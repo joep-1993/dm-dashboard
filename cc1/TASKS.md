@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Create lookup_plp_urls.py script to query Elasticsearch API for plpUrl using pimId, supports both old URL format (/p/maincat_url/pimId/) and new format (/p/product-name/maincat_id/pimId/), batches of 10K, maincat mapping from CSV #claude-session:2025-12-09
 - [x] Fix Redshift serialization conflict error (Error 1023) by replacing individual UPDATE loops with batch UPDATE operations using IN clauses #claude-session:2025-10-28
 - [x] Fix async/threading deadlock causing batch processing to hang after first batch (converted endpoint to synchronous, replaced executemany with individual executes) #claude-session:2025-10-23
 - [x] Fix URL filtering logic to use content table instead of tracking table (changed from pa.jvs_seo_werkvoorraad_kopteksten_check to pa.content_urls_joep for accurate filtering) #claude-session:2025-10-22

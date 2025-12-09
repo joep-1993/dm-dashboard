@@ -1432,6 +1432,35 @@ for row in reader:
 - **Location**: backend/main.py - `/api/upload-urls` endpoint (lines 463-542)
 - **Date**: 2025-10-21
 
+### Elasticsearch plpUrl Lookup with Maincat Routing
+- **Pattern**: Query Elasticsearch using pimId with maincat-specific indices
+- **Use Case**: Map old product URLs to new plpUrl format
+- **URL Formats Supported**:
+  - Old: `/p/gezond_mooi/nl-nl-gold-6150802976981/` (maincat_url + pimId with prefix)
+  - New: `/p/product-name/286/6150802976981/` (maincat_id in URL, pimId without prefix)
+- **Implementation**:
+  1. Load maincat mapping from CSV (maincat_url → maincat_id)
+  2. Extract maincat_id from URL (check URL patterns)
+  3. Build index name: `product_search_v4_nl-nl_{maincat_id}`
+  4. Query with terms filter on pimId field
+  5. Batch queries (10K pimIds per request)
+- **ES API Endpoint**: `https://elasticsearch-job-cluster-eck.beslist.nl/{index}/_search`
+- **Query Example**:
+```json
+{
+  "_source": ["plpUrl", "pimId"],
+  "size": 10000,
+  "query": {
+    "terms": {
+      "pimId": ["nl-nl-gold-6150802976981", "nl-nl-gold-..."]
+    }
+  }
+}
+```
+- **Maincat Mapping**: `/mnt/c/Users/JoepvanSchagen/Downloads/Python/maincat_mapping.csv` (semicolon-delimited, columns: maincat;maincat_url;maincat_id)
+- **Location**: cc1/lookup_plp_urls.py
+- **Date**: 2025-12-09
+
 ### Content Generation Performance Optimizations
 - **Problem**: Processing 131K URLs at ~4-10 seconds per URL would take 18-46 days
 - **Goal**: Reduce processing time to 3-9 days (2.8-6x faster)
@@ -1461,4 +1490,4 @@ for row in reader:
 - **Note on Scraping Delay**: Initial attempt at 0.05-0.1s was too aggressive, causing Cloudflare HTTP 202 (queuing) responses even with whitelisted IP. Adjusted to 0.2-0.3s as sweet spot between speed and avoiding rate limits.
 
 ---
-_Last updated: 2025-10-21_
+_Last updated: 2025-12-09_

@@ -12,11 +12,14 @@ content_top/
 │   │   ├── skip-permissions.md     # Toggle bypassPermissions mode
 │   │   └── restore-permissions.md  # Restore default permissions
 │   └── settings.local.json  # Local settings (git ignored)
-├── cc1/                   # CC1 documentation
+├── cc1/                   # CC1 documentation + utilities
 │   ├── TASKS.md          # Task tracking
 │   ├── LEARNINGS.md      # Knowledge capture
 │   ├── BACKLOG.md        # Future planning
-│   └── PROJECT_INDEX.md  # This file
+│   ├── PROJECT_INDEX.md  # This file
+│   ├── lookup_plp_urls.py    # Elasticsearch plpUrl lookup script (batch queries, maincat mapping)
+│   ├── input_urls.csv        # Input URLs for lookup
+│   └── output_plp_urls.csv   # Output with original URL and plpUrl (or GONE)
 ├── SEO_koptekst/         # Legacy SEO data directory
 ├── backend/
 │   ├── main.py           # FastAPI app with CORS & Thema Ads endpoints
@@ -398,4 +401,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2025-10-21_
+_Last updated: 2025-12-09_
