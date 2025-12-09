@@ -1,0 +1,12 @@
+GET product_search_v4_nl-nl_655/_search
+{
+  "_source": ["plpUrl", "pimId"], 
+  "query": {
+    "terms": {
+      "pimId": [
+        "nl-nl-gold-8806095982892",
+        "nl-nl-gold-0681495009473"
+      ]
+    }
+  }
+}

@@ -58,7 +58,10 @@ def get_redshift_connection():
     pool = _get_redshift_pool()
     print(f"[POOL] Getting Redshift connection...")
     conn = pool.getconn()
-    print(f"[POOL] Got Redshift connection")
+    # Set isolation level to READ COMMITTED to reduce serialization conflicts
+    # This is less strict than SERIALIZABLE but sufficient for our use case
+    conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
+    print(f"[POOL] Got Redshift connection with READ COMMITTED isolation")
     return conn
 
 def return_redshift_connection(conn):

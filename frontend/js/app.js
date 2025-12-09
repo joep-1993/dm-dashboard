@@ -189,8 +189,13 @@ async function processAllUrls() {
     try {
         // Get initial status
         const statusResponse = await fetch(`${API_BASE}/api/status`);
+
+        if (!statusResponse.ok) {
+            throw new Error(`Failed to get status: ${statusResponse.statusText}`);
+        }
+
         const initialStatus = await statusResponse.json();
-        const totalToProcess = initialStatus.pending;
+        const totalToProcess = initialStatus.pending ?? 0;
 
         if (totalToProcess === 0) {
             resultDiv.innerHTML = '<div class="alert alert-warning"><strong>No URLs to process</strong></div>';
@@ -209,6 +214,18 @@ async function processAllUrls() {
                 method: 'POST'
             });
 
+            if (!response.ok) {
+                // Handle HTTP errors
+                let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.detail || errorMessage;
+                } catch (e) {
+                    // If JSON parsing fails, use the status text
+                }
+                throw new Error(errorMessage);
+            }
+
             const data = await response.json();
 
             if (data.status === 'complete' && data.processed === 0) {
@@ -221,8 +238,15 @@ async function processAllUrls() {
 
             // Update progress based on initial pending count
             const currentStatus = await fetch(`${API_BASE}/api/status`);
+
+            if (!currentStatus.ok) {
+                console.error('Failed to get status during batch processing');
+                // Continue with last known status rather than breaking
+                continue;
+            }
+
             const status = await currentStatus.json();
-            const processedInThisRun = totalToProcess - status.pending;
+            const processedInThisRun = totalToProcess - (status.pending ?? 0);
             const progress = Math.round((processedInThisRun / totalToProcess) * 100);
 
             progressBar.style.width = progress + '%';

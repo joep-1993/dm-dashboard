@@ -9,12 +9,14 @@ import json
 import os
 import asyncio
 import tempfile
-from functools import partial
+import time
+from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection
 from backend.scraper_service import scrape_product_page, sanitize_content
 from backend.gpt_service import generate_product_content, check_content_has_valid_links
 from backend.link_validator import validate_content_links
+import psycopg2
 
 app = FastAPI(title="Content Top - SEO Content Generation", version="1.0.0")
 
@@ -28,6 +30,33 @@ app.add_middleware(
 
 # Serve frontend static files
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+def retry_on_redshift_serialization_error(max_retries=3, initial_delay=0.1):
+    """
+    Decorator to retry database operations that fail due to Redshift serialization conflicts.
+    Error 1023: Serializable isolation violation on table
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            delay = initial_delay
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except psycopg2.Error as e:
+                    error_msg = str(e)
+                    # Check for Redshift serialization conflict (error code 1023)
+                    if "1023" in error_msg or "Serializable isolation violation" in error_msg:
+                        if attempt < max_retries - 1:
+                            print(f"[RETRY] Redshift serialization conflict detected (attempt {attempt + 1}/{max_retries}), retrying in {delay}s...")
+                            time.sleep(delay)
+                            delay *= 2  # Exponential backoff
+                            continue
+                    # Re-raise if not a serialization error or max retries exceeded
+                    raise
+            return None
+        return wrapper
+    return decorator
 
 @app.get("/")
 def read_root():
@@ -139,11 +168,13 @@ def process_single_url(url: str, conservative_mode: bool = False):
         cur = conn.cursor()
 
         if final_reason:
+            # Truncate skip_reason to 255 characters to fit VARCHAR(255) column
+            truncated_reason = final_reason[:255] if len(final_reason) > 255 else final_reason
             cur.execute("""
                 INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason)
                 VALUES (%s, %s, %s)
                 ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason
-            """, (url, final_status, final_reason))
+            """, (url, final_status, truncated_reason))
         else:
             cur.execute("""
                 INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status)
@@ -163,11 +194,13 @@ def process_single_url(url: str, conservative_mode: bool = False):
             if not conn:
                 conn = get_db_connection()
                 cur = conn.cursor()
+            # Truncate error message to 255 characters to fit VARCHAR(255) column
+            error_msg = f"error: {str(e)}"[:255]
             cur.execute("""
                 INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason)
                 VALUES (%s, 'failed', %s)
                 ON CONFLICT (url) DO UPDATE SET status = 'failed', skip_reason = EXCLUDED.skip_reason
-            """, (url, f"error: {str(e)}"))
+            """, (url, error_msg))
             conn.commit()
         except:
             pass  # If DB fails, just return the result
@@ -259,8 +292,10 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
                 print(f"[RATE LIMIT DETECTED] 503 error detected - stopping batch immediately")
                 break
 
-        # Batch execute all Redshift operations using executemany() for better performance
-        if all_redshift_ops:
+        # Batch execute all Redshift operations - wrapped with retry logic for serialization conflicts
+        @retry_on_redshift_serialization_error(max_retries=5, initial_delay=0.2)
+        def execute_batch_redshift_ops():
+            """Execute all Redshift operations in a single transaction with retry on serialization conflicts"""
             output_conn = get_output_connection()
             output_cur = output_conn.cursor()
             try:
@@ -326,8 +361,10 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
                 print(f"[ENDPOINT] Cleaning up output connection...")
                 output_cur.close()
                 return_output_connection(output_conn)
-                output_conn = None
                 print(f"[ENDPOINT] Output connection cleanup complete")
+
+        if all_redshift_ops:
+            execute_batch_redshift_ops()
 
         processed_count = sum(1 for r in results if r['status'] == 'success')
         skipped_count = sum(1 for r in results if r['status'] == 'skipped')
@@ -607,26 +644,34 @@ async def upload_urls(file: UploadFile = File(...)):
 async def delete_result(url: str):
     """Delete a result and reset the URL back to pending state"""
     try:
-        # Delete from Redshift output table and update werkvoorraad
-        output_conn = get_output_connection()
-        output_cur = output_conn.cursor()
+        # Delete from Redshift output table and update werkvoorraad - with retry on serialization conflicts
+        @retry_on_redshift_serialization_error(max_retries=5, initial_delay=0.2)
+        def delete_from_redshift():
+            output_conn = get_output_connection()
+            output_cur = output_conn.cursor()
+            try:
+                # Delete content
+                output_cur.execute("""
+                    DELETE FROM pa.content_urls_joep
+                    WHERE url = %s
+                """, (url,))
 
-        # Delete content
-        output_cur.execute("""
-            DELETE FROM pa.content_urls_joep
-            WHERE url = %s
-        """, (url,))
+                # Reset kopteksten flag in werkvoorraad
+                output_cur.execute("""
+                    UPDATE pa.jvs_seo_werkvoorraad_shopping_season
+                    SET kopteksten = 0
+                    WHERE url = %s
+                """, (url,))
 
-        # Reset kopteksten flag in werkvoorraad
-        output_cur.execute("""
-            UPDATE pa.jvs_seo_werkvoorraad_shopping_season
-            SET kopteksten = 0
-            WHERE url = %s
-        """, (url,))
+                output_conn.commit()
+            except Exception as e:
+                output_conn.rollback()
+                raise e
+            finally:
+                output_cur.close()
+                return_output_connection(output_conn)
 
-        output_conn.commit()
-        output_cur.close()
-        return_output_connection(output_conn)
+        delete_from_redshift()
 
         # Delete from local tracking table
         conn = get_db_connection()
@@ -767,31 +812,36 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
                 'moved_to_pending': validation_result['has_broken_links']
             })
 
-        # BATCH DELETE/UPDATE operations to prevent serialization conflicts
-        if urls_with_broken_links:
-            placeholders = ','.join(['%s'] * len(urls_with_broken_links))
+        # BATCH DELETE/UPDATE operations - wrapped with retry logic for Redshift serialization conflicts
+        @retry_on_redshift_serialization_error(max_retries=5, initial_delay=0.2)
+        def batch_reset_broken_links():
+            """Batch delete and reset URLs with broken links"""
+            if urls_with_broken_links:
+                placeholders = ','.join(['%s'] * len(urls_with_broken_links))
 
-            # Delete from output table (Redshift or PostgreSQL)
-            output_cur.execute(f"""
-                DELETE FROM pa.content_urls_joep
-                WHERE url IN ({placeholders})
-            """, urls_with_broken_links)
+                # Delete from output table (Redshift or PostgreSQL)
+                output_cur.execute(f"""
+                    DELETE FROM pa.content_urls_joep
+                    WHERE url IN ({placeholders})
+                """, urls_with_broken_links)
 
-            # Delete from tracking table
-            cur.execute(f"""
-                DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
-                WHERE url IN ({placeholders})
-            """, urls_with_broken_links)
+                # Delete from tracking table
+                cur.execute(f"""
+                    DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+                    WHERE url IN ({placeholders})
+                """, urls_with_broken_links)
 
-            # Reset kopteksten flags
-            cur.execute(f"""
-                UPDATE pa.jvs_seo_werkvoorraad_shopping_season
-                SET kopteksten = 0
-                WHERE url IN ({placeholders})
-            """, urls_with_broken_links)
+                # Reset kopteksten flags
+                cur.execute(f"""
+                    UPDATE pa.jvs_seo_werkvoorraad_shopping_season
+                    SET kopteksten = 0
+                    WHERE url IN ({placeholders})
+                """, urls_with_broken_links)
 
-        conn.commit()
-        output_conn.commit()
+            conn.commit()
+            output_conn.commit()
+
+        batch_reset_broken_links()
 
         cur.close()
         return_db_connection(conn)
