@@ -850,7 +850,7 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
 
             # Reset kopteksten flags - ONLY for gone products
             cur.execute(f"""
-                UPDATE pa.jvs_seo_werkvoorraad
+                UPDATE pa.jvs_seo_werkvoorraad_shopping_season
                 SET kopteksten = 0
                 WHERE url IN ({placeholders})
             """, urls_with_gone_products)
