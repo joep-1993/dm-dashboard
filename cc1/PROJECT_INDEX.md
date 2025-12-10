@@ -28,9 +28,13 @@ content_top/
 │   │                     # Functions: get_db_connection(), get_redshift_connection(), get_output_connection()
 │   │                     # Schema: campaign_id and campaign_name columns added
 │   ├── gpt_service.py    # AI integration with optimized prompts for concise hyperlink text (3-5 words max)
-│   ├── link_validator.py # Hyperlink validation with HTTP status checking (301/404 detection)
-│   │                     # Conservative mode: 0.5-0.7s delay per link (~1,552 items/hour)
-│   │                     # Optimized mode: No delay (~60K items/hour with 5 workers)
+│   ├── link_validator.py # Hyperlink validation via Elasticsearch plpUrl lookup (replaces HTTP checking)
+│   │                     # Auto-corrects outdated URLs, resets GONE products to pending
+│   │                     # Uses maincat_mapping.csv for ES index routing
+│   ├── seo_content_generator.py  # SEO content from Product Search API
+│   │                     # Parses /products/{maincat}/{category}/c/{filters} URLs
+│   │                     # Fetches 30 products, generates GPT content with plpUrl links
+│   │                     # Outputs to Excel (url, maincat_id, category, content)
 │   ├── import_content.py # CSV import utility for bulk content upload (semicolon delimiter)
 │   ├── sync_werkvoorraad.py  # Utility: Synchronize werkvoorraad with content table
 │   ├── sync_redshift_flags.py # Utility: Sync Redshift kopteksten flags with local content table (fixes data consistency)
@@ -87,7 +91,7 @@ route add -p 65.9.0.0 mask 255.255.0.0 192.168.1.1 metric 1 if 10
 ```bash
 OPENAI_API_KEY=sk-...  # Your OpenAI API key
 DATABASE_URL=postgresql://postgres:postgres@db:5432/myapp
-AI_MODEL=gpt-4o-mini  # Or other OpenAI model (max_tokens: 200 for 100-word content, optimized from 300)
+AI_MODEL=gpt-4o-mini  # Or other OpenAI model (max_tokens: 500 for content with HTML links)
 ```
 
 ### Required (Redshift - Output Storage)
@@ -401,4 +405,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2025-12-09_
+_Last updated: 2025-12-10_

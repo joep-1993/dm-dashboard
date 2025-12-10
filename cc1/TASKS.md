@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Create seo_content_generator.py to generate SEO content from Product Search API using URL filters (parses /products/{maincat}/{category}/c/{filters}, fetches 30 products, generates GPT content with plpUrl links), outputs to Excel #claude-session:2025-12-10
+- [x] Rewrite link_validator.py to use Elasticsearch plpUrl lookup instead of HTTP status checks, auto-correct outdated URLs in content, reset URLs with GONE products to pending (kopteksten=0), validate via local PostgreSQL #claude-session:2025-12-10
 - [x] Create lookup_plp_urls.py script to query Elasticsearch API for plpUrl using pimId, supports both old URL format (/p/maincat_url/pimId/) and new format (/p/product-name/maincat_id/pimId/), batches of 10K, maincat mapping from CSV #claude-session:2025-12-09
 - [x] Fix Redshift serialization conflict error (Error 1023) by replacing individual UPDATE loops with batch UPDATE operations using IN clauses #claude-session:2025-10-28
 - [x] Fix async/threading deadlock causing batch processing to hang after first batch (converted endpoint to synchronous, replaced executemany with individual executes) #claude-session:2025-10-23

@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection
 from backend.scraper_service import scrape_product_page, sanitize_content
 from backend.gpt_service import generate_product_content, check_content_has_valid_links
-from backend.link_validator import validate_content_links
+from backend.link_validator import validate_content_links, validate_and_fix_content_links, update_content_in_redshift
 import psycopg2
 
 app = FastAPI(title="Content Top - SEO Content Generation", version="1.0.0")
@@ -693,34 +693,37 @@ async def delete_result(url: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def validate_single_content(content_data: tuple, conservative_mode: bool = False) -> dict:
-    """Validate links in a single content item - runs in thread pool
+def validate_single_content_es(content_data: tuple) -> dict:
+    """Validate and fix links in a single content item using Elasticsearch lookup.
 
     Args:
         content_data: Tuple of (content_url, content)
-        conservative_mode: If True, use conservative rate (max 2 URLs/sec)
+
+    Returns:
+        Dict with validation results including:
+        - content_url: The URL this content belongs to
+        - has_changes: Whether URLs were replaced
+        - replaced_urls: List of {old_url, new_url} replacements
+        - gone_urls: URLs where product is gone (need reprocessing)
+        - valid_urls: URLs that were already correct
+        - corrected_content: Content with corrected URLs (if any changes)
     """
     content_url, content = content_data
-
-    # Validate links in content
-    validation_result = validate_content_links(content, conservative_mode=conservative_mode)
-
-    # Add the content URL to the result
-    validation_result['content_url'] = content_url
-
-    return validation_result
+    return validate_and_fix_content_links(content, content_url)
 
 @app.post("/api/validate-links")
 def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative_mode: bool = False):
     """
-    Validate hyperlinks in generated content.
-    Checks if links return 301 or 404, and moves content back to pending if broken links found.
-    Supports parallel processing with configurable workers.
+    Validate and fix hyperlinks in generated content using Elasticsearch lookup.
+
+    - If a product URL differs from the canonical plpUrl, the content is auto-corrected
+    - If a product is GONE from Elasticsearch, the content is deleted and URL queued for reprocessing
+    - URLs with only corrected links keep their kopteksten=1 status
 
     Args:
         batch_size: Number of content items to validate
-        parallel_workers: Number of parallel workers (1-10), ignored if conservative_mode is True
-        conservative_mode: If True, use conservative rate (max 2 URLs/sec) with 1 worker. Default: False
+        parallel_workers: Number of parallel workers (1-10)
+        conservative_mode: Legacy parameter, kept for compatibility (ignored)
     """
     try:
         # Validate parameters
@@ -730,15 +733,7 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
         if parallel_workers < 1 or parallel_workers > 10:
             raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 10")
 
-        # Conservative mode always uses 1 worker for maximum safety
-        if conservative_mode:
-            parallel_workers = 1
-
-        # Get content from Redshift
-        output_conn = get_output_connection()
-        output_cur = output_conn.cursor()
-
-        # Get local PostgreSQL connection for validation tracking
+        # Use local PostgreSQL for all operations
         conn = get_db_connection()
         cur = conn.cursor()
 
@@ -746,26 +741,25 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
         cur.execute("SELECT content_url FROM pa.link_validation_results")
         validated_urls_set = set(row['content_url'] for row in cur.fetchall())
 
-        # Fetch more content than needed, filter in Python (faster than NOT IN)
-        output_cur.execute("""
+        # Fetch content from local database
+        cur.execute("""
             SELECT url, content
             FROM pa.content_urls_joep
             LIMIT %s
         """, (batch_size * 3 if validated_urls_set else batch_size,))
 
-        all_rows = output_cur.fetchall()
+        all_rows = cur.fetchall()
         # Filter out already validated URLs in Python
         rows = [row for row in all_rows if row['url'] not in validated_urls_set][:batch_size]
 
         if not rows:
-            output_cur.close()
-            return_output_connection(output_conn)
             cur.close()
             return_db_connection(conn)
             return {
                 "status": "complete",
                 "message": "No content to validate",
                 "validated": 0,
+                "urls_corrected": 0,
                 "moved_to_pending": 0
             }
 
@@ -773,84 +767,104 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
         content_items = [(row['url'], row['content']) for row in rows]
 
         # Process validations in parallel using ThreadPoolExecutor
-        # Use partial to bind conservative_mode parameter
-        validate_func = partial(validate_single_content, conservative_mode=conservative_mode)
         with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-            validation_results = list(executor.map(validate_func, content_items))
+            validation_results = list(executor.map(validate_single_content_es, content_items))
 
         results = []
+        urls_corrected = 0
         moved_to_pending = 0
-        urls_with_broken_links = []
+        urls_with_gone_products = []  # Only these get kopteksten reset to 0
+        urls_to_update_content = []  # URLs where content needs updating (replaced URLs)
 
-        # Process validation results and update database
+        # Process validation results
         for validation_result in validation_results:
             content_url = validation_result['content_url']
+            has_replaced = len(validation_result['replaced_urls']) > 0
+            has_gone = len(validation_result['gone_urls']) > 0
 
-            # Save validation results
+            # Calculate totals for tracking
+            total_links = len(validation_result['valid_urls']) + len(validation_result['replaced_urls']) + len(validation_result['gone_urls'])
+
+            # Save validation results to local tracking table
             cur.execute("""
                 INSERT INTO pa.link_validation_results
                 (content_url, total_links, broken_links, valid_links, broken_link_details)
                 VALUES (%s, %s, %s, %s, %s)
             """, (
                 content_url,
-                validation_result['total_links'],
-                len(validation_result['broken_links']),
-                validation_result['valid_links'],
-                json.dumps(validation_result['broken_links'])
+                total_links,
+                len(validation_result['gone_urls']),  # Only GONE URLs are truly broken
+                len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),  # Replaced URLs are now valid
+                json.dumps({
+                    'gone_urls': validation_result['gone_urls'],
+                    'replaced_urls': validation_result['replaced_urls']
+                })
             ))
 
-            # Collect URLs with broken links for batch operations
-            if validation_result['has_broken_links']:
-                urls_with_broken_links.append(content_url)
+            # Handle URL replacements - update content in local database
+            if has_replaced and not has_gone:
+                # Only replaced URLs, no gone URLs - update content, keep kopteksten=1
+                urls_to_update_content.append((content_url, validation_result['corrected_content']))
+                urls_corrected += 1
+
+            # Handle gone products - need to regenerate content
+            if has_gone:
+                urls_with_gone_products.append(content_url)
                 moved_to_pending += 1
 
             results.append({
                 'url': content_url,
-                'total_links': validation_result['total_links'],
-                'broken_links_count': len(validation_result['broken_links']),
-                'broken_links': validation_result['broken_links'],
-                'moved_to_pending': validation_result['has_broken_links']
+                'total_links': total_links,
+                'valid_urls': len(validation_result['valid_urls']),
+                'replaced_urls': validation_result['replaced_urls'],
+                'gone_urls': validation_result['gone_urls'],
+                'content_corrected': has_replaced and not has_gone,
+                'moved_to_pending': has_gone
             })
 
-        # BATCH DELETE/UPDATE operations - wrapped with retry logic for Redshift serialization conflicts
-        @retry_on_redshift_serialization_error(max_retries=5, initial_delay=0.2)
-        def batch_reset_broken_links():
-            """Batch delete and reset URLs with broken links"""
-            if urls_with_broken_links:
-                placeholders = ','.join(['%s'] * len(urls_with_broken_links))
+        # Update corrected content in local database
+        if urls_to_update_content:
+            for content_url, corrected_content in urls_to_update_content:
+                cur.execute("""
+                    UPDATE pa.content_urls_joep
+                    SET content = %s
+                    WHERE url = %s
+                """, (corrected_content, content_url))
+            print(f"[VALIDATE-LINKS] Updated content for {len(urls_to_update_content)} URLs with corrected links")
 
-                # Delete from output table (Redshift or PostgreSQL)
-                output_cur.execute(f"""
-                    DELETE FROM pa.content_urls_joep
-                    WHERE url IN ({placeholders})
-                """, urls_with_broken_links)
+        # Delete/reset operations for gone products only
+        if urls_with_gone_products:
+            placeholders = ','.join(['%s'] * len(urls_with_gone_products))
 
-                # Delete from tracking table
-                cur.execute(f"""
-                    DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
-                    WHERE url IN ({placeholders})
-                """, urls_with_broken_links)
+            # Delete from content table
+            cur.execute(f"""
+                DELETE FROM pa.content_urls_joep
+                WHERE url IN ({placeholders})
+            """, urls_with_gone_products)
 
-                # Reset kopteksten flags
-                cur.execute(f"""
-                    UPDATE pa.jvs_seo_werkvoorraad_shopping_season
-                    SET kopteksten = 0
-                    WHERE url IN ({placeholders})
-                """, urls_with_broken_links)
+            # Delete from tracking table
+            cur.execute(f"""
+                DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+                WHERE url IN ({placeholders})
+            """, urls_with_gone_products)
 
-            conn.commit()
-            output_conn.commit()
+            # Reset kopteksten flags - ONLY for gone products
+            cur.execute(f"""
+                UPDATE pa.jvs_seo_werkvoorraad
+                SET kopteksten = 0
+                WHERE url IN ({placeholders})
+            """, urls_with_gone_products)
 
-        batch_reset_broken_links()
+            print(f"[VALIDATE-LINKS] Reset {len(urls_with_gone_products)} URLs with gone products to pending")
 
+        conn.commit()
         cur.close()
         return_db_connection(conn)
-        output_cur.close()
-        return_output_connection(output_conn)
 
         return {
             "status": "success",
             "validated": len(rows),
+            "urls_corrected": urls_corrected,
             "moved_to_pending": moved_to_pending,
             "results": results
         }

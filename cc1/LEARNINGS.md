@@ -1461,6 +1461,58 @@ for row in reader:
 - **Location**: cc1/lookup_plp_urls.py
 - **Date**: 2025-12-09
 
+### Elasticsearch-based Link Validation (replaces HTTP checking)
+- **Pattern**: Use Elasticsearch plpUrl lookup instead of HTTP HEAD requests for link validation
+- **Use Case**: Validate product links in generated content - check if products still exist and URLs are correct
+- **Why Replace HTTP Checking**:
+  - HTTP HEAD requests are slow (network latency per link)
+  - Can trigger rate limiting on large batches
+  - Elasticsearch lookup is faster and more reliable
+  - Can also detect URL changes (old URL → new plpUrl)
+- **Implementation**:
+  1. Extract all `<a href="/p/...">` links from HTML content using BeautifulSoup
+  2. Parse pimId and maincat_id from each URL
+  3. Query Elasticsearch for current plpUrl by pimId
+  4. Compare: if plpUrl differs → replace in content; if product GONE → reset to pending
+- **Three Outcomes**:
+  - **Valid**: plpUrl matches original URL → no action
+  - **Outdated**: plpUrl differs → auto-replace URL in content (kopteksten stays 1)
+  - **Gone**: Product not found in ES → reset URL to pending (kopteksten=0) for content regeneration
+- **Benefits**:
+  - No rate limiting concerns (internal ES cluster)
+  - Batch processing of multiple links per content item
+  - Auto-correction of outdated URLs without regenerating content
+  - Clear distinction between "needs URL update" vs "needs new content"
+- **Location**: backend/link_validator.py (completely rewritten)
+- **Date**: 2025-12-10
+
+### Product Search API Content Generation
+- **Pattern**: Generate SEO content by querying Product Search API and using product descriptions
+- **Use Case**: Create content for SEO URLs with specific filters (brand, color, category)
+- **URL Format**: `/products/{maincat}/{category}/c/{filter1~value1~~filter2~value2}`
+  - Example: `/products/accessoires/accessoires_2596345/c/merk~2685977`
+  - Also supports: `/products/{maincat}/c/{filters}` (without subcategory)
+- **API Endpoint**: `https://productsearch-v2.api.beslist.nl/search/products`
+- **API Parameters**:
+  ```
+  query=&mainCategory={maincat_id}&category={category}&
+  filters[{filter_name}][0]={value}&
+  sort=popularity&sortDirection=desc&limit=30&
+  isBot=true&countryLanguage=nl-nl
+  ```
+- **Implementation**:
+  1. Parse URL to extract maincat name, category, and filters
+  2. Look up maincat_id from maincat_mapping.csv
+  3. Build API URL with filters encoded as `filters%5B{name}%5D%5B0%5D={value}`
+  4. Fetch products (limit=30, isBot=true)
+  5. Extract `plpUrl` and `title` from each product
+  6. Generate GPT content using product titles/descriptions
+  7. Output includes proper `<a href="{plpUrl}">` links with product titles as anchor text
+- **Output**: Excel file with columns: url, maincat_id, category, products_found, success, content
+- **GPT Settings**: max_tokens=500 (increased from 200 to accommodate HTML links)
+- **Location**: backend/seo_content_generator.py
+- **Date**: 2025-12-10
+
 ### Content Generation Performance Optimizations
 - **Problem**: Processing 131K URLs at ~4-10 seconds per URL would take 18-46 days
 - **Goal**: Reduce processing time to 3-9 days (2.8-6x faster)
@@ -1490,4 +1542,4 @@ for row in reader:
 - **Note on Scraping Delay**: Initial attempt at 0.05-0.1s was too aggressive, causing Cloudflare HTTP 202 (queuing) responses even with whitelisted IP. Adjusted to 0.2-0.3s as sweet spot between speed and avoiding rate limits.
 
 ---
-_Last updated: 2025-12-09_
+_Last updated: 2025-12-10_

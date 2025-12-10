@@ -86,7 +86,7 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
     response = client.chat.completions.create(
         model=MODEL,
         messages=messages,
-        max_tokens=200,  # Optimized for 100-word content (~130 tokens) with buffer
+        max_tokens=500,  # Increased for ~100 words + HTML links which use more tokens
         temperature=0.7
     )
 
