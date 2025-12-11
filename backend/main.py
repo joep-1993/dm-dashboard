@@ -90,7 +90,6 @@ def process_single_url(url: str, conservative_mode: bool = False):
         conservative_mode: If True, use conservative scraping rate (max 2 URLs/sec)
     """
     result = {"url": url, "status": "pending"}
-    redshift_ops = []  # Store Redshift operations to batch later
     conn = None
     final_status = None
     final_reason = None
@@ -109,18 +108,14 @@ def process_single_url(url: str, conservative_mode: bool = False):
             # 503 errors should stop the batch to avoid further rate limiting
         elif not scraped_data:
             final_status = 'failed'
-            final_reason = 'scraping_failed'
+            final_reason = 'api_failed'
             result["status"] = "failed"
-            result["reason"] = "scraping_failed"
-            # Mark as processed without content (kopteksten = 2) - other failures won't benefit from retry
-            redshift_ops.append(('update_werkvoorraad_processed', url))
+            result["reason"] = "api_failed"
         elif not scraped_data['products'] or len(scraped_data['products']) == 0:
             final_status = 'skipped'
             final_reason = 'no_products_found'
             result["status"] = "skipped"
             result["reason"] = "no_products_found"
-            # Mark as processed without content (kopteksten = 2) to avoid re-fetching
-            redshift_ops.append(('update_werkvoorraad_processed', url))
         else:
             # Generate AI content using product_subject from selected facets
             try:
@@ -146,12 +141,17 @@ def process_single_url(url: str, conservative_mode: bool = False):
                     final_reason = 'no_valid_links'
                     result["status"] = "failed"
                     result["reason"] = "no_valid_links"
-                    # Mark as processed without content (kopteksten = 2) - no valid links means no usable content
-                    redshift_ops.append(('update_werkvoorraad_processed', url))
                 else:
-                    # Collect Redshift operations for batch execution
-                    redshift_ops.append(('insert_content', url, sanitized))
-                    redshift_ops.append(('update_werkvoorraad_success', url))
+                    # Save content to local PostgreSQL immediately
+                    content_conn = get_db_connection()
+                    content_cur = content_conn.cursor()
+                    content_cur.execute("""
+                        INSERT INTO pa.content_urls_joep (url, content)
+                        VALUES (%s, %s)
+                    """, (url, sanitized))
+                    content_conn.commit()
+                    content_cur.close()
+                    return_db_connection(content_conn)
 
                     final_status = 'success'
                     result["status"] = "success"
@@ -162,8 +162,6 @@ def process_single_url(url: str, conservative_mode: bool = False):
                 final_reason = f"ai_generation_error: {str(e)}"
                 result["status"] = "failed"
                 result["reason"] = f"ai_generation_error: {str(e)}"
-                # Mark as processed without content (kopteksten = 2) - AI generation failed
-                redshift_ops.append(('update_werkvoorraad_processed', url))
 
         # Single DB transaction at the end with final status
         conn = get_db_connection()
@@ -186,7 +184,7 @@ def process_single_url(url: str, conservative_mode: bool = False):
 
         conn.commit()
         print(f"[PROCESSING] {url} - Status: {final_status}" + (f" - Reason: {final_reason}" if final_reason else ""))
-        return (result, redshift_ops)
+        return result
 
     except Exception as e:
         result["status"] = "failed"
@@ -206,7 +204,7 @@ def process_single_url(url: str, conservative_mode: bool = False):
             conn.commit()
         except:
             pass  # If DB fails, just return the result
-        return (result, redshift_ops)
+        return result
     finally:
         if conn:
             cur.close()
@@ -225,8 +223,6 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
         conservative_mode: If True, use conservative scraping rate (max 2 URLs/sec) with 1 worker. Default: False
     """
     print(f"[ENDPOINT] process_urls called - batch_size={batch_size}, workers={parallel_workers}, conservative={conservative_mode}")
-    output_conn = None
-    local_conn = None
 
     try:
         # Validate parameters
@@ -240,28 +236,30 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
         if conservative_mode:
             parallel_workers = 1
 
-        print(f"[ENDPOINT] Getting output connection...")
-        # Get unprocessed URLs from Redshift
-        output_conn = get_output_connection()
-        print(f"[ENDPOINT] Got output connection, creating cursor...")
-        output_cur = output_conn.cursor()
+        print(f"[ENDPOINT] Getting local connection...")
+        # Get unprocessed URLs from local PostgreSQL
+        local_conn = get_db_connection()
+        print(f"[ENDPOINT] Got local connection, creating cursor...")
+        local_cur = local_conn.cursor()
 
-        # Fetch unprocessed URLs from Redshift (kopteksten=0 means pending)
+        # Fetch unprocessed URLs from local werkvoorraad (URLs not yet in tracking table)
         try:
             print(f"[ENDPOINT] Querying for {batch_size} pending URLs...")
-            output_cur.execute("""
-                SELECT url FROM pa.jvs_seo_werkvoorraad_shopping_season
-                WHERE kopteksten = 0
+            local_cur.execute("""
+                SELECT w.url
+                FROM pa.jvs_seo_werkvoorraad w
+                LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
+                WHERE t.url IS NULL
                 LIMIT %s
             """, (batch_size,))
 
-            rows = output_cur.fetchall()
-            print(f"[ENDPOINT] Got {len(rows)} URLs from Redshift")
+            rows = local_cur.fetchall()
+            print(f"[ENDPOINT] Got {len(rows)} URLs from local PostgreSQL")
         finally:
             print(f"[ENDPOINT] Closing cursor and returning connection...")
-            output_cur.close()
-            return_output_connection(output_conn)
-            output_conn = None
+            local_cur.close()
+            return_db_connection(local_conn)
+            local_conn = None
             print(f"[ENDPOINT] Connection returned to pool")
 
         if not rows:
@@ -277,96 +275,15 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
         # Use partial to bind conservative_mode parameter
         process_func = partial(process_single_url, conservative_mode=conservative_mode)
         with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-            result_tuples = list(executor.map(process_func, urls))
+            results = list(executor.map(process_func, urls))
 
-        # Separate results and Redshift operations
-        results = []
-        all_redshift_ops = []
+        # Check for rate limiting
         rate_limited = False
-
-        for result, ops in result_tuples:
-            results.append(result)
-            all_redshift_ops.extend(ops)
-
-            # Check for 503 error (rate limiting) - stop immediately
+        for result in results:
             if result['status'] == 'failed' and result.get('reason') == 'rate_limited_503':
                 rate_limited = True
                 print(f"[RATE LIMIT DETECTED] 503 error detected - stopping batch immediately")
                 break
-
-        # Batch execute all Redshift operations - wrapped with retry logic for serialization conflicts
-        @retry_on_redshift_serialization_error(max_retries=5, initial_delay=0.2)
-        def execute_batch_redshift_ops():
-            """Execute all Redshift operations in a single transaction with retry on serialization conflicts"""
-            output_conn = get_output_connection()
-            output_cur = output_conn.cursor()
-            try:
-                # Separate operations by type for batch execution
-                insert_content_data = []
-                update_werkvoorraad_success_urls = []  # kopteksten = 1 (has content)
-                update_werkvoorraad_processed_urls = []  # kopteksten = 2 (processed but no content)
-
-                for op in all_redshift_ops:
-                    if op[0] == 'insert_content':
-                        _, url, content = op
-                        insert_content_data.append((url, content))
-                    elif op[0] == 'update_werkvoorraad_success':
-                        _, url = op
-                        update_werkvoorraad_success_urls.append((url,))
-                    elif op[0] == 'update_werkvoorraad_processed':
-                        _, url = op
-                        update_werkvoorraad_processed_urls.append((url,))
-
-                # Use individual executes instead of executemany for better Redshift compatibility
-                print(f"[ENDPOINT] Executing {len(insert_content_data)} inserts, {len(update_werkvoorraad_success_urls)} success updates, {len(update_werkvoorraad_processed_urls)} processed updates")
-
-                if insert_content_data:
-                    print(f"[ENDPOINT] Inserting {len(insert_content_data)} content records...")
-                    for url, content in insert_content_data:
-                        output_cur.execute("""
-                            INSERT INTO pa.content_urls_joep (url, content)
-                            VALUES (%s, %s)
-                        """, (url, content))
-                    print(f"[ENDPOINT] Content inserts complete")
-
-                # Update for successful URLs (kopteksten = 1) - BATCH UPDATE to prevent serialization conflicts
-                if update_werkvoorraad_success_urls:
-                    print(f"[ENDPOINT] Updating {len(update_werkvoorraad_success_urls)} successful URLs...")
-                    url_list = [url for (url,) in update_werkvoorraad_success_urls]
-                    placeholders = ','.join(['%s'] * len(url_list))
-                    output_cur.execute(f"""
-                        UPDATE pa.jvs_seo_werkvoorraad_shopping_season
-                        SET kopteksten = 1
-                        WHERE url IN ({placeholders})
-                    """, url_list)
-                    print(f"[ENDPOINT] Success updates complete")
-
-                # Update for processed-without-content URLs (kopteksten = 2) - BATCH UPDATE to prevent serialization conflicts
-                if update_werkvoorraad_processed_urls:
-                    print(f"[ENDPOINT] Updating {len(update_werkvoorraad_processed_urls)} processed URLs...")
-                    url_list = [url for (url,) in update_werkvoorraad_processed_urls]
-                    placeholders = ','.join(['%s'] * len(url_list))
-                    output_cur.execute(f"""
-                        UPDATE pa.jvs_seo_werkvoorraad_shopping_season
-                        SET kopteksten = 2
-                        WHERE url IN ({placeholders})
-                    """, url_list)
-                    print(f"[ENDPOINT] Processed updates complete")
-
-                print(f"[ENDPOINT] Committing transaction...")
-                output_conn.commit()
-                print(f"[ENDPOINT] Transaction committed successfully")
-            except Exception as db_error:
-                output_conn.rollback()
-                raise db_error
-            finally:
-                print(f"[ENDPOINT] Cleaning up output connection...")
-                output_cur.close()
-                return_output_connection(output_conn)
-                print(f"[ENDPOINT] Output connection cleanup complete")
-
-        if all_redshift_ops:
-            execute_batch_redshift_ops()
 
         processed_count = sum(1 for r in results if r['status'] == 'success')
         skipped_count = sum(1 for r in results if r['status'] == 'skipped')
@@ -389,32 +306,17 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
     except Exception as e:
         print(f"[ERROR] process_urls failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        # Ensure connections are always returned to pool
-        if local_conn:
-            return_db_connection(local_conn)
-        if output_conn:
-            return_output_connection(output_conn)
 
 @app.get("/api/status")
 def get_status():
-    """Get processing status and counts"""
+    """Get processing status and counts (LOCAL PostgreSQL only)"""
     try:
-        # Get counts from Redshift
-        output_conn = get_output_connection()
-        output_cur = output_conn.cursor()
-
-        # Get total URLs from Redshift
-        output_cur.execute("SELECT COUNT(*) as total FROM pa.jvs_seo_werkvoorraad_shopping_season")
-        total = output_cur.fetchone()['total']
-
-        # Get processed URLs (actual content records in Redshift)
-        output_cur.execute("SELECT COUNT(*) as processed FROM pa.content_urls_joep")
-        processed = output_cur.fetchone()['processed']
-
-        # Get local tracking for skipped/failed stats
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # Get total content URLs (processed with content)
+        cur.execute("SELECT COUNT(*) as processed FROM pa.content_urls_joep")
+        processed = cur.fetchone()['processed']
 
         # Get skipped URLs
         cur.execute("""
@@ -432,28 +334,35 @@ def get_status():
         """)
         failed = cur.fetchone()['failed']
 
-        # Get pending URLs directly from Redshift (URLs with kopteksten=0)
-        output_cur.execute("SELECT COUNT(*) as pending FROM pa.jvs_seo_werkvoorraad_shopping_season WHERE kopteksten = 0")
-        pending = output_cur.fetchone()['pending']
+        # Get total URLs from werkvoorraad
+        cur.execute("SELECT COUNT(*) as total FROM pa.jvs_seo_werkvoorraad")
+        total = cur.fetchone()['total']
 
-        # Get recent results from the output database (Redshift or PostgreSQL)
-        # Note: Redshift table may not have id or created_at columns, so we just get 5 rows
+        # Pending = URLs in werkvoorraad that haven't been tracked yet (using LEFT JOIN)
+        cur.execute("""
+            SELECT COUNT(*) as pending
+            FROM pa.jvs_seo_werkvoorraad w
+            LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
+            WHERE t.url IS NULL
+        """)
+        pending = cur.fetchone()['pending']
+
+        # Get recent results from local PostgreSQL
         try:
-            output_cur.execute("""
-                SELECT url, content
+            cur.execute("""
+                SELECT url, content, created_at
                 FROM pa.content_urls_joep
+                ORDER BY created_at DESC NULLS LAST
                 LIMIT 5
             """)
-            recent_rows = output_cur.fetchall()
-            recent = [{'url': r['url'], 'content': r['content'], 'created_at': None} for r in recent_rows]
+            recent_rows = cur.fetchall()
+            recent = [{'url': r['url'], 'content': r['content'], 'created_at': r['created_at'].isoformat() if r.get('created_at') else None} for r in recent_rows]
         except Exception as e:
             print(f"[DEBUG] Failed to get recent results: {e}")
             recent = []
 
         cur.close()
         return_db_connection(conn)
-        output_cur.close()
-        return_output_connection(output_conn)
 
         return {
             "total_urls": total,

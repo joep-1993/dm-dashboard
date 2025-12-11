@@ -239,17 +239,18 @@ MAIN_CATEGORY_IDS = {
     "kantoor_schoolartikelen": 7498,
     "kantoorartikelen": 7498,
     "klussen": 486172,
+    "meubilair": 10,
     "mode": 137,
     "muziek_film": 9242168,
     "schoenen": 32000,
-    "speelgoed": 98,
-    "speelgoed_spelletjes": 98,
+    "speelgoed": 332,
+    "speelgoed_spelletjes": 332,
+    "fietsen": 38000,
     "sport_outdoor": 433,
     "sport_outdoor_vrije-tijd": 433,
     "tuin_accessoires": 36000,
     "voor_volwassenen": 452,
-    "wonen": 10028,
-    "huis_tuin": 10028,
+    "huis_tuin": 165,
 }
 
 

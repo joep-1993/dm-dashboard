@@ -1513,6 +1513,48 @@ for row in reader:
 - **Location**: backend/seo_content_generator.py
 - **Date**: 2025-12-10
 
+### Switching from Redshift to Local PostgreSQL Only
+- **Context**: User requested to stop using Redshift and use only local PostgreSQL
+- **Changes Made**:
+  1. Updated `/api/status` endpoint to query local tables only
+  2. Updated `/api/process-urls` endpoint to get pending URLs from local werkvoorraad
+  3. Content is now saved directly in `process_single_url()` instead of batching to Redshift
+  4. Removed all Redshift batch operations from process_urls endpoint
+- **Tables Used (Local PostgreSQL)**:
+  - `pa.jvs_seo_werkvoorraad` - Source URLs to process
+  - `pa.jvs_seo_werkvoorraad_kopteksten_check` - Tracking table (status: success/failed/skipped)
+  - `pa.content_urls_joep` - Generated content storage
+- **Pending Calculation**: Uses LEFT JOIN to find URLs in werkvoorraad not yet in tracking table
+- **Location**: backend/main.py
+- **Date**: 2025-12-11
+
+### URL Format Normalization
+- **Problem**: Mixed URL formats causing mismatches between tables (relative vs absolute)
+- **Formats Found**:
+  - Absolute: `https://www.beslist.nl/products/...`
+  - Relative: `/products/...`
+  - Invalid: `/l/...` (old format)
+- **Solution**: Normalize all URLs to absolute format
+  ```sql
+  -- Update relative to absolute
+  UPDATE table SET url = 'https://www.beslist.nl' || url WHERE url LIKE '/products/%';
+  -- Delete invalid /l/ URLs
+  DELETE FROM table WHERE url LIKE '/l/%';
+  ```
+- **Date**: 2025-12-11
+
+### MAIN_CATEGORY_IDS Mapping Corrections
+- **Problem**: API returning 400 errors with "index_not_found_exception" for wrong maincat IDs
+- **How to Find Correct ID**: Check product URLs on beslist.nl category page - ID is in URL path `/p/product-name/{maincat_id}/ean/`
+- **Corrections Made**:
+  - `huis_tuin`: 10028 → 165
+  - `wonen`: removed (duplicate of huis_tuin)
+  - `speelgoed`/`speelgoed_spelletjes`: 98 → 332
+  - `fietsen`: added with ID 38000
+  - `meubilair`: added with ID 10
+- **Location**: backend/scraper_service.py MAIN_CATEGORY_IDS dict
+- **Date**: 2025-12-11
+
 ### Product Search API-based Content Generation with Facet Extraction
 - **Pattern**: Use Product Search API output to extract selected facet values and build product subjects
 - **Use Case**: Generate SEO content for filtered category pages (e.g., `/products/elektronica/.../c/kleur~19958432~~modelnaam_mob~23748469`)

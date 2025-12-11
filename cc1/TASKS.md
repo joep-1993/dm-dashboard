@@ -10,6 +10,12 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Switch to local PostgreSQL only - remove all Redshift dependencies from process-urls and status endpoints, content saved directly to local DB #claude-session:2025-12-11
+- [x] Add "meubilair" (ID: 10) to MAIN_CATEGORY_IDS mapping in scraper_service.py - fixes API 400 errors for furniture URLs #claude-session:2025-12-11
+- [x] Create import_missing_content.py script - imports CSV content to local PostgreSQL, converts relative URLs to absolute, updates tracking table #claude-session:2025-12-11
+- [x] Fix double single quotes in content ('') → single quote (') - updated 3,594 records #claude-session:2025-12-11
+- [x] Normalize URL formats across all tables - convert relative /products/ URLs to absolute https://www.beslist.nl/products/, remove /l/ format URLs #claude-session:2025-12-11
+- [x] Sync tracking table with content table - add tracking entries for 25K+ URLs that had content but weren't tracked #claude-session:2025-12-11
 - [x] Integrate Product Search API-based content generation into frontend SEO Content Generation - extracts selected facets (detailValue) to build product subjects (e.g., "Gele iPhone 15", "Nike Heren voetbalschoenen"), smart category name inclusion based on facet types #claude-session:2025-12-11
 - [x] Add "Validate All" button to frontend link validation - validates ALL unvalidated URLs in single batch, uses LEFT JOIN with WHERE IS NULL for efficient filtering #claude-session:2025-12-11
 - [x] Add urls_corrected count to link validation results display - shows how many URLs were auto-corrected vs moved to pending #claude-session:2025-12-11
