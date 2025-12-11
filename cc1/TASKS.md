@@ -10,6 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Integrate Product Search API-based content generation into frontend SEO Content Generation - extracts selected facets (detailValue) to build product subjects (e.g., "Gele iPhone 15", "Nike Heren voetbalschoenen"), smart category name inclusion based on facet types #claude-session:2025-12-11
+- [x] Add "Validate All" button to frontend link validation - validates ALL unvalidated URLs in single batch, uses LEFT JOIN with WHERE IS NULL for efficient filtering #claude-session:2025-12-11
+- [x] Add urls_corrected count to link validation results display - shows how many URLs were auto-corrected vs moved to pending #claude-session:2025-12-11
 - [x] Create seo_content_generator.py to generate SEO content from Product Search API using URL filters (parses /products/{maincat}/{category}/c/{filters}, fetches 30 products, generates GPT content with plpUrl links), outputs to Excel #claude-session:2025-12-10
 - [x] Rewrite link_validator.py to use Elasticsearch plpUrl lookup instead of HTTP status checks, auto-correct outdated URLs in content, reset URLs with GONE products to pending (kopteksten=0), validate via local PostgreSQL #claude-session:2025-12-10
 - [x] Create lookup_plp_urls.py script to query Elasticsearch API for plpUrl using pimId, supports both old URL format (/p/maincat_url/pimId/) and new format (/p/product-name/maincat_id/pimId/), batches of 10K, maincat mapping from CSV #claude-session:2025-12-09

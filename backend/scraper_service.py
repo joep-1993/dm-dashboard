@@ -1,9 +1,10 @@
 import requests
 from bs4 import BeautifulSoup
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import re
 import time
 import random
+from urllib.parse import urlencode
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -213,3 +214,337 @@ def sanitize_content(content: str) -> str:
     sanitized = sanitized.replace("'", "''")
 
     return sanitized
+
+
+# Product Search API configuration
+PRODUCT_SEARCH_API_URL = "https://productsearch-v2.api.beslist.nl/search/products"
+
+# Mapping of mainCategory names to IDs (for Product Search API)
+# These IDs are extracted from product URLs on beslist.nl pages
+MAIN_CATEGORY_IDS = {
+    "accessoires": 40000,
+    "baby_peuter": 326,
+    "boeken": 2,
+    "computer": 99950,
+    "computers": 99950,
+    "dieren": 502,
+    "dieren_accessoires": 502,
+    "dvd_blu_ray": 106,
+    "elektronica": 655,
+    "foto_video": 102,
+    "games": 95,
+    "cddvdrom": 95,
+    "gezond_mooi": 286,
+    "huishoudelijke_apparatuur": 12000,
+    "kantoor_schoolartikelen": 7498,
+    "kantoorartikelen": 7498,
+    "klussen": 486172,
+    "mode": 137,
+    "muziek_film": 9242168,
+    "schoenen": 32000,
+    "speelgoed": 98,
+    "speelgoed_spelletjes": 98,
+    "sport_outdoor": 433,
+    "sport_outdoor_vrije-tijd": 433,
+    "tuin_accessoires": 36000,
+    "voor_volwassenen": 452,
+    "wonen": 10028,
+    "huis_tuin": 10028,
+}
+
+
+def parse_beslist_url(url: str) -> Tuple[Optional[str], Optional[str], Dict[str, List[str]]]:
+    """
+    Parse a Beslist.nl URL and extract category and filter information.
+
+    URL format: /products/{maincat}/{category}/c/{filters}
+    Filters format: facet1~value1~~facet2~value2
+
+    Returns:
+        Tuple of (main_category_name, category_urlname, filters_dict)
+        filters_dict maps facet names to list of filter value IDs
+    """
+    # Remove domain if present
+    if url.startswith("http"):
+        url = "/" + url.split("/", 3)[-1]
+
+    # Pattern: /products/{maincat}/{category}/c/{filters}
+    # or: /products/{maincat}/c/{filters}
+    match = re.match(r'^/products/([^/]+)(?:/([^/]+))?/c/(.+)$', url)
+
+    if not match:
+        return None, None, {}
+
+    main_category = match.group(1)
+    category = match.group(2)  # May be None for top-level categories
+    filters_str = match.group(3)
+
+    # Parse filters: facet1~value1~~facet2~value2 or facet1~value1~~facet1~value2
+    filters: Dict[str, List[str]] = {}
+    if filters_str:
+        # Split by ~~ to get individual filter pairs
+        filter_pairs = filters_str.split("~~")
+        for pair in filter_pairs:
+            if "~" in pair:
+                facet_name, value_id = pair.split("~", 1)
+                if facet_name not in filters:
+                    filters[facet_name] = []
+                filters[facet_name].append(value_id)
+
+    return main_category, category, filters
+
+
+def build_api_params(main_category: str, category: Optional[str], filters: Dict[str, List[str]]) -> Dict:
+    """
+    Build API query parameters from parsed URL components.
+    """
+    main_cat_id = MAIN_CATEGORY_IDS.get(main_category)
+    if not main_cat_id:
+        return {}
+
+    params = {
+        "mainCategory": main_cat_id,
+        "sort": "popularity",
+        "sortDirection": "desc",
+        "limit": 76,
+        "offset": 0,
+        "isBot": "false",
+        "countryLanguage": "nl-nl",
+        "experiment": "topProducts",
+        "trackTotalHits": "false",
+    }
+
+    # Add category if present
+    if category:
+        params["category"] = category
+
+    # Add filters - API expects filters[facetName][index]=valueId
+    for facet_name, value_ids in filters.items():
+        for i, value_id in enumerate(value_ids):
+            params[f"filters[{facet_name}][{i}]"] = value_id
+
+    return params
+
+
+def extract_selected_facets(api_response: Dict) -> List[Dict[str, str]]:
+    """
+    Extract selected facet values from API response.
+
+    Returns list of dicts with:
+    - facet_name: Name of the facet group (e.g., "Kleur", "Serie")
+    - facet_value: Display value (e.g., "Geel")
+    - detail_value: Value for content generation (e.g., "Gele" - Dutch adjective form)
+    """
+    selected = []
+
+    facets = api_response.get("facets", [])
+    for facet_group in facets:
+        facet_name = facet_group.get("name", "")
+        values = facet_group.get("values", [])
+
+        for value in values:
+            if value.get("selected", False):
+                selected.append({
+                    "facet_name": facet_name,
+                    "facet_value": value.get("facetValue", ""),
+                    "detail_value": value.get("detailValue", value.get("facetValue", ""))
+                })
+
+    return selected
+
+
+def build_product_subject(selected_facets: List[Dict[str, str]], category_name: str = "") -> str:
+    """
+    Build a product subject/name from selected facet values.
+
+    Logic:
+    - Colors (Kleur) come first as adjectives (using detailValue which has proper Dutch form)
+    - Product names/series come next
+    - Other attributes (brand, target group) follow
+    - Category name is appended when needed for context
+
+    Category is added when:
+    - Subject is just a brand name (e.g., "Garmin" → "Garmin Accu's")
+    - Subject is just a color/material (e.g., "Zwarte" → "Zwarte Klimplantrekken")
+    - Subject is brand + target group (e.g., "Nike Heren" → "Nike Heren sneakers")
+
+    Category is NOT added when:
+    - Subject contains a specific product/model/series name (e.g., "iPhone 15")
+    - Subject contains a product type facet (e.g., "Pistonmachines")
+
+    Example: [{"facet_name": "Kleur", "detail_value": "Gele"},
+              {"facet_name": "Serie", "detail_value": "iPhone 15"}]
+    Returns: "Gele iPhone 15"
+    """
+    if not selected_facets:
+        return category_name  # Just return category if no facets
+
+    # Categorize facets by type
+    colors = []
+    materials = []
+    product_names = []  # Serie, Modelnaam, Type - these are specific product identifiers
+    brands = []
+    target_groups = []  # Doelgroep (Heren, Dames, etc.)
+    other = []
+
+    # Facet names that typically contain specific product/model names
+    # When these are present, we don't need the category name
+    product_name_facets = {"serie", "modelnaam", "modelnaam_mob", "model"}
+    # Product type facets - these describe what the product IS
+    product_type_facets = {"type", "type_koffiezetter", "t_klimplantrek"}
+    # Facet names for colors
+    color_facets = {"kleur", "kleurtint", "kleurtint_paars", "kleurtint_blauw", "kleurtint_groen"}
+    # Facet names for materials
+    material_facets = {"materiaal"}
+    # Facet names for target groups
+    target_group_facets = {"doelgroep", "doelgroep_schoenen", "doelgroep_mode"}
+    # Facet names for brands
+    brand_facets = {"merk"}
+
+    has_specific_product = False  # Track if we have a specific product identifier
+
+    for facet in selected_facets:
+        facet_name_lower = facet["facet_name"].lower()
+        detail_value = facet["detail_value"]
+
+        if any(c in facet_name_lower for c in color_facets):
+            colors.append(detail_value)
+        elif any(m in facet_name_lower for m in material_facets):
+            materials.append(detail_value)
+        elif any(p in facet_name_lower for p in product_name_facets):
+            product_names.append(detail_value)
+            has_specific_product = True
+        elif any(t in facet_name_lower for t in product_type_facets):
+            product_names.append(detail_value)
+            has_specific_product = True
+        elif any(t in facet_name_lower for t in target_group_facets):
+            target_groups.append(detail_value)
+        elif any(b in facet_name_lower for b in brand_facets):
+            brands.append(detail_value)
+        else:
+            other.append(detail_value)
+
+    # Build subject: colors/materials first (as adjectives), then product names, then brands, then target groups
+    parts = colors + materials + product_names + brands + target_groups + other
+
+    # Decide whether to append category name
+    # Add category when:
+    # 1. No specific product name/type is present AND
+    # 2. We only have generic facets (brand, color, material, target group)
+    needs_category = (
+        not has_specific_product and
+        category_name and
+        len(parts) > 0
+    )
+
+    if needs_category:
+        # Convert category to lowercase for natural reading
+        # e.g., "Sneakers" stays as is, but we want it at the end
+        parts.append(category_name.lower())
+
+    return " ".join(parts)
+
+
+def scrape_product_page_api(url: str) -> Optional[Dict]:
+    """
+    Scrape a product listing page using the Product Search API.
+
+    This method:
+    1. Parses the URL to extract category and filter information
+    2. Calls the Product Search API
+    3. Extracts selected facet values and builds a product subject
+    4. Returns product data with the fabricated subject
+
+    Returns:
+        Dict with:
+        - url: Original URL
+        - h1_title: Original page title (from breadcrumb/category)
+        - product_subject: Fabricated subject from selected facets (e.g., "Gele iPhone 15")
+        - products: List of products with title, url, listviewContent
+        - is_grouped: Whether page has facet filters
+        - selected_facets: Raw selected facet data
+    """
+    try:
+        clean = clean_url(url)
+
+        # Parse URL
+        main_category, category, filters = parse_beslist_url(clean)
+
+        if not main_category:
+            print(f"[API] Could not parse URL: {clean}")
+            return None
+
+        # Build API parameters
+        params = build_api_params(main_category, category, filters)
+
+        if not params:
+            print(f"[API] Unknown main category: {main_category}")
+            return None
+
+        # Small delay to be nice to the API
+        time.sleep(0.1 + random.uniform(0, 0.1))
+
+        # Make API request
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+        }
+
+        response = _session.get(PRODUCT_SEARCH_API_URL, params=params, headers=headers, timeout=30)
+
+        if response.status_code != 200:
+            print(f"[API] Request failed with status {response.status_code} for {clean}")
+            if response.status_code == 503:
+                return {'error': '503'}
+            return None
+
+        data = response.json()
+
+        # Extract selected facets
+        selected_facets = extract_selected_facets(data)
+
+        # Get category name from the deepest category level (for use in subject building)
+        categories = data.get("products", [{}])[0].get("categories", []) if data.get("products") else []
+        deepest_category_name = categories[-1].get("name", "") if categories else ""
+
+        # Build product subject from selected facets, passing category for context when needed
+        product_subject = build_product_subject(selected_facets, deepest_category_name)
+
+        # Extract products
+        products = []
+        api_products = data.get("products", [])[:70]  # Max 70 products
+
+        for product in api_products:
+            title = product.get("title", product.get("description", "No Title"))[:100]
+            description = product.get("description", title)[:150]
+
+            # Get plpUrl for product link
+            plp_url = product.get("plpUrl", "")
+            if plp_url and not plp_url.startswith("http"):
+                plp_url = "https://www.beslist.nl" + plp_url
+
+            if plp_url and description:
+                products.append({
+                    "title": title,
+                    "url": plp_url,
+                    "listviewContent": description
+                })
+
+        # Use deepest category as h1 title
+        h1_title = deepest_category_name if deepest_category_name else main_category
+
+        return {
+            "url": clean,
+            "h1_title": h1_title,
+            "product_subject": product_subject,
+            "products": products,
+            "is_grouped": len(filters) > 0,
+            "selected_facets": selected_facets
+        }
+
+    except requests.RequestException as e:
+        print(f"[API] Request error for {url}: {str(e)}")
+        return None
+    except Exception as e:
+        print(f"[API] Error for {url}: {str(e)}")
+        return None

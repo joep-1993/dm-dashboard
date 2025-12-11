@@ -1513,6 +1513,56 @@ for row in reader:
 - **Location**: backend/seo_content_generator.py
 - **Date**: 2025-12-10
 
+### Product Search API-based Content Generation with Facet Extraction
+- **Pattern**: Use Product Search API output to extract selected facet values and build product subjects
+- **Use Case**: Generate SEO content for filtered category pages (e.g., `/products/elektronica/.../c/kleur~19958432~~modelnaam_mob~23748469`)
+- **Implementation**:
+  1. Parse URL to extract maincat, category, and filter parameters
+  2. Call Product Search API with filters
+  3. Extract facets where `"selected": true` from response
+  4. Use `detailValue` field (Dutch adjective form) for colors/materials
+  5. Build product subject with smart ordering: colors → product names → brands → category
+- **Smart Category Name Inclusion**:
+  - Include category name when only generic facets present (brand, color, target group)
+  - Skip category when specific product/model/type facets exist (would be redundant)
+  - Example: "Nike Heren" needs category → "Nike Heren voetbalschoenen"
+  - Example: "iPhone 15" has specific product → no category needed
+- **Key Functions**:
+  - `parse_beslist_url()` - Extracts maincat, category, filters from URL
+  - `build_api_params()` - Constructs API query parameters
+  - `extract_selected_facets()` - Finds facets with `"selected": true`
+  - `build_product_subject()` - Builds product name from facets
+  - `scrape_product_page_api()` - Main function replacing HTML scraping
+- **Integration**: Used in frontend SEO Content Generation (process_single_url in main.py)
+- **Location**: backend/scraper_service.py
+- **Date**: 2025-12-11
+
+### SQL Filtering for Unvalidated URLs (LEFT JOIN vs In-Memory)
+- **Problem**: "No content to validate" error when URLs exist but query returns wrong results
+- **Cause**: SQL query with LIMIT but filtering done in-memory returns same already-validated rows
+- **Wrong Approach**:
+  ```python
+  # Fetches all content, filters in Python - doesn't scale with LIMIT
+  cur.execute("SELECT url, content FROM content LIMIT 1000")
+  rows = cur.fetchall()
+  unvalidated = [r for r in rows if r['url'] not in validated_set]  # May be empty!
+  ```
+- **Correct Approach**:
+  ```sql
+  -- Filter at database level using LEFT JOIN
+  SELECT c.url, c.content
+  FROM pa.content_urls_joep c
+  LEFT JOIN pa.link_validation_results v ON c.url = v.content_url
+  WHERE v.content_url IS NULL
+  LIMIT 1000
+  ```
+- **Benefits**:
+  - Efficiently finds unvalidated URLs at database level
+  - LIMIT applies after filtering, not before
+  - Works regardless of validation history size
+- **Location**: backend/main.py `/api/validate-all-links` endpoint
+- **Date**: 2025-12-11
+
 ### Content Generation Performance Optimizations
 - **Problem**: Processing 131K URLs at ~4-10 seconds per URL would take 18-46 days
 - **Goal**: Reduce processing time to 3-9 days (2.8-6x faster)
@@ -1542,4 +1592,4 @@ for row in reader:
 - **Note on Scraping Delay**: Initial attempt at 0.05-0.1s was too aggressive, causing Cloudflare HTTP 202 (queuing) responses even with whitelisted IP. Adjusted to 0.2-0.3s as sweet spot between speed and avoiding rate limits.
 
 ---
-_Last updated: 2025-12-10_
+_Last updated: 2025-12-11_

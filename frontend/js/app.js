@@ -611,7 +611,8 @@ async function validateLinks() {
                 <div class="alert alert-${data.moved_to_pending > 0 ? 'warning' : 'success'}">
                     <strong>Validation Complete</strong><br>
                     Validated: ${data.validated} items<br>
-                    Moved to pending (broken links): ${data.moved_to_pending}
+                    URLs corrected: ${data.urls_corrected || 0}<br>
+                    Moved to pending (gone products): ${data.moved_to_pending}
                 </div>
             `;
 
@@ -703,5 +704,64 @@ async function resetValidationHistory() {
     } finally {
         resetBtn.disabled = false;
         resetBtn.textContent = 'Reset Validation';
+    }
+}
+
+// Validate ALL links function
+async function validateAllLinks() {
+    const validateBtn = document.getElementById('validateBtn');
+    const validateAllBtn = document.getElementById('validateAllBtn');
+    const resetBtn = document.getElementById('resetValidationBtn');
+    const resultDiv = document.getElementById('validationResult');
+    const parallelWorkersInput = document.getElementById('validationParallelWorkers');
+    const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
+
+    if (parallelWorkers < 1 || parallelWorkers > 10) {
+        alert('Parallel workers must be between 1 and 10');
+        return;
+    }
+
+    // Disable buttons
+    validateBtn.disabled = true;
+    validateAllBtn.disabled = true;
+    resetBtn.disabled = true;
+    validateAllBtn.textContent = 'Validating All...';
+    resultDiv.innerHTML = `<div class="alert alert-info">Validating ALL content URLs with ${parallelWorkers} parallel workers... This may take a while.</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/validate-all-links?parallel_workers=${parallelWorkers}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (data.validated === 0) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>No content to validate</strong><br>
+                    All URLs have already been validated.
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-${data.moved_to_pending > 0 ? 'warning' : 'success'}">
+                    <strong>Validation Complete!</strong><br>
+                    Total validated: ${data.validated} items<br>
+                    URLs corrected: ${data.urls_corrected || 0}<br>
+                    Moved to pending (gone products): ${data.moved_to_pending}
+                </div>
+            `;
+        }
+
+        // Refresh status counts
+        refreshStatus();
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        validateBtn.disabled = false;
+        validateAllBtn.disabled = false;
+        resetBtn.disabled = false;
+        validateAllBtn.textContent = 'Validate All';
     }
 }

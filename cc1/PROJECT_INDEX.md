@@ -24,6 +24,7 @@ content_top/
 ├── backend/
 │   ├── main.py           # FastAPI app with CORS & Thema Ads endpoints
 │   │                     # CSV parsing: empty row handling, dash removal, optional columns
+│   │                     # SEO content generation uses Product Search API via scrape_product_page_api()
 │   ├── database.py       # Hybrid database connections (PostgreSQL + Redshift)
 │   │                     # Functions: get_db_connection(), get_redshift_connection(), get_output_connection()
 │   │                     # Schema: campaign_id and campaign_name columns added
@@ -44,6 +45,9 @@ content_top/
 │   ├── thema_ads_schema.sql  # Database schema for job tracking
 │   ├── schema.sql        # SEO workflow database schema
 │   └── scraper_service.py    # Web scraping utilities with 0.2-0.3s delay (optimized mode) or 0.5-0.7s delay (conservative mode), custom UA 'Beslist script voor SEO' (bypasses VPN, whitelisted IP has no rate limits), hidden 503 detection (checks HTML body, returns {'error': '503'} for immediate batch stop)
+│                             # Key functions: scrape_product_page_api() - Product Search API integration
+│                             # parse_beslist_url(), build_api_params(), extract_selected_facets(), build_product_subject()
+│                             # Extracts selected facets (detailValue) for product subjects with smart category inclusion
 ├── openvpn               # OpenVPN client config (with pull-filter for split tunneling)
 ├── frontend/
 │   ├── index.html        # Main page (Bootstrap CDN)
@@ -303,6 +307,7 @@ python-dotenv==1.0.0      # Environment variable management
 - `GET /api/export/csv` - Export all generated content as CSV
 - `GET /api/export/json` - Export all generated content as JSON
 - `POST /api/validate-links?batch_size=1000&parallel_workers=3&conservative_mode=false` - Validate hyperlinks in content (checks for 301/404, auto-resets to pending if broken) (batch_size: min 1, no upper limit, parallel_workers: 1-10, conservative_mode forces 1 worker with 0.5-0.7s delay per link). Only validates URLs not yet validated.
+- `POST /api/validate-all-links?parallel_workers=3` - Validate ALL unvalidated URLs in single batch. Uses LEFT JOIN for efficient filtering. Returns: validated count, urls_corrected count, moved_to_pending count.
 - `GET /api/validation-history?limit=20` - Get link validation history with broken link details
 - `DELETE /api/validation-history/reset` - Reset all validation history to allow re-validation of all URLs
 
@@ -405,4 +410,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2025-12-10_
+_Last updated: 2025-12-11_
