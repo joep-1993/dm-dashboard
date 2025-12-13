@@ -334,8 +334,14 @@ def get_status():
         """)
         failed = cur.fetchone()['failed']
 
-        # Get total URLs from werkvoorraad
-        cur.execute("SELECT COUNT(*) as total FROM pa.jvs_seo_werkvoorraad")
+        # Get total unique URLs across all tables (werkvoorraad + content)
+        cur.execute("""
+            SELECT COUNT(DISTINCT url) as total FROM (
+                SELECT url FROM pa.jvs_seo_werkvoorraad
+                UNION
+                SELECT url FROM pa.content_urls_joep
+            ) all_urls
+        """)
         total = cur.fetchone()['total']
 
         # Pending = URLs in werkvoorraad that haven't been tracked yet (using LEFT JOIN)

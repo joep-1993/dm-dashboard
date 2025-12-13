@@ -1543,17 +1543,25 @@ for row in reader:
   ```
 - **Date**: 2025-12-11
 
-### MAIN_CATEGORY_IDS Mapping Corrections
-- **Problem**: API returning 400 errors with "index_not_found_exception" for wrong maincat IDs
-- **How to Find Correct ID**: Check product URLs on beslist.nl category page - ID is in URL path `/p/product-name/{maincat_id}/ean/`
-- **Corrections Made**:
-  - `huis_tuin`: 10028 → 165
-  - `wonen`: removed (duplicate of huis_tuin)
-  - `speelgoed`/`speelgoed_spelletjes`: 98 → 332
-  - `fietsen`: added with ID 38000
-  - `meubilair`: added with ID 10
+### MAIN_CATEGORY_IDS Authoritative Source
+- **Source File**: `maincat_ids_new.xlsx` - DO NOT EDIT mapping without updating this file
 - **Location**: backend/scraper_service.py MAIN_CATEGORY_IDS dict
-- **Date**: 2025-12-11
+- **How to Find Correct ID**: Check product URLs on beslist.nl category page - ID is in URL path `/p/product-name/{maincat_id}/ean/`
+- **Key Mappings** (31 total):
+  - autos: 37000, baby_peuter: 8, boeken: 701, computers: 6
+  - elektronica: 655, fietsen: 38000, huis_tuin: 165, klussen: 35000
+  - meubilair: 10, mode: 137, schoenen: 32000, speelgoed_spelletjes: 332
+- **Date**: 2025-12-12
+
+### Content Generation Performance Optimization
+- **API Delay**: Reduced from 0.1-0.2s to 0.02-0.05s per call (5x faster)
+- **Default Workers**: Increased from 3 to 6 (2x parallelization)
+- **Default Batch Size**: Increased from 10 to 50 (5x per request)
+- **Why Safe**: Product Search API is internal, less restrictive than scraping
+- **Location**:
+  - API delay: backend/scraper_service.py line 488
+  - Workers/batch: frontend/index.html
+- **Date**: 2025-12-12
 
 ### Product Search API-based Content Generation with Facet Extraction
 - **Pattern**: Use Product Search API output to extract selected facet values and build product subjects

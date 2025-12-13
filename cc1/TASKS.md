@@ -10,6 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Update MAIN_CATEGORY_IDS from maincat_ids_new.xlsx - replaced all mappings with correct values from authoritative source file #claude-session:2025-12-12
+- [x] Optimize content generation speed - reduced API delay (0.1-0.2s → 0.02-0.05s), increased default workers (3 → 6), batch size (10 → 50) #claude-session:2025-12-12
+- [x] Fix Total URLs count to show all unique URLs across werkvoorraad + content tables (not just werkvoorraad) #claude-session:2025-12-12
 - [x] Switch to local PostgreSQL only - remove all Redshift dependencies from process-urls and status endpoints, content saved directly to local DB #claude-session:2025-12-11
 - [x] Add "meubilair" (ID: 10) to MAIN_CATEGORY_IDS mapping in scraper_service.py - fixes API 400 errors for furniture URLs #claude-session:2025-12-11
 - [x] Create import_missing_content.py script - imports CSV content to local PostgreSQL, converts relative URLs to absolute, updates tracking table #claude-session:2025-12-11

@@ -484,8 +484,8 @@ def scrape_product_page_api(url: str) -> Optional[Dict]:
             print(f"[API] Unknown main category: {main_category}")
             return None
 
-        # Small delay to be nice to the API
-        time.sleep(0.1 + random.uniform(0, 0.1))
+        # Minimal delay for API calls (internal API, less restrictive)
+        time.sleep(0.02 + random.uniform(0, 0.03))
 
         # Make API request
         headers = {
