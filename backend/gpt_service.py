@@ -50,6 +50,7 @@ def create_product_recommendation_prompt(h1_title: str, products: List[Dict]) ->
     prompt = f"""Opdracht
 Een prijsbewuste consumenten landt op een pagina na het zoeken in Google.Op de pagina staan veel producten waaruit hij moet kiezen. Zie de lijst met de 40 populairste producten hieronder.
 Schrijf een korte tekst (max. 100 woorden) met als doel om de bezoeker te helpen de juiste keuze te maken.
+- Schrijf de tekst als EEN doorlopende alinea, GEEN meerdere paragrafen of witregels.
 - Geef concreet advies: noem bijvoorbeeld verschillen in functies, eigenschappen of gebruiksscenario's
 - Vermijd het noemen van prijzen.
 - Gebruik waar relevant, klikbare links naar producten en gebruik hierbij HTML-links met de tag <a href="url"> en als linktekst een KORTE, heldere omschrijving (max 3-5 woorden). Maak bijvoorbeeld van "Beeztees kattentuigje Hearts zwart 120 x 1 cm" gewoon "Beeztees kattentuigje Hearts". Gebruik alleen "urls" die hieronder in deze lijst voorkomen en negeer urls met een lege waarde.
@@ -72,6 +73,7 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
     system_message = """Je bent een online voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
 - Spreek de lezer aan met "je," in een toegankelijke, optimistische toon.
 - Noem nooit prijzen.
+- Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
 - Focus op advies dat écht helpt bij het maken van een keuze (bv. voordelen, verschillen, specifieke kenmerken).
 - Als je linkt gebruikt, gebruik de tag <a href> en kies dan de juiste url uit de lijst van meegeleverde producten. Maak nooit zelf een andere url en negeer urls met waarde [empty]
 - Als je een link maakt: HOUD DE LINKTEKST KORT (max 3-5 woorden). Zorg dat de linktekst verwijst naar het correcte product, maar vermijd lange productnamen met specificaties. Bijvoorbeeld: "Beeztees kattentuigje Hearts" in plaats van "Beeztees kattentuigje Hearts zwart 120 x 1 cm".
@@ -86,11 +88,17 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
     response = client.chat.completions.create(
         model=MODEL,
         messages=messages,
-        max_tokens=500,  # Increased for ~100 words + HTML links which use more tokens
+        max_tokens=1000,  # Increased to avoid mid-entity truncation (e.g. &amp;)
         temperature=0.7
     )
 
-    return response.choices[0].message.content
+    content = response.choices[0].message.content
+
+    # Check if response was truncated
+    if response.choices[0].finish_reason == "length":
+        print(f"[GPT] Warning: Response was truncated for '{h1_title}'")
+
+    return content
 
 def check_content_has_valid_links(content: str) -> bool:
     """

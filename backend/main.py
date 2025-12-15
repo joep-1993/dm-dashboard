@@ -382,45 +382,52 @@ def get_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/export/csv")
-async def export_csv():
-    """Export all generated content as CSV"""
+@app.get("/api/export/xlsx")
+async def export_xlsx():
+    """Export all generated content as Excel XLSX (from local PostgreSQL)"""
+    from openpyxl import Workbook
+
     try:
-        conn = get_output_connection()
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
             SELECT url, content
             FROM pa.content_urls_joep
-            ORDER BY created_at DESC
         """)
         rows = cur.fetchall()
 
         cur.close()
         return_db_connection(conn)
 
-        # Create CSV in memory with UTF-8 BOM for proper Excel compatibility
-        output = BytesIO()
-        output.write('\ufeff'.encode('utf-8'))  # UTF-8 BOM
+        # Create Excel workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Content Export"
 
-        text_output = StringIO()
-        writer = csv.writer(text_output, quoting=csv.QUOTE_ALL, lineterminator='\n')
-        writer.writerow(['url', 'content'])
+        # Add headers
+        ws.append(['url', 'content'])
+
+        # Add data rows
+        import re
+        # Remove control characters that Excel doesn't allow (except tab, newline, carriage return)
+        illegal_chars = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
 
         for row in rows:
-            # Replace newlines in content with spaces to prevent row breaks
-            content = row['content'].replace('\n', ' ').replace('\r', ' ') if row['content'] else ''
-            writer.writerow([row['url'], content])
+            content = row['content'] if row['content'] else ''
+            # Remove illegal control characters
+            content = illegal_chars.sub('', content)
+            ws.append([row['url'], content])
 
-        # Write CSV text to output with UTF-8 encoding
-        output.write(text_output.getvalue().encode('utf-8'))
-
-        # Return as downloadable file
+        # Save to BytesIO
+        output = BytesIO()
+        wb.save(output)
         output.seek(0)
+
         return StreamingResponse(
             iter([output.getvalue()]),
-            media_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": f"attachment; filename=content_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=content_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
         )
 
     except Exception as e:
@@ -440,15 +447,14 @@ async def export_json():
         rows = cur.fetchall()
 
         cur.close()
-        return_db_connection(conn)
+        return_output_connection(conn)
 
         # Convert to JSON-serializable format
         data = []
         for row in rows:
             data.append({
                 'url': row['url'],
-                'content': row['content'],
-                'created_at': row['created_at'].isoformat() if row['created_at'] else None
+                'content': row['content']
             })
 
         # Return as downloadable file
@@ -761,6 +767,14 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
                 WHERE url IN ({placeholders})
             """, urls_with_gone_products)
 
+            # Add URLs to werkvoorraad for reprocessing (if not already there)
+            for url in urls_with_gone_products:
+                cur.execute("""
+                    INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
+                    VALUES (%s, 0)
+                    ON CONFLICT (url) DO UPDATE SET kopteksten = 0
+                """, (url,))
+
             print(f"[VALIDATE-LINKS] Deleted content for {len(urls_with_gone_products)} URLs with gone products")
 
         conn.commit()
@@ -901,6 +915,13 @@ def validate_all_links(parallel_workers: int = 3):
                     DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
                     WHERE url IN ({placeholders})
                 """, urls_with_gone_products)
+                # Add URLs to werkvoorraad for reprocessing (if not already there)
+                for url in urls_with_gone_products:
+                    cur.execute("""
+                        INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
+                        VALUES (%s, 0)
+                        ON CONFLICT (url) DO UPDATE SET kopteksten = 0
+                    """, (url,))
 
             conn.commit()
             cur.close()

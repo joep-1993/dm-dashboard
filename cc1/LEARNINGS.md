@@ -28,6 +28,70 @@ docker-compose exec app python -m backend.import_content
 
 ## Common Issues & Solutions
 
+### Orphaned URLs After Content Deletion
+- **Problem**: URLs become "lost" when content is deleted (validation/regeneration) but URL not in werkvoorraad
+- **Symptoms**: Total URL count drops, URLs cannot be reprocessed
+- **Cause**: Content deleted from `content_urls_joep` but URL never existed in `jvs_seo_werkvoorraad`
+- **Solution**: When deleting content, always ensure URLs are added to werkvoorraad:
+```python
+# After deleting content, add URLs to werkvoorraad for reprocessing
+for url in deleted_urls:
+    cur.execute("""
+        INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
+        VALUES (%s, 0)
+        ON CONFLICT (url) DO UPDATE SET kopteksten = 0
+    """, (url,))
+```
+- **Recovery**: Check for orphaned URLs in validation_results or tracking tables and add to werkvoorraad
+- **Location**: backend/main.py - validate-links and validate-all-links endpoints
+- **Date**: 2025-12-15
+
+### GPT Generating Multiple Paragraphs
+- **Problem**: Generated content contains `\n\n` (double newlines) creating multiple paragraphs
+- **Solution**: Add explicit instruction to BOTH system message and user prompt:
+  - System: `"Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen."`
+  - User: `"Schrijf de tekst als EEN doorlopende alinea, GEEN meerdere paragrafen of witregels."`
+- **Location**: backend/gpt_service.py
+- **Date**: 2025-12-15
+
+### Connection Pool Mismatch in Export Functions
+- **Error**: `trying to put unkeyed connection`
+- **Cause**: Using `get_output_connection()` but returning with `return_db_connection()` - wrong pool
+- **Solution**: Always use matching return function for connection type:
+  - `get_db_connection()` → `return_db_connection()`
+  - `get_output_connection()` → `return_output_connection()`
+  - `get_redshift_connection()` → `return_redshift_connection()`
+- **Location**: backend/main.py - export endpoints
+- **Date**: 2025-12-15
+
+### Illegal Characters in Excel Export (openpyxl)
+- **Error**: `\u0011 cannot be used in worksheets`
+- **Cause**: Content contains control characters that Excel doesn't allow
+- **Solution**: Sanitize content before writing to Excel worksheet:
+```python
+import re
+# Remove control characters except tab, newline, carriage return
+illegal_chars = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+content = illegal_chars.sub('', content)
+```
+- **Location**: backend/main.py - `/api/export/xlsx` endpoint
+- **Date**: 2025-12-15
+
+### GPT Content Truncation Mid-Entity
+- **Problem**: Generated content cut off mid-HTML entity (e.g., `&amp` without `;`)
+- **Cause**: OpenAI `max_tokens` limit reached before response completed
+- **Symptoms**: Content ends with incomplete entities like `&amp`, `&quot`, `&#123`
+- **Solution**:
+  1. Increase `max_tokens` (500 → 1000 for ~100 word content with HTML)
+  2. Check `finish_reason` to detect truncation:
+```python
+response = client.chat.completions.create(...)
+if response.choices[0].finish_reason == "length":
+    print(f"Warning: Response was truncated")
+```
+- **Location**: backend/gpt_service.py (line 89)
+- **Date**: 2025-12-15
+
 ### Redshift Serializable Isolation Violation (Error 1023)
 - **Error**: `Error: 1023 DETAIL: Serializable isolation violation on table - 37521601, transactions forming the cycle are: 573354047, 573354048, 573354046 (pid:1073775083)`
 - **Cause**: Multiple concurrent batch jobs updating the same Redshift table (`pa.jvs_seo_werkvoorraad_shopping_season`) with individual UPDATE statements in loops
@@ -1642,4 +1706,4 @@ for row in reader:
 - **Note on Scraping Delay**: Initial attempt at 0.05-0.1s was too aggressive, causing Cloudflare HTTP 202 (queuing) responses even with whitelisted IP. Adjusted to 0.2-0.3s as sweet spot between speed and avoiding rate limits.
 
 ---
-_Last updated: 2025-12-11_
+_Last updated: 2025-12-15_

@@ -29,9 +29,9 @@ content_top/
 │   │                     # Functions: get_db_connection(), get_redshift_connection(), get_output_connection()
 │   │                     # Schema: campaign_id and campaign_name columns added
 │   ├── gpt_service.py    # AI integration with optimized prompts for concise hyperlink text (3-5 words max)
-│   ├── link_validator.py # Hyperlink validation via Elasticsearch plpUrl lookup (replaces HTTP checking)
+│   ├── link_validator.py # Hyperlink validation via Elasticsearch plpUrl lookup (uses local PostgreSQL only)
 │   │                     # Auto-corrects outdated URLs, resets GONE products to pending
-│   │                     # Uses maincat_mapping.csv for ES index routing
+│   │                     # Adds gone URLs to werkvoorraad for reprocessing
 │   ├── seo_content_generator.py  # SEO content from Product Search API
 │   │                     # Parses /products/{maincat}/{category}/c/{filters} URLs
 │   │                     # Fetches 30 products, generates GPT content with plpUrl links
@@ -95,7 +95,7 @@ route add -p 65.9.0.0 mask 255.255.0.0 192.168.1.1 metric 1 if 10
 ```bash
 OPENAI_API_KEY=sk-...  # Your OpenAI API key
 DATABASE_URL=postgresql://postgres:postgres@db:5432/myapp
-AI_MODEL=gpt-4o-mini  # Or other OpenAI model (max_tokens: 500 for content with HTML links)
+AI_MODEL=gpt-4o-mini  # Or other OpenAI model (max_tokens: 1000 for content with HTML links)
 ```
 
 ### Required (Redshift - Output Storage)
@@ -304,7 +304,7 @@ python-dotenv==1.0.0      # Environment variable management
 - `GET /api/status` - Get SEO processing status (includes total, processed, skipped, failed, pending counts)
 - `POST /api/upload-urls` - Upload text file with URLs (one per line, duplicates skipped)
 - `DELETE /api/result/{url}` - Delete result and reset URL to pending
-- `GET /api/export/csv` - Export all generated content as CSV
+- `GET /api/export/xlsx` - Export all generated content as Excel XLSX (from local PostgreSQL, sanitizes illegal characters)
 - `GET /api/export/json` - Export all generated content as JSON
 - `POST /api/validate-links?batch_size=1000&parallel_workers=3&conservative_mode=false` - Validate hyperlinks in content (checks for 301/404, auto-resets to pending if broken) (batch_size: min 1, no upper limit, parallel_workers: 1-10, conservative_mode forces 1 worker with 0.5-0.7s delay per link). Only validates URLs not yet validated.
 - `POST /api/validate-all-links?parallel_workers=3` - Validate ALL unvalidated URLs in single batch. Uses LEFT JOIN for efficient filtering. Returns: validated count, urls_corrected count, moved_to_pending count.
@@ -410,4 +410,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2025-12-11_
+_Last updated: 2025-12-15_

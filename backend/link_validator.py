@@ -6,7 +6,7 @@ from typing import List, Dict, Tuple, Optional
 from bs4 import BeautifulSoup
 from pathlib import Path
 
-from backend.database import get_redshift_connection, return_redshift_connection
+from backend.database import get_db_connection, return_db_connection
 
 # Elasticsearch configuration
 ES_URL = "https://elasticsearch-job-cluster-eck.beslist.nl"
@@ -255,12 +255,13 @@ def validate_and_fix_content_links(content: str, content_url: str) -> Dict:
 
 def update_content_in_redshift(content_url: str, new_content: str) -> bool:
     """
-    Update content in Redshift pa.content_urls_joep table.
+    Update content in local PostgreSQL pa.content_urls_joep table.
     Returns True if successful.
+    Note: Function name kept for backwards compatibility.
     """
     conn = None
     try:
-        conn = get_redshift_connection()
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -273,19 +274,19 @@ def update_content_in_redshift(content_url: str, new_content: str) -> bool:
         print(f"[LINK_VALIDATOR] Updated content for URL: {content_url}")
         return True
     except Exception as e:
-        print(f"[LINK_VALIDATOR] Error updating content in Redshift: {e}")
+        print(f"[LINK_VALIDATOR] Error updating content in PostgreSQL: {e}")
         if conn:
             conn.rollback()
         return False
     finally:
         if conn:
-            return_redshift_connection(conn)
+            return_db_connection(conn)
 
 
 def add_urls_to_werkvoorraad(urls: List[str]) -> int:
     """
     Add URLs to werkvoorraad table for reprocessing.
-    Inserts into pa.jvs_seo_werkvoorraad_shopping_season with kopteksten=0.
+    Inserts into pa.jvs_seo_werkvoorraad with kopteksten=0.
     Returns number of URLs added.
     """
     if not urls:
@@ -293,21 +294,18 @@ def add_urls_to_werkvoorraad(urls: List[str]) -> int:
 
     conn = None
     try:
-        conn = get_redshift_connection()
+        conn = get_db_connection()
         cur = conn.cursor()
 
         added_count = 0
         for url in urls:
             try:
-                # Use INSERT with ON CONFLICT to avoid duplicates
-                # Redshift doesn't support ON CONFLICT, so we use a different approach
+                # PostgreSQL supports ON CONFLICT
                 cur.execute("""
-                    INSERT INTO pa.jvs_seo_werkvoorraad_shopping_season (url, kopteksten)
-                    SELECT %s, 0
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM pa.jvs_seo_werkvoorraad_shopping_season WHERE url = %s
-                    )
-                """, (url, url))
+                    INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
+                    VALUES (%s, 0)
+                    ON CONFLICT (url) DO UPDATE SET kopteksten = 0
+                """, (url,))
                 added_count += cur.rowcount
             except Exception as e:
                 print(f"[LINK_VALIDATOR] Error adding URL {url} to werkvoorraad: {e}")
@@ -322,18 +320,18 @@ def add_urls_to_werkvoorraad(urls: List[str]) -> int:
         return 0
     finally:
         if conn:
-            return_redshift_connection(conn)
+            return_db_connection(conn)
 
 
 def validate_and_fix_content_batch(contents: List[Tuple[str, str]],
-                                    auto_update_redshift: bool = False,
+                                    auto_update_db: bool = False,
                                     auto_add_to_werkvoorraad: bool = False) -> Dict:
     """
     Validate and fix hyperlinks for multiple content items.
 
     Args:
         contents: List of tuples (content_url, content)
-        auto_update_redshift: If True, automatically update corrected content in Redshift
+        auto_update_db: If True, automatically update corrected content in PostgreSQL
         auto_add_to_werkvoorraad: If True, automatically add gone URLs to werkvoorraad
 
     Returns:
@@ -351,8 +349,8 @@ def validate_and_fix_content_batch(contents: List[Tuple[str, str]],
         # Collect gone URLs
         all_gone_urls.extend(validation['gone_urls'])
 
-        # Update Redshift if content changed and auto_update is enabled
-        if validation['has_changes'] and auto_update_redshift:
+        # Update PostgreSQL if content changed and auto_update is enabled
+        if validation['has_changes'] and auto_update_db:
             if update_content_in_redshift(content_url, validation['corrected_content']):
                 total_updated += 1
 
@@ -366,7 +364,7 @@ def validate_and_fix_content_batch(contents: List[Tuple[str, str]],
     return {
         'total_content_items': len(contents),
         'total_urls_replaced': total_replaced,
-        'total_content_updated_in_redshift': total_updated,
+        'total_content_updated_in_db': total_updated,
         'total_gone_urls': len(all_gone_urls),
         'urls_added_to_werkvoorraad': urls_added_to_werkvoorraad,
         'gone_urls': list(set(all_gone_urls)),  # deduplicated

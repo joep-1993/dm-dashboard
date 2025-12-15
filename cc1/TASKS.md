@@ -10,6 +10,13 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Switch link validator to PostgreSQL only - removed Redshift dependency from link_validator.py, all validation now uses local PostgreSQL #claude-session:2025-12-15
+- [x] Add single-paragraph constraint to GPT prompt - updated gpt_service.py to require single continuous paragraph, reset 12,779 URLs with multiple paragraphs for regeneration #claude-session:2025-12-15
+- [x] Fix validation 'moved to pending' not tracking URLs - URLs with gone products now properly added to werkvoorraad table for reprocessing #claude-session:2025-12-15
+- [x] Recover orphaned URLs and fix data consistency - recovered 8,972 URLs from validation results + 56,666 content URLs not in werkvoorraad, total now 163,250 unique URLs #claude-session:2025-12-15
+- [x] Fix export endpoint errors and switch to XLSX format - fixed created_at column missing, connection pool mismatch, changed CSV to XLSX with illegal character sanitization #claude-session:2025-12-15
+- [x] Fix GPT content truncation at &amp entities - increased max_tokens from 500 to 1000, added truncation warning logging #claude-session:2025-12-15
+- [x] Fix export data source mismatch - changed export to read from local PostgreSQL instead of Redshift (94K→177K rows) #claude-session:2025-12-15
 - [x] Update MAIN_CATEGORY_IDS from maincat_ids_new.xlsx - replaced all mappings with correct values from authoritative source file #claude-session:2025-12-12
 - [x] Optimize content generation speed - reduced API delay (0.1-0.2s → 0.02-0.05s), increased default workers (3 → 6), batch size (10 → 50) #claude-session:2025-12-12
 - [x] Fix Total URLs count to show all unique URLs across werkvoorraad + content tables (not just werkvoorraad) #claude-session:2025-12-12

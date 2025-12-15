@@ -550,9 +550,9 @@ async function deleteResult(url, index) {
 }
 
 // Export functions
-async function exportCSV() {
+async function exportXLSX() {
     try {
-        window.location.href = `${API_BASE}/api/export/csv`;
+        window.location.href = `${API_BASE}/api/export/xlsx`;
     } catch (error) {
         alert(`Export failed: ${error.message}`);
     }
