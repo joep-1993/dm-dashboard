@@ -3,7 +3,7 @@
 /* Custom Color Scheme */
 :root {
     --color-navbar: #5e4a90;    /* Purple - for top navbar only */
-    --color-section: #aaaaaa;   /* Grey - for section headers */
+    --color-section: #E8E9EB;   /* Light grey - for section headers */
     --color-button: #CC5500;    /* Burnt orange - for buttons */
     --color-button-hover: #E97451;  /* Coral orange - for button hover */
 }
@@ -127,7 +127,7 @@ body {
 }
 
 .alert-info {
-    background-color: rgba(170, 170, 170, 0.15);
+    background-color: rgba(232, 233, 235, 0.5);
     border-color: var(--color-section);
     color: #333;
 }
@@ -170,7 +170,7 @@ body {
 }
 
 .alert-success {
-    background-color: rgba(170, 170, 170, 0.15);
+    background-color: rgba(232, 233, 235, 0.5);
     border-color: var(--color-section);
     color: #333;
 }
