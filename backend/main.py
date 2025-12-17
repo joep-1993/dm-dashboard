@@ -75,7 +75,7 @@ def read_root():
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "healthy", "service": "content_top"}
+    return {"status": "healthy", "service": "dm_tools"}
 
 @app.post("/api/generate")
 async def generate_text(prompt: str):
