@@ -1,0 +1,514 @@
+"""
+FAQ Generation Service
+
+Generates FAQ content for product category pages using the Product Search API and OpenAI.
+Adapted from seo_faq/faq_generator_api.py for integration with content_top.
+"""
+
+import os
+import json
+import time
+import random
+import re
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass, asdict
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from openai import OpenAI
+
+# Configuration
+USER_AGENT = "Beslist script voor SEO"
+AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
+
+# Product Search API configuration
+PRODUCT_SEARCH_API_URL = "https://productsearch-v2.api.beslist.nl/search/products"
+
+# Mapping of mainCategory URL names to IDs (for Product Search API)
+MAIN_CATEGORY_IDS = {
+    "autos": 37000,
+    "baby_peuter": 8,
+    "boeken": 701,
+    "cadeaus_gadgets_culinair": 262,
+    "computers": 6,
+    "dieren_accessoires": 34000,
+    "gezond_mooi": 286,
+    "elektronica": 655,
+    "voor_volwassenen": 452,
+    "eten_drinken": 11,
+    "fietsen": 38000,
+    "films-series": 700,
+    "cddvdrom": 4,
+    "horloge": 30000,
+    "huishoudelijke_apparatuur": 12000,
+    "kantoorartikelen": 361,
+    "mode": 137,
+    "klussen": 35000,
+    "meubilair": 10,
+    "mode_accessoires": 33000,
+    "accessoires": 40000,
+    "muziekinstrument": 31000,
+    "parfum_aftershave": 29000,
+    "main_sanitair": 27000,
+    "schoenen": 32000,
+    "sieraden_horloges": 347,
+    "software": 155,
+    "speelgoed_spelletjes": 332,
+    "sport_outdoor_vrije-tijd": 206,
+    "tuin_accessoires": 36000,
+    "huis_tuin": 165,
+}
+
+
+@dataclass
+class FAQItem:
+    """Single FAQ question-answer pair"""
+    question: str
+    answer: str
+
+
+@dataclass
+class FAQPage:
+    """Structured FAQ data for a single URL/page"""
+    url: str
+    page_title: str
+    faqs: List[FAQItem]
+
+    def to_schema_org(self) -> Dict:
+        """Convert to Schema.org FAQPage structured data format"""
+        return {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": [
+                {
+                    "@type": "Question",
+                    "name": faq.question,
+                    "acceptedAnswer": {
+                        "@type": "Answer",
+                        "text": faq.answer
+                    }
+                }
+                for faq in self.faqs
+            ]
+        }
+
+    def to_json_ld(self) -> str:
+        """Return JSON-LD script tag for embedding in HTML"""
+        schema = self.to_schema_org()
+        return f'<script type="application/ld+json">\n{json.dumps(schema, indent=2, ensure_ascii=False)}\n</script>'
+
+
+# --- HTTP Session Management ---
+
+def create_faq_session() -> requests.Session:
+    """Create a requests session with retry logic and connection pooling"""
+    session = requests.Session()
+
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"]
+    )
+
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=1, pool_maxsize=1)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    return session
+
+
+_faq_session = create_faq_session()
+
+
+def clean_url(url: str) -> str:
+    """Remove query parameters from URL"""
+    return url.split("?")[0] if url else ""
+
+
+# --- URL Parsing and API Parameter Building ---
+
+def parse_beslist_url(url: str) -> Tuple[Optional[str], Optional[str], Dict[str, List[str]]]:
+    """
+    Parse a Beslist.nl URL and extract category and filter information.
+
+    URL format: /products/{maincat}/{category}/c/{filters}
+    Filters format: facet1~value1~~facet2~value2
+
+    Returns:
+        Tuple of (main_category_name, category_urlname, filters_dict)
+        filters_dict maps facet names to list of filter value IDs
+    """
+    # Remove domain if present
+    if url.startswith("http"):
+        url = "/" + url.split("/", 3)[-1]
+
+    # Pattern: /products/{maincat}/{category}/c/{filters}
+    # or: /products/{maincat}/c/{filters}
+    match = re.match(r'^/products/([^/]+)(?:/([^/]+))?/c/(.+)$', url)
+
+    if not match:
+        return None, None, {}
+
+    main_category = match.group(1)
+    category = match.group(2)  # May be None for top-level categories
+    filters_str = match.group(3)
+
+    # Parse filters: facet1~value1~~facet2~value2 or facet1~value1~~facet1~value2
+    filters: Dict[str, List[str]] = {}
+    if filters_str:
+        # Split by ~~ to get individual filter pairs
+        filter_pairs = filters_str.split("~~")
+        for pair in filter_pairs:
+            if "~" in pair:
+                facet_name, value_id = pair.split("~", 1)
+                if facet_name not in filters:
+                    filters[facet_name] = []
+                filters[facet_name].append(value_id)
+
+    return main_category, category, filters
+
+
+def build_api_params(main_category: str, category: Optional[str], filters: Dict[str, List[str]]) -> Dict:
+    """
+    Build API query parameters from parsed URL components.
+    """
+    main_cat_id = MAIN_CATEGORY_IDS.get(main_category)
+    if not main_cat_id:
+        return {}
+
+    params = {
+        "mainCategory": main_cat_id,
+        "sort": "popularity",
+        "sortDirection": "desc",
+        "limit": 76,
+        "offset": 0,
+        "isBot": "false",
+        "countryLanguage": "nl-nl",
+        "experiment": "topProducts",
+        "trackTotalHits": "false",
+    }
+
+    # Add category if present
+    if category:
+        params["category"] = category
+
+    # Add filters - API expects filters[facetName][index]=valueId
+    for facet_name, value_ids in filters.items():
+        for i, value_id in enumerate(value_ids):
+            params[f"filters[{facet_name}][{i}]"] = value_id
+
+    return params
+
+
+def extract_selected_facets(api_response: Dict) -> List[Dict[str, str]]:
+    """
+    Extract selected facet values from API response.
+
+    Returns list of dicts with:
+    - facet_name: Name of the facet group (e.g., "Kleur", "Serie")
+    - facet_value: Display value (e.g., "Geel")
+    - detail_value: Value for content generation (e.g., "Gele" - Dutch adjective form)
+    """
+    selected = []
+
+    facets = api_response.get("facets", [])
+    for facet_group in facets:
+        facet_name = facet_group.get("name", "")
+        values = facet_group.get("values", [])
+
+        for value in values:
+            if value.get("selected", False):
+                selected.append({
+                    "facet_name": facet_name,
+                    "facet_value": value.get("facetValue", ""),
+                    "detail_value": value.get("detailValue", value.get("facetValue", ""))
+                })
+
+    return selected
+
+
+def build_product_subject(selected_facets: List[Dict[str, str]], category_name: str = "") -> str:
+    """
+    Build a product subject/name from selected facet values.
+    """
+    if not selected_facets:
+        return category_name
+
+    # Categorize facets by type
+    colors = []
+    materials = []
+    product_names = []
+    brands = []
+    target_groups = []
+    other = []
+
+    product_name_facets = {"serie", "modelnaam", "modelnaam_mob", "model"}
+    product_type_facets = {"type", "type_koffiezetter", "t_klimplantrek"}
+    color_facets = {"kleur", "kleurtint", "kleurtint_paars", "kleurtint_blauw", "kleurtint_groen"}
+    material_facets = {"materiaal"}
+    target_group_facets = {"doelgroep", "doelgroep_schoenen", "doelgroep_mode"}
+    brand_facets = {"merk"}
+
+    has_specific_product = False
+
+    for facet in selected_facets:
+        facet_name_lower = facet["facet_name"].lower()
+        detail_value = facet["detail_value"]
+
+        if any(c in facet_name_lower for c in color_facets):
+            colors.append(detail_value)
+        elif any(m in facet_name_lower for m in material_facets):
+            materials.append(detail_value)
+        elif any(p in facet_name_lower for p in product_name_facets):
+            product_names.append(detail_value)
+            has_specific_product = True
+        elif any(t in facet_name_lower for t in product_type_facets):
+            product_names.append(detail_value)
+            has_specific_product = True
+        elif any(t in facet_name_lower for t in target_group_facets):
+            target_groups.append(detail_value)
+        elif any(b in facet_name_lower for b in brand_facets):
+            brands.append(detail_value)
+        else:
+            other.append(detail_value)
+
+    parts = colors + materials + product_names + brands + target_groups + other
+
+    needs_category = (
+        not has_specific_product and
+        category_name and
+        len(parts) > 0
+    )
+
+    if needs_category:
+        parts.append(category_name.lower())
+
+    return " ".join(parts)
+
+
+# --- Product Search API ---
+
+def fetch_products_api(url: str) -> Optional[Dict]:
+    """
+    Fetch product data from the Product Search API.
+
+    Returns:
+        Dict with:
+        - url: Original URL
+        - h1_title: Page title (from category)
+        - product_subject: Subject built from selected facets
+        - products: List of products with title and description
+    """
+    try:
+        clean = clean_url(url)
+
+        # Parse URL
+        main_category, category, filters = parse_beslist_url(clean)
+
+        if not main_category:
+            print(f"[FAQ-API] Could not parse URL: {clean}")
+            return None
+
+        # Build API parameters
+        params = build_api_params(main_category, category, filters)
+
+        if not params:
+            print(f"[FAQ-API] Unknown main category: {main_category}")
+            return None
+
+        # Minimal delay for API calls
+        time.sleep(0.02 + random.uniform(0, 0.03))
+
+        # Make API request
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+        }
+
+        response = _faq_session.get(PRODUCT_SEARCH_API_URL, params=params, headers=headers, timeout=30)
+
+        if response.status_code != 200:
+            print(f"[FAQ-API] Request failed with status {response.status_code} for {clean}")
+            return None
+
+        data = response.json()
+
+        # Extract selected facets
+        selected_facets = extract_selected_facets(data)
+
+        # Get category name from the deepest category level
+        categories = data.get("products", [{}])[0].get("categories", []) if data.get("products") else []
+        deepest_category_name = categories[-1].get("name", "") if categories else ""
+
+        # Build product subject from selected facets
+        product_subject = build_product_subject(selected_facets, deepest_category_name)
+
+        # Extract products
+        products = []
+        api_products = data.get("products", [])[:30]  # Limit for FAQ generation
+
+        for product in api_products:
+            title = product.get("title", product.get("description", ""))[:100]
+            description = product.get("description", title)[:200]
+
+            if title:
+                products.append({
+                    "title": title,
+                    "description": description
+                })
+
+        # Use product_subject as title if available, otherwise use category
+        h1_title = product_subject if product_subject else deepest_category_name if deepest_category_name else main_category
+
+        return {
+            "url": clean,
+            "h1_title": h1_title,
+            "products": products,
+            "selected_facets": selected_facets
+        }
+
+    except requests.RequestException as e:
+        print(f"[FAQ-API] Request error for {url}: {str(e)}")
+        return None
+    except Exception as e:
+        print(f"[FAQ-API] Error for {url}: {str(e)}")
+        return None
+
+
+# --- FAQ Generation ---
+
+def generate_faqs_for_page(page_data: Dict, num_faqs: int = 5) -> Optional[FAQPage]:
+    """
+    Generate FAQ content for a page using AI.
+
+    Args:
+        page_data: Dict from fetch_products_api()
+        num_faqs: Number of FAQ items to generate
+
+    Returns:
+        FAQPage object with structured FAQ data
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("[FAQ] Error: OPENAI_API_KEY environment variable not set")
+        return None
+
+    client = OpenAI(api_key=api_key)
+
+    # Build context from products
+    products_context = ""
+    if page_data.get("products"):
+        products_list = "\n".join([
+            f"- {p['title']}: {p['description']}"
+            for p in page_data["products"][:15]
+        ])
+        products_context = f"\n\nBeschikbare producten:\n{products_list}"
+
+    prompt = f"""Je bent een SEO-expert die FAQ's schrijft voor e-commerce pagina's.
+
+Pagina titel: {page_data['h1_title']}
+URL: {page_data['url']}
+{products_context}
+
+Schrijf {num_faqs} veelgestelde vragen (FAQ's) die relevant zijn voor bezoekers van deze productcategorie pagina.
+
+Vereisten:
+- Vragen moeten natuurlijk klinken, zoals echte klanten ze zouden stellen
+- Antwoorden moeten informatief en behulpzaam zijn (50-100 woorden per antwoord)
+- Focus op koopadvies, productvergelijkingen, en praktische tips
+- Schrijf in het Nederlands
+- Noem geen specifieke prijzen
+
+Geef je antwoord als JSON array met objecten die "question" en "answer" bevatten.
+Alleen de JSON array, geen andere tekst.
+
+Voorbeeld formaat:
+[
+  {{"question": "Vraag hier?", "answer": "Antwoord hier."}},
+  {{"question": "Andere vraag?", "answer": "Ander antwoord."}}
+]"""
+
+    try:
+        response = client.chat.completions.create(
+            model=AI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1500,
+            temperature=0.7
+        )
+
+        content = response.choices[0].message.content.strip()
+
+        # Parse JSON response
+        # Handle potential markdown code blocks
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        content = content.strip()
+
+        faqs_data = json.loads(content)
+
+        faq_items = [
+            FAQItem(question=item["question"], answer=item["answer"])
+            for item in faqs_data
+        ]
+
+        return FAQPage(
+            url=page_data["url"],
+            page_title=page_data["h1_title"],
+            faqs=faq_items
+        )
+
+    except json.JSONDecodeError as e:
+        print(f"[FAQ] Failed to parse AI response as JSON: {e}")
+        return None
+    except Exception as e:
+        print(f"[FAQ] AI generation error: {e}")
+        return None
+
+
+def process_single_url_faq(url: str, num_faqs: int = 5) -> Dict:
+    """
+    Process a single URL for FAQ generation.
+
+    Returns:
+        Dict with status, url, and optionally faq_page data
+    """
+    result = {"url": url, "status": "pending"}
+
+    try:
+        # Fetch product data via API
+        page_data = fetch_products_api(url)
+
+        if not page_data:
+            result["status"] = "failed"
+            result["reason"] = "api_failed"
+            return result
+
+        if not page_data.get("products") or len(page_data["products"]) == 0:
+            result["status"] = "skipped"
+            result["reason"] = "no_products_found"
+            return result
+
+        # Generate FAQs
+        faq_page = generate_faqs_for_page(page_data, num_faqs)
+
+        if not faq_page or not faq_page.faqs:
+            result["status"] = "failed"
+            result["reason"] = "faq_generation_failed"
+            return result
+
+        result["status"] = "success"
+        result["page_title"] = faq_page.page_title
+        result["faq_json"] = json.dumps([asdict(faq) for faq in faq_page.faqs], ensure_ascii=False)
+        result["schema_org"] = json.dumps(faq_page.to_schema_org(), ensure_ascii=False)
+        result["faq_count"] = len(faq_page.faqs)
+
+        return result
+
+    except Exception as e:
+        result["status"] = "failed"
+        result["reason"] = f"error: {str(e)}"
+        return result

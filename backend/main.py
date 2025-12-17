@@ -16,6 +16,7 @@ from backend.database import get_db_connection, get_output_connection, return_db
 from backend.scraper_service import scrape_product_page, scrape_product_page_api, sanitize_content
 from backend.gpt_service import generate_product_content, check_content_has_valid_links
 from backend.link_validator import validate_content_links, validate_and_fix_content_links, update_content_in_redshift
+from backend.faq_service import process_single_url_faq
 import psycopg2
 
 app = FastAPI(title="Content Top - SEO Content Generation", version="1.0.0")
@@ -475,11 +476,19 @@ async def upload_urls(file: UploadFile = File(...)):
         # Read file content
         content = await file.read()
 
-        # Try to decode with UTF-8 BOM first, then fall back to UTF-8
-        try:
-            text_content = content.decode('utf-8-sig')
-        except:
-            text_content = content.decode('utf-8')
+        # Try multiple encodings (UTF-16, UTF-8 with BOM, UTF-8, Windows-1252, Latin-1)
+        text_content = None
+        for encoding in ['utf-16', 'utf-16-le', 'utf-8-sig', 'utf-8', 'windows-1252', 'latin-1']:
+            try:
+                text_content = content.decode(encoding)
+                # Verify no replacement characters
+                if '�' not in text_content:
+                    break
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+
+        if text_content is None:
+            text_content = content.decode('latin-1')  # Latin-1 never fails
 
         # Handle both newlines and semicolons as separators (for CSV format)
         lines = text_content.strip().replace('\r\n', '\n').replace('\r', '\n').split('\n')
@@ -1015,6 +1024,337 @@ async def reset_validation_history():
             "status": "success",
             "message": f"Reset validation history for {count} URLs",
             "cleared_count": count
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# FAQ GENERATION ENDPOINTS
+# ============================================================================
+
+def process_single_url_faq_wrapper(args: tuple) -> Dict:
+    """Wrapper for process_single_url_faq to work with ThreadPoolExecutor"""
+    url, num_faqs = args
+    return process_single_url_faq(url, num_faqs)
+
+
+@app.get("/api/faq/status")
+def get_faq_status():
+    """Get FAQ processing status and counts"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Get total FAQ content (processed with FAQs)
+        cur.execute("SELECT COUNT(*) as processed FROM pa.faq_content")
+        processed = cur.fetchone()['processed']
+
+        # Get skipped URLs
+        cur.execute("""
+            SELECT COUNT(*) as skipped
+            FROM pa.faq_tracking
+            WHERE status = 'skipped'
+        """)
+        skipped = cur.fetchone()['skipped']
+
+        # Get failed URLs
+        cur.execute("""
+            SELECT COUNT(*) as failed
+            FROM pa.faq_tracking
+            WHERE status = 'failed'
+        """)
+        failed = cur.fetchone()['failed']
+
+        # Get total unique URLs across all tables (werkvoorraad + faq_content)
+        cur.execute("""
+            SELECT COUNT(DISTINCT url) as total FROM (
+                SELECT url FROM pa.jvs_seo_werkvoorraad
+                UNION
+                SELECT url FROM pa.faq_content
+            ) all_urls
+        """)
+        total = cur.fetchone()['total']
+
+        # Pending = URLs in werkvoorraad that haven't been tracked for FAQ yet
+        cur.execute("""
+            SELECT COUNT(*) as pending
+            FROM pa.jvs_seo_werkvoorraad w
+            LEFT JOIN pa.faq_tracking t ON w.url = t.url
+            WHERE t.url IS NULL
+        """)
+        pending = cur.fetchone()['pending']
+
+        # Get recent FAQ results
+        try:
+            cur.execute("""
+                SELECT url, page_title, faq_json, schema_org, created_at
+                FROM pa.faq_content
+                ORDER BY created_at DESC NULLS LAST
+                LIMIT 5
+            """)
+            recent_rows = cur.fetchall()
+            recent = [{
+                'url': r['url'],
+                'page_title': r['page_title'],
+                'faq_json': r['faq_json'],
+                'schema_org': r['schema_org'],
+                'created_at': r['created_at'].isoformat() if r.get('created_at') else None
+            } for r in recent_rows]
+        except Exception as e:
+            print(f"[FAQ] Failed to get recent results: {e}")
+            recent = []
+
+        cur.close()
+        return_db_connection(conn)
+
+        return {
+            "total_urls": total,
+            "processed": processed,
+            "skipped": skipped,
+            "failed": failed,
+            "pending": pending,
+            "recent_results": recent
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/faq/process-urls")
+def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: int = 5):
+    """
+    Process batch of URLs for FAQ generation.
+
+    Args:
+        batch_size: Number of URLs to process
+        parallel_workers: Number of parallel workers (1-10)
+        num_faqs: Number of FAQ items to generate per page (default 5)
+    """
+    print(f"[FAQ] process_faq_urls called - batch_size={batch_size}, workers={parallel_workers}, num_faqs={num_faqs}")
+
+    try:
+        # Validate parameters
+        if batch_size < 1:
+            raise HTTPException(status_code=400, detail="Batch size must be at least 1")
+
+        if parallel_workers < 1 or parallel_workers > 10:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 10")
+
+        if num_faqs < 1 or num_faqs > 10:
+            raise HTTPException(status_code=400, detail="Number of FAQs must be between 1 and 10")
+
+        # Get unprocessed URLs from local PostgreSQL
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Fetch unprocessed URLs (URLs not yet in FAQ tracking table)
+        cur.execute("""
+            SELECT w.url
+            FROM pa.jvs_seo_werkvoorraad w
+            LEFT JOIN pa.faq_tracking t ON w.url = t.url
+            WHERE t.url IS NULL
+            LIMIT %s
+        """, (batch_size,))
+
+        rows = cur.fetchall()
+        cur.close()
+        return_db_connection(conn)
+
+        if not rows:
+            return {
+                "status": "complete",
+                "message": "No URLs to process",
+                "processed": 0
+            }
+
+        urls = [row['url'] for row in rows]
+
+        # Process URLs in parallel using ThreadPoolExecutor
+        url_args = [(url, num_faqs) for url in urls]
+        with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+            results = list(executor.map(process_single_url_faq_wrapper, url_args))
+
+        # Save results to database
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        for result in results:
+            url = result['url']
+            status = result['status']
+            reason = result.get('reason')
+
+            # Update tracking table
+            if reason:
+                truncated_reason = reason[:255] if len(reason) > 255 else reason
+                cur.execute("""
+                    INSERT INTO pa.faq_tracking (url, status, skip_reason)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason
+                """, (url, status, truncated_reason))
+            else:
+                cur.execute("""
+                    INSERT INTO pa.faq_tracking (url, status)
+                    VALUES (%s, %s)
+                    ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = NULL
+                """, (url, status))
+
+            # Save FAQ content if successful
+            if status == 'success':
+                cur.execute("""
+                    INSERT INTO pa.faq_content (url, page_title, faq_json, schema_org)
+                    VALUES (%s, %s, %s, %s)
+                """, (url, result.get('page_title', ''), result.get('faq_json', ''), result.get('schema_org', '')))
+
+            print(f"[FAQ] {url} - Status: {status}" + (f" - Reason: {reason}" if reason else f" - {result.get('faq_count', 0)} FAQs"))
+
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+
+        processed_count = sum(1 for r in results if r['status'] == 'success')
+        skipped_count = sum(1 for r in results if r['status'] == 'skipped')
+        failed_count = sum(1 for r in results if r['status'] == 'failed')
+
+        print(f"[FAQ BATCH COMPLETE] Processed: {processed_count}/{len(urls)} | Skipped: {skipped_count} | Failed: {failed_count}")
+
+        return {
+            "status": "success",
+            "processed": processed_count,
+            "skipped": skipped_count,
+            "failed": failed_count,
+            "total_attempted": len(results),
+            "results": results
+        }
+
+    except Exception as e:
+        print(f"[FAQ ERROR] process_faq_urls failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/faq/export/xlsx")
+async def export_faq_xlsx():
+    """Export all generated FAQs as Excel XLSX"""
+    from openpyxl import Workbook
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT url, page_title, faq_json, schema_org
+            FROM pa.faq_content
+        """)
+        rows = cur.fetchall()
+
+        cur.close()
+        return_db_connection(conn)
+
+        # Create Excel workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "FAQ Export"
+
+        # Add headers (matching the format user requested: url, content_faq)
+        ws.append(['url', 'content_faq'])
+
+        # Add data rows
+        import re
+        # Remove control characters that Excel doesn't allow
+        illegal_chars = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+        for row in rows:
+            # Build JSON-LD script tag for content_faq column
+            schema_org = row['schema_org'] if row['schema_org'] else '{}'
+            content_faq = f'<script type="application/ld+json">\n{schema_org}\n</script>'
+            content_faq = illegal_chars.sub('', content_faq)
+            ws.append([row['url'], content_faq])
+
+        # Auto-adjust column widths
+        ws.column_dimensions["A"].width = 80
+        ws.column_dimensions["B"].width = 100
+
+        # Save to BytesIO
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=faq_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/faq/export/json")
+async def export_faq_json():
+    """Export all generated FAQs as JSON"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT url, page_title, faq_json, schema_org
+            FROM pa.faq_content
+        """)
+        rows = cur.fetchall()
+
+        cur.close()
+        return_db_connection(conn)
+
+        # Convert to JSON-serializable format
+        data = []
+        for row in rows:
+            data.append({
+                'url': row['url'],
+                'page_title': row['page_title'],
+                'faqs': json.loads(row['faq_json']) if row['faq_json'] else [],
+                'schema_org': json.loads(row['schema_org']) if row['schema_org'] else {}
+            })
+
+        # Return as downloadable file
+        json_str = json.dumps(data, indent=2, ensure_ascii=False)
+        return StreamingResponse(
+            iter([json_str]),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename=faq_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"}
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/faq/result/{url:path}")
+async def delete_faq_result(url: str):
+    """Delete a FAQ result and reset the URL back to pending state"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Delete from FAQ content table
+        cur.execute("""
+            DELETE FROM pa.faq_content
+            WHERE url = %s
+        """, (url,))
+
+        # Delete from FAQ tracking table
+        cur.execute("""
+            DELETE FROM pa.faq_tracking
+            WHERE url = %s
+        """, (url,))
+
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+
+        return {
+            "status": "success",
+            "message": f"FAQ result deleted and URL reset to pending",
+            "url": url
         }
 
     except Exception as e:
