@@ -1764,5 +1764,31 @@ for row in reader:
 - **Benefits**: Single deployment, shared CSS/styling, unified dashboard
 - **Date**: 2025-12-17
 
+### UI Cleanup - Compact Tabs and Collapsible Info
+- **Change**: Cleaned up thema-ads UI for better usability
+- **Tab Improvements**:
+  - Shortened tab names: Plan, Ad Groups, Discover, Check-up, Cleanup, All Themes, Activate, Duplicates
+  - Compact padding and font-size for single-row display
+  - Consistent anthracite (#2d3436) text with orange hover (#E97451)
+- **Content Cleanup**:
+  - Removed verbose explanatory text from all tabs
+  - Added collapsible "More info" buttons for detailed documentation
+  - "More info" buttons use inverted orange style (border/text → filled on hover)
+- **CSS Pattern for collapsible info buttons**:
+  ```css
+  .more-info-btn {
+      border: 1px solid #CC5500;
+      color: #CC5500;
+      background: transparent;
+      transition: all 0.2s ease;
+  }
+  .more-info-btn:hover {
+      background: #CC5500;
+      color: white;
+  }
+  ```
+- **Location**: frontend/thema-ads.html
+- **Date**: 2025-12-17
+
 ---
 _Last updated: 2025-12-17_
