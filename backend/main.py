@@ -1034,7 +1034,7 @@ async def reset_validation_history():
 # FAQ GENERATION ENDPOINTS
 # ============================================================================
 
-def process_single_url_faq_wrapper(args: tuple) -> Dict:
+def process_single_url_faq_wrapper(args: tuple) -> dict:
     """Wrapper for process_single_url_faq to work with ThreadPoolExecutor"""
     url, num_faqs = args
     return process_single_url_faq(url, num_faqs)
@@ -1123,7 +1123,7 @@ def get_faq_status():
 
 
 @app.post("/api/faq/process-urls")
-def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: int = 5):
+def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: int = 6):
     """
     Process batch of URLs for FAQ generation.
 
