@@ -72,9 +72,9 @@ async function refreshFaqStatus() {
                                 <div class="full-content d-none" id="faq-full-${index}">
                                     <div class="mb-1" style="font-size: 0.875rem;"></div>
                                 </div>
-                                <a href="#" class="text-decoration-none" onclick="toggleFaqContent(${index}); return false;">
+                                <button class="btn btn-sm btn-link p-0" onclick="toggleFaqContent(${index})">
                                     <span id="faq-toggle-text-${index}">View All FAQs</span>
-                                </a>
+                                </button>
                             </div>
                         </div>
                         <button class="btn btn-sm btn-danger ms-2" onclick="deleteFaqResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
@@ -136,7 +136,7 @@ async function processFaqUrls() {
             `;
         } else {
             let resultsHtml = `
-                <div class="alert alert-success">
+                <div class="alert alert-warning">
                     <strong>Processed ${data.processed || 0} of ${data.total_attempted || 0} URLs</strong><br>
                     Skipped: ${data.skipped || 0} | Failed: ${data.failed || 0}
                 </div>
@@ -144,12 +144,12 @@ async function processFaqUrls() {
             `;
 
             (data.results || []).forEach(r => {
-                let badgeClass = r.status === 'success' ? 'success' :
-                               r.status === 'skipped' ? 'secondary' : 'danger';
+                let badgeStyle = r.status === 'success' ? 'background-color: #198754; color: #fff;' :
+                               r.status === 'skipped' ? 'background-color: #6c757d; color: #fff;' : 'background-color: #dc3545; color: #fff;';
                 resultsHtml += `
                     <li class="list-group-item">
-                        <span class="badge bg-${badgeClass}">${r.status}</span>
-                        ${r.faq_count ? `<span class="badge bg-info ms-1">${r.faq_count} FAQs</span>` : ''}
+                        <span class="badge" style="${badgeStyle}">${r.status}</span>
+                        ${r.faq_count ? `<span class="badge ms-1" style="background-color: #ffc107; color: #000;">${r.faq_count} FAQs</span>` : ''}
                         <small class="text-muted d-block">${r.url}</small>
                         ${r.page_title ? `<small>${r.page_title}</small>` : ''}
                         ${r.reason ? `<small class="text-danger d-block">${r.reason}</small>` : ''}
@@ -292,7 +292,7 @@ async function processAllFaqUrls() {
         progressBar.classList.remove('progress-bar-animated');
 
         resultDiv.innerHTML = `
-            <div class="alert alert-success">
+            <div class="alert alert-warning">
                 <strong>FAQ Processing Complete!</strong><br>
                 Total batches: ${batchCount}<br>
                 Processed in this run: ${finalProcessed} of ${totalToProcess} URLs<br>

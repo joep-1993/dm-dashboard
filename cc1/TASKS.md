@@ -10,7 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
-- [x] Standardize FAQ generator UI - consistent button colors (btn-info), FAQ count badges (#0dcaf0), success labels (green), View All FAQs as textual link #claude-session:2025-12-17
+- [x] Fix Product Search API to support URLs without /c/ filters - updated parse_beslist_url in both scraper_service.py and faq_service.py #claude-session:2025-12-17
+- [x] Fix FAQ prompt to prevent fake URLs and generic link texts - added strict instructions to only use provided URLs, removed 32 problematic FAQ records #claude-session:2025-12-17
+- [x] Standardize UI colors across tools - inline styles for badges (success=#198754, warning=#ffc107, danger=#dc3545), consistent alert-warning backgrounds #claude-session:2025-12-17
 - [x] Switch link validator to PostgreSQL only - removed Redshift dependency from link_validator.py, all validation now uses local PostgreSQL #claude-session:2025-12-15
 - [x] Add single-paragraph constraint to GPT prompt - updated gpt_service.py to require single continuous paragraph, reset 12,779 URLs with multiple paragraphs for regeneration #claude-session:2025-12-15
 - [x] Fix validation 'moved to pending' not tracking URLs - URLs with gone products now properly added to werkvoorraad table for reprocessing #claude-session:2025-12-15

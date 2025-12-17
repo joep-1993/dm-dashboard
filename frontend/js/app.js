@@ -129,11 +129,11 @@ async function processUrls() {
             `;
 
             (data.results || []).forEach(r => {
-                let badgeClass = r.status === 'success' ? 'success' :
-                               r.status === 'skipped' ? 'warning' : 'danger';
+                let badgeStyle = r.status === 'success' ? 'background-color: #198754; color: #fff;' :
+                               r.status === 'skipped' ? 'background-color: #ffc107; color: #000;' : 'background-color: #dc3545; color: #fff;';
                 resultsHtml += `
                     <li class="list-group-item">
-                        <span class="badge bg-${badgeClass}">${r.status}</span>
+                        <span class="badge" style="${badgeStyle}">${r.status}</span>
                         <small class="text-muted d-block">${r.url}</small>
                         ${r.content_preview ? `<small>${r.content_preview}</small>` : ''}
                         ${r.reason ? `<small class="text-danger">${r.reason}</small>` : ''}
@@ -630,14 +630,14 @@ async function validateLinks() {
                 summaryHtml += '<div class="mt-3"><strong>Results:</strong></div><ul class="list-group mt-2">';
 
                 data.results.forEach(r => {
-                    let badgeClass = r.moved_to_pending ? 'danger' : 'success';
+                    let badgeStyle = r.moved_to_pending ? 'background-color: #dc3545; color: #fff;' : 'background-color: #198754; color: #fff;';
                     let statusText = r.moved_to_pending ? 'Moved to Pending' : 'Valid';
 
                     summaryHtml += `
                         <li class="list-group-item">
                             <div class="d-flex justify-content-between align-items-start">
                                 <div style="flex: 1;">
-                                    <span class="badge bg-${badgeClass}">${statusText}</span>
+                                    <span class="badge" style="${badgeStyle}">${statusText}</span>
                                     <small class="text-muted d-block mt-1" style="word-break: break-all;">${r.url}</small>
                                     <small>Links: ${r.total_links} total</small>
                                     ${r.broken_links_count > 0 ? `

@@ -134,7 +134,12 @@ def parse_beslist_url(url: str) -> Tuple[Optional[str], Optional[str], Dict[str,
     """
     Parse a Beslist.nl URL and extract category and filter information.
 
-    URL format: /products/{maincat}/{category}/c/{filters}
+    URL formats supported:
+    - /products/{maincat}/{category}/c/{filters}  (with filters)
+    - /products/{maincat}/{category}/             (without filters)
+    - /products/{maincat}/c/{filters}             (top-level with filters)
+    - /products/{maincat}/                        (top-level without filters)
+
     Filters format: facet1~value1~~facet2~value2
 
     Returns:
@@ -145,30 +150,42 @@ def parse_beslist_url(url: str) -> Tuple[Optional[str], Optional[str], Dict[str,
     if url.startswith("http"):
         url = "/" + url.split("/", 3)[-1]
 
-    # Pattern: /products/{maincat}/{category}/c/{filters}
+    # Remove trailing slash for consistent parsing
+    url = url.rstrip("/")
+
+    # Pattern 1: /products/{maincat}/{category}/c/{filters}
     # or: /products/{maincat}/c/{filters}
     match = re.match(r'^/products/([^/]+)(?:/([^/]+))?/c/(.+)$', url)
 
-    if not match:
-        return None, None, {}
+    if match:
+        main_category = match.group(1)
+        category = match.group(2)  # May be None for top-level categories
+        filters_str = match.group(3)
 
-    main_category = match.group(1)
-    category = match.group(2)  # May be None for top-level categories
-    filters_str = match.group(3)
+        # Parse filters: facet1~value1~~facet2~value2 or facet1~value1~~facet1~value2
+        filters: Dict[str, List[str]] = {}
+        if filters_str:
+            # Split by ~~ to get individual filter pairs
+            filter_pairs = filters_str.split("~~")
+            for pair in filter_pairs:
+                if "~" in pair:
+                    facet_name, value_id = pair.split("~", 1)
+                    if facet_name not in filters:
+                        filters[facet_name] = []
+                    filters[facet_name].append(value_id)
 
-    # Parse filters: facet1~value1~~facet2~value2 or facet1~value1~~facet1~value2
-    filters: Dict[str, List[str]] = {}
-    if filters_str:
-        # Split by ~~ to get individual filter pairs
-        filter_pairs = filters_str.split("~~")
-        for pair in filter_pairs:
-            if "~" in pair:
-                facet_name, value_id = pair.split("~", 1)
-                if facet_name not in filters:
-                    filters[facet_name] = []
-                filters[facet_name].append(value_id)
+        return main_category, category, filters
 
-    return main_category, category, filters
+    # Pattern 2: /products/{maincat}/{category} (without /c/ filters)
+    # or: /products/{maincat}
+    match = re.match(r'^/products/([^/]+)(?:/([^/]+))?$', url)
+
+    if match:
+        main_category = match.group(1)
+        category = match.group(2)  # May be None for top-level categories
+        return main_category, category, {}  # Empty filters dict
+
+    return None, None, {}
 
 
 def build_api_params(main_category: str, category: Optional[str], filters: Dict[str, List[str]]) -> Dict:
@@ -503,7 +520,12 @@ Vereisten:
 - Schrijf in het Nederlands
 - Noem geen specifieke prijzen
 - BELANGRIJK: Gebruik NOOIT "wij", "we", "ons", "onze", "onze producten", "onze website" of vergelijkbare eerste persoon meervoud. Schrijf neutraal en informatief, alsof je een onafhankelijke adviseur bent.
-- BELANGRIJK: Gebruik relevante hyperlinks naar gerelateerde categoriepagina's in je antwoorden. Gebruik HTML anchor tags met de volledige URL, bijvoorbeeld: <a href="https://www.beslist.nl/products/...">linktekst</a>
+- BELANGRIJK voor hyperlinks:
+  * Gebruik ALLEEN URLs uit de hierboven gegeven lijst "Gerelateerde categoriepagina's"
+  * Verzin NOOIT zelf URLs - gebruik alleen de exacte URLs die in de lijst staan
+  * Gebruik GEEN generieke verwijzingen zoals "deze gids", "deze pagina", "hier" of vergelijkbare vage linkteksten
+  * Linktekst moet beschrijvend zijn en verwijzen naar het product/categorie, bijv. "Samsung telefoonhoesjes" of "zwarte hoesjes"
+  * Als er geen relevante URL in de lijst staat, maak dan GEEN hyperlink
 - Verwerk 1-3 hyperlinks per antwoord waar relevant (naar merken, kleuren, types, etc.)
 
 Geef je antwoord als JSON array met objecten die "question" en "answer" bevatten.
