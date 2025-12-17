@@ -24,6 +24,7 @@ AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
 
 # Product Search API configuration
 PRODUCT_SEARCH_API_URL = "https://productsearch-v2.api.beslist.nl/search/products"
+BASE_URL = "https://www.beslist.nl"  # Base URL for building full hyperlinks
 
 # Mapping of mainCategory URL names to IDs (for Product Search API)
 MAIN_CATEGORY_IDS = {
@@ -229,6 +230,73 @@ def extract_selected_facets(api_response: Dict) -> List[Dict[str, str]]:
     return selected
 
 
+def extract_related_plp_urls(api_response: Dict, max_urls: int = 15) -> List[Dict[str, str]]:
+    """
+    Extract related PLP URLs from facets for use in FAQ answers.
+    Uses the URL provided directly in the API response.
+
+    Returns list of dicts with:
+    - url: Full URL to the PLP
+    - label: Display name for the link
+    - facet_type: Type of facet (e.g., "merk", "kleur", "type")
+    """
+    related_urls = []
+
+    facets = api_response.get("facets", [])
+
+    # Priority facet types for linking (most useful for FAQ answers)
+    priority_facets = ["merk", "type", "serie", "kleur", "materiaal", "doelgroep"]
+
+    for facet_group in facets:
+        facet_name = facet_group.get("name", "")
+        values = facet_group.get("values", [])
+
+        # Skip already selected facets - we want to link to related pages
+        for value in values:
+            if value.get("selected", False):
+                continue
+
+            count = value.get("count", 0)
+            if count < 5:  # Skip facets with very few products
+                continue
+
+            facet_value = value.get("facetValue", "")
+            # Get URL directly from API response
+            plp_url = value.get("url", "")
+
+            if not plp_url or not facet_value:
+                continue
+
+            # Make it a full URL if it's relative
+            if plp_url.startswith("/"):
+                full_url = f"{BASE_URL}{plp_url}"
+            elif not plp_url.startswith("http"):
+                full_url = f"{BASE_URL}/{plp_url}"
+            else:
+                full_url = plp_url
+
+            related_urls.append({
+                "url": full_url,
+                "label": facet_value,
+                "facet_type": facet_name.lower(),
+                "count": count
+            })
+
+    # Sort by priority facet types, then by product count
+    def sort_key(item):
+        facet_lower = item["facet_type"].lower()
+        priority = 999
+        for i, pf in enumerate(priority_facets):
+            if pf in facet_lower:
+                priority = i
+                break
+        return (priority, -item["count"])
+
+    related_urls.sort(key=sort_key)
+
+    return related_urls[:max_urls]
+
+
 def build_product_subject(selected_facets: List[Dict[str, str]], category_name: str = "") -> str:
     """
     Build a product subject/name from selected facet values.
@@ -338,6 +406,9 @@ def fetch_products_api(url: str) -> Optional[Dict]:
         # Extract selected facets
         selected_facets = extract_selected_facets(data)
 
+        # Extract related PLP URLs for hyperlinks in FAQ answers
+        related_plp_urls = extract_related_plp_urls(data)
+
         # Get category name from the deepest category level
         categories = data.get("products", [{}])[0].get("categories", []) if data.get("products") else []
         deepest_category_name = categories[-1].get("name", "") if categories else ""
@@ -366,7 +437,8 @@ def fetch_products_api(url: str) -> Optional[Dict]:
             "url": clean,
             "h1_title": h1_title,
             "products": products,
-            "selected_facets": selected_facets
+            "selected_facets": selected_facets,
+            "related_plp_urls": related_plp_urls
         }
 
     except requests.RequestException as e:
@@ -406,11 +478,21 @@ def generate_faqs_for_page(page_data: Dict, num_faqs: int = 5) -> Optional[FAQPa
         ])
         products_context = f"\n\nBeschikbare producten:\n{products_list}"
 
+    # Build context for related PLP URLs (for hyperlinks)
+    related_urls_context = ""
+    if page_data.get("related_plp_urls"):
+        urls_list = "\n".join([
+            f"- {item['label']}: {item['url']}"
+            for item in page_data["related_plp_urls"][:12]
+        ])
+        related_urls_context = f"\n\nGerelateerde categoriepagina's (gebruik deze voor hyperlinks in antwoorden):\n{urls_list}"
+
     prompt = f"""Je bent een SEO-expert die FAQ's schrijft voor e-commerce pagina's.
 
 Pagina titel: {page_data['h1_title']}
 URL: {page_data['url']}
 {products_context}
+{related_urls_context}
 
 Schrijf {num_faqs} veelgestelde vragen (FAQ's) die relevant zijn voor bezoekers van deze productcategorie pagina.
 
@@ -420,21 +502,24 @@ Vereisten:
 - Focus op koopadvies, productvergelijkingen, en praktische tips
 - Schrijf in het Nederlands
 - Noem geen specifieke prijzen
+- BELANGRIJK: Gebruik relevante hyperlinks naar gerelateerde categoriepagina's in je antwoorden. Gebruik HTML anchor tags met de volledige URL, bijvoorbeeld: <a href="https://www.beslist.nl/products/...">linktekst</a>
+- Verwerk 1-3 hyperlinks per antwoord waar relevant (naar merken, kleuren, types, etc.)
 
 Geef je antwoord als JSON array met objecten die "question" en "answer" bevatten.
+De "answer" mag HTML hyperlinks bevatten.
 Alleen de JSON array, geen andere tekst.
 
 Voorbeeld formaat:
 [
-  {{"question": "Vraag hier?", "answer": "Antwoord hier."}},
-  {{"question": "Andere vraag?", "answer": "Ander antwoord."}}
+  {{"question": "Welke merken zijn populair?", "answer": "Populaire merken zijn onder andere <a href=\"https://www.beslist.nl/products/.../merk~123\">Samsung</a> en <a href=\"https://www.beslist.nl/products/.../merk~456\">Philips</a>. Beide merken staan bekend om hun kwaliteit."}},
+  {{"question": "Andere vraag?", "answer": "Ander antwoord met <a href=\"https://www.beslist.nl/...\">relevante link</a>."}}
 ]"""
 
     try:
         response = client.chat.completions.create(
             model=AI_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1500,
+            max_tokens=2500,  # Increased for hyperlinks in answers
             temperature=0.7
         )
 

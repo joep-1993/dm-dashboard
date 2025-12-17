@@ -49,6 +49,10 @@ async function refreshFaqStatus() {
 
                 const dateText = item.created_at ? new Date(item.created_at).toLocaleString() : '';
 
+                // Store FAQ data in a global map for easy retrieval
+                if (!window.faqDataMap) window.faqDataMap = {};
+                window.faqDataMap[index] = item.faq_json || '[]';
+
                 itemDiv.innerHTML = `
                     <div class="d-flex w-100 justify-content-between align-items-start">
                         <div style="flex: 1;">
@@ -67,7 +71,7 @@ async function refreshFaqStatus() {
                                 <div class="full-content d-none" id="faq-full-${index}">
                                     <div class="mb-1" style="font-size: 0.875rem;"></div>
                                 </div>
-                                <button class="btn btn-sm btn-link p-0" onclick="toggleFaqContent(${index}, '${item.faq_json ? item.faq_json.replace(/'/g, "\\'").replace(/"/g, '\\"') : '[]'}')">
+                                <button class="btn btn-sm btn-link p-0" onclick="toggleFaqContent(${index})">
                                     <span id="faq-toggle-text-${index}">View All FAQs</span>
                                 </button>
                             </div>
@@ -310,15 +314,16 @@ function stopFaqProcessing() {
     document.getElementById('progressText').textContent = 'Stopping after current batch...';
 }
 
-function toggleFaqContent(index, faqJsonStr) {
+function toggleFaqContent(index) {
     const preview = document.getElementById(`faq-preview-${index}`);
     const full = document.getElementById(`faq-full-${index}`);
     const toggleText = document.getElementById(`faq-toggle-text-${index}`);
 
     if (full.classList.contains('d-none')) {
-        // Show full content
+        // Show full content - get FAQ data from global map
         try {
-            const faqs = JSON.parse(faqJsonStr.replace(/\\"/g, '"').replace(/\\'/g, "'"));
+            const faqJsonStr = window.faqDataMap ? window.faqDataMap[index] : '[]';
+            const faqs = JSON.parse(faqJsonStr);
             let fullHtml = '<div class="accordion" id="faqAccordion' + index + '">';
             faqs.forEach((faq, i) => {
                 fullHtml += `
@@ -339,6 +344,7 @@ function toggleFaqContent(index, faqJsonStr) {
             fullHtml += '</div>';
             full.querySelector('div').innerHTML = fullHtml;
         } catch (e) {
+            console.error('Error parsing FAQs:', e);
             full.querySelector('div').innerHTML = 'Error parsing FAQs';
         }
 
