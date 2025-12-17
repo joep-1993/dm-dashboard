@@ -2,9 +2,8 @@
 
 /* Custom Color Scheme */
 :root {
-    --color-primary: #2d3436;   /* Anthracite - for headers */
-    --color-info: #2d3436;      /* Anthracite */
-    --color-success: #2d3436;   /* Anthracite */
+    --color-navbar: #5e4a90;    /* Purple - for top navbar only */
+    --color-section: #aaaaaa;   /* Grey - for section headers */
     --color-button: #CC5500;    /* Burnt orange - for buttons */
     --color-button-hover: #E97451;  /* Coral orange - for button hover */
 }
@@ -17,10 +16,10 @@ body {
     box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
 }
 
-/* All card headers are anthracite */
+/* All card/section headers are light grey */
 .card-header {
-    background-color: var(--color-primary) !important;
-    color: white !important;
+    background-color: var(--color-section) !important;
+    color: #333 !important;
 }
 
 #result {
@@ -45,10 +44,16 @@ body {
 
 /* Override Bootstrap Colors */
 
-/* Primary Color - Anthracite for backgrounds/headers */
-.bg-primary,
-.navbar.bg-primary {
-    background-color: var(--color-primary) !important;
+/* Top navbar - Purple */
+.navbar,
+.navbar.bg-primary,
+.navbar.bg-dark {
+    background-color: var(--color-navbar) !important;
+}
+
+/* Other bg-primary elements use section color */
+.bg-primary:not(.navbar) {
+    background-color: var(--color-section) !important;
 }
 
 /* All buttons are orange */
@@ -76,17 +81,17 @@ body {
 }
 
 .text-primary {
-    color: var(--color-primary) !important;
+    color: var(--color-navbar) !important;
 }
 
 .badge.bg-primary {
-    background-color: var(--color-primary) !important;
+    background-color: var(--color-navbar) !important;
 }
 
-/* Info Color - Anthracite for headers, Orange for buttons */
+/* Info Color - Grey for headers, Orange for buttons */
 .bg-info,
 .card-header.bg-info {
-    background-color: var(--color-info) !important;
+    background-color: var(--color-section) !important;
 }
 
 .btn-info {
@@ -114,23 +119,23 @@ body {
 }
 
 .text-info {
-    color: var(--color-info) !important;
+    color: #666 !important;
 }
 
 .badge.bg-info {
-    background-color: var(--color-info) !important;
+    background-color: var(--color-section) !important;
 }
 
 .alert-info {
-    background-color: rgba(45, 52, 54, 0.15);
-    border-color: var(--color-info);
-    color: #1e2526;
+    background-color: rgba(170, 170, 170, 0.15);
+    border-color: var(--color-section);
+    color: #333;
 }
 
-/* Success Color - Anthracite for headers, Orange for buttons */
+/* Success Color - Grey for headers, Orange for buttons */
 .bg-success,
 .card-header.bg-success {
-    background-color: var(--color-success) !important;
+    background-color: var(--color-section) !important;
 }
 
 .btn-success {
@@ -157,27 +162,27 @@ body {
 }
 
 .text-success {
-    color: var(--color-success) !important;
+    color: #666 !important;
 }
 
 .badge.bg-success {
-    background-color: var(--color-success) !important;
+    background-color: var(--color-section) !important;
 }
 
 .alert-success {
-    background-color: rgba(45, 52, 54, 0.15);
-    border-color: var(--color-success);
-    color: #1e2526;
+    background-color: rgba(170, 170, 170, 0.15);
+    border-color: var(--color-section);
+    color: #333;
 }
 
 .progress-bar {
     background-color: var(--color-button);
 }
 
-/* Secondary Color - Anthracite for headers, Orange for buttons */
+/* Secondary Color - Grey for headers, Orange for buttons */
 .bg-secondary,
 .card-header.bg-secondary {
-    background-color: var(--color-primary) !important;
+    background-color: var(--color-section) !important;
 }
 
 .btn-secondary {
