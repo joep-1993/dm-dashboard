@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO Tools Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .tool-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+            height: 100%;
+        }
+        .tool-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .tool-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        .tool-card .card-body {
+            display: flex;
+            flex-direction: column;
+        }
+        .tool-card .btn {
+            margin-top: auto;
+        }
+        .hero-section {
+            background: linear-gradient(135deg, #059CDF 0%, #9C3095 100%);
+            color: white;
+            padding: 3rem 0;
+            margin-bottom: 2rem;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-list li {
+            padding: 0.25rem 0;
+        }
+        .feature-list li::before {
+            content: "✓ ";
+            color: #A0D168;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="hero-section">
+        <div class="container">
+            <h1 class="display-4">SEO Tools Dashboard</h1>
+            <p class="lead">Unified platform for SEO content generation, FAQ management, and Google Ads campaigns</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="row g-4 mb-5">
+            <!-- SEO Content Generator Card -->
+            <div class="col-md-4">
+                <div class="card tool-card h-100">
+                    <div class="card-body text-center">
+                        <div class="tool-icon text-success">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
+                                <path d="M4.5 12.5A.5.5 0 0 1 5 12h3a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm0-2A.5.5 0 0 1 5 10h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm1.639-3.708 1.33.886 1.854-1.855a.25.25 0 0 1 .289-.047l1.888.974V8.5a.5.5 0 0 1-.5.5H5a.5.5 0 0 1-.5-.5V8s1.54-1.274 1.639-1.208z"/>
+                            </svg>
+                        </div>
+                        <h4 class="card-title">SEO Content Generator</h4>
+                        <p class="card-text text-muted">Generate AI-powered product recommendations for e-commerce pages with automatic hyperlinks.</p>
+                        <ul class="feature-list text-start small">
+                            <li>Batch URL processing</li>
+                            <li>Parallel workers (1-10)</li>
+                            <li>Link validation</li>
+                            <li>Excel/JSON export</li>
+                        </ul>
+                        <a href="/static/index.html" class="btn btn-success btn-lg w-100">Open Tool</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- FAQ Generator Card -->
+            <div class="col-md-4">
+                <div class="card tool-card h-100">
+                    <div class="card-body text-center">
+                        <div class="tool-icon text-info">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                                <path d="M5.255 5.786a.237.237 0 0 0 .241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94z"/>
+                            </svg>
+                        </div>
+                        <h4 class="card-title">FAQ Generator</h4>
+                        <p class="card-text text-muted">Generate SEO-optimized FAQs with Schema.org structured data for rich search results.</p>
+                        <ul class="feature-list text-start small">
+                            <li>Schema.org JSON-LD output</li>
+                            <li>Configurable FAQ count (1-10)</li>
+                            <li>Hyperlinks to related pages</li>
+                            <li>Combined export option</li>
+                        </ul>
+                        <a href="/static/faq.html" class="btn btn-info btn-lg w-100">Open Tool</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Thema Ads Card -->
+            <div class="col-md-4">
+                <div class="card tool-card h-100">
+                    <div class="card-body text-center">
+                        <div class="tool-icon text-warning">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5l2.404.961L10.404 2l-2.218-.887zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/>
+                            </svg>
+                        </div>
+                        <h4 class="card-title">Thema Ads</h4>
+                        <p class="card-text text-muted">Manage seasonal Google Ads campaigns at scale with themed RSA creation.</p>
+                        <ul class="feature-list text-start small">
+                            <li>Black Friday, Cyber Monday themes</li>
+                            <li>Sinterklaas, Kerstmis themes</li>
+                            <li>Bulk RSA creation</li>
+                            <li>Job tracking & resume</li>
+                        </ul>
+                        <a href="http://localhost:8002/static/thema-ads.html" class="btn btn-warning btn-lg w-100" target="_blank">Open Tool</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Stats Section -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Quick Stats</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center" id="quickStats">
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="statTotalUrls" class="text-primary">-</h3>
+                                <p class="text-muted mb-0">Total URLs</p>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="statContentProcessed" class="text-success">-</h3>
+                                <p class="text-muted mb-0">Content Generated</p>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="statFaqProcessed" class="text-info">-</h3>
+                                <p class="text-muted mb-0">FAQs Generated</p>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="statPending" class="text-warning">-</h3>
+                                <p class="text-muted mb-0">Pending</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="text-center text-muted py-4">
+            <small>SEO Tools Dashboard - Port 8003 (Content) | Port 8002 (Thema Ads)</small>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = 'http://localhost:8003';
+
+        // Load quick stats on page load
+        window.addEventListener('DOMContentLoaded', loadStats);
+
+        async function loadStats() {
+            try {
+                // Get content status
+                const contentResponse = await fetch(`${API_BASE}/api/status`);
+                const contentData = await contentResponse.json();
+
+                // Get FAQ status
+                const faqResponse = await fetch(`${API_BASE}/api/faq/status`);
+                const faqData = await faqResponse.json();
+
+                // Update stats
+                document.getElementById('statTotalUrls').textContent = contentData.total_urls?.toLocaleString() || '-';
+                document.getElementById('statContentProcessed').textContent = contentData.processed?.toLocaleString() || '-';
+                document.getElementById('statFaqProcessed').textContent = faqData.processed?.toLocaleString() || '-';
+                document.getElementById('statPending').textContent = contentData.pending?.toLocaleString() || '-';
+
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+    </script>
+</body>
+</html>

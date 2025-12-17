@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
 from datetime import datetime
 from io import StringIO, BytesIO
 import csv
@@ -61,12 +61,8 @@ def retry_on_redshift_serialization_error(max_retries=3, initial_delay=0.1):
 
 @app.get("/")
 def read_root():
-    return {
-        "status": "running",
-        "project": "content_top",
-        "description": "SEO Content Generation API",
-        "timestamp": datetime.now().isoformat()
-    }
+    """Redirect to the unified dashboard"""
+    return RedirectResponse(url="/static/dashboard.html")
 
 @app.get("/api/health")
 def health_check():
