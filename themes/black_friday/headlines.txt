@@ -1,0 +1,15 @@
+{KeyWord:Black Friday Deal}
+Black Friday {COUNTDOWN(2025-11-28 00:00:00,5)}
+{KeyWord:Deals} Online
+Bestel {KeyWord:Vandaag}!
+{KeyWord:Deal} Shop nu!
+Top {KeyWord:Acties} – Shop Nu
+{KeyWord:Sale} Niet Missen
+Profiteer Nu – Black Friday
+Shop Nu – {COUNTDOWN(2025-11-28 00:00:00,5)}
+Start In {COUNTDOWN(2025-11-28 00:00:00,5)}
+{KeyWord:BF} {COUNTDOWN(2025-11-28 00:00:00,5)}
+{KeyWord:Deal} {COUNTDOWN(2025-11-28 00:00:00,5)}
+{KeyWord:Sale} – {COUNTDOWN(2025-11-28 00:00:00,5)}
+{KeyWord:Acties} {COUNTDOWN(2025-11-28 00:00:00,5)}
+Black Friday Acties Nu

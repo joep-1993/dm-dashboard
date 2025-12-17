@@ -1740,5 +1740,29 @@ for row in reader:
 - **Location**: frontend/css/style.css
 - **Date**: 2025-12-17
 
+### Project Merge - Unified SEO Tools Platform
+- **Change**: Merged seo_faq, content_top, and theme_ads into single unified platform
+- **Port**: All services now run on port 8003 (previously 8003 + 8002)
+- **Approach**: Used FastAPI APIRouter to keep thema_ads code modular
+- **Files Copied**:
+  - `theme_ads/backend/thema_ads_service.py` → `backend/thema_ads_service.py`
+  - `theme_ads/backend/database.py` → `backend/thema_ads_db.py`
+  - `theme_ads/backend/main.py` → `backend/thema_ads_router.py` (converted to APIRouter)
+  - `theme_ads/frontend/thema-ads.html` → `frontend/thema-ads.html`
+  - `theme_ads/frontend/js/thema-ads.js` → `frontend/js/thema-ads.js`
+  - `theme_ads/thema_ads_optimized/` → `thema_ads_optimized/`
+  - `theme_ads/themes/` → `themes/`
+- **Router Pattern**:
+  ```python
+  # thema_ads_router.py
+  router = APIRouter(prefix="/api/thema-ads", tags=["thema-ads"])
+
+  # main.py
+  from backend.thema_ads_router import router as thema_ads_router
+  app.include_router(thema_ads_router)
+  ```
+- **Benefits**: Single deployment, shared CSS/styling, unified dashboard
+- **Date**: 2025-12-17
+
 ---
 _Last updated: 2025-12-17_

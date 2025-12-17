@@ -6,12 +6,17 @@ Backend: FastAPI (Python 3.11, ThreadPoolExecutor for parallel processing, psyco
 
 ## Directory Structure
 ```
-content_top/
+content_top/                 # Unified SEO Tools Platform (Port 8003)
 ├── .claude/              # Claude Code configuration
 │   ├── commands/         # Custom slash commands
 │   │   ├── skip-permissions.md     # Toggle bypassPermissions mode
 │   │   └── restore-permissions.md  # Restore default permissions
 │   └── settings.local.json  # Local settings (git ignored)
+├── thema_ads_optimized/  # Google Ads theme management (merged from theme_ads)
+│   ├── themes.py         # Theme definitions (black_friday, cyber_monday, etc.)
+│   ├── config.py         # Configuration management
+│   └── ...               # Google Ads automation utilities
+├── themes/               # Theme template data (merged from theme_ads)
 ├── cc1/                   # CC1 documentation + utilities
 │   ├── TASKS.md          # Task tracking
 │   ├── LEARNINGS.md      # Knowledge capture
@@ -22,9 +27,13 @@ content_top/
 │   └── output_plp_urls.csv   # Output with original URL and plpUrl (or GONE)
 ├── SEO_koptekst/         # Legacy SEO data directory
 ├── backend/
-│   ├── main.py           # FastAPI app with CORS & Thema Ads endpoints
+│   ├── main.py           # FastAPI app - Unified SEO Tools Platform
+│   │                     # Includes: SEO content, FAQ, Thema Ads (via router)
 │   │                     # CSV parsing: empty row handling, dash removal, optional columns
 │   │                     # SEO content generation uses Product Search API via scrape_product_page_api()
+│   ├── thema_ads_router.py  # APIRouter for all /api/thema-ads/* endpoints
+│   ├── thema_ads_service.py # Thema Ads business logic (merged from theme_ads)
+│   ├── thema_ads_db.py      # Thema Ads database functions (merged from theme_ads)
 │   ├── database.py       # Hybrid database connections (PostgreSQL + Redshift)
 │   │                     # Functions: get_db_connection(), get_redshift_connection(), get_output_connection()
 │   │                     # Schema: campaign_id and campaign_name columns added
@@ -50,11 +59,15 @@ content_top/
 │                             # Extracts selected facets (detailValue) for product subjects with smart category inclusion
 ├── openvpn               # OpenVPN client config (with pull-filter for split tunneling)
 ├── frontend/
-│   ├── index.html        # Main page (Bootstrap CDN)
+│   ├── dashboard.html    # Unified dashboard - entry point
+│   ├── index.html        # SEO Content Generation page
+│   ├── faq.html          # FAQ Generation page
+│   ├── thema-ads.html    # Thema Ads page (merged from theme_ads)
 │   ├── css/
-│   │   └── style.css     # Custom styles
+│   │   └── style.css     # Custom styles (purple navbar, grey headers, orange buttons)
 │   └── js/
-│       ├── app.js        # Vanilla JavaScript with expandable content and full URL display
+│       ├── app.js        # SEO content frontend logic
+│       ├── faq.js        # FAQ frontend logic
 │       └── thema-ads.js  # Thema Ads frontend logic with polling
 │                         # Features: delete job UI with confirmation
 ├── docker-compose.yml    # Service orchestration (no version attr)

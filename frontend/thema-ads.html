@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thema Ads Processing</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        /* Make active tab text blue instead of white */
+        .nav-tabs .nav-link.active {
+            color: #0d6efd !important;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container">
+            <span class="navbar-brand mb-0 h1">Thema Ads Processing</span>
+            <div>
+                <a href="http://localhost:8003/static/dashboard.html" class="btn btn-outline-light btn-sm fw-bold" target="_blank">Dashboard</a>
+                <a href="http://localhost:8003/static/index.html" class="btn btn-outline-light btn-sm fw-bold" target="_blank">SEO Content</a>
+                <a href="http://localhost:8003/static/faq.html" class="btn btn-outline-light btn-sm fw-bold" target="_blank">FAQ Generator</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+                <!-- Upload CSV or Auto-Discover -->
+                <div class="card mb-4">
+                    <div class="card-header bg-primary text-white">
+                        <ul class="nav nav-tabs card-header-tabs mb-0" role="tablist">
+                            <li class="nav-item">
+                                <a class="nav-link active text-white" id="excel-tab" data-bs-toggle="tab" href="#excelUpload" role="tab">Upload Account Plan</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-white" id="csv-tab" data-bs-toggle="tab" href="#csvUpload" role="tab">Upload Ad Groups</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-white" id="discover-tab" data-bs-toggle="tab" href="#autoDiscover" role="tab">Auto-Discover</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-white" id="checkup-tab" data-bs-toggle="tab" href="#checkup" role="tab">Check-up</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-white" id="cleanup-tab" data-bs-toggle="tab" href="#cleanup" role="tab">Label Cleanup</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-white" id="run-all-themes-tab" data-bs-toggle="tab" href="#runAllThemes" role="tab">Run All Themes</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-white" id="activate-ads-tab" data-bs-toggle="tab" href="#activateAds" role="tab">Activate Ads</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-white" id="remove-duplicates-tab" data-bs-toggle="tab" href="#removeDuplicates" role="tab">Remove Duplicates</a>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="card-body">
+                        <div class="tab-content">
+                            <!-- Excel Upload Tab -->
+                            <div class="tab-pane fade show active" id="excelUpload" role="tabpanel">
+                                <h6>Excel Upload - Multi-Theme Support</h6>
+                                <p class="text-muted">
+                                    Upload an Excel file (.xlsx) with the following columns:
+                                </p>
+                                <div class="alert alert-info">
+                                    <strong>Required Columns:</strong>
+                                    <ul class="mb-0">
+                                        <li><code>customer_id</code> - Google Ads customer ID (without dashes)</li>
+                                        <li><code>theme</code> - Theme name (see supported themes below)</li>
+                                    </ul>
+                                    <hr>
+                                    <strong>Optional Columns:</strong>
+                                    <ul class="mb-0">
+                                        <li><code>ad_group_id</code> - Ad group ID (if omitted, will auto-discover ad groups)</li>
+                                        <li><code>campaign_id</code> - Campaign ID</li>
+                                        <li><code>campaign_name</code> - Campaign name</li>
+                                        <li><code>ad_group_name</code> - Ad group name</li>
+                                    </ul>
+                                    <p class="mt-2 mb-0"><small>
+                                        <strong>Auto-discovery mode:</strong> When <code>ad_group_id</code> is not provided, the system will automatically discover all ad groups in HS/ campaigns for that customer (excluding ad groups with the theme's DONE label).
+                                    </small></p>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="excelFile" class="form-label">Select Excel File</label>
+                                    <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="excelBatchSize" class="form-label">Batch Size</label>
+                                    <input type="number" class="form-control" id="excelBatchSize" value="5000" min="1000" max="10000" style="max-width: 300px;">
+                                    <small class="text-muted">Number of items per API batch query (1000-10000, default: 5000)</small>
+                                </div>
+                                <button class="btn btn-primary" onclick="uploadExcel()">Upload & Create Job</button>
+                                <div id="excelUploadResult" class="mt-3"></div>
+                                <div class="mt-3">
+                                    <small class="text-muted">
+                                        <strong>Supported themes:</strong>
+                                        <span id="supportedThemes">Loading...</span>
+                                    </small>
+                                </div>
+                            </div>
+
+                            <!-- CSV Upload Tab -->
+                            <div class="tab-pane fade" id="csvUpload" role="tabpanel">
+                                <h6>Upload Ad Groups - Flexible Themes</h6>
+                                <p class="text-muted">
+                                    Upload a CSV file with <code>customer_id</code> (required) and optional <code>ad_group_id</code> / <code>theme</code> columns.<br>
+                                    <small>
+                                        <strong>Two modes:</strong><br>
+                                        • <strong>Specific ad groups:</strong> <code>customer_id</code> + <code>ad_group_id</code> for targeted processing<br>
+                                        • <strong>Auto-discover:</strong> <code>customer_id</code> only - finds all ad groups in HS/ campaigns without theme's DONE label<br>
+                                        <br>
+                                        <strong>Theme options:</strong><br>
+                                        • <strong>With theme column:</strong> Different theme per row (e.g., <code>customer_id,theme</code> with values like <code>123456,black_friday</code>)<br>
+                                        • <strong>Without theme column:</strong> Uses dropdown selection below for all rows<br>
+                                        <br>
+                                        <strong>Auto-cleanup:</strong> Respects 3 RSA limit per ad group. When at limit, removes:<br>
+                                        &nbsp;&nbsp;1) Paused theme ads first<br>
+                                        &nbsp;&nbsp;2) Active theme ads from other themes
+                                    </small>
+                                </p>
+                                <div class="mb-3">
+                                    <label for="csvTheme" class="form-label">Default Theme</label>
+                                    <select class="form-select" id="csvTheme" style="max-width: 300px;">
+                                        <option value="">Loading themes...</option>
+                                    </select>
+                                    <small class="text-muted">Default theme (used when CSV doesn't have a 'theme' column)</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="csvFile" class="form-label">Select CSV File</label>
+                                    <input type="file" class="form-control" id="csvFile" accept=".csv">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="csvBatchSize" class="form-label">Batch Size</label>
+                                    <input type="number" class="form-control" id="csvBatchSize" value="5000" min="1000" max="10000" style="max-width: 300px;">
+                                    <small class="text-muted">Number of items per API batch query (1000-10000, default: 5000)</small>
+                                </div>
+                                <button class="btn btn-primary" onclick="uploadCSV()">Upload & Create Job</button>
+                                <div id="uploadResult" class="mt-3"></div>
+                            </div>
+
+                            <!-- Auto-Discover Tab -->
+                            <div class="tab-pane fade" id="autoDiscover" role="tabpanel">
+                                <h6>Auto-Discover Ad Groups</h6>
+                                <p class="text-muted">
+                                    Automatically discover and process ad groups from your Google Ads account:<br>
+                                    <small>
+                                        • Searches all configured customer accounts<br>
+                                        • Finds campaigns starting with <strong>HS/</strong><br>
+                                        • Selects ad groups with <strong>ENABLED</strong> status<br>
+                                        • Applies selected theme to all discovered ad groups
+                                    </small>
+                                </p>
+                                <div class="mb-3">
+                                    <label for="discoverTheme" class="form-label">Theme</label>
+                                    <select class="form-select" id="discoverTheme" style="max-width: 300px;">
+                                        <option value="">Loading themes...</option>
+                                    </select>
+                                    <small class="text-muted">Select which theme to apply to discovered ad groups</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="discoverLimit" class="form-label">Limit (optional)</label>
+                                    <input type="number" class="form-control" id="discoverLimit" placeholder="Leave empty for no limit" min="1" max="100000" style="max-width: 300px;">
+                                    <small class="text-muted">Recommended: Start with 100-1000 for testing</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="discoverBatchSize" class="form-label">Batch Size</label>
+                                    <input type="number" class="form-control" id="discoverBatchSize" value="5000" min="1000" max="10000" style="max-width: 300px;">
+                                    <small class="text-muted">Number of items per API batch query (1000-10000, default: 5000)</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="discoverJobChunkSize" class="form-label">Job Chunk Size</label>
+                                    <input type="number" class="form-control" id="discoverJobChunkSize" value="50000" min="10000" max="100000" step="10000" style="max-width: 300px;">
+                                    <small class="text-muted">Max items per job - large discoveries split into multiple jobs (10k-100k, default: 50k)</small>
+                                </div>
+                                <button class="btn btn-primary" onclick="discoverAdGroups()" id="discoverBtn">
+                                    <i class="bi bi-search"></i> Discover & Process Ad Groups
+                                </button>
+                                <div id="discoverResult" class="mt-3"></div>
+                            </div>
+
+                            <!-- Check-up Tab -->
+                            <div class="tab-pane fade" id="checkup" role="tabpanel">
+                                <h6>Check-up & Verification - OPTIMIZED</h6>
+                                <p class="text-muted">
+                                    Audit theme DONE labels and verify themed ads exist:<br>
+                                    <small>
+                                        <strong>OPTIMIZED:</strong> 12-24x faster than old check-up!<br>
+                                        • Queries all themes at once (4x faster)<br>
+                                        • Filters to HS/ campaigns only (2-3x faster)<br>
+                                        • Better chunking for large queries (1.5x faster)<br>
+                                        • Skips already-audited ad groups with THEMES_CHECK_DONE label<br>
+                                        • Removes invalid DONE labels where themed ads are missing<br>
+                                        • Creates <strong>repair jobs</strong> for ad groups missing theme ads
+                                    </small>
+                                </p>
+                                <div class="mb-3">
+                                    <label for="checkupLimit" class="form-label">Limit (optional)</label>
+                                    <input type="number" class="form-control" id="checkupLimit" placeholder="Leave empty for no limit" min="1" max="100000" style="max-width: 300px;">
+                                    <small class="text-muted">Recommended: Start with 10-100 for testing</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="checkupBatchSize" class="form-label">Batch Size</label>
+                                    <input type="number" class="form-control" id="checkupBatchSize" value="5000" min="1000" max="10000" style="max-width: 300px;">
+                                    <small class="text-muted">Number of items per API batch query (1000-10000, default: 5000)</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="checkupJobChunkSize" class="form-label">Job Chunk Size</label>
+                                    <input type="number" class="form-control" id="checkupJobChunkSize" value="50000" min="10000" max="100000" step="10000" style="max-width: 300px;">
+                                    <small class="text-muted">Max items per repair job (10k-100k, default: 50k)</small>
+                                </div>
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="checkupSkipAudited" checked>
+                                    <label class="form-check-label" for="checkupSkipAudited">
+                                        Skip already audited ad groups (THEMES_CHECK_DONE label)
+                                    </label>
+                                    <small class="text-muted d-block">Faster: skips ad groups that were already validated. Uncheck to re-audit all ad groups.</small>
+                                </div>
+                                <div class="btn-group mb-3" role="group">
+                                    <button class="btn btn-primary" onclick="runCheckup()" id="checkupBtn">
+                                        <i class="bi bi-check-circle"></i> Run Check-up
+                                    </button>
+                                    <button class="btn btn-warning" onclick="removeCheckupLabels()" id="removeLabelsBtn">
+                                        <i class="bi bi-arrow-counterclockwise"></i> Reset Audit Labels
+                                    </button>
+                                </div>
+                                <div id="checkupResult" class="mt-3"></div>
+                            </div>
+
+                            <!-- Label Cleanup Tab -->
+                            <div class="tab-pane fade" id="cleanup" role="tabpanel">
+                                <h6>Label Cleanup - Remove Conflicting THEMA_ORIGINAL Labels</h6>
+                                <p class="text-muted">
+                                    Fix ads that incorrectly have both THEMA_ORIGINAL and theme labels:<br>
+                                    <small>
+                                        <strong>Problem:</strong> Some ads have both THEMA_ORIGINAL and theme labels (THEME_BF, THEME_CM, etc.)<br>
+                                        <strong>Correct behavior:</strong><br>
+                                        • Theme ads should <strong>ONLY</strong> have theme labels (not THEMA_ORIGINAL)<br>
+                                        • Original ads should <strong>ONLY</strong> have THEMA_ORIGINAL (not theme labels)<br>
+                                        <br>
+                                        <strong>What this does:</strong><br>
+                                        • Scans all 28 customers for ads with conflicting labels<br>
+                                        • Removes THEMA_ORIGINAL label from ads that have theme labels<br>
+                                        • Processes in batches of 1000 for efficiency<br>
+                                        • <strong>Dry-run mode:</strong> Preview what would be changed without making changes
+                                    </small>
+                                </p>
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="cleanupDryRun" checked>
+                                    <label class="form-check-label" for="cleanupDryRun">
+                                        <strong>Dry-run mode (preview only)</strong>
+                                    </label>
+                                    <small class="text-muted d-block">
+                                        When checked, only shows what would be changed without making actual changes.
+                                        Uncheck to execute the cleanup.
+                                    </small>
+                                </div>
+                                <div class="alert alert-warning" role="alert">
+                                    <i class="bi bi-exclamation-triangle"></i>
+                                    <strong>Important:</strong> Always run in dry-run mode first to preview changes before executing!
+                                </div>
+                                <button class="btn btn-primary" onclick="runCleanup()" id="cleanupBtn">
+                                    <i class="bi bi-tags"></i> Run Cleanup
+                                </button>
+                                <div id="cleanupResult" class="mt-3"></div>
+                            </div>
+
+                            <!-- Run All Themes Tab -->
+                            <div class="tab-pane fade" id="runAllThemes" role="tabpanel">
+                                <h6>Run All Themes - Complete Theme Coverage</h6>
+                                <p class="text-muted">
+                                    Discover all ad groups and add ALL missing theme ads:<br>
+                                    <small>
+                                        • Finds all customers matching the filter<br>
+                                        • Discovers all ad groups in HS/ campaigns<br>
+                                        • Checks which themes are missing (no DONE label + no theme ads)<br>
+                                        • <strong>Prevents duplicates:</strong> detects existing theme ads even without DONE labels<br>
+                                        • Creates one job per theme for easy tracking<br>
+                                        • Use this to ensure complete theme coverage across all ad groups
+                                    </small>
+                                </p>
+                                <div class="mb-3">
+                                    <label for="allThemesCustomerFilter" class="form-label">Customer Filter</label>
+                                    <input type="text" class="form-control" id="allThemesCustomerFilter" value="Beslist.nl -" style="max-width: 300px;">
+                                    <small class="text-muted">Only process customers with names starting with this text</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Select Themes to Process</label>
+                                    <div id="allThemesCheckboxes">
+                                        <!-- Dynamically populated -->
+                                    </div>
+                                    <small class="text-muted">Select which themes to add to ad groups</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="allThemesLimit" class="form-label">Limit (optional)</label>
+                                    <input type="number" class="form-control" id="allThemesLimit" placeholder="Leave empty for no limit" min="1" max="100000" style="max-width: 300px;">
+                                    <small class="text-muted">Recommended: Start with 10-50 for testing</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="allThemesBatchSize" class="form-label">Batch Size</label>
+                                    <input type="number" class="form-control" id="allThemesBatchSize" value="5000" min="1000" max="10000" style="max-width: 300px;">
+                                    <small class="text-muted">Number of items per API batch query (1000-10000, default: 5000)</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="allThemesJobChunkSize" class="form-label">Job Chunk Size</label>
+                                    <input type="number" class="form-control" id="allThemesJobChunkSize" value="50000" min="10000" max="100000" step="10000" style="max-width: 300px;">
+                                    <small class="text-muted">Max items per job (10k-100k, default: 50k)</small>
+                                </div>
+                                <button class="btn btn-primary" onclick="runAllThemes()" id="runAllThemesBtn">
+                                    <i class="bi bi-lightning-fill"></i> Discover & Create Jobs
+                                </button>
+                                <div id="allThemesResult" class="mt-3"></div>
+                            </div>
+
+                            <!-- Activate Ads Tab -->
+                            <div class="tab-pane fade" id="activateAds" role="tabpanel">
+                                <h6>Activate Ads - Plan-Based Ad Activation (Optimized)</h6>
+                                <p class="text-muted">
+                                    Activate the correct theme ad per customer based on your activation plan:<br>
+                                    <small>
+                                        • First, upload your activation plan (Excel with customer_id + theme)<br>
+                                        • Then, run activation to pause all ads and enable only the correct theme ad<br>
+                                        • <strong>Safe operation:</strong> pauses all ads first, then activates correct ad<br>
+                                        • <strong>Optimized:</strong> 5-10x faster with parallel processing and bulk queries<br>
+                                        • Tracks ad groups missing the required theme ad for separate processing<br>
+                                        • Skips ad groups already processed (unless "Reset Labels" is checked)
+                                    </small>
+                                </p>
+
+                                <!-- Upload Plan Section -->
+                                <div class="card mb-3">
+                                    <div class="card-header">
+                                        <strong>Step 1: Upload Activation Plan</strong>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-muted">
+                                            Upload an Excel file with <code>customer_id</code> and <code>theme</code> columns.<br>
+                                            This defines which theme should be active for each customer.
+                                        </p>
+                                        <div class="mb-3">
+                                            <label for="activationPlanFile" class="form-label">Select Excel File</label>
+                                            <input type="file" class="form-control" id="activationPlanFile" accept=".xlsx,.xls" style="max-width: 400px;">
+                                        </div>
+                                        <div class="form-check mb-3">
+                                            <input class="form-check-input" type="checkbox" id="resetActivationLabels">
+                                            <label class="form-check-label" for="resetActivationLabels">
+                                                Reset activation labels (reprocess all ad groups)
+                                            </label>
+                                            <small class="text-muted d-block">Check this to reprocess ad groups that were already activated</small>
+                                        </div>
+                                        <button class="btn btn-primary" onclick="uploadActivationPlan()" id="uploadPlanBtn">
+                                            <i class="bi bi-upload"></i> Upload Plan
+                                        </button>
+                                        <div id="uploadPlanResult" class="mt-3"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Current Plan Display -->
+                                <div class="card mb-3">
+                                    <div class="card-header">
+                                        <strong>Current Activation Plan</strong>
+                                        <button class="btn btn-sm btn-outline-primary float-end" onclick="loadActivationPlan()">
+                                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                                        </button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="currentPlan">Loading...</div>
+                                    </div>
+                                </div>
+
+                                <!-- Activate Section -->
+                                <div class="card mb-3">
+                                    <div class="card-header">
+                                        <strong>Step 2: Activate Ads</strong>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-muted">
+                                            Run activation to pause all ads and enable the correct theme ad per the plan.
+                                        </p>
+                                        <div class="mb-3">
+                                            <label for="activateCustomerIds" class="form-label">Customer IDs (optional)</label>
+                                            <input type="text" class="form-control" id="activateCustomerIds" placeholder="Leave empty to process all customers in plan" style="max-width: 500px;">
+                                            <small class="text-muted">Comma-separated list (e.g., 1234567890,9876543210)</small>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="activateParallelWorkers" class="form-label">Parallel Workers</label>
+                                            <input type="number" class="form-control" id="activateParallelWorkers" value="5" min="1" max="10" style="max-width: 150px;">
+                                            <small class="text-muted">Number of customers to process simultaneously (1-10, recommended: 5)</small>
+                                        </div>
+                                        <div class="form-check mb-3">
+                                            <input class="form-check-input" type="checkbox" id="activateResetLabels">
+                                            <label class="form-check-label" for="activateResetLabels">
+                                                Reset labels (reprocess ad groups with ACTIVATION_DONE label)
+                                            </label>
+                                        </div>
+                                        <button class="btn btn-success" onclick="activateAds()" id="activateAdsBtn">
+                                            <i class="bi bi-play-circle"></i> Activate Ads
+                                        </button>
+                                        <div id="activateResult" class="mt-3"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Missing Ads Section -->
+                                <div class="card mb-3" id="missingAdsCard" style="display: none;">
+                                    <div class="card-header bg-warning">
+                                        <strong>Ad Groups Missing Required Theme Ads</strong>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-muted">
+                                            These ad groups don't have the theme ad specified in the plan.<br>
+                                            Download the CSV and upload via "Upload Ad Groups" to add the missing theme ads.
+                                        </p>
+                                        <button class="btn btn-warning" onclick="downloadMissingAds()">
+                                            <i class="bi bi-download"></i> Download Missing Ads CSV
+                                        </button>
+                                        <div class="table-responsive mt-3">
+                                            <table class="table table-sm" id="missingAdsTable">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Customer ID</th>
+                                                        <th>Campaign</th>
+                                                        <th>Ad Group</th>
+                                                        <th>Required Theme</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="missingAdsTableBody">
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Remove Duplicates Tab -->
+                            <div class="tab-pane fade" id="removeDuplicates" role="tabpanel">
+                                <h6>Remove Duplicates - Clean Up Duplicate Ads</h6>
+                                <p class="text-muted">
+                                    Find and remove duplicate ads from HS/ campaigns:<br>
+                                    <small>
+                                        • Finds ads with identical content (same headlines + descriptions)<br>
+                                        • Keeps ads with theme labels (THEME_BF, THEME_SK, etc.)<br>
+                                        • Removes duplicate ads without theme labels<br>
+                                        • Labels processed ad groups with <code>THEME_DUPLICATES_CHECK</code> to prevent reprocessing<br>
+                                        • <strong>Safe operation:</strong> dry-run mode by default (preview changes first)
+                                    </small>
+                                </p>
+
+                                <div class="card mb-3">
+                                    <div class="card-header">
+                                        <strong>Remove Duplicates Configuration</strong>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="duplicateCustomerFilter" class="form-label">Customer Filter</label>
+                                            <select class="form-select" id="duplicateCustomerFilter" style="max-width: 300px;">
+                                                <option value="beslist">Beslist.nl accounts only</option>
+                                                <option value="all">All customers</option>
+                                                <option value="single">Single customer</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="mb-3" id="duplicateSingleCustomerDiv" style="display: none;">
+                                            <label for="duplicateSingleCustomer" class="form-label">Customer ID</label>
+                                            <input type="text" class="form-control" id="duplicateSingleCustomer" placeholder="Enter customer ID" style="max-width: 300px;">
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label for="duplicateLimit" class="form-label">Limit (optional)</label>
+                                            <input type="number" class="form-control" id="duplicateLimit" placeholder="Leave empty for no limit" style="max-width: 200px;">
+                                            <small class="text-muted">Limit ad groups per customer (for testing)</small>
+                                        </div>
+
+                                        <div class="form-check mb-3">
+                                            <input class="form-check-input" type="checkbox" id="duplicateDryRun" checked>
+                                            <label class="form-check-label" for="duplicateDryRun">
+                                                <strong>Dry Run (Preview Only)</strong>
+                                            </label>
+                                            <small class="text-muted d-block">Check this to see what would be removed without actually removing anything. <strong>Uncheck to actually remove duplicates.</strong></small>
+                                        </div>
+
+                                        <div class="form-check mb-3">
+                                            <input class="form-check-input" type="checkbox" id="duplicateResetLabels">
+                                            <label class="form-check-label" for="duplicateResetLabels">
+                                                Reset labels (recheck ad groups with THEME_DUPLICATES_CHECK label)
+                                            </label>
+                                        </div>
+
+                                        <button class="btn btn-warning" onclick="removeDuplicates()" id="removeDuplicatesBtn">
+                                            <i class="bi bi-trash"></i> Find & Remove Duplicates
+                                        </button>
+                                        <div id="removeDuplicatesResult" class="mt-3"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Job List -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Processing Jobs</h5>
+                        <div class="d-flex align-items-center gap-3">
+                            <!-- Auto-Queue Toggle -->
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="autoQueueToggle" onchange="toggleAutoQueue()">
+                                <label class="form-check-label" for="autoQueueToggle">
+                                    <span id="queueStatusLabel">Auto-Queue</span>
+                                </label>
+                            </div>
+                            <button class="btn btn-sm btn-outline-primary" onclick="refreshJobs()">
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info" role="alert">
+                            <strong>Auto-Queue:</strong> <span id="queueStatusText">Loading...</span>
+                        </div>
+                        <div id="jobsList" class="table-responsive">
+                            Loading...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Current Job Detail -->
+                <div class="card mb-4" id="currentJobCard" style="display: none;">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0">Current Job: <span id="currentJobId"></span></h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Progress Bar -->
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span>Progress</span>
+                                <span id="progressText">0 / 0</span>
+                            </div>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar"
+                                     id="progressBar"
+                                     style="width: 0%">0%</div>
+                            </div>
+                        </div>
+
+                        <!-- Statistics -->
+                        <div class="row text-center mb-3">
+                            <div class="col">
+                                <h4 id="totalItems" class="text-primary">0</h4>
+                                <p class="text-muted small">Total</p>
+                            </div>
+                            <div class="col">
+                                <h4 id="successfulItems" class="text-success">0</h4>
+                                <p class="text-muted small">Successful</p>
+                            </div>
+                            <div class="col">
+                                <h4 id="skippedItems" class="text-info">0</h4>
+                                <p class="text-muted small">Skipped</p>
+                            </div>
+                            <div class="col">
+                                <h4 id="failedItems" class="text-danger">0</h4>
+                                <p class="text-muted small">Failed</p>
+                            </div>
+                            <div class="col">
+                                <h4 id="pendingItems" class="text-warning">0</h4>
+                                <p class="text-muted small">Pending</p>
+                            </div>
+                        </div>
+
+                        <!-- Job Info -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <strong>Status:</strong>
+                                <span class="badge" id="jobStatus">-</span>
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Started:</strong>
+                                <span id="jobStarted">-</span>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-success" onclick="startJob()" id="startBtn">Start</button>
+                            <button class="btn btn-warning" onclick="pauseJob()" id="pauseBtn" style="display:none;">Pause</button>
+                            <button class="btn btn-info" onclick="resumeJob()" id="resumeBtn" style="display:none;">Resume</button>
+                        </div>
+
+                        <!-- Recent Failures -->
+                        <div class="mt-4" id="failuresSection" style="display:none;">
+                            <h6>Recent Failures</h6>
+                            <div class="list-group" id="failuresList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/thema-ads.js?v=2"></script>
+</body>
+</html>

@@ -17,9 +17,18 @@ from backend.scraper_service import scrape_product_page, scrape_product_page_api
 from backend.gpt_service import generate_product_content, check_content_has_valid_links
 from backend.link_validator import validate_content_links, validate_and_fix_content_links, update_content_in_redshift
 from backend.faq_service import process_single_url_faq
+from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
 import psycopg2
 
-app = FastAPI(title="Content Top - SEO Content Generation", version="1.0.0")
+app = FastAPI(title="SEO Tools - Unified Platform", version="1.0.0")
+
+# Include thema_ads router
+app.include_router(thema_ads_router)
+
+@app.on_event("startup")
+async def startup_event():
+    """Run startup tasks for all services."""
+    await cleanup_thema_ads_jobs()
 
 # CORS for frontend
 app.add_middleware(

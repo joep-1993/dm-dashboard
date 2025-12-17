@@ -1,0 +1,5 @@
+        "Shop {KeyWord:Kerstgeschenken}. {COUNTDOWN(2025-12-25 00:00:00,5)} te gaan – op tijd bezorgd!",
+        "{KeyWord:Kerst Deals} nu met hoge korting. Alleen echte Kerst deals – geen nepprijzen!",
+        "Scoor {KeyWord:Aanbiedingen} tijdens Kerst. Alleen echte Kerstdeals, op=op!",
+        "{KeyWord:Kerst Deals} nu live. Nog {COUNTDOWN(2025-12-25 00:00:00,5)}! Alleen echte Kerstdeals.",
+        "Scoor {KeyWord:Aanbiedingen} voor Kerst. Slechts {COUNTDOWN(2025-12-25 00:00:00,5)} te gaan – geen nepdeals!",
