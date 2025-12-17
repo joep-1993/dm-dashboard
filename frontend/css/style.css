@@ -216,6 +216,18 @@ body {
     color: white;
 }
 
+.btn-outline-warning {
+    color: var(--color-button);
+    border-color: var(--color-button);
+    background-color: transparent;
+}
+
+.btn-outline-warning:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
 /* Danger buttons - keep red for destructive actions */
 .btn-danger {
     background-color: #dc3545;
