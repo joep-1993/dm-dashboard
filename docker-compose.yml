@@ -8,10 +8,12 @@ services:
       # Mount for live editing - no build needed!
       - ./backend:/app/backend
       - ./frontend:/app/frontend
+      - ./thema_ads_optimized:/app/thema_ads_optimized
+      - ./themes:/app/themes
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AI_MODEL=${AI_MODEL:-gpt-4o-mini}
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/content_top
+      - DATABASE_URL=postgresql://postgres:postgres@seo_tools_db:5432/seo_tools
       - USE_REDSHIFT_OUTPUT=${USE_REDSHIFT_OUTPUT:-false}
       - REDSHIFT_HOST=${REDSHIFT_HOST}
       - REDSHIFT_PORT=${REDSHIFT_PORT:-5439}
@@ -27,21 +29,10 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - GOOGLE_LOGIN_CUSTOMER_ID=${GOOGLE_LOGIN_CUSTOMER_ID}
-    depends_on:
-      - db
+    networks:
+      - seo-tools_default
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
-  db:
-    container_name: content_top_db
-    image: postgres:15
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: content_top
-    ports:
-      - "5433:5432"  # Avoid conflicts with local PostgreSQL
-    volumes:
-      - content_top_postgres_data:/var/lib/postgresql/data
-
-volumes:
-  content_top_postgres_data:
+networks:
+  seo-tools_default:
+    external: true
