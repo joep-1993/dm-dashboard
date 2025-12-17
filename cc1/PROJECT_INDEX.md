@@ -299,10 +299,10 @@ python-dotenv==1.0.0      # Environment variable management
 
 ## Git Repository
 
-- **URL**: https://github.com/joep-1993/content_top
+- **URL**: https://github.com/joep-1993/dm-tools
 - **User**: joep-1993 <joepvanschagen34@gmail.com>
 - **Authentication**: SSH (ed25519 key)
-- **Protected Files**: .env files, *.xlsx, *.xls, thema_ads_optimized/, thema_ads_project/ (all in .gitignore)
+- **Protected Files**: .env files, *.xlsx, *.xls, thema_ads_optimized/, themes/ (all in .gitignore)
 
 ## API Endpoints
 
