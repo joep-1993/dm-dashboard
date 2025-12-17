@@ -240,3 +240,16 @@ body {
     border-color: #bd2130;
     color: white;
 }
+
+/* Outline danger buttons - orange like other outline buttons */
+.btn-outline-danger {
+    color: var(--color-button);
+    border-color: var(--color-button);
+    background-color: transparent;
+}
+
+.btn-outline-danger:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
