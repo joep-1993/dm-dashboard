@@ -7,7 +7,14 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        /* Make active tab text match color scheme */
+        /* Tab styling */
+        .nav-tabs .nav-link {
+            color: #2d3436 !important;
+            transition: color 0.2s ease;
+        }
+        .nav-tabs .nav-link:hover {
+            color: #E97451 !important;
+        }
         .nav-tabs .nav-link.active {
             color: #CC5500 !important;
         }
@@ -33,28 +40,28 @@
                     <div class="card-header">
                         <ul class="nav nav-tabs card-header-tabs mb-0" role="tablist">
                             <li class="nav-item">
-                                <a class="nav-link active" id="excel-tab" data-bs-toggle="tab" href="#excelUpload" role="tab" style="color: #2d3436;">Upload Account Plan</a>
+                                <a class="nav-link active" id="excel-tab" data-bs-toggle="tab" href="#excelUpload" role="tab">Upload Account Plan</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" id="csv-tab" data-bs-toggle="tab" href="#csvUpload" role="tab" style="color: #2d3436;">Upload Ad Groups</a>
+                                <a class="nav-link" id="csv-tab" data-bs-toggle="tab" href="#csvUpload" role="tab">Upload Ad Groups</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" id="discover-tab" data-bs-toggle="tab" href="#autoDiscover" role="tab" style="color: #2d3436;">Auto-Discover</a>
+                                <a class="nav-link" id="discover-tab" data-bs-toggle="tab" href="#autoDiscover" role="tab">Auto-Discover</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" id="checkup-tab" data-bs-toggle="tab" href="#checkup" role="tab" style="color: #2d3436;">Check-up</a>
+                                <a class="nav-link" id="checkup-tab" data-bs-toggle="tab" href="#checkup" role="tab">Check-up</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" id="cleanup-tab" data-bs-toggle="tab" href="#cleanup" role="tab" style="color: #2d3436;">Label Cleanup</a>
+                                <a class="nav-link" id="cleanup-tab" data-bs-toggle="tab" href="#cleanup" role="tab">Label Cleanup</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" id="run-all-themes-tab" data-bs-toggle="tab" href="#runAllThemes" role="tab" style="color: #2d3436;">Run All Themes</a>
+                                <a class="nav-link" id="run-all-themes-tab" data-bs-toggle="tab" href="#runAllThemes" role="tab">Run All Themes</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" id="activate-ads-tab" data-bs-toggle="tab" href="#activateAds" role="tab" style="color: #2d3436;">Activate Ads</a>
+                                <a class="nav-link" id="activate-ads-tab" data-bs-toggle="tab" href="#activateAds" role="tab">Activate Ads</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link" id="remove-duplicates-tab" data-bs-toggle="tab" href="#removeDuplicates" role="tab" style="color: #2d3436;">Remove Duplicates</a>
+                                <a class="nav-link" id="remove-duplicates-tab" data-bs-toggle="tab" href="#removeDuplicates" role="tab">Remove Duplicates</a>
                             </li>
                         </ul>
                     </div>
