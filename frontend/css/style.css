@@ -17,6 +17,12 @@ body {
     box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
 }
 
+/* All card headers are anthracite */
+.card-header {
+    background-color: var(--color-primary) !important;
+    color: white !important;
+}
+
 #result {
     padding: 1rem;
     background-color: #f1f3f5;
@@ -64,8 +70,8 @@ body {
 }
 
 .btn-outline-primary:hover {
-    background-color: var(--color-button);
-    border-color: var(--color-button);
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
     color: white;
 }
 
@@ -90,6 +96,18 @@ body {
 }
 
 .btn-info:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.btn-outline-info {
+    color: var(--color-button);
+    border-color: var(--color-button);
+    background-color: transparent;
+}
+
+.btn-outline-info:hover {
     background-color: var(--color-button-hover);
     border-color: var(--color-button-hover);
     color: white;
@@ -133,8 +151,8 @@ body {
 }
 
 .btn-outline-success:hover {
-    background-color: var(--color-button);
-    border-color: var(--color-button);
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
     color: white;
 }
 
@@ -156,7 +174,12 @@ body {
     background-color: var(--color-button);
 }
 
-/* Secondary/Default buttons - also orange */
+/* Secondary Color - Anthracite for headers, Orange for buttons */
+.bg-secondary,
+.card-header.bg-secondary {
+    background-color: var(--color-primary) !important;
+}
+
 .btn-secondary {
     background-color: var(--color-button);
     border-color: var(--color-button);
@@ -175,8 +198,8 @@ body {
 }
 
 .btn-outline-secondary:hover {
-    background-color: var(--color-button);
-    border-color: var(--color-button);
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
     color: white;
 }
 
