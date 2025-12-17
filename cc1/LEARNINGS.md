@@ -1732,8 +1732,8 @@ for row in reader:
 - **CSS Variables**:
   ```css
   --color-primary: #2d3436;      /* Anthracite - for headers */
-  --color-button: #FF8C00;       /* Orange - for buttons */
-  --color-button-hover: #FFA940; /* Light orange - for hover */
+  --color-button: #CC5500;       /* Burnt orange - for buttons */
+  --color-button-hover: #E97451; /* Coral orange - for hover */
   ```
 - **Location**: frontend/css/style.css
 - **Date**: 2025-12-17

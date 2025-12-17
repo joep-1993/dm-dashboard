@@ -5,8 +5,8 @@
     --color-primary: #2d3436;   /* Anthracite - for headers */
     --color-info: #2d3436;      /* Anthracite */
     --color-success: #2d3436;   /* Anthracite */
-    --color-button: #FF8C00;    /* Orange - for buttons */
-    --color-button-hover: #FFA940;  /* Light orange - for button hover */
+    --color-button: #CC5500;    /* Burnt orange - for buttons */
+    --color-button-hover: #E97451;  /* Coral orange - for button hover */
 }
 
 body {
