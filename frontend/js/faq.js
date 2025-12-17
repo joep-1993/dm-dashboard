@@ -408,3 +408,11 @@ function exportFaqJSON() {
         alert(`Export failed: ${error.message}`);
     }
 }
+
+function exportCombined() {
+    try {
+        window.location.href = `${API_BASE}/api/export/combined/xlsx`;
+    } catch (error) {
+        alert(`Combined export failed: ${error.message}`);
+    }
+}

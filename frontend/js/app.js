@@ -566,6 +566,14 @@ async function exportJSON() {
     }
 }
 
+async function exportCombined() {
+    try {
+        window.location.href = `${API_BASE}/api/export/combined/xlsx`;
+    } catch (error) {
+        alert(`Combined export failed: ${error.message}`);
+    }
+}
+
 // Validate links function
 async function validateLinks() {
     const validateBtn = document.getElementById('validateBtn');

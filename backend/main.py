@@ -1328,6 +1328,79 @@ async def export_faq_json():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/export/combined/xlsx")
+async def export_combined_xlsx():
+    """
+    Export combined FAQ and content_top results as Excel XLSX.
+    Columns: url, content_faq, content_top, country_language
+    Only includes URLs that have both FAQ and content_top data.
+    """
+    from openpyxl import Workbook
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Join FAQ content with content_top content
+        cur.execute("""
+            SELECT
+                f.url,
+                f.schema_org as content_faq,
+                c.content as content_top
+            FROM pa.faq_content f
+            INNER JOIN pa.content_urls_joep c ON f.url = c.url
+            ORDER BY f.url
+        """)
+        rows = cur.fetchall()
+
+        cur.close()
+        return_db_connection(conn)
+
+        # Create Excel workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Combined Export"
+
+        # Add headers
+        ws.append(['url', 'content_faq', 'content_top', 'country_language'])
+
+        # Add data rows
+        import re
+        # Remove control characters that Excel doesn't allow
+        illegal_chars = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+        for row in rows:
+            # Build JSON-LD script tag for content_faq column
+            schema_org = row['content_faq'] if row['content_faq'] else '{}'
+            content_faq = f'<script type="application/ld+json">\n{schema_org}\n</script>'
+            content_faq = illegal_chars.sub('', content_faq)
+
+            content_top = row['content_top'] if row['content_top'] else ''
+            content_top = illegal_chars.sub('', content_top)
+
+            ws.append([row['url'], content_faq, content_top, 'nl-nl'])
+
+        # Auto-adjust column widths
+        ws.column_dimensions["A"].width = 80
+        ws.column_dimensions["B"].width = 100
+        ws.column_dimensions["C"].width = 100
+        ws.column_dimensions["D"].width = 15
+
+        # Save to BytesIO
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=combined_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/faq/result/{url:path}")
 async def delete_faq_result(url: str):
     """Delete a FAQ result and reset the URL back to pending state"""

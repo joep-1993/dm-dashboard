@@ -14,7 +14,7 @@
             <span class="navbar-brand mb-0 h1">FAQ Generator</span>
             <div>
                 <a href="/static/index.html" class="btn btn-light btn-sm">SEO Content</a>
-                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm">Thema Ads</a>
+                <a href="http://localhost:8002" class="btn btn-outline-light btn-sm" target="_blank">Thema Ads</a>
             </div>
         </div>
     </nav>
@@ -122,6 +122,9 @@
                             </button>
                             <button class="btn btn-sm btn-outline-primary" onclick="exportFaqJSON()">
                                 Export JSON
+                            </button>
+                            <button class="btn btn-sm btn-warning" onclick="exportCombined()" title="Export FAQ + Content combined">
+                                Export Combined
                             </button>
                         </div>
                     </div>
