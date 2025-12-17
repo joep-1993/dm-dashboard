@@ -1722,16 +1722,18 @@ for row in reader:
 - **Location**: backend/main.py - `/api/status` (line 315) and `/api/faq/status` (lines 1066-1079)
 - **Date**: 2025-12-17
 
-### Color Theme - Orange Buttons, Anthracite Headers
+### Color Theme - Purple Navbar, Grey Headers, Orange Buttons
 - **Change**: Complete UI color overhaul
-  - All buttons: Orange (`#FF8C00`) with light orange hover (`#FFA940`)
-  - All headers/backgrounds: Anthracite (`#2d3436`)
-- **Button Types Updated**: btn-primary, btn-info, btn-success, btn-secondary, btn-warning, btn-outline-*
-- **Header Types Updated**: bg-primary, bg-info, bg-success, card-header, navbar
+  - Top navbar: Purple (`#5e4a90`)
+  - Section headers: Light grey (`#E8E9EB`)
+  - All buttons: Burnt orange (`#CC5500`) with coral hover (`#E97451`)
+- **Button Types Updated**: btn-primary, btn-info, btn-success, btn-secondary, btn-warning, btn-outline-* (all variants)
+- **Header Types Updated**: All card-header elements use light grey
 - **Exceptions**: btn-danger kept red for destructive actions
 - **CSS Variables**:
   ```css
-  --color-primary: #2d3436;      /* Anthracite - for headers */
+  --color-navbar: #5e4a90;       /* Purple - top navbar only */
+  --color-section: #E8E9EB;      /* Light grey - section headers */
   --color-button: #CC5500;       /* Burnt orange - for buttons */
   --color-button-hover: #E97451; /* Coral orange - for hover */
   ```
