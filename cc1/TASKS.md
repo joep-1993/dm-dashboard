@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Standardize alert colors to yellow (alert-warning) across both tools #claude-session:2025-12-17
+- [x] Update FAQ prompt to use informal Dutch tone ("jij"/"je" instead of "u"/"uw") #claude-session:2025-12-17
 - [x] Fix content preview HTML truncation bug - strip HTML tags before truncating to prevent broken links in results list #claude-session:2025-12-17
 - [x] Fix Product Search API to support URLs without /c/ filters - updated parse_beslist_url in both scraper_service.py and faq_service.py #claude-session:2025-12-17
 - [x] Fix FAQ prompt to prevent fake URLs and generic link texts - added strict instructions to only use provided URLs, removed 32 problematic FAQ records #claude-session:2025-12-17

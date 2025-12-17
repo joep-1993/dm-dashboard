@@ -122,7 +122,7 @@ async function processUrls() {
             `;
         } else {
             let resultsHtml = `
-                <div class="alert alert-success">
+                <div class="alert alert-warning">
                     <strong>Processed ${data.processed || 0} of ${data.total_attempted || 0} URLs</strong>
                 </div>
                 <ul class="list-group mt-2">
@@ -289,7 +289,7 @@ async function processAllUrls() {
         progressBar.classList.remove('progress-bar-animated');
 
         resultDiv.innerHTML = `
-            <div class="alert alert-success">
+            <div class="alert alert-warning">
                 <strong>Processing Complete!</strong><br>
                 Total batches: ${batchCount}<br>
                 Processed in this run: ${finalProcessed} of ${totalToProcess} URLs<br>
@@ -417,7 +417,7 @@ async function uploadUrls() {
 
         if (response.ok) {
             resultDiv.innerHTML = `
-                <div class="alert alert-success">
+                <div class="alert alert-warning">
                     <strong>${data.message}</strong><br>
                     Total URLs in file: ${data.total_urls}<br>
                     New URLs added: ${data.added}<br>
@@ -472,7 +472,7 @@ async function uploadManualUrls() {
 
         if (response.ok) {
             resultDiv.innerHTML = `
-                <div class="alert alert-success">
+                <div class="alert alert-warning">
                     <strong>${data.message}</strong><br>
                     Total URLs entered: ${data.total_urls}<br>
                     New URLs added: ${data.added}<br>
@@ -699,7 +699,7 @@ async function resetValidationHistory() {
 
         if (response.ok) {
             resultDiv.innerHTML = `
-                <div class="alert alert-success">
+                <div class="alert alert-warning">
                     <strong>${data.message}</strong><br>
                     All URLs can now be re-validated.
                 </div>

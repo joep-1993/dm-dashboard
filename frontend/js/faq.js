@@ -199,7 +199,7 @@ async function processAllFaqUrls() {
     let totalFailed = 0;
     let batchCount = 0;
 
-    resultDiv.innerHTML = '<div class="alert alert-info">Starting FAQ batch processing...</div>';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Starting FAQ batch processing...</div>';
 
     try {
         // Get initial status
@@ -266,7 +266,7 @@ async function processAllFaqUrls() {
             const batchTotal = data.total_attempted || 0;
             const batchFailed = batchTotal - batchProcessed;
 
-            let batchHtml = `<div class="alert alert-info">`;
+            let batchHtml = `<div class="alert alert-warning">`;
             batchHtml += `<strong>Batch ${batchCount} Complete:</strong> `;
             batchHtml += `${batchProcessed} successful, ${batchFailed} failed/skipped<br>`;
             batchHtml += `<strong>Total Progress:</strong> ${processedInThisRun} of ${totalToProcess} URLs (${progress}%)`;
