@@ -2,9 +2,11 @@
 
 /* Custom Color Scheme */
 :root {
-    --color-primary: #059CDF;   /* Blue */
-    --color-info: #9C3095;      /* Purple/Magenta */
-    --color-success: #A0D168;   /* Green */
+    --color-primary: #2d3436;   /* Anthracite - for headers */
+    --color-info: #2d3436;      /* Anthracite */
+    --color-success: #2d3436;   /* Anthracite */
+    --color-button: #FF8C00;    /* Orange - for buttons */
+    --color-button-hover: #FFA940;  /* Light orange - for button hover */
 }
 
 body {
@@ -28,7 +30,7 @@ body {
 }
 
 .status-ok {
-    color: var(--color-success);
+    color: #28a745;
 }
 
 .status-error {
@@ -37,30 +39,33 @@ body {
 
 /* Override Bootstrap Colors */
 
-/* Primary Color - Blue #059CDF */
+/* Primary Color - Anthracite for backgrounds/headers */
 .bg-primary,
 .navbar.bg-primary {
     background-color: var(--color-primary) !important;
 }
 
+/* All buttons are orange */
 .btn-primary {
-    background-color: var(--color-primary);
-    border-color: var(--color-primary);
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
 }
 
 .btn-primary:hover {
-    background-color: #0480b3;
-    border-color: #0480b3;
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
 }
 
 .btn-outline-primary {
-    color: var(--color-primary);
-    border-color: var(--color-primary);
+    color: var(--color-button);
+    border-color: var(--color-button);
 }
 
 .btn-outline-primary:hover {
-    background-color: var(--color-primary);
-    border-color: var(--color-primary);
+    background-color: var(--color-button);
+    border-color: var(--color-button);
     color: white;
 }
 
@@ -72,20 +77,22 @@ body {
     background-color: var(--color-primary) !important;
 }
 
-/* Info Color - Purple/Magenta #9C3095 */
+/* Info Color - Anthracite for headers, Orange for buttons */
 .bg-info,
 .card-header.bg-info {
     background-color: var(--color-info) !important;
 }
 
 .btn-info {
-    background-color: var(--color-info);
-    border-color: var(--color-info);
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
 }
 
 .btn-info:hover {
-    background-color: #7d2678;
-    border-color: #7d2678;
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
 }
 
 .text-info {
@@ -97,35 +104,37 @@ body {
 }
 
 .alert-info {
-    background-color: rgba(156, 48, 149, 0.15);
+    background-color: rgba(45, 52, 54, 0.15);
     border-color: var(--color-info);
-    color: #4d1847;
+    color: #1e2526;
 }
 
-/* Success Color - Green #A0D168 */
+/* Success Color - Anthracite for headers, Orange for buttons */
 .bg-success,
 .card-header.bg-success {
     background-color: var(--color-success) !important;
 }
 
 .btn-success {
-    background-color: var(--color-success);
-    border-color: var(--color-success);
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
 }
 
 .btn-success:hover {
-    background-color: #8ac153;
-    border-color: #8ac153;
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
 }
 
 .btn-outline-success {
-    color: var(--color-success);
-    border-color: var(--color-success);
+    color: var(--color-button);
+    border-color: var(--color-button);
 }
 
 .btn-outline-success:hover {
-    background-color: var(--color-success);
-    border-color: var(--color-success);
+    background-color: var(--color-button);
+    border-color: var(--color-button);
     color: white;
 }
 
@@ -138,11 +147,61 @@ body {
 }
 
 .alert-success {
-    background-color: rgba(160, 209, 104, 0.15);
+    background-color: rgba(45, 52, 54, 0.15);
     border-color: var(--color-success);
-    color: #4d6632;
+    color: #1e2526;
 }
 
 .progress-bar {
-    background-color: var(--color-success);
+    background-color: var(--color-button);
+}
+
+/* Secondary/Default buttons - also orange */
+.btn-secondary {
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.btn-outline-secondary {
+    color: var(--color-button);
+    border-color: var(--color-button);
+}
+
+.btn-outline-secondary:hover {
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
+}
+
+/* Warning buttons - also orange */
+.btn-warning {
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
+}
+
+.btn-warning:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+/* Danger buttons - keep red for destructive actions */
+.btn-danger {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+    color: white;
 }

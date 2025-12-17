@@ -1705,5 +1705,38 @@ for row in reader:
 - **Location**: backend/scraper_service.py (lines 70-72, 102), backend/gpt_service.py (line 89), backend/main.py (lines 52-145, 208-243)
 - **Note on Scraping Delay**: Initial attempt at 0.05-0.1s was too aggressive, causing Cloudflare HTTP 202 (queuing) responses even with whitelisted IP. Adjusted to 0.2-0.3s as sweet spot between speed and avoiding rate limits.
 
+### Status API Consistency Fix - Distinct URL Counts
+- **Problem**: Content status showed processed=167,841 but total_urls=149,954 (inconsistent)
+- **Cause**: `processed` used `COUNT(*)` (total rows) while `total_urls` used `COUNT(DISTINCT url)`
+- **Impact**: Duplicate URLs in content table caused misleading dashboard numbers
+- **Solution**: Changed both endpoints to use `COUNT(DISTINCT url)` for all counts
+  ```sql
+  -- Before: COUNT(*) = 167,841 (total rows including duplicates)
+  SELECT COUNT(*) as processed FROM pa.content_urls_joep;
+
+  -- After: COUNT(DISTINCT url) = 149,954 (unique URLs only)
+  SELECT COUNT(DISTINCT url) as processed FROM pa.content_urls_joep;
+  ```
+- **Also Fixed**: FAQ status endpoint now uses `pa.content_urls_joep` as source for total_urls (same as content status)
+- **Result**: Both status endpoints show consistent counts based on distinct URLs
+- **Location**: backend/main.py - `/api/status` (line 315) and `/api/faq/status` (lines 1066-1079)
+- **Date**: 2025-12-17
+
+### Color Theme - Orange Buttons, Anthracite Headers
+- **Change**: Complete UI color overhaul
+  - All buttons: Orange (`#FF8C00`) with light orange hover (`#FFA940`)
+  - All headers/backgrounds: Anthracite (`#2d3436`)
+- **Button Types Updated**: btn-primary, btn-info, btn-success, btn-secondary, btn-warning, btn-outline-*
+- **Header Types Updated**: bg-primary, bg-info, bg-success, card-header, navbar
+- **Exceptions**: btn-danger kept red for destructive actions
+- **CSS Variables**:
+  ```css
+  --color-primary: #2d3436;      /* Anthracite - for headers */
+  --color-button: #FF8C00;       /* Orange - for buttons */
+  --color-button-hover: #FFA940; /* Light orange - for hover */
+  ```
+- **Location**: frontend/css/style.css
+- **Date**: 2025-12-17
+
 ---
-_Last updated: 2025-12-15_
+_Last updated: 2025-12-17_

@@ -311,8 +311,8 @@ def get_status():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Get total content URLs (processed with content)
-        cur.execute("SELECT COUNT(*) as processed FROM pa.content_urls_joep")
+        # Get total content URLs (processed with content) - use DISTINCT to avoid counting duplicates
+        cur.execute("SELECT COUNT(DISTINCT url) as processed FROM pa.content_urls_joep")
         processed = cur.fetchone()['processed']
 
         # Get skipped URLs
@@ -1063,22 +1063,18 @@ def get_faq_status():
         """)
         failed = cur.fetchone()['failed']
 
-        # Get total unique URLs across all tables (werkvoorraad + faq_content)
+        # Get total unique URLs from content_urls_joep (same as content status)
         cur.execute("""
-            SELECT COUNT(DISTINCT url) as total FROM (
-                SELECT url FROM pa.jvs_seo_werkvoorraad
-                UNION
-                SELECT url FROM pa.faq_content
-            ) all_urls
+            SELECT COUNT(DISTINCT url) as total FROM pa.content_urls_joep
         """)
         total = cur.fetchone()['total']
 
-        # Pending = URLs in werkvoorraad that haven't been tracked for FAQ yet
+        # Pending = content URLs that don't have FAQs yet
         cur.execute("""
             SELECT COUNT(*) as pending
-            FROM pa.jvs_seo_werkvoorraad w
-            LEFT JOIN pa.faq_tracking t ON w.url = t.url
-            WHERE t.url IS NULL
+            FROM (SELECT DISTINCT url FROM pa.content_urls_joep) c
+            LEFT JOIN pa.faq_content f ON c.url = f.url
+            WHERE f.url IS NULL
         """)
         pending = cur.fetchone()['pending']
 
