@@ -519,6 +519,7 @@ Vereisten:
 - Focus op koopadvies, productvergelijkingen, en praktische tips
 - Schrijf in het Nederlands
 - Noem geen specifieke prijzen
+- BELANGRIJK: Gebruik een informele, toegankelijke toon. Gebruik "jij" en "je" in plaats van "u" en "uw". Spreek de lezer direct en vriendelijk aan.
 - BELANGRIJK: Gebruik NOOIT "wij", "we", "ons", "onze", "onze producten", "onze website" of vergelijkbare eerste persoon meervoud. Schrijf neutraal en informatief, alsof je een onafhankelijke adviseur bent.
 - BELANGRIJK voor hyperlinks:
   * Gebruik ALLEEN URLs uit de hierboven gegeven lijst "Gerelateerde categoriepagina's"
