@@ -27,24 +27,26 @@ Thumbs.db
 # Docker
 postgres_data/
 
-# CC1 (keep structure but ignore sensitive content)
-cc1/.tmp/
-cc1/*.log
-
-# Thema Ads project files (separate repository)
-thema_ads_optimized/
-thema_ads_project/
-start-thema-ads.sh
-THEMA_ADS_GUIDE.md
-sample_input.csv
+# CC1 context files (Claude Code)
+cc1/
 
 # Large data files
 *.xlsx
 *.xls
 
-# Redshift credentials
+# Temporary/output files
+*.csv
+!data/*.csv
+
+# Credentials
 redshift
-backend/test_redshift.py
-backend/check_redshift_tables.py
-backend/check_table_structure.py
-test_redshift.py
+
+# Google Ads automation (contains sensitive config)
+thema_ads_optimized/
+themes/
+
+# Testing scripts
+scripts/testing/
+
+# Utility scripts (one-off)
+backend/check_*.py

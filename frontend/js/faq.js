@@ -1,6 +1,7 @@
 // FAQ Generator - Vanilla JavaScript
 
-const API_BASE = 'http://localhost:8003';
+// Use dynamic API base - works from localhost, WSL IP, or any host
+const API_BASE = window.location.origin;
 
 let faqProcessingActive = false;
 let faqShouldStop = false;
@@ -64,16 +65,16 @@ async function refreshFaqStatus() {
                                 ${dateText ? `<small class="text-muted text-nowrap ms-2">${dateText}</small>` : ''}
                             </div>
                             <div class="mt-2">
-                                <span class="badge bg-info">${faqCount} FAQs</span>
+                                <span class="badge" style="background-color: #0dcaf0; color: #000;">${faqCount} FAQs</span>
                             </div>
                             <div class="content-preview mt-2">
                                 <div class="mb-1" style="font-size: 0.875rem;" id="faq-preview-${index}">${faqPreview}</div>
                                 <div class="full-content d-none" id="faq-full-${index}">
                                     <div class="mb-1" style="font-size: 0.875rem;"></div>
                                 </div>
-                                <button class="btn btn-sm btn-link p-0" onclick="toggleFaqContent(${index})">
+                                <a href="#" class="text-decoration-none" onclick="toggleFaqContent(${index}); return false;">
                                     <span id="faq-toggle-text-${index}">View All FAQs</span>
-                                </button>
+                                </a>
                             </div>
                         </div>
                         <button class="btn btn-sm btn-danger ms-2" onclick="deleteFaqResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
@@ -117,7 +118,7 @@ async function processFaqUrls() {
 
     btn.disabled = true;
     btn.textContent = 'Processing...';
-    resultDiv.innerHTML = `<div class="alert alert-info">Processing ${batchSize} URL(s) with ${parallelWorkers} parallel worker(s), generating ${numFaqs} FAQs each...</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Processing ${batchSize} URL(s) with ${parallelWorkers} parallel worker(s), generating ${numFaqs} FAQs each...</div>`;
 
     try {
         const response = await fetch(`${API_BASE}/api/faq/process-urls?batch_size=${batchSize}&parallel_workers=${parallelWorkers}&num_faqs=${numFaqs}`, {
@@ -144,7 +145,7 @@ async function processFaqUrls() {
 
             (data.results || []).forEach(r => {
                 let badgeClass = r.status === 'success' ? 'success' :
-                               r.status === 'skipped' ? 'warning' : 'danger';
+                               r.status === 'skipped' ? 'secondary' : 'danger';
                 resultsHtml += `
                     <li class="list-group-item">
                         <span class="badge bg-${badgeClass}">${r.status}</span>

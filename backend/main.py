@@ -1072,18 +1072,18 @@ def get_faq_status():
         """)
         failed = cur.fetchone()['failed']
 
-        # Get total unique URLs from content_urls_joep (same as content status)
+        # Get total unique URLs from werkvoorraad (same as content status)
         cur.execute("""
-            SELECT COUNT(DISTINCT url) as total FROM pa.content_urls_joep
+            SELECT COUNT(*) as total FROM pa.jvs_seo_werkvoorraad
         """)
         total = cur.fetchone()['total']
 
-        # Pending = content URLs that don't have FAQs yet
+        # Pending = werkvoorraad URLs that don't have FAQs yet
         cur.execute("""
             SELECT COUNT(*) as pending
-            FROM (SELECT DISTINCT url FROM pa.content_urls_joep) c
-            LEFT JOIN pa.faq_content f ON c.url = f.url
-            WHERE f.url IS NULL
+            FROM pa.jvs_seo_werkvoorraad w
+            LEFT JOIN pa.faq_tracking t ON w.url = t.url
+            WHERE t.url IS NULL
         """)
         pending = cur.fetchone()['pending']
 

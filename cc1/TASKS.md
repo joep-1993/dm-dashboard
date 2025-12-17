@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Standardize FAQ generator UI - consistent button colors (btn-info), FAQ count badges (#0dcaf0), success labels (green), View All FAQs as textual link #claude-session:2025-12-17
 - [x] Switch link validator to PostgreSQL only - removed Redshift dependency from link_validator.py, all validation now uses local PostgreSQL #claude-session:2025-12-15
 - [x] Add single-paragraph constraint to GPT prompt - updated gpt_service.py to require single continuous paragraph, reset 12,779 URLs with multiple paragraphs for regeneration #claude-session:2025-12-15
 - [x] Fix validation 'moved to pending' not tracking URLs - URLs with gone products now properly added to werkvoorraad table for reprocessing #claude-session:2025-12-15

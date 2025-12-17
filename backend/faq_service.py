@@ -502,6 +502,7 @@ Vereisten:
 - Focus op koopadvies, productvergelijkingen, en praktische tips
 - Schrijf in het Nederlands
 - Noem geen specifieke prijzen
+- BELANGRIJK: Gebruik NOOIT "wij", "we", "ons", "onze", "onze producten", "onze website" of vergelijkbare eerste persoon meervoud. Schrijf neutraal en informatief, alsof je een onafhankelijke adviseur bent.
 - BELANGRIJK: Gebruik relevante hyperlinks naar gerelateerde categoriepagina's in je antwoorden. Gebruik HTML anchor tags met de volledige URL, bijvoorbeeld: <a href="https://www.beslist.nl/products/...">linktekst</a>
 - Verwerk 1-3 hyperlinks per antwoord waar relevant (naar merken, kleuren, types, etc.)
 

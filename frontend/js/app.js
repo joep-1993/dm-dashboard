@@ -1,6 +1,7 @@
 // Vanilla JavaScript - no build tools, no transpilation!
 
-const API_BASE = 'http://localhost:8003';
+// Use dynamic API base - works from localhost, WSL IP, or any host
+const API_BASE = window.location.origin;
 
 // Check system status on load
 window.addEventListener('DOMContentLoaded', () => {
@@ -103,7 +104,7 @@ async function processUrls() {
     btn.disabled = true;
     btn.textContent = 'Processing...';
     const modeText = conservativeMode ? ' (Conservative Mode)' : '';
-    resultDiv.innerHTML = `<div class="alert alert-info">Processing ${batchSize} URL(s) with ${parallelWorkers} parallel worker(s)${modeText}...</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Processing ${batchSize} URL(s) with ${parallelWorkers} parallel worker(s)${modeText}...</div>`;
 
     try {
         const response = await fetch(`${API_BASE}/api/process-urls?batch_size=${batchSize}&parallel_workers=${parallelWorkers}&conservative_mode=${conservativeMode}`, {
@@ -598,7 +599,7 @@ async function validateLinks() {
     validateBtn.disabled = true;
     validateBtn.textContent = 'Validating...';
     const modeText = conservativeMode ? ' (Conservative Mode)' : '';
-    resultDiv.innerHTML = `<div class="alert alert-info">Validating links in ${batchSize} content items with ${parallelWorkers} parallel workers${modeText}...</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating links in ${batchSize} content items with ${parallelWorkers} parallel workers${modeText}...</div>`;
 
     try {
         const response = await fetch(`${API_BASE}/api/validate-links?batch_size=${batchSize}&parallel_workers=${parallelWorkers}&conservative_mode=${conservativeMode}`, {
@@ -734,7 +735,7 @@ async function validateAllLinks() {
     validateAllBtn.disabled = true;
     resetBtn.disabled = true;
     validateAllBtn.textContent = 'Validating All...';
-    resultDiv.innerHTML = `<div class="alert alert-info">Validating ALL content URLs with ${parallelWorkers} parallel workers... This may take a while.</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating ALL content URLs with ${parallelWorkers} parallel workers... This may take a while.</div>`;
 
     try {
         const response = await fetch(`${API_BASE}/api/validate-all-links?parallel_workers=${parallelWorkers}`, {
