@@ -10,6 +10,7 @@ import os
 import asyncio
 import tempfile
 import time
+import re
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection, get_redshift_connection, return_redshift_connection
@@ -161,7 +162,9 @@ def process_single_url(url: str, conservative_mode: bool = False):
 
                     final_status = 'success'
                     result["status"] = "success"
-                    result["content_preview"] = ai_content[:100] + "..."
+                    # Strip HTML tags from preview to avoid broken tags
+                    preview_text = re.sub(r'<[^>]+>', '', ai_content)
+                    result["content_preview"] = preview_text[:100] + "..."
 
             except Exception as e:
                 final_status = 'failed'

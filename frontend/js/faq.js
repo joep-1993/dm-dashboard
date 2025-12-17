@@ -38,7 +38,9 @@ async function refreshFaqStatus() {
                     const faqs = JSON.parse(item.faq_json || '[]');
                     faqCount = faqs.length;
                     if (faqs.length > 0) {
-                        faqPreview = `<strong>Q:</strong> ${faqs[0].question}<br><strong>A:</strong> ${faqs[0].answer.substring(0, 100)}...`;
+                        // Strip HTML tags from answer to avoid broken tags in preview
+                        const answerText = faqs[0].answer.replace(/<[^>]+>/g, '');
+                        faqPreview = `<strong>Q:</strong> ${faqs[0].question}<br><strong>A:</strong> ${answerText.substring(0, 100)}...`;
                     }
                 } catch (e) {
                     faqPreview = 'Error parsing FAQs';
