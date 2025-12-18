@@ -238,8 +238,8 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
         if batch_size < 1:
             raise HTTPException(status_code=400, detail="Batch size must be at least 1")
 
-        if parallel_workers < 1 or parallel_workers > 10:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 10")
+        if parallel_workers < 1 or parallel_workers > 20:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
 
         # Conservative mode always uses 1 worker for maximum safety
         if conservative_mode:
@@ -670,8 +670,8 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
         if batch_size < 1:
             raise HTTPException(status_code=400, detail="Batch size must be at least 1")
 
-        if parallel_workers < 1 or parallel_workers > 10:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 10")
+        if parallel_workers < 1 or parallel_workers > 20:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
 
         # Use local PostgreSQL for all operations
         conn = get_db_connection()
@@ -839,8 +839,8 @@ def validate_all_links(parallel_workers: int = 3):
         parallel_workers: Number of parallel workers (1-10)
     """
     try:
-        if parallel_workers < 1 or parallel_workers > 10:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 10")
+        if parallel_workers < 1 or parallel_workers > 20:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
 
         total_validated = 0
         total_urls_corrected = 0
@@ -1143,8 +1143,8 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
         if batch_size < 1:
             raise HTTPException(status_code=400, detail="Batch size must be at least 1")
 
-        if parallel_workers < 1 or parallel_workers > 10:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 10")
+        if parallel_workers < 1 or parallel_workers > 20:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
 
         if num_faqs < 1 or num_faqs > 10:
             raise HTTPException(status_code=400, detail="Number of FAQs must be between 1 and 10")
@@ -1180,38 +1180,46 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
         with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
             results = list(executor.map(process_single_url_faq_wrapper, url_args))
 
-        # Save results to database
+        # Save results to database using batch inserts for better performance
         conn = get_db_connection()
         cur = conn.cursor()
+
+        # Prepare batch data
+        tracking_data = []
+        content_data = []
 
         for result in results:
             url = result['url']
             status = result['status']
             reason = result.get('reason')
+            truncated_reason = reason[:255] if reason and len(reason) > 255 else reason
 
-            # Update tracking table
-            if reason:
-                truncated_reason = reason[:255] if len(reason) > 255 else reason
-                cur.execute("""
-                    INSERT INTO pa.faq_tracking (url, status, skip_reason)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason
-                """, (url, status, truncated_reason))
-            else:
-                cur.execute("""
-                    INSERT INTO pa.faq_tracking (url, status)
-                    VALUES (%s, %s)
-                    ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = NULL
-                """, (url, status))
+            tracking_data.append((url, status, truncated_reason))
 
-            # Save FAQ content if successful
             if status == 'success':
-                cur.execute("""
-                    INSERT INTO pa.faq_content (url, page_title, faq_json, schema_org)
-                    VALUES (%s, %s, %s, %s)
-                """, (url, result.get('page_title', ''), result.get('faq_json', ''), result.get('schema_org', '')))
+                content_data.append((
+                    url,
+                    result.get('page_title', ''),
+                    result.get('faq_json', ''),
+                    result.get('schema_org', '')
+                ))
 
             print(f"[FAQ] {url} - Status: {status}" + (f" - Reason: {reason}" if reason else f" - {result.get('faq_count', 0)} FAQs"))
+
+        # Batch insert tracking data
+        if tracking_data:
+            cur.executemany("""
+                INSERT INTO pa.faq_tracking (url, status, skip_reason)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason
+            """, tracking_data)
+
+        # Batch insert content data
+        if content_data:
+            cur.executemany("""
+                INSERT INTO pa.faq_content (url, page_title, faq_json, schema_org)
+                VALUES (%s, %s, %s, %s)
+            """, content_data)
 
         conn.commit()
         cur.close()
@@ -1237,6 +1245,23 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def faq_json_to_html(faq_json_str: str) -> str:
+    """Convert FAQ JSON to HTML with bold questions and regular answers."""
+    if not faq_json_str:
+        return ''
+    try:
+        faqs = json.loads(faq_json_str)
+        html_parts = []
+        for faq in faqs:
+            question = faq.get('question', '')
+            answer = faq.get('answer', '')
+            html_parts.append(f'<b>{question}</b><br>{answer}')
+        content = '<br><br>'.join(html_parts)
+        return f'<br />{content}<br />' if content else ''
+    except (json.JSONDecodeError, TypeError):
+        return ''
+
+
 @app.get("/api/faq/export/xlsx")
 async def export_faq_xlsx():
     """Export all generated FAQs as Excel XLSX"""
@@ -1260,8 +1285,8 @@ async def export_faq_xlsx():
         ws = wb.active
         ws.title = "FAQ Export"
 
-        # Add headers (matching the format user requested: url, content_faq)
-        ws.append(['url', 'content_faq'])
+        # Add headers (matching the format user requested: url, content_faq, content_bottom)
+        ws.append(['url', 'content_faq', 'content_bottom'])
 
         # Add data rows
         import re
@@ -1273,11 +1298,17 @@ async def export_faq_xlsx():
             schema_org = row['schema_org'] if row['schema_org'] else '{}'
             content_faq = f'<script type="application/ld+json">\n{schema_org}\n</script>'
             content_faq = illegal_chars.sub('', content_faq)
-            ws.append([row['url'], content_faq])
+
+            # Build HTML for content_bottom column
+            content_bottom = faq_json_to_html(row['faq_json'])
+            content_bottom = illegal_chars.sub('', content_bottom)
+
+            ws.append([row['url'], content_faq, content_bottom])
 
         # Auto-adjust column widths
         ws.column_dimensions["A"].width = 80
         ws.column_dimensions["B"].width = 100
+        ws.column_dimensions["C"].width = 100
 
         # Save to BytesIO
         output = BytesIO()
@@ -1336,7 +1367,7 @@ async def export_faq_json():
 async def export_combined_xlsx():
     """
     Export combined FAQ and content_top results as Excel XLSX.
-    Columns: url, content_faq, content_top, country_language
+    Columns: url, content_faq, content_top, content_bottom, country_language
     Only includes URLs that have both FAQ and content_top data.
     """
     from openpyxl import Workbook
@@ -1350,6 +1381,7 @@ async def export_combined_xlsx():
             SELECT
                 f.url,
                 f.schema_org as content_faq,
+                f.faq_json,
                 c.content as content_top
             FROM pa.faq_content f
             INNER JOIN pa.content_urls_joep c ON f.url = c.url
@@ -1366,7 +1398,7 @@ async def export_combined_xlsx():
         ws.title = "Combined Export"
 
         # Add headers
-        ws.append(['url', 'content_faq', 'content_top', 'country_language'])
+        ws.append(['url', 'content_faq', 'content_top', 'content_bottom', 'country_language'])
 
         # Add data rows
         import re
@@ -1382,13 +1414,18 @@ async def export_combined_xlsx():
             content_top = row['content_top'] if row['content_top'] else ''
             content_top = illegal_chars.sub('', content_top)
 
-            ws.append([row['url'], content_faq, content_top, 'nl-nl'])
+            # Build HTML for content_bottom column
+            content_bottom = faq_json_to_html(row['faq_json'])
+            content_bottom = illegal_chars.sub('', content_bottom)
+
+            ws.append([row['url'], content_faq, content_top, content_bottom, 'nl-nl'])
 
         # Auto-adjust column widths
         ws.column_dimensions["A"].width = 80
         ws.column_dimensions["B"].width = 100
         ws.column_dimensions["C"].width = 100
-        ws.column_dimensions["D"].width = 15
+        ws.column_dimensions["D"].width = 100
+        ws.column_dimensions["E"].width = 15
 
         # Save to BytesIO
         output = BytesIO()

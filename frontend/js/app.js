@@ -96,8 +96,8 @@ async function processUrls() {
         return;
     }
 
-    if (parallelWorkers < 1 || parallelWorkers > 10) {
-        alert('Parallel workers must be between 1 and 10');
+    if (parallelWorkers < 1 || parallelWorkers > 20) {
+        alert('Parallel workers must be between 1 and 20');
         return;
     }
 
@@ -591,8 +591,8 @@ async function validateLinks() {
         return;
     }
 
-    if (parallelWorkers < 1 || parallelWorkers > 10) {
-        alert('Parallel workers must be between 1 and 10');
+    if (parallelWorkers < 1 || parallelWorkers > 20) {
+        alert('Parallel workers must be between 1 and 20');
         return;
     }
 
@@ -725,8 +725,8 @@ async function validateAllLinks() {
     const parallelWorkersInput = document.getElementById('validationParallelWorkers');
     const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
 
-    if (parallelWorkers < 1 || parallelWorkers > 10) {
-        alert('Parallel workers must be between 1 and 10');
+    if (parallelWorkers < 1 || parallelWorkers > 20) {
+        alert('Parallel workers must be between 1 and 20');
         return;
     }
 

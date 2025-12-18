@@ -313,13 +313,13 @@ python-dotenv==1.0.0      # Environment variable management
 - `GET /static/*` - Frontend files
 
 ### SEO Workflow
-- `POST /api/process-urls?batch_size=10&parallel_workers=3&conservative_mode=false` - Process URLs with parallel workers (synchronous processing - optimized for database connection pooling, batch_size: min 1 no max, parallel_workers: 1-10, conservative_mode forces 1 worker with 0.5-0.7s delay)
+- `POST /api/process-urls?batch_size=10&parallel_workers=3&conservative_mode=false` - Process URLs with parallel workers (synchronous processing - optimized for database connection pooling, batch_size: min 1 no max, parallel_workers: 1-20, conservative_mode forces 1 worker with 0.5-0.7s delay)
 - `GET /api/status` - Get SEO processing status (includes total, processed, skipped, failed, pending counts)
 - `POST /api/upload-urls` - Upload text file with URLs (one per line, duplicates skipped)
 - `DELETE /api/result/{url}` - Delete result and reset URL to pending
 - `GET /api/export/xlsx` - Export all generated content as Excel XLSX (from local PostgreSQL, sanitizes illegal characters)
 - `GET /api/export/json` - Export all generated content as JSON
-- `POST /api/validate-links?batch_size=1000&parallel_workers=3&conservative_mode=false` - Validate hyperlinks in content (checks for 301/404, auto-resets to pending if broken) (batch_size: min 1, no upper limit, parallel_workers: 1-10, conservative_mode forces 1 worker with 0.5-0.7s delay per link). Only validates URLs not yet validated.
+- `POST /api/validate-links?batch_size=1000&parallel_workers=3&conservative_mode=false` - Validate hyperlinks in content (checks for 301/404, auto-resets to pending if broken) (batch_size: min 1, no upper limit, parallel_workers: 1-20, conservative_mode forces 1 worker with 0.5-0.7s delay per link). Only validates URLs not yet validated.
 - `POST /api/validate-all-links?parallel_workers=3` - Validate ALL unvalidated URLs in single batch. Uses LEFT JOIN for efficient filtering. Returns: validated count, urls_corrected count, moved_to_pending count.
 - `GET /api/validation-history?limit=20` - Get link validation history with broken link details
 - `DELETE /api/validation-history/reset` - Reset all validation history to allow re-validation of all URLs
@@ -423,4 +423,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2025-12-17_
+_Last updated: 2025-12-18_

@@ -108,8 +108,8 @@ async function processFaqUrls() {
         return;
     }
 
-    if (parallelWorkers < 1 || parallelWorkers > 10) {
-        alert('Parallel workers must be between 1 and 10');
+    if (parallelWorkers < 1 || parallelWorkers > 20) {
+        alert('Parallel workers must be between 1 and 20');
         return;
     }
 

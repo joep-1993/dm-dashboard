@@ -22,6 +22,18 @@ from openai import OpenAI
 USER_AGENT = "Beslist script voor SEO"
 AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
 
+# Reusable OpenAI client (created once at module load)
+_openai_client = None
+
+def get_openai_client() -> OpenAI:
+    """Get or create the shared OpenAI client."""
+    global _openai_client
+    if _openai_client is None:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            _openai_client = OpenAI(api_key=api_key)
+    return _openai_client
+
 # Product Search API configuration
 PRODUCT_SEARCH_API_URL = "https://productsearch-v2.api.beslist.nl/search/products"
 BASE_URL = "https://www.beslist.nl"  # Base URL for building full hyperlinks
@@ -113,7 +125,8 @@ def create_faq_session() -> requests.Session:
         allowed_methods=["GET"]
     )
 
-    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=1, pool_maxsize=1)
+    # Increased pool size for better concurrency with multiple workers
+    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
 
@@ -403,8 +416,8 @@ def fetch_products_api(url: str) -> Optional[Dict]:
             print(f"[FAQ-API] Unknown main category: {main_category}")
             return None
 
-        # Minimal delay for API calls
-        time.sleep(0.02 + random.uniform(0, 0.03))
+        # Removed artificial delay for faster processing
+        # (connection pooling and retry logic handle rate limiting)
 
         # Make API request
         headers = {
@@ -479,12 +492,10 @@ def generate_faqs_for_page(page_data: Dict, num_faqs: int = 5) -> Optional[FAQPa
     Returns:
         FAQPage object with structured FAQ data
     """
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    client = get_openai_client()
+    if not client:
         print("[FAQ] Error: OPENAI_API_KEY environment variable not set")
         return None
-
-    client = OpenAI(api_key=api_key)
 
     # Build context from products
     products_context = ""

@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Optimize FAQ generator performance - reuse OpenAI client, increase HTTP pool (1→10/20), remove sleep delay, increase max workers (10→20), batch DB inserts #claude-session:2025-12-18
+- [x] Add content_bottom column to FAQ exports (XLSX and combined) - HTML formatted FAQs with bold questions and regular answers with hyperlinks #claude-session:2025-12-18
 - [x] Fix FAQ hyperlinks to use full beslist.nl URLs instead of relative/localhost URLs - added post-processing and fixed 379 existing records #claude-session:2025-12-18
 - [x] Standardize alert colors to yellow (alert-warning) across both tools #claude-session:2025-12-17
 - [x] Update FAQ prompt to use informal Dutch tone ("jij"/"je" instead of "u"/"uw") #claude-session:2025-12-17
