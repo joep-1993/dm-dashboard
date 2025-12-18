@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Fix FAQ hyperlinks to use full beslist.nl URLs instead of relative/localhost URLs - added post-processing and fixed 379 existing records #claude-session:2025-12-18
 - [x] Standardize alert colors to yellow (alert-warning) across both tools #claude-session:2025-12-17
 - [x] Update FAQ prompt to use informal Dutch tone ("jij"/"je" instead of "u"/"uw") #claude-session:2025-12-17
 - [x] Fix content preview HTML truncation bug - strip HTML tags before truncating to prevent broken links in results list #claude-session:2025-12-17

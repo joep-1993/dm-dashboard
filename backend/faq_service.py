@@ -559,8 +559,25 @@ Voorbeeld formaat:
 
         faqs_data = json.loads(content)
 
+        # Fix any relative or localhost URLs in answers
+        def fix_urls_in_answer(answer: str) -> str:
+            import re
+            # Fix relative URLs (starting with /)
+            answer = re.sub(
+                r'href="(/products/[^"]+)"',
+                f'href="{BASE_URL}\\1"',
+                answer
+            )
+            # Fix localhost URLs
+            answer = re.sub(
+                r'href="http://localhost[^"]*(/products/[^"]+)"',
+                f'href="{BASE_URL}\\1"',
+                answer
+            )
+            return answer
+
         faq_items = [
-            FAQItem(question=item["question"], answer=item["answer"])
+            FAQItem(question=item["question"], answer=fix_urls_in_answer(item["answer"]))
             for item in faqs_data
         ]
 
