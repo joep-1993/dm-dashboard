@@ -563,10 +563,10 @@ Geef je antwoord als JSON array met objecten die "question" en "answer" bevatten
 De "answer" mag HTML hyperlinks bevatten.
 Alleen de JSON array, geen andere tekst.
 
-Voorbeeld formaat:
+Voorbeeld formaat (let op: URLs moeten EXACT uit de lijst komen, formaat /p/productnaam/category_id/pim_id/):
 [
-  {{"question": "Welke merken zijn populair?", "answer": "Populaire merken zijn onder andere <a href=\"https://www.beslist.nl/products/.../merk~123\">Samsung</a> en <a href=\"https://www.beslist.nl/products/.../merk~456\">Philips</a>. Beide merken staan bekend om hun kwaliteit."}},
-  {{"question": "Andere vraag?", "answer": "Ander antwoord met <a href=\"https://www.beslist.nl/...\">relevante link</a>."}}
+  {{"question": "Welke merken zijn populair?", "answer": "Populaire merken zijn onder andere <a href=\"https://www.beslist.nl/p/samsung-galaxy-s24/6/1234567890123/\">Samsung Galaxy S24</a>. Dit model staat bekend om zijn kwaliteit."}},
+  {{"question": "Andere vraag?", "answer": "Een ander goed product is de <a href=\"https://www.beslist.nl/p/philips-airfryer/12000/9876543210987/\">Philips Airfryer</a>."}}
 ]"""
 
     try:
@@ -589,25 +589,38 @@ Voorbeeld formaat:
 
         faqs_data = json.loads(content)
 
-        # Fix any relative or localhost URLs in answers
-        def fix_urls_in_answer(answer: str) -> str:
+        # Validate and clean URLs in answers - remove any fabricated URLs
+        def clean_urls_in_answer(answer: str, valid_urls: list) -> str:
             import re
-            # Fix relative URLs (starting with /)
-            answer = re.sub(
-                r'href="(/products/[^"]+)"',
-                f'href="{BASE_URL}\\1"',
-                answer
-            )
-            # Fix localhost URLs
-            answer = re.sub(
-                r'href="http://localhost[^"]*(/products/[^"]+)"',
-                f'href="{BASE_URL}\\1"',
-                answer
-            )
-            return answer
+
+            # Extract all href URLs from the answer
+            href_pattern = r'<a\s+href="([^"]+)"[^>]*>([^<]+)</a>'
+
+            def replace_invalid_link(match):
+                url = match.group(1)
+                link_text = match.group(2)
+
+                # Check if URL is valid (must be /p/ format and in our list)
+                is_valid = False
+                if "/p/" in url and "/products/" not in url and "/c/" not in url:
+                    # Check if it matches any of our provided URLs
+                    for valid_url in valid_urls:
+                        if valid_url in url or url in valid_url:
+                            is_valid = True
+                            break
+
+                if is_valid:
+                    return match.group(0)  # Keep valid link
+                else:
+                    return link_text  # Remove invalid link, keep text only
+
+            return re.sub(href_pattern, replace_invalid_link, answer)
+
+        # Get list of valid URLs from page_data
+        valid_urls = [item["url"] for item in page_data.get("product_urls", [])]
 
         faq_items = [
-            FAQItem(question=item["question"], answer=fix_urls_in_answer(item["answer"]))
+            FAQItem(question=item["question"], answer=clean_urls_in_answer(item["answer"], valid_urls))
             for item in faqs_data
         ]
 

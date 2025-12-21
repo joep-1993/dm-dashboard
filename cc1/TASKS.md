@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Fix FAQ URL validation - remove fabricated URLs, only keep valid /p/ URLs from provided list, updated prompt examples #claude-session:2025-12-21
 - [x] Filter product links to only include products with ≥2 offers (shopCount) in both FAQ and SEO content generators #claude-session:2025-12-21
 - [x] Change FAQ hyperlinks to use product URLs (/p/) instead of category URLs (/c/) - deleted all 100K FAQs, reset to pending for regeneration #claude-session:2025-12-21
 - [x] Change combined export to include ALL URLs (FULL OUTER JOIN) - URLs without content_top or content_faq now included with empty cells #claude-session:2025-12-21
