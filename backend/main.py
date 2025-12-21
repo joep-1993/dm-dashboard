@@ -1368,7 +1368,7 @@ async def export_combined_xlsx():
     """
     Export combined FAQ and content_top results as Excel XLSX.
     Columns: url, content_faq, content_top, content_bottom, country_language
-    Only includes URLs that have both FAQ and content_top data.
+    Includes ALL URLs from both tables (empty cells where data is missing).
     """
     from openpyxl import Workbook
 
@@ -1376,16 +1376,16 @@ async def export_combined_xlsx():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Join FAQ content with content_top content
+        # Full outer join to get ALL URLs from both tables
         cur.execute("""
             SELECT
-                f.url,
+                COALESCE(f.url, c.url) as url,
                 f.schema_org as content_faq,
                 f.faq_json,
                 c.content as content_top
             FROM pa.faq_content f
-            INNER JOIN pa.content_urls_joep c ON f.url = c.url
-            ORDER BY f.url
+            FULL OUTER JOIN pa.content_urls_joep c ON f.url = c.url
+            ORDER BY COALESCE(f.url, c.url)
         """)
         rows = cur.fetchall()
 
@@ -1406,17 +1406,21 @@ async def export_combined_xlsx():
         illegal_chars = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
 
         for row in rows:
-            # Build JSON-LD script tag for content_faq column
-            schema_org = row['content_faq'] if row['content_faq'] else '{}'
-            content_faq = f'<script type="application/ld+json">\n{schema_org}\n</script>'
-            content_faq = illegal_chars.sub('', content_faq)
+            # Build JSON-LD script tag for content_faq column (empty if no FAQ data)
+            if row['content_faq']:
+                content_faq = f'<script type="application/ld+json">\n{row["content_faq"]}\n</script>'
+                content_faq = illegal_chars.sub('', content_faq)
+            else:
+                content_faq = ''
 
             content_top = row['content_top'] if row['content_top'] else ''
-            content_top = illegal_chars.sub('', content_top)
+            if content_top:
+                content_top = illegal_chars.sub('', content_top)
 
-            # Build HTML for content_bottom column
-            content_bottom = faq_json_to_html(row['faq_json'])
-            content_bottom = illegal_chars.sub('', content_bottom)
+            # Build HTML for content_bottom column (empty if no FAQ data)
+            content_bottom = faq_json_to_html(row['faq_json']) if row['faq_json'] else ''
+            if content_bottom:
+                content_bottom = illegal_chars.sub('', content_bottom)
 
             ws.append([row['url'], content_faq, content_top, content_bottom, 'nl-nl'])
 

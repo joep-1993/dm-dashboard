@@ -446,19 +446,35 @@ def fetch_products_api(url: str) -> Optional[Dict]:
         # Build product subject from selected facets
         product_subject = build_product_subject(selected_facets, deepest_category_name)
 
-        # Extract products
+        # Extract products and their URLs
         products = []
+        product_urls = []
         api_products = data.get("products", [])[:30]  # Limit for FAQ generation
 
         for product in api_products:
             title = product.get("title", product.get("description", ""))[:100]
             description = product.get("description", title)[:200]
+            plp_url = product.get("plpUrl", "")
 
             if title:
                 products.append({
                     "title": title,
                     "description": description
                 })
+
+            # Extract product URLs (/p/ URLs) for FAQ hyperlinks
+            if plp_url and "/p/" in plp_url:
+                # Make it a full URL if relative
+                if plp_url.startswith("/"):
+                    full_url = f"{BASE_URL}{plp_url}"
+                else:
+                    full_url = plp_url
+                # Avoid duplicates
+                if not any(p["url"] == full_url for p in product_urls):
+                    product_urls.append({
+                        "url": full_url,
+                        "label": title[:50] if title else "Product"
+                    })
 
         # Use product_subject as title if available, otherwise use category
         h1_title = product_subject if product_subject else deepest_category_name if deepest_category_name else main_category
@@ -468,7 +484,7 @@ def fetch_products_api(url: str) -> Optional[Dict]:
             "h1_title": h1_title,
             "products": products,
             "selected_facets": selected_facets,
-            "related_plp_urls": related_plp_urls
+            "product_urls": product_urls[:15]  # Limit to 15 product URLs for FAQ hyperlinks
         }
 
     except requests.RequestException as e:
@@ -506,21 +522,21 @@ def generate_faqs_for_page(page_data: Dict, num_faqs: int = 5) -> Optional[FAQPa
         ])
         products_context = f"\n\nBeschikbare producten:\n{products_list}"
 
-    # Build context for related PLP URLs (for hyperlinks)
-    related_urls_context = ""
-    if page_data.get("related_plp_urls"):
+    # Build context for product URLs (for hyperlinks in FAQ answers)
+    product_urls_context = ""
+    if page_data.get("product_urls"):
         urls_list = "\n".join([
             f"- {item['label']}: {item['url']}"
-            for item in page_data["related_plp_urls"][:12]
+            for item in page_data["product_urls"][:12]
         ])
-        related_urls_context = f"\n\nGerelateerde categoriepagina's (gebruik deze voor hyperlinks in antwoorden):\n{urls_list}"
+        product_urls_context = f"\n\nProductpagina's (gebruik deze voor hyperlinks in antwoorden):\n{urls_list}"
 
     prompt = f"""Je bent een SEO-expert die FAQ's schrijft voor e-commerce pagina's.
 
 Pagina titel: {page_data['h1_title']}
 URL: {page_data['url']}
 {products_context}
-{related_urls_context}
+{product_urls_context}
 
 Schrijf {num_faqs} veelgestelde vragen (FAQ's) die relevant zijn voor bezoekers van deze productcategorie pagina.
 
@@ -533,12 +549,13 @@ Vereisten:
 - BELANGRIJK: Gebruik een informele, toegankelijke toon. Gebruik "jij" en "je" in plaats van "u" en "uw". Spreek de lezer direct en vriendelijk aan.
 - BELANGRIJK: Gebruik NOOIT "wij", "we", "ons", "onze", "onze producten", "onze website" of vergelijkbare eerste persoon meervoud. Schrijf neutraal en informatief, alsof je een onafhankelijke adviseur bent.
 - BELANGRIJK voor hyperlinks:
-  * Gebruik ALLEEN URLs uit de hierboven gegeven lijst "Gerelateerde categoriepagina's"
+  * Gebruik ALLEEN URLs uit de hierboven gegeven lijst "Productpagina's" (URLs met /p/)
   * Verzin NOOIT zelf URLs - gebruik alleen de exacte URLs die in de lijst staan
+  * Gebruik GEEN URLs met /c/ (categoriepagina's) - alleen productpagina URLs met /p/
   * Gebruik GEEN generieke verwijzingen zoals "deze gids", "deze pagina", "hier" of vergelijkbare vage linkteksten
-  * Linktekst moet beschrijvend zijn en verwijzen naar het product/categorie, bijv. "Samsung telefoonhoesjes" of "zwarte hoesjes"
+  * Linktekst moet beschrijvend zijn en verwijzen naar het specifieke product
   * Als er geen relevante URL in de lijst staat, maak dan GEEN hyperlink
-- Verwerk 1-3 hyperlinks per antwoord waar relevant (naar merken, kleuren, types, etc.)
+- Verwerk 1-3 hyperlinks per antwoord waar relevant (naar specifieke producten)
 
 Geef je antwoord als JSON array met objecten die "question" en "answer" bevatten.
 De "answer" mag HTML hyperlinks bevatten.
