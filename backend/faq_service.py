@@ -455,6 +455,7 @@ def fetch_products_api(url: str) -> Optional[Dict]:
             title = product.get("title", product.get("description", ""))[:100]
             description = product.get("description", title)[:200]
             plp_url = product.get("plpUrl", "")
+            shop_count = product.get("shopCount", 0)
 
             if title:
                 products.append({
@@ -463,7 +464,8 @@ def fetch_products_api(url: str) -> Optional[Dict]:
                 })
 
             # Extract product URLs (/p/ URLs) for FAQ hyperlinks
-            if plp_url and "/p/" in plp_url:
+            # Only include products with at least 2 offers (shopCount >= 2)
+            if plp_url and "/p/" in plp_url and shop_count >= 2:
                 # Make it a full URL if relative
                 if plp_url.startswith("/"):
                     full_url = f"{BASE_URL}{plp_url}"
