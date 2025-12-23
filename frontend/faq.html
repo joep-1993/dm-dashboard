@@ -79,6 +79,42 @@
                     </div>
                 </div>
 
+                <!-- Link Validation -->
+                <div class="card mb-4">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="mb-0">Link Validation</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Validate product hyperlinks in FAQ answers. FAQs with gone products will be reset to pending for regeneration.</p>
+                        <div class="row g-2 mb-3">
+                            <div class="col-auto">
+                                <label for="validateBatchSizeInput" class="form-label small mb-1">Batch Size</label>
+                                <input type="number" class="form-control" id="validateBatchSizeInput" value="500" min="1" style="width: 120px;">
+                            </div>
+                            <div class="col-auto">
+                                <label for="validateWorkersInput" class="form-label small mb-1">Workers</label>
+                                <input type="number" class="form-control" id="validateWorkersInput" value="3" min="1" max="10" style="width: 100px;">
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-warning" onclick="validateFaqLinks()" id="validateBtn">
+                                    Validate Links
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-outline-warning" onclick="validateAllFaqLinks()" id="validateAllBtn">
+                                    Validate All
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-outline-danger" onclick="resetFaqValidationHistory()" id="resetValidationBtn">
+                                    Reset Validation
+                                </button>
+                            </div>
+                        </div>
+                        <div id="validateResult" class="mt-3"></div>
+                    </div>
+                </div>
+
                 <!-- Status Overview -->
                 <div class="card mb-4">
                     <div class="card-header">

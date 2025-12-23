@@ -372,6 +372,202 @@ def validate_and_fix_content_batch(contents: List[Tuple[str, str]],
     }
 
 
+# --- FAQ Link Validation ---
+
+def extract_hyperlinks_from_faq_json(faq_json: str) -> List[str]:
+    """
+    Extract all product href URLs from FAQ JSON content.
+    FAQ JSON is a list of {question, answer} objects where answers may contain HTML links.
+    Handles both relative (/p/...) and absolute (https://www.beslist.nl/p/...) URLs.
+    """
+    import json
+
+    links = []
+    try:
+        faqs = json.loads(faq_json) if faq_json else []
+        for faq in faqs:
+            answer = faq.get('answer', '')
+            # Extract links from each answer using BeautifulSoup
+            soup = BeautifulSoup(answer, 'html.parser')
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                # Include both relative /p/ and absolute beslist.nl/p/ URLs
+                if '/p/' in href:
+                    links.append(href)
+    except json.JSONDecodeError:
+        pass
+
+    return links
+
+
+def validate_faq_links(faq_json: str) -> Dict:
+    """
+    Validate all product hyperlinks in FAQ JSON content.
+
+    Returns dict with:
+    {
+        'total_links': int,
+        'valid_links': int,
+        'gone_links': List[str],  # URLs where product is gone
+        'has_gone_links': bool,
+    }
+    """
+    links = extract_hyperlinks_from_faq_json(faq_json)
+
+    if not links:
+        return {
+            'total_links': 0,
+            'valid_links': 0,
+            'gone_links': [],
+            'has_gone_links': False
+        }
+
+    # Look up all links
+    maincat_mapping = load_maincat_mapping()
+
+    # Group links by maincat_id for batch ES queries
+    maincat_groups: Dict[str, Dict[str, str]] = {}
+    url_to_pim_id: Dict[str, str] = {}
+
+    unique_links = list(set(links))
+
+    for link in unique_links:
+        # Handle both relative and absolute URLs
+        relative_link = link
+        if link.startswith('https://www.beslist.nl'):
+            relative_link = link.replace('https://www.beslist.nl', '')
+
+        maincat_id, pim_id = extract_from_url(relative_link, maincat_mapping)
+
+        if maincat_id and pim_id:
+            url_to_pim_id[link] = pim_id
+            if maincat_id not in maincat_groups:
+                maincat_groups[maincat_id] = {}
+            maincat_groups[maincat_id][pim_id] = link
+
+    # Query each maincat index
+    pim_id_to_plp_url: Dict[str, Optional[str]] = {}
+
+    for maincat_id, pim_id_map in maincat_groups.items():
+        index = f"{INDEX_PREFIX}{maincat_id}"
+        pim_ids = list(pim_id_map.keys())
+
+        try:
+            result = query_elasticsearch(index, pim_ids)
+            for pim_id in pim_ids:
+                pim_id_to_plp_url[pim_id] = result.get(pim_id)
+        except Exception as e:
+            print(f"[FAQ_VALIDATOR] Error querying ES index {index}: {e}")
+            for pim_id in pim_ids:
+                pim_id_to_plp_url[pim_id] = None
+
+    # Determine which links are gone
+    gone_links = []
+    valid_count = 0
+
+    for link in unique_links:
+        pim_id = url_to_pim_id.get(link)
+        if pim_id:
+            plp_url = pim_id_to_plp_url.get(pim_id)
+            if plp_url is None:
+                gone_links.append(link)
+            else:
+                valid_count += 1
+        else:
+            # Could not extract pim_id - treat as gone
+            gone_links.append(link)
+
+    return {
+        'total_links': len(unique_links),
+        'valid_links': valid_count,
+        'gone_links': gone_links,
+        'has_gone_links': len(gone_links) > 0
+    }
+
+
+def validate_faq_batch(faqs: List[Tuple[str, str]]) -> Dict:
+    """
+    Validate links for multiple FAQ entries.
+
+    Args:
+        faqs: List of tuples (url, faq_json)
+
+    Returns:
+        Dict with validation summary and list of URLs with gone products
+    """
+    urls_with_gone_products = []
+    total_links = 0
+    total_valid = 0
+    total_gone = 0
+
+    for url, faq_json in faqs:
+        result = validate_faq_links(faq_json)
+        total_links += result['total_links']
+        total_valid += result['valid_links']
+        total_gone += len(result['gone_links'])
+
+        if result['has_gone_links']:
+            urls_with_gone_products.append({
+                'url': url,
+                'gone_links': result['gone_links']
+            })
+
+    return {
+        'total_faqs_checked': len(faqs),
+        'total_links_checked': total_links,
+        'total_valid_links': total_valid,
+        'total_gone_links': total_gone,
+        'faqs_with_gone_products': len(urls_with_gone_products),
+        'urls_with_gone_products': urls_with_gone_products
+    }
+
+
+def reset_faq_to_pending(urls: List[str]) -> int:
+    """
+    Reset FAQ URLs to pending status for regeneration.
+    - Updates pa.faq_tracking to 'pending'
+    - Deletes from pa.faq_content
+
+    Returns number of URLs reset.
+    """
+    if not urls:
+        return 0
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        reset_count = 0
+        for url in urls:
+            # Update tracking to pending
+            cur.execute("""
+                UPDATE pa.faq_tracking
+                SET status = 'pending', skip_reason = NULL
+                WHERE url = %s
+            """, (url,))
+
+            # Delete existing FAQ content
+            cur.execute("""
+                DELETE FROM pa.faq_content
+                WHERE url = %s
+            """, (url,))
+
+            reset_count += 1
+
+        conn.commit()
+        print(f"[FAQ_VALIDATOR] Reset {reset_count} FAQ URLs to pending")
+        return reset_count
+    except Exception as e:
+        print(f"[FAQ_VALIDATOR] Error resetting FAQ URLs: {e}")
+        if conn:
+            conn.rollback()
+        return 0
+    finally:
+        if conn:
+            return_db_connection(conn)
+
+
 # Legacy function for backward compatibility
 def validate_content_links(content: str, conservative_mode: bool = False) -> Dict:
     """

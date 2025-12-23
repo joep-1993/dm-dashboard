@@ -419,3 +419,131 @@ function exportCombined() {
         alert(`Combined export failed: ${error.message}`);
     }
 }
+
+// Link validation functions
+async function validateFaqLinks() {
+    const btn = document.getElementById('validateBtn');
+    const resultDiv = document.getElementById('validateResult');
+    const batchSize = parseInt(document.getElementById('validateBatchSizeInput').value) || 500;
+    const workers = parseInt(document.getElementById('validateWorkersInput').value) || 3;
+
+    btn.disabled = true;
+    btn.textContent = 'Validating...';
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating ${batchSize} FAQs with ${workers} workers...</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/faq/validate-links?batch_size=${batchSize}&parallel_workers=${workers}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Validation failed');
+        }
+
+        let alertClass = data.reset_to_pending > 0 ? 'alert-warning' : 'alert-success';
+        resultDiv.innerHTML = `
+            <div class="alert ${alertClass}">
+                <strong>Validation Complete</strong><br>
+                FAQs validated: ${data.validated}<br>
+                Links checked: ${data.total_links_checked}<br>
+                Valid links: ${data.valid_links}<br>
+                Gone links: ${data.gone_links}<br>
+                <strong>Reset to pending: ${data.reset_to_pending}</strong>
+            </div>
+        `;
+
+        if (data.reset_to_pending > 0) {
+            await refreshFaqStatus();
+        }
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Validate Links';
+    }
+}
+
+async function validateAllFaqLinks() {
+    const btn = document.getElementById('validateAllBtn');
+    const validateBtn = document.getElementById('validateBtn');
+    const resultDiv = document.getElementById('validateResult');
+    const workers = parseInt(document.getElementById('validateWorkersInput').value) || 3;
+
+    if (!confirm('This will validate all unvalidated FAQ links. Continue?')) {
+        return;
+    }
+
+    btn.disabled = true;
+    validateBtn.disabled = true;
+    btn.textContent = 'Validating All...';
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating all unvalidated FAQs... This may take a while.</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/faq/validate-all-links?parallel_workers=${workers}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Validation failed');
+        }
+
+        let alertClass = data.reset_to_pending > 0 ? 'alert-warning' : 'alert-success';
+        resultDiv.innerHTML = `
+            <div class="alert ${alertClass}">
+                <strong>${data.message}</strong><br>
+                Links checked: ${data.total_links_checked}<br>
+                Gone links: ${data.gone_links}<br>
+                <strong>Reset to pending: ${data.reset_to_pending}</strong>
+            </div>
+        `;
+
+        await refreshFaqStatus();
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        btn.disabled = false;
+        validateBtn.disabled = false;
+        btn.textContent = 'Validate All';
+    }
+}
+
+async function resetFaqValidationHistory() {
+    if (!confirm('This will reset all FAQ validation history, allowing all FAQs to be re-validated. Continue?')) {
+        return;
+    }
+
+    const btn = document.getElementById('resetValidationBtn');
+    const resultDiv = document.getElementById('validateResult');
+
+    btn.disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/faq/validation-history/reset`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Reset failed');
+        }
+
+        resultDiv.innerHTML = `
+            <div class="alert alert-success">
+                <strong>Validation History Reset</strong><br>
+                ${data.message}
+            </div>
+        `;
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        btn.disabled = false;
+    }
+}

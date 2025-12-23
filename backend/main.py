@@ -13,10 +13,10 @@ import time
 import re
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
-from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection, get_redshift_connection, return_redshift_connection
+from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection
 from backend.scraper_service import scrape_product_page, scrape_product_page_api, sanitize_content
 from backend.gpt_service import generate_product_content, check_content_has_valid_links
-from backend.link_validator import validate_content_links, validate_and_fix_content_links, update_content_in_redshift
+from backend.link_validator import validate_content_links, validate_and_fix_content_links
 from backend.faq_service import process_single_url_faq
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
 import psycopg2
@@ -798,24 +798,6 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
         cur.close()
         return_db_connection(conn)
 
-        # Reset kopteksten flags in Redshift - ONLY for gone products
-        if urls_with_gone_products:
-            try:
-                redshift_conn = get_redshift_connection()
-                redshift_cur = redshift_conn.cursor()
-                placeholders = ','.join(['%s'] * len(urls_with_gone_products))
-                redshift_cur.execute(f"""
-                    UPDATE pa.jvs_seo_werkvoorraad_shopping_season
-                    SET kopteksten = 0
-                    WHERE url IN ({placeholders})
-                """, urls_with_gone_products)
-                redshift_conn.commit()
-                redshift_cur.close()
-                return_redshift_connection(redshift_conn)
-                print(f"[VALIDATE-LINKS] Reset {len(urls_with_gone_products)} URLs in Redshift to pending")
-            except Exception as redshift_error:
-                print(f"[VALIDATE-LINKS] WARNING: Failed to update Redshift kopteksten flags: {redshift_error}")
-
         return {
             "status": "success",
             "validated": len(rows),
@@ -943,23 +925,6 @@ def validate_all_links(parallel_workers: int = 3):
             conn.commit()
             cur.close()
             return_db_connection(conn)
-
-            # Reset kopteksten flags in Redshift for gone products
-            if urls_with_gone_products:
-                try:
-                    redshift_conn = get_redshift_connection()
-                    redshift_cur = redshift_conn.cursor()
-                    placeholders = ','.join(['%s'] * len(urls_with_gone_products))
-                    redshift_cur.execute(f"""
-                        UPDATE pa.jvs_seo_werkvoorraad_shopping_season
-                        SET kopteksten = 0
-                        WHERE url IN ({placeholders})
-                    """, urls_with_gone_products)
-                    redshift_conn.commit()
-                    redshift_cur.close()
-                    return_redshift_connection(redshift_conn)
-                except Exception as redshift_error:
-                    print(f"[VALIDATE-ALL] WARNING: Failed to update Redshift: {redshift_error}")
 
             total_validated += len(rows)
             total_urls_corrected += urls_corrected
@@ -1358,6 +1323,256 @@ async def export_faq_json():
             media_type="application/json",
             headers={"Content-Disposition": f"attachment; filename=faq_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"}
         )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/faq/validate-links")
+def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3):
+    """
+    Validate hyperlinks in FAQ content using Elasticsearch lookup.
+
+    - Only validates FAQs that haven't been validated yet
+    - Checks all product links (/p/) in FAQ answers
+    - If product is gone, resets FAQ URL to pending for regeneration
+    - Records validation results to avoid re-validating
+
+    Args:
+        batch_size: Number of FAQs to validate per batch (default: 100)
+        parallel_workers: Number of parallel workers (default: 3)
+    """
+    from backend.link_validator import validate_faq_links, reset_faq_to_pending
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Get FAQs that haven't been validated yet (LEFT JOIN)
+        cur.execute("""
+            SELECT c.url, c.faq_json
+            FROM pa.faq_content c
+            LEFT JOIN pa.faq_validation_results v ON c.url = v.url
+            WHERE c.faq_json IS NOT NULL
+              AND v.url IS NULL
+            LIMIT %s
+        """, (batch_size,))
+        rows = cur.fetchall()
+
+        cur.close()
+        return_db_connection(conn)
+
+        if not rows:
+            return {
+                "status": "success",
+                "message": "No unvalidated FAQs found",
+                "validated": 0,
+                "reset_to_pending": 0
+            }
+
+        # Validate each FAQ and collect results
+        all_urls_with_gone = []
+        total_links = 0
+        total_valid = 0
+        total_gone = 0
+        validation_records = []
+
+        def validate_single(row):
+            url = row['url']
+            faq_json = row['faq_json']
+            result = validate_faq_links(faq_json)
+            return {
+                'url': url,
+                'total_links': result['total_links'],
+                'valid_links': result['valid_links'],
+                'gone_links': result['gone_links'],
+                'has_gone': result['has_gone_links']
+            }
+
+        # Process in parallel
+        with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+            futures = {executor.submit(validate_single, row): row for row in rows}
+
+            for future in as_completed(futures):
+                result = future.result()
+                total_links += result['total_links']
+                total_valid += result['valid_links']
+                total_gone += len(result['gone_links']) if isinstance(result['gone_links'], list) else result['gone_links']
+
+                validation_records.append(result)
+
+                if result['has_gone']:
+                    all_urls_with_gone.append(result['url'])
+
+        # Record validation results (for URLs that passed - no gone products)
+        conn = get_db_connection()
+        cur = conn.cursor()
+        for record in validation_records:
+            if not record['has_gone']:  # Only record if no gone products
+                cur.execute("""
+                    INSERT INTO pa.faq_validation_results (url, total_links, valid_links, gone_links)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (url) DO UPDATE SET
+                        total_links = EXCLUDED.total_links,
+                        valid_links = EXCLUDED.valid_links,
+                        gone_links = EXCLUDED.gone_links,
+                        validated_at = CURRENT_TIMESTAMP
+                """, (record['url'], record['total_links'], record['valid_links'], 0))
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+
+        # Reset FAQs with gone products to pending
+        reset_count = 0
+        if all_urls_with_gone:
+            reset_count = reset_faq_to_pending(all_urls_with_gone)
+
+        return {
+            "status": "success",
+            "validated": len(rows),
+            "total_links_checked": total_links,
+            "valid_links": total_valid,
+            "gone_links": total_gone,
+            "faqs_with_gone_products": len(all_urls_with_gone),
+            "reset_to_pending": reset_count,
+            "urls_reset": all_urls_with_gone[:20]  # Show first 20 for debugging
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/faq/validate-all-links")
+def validate_all_faq_links(parallel_workers: int = 3):
+    """
+    Validate ALL unvalidated FAQ links until complete.
+
+    - Only validates FAQs that haven't been validated yet
+    - Processes in batches, resetting any with gone products to pending
+    - Records validation results to avoid re-validating
+    """
+    from backend.link_validator import validate_faq_links, reset_faq_to_pending
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    try:
+        batch_size = 500
+        total_validated = 0
+        total_reset = 0
+        total_links_checked = 0
+        total_gone_links = 0
+
+        while True:
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            # Get next batch of unvalidated FAQs (LEFT JOIN)
+            cur.execute("""
+                SELECT c.url, c.faq_json
+                FROM pa.faq_content c
+                LEFT JOIN pa.faq_validation_results v ON c.url = v.url
+                WHERE c.faq_json IS NOT NULL
+                  AND v.url IS NULL
+                LIMIT %s
+            """, (batch_size,))
+            rows = cur.fetchall()
+
+            cur.close()
+            return_db_connection(conn)
+
+            if not rows:
+                break
+
+            # Validate each FAQ
+            batch_urls_with_gone = []
+            validation_records = []
+
+            def validate_single(row):
+                url = row['url']
+                faq_json = row['faq_json']
+                result = validate_faq_links(faq_json)
+                return {
+                    'url': url,
+                    'total_links': result['total_links'],
+                    'valid_links': result['valid_links'],
+                    'gone_links': result['gone_links'],
+                    'has_gone': result['has_gone_links']
+                }
+
+            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                futures = {executor.submit(validate_single, row): row for row in rows}
+
+                for future in as_completed(futures):
+                    result = future.result()
+                    total_links_checked += result['total_links']
+                    gone_count = len(result['gone_links']) if isinstance(result['gone_links'], list) else result['gone_links']
+                    total_gone_links += gone_count
+
+                    validation_records.append(result)
+
+                    if result['has_gone']:
+                        batch_urls_with_gone.append(result['url'])
+
+            # Record validation results (for URLs that passed)
+            conn = get_db_connection()
+            cur = conn.cursor()
+            for record in validation_records:
+                if not record['has_gone']:
+                    cur.execute("""
+                        INSERT INTO pa.faq_validation_results (url, total_links, valid_links, gone_links)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (url) DO UPDATE SET
+                            total_links = EXCLUDED.total_links,
+                            valid_links = EXCLUDED.valid_links,
+                            gone_links = EXCLUDED.gone_links,
+                            validated_at = CURRENT_TIMESTAMP
+                    """, (record['url'], record['total_links'], record['valid_links'], 0))
+            conn.commit()
+            cur.close()
+            return_db_connection(conn)
+
+            # Reset FAQs with gone products
+            if batch_urls_with_gone:
+                reset_count = reset_faq_to_pending(batch_urls_with_gone)
+                total_reset += reset_count
+
+            total_validated += len(rows)
+            print(f"[FAQ-VALIDATE] Batch complete: {len(rows)} validated, {len(batch_urls_with_gone)} reset. Total: {total_validated}")
+
+        return {
+            "status": "success",
+            "message": f"Validated all {total_validated} unvalidated FAQs",
+            "validated": total_validated,
+            "total_links_checked": total_links_checked,
+            "gone_links": total_gone_links,
+            "reset_to_pending": total_reset
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/faq/validation-history/reset")
+def reset_faq_validation_history():
+    """
+    Reset all FAQ validation history to allow re-validation of all FAQs.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("DELETE FROM pa.faq_validation_results")
+        deleted = cur.rowcount
+
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+
+        return {
+            "status": "success",
+            "message": f"Reset validation history for {deleted} FAQs",
+            "deleted": deleted
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
