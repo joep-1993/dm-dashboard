@@ -10,6 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add FAQ link validator with Elasticsearch lookup, validation tracking table (pa.faq_validation_results), and frontend UI (Validate Links, Validate All, Reset Validation buttons) #claude-session:2025-12-23
+- [x] Remove Redshift sync calls from main.py - system now uses PostgreSQL only for all operations #claude-session:2025-12-23
+- [x] Remove 1,329 URLs containing /r/ from all database tables (faq_tracking, content_urls_joep, werkvoorraad, kopteksten_check) #claude-session:2025-12-23
 - [x] Fix FAQ URL validation - remove fabricated URLs, only keep valid /p/ URLs from provided list, updated prompt examples #claude-session:2025-12-21
 - [x] Filter product links to only include products with ≥2 offers (shopCount) in both FAQ and SEO content generators #claude-session:2025-12-21
 - [x] Change FAQ hyperlinks to use product URLs (/p/) instead of category URLs (/c/) - deleted all 100K FAQs, reset to pending for regeneration #claude-session:2025-12-21

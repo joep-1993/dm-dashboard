@@ -1046,12 +1046,12 @@ def get_faq_status():
         """)
         total = cur.fetchone()['total']
 
-        # Pending = werkvoorraad URLs that don't have FAQs yet
+        # Pending = werkvoorraad URLs that don't have FAQs yet OR have status='pending' in tracking
         cur.execute("""
             SELECT COUNT(*) as pending
             FROM pa.jvs_seo_werkvoorraad w
             LEFT JOIN pa.faq_tracking t ON w.url = t.url
-            WHERE t.url IS NULL
+            WHERE t.url IS NULL OR t.status = 'pending'
         """)
         pending = cur.fetchone()['pending']
 

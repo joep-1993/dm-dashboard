@@ -41,6 +41,7 @@ content_top/                 # Unified SEO Tools Platform (Port 8003)
 │   ├── link_validator.py # Hyperlink validation via Elasticsearch plpUrl lookup (uses local PostgreSQL only)
 │   │                     # Auto-corrects outdated URLs, resets GONE products to pending
 │   │                     # Adds gone URLs to werkvoorraad for reprocessing
+│   │                     # FAQ validation: extract_hyperlinks_from_faq_json(), validate_faq_links(), reset_faq_to_pending()
 │   ├── seo_content_generator.py  # SEO content from Product Search API
 │   │                     # Parses /products/{maincat}/{category}/c/{filters} URLs
 │   │                     # Fetches 30 products, generates GPT content with plpUrl links
@@ -267,6 +268,17 @@ CREATE TABLE pa.link_validation_results (
     broken_link_details JSONB,  -- Stores array of broken link objects with url, status_code, status_text
     validated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- FAQ validation results tracking (prevents re-validation)
+CREATE TABLE pa.faq_validation_results (
+    id SERIAL PRIMARY KEY,
+    url TEXT NOT NULL UNIQUE,
+    total_links INTEGER DEFAULT 0,
+    valid_links INTEGER DEFAULT 0,
+    gone_links INTEGER DEFAULT 0,
+    validated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_faq_validation_url ON pa.faq_validation_results(url);
 ```
 
 ## Dependencies
@@ -323,6 +335,11 @@ python-dotenv==1.0.0      # Environment variable management
 - `POST /api/validate-all-links?parallel_workers=3` - Validate ALL unvalidated URLs in single batch. Uses LEFT JOIN for efficient filtering. Returns: validated count, urls_corrected count, moved_to_pending count.
 - `GET /api/validation-history?limit=20` - Get link validation history with broken link details
 - `DELETE /api/validation-history/reset` - Reset all validation history to allow re-validation of all URLs
+
+### FAQ Link Validation
+- `POST /api/faq/validate-links?batch_size=100&parallel_workers=3` - Validate FAQ hyperlinks via Elasticsearch lookup. Only validates unvalidated FAQs. Resets FAQs with gone products to pending.
+- `POST /api/faq/validate-all-links?parallel_workers=3` - Validate ALL unvalidated FAQ links until complete. Records results to tracking table.
+- `DELETE /api/faq/validation-history/reset` - Reset FAQ validation history to allow re-validation of all FAQs.
 
 ### Labels Applied by Thema Ads
 **Ad Groups get labeled with:**
@@ -423,4 +440,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2025-12-21_
+_Last updated: 2025-12-23_
