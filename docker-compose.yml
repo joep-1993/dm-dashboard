@@ -1,4 +1,21 @@
 services:
+  db:
+    container_name: seo_tools_db
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=seo_tools
+    volumes:
+      - seo_tools_postgres_data:/var/lib/postgresql/data
+    networks:
+      - seo-tools_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   app:
     container_name: dm_tools_app
     build: .
@@ -10,6 +27,9 @@ services:
       - ./frontend:/app/frontend
       - ./thema_ads_optimized:/app/thema_ads_optimized
       - ./themes:/app/themes
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AI_MODEL=${AI_MODEL:-gpt-4o-mini}
@@ -35,4 +55,8 @@ services:
 
 networks:
   seo-tools_default:
+    external: true
+
+volumes:
+  seo_tools_postgres_data:
     external: true

@@ -10,6 +10,10 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add PostgreSQL database service to docker-compose.yml with healthcheck - app now auto-starts db container with depends_on condition #claude-session:2025-12-24
+- [x] Reset 11 FAQs with improper /p/ URLs (missing pim_id) to pending for regeneration #claude-session:2025-12-24
+- [x] Fix FAQ processor to include URLs reset to pending (was only fetching URLs with no tracking entry, now also includes status='pending') #claude-session:2025-12-23
+- [x] Fix FAQ status pending count to include URLs reset after validation (was only counting URLs with no tracking entry, now also includes status='pending') #claude-session:2025-12-23
 - [x] Add FAQ link validator with Elasticsearch lookup, validation tracking table (pa.faq_validation_results), and frontend UI (Validate Links, Validate All, Reset Validation buttons) #claude-session:2025-12-23
 - [x] Remove Redshift sync calls from main.py - system now uses PostgreSQL only for all operations #claude-session:2025-12-23
 - [x] Remove 1,329 URLs containing /r/ from all database tables (faq_tracking, content_urls_joep, werkvoorraad, kopteksten_check) #claude-session:2025-12-23

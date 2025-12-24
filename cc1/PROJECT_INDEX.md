@@ -71,7 +71,7 @@ content_top/                 # Unified SEO Tools Platform (Port 8003)
 │       ├── faq.js        # FAQ frontend logic
 │       └── thema-ads.js  # Thema Ads frontend logic with polling
 │                         # Features: delete job UI with confirmation
-├── docker-compose.yml    # Service orchestration (no version attr)
+├── docker-compose.yml    # Service orchestration - includes db (postgres:15) and app services with healthcheck
 ├── Dockerfile           # Python container
 ├── requirements.txt     # Python dependencies
 ├── .env.example        # Environment template
@@ -440,4 +440,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2025-12-23_
+_Last updated: 2025-12-24_
