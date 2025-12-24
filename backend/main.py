@@ -1118,12 +1118,12 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Fetch unprocessed URLs (URLs not yet in FAQ tracking table)
+        # Fetch unprocessed URLs (URLs not yet in FAQ tracking table OR with status='pending')
         cur.execute("""
             SELECT w.url
             FROM pa.jvs_seo_werkvoorraad w
             LEFT JOIN pa.faq_tracking t ON w.url = t.url
-            WHERE t.url IS NULL
+            WHERE t.url IS NULL OR t.status = 'pending'
             LIMIT %s
         """, (batch_size,))
 
