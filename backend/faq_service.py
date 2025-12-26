@@ -398,6 +398,7 @@ def fetch_products_api(url: str) -> Optional[Dict]:
         - h1_title: Page title (from category)
         - product_subject: Subject built from selected facets
         - products: List of products with title and description
+        - error: (optional) Error reason if API call failed
     """
     try:
         clean = clean_url(url)
@@ -429,7 +430,23 @@ def fetch_products_api(url: str) -> Optional[Dict]:
 
         if response.status_code != 200:
             print(f"[FAQ-API] Request failed with status {response.status_code} for {clean}")
-            return None
+            # Check if it's a facet validation error (400 with specific error message)
+            if response.status_code == 400:
+                try:
+                    error_data = response.json()
+                    errors = error_data.get("errors", [])
+                    if isinstance(errors, list):
+                        for err in errors:
+                            error_info = err.get("errorInfo", "")
+                            # Check for "facet is not valid" or "facet value is not valid"
+                            if "not valid" in error_info:
+                                context = err.get("context", "unknown")
+                                value = err.get("value", "unknown")
+                                print(f"[FAQ-API] Invalid facet/value: context='{context}', value='{value}' for {clean}")
+                                return {"error": "facet_not_available", "invalid_facet": f"{context}:{value}"}
+                except Exception:
+                    pass
+            return {"error": "api_failed"}
 
         data = response.json()
 
@@ -654,6 +671,14 @@ def process_single_url_faq(url: str, num_faqs: int = 5) -> Dict:
         if not page_data:
             result["status"] = "failed"
             result["reason"] = "api_failed"
+            return result
+
+        # Check if the API returned an error dict
+        if page_data.get("error"):
+            result["status"] = "failed"
+            result["reason"] = page_data["error"]
+            if page_data.get("invalid_facet"):
+                result["invalid_facet"] = page_data["invalid_facet"]
             return result
 
         if not page_data.get("products") or len(page_data["products"]) == 0:
