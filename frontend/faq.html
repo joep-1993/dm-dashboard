@@ -115,6 +115,63 @@
                     </div>
                 </div>
 
+                <!-- Content Publishing -->
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">Content Publishing</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Publish generated content (content_top + FAQ) to the website-configuration API</p>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <div class="d-flex gap-3 mb-3" id="publishStats">
+                                    <div class="text-center">
+                                        <h5 class="mb-0" id="publishContentCount">-</h5>
+                                        <small class="text-muted">Content Top</small>
+                                    </div>
+                                    <div class="text-center">
+                                        <h5 class="mb-0" id="publishFaqCount">-</h5>
+                                        <small class="text-muted">FAQ</small>
+                                    </div>
+                                    <div class="text-center">
+                                        <h5 class="mb-0" id="publishTotalCount">-</h5>
+                                        <small class="text-muted">Total URLs</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-auto">
+                                <label for="publishEnvironment" class="form-label small mb-1">Environment</label>
+                                <select class="form-select" id="publishEnvironment" style="width: 150px;">
+                                    <option value="dev">Dev</option>
+                                    <option value="staging">Staging</option>
+                                    <option value="production">Production</option>
+                                </select>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-outline-secondary" onclick="refreshPublishStats()">
+                                    Refresh Stats
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-secondary" onclick="publishContent(true)" id="publishDryRunBtn">
+                                    Dry Run
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-danger" onclick="publishContent(false)" id="publishBtn">
+                                    Publish All
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="publishResult" class="mt-3"></div>
+                    </div>
+                </div>
+
                 <!-- Status Overview -->
                 <div class="card mb-4">
                     <div class="card-header">

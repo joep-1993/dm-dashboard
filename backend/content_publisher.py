@@ -1,0 +1,452 @@
+"""
+Content Publisher Service
+
+Publishes generated content (content_top) and FAQ content to the website-configuration API.
+All content is sent in a single API call (no batching).
+"""
+import os
+import json
+import requests
+import threading
+import time
+from typing import List, Dict, Optional
+from backend.database import get_db_connection, return_db_connection
+
+# API Configuration
+CONTENT_API_URLS = {
+    "dev": "http://dev.website-configuration.api.beslist.nl:5900/automated-content",
+    "staging": "https://website-configuration-staging.api.beslist.nl/automated-content",
+    "production": "https://website-configuration.api.beslist.nl/automated-content"
+}
+
+CONTENT_API_KEYS = {
+    "dev": "Sectional~Publisher~Dumpling1",
+    "staging": "Crease~Skeptic8~Baguette",
+    "production": "Sectional~Publisher~Dumpling1"
+}
+
+# Default environment
+DEFAULT_ENV = os.getenv("CONTENT_API_ENV", "dev")
+
+# Background task storage
+_publish_tasks = {}
+_task_lock = threading.Lock()
+
+
+def get_api_config(environment: str = None) -> tuple:
+    """Get API URL and key for the specified environment."""
+    env = environment or DEFAULT_ENV
+    if env not in CONTENT_API_URLS:
+        raise ValueError(f"Unknown environment: {env}. Valid options: {list(CONTENT_API_URLS.keys())}")
+    return CONTENT_API_URLS[env], CONTENT_API_KEYS[env]
+
+
+def faq_json_to_html(faq_json_str: str) -> str:
+    """
+    Convert FAQ JSON array to HTML format.
+
+    Input format: [{"question": "...", "answer": "..."}, ...]
+    Output format: <div class="faq-item"><h3>Question</h3><p>Answer</p></div>...
+    """
+    if not faq_json_str:
+        return ""
+
+    try:
+        faq_list = json.loads(faq_json_str)
+        if not isinstance(faq_list, list):
+            return ""
+
+        html_parts = []
+        for item in faq_list:
+            question = item.get("question", "")
+            answer = item.get("answer", "")
+            if question and answer:
+                html_parts.append(
+                    f'<div class="faq-item">'
+                    f'<h3>{question}</h3>'
+                    f'<p>{answer}</p>'
+                    f'</div>'
+                )
+
+        return "".join(html_parts)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+
+
+def get_all_content_for_publishing() -> List[Dict]:
+    """
+    Fetch all content (content_top and FAQ) from database, merged by URL.
+    Returns a list of dicts with url, content_top, content_bottom, content_faq.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Get all unique URLs with their content
+        # LEFT JOIN to get both content_top (from content_urls_joep) and FAQ content
+        cur.execute("""
+            SELECT
+                COALESCE(c.url, f.url) as url,
+                c.content as content_top,
+                f.faq_json as faq_json
+            FROM pa.content_urls_joep c
+            FULL OUTER JOIN pa.faq_content f ON c.url = f.url
+            WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
+        """)
+
+        rows = cur.fetchall()
+
+        # Build result list with unique URLs
+        url_data = {}
+        for row in rows:
+            url = row['url']
+            if url not in url_data:
+                url_data[url] = {
+                    "url": url,
+                    "content_top": "",
+                    "content_bottom": "",
+                    "content_faq": "",
+                    "country_language": "nl-nl"
+                }
+
+            # Update content_top if available
+            if row['content_top']:
+                url_data[url]["content_top"] = row['content_top']
+
+            # Convert FAQ JSON to HTML if available
+            if row['faq_json']:
+                url_data[url]["content_faq"] = faq_json_to_html(row['faq_json'])
+
+        return list(url_data.values())
+
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
+    """
+    Fetch a batch of content for publishing.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                COALESCE(c.url, f.url) as url,
+                c.content as content_top,
+                f.faq_json as faq_json
+            FROM pa.content_urls_joep c
+            FULL OUTER JOIN pa.faq_content f ON c.url = f.url
+            WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
+            ORDER BY COALESCE(c.url, f.url)
+            LIMIT %s OFFSET %s
+        """, (limit, offset))
+
+        rows = cur.fetchall()
+
+        result = []
+        seen_urls = set()
+
+        for row in rows:
+            url = row['url']
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            content_top = sanitize_for_api(row['content_top'] or "")
+            content_faq = sanitize_for_api(faq_json_to_html(row['faq_json'])) if row['faq_json'] else ""
+
+            item = {
+                "url": url,
+                "content_top": content_top,
+                "content_bottom": "",
+                "content_faq": content_faq,
+                "country_language": "nl-nl"
+            }
+            result.append(item)
+
+        return result
+
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def get_total_content_count() -> int:
+    """Get total count of unique URLs with content."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT COUNT(DISTINCT COALESCE(c.url, f.url)) as count
+            FROM pa.content_urls_joep c
+            FULL OUTER JOIN pa.faq_content f ON c.url = f.url
+            WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
+        """)
+        return cur.fetchone()['count']
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def sanitize_for_api(text: str) -> str:
+    """
+    Sanitize text content for the website-configuration API.
+    Escapes characters that might cause SQL issues on the receiving end.
+    """
+    if not text:
+        return ""
+    # First normalize double single quotes to single (legacy data issue)
+    # Then replace single quotes with HTML entity to avoid SQL escaping issues
+    text = text.replace("''", "'")
+    return text.replace("'", "&#39;")
+
+
+def get_all_content_items() -> List[Dict]:
+    """
+    Fetch ALL content items from database for publishing.
+    Returns a list of dicts with url, content_top, content_bottom, content_faq.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        # Get all unique URLs with their content in a single query
+        cur.execute("""
+            SELECT
+                COALESCE(c.url, f.url) as url,
+                c.content as content_top,
+                f.faq_json as faq_json
+            FROM pa.content_urls_joep c
+            FULL OUTER JOIN pa.faq_content f ON c.url = f.url
+            WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
+            ORDER BY COALESCE(c.url, f.url)
+        """)
+
+        rows = cur.fetchall()
+
+        # Build result list - already unique due to COALESCE
+        result = []
+        for row in rows:
+            content_top = sanitize_for_api(row['content_top'] or "")
+            content_faq = sanitize_for_api(faq_json_to_html(row['faq_json'])) if row['faq_json'] else ""
+
+            item = {
+                "url": row['url'],
+                "content_top": content_top,
+                "content_bottom": "",
+                "content_faq": content_faq,
+                "country_language": "nl-nl"
+            }
+            result.append(item)
+
+        return result
+
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def publish_all_content(dry_run: bool = False, environment: str = None) -> Dict:
+    """
+    Publish ALL content in a single API call (no batching).
+
+    Args:
+        dry_run: If True, just return stats without making API call
+        environment: Target environment (dev, staging, production)
+
+    Returns:
+        Dict with results
+    """
+    env = environment or DEFAULT_ENV
+    api_url, api_key = get_api_config(env)
+
+    print(f"[Publisher] Fetching all content from database...")
+    content_items = get_all_content_items()
+    total_count = len(content_items)
+
+    print(f"[Publisher] Total URLs with content: {total_count}")
+    print(f"[Publisher] Target environment: {env} ({api_url})")
+
+    if dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "environment": env,
+            "api_url": api_url,
+            "total_urls": total_count,
+            "items_to_publish": total_count,
+            "payload_size_mb": round(len(json.dumps({"data": content_items})) / 1024 / 1024, 2)
+        }
+
+    if not content_items:
+        return {
+            "success": True,
+            "message": "No items to publish",
+            "environment": env,
+            "total_urls": 0
+        }
+
+    # Build payload
+    payload = {"data": content_items}
+    payload_size = len(json.dumps(payload))
+    print(f"[Publisher] Payload size: {payload_size / 1024 / 1024:.2f} MB")
+
+    headers = {
+        "X-Api-Key": api_key,
+        "Content-Type": "application/json"
+    }
+
+    try:
+        print(f"[Publisher] Sending request to {api_url}...")
+        response = requests.post(
+            api_url,
+            headers=headers,
+            json=payload,
+            timeout=600  # 10 minute timeout for large payload
+        )
+
+        return {
+            "success": response.status_code in (200, 201),
+            "status_code": response.status_code,
+            "environment": env,
+            "api_url": api_url,
+            "total_urls": total_count,
+            "items_published": total_count if response.status_code in (200, 201) else 0,
+            "payload_size_mb": round(payload_size / 1024 / 1024, 2),
+            "response": response.text[:1000] if response.text else None
+        }
+    except requests.RequestException as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "environment": env,
+            "api_url": api_url,
+            "total_urls": total_count
+        }
+
+
+# Background task functions
+def _run_publish_task(task_id: str, environment: str):
+    """Background worker to run the publish task."""
+    with _task_lock:
+        _publish_tasks[task_id]["status"] = "running"
+        _publish_tasks[task_id]["started_at"] = time.time()
+
+    try:
+        result = publish_all_content(dry_run=False, environment=environment)
+        with _task_lock:
+            _publish_tasks[task_id]["status"] = "completed"
+            _publish_tasks[task_id]["result"] = result
+            _publish_tasks[task_id]["completed_at"] = time.time()
+    except Exception as e:
+        with _task_lock:
+            _publish_tasks[task_id]["status"] = "failed"
+            _publish_tasks[task_id]["error"] = str(e)
+            _publish_tasks[task_id]["completed_at"] = time.time()
+
+
+def start_publish_task(environment: str) -> str:
+    """
+    Start a background publish task.
+    Returns task_id that can be used to check status.
+    """
+    import uuid
+    task_id = str(uuid.uuid4())[:8]
+
+    with _task_lock:
+        _publish_tasks[task_id] = {
+            "status": "pending",
+            "environment": environment,
+            "created_at": time.time(),
+            "started_at": None,
+            "completed_at": None,
+            "result": None,
+            "error": None
+        }
+
+    # Start background thread
+    thread = threading.Thread(target=_run_publish_task, args=(task_id, environment))
+    thread.daemon = True
+    thread.start()
+
+    return task_id
+
+
+def get_publish_task_status(task_id: str) -> Dict:
+    """Get the status of a publish task."""
+    with _task_lock:
+        if task_id not in _publish_tasks:
+            return {"error": "Task not found", "task_id": task_id}
+        return {"task_id": task_id, **_publish_tasks[task_id]}
+
+
+def generate_curl_command(content_items: List[Dict] = None, limit: int = 10, environment: str = None) -> str:
+    """
+    Generate a curl command for publishing content.
+
+    Args:
+        content_items: Optional list of content items. If None, fetches from database.
+        limit: Maximum number of items to include in the command
+        environment: Target environment (dev, staging, production)
+
+    Returns:
+        A curl command string
+    """
+    api_url, api_key = get_api_config(environment)
+
+    if content_items is None:
+        content_items = get_content_batch(0, limit)
+    else:
+        content_items = content_items[:limit]
+
+    payload = {"data": content_items}
+    json_str = json.dumps(payload, indent=4, ensure_ascii=False)
+
+    # Escape single quotes for shell
+    json_str_escaped = json_str.replace("'", "'\\''")
+
+    curl_cmd = f"""curl --location '{api_url}' \\
+--header 'X-Api-Key: {api_key}' \\
+--header 'Content-Type: application/json' \\
+--data '{json_str_escaped}'"""
+
+    return curl_cmd
+
+
+# CLI for testing
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1]
+
+        if cmd == "count":
+            count = get_total_content_count()
+            print(f"Total URLs with content: {count}")
+
+        elif cmd == "sample":
+            limit = int(sys.argv[2]) if len(sys.argv) > 2 else 5
+            items = get_content_batch(0, limit)
+            print(json.dumps(items, indent=2, ensure_ascii=False))
+
+        elif cmd == "curl":
+            limit = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+            print(generate_curl_command(limit=limit))
+
+        elif cmd == "publish":
+            dry_run = "--dry-run" in sys.argv
+            result = publish_all_content(dry_run=dry_run)
+            print(json.dumps(result, indent=2))
+
+        else:
+            print("Usage: python content_publisher.py [count|sample|curl|publish]")
+            print("  count           - Show total URLs with content")
+            print("  sample [n]      - Show sample of n content items (default: 5)")
+            print("  curl [n]        - Generate curl command with n items (default: 10)")
+            print("  publish [--dry-run] - Publish all content (use --dry-run to test)")
+    else:
+        print("Usage: python content_publisher.py [count|sample|curl|publish]")

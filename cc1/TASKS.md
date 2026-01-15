@@ -10,6 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add content publishing feature with background task pattern - supports dev/staging/production environments, single-payload publishing (no batching), SQL sanitization for apostrophes ('' → ' → &#39;), 10-minute timeout for large payloads (~512MB) #claude-session:2026-01-15
+- [x] Deduplicate content_urls_joep table (33,759 duplicates removed), add unique constraint on url column, copy 6,039 URLs from Redshift, reset 2,577 truncated content URLs to pending #claude-session:2026-01-15
+- [x] Add facet_not_available error type to FAQ processor - distinguishes invalid facet/value API errors (400) from generic failures, includes invalid_facet details in response #claude-session:2025-12-26
 - [x] Add PostgreSQL database service to docker-compose.yml with healthcheck - app now auto-starts db container with depends_on condition #claude-session:2025-12-24
 - [x] Reset 11 FAQs with improper /p/ URLs (missing pim_id) to pending for regeneration #claude-session:2025-12-24
 - [x] Fix FAQ processor to include URLs reset to pending (was only fetching URLs with no tracking entry, now also includes status='pending') #claude-session:2025-12-23

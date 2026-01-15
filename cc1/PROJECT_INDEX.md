@@ -11,6 +11,12 @@ content_top/                 # Unified SEO Tools Platform (Port 8003)
 │   ├── commands/         # Custom slash commands
 │   │   ├── skip-permissions.md     # Toggle bypassPermissions mode
 │   │   └── restore-permissions.md  # Restore default permissions
+│   ├── skills/           # Domain-specific knowledge packs for Claude
+│   │   ├── ai-engineer/      # OpenAI, Gemini, Claude API reference (models, pricing, prompting)
+│   │   ├── beslist-query/    # Redshift SQL query assistant (tables, filters, metrics)
+│   │   ├── beslist-apis/     # Beslist.nl API integrations
+│   │   ├── laiza/            # Laiza platform integration
+│   │   └── google-ads-query.md  # Google Ads query reference
 │   └── settings.local.json  # Local settings (git ignored)
 ├── thema_ads_optimized/  # Google Ads theme management (merged from theme_ads)
 │   ├── themes.py         # Theme definitions (black_friday, cyber_monday, etc.)
@@ -42,6 +48,10 @@ content_top/                 # Unified SEO Tools Platform (Port 8003)
 │   │                     # Auto-corrects outdated URLs, resets GONE products to pending
 │   │                     # Adds gone URLs to werkvoorraad for reprocessing
 │   │                     # FAQ validation: extract_hyperlinks_from_faq_json(), validate_faq_links(), reset_faq_to_pending()
+│   ├── content_publisher.py # Publishes content (content_top + FAQ) to website-configuration API
+│   │                     # Supports dev/staging/production environments with different API keys
+│   │                     # Background task with polling for large payloads (~512MB)
+│   │                     # SQL sanitization: apostrophes replaced with &#39;
 │   ├── seo_content_generator.py  # SEO content from Product Search API
 │   │                     # Parses /products/{maincat}/{category}/c/{filters} URLs
 │   │                     # Fetches 30 products, generates GPT content with plpUrl links
@@ -341,6 +351,13 @@ python-dotenv==1.0.0      # Environment variable management
 - `POST /api/faq/validate-all-links?parallel_workers=3` - Validate ALL unvalidated FAQ links until complete. Records results to tracking table.
 - `DELETE /api/faq/validation-history/reset` - Reset FAQ validation history to allow re-validation of all FAQs.
 
+### Content Publishing
+- `GET /api/content-publish/stats` - Get publishing stats (content_top count, FAQ count, total URLs)
+- `GET /api/content-publish/preview?limit=10` - Preview content items to be published
+- `GET /api/content-publish/curl?limit=10&environment=dev` - Generate curl command for testing
+- `POST /api/content-publish?dry_run=true&environment=dev` - Publish content (dry_run=true returns stats, false starts background task)
+- `GET /api/content-publish/status/{task_id}` - Poll background task status (pending/running/completed/failed)
+
 ### Labels Applied by Thema Ads
 **Ad Groups get labeled with:**
 - `BF_2025` - Black Friday 2025 campaign marker
@@ -440,4 +457,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2025-12-24_
+_Last updated: 2026-01-15_

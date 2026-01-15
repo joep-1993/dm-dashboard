@@ -19,6 +19,14 @@ from backend.gpt_service import generate_product_content, check_content_has_vali
 from backend.link_validator import validate_content_links, validate_and_fix_content_links
 from backend.faq_service import process_single_url_faq
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
+from backend.content_publisher import (
+    get_total_content_count,
+    get_content_batch,
+    publish_all_content,
+    generate_curl_command,
+    start_publish_task,
+    get_publish_task_status
+)
 import psycopg2
 
 app = FastAPI(title="SEO Tools - Unified Platform", version="1.0.0")
@@ -77,6 +85,29 @@ def read_root():
 @app.get("/api/health")
 def health_check():
     return {"status": "healthy", "service": "dm_tools"}
+
+@app.get("/api/debug/test-scraper")
+def debug_test_scraper(url: str):
+    """Debug endpoint to test scraper on a single URL"""
+    import time
+    start = time.time()
+    try:
+        result = scrape_product_page_api(url)
+        elapsed = time.time() - start
+        if result is None:
+            return {"status": "failed", "reason": "api_returned_none", "elapsed_seconds": elapsed}
+        if result.get('error'):
+            return {"status": "failed", "reason": result.get('error'), "elapsed_seconds": elapsed}
+        return {
+            "status": "success",
+            "elapsed_seconds": elapsed,
+            "product_count": len(result.get('products', [])),
+            "h1_title": result.get('h1_title'),
+            "product_subject": result.get('product_subject')
+        }
+    except Exception as e:
+        elapsed = time.time() - start
+        return {"status": "error", "reason": str(e), "elapsed_seconds": elapsed}
 
 @app.post("/api/generate")
 async def generate_text(prompt: str):
@@ -150,15 +181,19 @@ def process_single_url(url: str, conservative_mode: bool = False):
                     result["reason"] = "no_valid_links"
                 else:
                     # Save content to local PostgreSQL immediately
-                    content_conn = get_db_connection()
-                    content_cur = content_conn.cursor()
-                    content_cur.execute("""
-                        INSERT INTO pa.content_urls_joep (url, content)
-                        VALUES (%s, %s)
-                    """, (url, sanitized))
-                    content_conn.commit()
-                    content_cur.close()
-                    return_db_connection(content_conn)
+                    content_conn = None
+                    try:
+                        content_conn = get_db_connection()
+                        content_cur = content_conn.cursor()
+                        content_cur.execute("""
+                            INSERT INTO pa.content_urls_joep (url, content)
+                            VALUES (%s, %s)
+                        """, (url, sanitized))
+                        content_conn.commit()
+                        content_cur.close()
+                    finally:
+                        if content_conn:
+                            return_db_connection(content_conn)
 
                     final_status = 'success'
                     result["status"] = "success"
@@ -386,6 +421,31 @@ def get_status():
             "failed": failed,
             "pending": pending,
             "recent_results": recent
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/failure-reasons")
+def get_failure_reasons():
+    """Get breakdown of failure reasons"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT status, skip_reason, COUNT(*) as count
+            FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+            GROUP BY status, skip_reason
+            ORDER BY count DESC
+        """)
+        rows = cur.fetchall()
+
+        cur.close()
+        return_db_connection(conn)
+
+        return {
+            "breakdown": [{"status": r["status"], "reason": r["skip_reason"], "count": r["count"]} for r in rows]
         }
 
     except Exception as e:
@@ -1690,5 +1750,128 @@ async def delete_faq_result(url: str):
             "url": url
         }
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Content Publishing API
+# ============================================================================
+
+@app.get("/api/content-publish/stats")
+async def get_content_publish_stats():
+    """Get statistics about content available for publishing."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Get counts
+        cur.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM pa.content_urls_joep WHERE content IS NOT NULL) as content_top_count,
+                (SELECT COUNT(*) FROM pa.faq_content WHERE faq_json IS NOT NULL) as faq_count,
+                (SELECT COUNT(DISTINCT COALESCE(c.url, f.url))
+                 FROM pa.content_urls_joep c
+                 FULL OUTER JOIN pa.faq_content f ON c.url = f.url
+                 WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL) as total_unique_urls
+        """)
+        row = cur.fetchone()
+
+        cur.close()
+        return_db_connection(conn)
+
+        return {
+            "content_top_count": row['content_top_count'],
+            "faq_count": row['faq_count'],
+            "total_unique_urls": row['total_unique_urls']
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/content-publish/preview")
+async def preview_content_publish(offset: int = 0, limit: int = 10):
+    """Preview content that will be published."""
+    try:
+        items = get_content_batch(offset, min(limit, 100))
+        total = get_total_content_count()
+
+        return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "items": items
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/content-publish/curl")
+async def get_content_publish_curl(limit: int = 10, environment: str = "dev"):
+    """
+    Generate a curl command for publishing content.
+
+    Args:
+        limit: Number of items to include (default: 10, max: 100)
+        environment: Target environment (dev, staging, production)
+    """
+    try:
+        if environment not in ("dev", "staging", "production"):
+            raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+        curl_cmd = generate_curl_command(limit=min(limit, 100), environment=environment)
+        return {
+            "environment": environment,
+            "curl_command": curl_cmd
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/content-publish")
+async def publish_content(dry_run: bool = True, environment: str = "dev"):
+    """
+    Publish all content to the website-configuration API in a single call.
+
+    Args:
+        dry_run: If True (default), just return stats without making API call
+        environment: Target environment (dev, staging, production)
+    """
+    try:
+        if environment not in ("dev", "staging", "production"):
+            raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+
+        if dry_run:
+            # Dry run - return stats immediately
+            result = publish_all_content(dry_run=True, environment=environment)
+            return result
+        else:
+            # Start background task for actual publishing
+            task_id = start_publish_task(environment=environment)
+            return {
+                "status": "started",
+                "task_id": task_id,
+                "environment": environment,
+                "message": "Publishing started in background. Use /api/content-publish/status/{task_id} to check progress."
+            }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/content-publish/status/{task_id}")
+async def get_publish_status(task_id: str):
+    """
+    Get the status of a content publishing task.
+    """
+    try:
+        status = get_publish_task_status(task_id)
+        if "error" in status and status["error"] == "Task not found":
+            raise HTTPException(status_code=404, detail="Task not found")
+        return status
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

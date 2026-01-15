@@ -9,6 +9,10 @@ let faqShouldStop = false;
 // Initialize on page load
 window.addEventListener('DOMContentLoaded', () => {
     refreshFaqStatus();
+    // Refresh publish stats if on a page with publishing elements
+    if (document.getElementById('publishStats')) {
+        refreshPublishStats();
+    }
 });
 
 // Auto-refresh status every 30 seconds
@@ -545,5 +549,162 @@ async function resetFaqValidationHistory() {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
     } finally {
         btn.disabled = false;
+    }
+}
+
+// ============================================================================
+// Content Publishing Functions
+// ============================================================================
+
+async function refreshPublishStats() {
+    try {
+        const response = await fetch(`${API_BASE}/api/content-publish/stats`);
+        const data = await response.json();
+
+        document.getElementById('publishContentCount').textContent = data.content_top_count?.toLocaleString() || '-';
+        document.getElementById('publishFaqCount').textContent = data.faq_count?.toLocaleString() || '-';
+        document.getElementById('publishTotalCount').textContent = data.total_unique_urls?.toLocaleString() || '-';
+
+    } catch (error) {
+        console.error('Failed to refresh publish stats:', error);
+    }
+}
+
+async function publishContent(dryRun = true) {
+    const dryRunBtn = document.getElementById('publishDryRunBtn');
+    const publishBtn = document.getElementById('publishBtn');
+    const resultDiv = document.getElementById('publishResult');
+    const environmentSelect = document.getElementById('publishEnvironment');
+
+    const environment = environmentSelect.value;
+
+    // Confirm for production
+    if (!dryRun && environment === 'production') {
+        if (!confirm('⚠️ WARNING: You are about to publish to PRODUCTION!\n\nAre you sure you want to continue?')) {
+            return;
+        }
+    }
+
+    // Disable buttons
+    dryRunBtn.disabled = true;
+    publishBtn.disabled = true;
+
+    const actionText = dryRun ? 'Dry Run' : 'Publishing';
+    resultDiv.innerHTML = `<div class="alert alert-info">${actionText} to ${environment}...</div>`;
+
+    try {
+        const response = await fetch(
+            `${API_BASE}/api/content-publish?dry_run=${dryRun}&environment=${environment}`,
+            { method: 'POST' }
+        );
+
+        const data = await response.json();
+
+        if (response.ok) {
+            if (dryRun) {
+                // Dry run - show results immediately
+                resultDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <strong>Dry Run Complete</strong><br>
+                        Environment: <code>${data.environment}</code><br>
+                        API URL: <code>${data.api_url}</code><br>
+                        Total URLs: ${data.total_urls?.toLocaleString() || 0}<br>
+                        Items to publish: ${data.items_to_publish?.toLocaleString() || 0}<br>
+                        Payload size: ${data.payload_size_mb || 0} MB
+                    </div>
+                `;
+                dryRunBtn.disabled = false;
+                publishBtn.disabled = false;
+            } else {
+                // Background task started - poll for status
+                const taskId = data.task_id;
+                resultDiv.innerHTML = `
+                    <div class="alert alert-info">
+                        <strong>Publishing started...</strong><br>
+                        Task ID: <code>${taskId}</code><br>
+                        Environment: <code>${data.environment}</code><br>
+                        <div class="mt-2">
+                            <div class="spinner-border spinner-border-sm" role="status"></div>
+                            <span id="publishStatusText">Preparing content...</span>
+                        </div>
+                    </div>
+                `;
+
+                // Poll for status
+                pollPublishStatus(taskId, resultDiv, dryRunBtn, publishBtn);
+            }
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail || 'Unknown error'}</div>`;
+            dryRunBtn.disabled = false;
+            publishBtn.disabled = false;
+        }
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        dryRunBtn.disabled = false;
+        publishBtn.disabled = false;
+    }
+}
+
+async function pollPublishStatus(taskId, resultDiv, dryRunBtn, publishBtn) {
+    try {
+        const response = await fetch(`${API_BASE}/api/content-publish/status/${taskId}`);
+        const data = await response.json();
+
+        if (data.status === 'running' || data.status === 'pending') {
+            // Still running - update status text and poll again
+            const statusText = document.getElementById('publishStatusText');
+            if (statusText) {
+                statusText.textContent = data.status === 'running' ? 'Sending content to API...' : 'Starting...';
+            }
+            setTimeout(() => pollPublishStatus(taskId, resultDiv, dryRunBtn, publishBtn), 2000);
+        } else if (data.status === 'completed') {
+            // Done - show results
+            const result = data.result || {};
+            const alertClass = result.success ? 'success' : 'warning';
+
+            let html = `
+                <div class="alert alert-${alertClass}">
+                    <strong>Publishing Complete!</strong><br>
+                    Environment: <code>${result.environment}</code><br>
+                    API URL: <code>${result.api_url}</code><br>
+                    Total URLs: ${result.total_urls?.toLocaleString() || 0}<br>
+                    Items published: ${result.items_published?.toLocaleString() || 0}<br>
+                    Payload size: ${result.payload_size_mb || 0} MB<br>
+                    Status code: ${result.status_code || 'N/A'}
+                </div>
+            `;
+
+            if (result.response) {
+                html += `
+                    <div class="alert alert-secondary mt-2">
+                        <strong>API Response:</strong><br>
+                        <small><code>${result.response}</code></small>
+                    </div>
+                `;
+            }
+
+            if (result.error) {
+                html += `<div class="alert alert-danger mt-2"><strong>Error:</strong> ${result.error}</div>`;
+            }
+
+            resultDiv.innerHTML = html;
+            dryRunBtn.disabled = false;
+            publishBtn.disabled = false;
+        } else if (data.status === 'failed') {
+            // Failed
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <strong>Publishing Failed</strong><br>
+                    Error: ${data.error || 'Unknown error'}
+                </div>
+            `;
+            dryRunBtn.disabled = false;
+            publishBtn.disabled = false;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error checking status: ${error.message}</div>`;
+        dryRunBtn.disabled = false;
+        publishBtn.disabled = false;
     }
 }

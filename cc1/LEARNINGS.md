@@ -28,6 +28,66 @@ docker-compose exec app python -m backend.import_content
 
 ## Common Issues & Solutions
 
+### Beslist Product Search API Facet Validation Errors
+- **Problem**: FAQ processor API calls fail with HTTP 400 for certain URLs
+- **Cause**: URLs contain facet names or value IDs that are no longer valid for that category
+- **Error Response Types**:
+  - Invalid facet name: `{"context": "facet", "errorInfo": "The given facet is not valid.", "value": "personage"}`
+  - Invalid facet value: `{"context": "merk", "errorInfo": "The given facet value is not valid.", "value": 19957206}`
+- **Solution**: Detect 400 errors with "not valid" in errorInfo, return `facet_not_available` error type instead of generic `api_failed`
+- **FAQ Processor Error Reasons Reference**:
+  - `facet_not_available` - URL contains invalid facet name or value ID for category
+  - `api_failed` - Generic API failure (non-400 or unparseable error)
+  - `no_products_found` - API returned 0 products (skipped)
+  - `faq_generation_failed` - OpenAI generation failed
+- **Location**: backend/faq_service.py - `fetch_products_api()` and `process_single_url_faq()`
+- **Date**: 2025-12-26
+
+### External API SQL Escaping Errors
+- **Problem**: Website-configuration API returns MySQL INSERT exception when content contains apostrophes
+- **Error**: `An exception occurred while executing 'INSERT INTO ... VALUES ('...DVD's...')`
+- **Cause**: External API's MySQL INSERT not properly escaping single quotes in content
+- **Additional Issue**: Legacy content contains double single quotes (`''`) which need normalization
+- **Solution**: Sanitize content before sending to external API:
+```python
+def sanitize_for_api(text: str) -> str:
+    if not text:
+        return ""
+    # First normalize double single quotes to single (legacy data issue)
+    text = text.replace("''", "'")
+    # Then replace single quotes with HTML entity
+    return text.replace("'", "&#39;")
+```
+- **Location**: backend/content_publisher.py - `sanitize_for_api()`
+- **Date**: 2026-01-15
+
+### Background Task Pattern for Long-Running Operations
+- **Problem**: Browser times out when API operations take >30 seconds (e.g., publishing 162K+ URLs)
+- **Solution**: Use threading with task_id polling pattern:
+  1. Start background thread with unique task_id
+  2. Return task_id immediately to client
+  3. Client polls status endpoint every 2 seconds
+  4. Background thread updates shared dict with progress/result
+```python
+_tasks = {}
+_task_lock = threading.Lock()
+
+def start_task(params) -> str:
+    task_id = str(uuid.uuid4())[:8]
+    with _task_lock:
+        _tasks[task_id] = {"status": "pending", ...}
+    thread = threading.Thread(target=_run_task, args=(task_id, params))
+    thread.daemon = True
+    thread.start()
+    return task_id
+
+def get_task_status(task_id: str) -> Dict:
+    with _task_lock:
+        return _tasks.get(task_id, {"error": "Task not found"})
+```
+- **Location**: backend/content_publisher.py - `start_publish_task()`, `get_publish_task_status()`
+- **Date**: 2026-01-15
+
 ### Orphaned URLs After Content Deletion
 - **Problem**: URLs become "lost" when content is deleted (validation/regeneration) but URL not in werkvoorraad
 - **Symptoms**: Total URL count drops, URLs cannot be reprocessed
