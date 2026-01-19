@@ -2,7 +2,7 @@
 Content Publisher Service
 
 Publishes generated content (content_top) and FAQ content to the website-configuration API.
-All content is sent in a single API call (no batching).
+Supports batched publishing to handle large datasets.
 """
 import os
 import json
@@ -73,6 +73,52 @@ def faq_json_to_html(faq_json_str: str) -> str:
         return ""
 
 
+def faq_json_to_content_bottom(faq_json_str: str) -> str:
+    """
+    Convert FAQ JSON array to content_bottom format.
+    Only includes Q&As that have internal links (beslist.nl).
+
+    Input format: [{"question": "...", "answer": "..."}, ...]
+    Output format: <br /><strong>Question</strong><br>Answer<br>...
+    """
+    import re
+
+    if not faq_json_str:
+        return ""
+
+    try:
+        faq_list = json.loads(faq_json_str)
+        if not isinstance(faq_list, list):
+            return ""
+
+        # Simple pattern to detect internal links (beslist.nl in href)
+        internal_link_pattern = re.compile(r'href="[^"]*beslist\.nl', re.IGNORECASE)
+
+        html_parts = []
+        for item in faq_list:
+            question = item.get("question", "")
+            answer = item.get("answer", "")
+
+            # Only include if question or answer has internal links
+            has_internal_link = (
+                internal_link_pattern.search(question) or
+                internal_link_pattern.search(answer)
+            )
+
+            if question and answer and has_internal_link:
+                html_parts.append(
+                    f'<strong>{question}</strong><br>{answer}<br>'
+                )
+
+        if not html_parts:
+            return ""
+
+        # Start with <br /> and join all parts with <br /> for blank lines between questions
+        return "<br />" + "<br />".join(html_parts)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+
+
 def get_all_content_for_publishing() -> List[Dict]:
     """
     Fetch all content (content_top and FAQ) from database, merged by URL.
@@ -116,6 +162,7 @@ def get_all_content_for_publishing() -> List[Dict]:
             # Convert FAQ JSON to HTML if available
             if row['faq_json']:
                 url_data[url]["content_faq"] = faq_json_to_html(row['faq_json'])
+                url_data[url]["content_bottom"] = faq_json_to_content_bottom(row['faq_json'])
 
         return list(url_data.values())
 
@@ -157,11 +204,12 @@ def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
 
             content_top = sanitize_for_api(row['content_top'] or "")
             content_faq = sanitize_for_api(faq_json_to_html(row['faq_json'])) if row['faq_json'] else ""
+            content_bottom = sanitize_for_api(faq_json_to_content_bottom(row['faq_json'])) if row['faq_json'] else ""
 
             item = {
                 "url": url,
                 "content_top": content_top,
-                "content_bottom": "",
+                "content_bottom": content_bottom,
                 "content_faq": content_faq,
                 "country_language": "nl-nl"
             }
@@ -233,11 +281,12 @@ def get_all_content_items() -> List[Dict]:
         for row in rows:
             content_top = sanitize_for_api(row['content_top'] or "")
             content_faq = sanitize_for_api(faq_json_to_html(row['faq_json'])) if row['faq_json'] else ""
+            content_bottom = sanitize_for_api(faq_json_to_content_bottom(row['faq_json'])) if row['faq_json'] else ""
 
             item = {
                 "url": row['url'],
                 "content_top": content_top,
-                "content_bottom": "",
+                "content_bottom": content_bottom,
                 "content_faq": content_faq,
                 "country_language": "nl-nl"
             }
@@ -327,6 +376,141 @@ def publish_all_content(dry_run: bool = False, environment: str = None) -> Dict:
             "api_url": api_url,
             "total_urls": total_count
         }
+
+
+def publish_content_batched(batch_size: int = 5000, limit: int = None, dry_run: bool = False, environment: str = None) -> Dict:
+    """
+    Publish content in batches to avoid overwhelming the API.
+
+    Args:
+        batch_size: Number of items per API request (default: 5000)
+        limit: Maximum total items to publish (None = all)
+        dry_run: If True, just return stats without making API calls
+        environment: Target environment (dev, staging, production)
+
+    Returns:
+        Dict with results including per-batch status
+    """
+    env = environment or DEFAULT_ENV
+    api_url, api_key = get_api_config(env)
+
+    print(f"[Publisher] Fetching content from database...")
+    all_items = get_all_content_items()
+
+    # Apply limit if specified
+    if limit is not None:
+        all_items = all_items[:limit]
+
+    total_count = len(all_items)
+    print(f"[Publisher] Total URLs to publish: {total_count}")
+    print(f"[Publisher] Batch size: {batch_size}")
+    print(f"[Publisher] Target environment: {env} ({api_url})")
+
+    if dry_run:
+        num_batches = (total_count + batch_size - 1) // batch_size if total_count > 0 else 0
+        return {
+            "success": True,
+            "dry_run": True,
+            "environment": env,
+            "api_url": api_url,
+            "total_urls": total_count,
+            "batch_size": batch_size,
+            "num_batches": num_batches,
+            "payload_size_mb": round(len(json.dumps({"data": all_items})) / 1024 / 1024, 2)
+        }
+
+    if not all_items:
+        return {
+            "success": True,
+            "message": "No items to publish",
+            "environment": env,
+            "total_urls": 0
+        }
+
+    headers = {
+        "X-Api-Key": api_key,
+        "Content-Type": "application/json"
+    }
+
+    # Process in batches
+    total_published = 0
+    batch_results = []
+
+    for i in range(0, total_count, batch_size):
+        batch_num = (i // batch_size) + 1
+        batch_items = all_items[i:i + batch_size]
+
+        payload = {"data": batch_items}
+        payload_size = len(json.dumps(payload))
+
+        print(f"[Publisher] Batch {batch_num}: Sending {len(batch_items)} items ({payload_size / 1024 / 1024:.2f} MB)...")
+
+        try:
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=300  # 5 minute timeout per batch
+            )
+
+            batch_success = response.status_code in (200, 201)
+            batch_result = {
+                "batch": batch_num,
+                "items": len(batch_items),
+                "success": batch_success,
+                "status_code": response.status_code,
+                "response": response.text[:500] if response.text else None
+            }
+
+            if batch_success:
+                total_published += len(batch_items)
+                print(f"[Publisher] Batch {batch_num}: SUCCESS ({len(batch_items)} items)")
+            else:
+                print(f"[Publisher] Batch {batch_num}: FAILED (status {response.status_code})")
+                batch_results.append(batch_result)
+                # Stop on first failure
+                return {
+                    "success": False,
+                    "environment": env,
+                    "api_url": api_url,
+                    "total_urls": total_count,
+                    "items_published": total_published,
+                    "failed_at_batch": batch_num,
+                    "batch_results": batch_results,
+                    "error": f"Batch {batch_num} failed with status {response.status_code}"
+                }
+
+            batch_results.append(batch_result)
+
+        except requests.RequestException as e:
+            print(f"[Publisher] Batch {batch_num}: ERROR - {str(e)}")
+            batch_results.append({
+                "batch": batch_num,
+                "items": len(batch_items),
+                "success": False,
+                "error": str(e)
+            })
+            return {
+                "success": False,
+                "environment": env,
+                "api_url": api_url,
+                "total_urls": total_count,
+                "items_published": total_published,
+                "failed_at_batch": batch_num,
+                "batch_results": batch_results,
+                "error": str(e)
+            }
+
+    return {
+        "success": True,
+        "environment": env,
+        "api_url": api_url,
+        "total_urls": total_count,
+        "items_published": total_published,
+        "batch_size": batch_size,
+        "num_batches": len(batch_results),
+        "batch_results": batch_results
+    }
 
 
 # Background task functions

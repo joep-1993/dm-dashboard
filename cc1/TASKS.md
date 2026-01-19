@@ -10,6 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add content_bottom field to publishing - extracts FAQ Q&As with internal beslist.nl links, format: `<br /><strong>Question</strong><br>Answer<br>` with `<br />` between Q&A pairs for blank lines #claude-session:2026-01-19
+- [x] Add batched publishing support to content_publisher.py - tested API limits on staging (max ~14,000 items / ~57MB per request), discovered Beslist API replaces table on each request (batching won't work without API changes) #claude-session:2026-01-19
+- [x] Remove 1 URL containing /l/ from content_urls_joep table #claude-session:2026-01-19
 - [x] Add content publishing feature with background task pattern - supports dev/staging/production environments, single-payload publishing (no batching), SQL sanitization for apostrophes ('' → ' → &#39;), 10-minute timeout for large payloads (~512MB) #claude-session:2026-01-15
 - [x] Deduplicate content_urls_joep table (33,759 duplicates removed), add unique constraint on url column, copy 6,039 URLs from Redshift, reset 2,577 truncated content URLs to pending #claude-session:2026-01-15
 - [x] Add facet_not_available error type to FAQ processor - distinguishes invalid facet/value API errors (400) from generic failures, includes invalid_facet details in response #claude-session:2025-12-26

@@ -25,7 +25,7 @@ services:
       # Mount for live editing - no build needed!
       - ./backend:/app/backend
       - ./frontend:/app/frontend
-      - ./thema_ads_optimized:/app/thema_ads_optimized
+      - ../theme_ads/thema_ads_optimized:/app/thema_ads_optimized
       - ./themes:/app/themes
     depends_on:
       db:
