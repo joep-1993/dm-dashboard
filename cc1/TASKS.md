@@ -10,6 +10,15 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Remove conservative mode from Link Validation section in SEO Content Generator (HTML + JS) #claude-session:2026-01-20
+- [x] Update publish function: remove dry run option, add content type selection (all/seo_only/faq_only), remove dev environment option #claude-session:2026-01-20
+- [x] Add minimum 2 offers validation to link validator - PLPs with shopCount < 2 now treated as "gone" #claude-session:2026-01-20
+- [x] Change content_faq format from HTML divs to JSON-LD schema with script tag wrapper (schema_org_to_script_tag function) #claude-session:2026-01-20
+- [x] Fix production publish failures caused by case-insensitive duplicate URLs - added deduplication and removed 11 duplicate entries #claude-session:2026-01-20
+- [x] Successfully publish 164,286 URLs to production in single 1GB payload #claude-session:2026-01-20
+- [x] Configure OpenAI API key and Google Ads credentials in .env file #claude-session:2026-01-19
+- [x] Reset 10,545 failed/skipped content URLs and 2,451 failed/skipped FAQ URLs to pending for reprocessing #claude-session:2026-01-19
+- [x] Fix docker-compose mount path for thema_ads_optimized (../theme_ads/thema_ads_optimized) #claude-session:2026-01-19
 - [x] Add content_bottom field to publishing - extracts FAQ Q&As with internal beslist.nl links, format: `<br /><strong>Question</strong><br>Answer<br>` with `<br />` between Q&A pairs for blank lines #claude-session:2026-01-19
 - [x] Add batched publishing support to content_publisher.py - tested API limits on staging (max ~14,000 items / ~57MB per request), discovered Beslist API replaces table on each request (batching won't work without API changes) #claude-session:2026-01-19
 - [x] Remove 1 URL containing /l/ from content_urls_joep table #claude-session:2026-01-19
