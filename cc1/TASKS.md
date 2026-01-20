@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Change alert-info to alert-warning in app.js for consistent yellow styling across SEO Content Generator #claude-session:2026-01-20
+- [x] Update publishing section in SEO Content Generator to match FAQ Generator (remove dry run, add content type selection, remove dev environment) #claude-session:2026-01-20
 - [x] Remove conservative mode from Link Validation section in SEO Content Generator (HTML + JS) #claude-session:2026-01-20
 - [x] Update publish function: remove dry run option, add content type selection (all/seo_only/faq_only), remove dev environment option #claude-session:2026-01-20
 - [x] Add minimum 2 offers validation to link validator - PLPs with shopCount < 2 now treated as "gone" #claude-session:2026-01-20
