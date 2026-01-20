@@ -183,9 +183,16 @@
                             <div class="col-auto">
                                 <label for="publishEnvironment" class="form-label small mb-1">Environment</label>
                                 <select class="form-select" id="publishEnvironment" style="width: 150px;">
-                                    <option value="dev">Dev</option>
                                     <option value="staging">Staging</option>
                                     <option value="production">Production</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <label for="publishContentType" class="form-label small mb-1">Content Type</label>
+                                <select class="form-select" id="publishContentType" style="width: 150px;">
+                                    <option value="all">All</option>
+                                    <option value="seo_only">SEO Only</option>
+                                    <option value="faq_only">FAQ Only</option>
                                 </select>
                             </div>
                             <div class="col-auto d-flex align-items-end">
@@ -194,13 +201,8 @@
                                 </button>
                             </div>
                             <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-warning" onclick="publishContent(true)" id="publishDryRunBtn">
-                                    Dry Run
-                                </button>
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-danger" onclick="publishContent(false)" id="publishBtn">
-                                    Publish All
+                                <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">
+                                    Publish
                                 </button>
                             </div>
                         </div>
