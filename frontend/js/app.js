@@ -581,10 +581,8 @@ async function validateLinks() {
     const resultDiv = document.getElementById('validationResult');
     const batchSizeInput = document.getElementById('validationBatchSize');
     const parallelWorkersInput = document.getElementById('validationParallelWorkers');
-    const conservativeModeCheckbox = document.getElementById('validationConservativeModeCheckbox');
     const batchSize = parseInt(batchSizeInput.value) || 10;
     const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
-    const conservativeMode = conservativeModeCheckbox.checked;
 
     if (batchSize < 1) {
         alert('Batch size must be at least 1');
@@ -598,11 +596,10 @@ async function validateLinks() {
 
     validateBtn.disabled = true;
     validateBtn.textContent = 'Validating...';
-    const modeText = conservativeMode ? ' (Conservative Mode)' : '';
-    resultDiv.innerHTML = `<div class="alert alert-warning">Validating links in ${batchSize} content items with ${parallelWorkers} parallel workers${modeText}...</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating links in ${batchSize} content items with ${parallelWorkers} parallel workers...</div>`;
 
     try {
-        const response = await fetch(`${API_BASE}/api/validate-links?batch_size=${batchSize}&parallel_workers=${parallelWorkers}&conservative_mode=${conservativeMode}`, {
+        const response = await fetch(`${API_BASE}/api/validate-links?batch_size=${batchSize}&parallel_workers=${parallelWorkers}`, {
             method: 'POST'
         });
 

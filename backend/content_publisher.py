@@ -207,14 +207,17 @@ def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
 
         rows = cur.fetchall()
 
+        # Case-insensitive deduplication to prevent publish failures
         result = []
-        seen_urls = set()
+        seen_urls_lower = set()
 
         for row in rows:
             url = row['url']
-            if url in seen_urls:
+            url_lower = url.lower()
+
+            if url_lower in seen_urls_lower:
                 continue
-            seen_urls.add(url)
+            seen_urls_lower.add(url_lower)
 
             content_top = sanitize_for_api(row['content_top'] or "")
             # Use schema_org wrapped in script tag for content_faq
@@ -292,22 +295,39 @@ def get_all_content_items() -> List[Dict]:
 
         rows = cur.fetchall()
 
-        # Build result list - already unique due to COALESCE
+        # Build result list with case-insensitive deduplication
+        # This prevents publish failures from URLs that differ only in case
+        # (e.g., /type_parfum~123 vs /Type_parfum~123)
         result = []
+        seen_urls_lower = set()
+        duplicates_skipped = 0
+
         for row in rows:
+            url = row['url']
+            url_lower = url.lower()
+
+            # Skip case-insensitive duplicates
+            if url_lower in seen_urls_lower:
+                duplicates_skipped += 1
+                continue
+            seen_urls_lower.add(url_lower)
+
             content_top = sanitize_for_api(row['content_top'] or "")
             # Use schema_org wrapped in script tag for content_faq
             content_faq = sanitize_for_api(schema_org_to_script_tag(row['schema_org'])) if row['schema_org'] else ""
             content_bottom = sanitize_for_api(faq_json_to_content_bottom(row['faq_json'])) if row['faq_json'] else ""
 
             item = {
-                "url": row['url'],
+                "url": url,
                 "content_top": content_top,
                 "content_bottom": content_bottom,
                 "content_faq": content_faq,
                 "country_language": "nl-nl"
             }
             result.append(item)
+
+        if duplicates_skipped > 0:
+            print(f"[Publisher] Skipped {duplicates_skipped} case-insensitive duplicate URLs")
 
         return result
 
@@ -316,13 +336,13 @@ def get_all_content_items() -> List[Dict]:
         return_db_connection(conn)
 
 
-def publish_all_content(dry_run: bool = False, environment: str = None) -> Dict:
+def publish_all_content(environment: str = None, content_type: str = "all") -> Dict:
     """
-    Publish ALL content in a single API call (no batching).
+    Publish content in a single API call (no batching).
 
     Args:
-        dry_run: If True, just return stats without making API call
         environment: Target environment (dev, staging, production)
+        content_type: What to publish - "all", "seo_only", or "faq_only"
 
     Returns:
         Dict with results
@@ -330,23 +350,32 @@ def publish_all_content(dry_run: bool = False, environment: str = None) -> Dict:
     env = environment or DEFAULT_ENV
     api_url, api_key = get_api_config(env)
 
-    print(f"[Publisher] Fetching all content from database...")
+    print(f"[Publisher] Fetching content from database...")
     content_items = get_all_content_items()
+
+    # Filter based on content_type
+    if content_type == "seo_only":
+        # Only publish content_top, clear FAQ fields
+        content_items = [
+            {**item, "content_faq": "", "content_bottom": ""}
+            for item in content_items
+            if item.get("content_top")  # Only include items that have content_top
+        ]
+        print(f"[Publisher] Publishing SEO content only")
+    elif content_type == "faq_only":
+        # Only publish content_faq and content_bottom, clear content_top
+        content_items = [
+            {**item, "content_top": ""}
+            for item in content_items
+            if item.get("content_faq")  # Only include items that have content_faq
+        ]
+        print(f"[Publisher] Publishing FAQ content only")
+    else:
+        print(f"[Publisher] Publishing all content")
+
     total_count = len(content_items)
-
-    print(f"[Publisher] Total URLs with content: {total_count}")
+    print(f"[Publisher] Total URLs to publish: {total_count}")
     print(f"[Publisher] Target environment: {env} ({api_url})")
-
-    if dry_run:
-        return {
-            "success": True,
-            "dry_run": True,
-            "environment": env,
-            "api_url": api_url,
-            "total_urls": total_count,
-            "items_to_publish": total_count,
-            "payload_size_mb": round(len(json.dumps({"data": content_items})) / 1024 / 1024, 2)
-        }
 
     if not content_items:
         return {
@@ -531,14 +560,14 @@ def publish_content_batched(batch_size: int = 5000, limit: int = None, dry_run: 
 
 
 # Background task functions
-def _run_publish_task(task_id: str, environment: str):
+def _run_publish_task(task_id: str, environment: str, content_type: str = "all"):
     """Background worker to run the publish task."""
     with _task_lock:
         _publish_tasks[task_id]["status"] = "running"
         _publish_tasks[task_id]["started_at"] = time.time()
 
     try:
-        result = publish_all_content(dry_run=False, environment=environment)
+        result = publish_all_content(environment=environment, content_type=content_type)
         with _task_lock:
             _publish_tasks[task_id]["status"] = "completed"
             _publish_tasks[task_id]["result"] = result
@@ -550,10 +579,14 @@ def _run_publish_task(task_id: str, environment: str):
             _publish_tasks[task_id]["completed_at"] = time.time()
 
 
-def start_publish_task(environment: str) -> str:
+def start_publish_task(environment: str, content_type: str = "all") -> str:
     """
     Start a background publish task.
     Returns task_id that can be used to check status.
+
+    Args:
+        environment: Target environment (dev, staging, production)
+        content_type: What to publish - "all", "seo_only", or "faq_only"
     """
     import uuid
     task_id = str(uuid.uuid4())[:8]
@@ -562,6 +595,7 @@ def start_publish_task(environment: str) -> str:
         _publish_tasks[task_id] = {
             "status": "pending",
             "environment": environment,
+            "content_type": content_type,
             "created_at": time.time(),
             "started_at": None,
             "completed_at": None,
@@ -570,7 +604,7 @@ def start_publish_task(environment: str) -> str:
         }
 
     # Start background thread
-    thread = threading.Thread(target=_run_publish_task, args=(task_id, environment))
+    thread = threading.Thread(target=_run_publish_task, args=(task_id, environment, content_type))
     thread.daemon = True
     thread.start()
 

@@ -1831,31 +1831,30 @@ async def get_content_publish_curl(limit: int = 10, environment: str = "dev"):
 
 
 @app.post("/api/content-publish")
-async def publish_content(dry_run: bool = True, environment: str = "dev"):
+async def publish_content(environment: str = "dev", content_type: str = "all"):
     """
-    Publish all content to the website-configuration API in a single call.
+    Publish content to the website-configuration API in a single call.
 
     Args:
-        dry_run: If True (default), just return stats without making API call
         environment: Target environment (dev, staging, production)
+        content_type: What to publish - "all", "seo_only", or "faq_only"
     """
     try:
         if environment not in ("dev", "staging", "production"):
             raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
 
-        if dry_run:
-            # Dry run - return stats immediately
-            result = publish_all_content(dry_run=True, environment=environment)
-            return result
-        else:
-            # Start background task for actual publishing
-            task_id = start_publish_task(environment=environment)
-            return {
-                "status": "started",
-                "task_id": task_id,
-                "environment": environment,
-                "message": "Publishing started in background. Use /api/content-publish/status/{task_id} to check progress."
-            }
+        if content_type not in ("all", "seo_only", "faq_only"):
+            raise HTTPException(status_code=400, detail="Invalid content_type. Use: all, seo_only, faq_only")
+
+        # Start background task for publishing
+        task_id = start_publish_task(environment=environment, content_type=content_type)
+        return {
+            "status": "started",
+            "task_id": task_id,
+            "environment": environment,
+            "content_type": content_type,
+            "message": "Publishing started in background. Use /api/content-publish/status/{task_id} to check progress."
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
