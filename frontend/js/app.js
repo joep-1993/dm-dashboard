@@ -185,7 +185,7 @@ async function processAllUrls() {
     let totalFailed = 0;
     let batchCount = 0;
 
-    resultDiv.innerHTML = '<div class="alert alert-info">Starting batch processing...</div>';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Starting batch processing...</div>';
 
     try {
         // Get initial status
@@ -259,7 +259,7 @@ async function processAllUrls() {
             const batchTotal = data.total_attempted || 0;
             const batchFailed = batchTotal - batchProcessed;
 
-            let batchHtml = `<div class="alert alert-info">`;
+            let batchHtml = `<div class="alert alert-warning">`;
             batchHtml += `<strong>Batch ${batchCount} Complete:</strong> `;
             batchHtml += `${batchProcessed} successful, ${batchFailed} failed/skipped<br>`;
             batchHtml += `<strong>Total Progress:</strong> ${processedInThisRun} of ${totalToProcess} URLs (${progress}%)`;
@@ -402,7 +402,7 @@ async function uploadUrls() {
 
     uploadBtn.disabled = true;
     uploadBtn.textContent = 'Uploading...';
-    resultDiv.innerHTML = '<div class="alert alert-info">Uploading URLs...</div>';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Uploading URLs...</div>';
 
     try {
         const formData = new FormData();
@@ -455,7 +455,7 @@ async function uploadManualUrls() {
 
     uploadBtn.disabled = true;
     uploadBtn.textContent = 'Adding...';
-    resultDiv.innerHTML = '<div class="alert alert-info">Adding URLs...</div>';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Adding URLs...</div>';
 
     try {
         // Convert text to file-like blob
@@ -685,7 +685,7 @@ async function resetValidationHistory() {
 
     resetBtn.disabled = true;
     resetBtn.textContent = 'Resetting...';
-    resultDiv.innerHTML = '<div class="alert alert-info">Resetting validation history...</div>';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Resetting validation history...</div>';
 
     try {
         const response = await fetch(`${API_BASE}/api/validation-history/reset`, {
