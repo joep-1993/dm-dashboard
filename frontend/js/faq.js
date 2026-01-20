@@ -590,7 +590,7 @@ async function publishContent(dryRun = true) {
     publishBtn.disabled = true;
 
     const actionText = dryRun ? 'Dry Run' : 'Publishing';
-    resultDiv.innerHTML = `<div class="alert alert-info">${actionText} to ${environment}...</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">${actionText} to ${environment}...</div>`;
 
     try {
         const response = await fetch(
@@ -619,7 +619,7 @@ async function publishContent(dryRun = true) {
                 // Background task started - poll for status
                 const taskId = data.task_id;
                 resultDiv.innerHTML = `
-                    <div class="alert alert-info">
+                    <div class="alert alert-warning">
                         <strong>Publishing started...</strong><br>
                         Task ID: <code>${taskId}</code><br>
                         Environment: <code>${data.environment}</code><br>
