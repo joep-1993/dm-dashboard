@@ -75,13 +75,24 @@ def extract_from_url(url: str, maincat_mapping: Dict[str, str]) -> Tuple[Optiona
     return None, None
 
 
-def query_elasticsearch(index: str, pim_ids: List[str]) -> Dict[str, str]:
-    """Query Elasticsearch for plpUrls given a list of pimIds."""
+def query_elasticsearch(index: str, pim_ids: List[str], min_offers: int = 2) -> Dict[str, str]:
+    """
+    Query Elasticsearch for plpUrls given a list of pimIds.
+
+    Args:
+        index: Elasticsearch index name
+        pim_ids: List of pimIds to look up
+        min_offers: Minimum number of offers required (default: 2).
+                    Products with fewer offers are treated as "gone".
+
+    Returns:
+        Dict mapping pimId to plpUrl. Products with < min_offers return None.
+    """
     if not pim_ids:
         return {}
 
     query = {
-        "_source": ["plpUrl", "pimId"],
+        "_source": ["plpUrl", "pimId", "shopCount"],
         "size": len(pim_ids),
         "query": {
             "terms": {
@@ -96,14 +107,21 @@ def query_elasticsearch(index: str, pim_ids: List[str]) -> Dict[str, str]:
 
     data = response.json()
 
-    # Map pimId to plpUrl
+    # Map pimId to plpUrl (only if shopCount >= min_offers)
     result = {}
     for hit in data.get('hits', {}).get('hits', []):
         source = hit.get('_source', {})
         pim_id = source.get('pimId')
         plp_url = source.get('plpUrl')
+        shop_count = source.get('shopCount', 0) or 0
+
         if pim_id:
-            result[pim_id] = plp_url if plp_url else None
+            # Only return plpUrl if product has enough offers
+            if shop_count >= min_offers and plp_url:
+                result[pim_id] = plp_url
+            else:
+                # Treat as "gone" if not enough offers
+                result[pim_id] = None
 
     return result
 

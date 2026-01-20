@@ -73,6 +73,19 @@ def faq_json_to_html(faq_json_str: str) -> str:
         return ""
 
 
+def schema_org_to_script_tag(schema_org_str: str) -> str:
+    """
+    Wrap schema.org JSON-LD in a script tag for content_faq.
+
+    Input: JSON-LD string (FAQPage schema)
+    Output: <script type="application/ld+json">...</script>
+    """
+    if not schema_org_str:
+        return ""
+
+    return f'<script type="application/ld+json">\n{schema_org_str}\n</script>'
+
+
 def faq_json_to_content_bottom(faq_json_str: str) -> str:
     """
     Convert FAQ JSON array to content_bottom format.
@@ -183,7 +196,8 @@ def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
             SELECT
                 COALESCE(c.url, f.url) as url,
                 c.content as content_top,
-                f.faq_json as faq_json
+                f.faq_json as faq_json,
+                f.schema_org as schema_org
             FROM pa.content_urls_joep c
             FULL OUTER JOIN pa.faq_content f ON c.url = f.url
             WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
@@ -203,7 +217,8 @@ def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
             seen_urls.add(url)
 
             content_top = sanitize_for_api(row['content_top'] or "")
-            content_faq = sanitize_for_api(faq_json_to_html(row['faq_json'])) if row['faq_json'] else ""
+            # Use schema_org wrapped in script tag for content_faq
+            content_faq = sanitize_for_api(schema_org_to_script_tag(row['schema_org'])) if row['schema_org'] else ""
             content_bottom = sanitize_for_api(faq_json_to_content_bottom(row['faq_json'])) if row['faq_json'] else ""
 
             item = {
@@ -267,7 +282,8 @@ def get_all_content_items() -> List[Dict]:
             SELECT
                 COALESCE(c.url, f.url) as url,
                 c.content as content_top,
-                f.faq_json as faq_json
+                f.faq_json as faq_json,
+                f.schema_org as schema_org
             FROM pa.content_urls_joep c
             FULL OUTER JOIN pa.faq_content f ON c.url = f.url
             WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
@@ -280,7 +296,8 @@ def get_all_content_items() -> List[Dict]:
         result = []
         for row in rows:
             content_top = sanitize_for_api(row['content_top'] or "")
-            content_faq = sanitize_for_api(faq_json_to_html(row['faq_json'])) if row['faq_json'] else ""
+            # Use schema_org wrapped in script tag for content_faq
+            content_faq = sanitize_for_api(schema_org_to_script_tag(row['schema_org'])) if row['schema_org'] else ""
             content_bottom = sanitize_for_api(faq_json_to_content_bottom(row['faq_json'])) if row['faq_json'] else ""
 
             item = {
