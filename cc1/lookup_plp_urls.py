@@ -44,8 +44,13 @@ def extract_from_url(url: str, maincat_mapping: dict[str, str]) -> tuple[str | N
     1. Old: /p/gezond_mooi/nl-nl-gold-6150802976981/ -> maincat from mapping, pimId with prefix
     2. New: /p/product-name/286/6150802976981/ -> maincat_id and pimId directly from URL
 
+    Handles both relative (/p/...) and absolute (https://www.beslist.nl/p/...) URLs.
+
     Returns: (maincat_id, pimId) tuple, with pimId always in 'nl-nl-gold-XXX' format
     """
+    # Convert absolute URLs to relative for consistent processing
+    if url.startswith('https://www.beslist.nl'):
+        url = url.replace('https://www.beslist.nl', '')
     url = url.rstrip('/')
     parts = url.split('/')
 

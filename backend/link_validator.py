@@ -130,15 +130,18 @@ def extract_hyperlinks_from_content(content: str) -> List[str]:
     """
     Extract all href URLs from HTML content.
     Returns list of relative URLs found in <a href="..."> tags.
-    Only returns product URLs (starting with /p/).
+    Handles both relative (/p/...) and absolute (https://www.beslist.nl/p/...) URLs.
     """
     soup = BeautifulSoup(content, 'html.parser')
     links = []
 
     for link in soup.find_all('a', href=True):
         href = link['href']
-        # Only include product URLs (starting with /p/)
-        if href.startswith('/p/'):
+        # Include both relative /p/ and absolute beslist.nl/p/ URLs
+        if '/p/' in href:
+            # Convert absolute URLs to relative for consistent processing
+            if href.startswith('https://www.beslist.nl'):
+                href = href.replace('https://www.beslist.nl', '')
             links.append(href)
 
     return links

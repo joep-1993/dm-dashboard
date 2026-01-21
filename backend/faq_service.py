@@ -573,6 +573,7 @@ Vereisten:
   * Gebruik GEEN URLs met /c/ (categoriepagina's) - alleen productpagina URLs met /p/
   * Gebruik GEEN generieke verwijzingen zoals "deze gids", "deze pagina", "hier" of vergelijkbare vage linkteksten
   * Linktekst moet beschrijvend zijn en verwijzen naar het specifieke product
+  * HOUD DE LINKTEKST KORT (max 3-5 woorden). Vermijd lange productnamen met specificaties. Bijvoorbeeld: "Beeztees kattentuigje Hearts" in plaats van "Beeztees kattentuigje Hearts zwart 120 x 1 cm"
   * Als er geen relevante URL in de lijst staat, maak dan GEEN hyperlink
 - Verwerk 1-3 hyperlinks per antwoord waar relevant (naar specifieke producten)
 
