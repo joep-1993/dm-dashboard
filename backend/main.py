@@ -1874,3 +1874,199 @@ async def get_publish_status(task_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Unique Titles Publishing API
+# ============================================================================
+
+from backend.unique_titles import (
+    init_unique_titles_table,
+    bulk_upsert_titles,
+    get_all_titles,
+    get_titles_count,
+    generate_csv_for_upload,
+    upload_titles_to_api,
+    delete_title,
+    search_titles
+)
+
+# Initialize table on startup
+try:
+    init_unique_titles_table()
+except Exception as e:
+    print(f"[STARTUP] Could not initialize unique_titles table: {e}")
+
+
+@app.get("/api/unique-titles/status")
+async def get_unique_titles_status():
+    """Get statistics about unique titles in database."""
+    try:
+        count = get_titles_count()
+        return {
+            "total_titles": count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/unique-titles/import")
+async def import_unique_titles(file: UploadFile = File(...)):
+    """
+    Import a CSV file with titles into the database.
+
+    The CSV must have semicolon (;) as separator and include columns:
+    url, title, description, h1_title
+    (Other columns like id, active, created_at, updated_at are ignored)
+    """
+    try:
+        # Read file content
+        content = await file.read()
+
+        # Try to detect encoding
+        text_content = None
+        for encoding in ['utf-8', 'utf-8-sig', 'utf-16', 'utf-16-le', 'windows-1252', 'latin-1']:
+            try:
+                text_content = content.decode(encoding)
+                if '\x00' not in text_content:  # UTF-16 check
+                    break
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+
+        if text_content is None:
+            text_content = content.decode('latin-1')
+
+        # Parse CSV
+        lines = text_content.strip().split('\n')
+        if not lines:
+            raise HTTPException(status_code=400, detail="Empty file")
+
+        # Parse header to find column indices
+        header = lines[0].split(';')
+        header_lower = [h.strip().lower() for h in header]
+
+        # Find required column indices
+        try:
+            url_idx = header_lower.index('url')
+            title_idx = header_lower.index('title')
+            desc_idx = header_lower.index('description')
+            h1_idx = header_lower.index('h1_title')
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Missing required column: {e}")
+
+        # Parse data rows
+        titles = []
+        for line in lines[1:]:
+            if not line.strip():
+                continue
+
+            # Handle quoted fields with semicolons
+            parts = []
+            in_quotes = False
+            current = ''
+            for char in line:
+                if char == '"':
+                    in_quotes = not in_quotes
+                elif char == ';' and not in_quotes:
+                    parts.append(current.strip().strip('"'))
+                    current = ''
+                else:
+                    current += char
+            parts.append(current.strip().strip('"'))
+
+            if len(parts) > max(url_idx, title_idx, desc_idx, h1_idx):
+                titles.append({
+                    'url': parts[url_idx],
+                    'title': parts[title_idx],
+                    'description': parts[desc_idx],
+                    'h1_title': parts[h1_idx]
+                })
+
+        # Bulk upsert to database
+        result = bulk_upsert_titles(titles)
+
+        return {
+            "status": "success",
+            "rows_in_file": len(lines) - 1,
+            "imported": result["success_count"],
+            "errors": result["error_count"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/unique-titles/publish")
+async def publish_unique_titles():
+    """
+    Generate CSV from database and upload to the website-configuration API.
+    """
+    try:
+        result = upload_titles_to_api()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/unique-titles/preview")
+async def preview_unique_titles(offset: int = 0, limit: int = 100):
+    """Preview titles from database."""
+    try:
+        all_titles = get_all_titles()
+        total = len(all_titles)
+        titles = all_titles[offset:offset + limit]
+
+        return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "titles": titles
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/unique-titles/download-csv")
+async def download_unique_titles_csv():
+    """Download the generated CSV file."""
+    try:
+        csv_content = generate_csv_for_upload()
+
+        return StreamingResponse(
+            iter([csv_content]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=unique_titles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/unique-titles/{url:path}")
+async def delete_unique_title(url: str):
+    """Delete a title by URL."""
+    try:
+        success = delete_title(url)
+        if success:
+            return {"status": "success", "message": f"Deleted title for {url}"}
+        else:
+            raise HTTPException(status_code=404, detail="Title not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/unique-titles/search")
+async def search_unique_titles(q: str, limit: int = 100):
+    """Search titles by URL or title content."""
+    try:
+        results = search_titles(q, limit)
+        return {
+            "query": q,
+            "count": len(results),
+            "results": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

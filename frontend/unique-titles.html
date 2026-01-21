@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unique Titles Manager</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container">
+            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1" style="text-decoration: none;">Unique Titles Manager</a>
+            <div>
+                <a href="/static/dashboard.html" class="btn btn-outline-light btn-sm fw-bold">Dashboard</a>
+                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">SEO Content</a>
+                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
+                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+
+        <!-- Stats Row -->
+        <div class="row mb-4">
+            <div class="col-lg-8 mx-auto">
+                <div class="card">
+                    <div class="card-body d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center">
+                            <div class="text-center me-4 pe-4 border-end">
+                                <h3 id="totalTitles" class="text-primary mb-0">-</h3>
+                                <small class="text-muted">Titles in Database</small>
+                            </div>
+                            <div>
+                                <h5 class="mb-1">Publish to API</h5>
+                                <p class="text-muted mb-0 small">Upload to website-configuration API</p>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2 flex-nowrap">
+                            <a href="/api/unique-titles/download-csv" class="btn btn-outline-secondary">Download CSV</a>
+                            <button id="publishBtn" class="btn btn-success">
+                                <span id="publishBtnText">Publish All</span>
+                                <span id="publishSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <!-- Add/Edit Form -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Add / Edit Title</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="titleForm">
+                            <div class="mb-3">
+                                <label for="titleUrl" class="form-label">URL <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="titleUrl" placeholder="/products/category/..." required>
+                                <div class="form-text">Relative URL (e.g., /products/category/subcategory). Will be stored in lowercase.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="titleTitle" class="form-label">Title <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="titleTitle" placeholder="Page title..." required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="titleDescription" class="form-label">Description <span class="text-danger">*</span></label>
+                                <textarea class="form-control" id="titleDescription" rows="3" placeholder="Meta description..." required></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label for="titleH1" class="form-label">H1 Title <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="titleH1" placeholder="H1 heading..." required>
+                            </div>
+                            <button type="submit" class="btn btn-primary" id="saveBtn">
+                                <span id="saveBtnText">Save</span>
+                                <span id="saveSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="clearBtn">Clear</button>
+                        </form>
+                        <div id="saveResult" class="mt-3 d-none">
+                            <div class="alert" id="saveAlert"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Search Titles</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="input-group mb-3">
+                            <input type="text" class="form-control" id="searchInput" placeholder="Search by URL or title...">
+                            <button class="btn btn-outline-secondary" id="searchBtn">Search</button>
+                        </div>
+                        <div id="searchResults" style="max-height: 500px; overflow-y: auto;">
+                            <p class="text-muted text-center">Enter a search term to find titles</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Import CSV -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Import CSV to Database</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="importForm">
+                            <div class="mb-3">
+                                <label for="csvFile" class="form-label">Select CSV File</label>
+                                <input type="file" class="form-control" id="csvFile" accept=".csv" required>
+                                <div class="form-text">
+                                    CSV must have columns: url, title, description, h1_title (semicolon separated)
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-secondary" id="importBtn">
+                                <span id="importBtnText">Import to Database</span>
+                                <span id="importSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                        </form>
+                        <div id="importResult" class="mt-3 d-none">
+                            <div class="alert" id="importAlert"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = window.location.origin;
+
+        // Load stats on page load
+        window.addEventListener('DOMContentLoaded', loadStats);
+
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/unique-titles/status`);
+                const data = await response.json();
+                document.getElementById('totalTitles').textContent = data.total_titles?.toLocaleString() || '0';
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        // Add/Edit Form
+        document.getElementById('titleForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const url = document.getElementById('titleUrl').value.trim();
+            const title = document.getElementById('titleTitle').value.trim();
+            const description = document.getElementById('titleDescription').value.trim();
+            const h1_title = document.getElementById('titleH1').value.trim();
+
+            if (!url || !title || !description || !h1_title) {
+                alert('All fields are required');
+                return;
+            }
+
+            const btn = document.getElementById('saveBtn');
+            const btnText = document.getElementById('saveBtnText');
+            const spinner = document.getElementById('saveSpinner');
+
+            btn.disabled = true;
+            btnText.textContent = 'Saving...';
+            spinner.classList.remove('d-none');
+
+            try {
+                // Use import endpoint with single item
+                const csvContent = 'url;title;description;h1_title\n' +
+                    `${url};${title.replace(/;/g, ',')};${description.replace(/;/g, ',')};${h1_title.replace(/;/g, ',')}`;
+
+                const blob = new Blob([csvContent], { type: 'text/csv' });
+                const formData = new FormData();
+                formData.append('file', blob, 'single_title.csv');
+
+                const response = await fetch(`${API_BASE}/api/unique-titles/import`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                const resultDiv = document.getElementById('saveResult');
+                const resultAlert = document.getElementById('saveAlert');
+
+                resultDiv.classList.remove('d-none');
+
+                if (result.status === 'success' && result.imported > 0) {
+                    resultAlert.className = 'alert alert-success';
+                    resultAlert.textContent = `Title saved successfully for: ${url}`;
+                    loadStats();
+                } else {
+                    resultAlert.className = 'alert alert-danger';
+                    resultAlert.textContent = 'Failed to save title: ' + (result.detail || 'Unknown error');
+                }
+
+            } catch (error) {
+                alert('Save failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = 'Save';
+                spinner.classList.add('d-none');
+            }
+        });
+
+        // Clear form
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            document.getElementById('titleForm').reset();
+            document.getElementById('saveResult').classList.add('d-none');
+        });
+
+        // Import CSV
+        document.getElementById('importForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('csvFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+
+            const btn = document.getElementById('importBtn');
+            const btnText = document.getElementById('importBtnText');
+            const spinner = document.getElementById('importSpinner');
+
+            btn.disabled = true;
+            btnText.textContent = 'Importing...';
+            spinner.classList.remove('d-none');
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch(`${API_BASE}/api/unique-titles/import`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                const resultDiv = document.getElementById('importResult');
+                const resultAlert = document.getElementById('importAlert');
+
+                resultDiv.classList.remove('d-none');
+
+                if (result.status === 'success') {
+                    resultAlert.className = 'alert alert-success';
+                    resultAlert.innerHTML = `
+                        <strong>Import Successful!</strong><br>
+                        Rows in file: ${result.rows_in_file?.toLocaleString()}<br>
+                        Imported: ${result.imported?.toLocaleString()}<br>
+                        Errors: ${result.errors || 0}
+                    `;
+                    loadStats();
+                } else {
+                    resultAlert.className = 'alert alert-danger';
+                    resultAlert.textContent = 'Import failed: ' + (result.detail || 'Unknown error');
+                }
+
+            } catch (error) {
+                alert('Import failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = 'Import to Database';
+                spinner.classList.add('d-none');
+            }
+        });
+
+        // Publish
+        document.getElementById('publishBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('publishBtn');
+            const btnText = document.getElementById('publishBtnText');
+            const spinner = document.getElementById('publishSpinner');
+
+            btn.disabled = true;
+            btnText.textContent = 'Publishing...';
+            spinner.classList.remove('d-none');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/unique-titles/publish`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const records = result.api_response?.records || result.rows_uploaded;
+                    alert(`Published successfully! ${records?.toLocaleString()} records uploaded.`);
+                } else {
+                    alert('Publish failed: ' + (result.error || JSON.stringify(result.api_response)));
+                }
+
+            } catch (error) {
+                alert('Publish failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = 'Publish All';
+                spinner.classList.add('d-none');
+            }
+        });
+
+        // Search
+        document.getElementById('searchBtn').addEventListener('click', doSearch);
+        document.getElementById('searchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') doSearch();
+        });
+
+        async function doSearch() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) return;
+
+            const resultsDiv = document.getElementById('searchResults');
+            resultsDiv.innerHTML = '<p class="text-center"><span class="spinner-border spinner-border-sm"></span> Searching...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/unique-titles/search?q=${encodeURIComponent(query)}&limit=50`);
+                const data = await response.json();
+
+                if (data.results.length === 0) {
+                    resultsDiv.innerHTML = '<p class="text-muted text-center">No results found</p>';
+                    return;
+                }
+
+                resultsDiv.innerHTML = data.results.map(item => `
+                    <div class="card mb-2">
+                        <div class="card-body py-2">
+                            <p class="mb-1 small"><strong>URL:</strong> <code>${item.url}</code></p>
+                            <p class="mb-1 small"><strong>Title:</strong> ${item.title}</p>
+                            <p class="mb-1 small"><strong>H1:</strong> ${item.h1_title}</p>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editTitle('${encodeURIComponent(JSON.stringify(item))}')">Edit</button>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                resultsDiv.innerHTML = '<p class="text-danger text-center">Search failed</p>';
+            }
+        }
+
+        function editTitle(encodedItem) {
+            const item = JSON.parse(decodeURIComponent(encodedItem));
+            document.getElementById('titleUrl').value = item.url;
+            document.getElementById('titleTitle').value = item.title;
+            document.getElementById('titleDescription').value = item.description;
+            document.getElementById('titleH1').value = item.h1_title;
+            document.getElementById('titleUrl').focus();
+        }
+    </script>
+</body>
+</html>
