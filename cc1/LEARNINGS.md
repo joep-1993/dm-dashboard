@@ -1,6 +1,34 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## User Preferences
+- **Default Project**: When user says "the frontend" or "start the frontend" without specifying a project, always assume **dm-tools**
+- **Date**: 2026-01-23
+
+## AI Title Generation Service
+- **Purpose**: Generates SEO-optimized titles using OpenAI based on N8N flow logic
+- **Location**: `backend/ai_titles_service.py`
+- **Frontend**: Unique Titles Manager (`/static/unique-titles.html`)
+- **API Endpoints**:
+  - `GET /api/ai-titles/status` - Get processing status and stats
+  - `POST /api/ai-titles/start?batch_size=100` - Start AI title generation (batch size configurable)
+  - `POST /api/ai-titles/stop` - Stop processing
+  - `GET /api/ai-titles/recent` - Get recently processed titles
+- **Database columns added to `pa.unique_titles`**:
+  - `ai_processed` (BOOLEAN) - Whether URL has been processed
+  - `ai_processed_at` (TIMESTAMP) - When it was processed
+  - `ai_error` (TEXT) - Error message if failed
+  - `original_h1` (TEXT) - Original H1 before AI rewrite
+- **Generated Content**:
+  - **H1**: AI-rewritten title using adjectives (e.g., "Zwarte houten tv-meubels")
+  - **Title**: `{H1} kopen? | Tot !!DISCOUNT!! korting! | beslist.nl`
+  - **Description**: `Zoek je {H1}? &#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop &#10062; Shop {H1} met !!DISCOUNT!! korting online! &#10062; beslist.nl`
+- **OpenAI Prompt Rules**:
+  - Brand always first (e.g., "Apple iPhones" not "iPhones van Apple")
+  - ALWAYS use adjectives for colors/materials (e.g., "Houten bank" not "bank van hout")
+  - NEVER use "in" or "van" for colors/materials (e.g., "Zwarte stalen kast" not "kast in zwart")
+- **Date**: 2026-01-23
+
 ## Docker Commands
 ```bash
 # Development

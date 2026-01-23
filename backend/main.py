@@ -2070,3 +2070,68 @@ async def search_unique_titles(q: str, limit: int = 100):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# AI Title Generation API
+# ============================================================================
+
+from backend.ai_titles_service import (
+    init_ai_titles_columns,
+    get_processing_status,
+    start_processing,
+    stop_processing,
+    get_ai_titles_stats,
+    get_unprocessed_count,
+    get_recent_results,
+)
+
+# Initialize AI titles columns on startup
+try:
+    init_ai_titles_columns()
+except Exception as e:
+    print(f"[STARTUP] Could not initialize AI titles columns: {e}")
+
+
+@app.get("/api/ai-titles/status")
+async def get_ai_titles_status():
+    """Get AI title processing status."""
+    try:
+        processing = get_processing_status()
+        stats = get_ai_titles_stats()
+        return {
+            "processing": processing,
+            "stats": stats
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ai-titles/start")
+async def start_ai_titles_processing(batch_size: int = 100):
+    """Start AI title generation processing."""
+    try:
+        result = start_processing(batch_size)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ai-titles/stop")
+async def stop_ai_titles_processing():
+    """Stop AI title generation processing."""
+    try:
+        result = stop_processing()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ai-titles/recent")
+async def get_ai_titles_recent(limit: int = 20):
+    """Get recently processed AI titles."""
+    try:
+        results = get_recent_results(limit)
+        return {"results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
