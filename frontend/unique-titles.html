@@ -93,9 +93,13 @@
                         </div>
 
                         <div class="d-flex justify-content-center align-items-center gap-2">
-                            <div class="input-group" style="width: 200px;">
+                            <div class="input-group" style="width: 150px;">
                                 <span class="input-group-text">Batch</span>
-                                <input type="number" class="form-control" id="aiBatchSize" value="100" min="1" max="10000" placeholder="100">
+                                <input type="number" class="form-control" id="aiBatchSize" value="100" min="1" max="100000" placeholder="100">
+                            </div>
+                            <div class="input-group" style="width: 150px;">
+                                <span class="input-group-text">Workers</span>
+                                <input type="number" class="form-control" id="aiWorkers" value="15" min="1" max="50" placeholder="15">
                             </div>
                             <button id="aiStartBtn" class="btn btn-warning">
                                 <span id="aiStartBtnText">Start Batch</span>
@@ -245,6 +249,7 @@
                 const stopBtn = document.getElementById('aiStopBtn');
                 const errorContainer = document.getElementById('aiErrorContainer');
                 const batchSizeInput = document.getElementById('aiBatchSize').parentElement;
+                const workersInput = document.getElementById('aiWorkers').parentElement;
 
                 if (processing.is_running) {
                     statusBadge.className = 'badge bg-primary';
@@ -253,6 +258,7 @@
                     startBtn.classList.add('d-none');
                     processAllBtn.classList.add('d-none');
                     batchSizeInput.classList.add('d-none');
+                    workersInput.classList.add('d-none');
                     stopBtn.classList.remove('d-none');
 
                     // Update progress
@@ -275,6 +281,7 @@
                     startBtn.classList.remove('d-none');
                     processAllBtn.classList.remove('d-none');
                     batchSizeInput.classList.remove('d-none');
+                    workersInput.classList.remove('d-none');
                     stopBtn.classList.add('d-none');
 
                     document.getElementById('aiSuccessful').textContent = '-';
@@ -295,7 +302,7 @@
         }
 
         // AI Processing controls
-        async function startAiProcessing(batchSize) {
+        async function startAiProcessing(batchSize, numWorkers) {
             const startBtn = document.getElementById('aiStartBtn');
             const startBtnText = document.getElementById('aiStartBtnText');
             const startSpinner = document.getElementById('aiStartSpinner');
@@ -316,7 +323,7 @@
             }
 
             try {
-                const response = await fetch(`${API_BASE}/api/ai-titles/start?batch_size=${batchSize}`, { method: 'POST' });
+                const response = await fetch(`${API_BASE}/api/ai-titles/start?batch_size=${batchSize}&num_workers=${numWorkers}`, { method: 'POST' });
                 const result = await response.json();
 
                 if (result.status === 'started') {
@@ -338,11 +345,13 @@
 
         document.getElementById('aiStartBtn').addEventListener('click', async () => {
             const batchSize = parseInt(document.getElementById('aiBatchSize').value) || 100;
-            await startAiProcessing(batchSize);
+            const numWorkers = parseInt(document.getElementById('aiWorkers').value) || 15;
+            await startAiProcessing(batchSize, numWorkers);
         });
 
         document.getElementById('aiProcessAllBtn').addEventListener('click', async () => {
-            await startAiProcessing(0);
+            const numWorkers = parseInt(document.getElementById('aiWorkers').value) || 15;
+            await startAiProcessing(0, numWorkers);
         });
 
         document.getElementById('aiStopBtn').addEventListener('click', async () => {

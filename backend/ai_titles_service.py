@@ -8,7 +8,9 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from queue import Queue
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
@@ -426,11 +428,27 @@ def process_single_url(url: str) -> Dict:
         return result
 
 
-def _run_processing(max_urls: int = 100):
-    """Background thread for processing URLs.
+def _process_url_with_delay(url: str) -> Dict:
+    """Process a single URL with rate limiting delay."""
+    # Check stop flag before processing
+    with _state_lock:
+        if _processing_state["should_stop"]:
+            return {"url": url, "status": "skipped", "reason": "stopped"}
+
+    result = process_single_url(url)
+
+    # Rate limit: 0.5s delay = max 2 URLs per worker per second
+    time.sleep(0.5)
+
+    return result
+
+
+def _run_processing(max_urls: int = 100, num_workers: int = 15):
+    """Background thread for processing URLs with multiple workers.
 
     Args:
         max_urls: Maximum number of URLs to process in this batch. If 0, process all pending.
+        num_workers: Number of parallel workers (default 15).
     """
     global _processing_state
 
@@ -457,31 +475,46 @@ def _run_processing(max_urls: int = 100):
             return
 
         batch_msg = "all pending" if max_urls == 0 else f"batch of {max_urls}"
-        print(f"[AI_TITLES] Starting processing of {total} URLs ({batch_msg})")
+        print(f"[AI_TITLES] Starting processing of {total} URLs ({batch_msg}) with {num_workers} workers")
 
-        for url_data in urls:
-            # Check stop flag
-            with _state_lock:
-                if _processing_state["should_stop"]:
-                    print("[AI_TITLES] Processing stopped by user")
-                    break
-                _processing_state["current_url"] = url_data["url"]
+        # Process URLs using thread pool
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all URLs to the executor
+            future_to_url = {
+                executor.submit(_process_url_with_delay, url_data["url"]): url_data["url"]
+                for url_data in urls
+            }
 
-            # Process URL
-            result = process_single_url(url_data["url"])
+            # Process results as they complete
+            for future in as_completed(future_to_url):
+                # Check stop flag
+                with _state_lock:
+                    if _processing_state["should_stop"]:
+                        print("[AI_TITLES] Processing stopped by user")
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
 
-            with _state_lock:
-                _processing_state["processed"] += 1
-                if result["status"] == "success":
-                    _processing_state["successful"] += 1
-                elif result["status"] == "failed":
-                    _processing_state["failed"] += 1
-                    _processing_state["last_error"] = result.get("reason", "Unknown error")
-                else:
-                    _processing_state["skipped"] += 1
+                url = future_to_url[future]
+                try:
+                    result = future.result()
 
-            # Small delay to avoid rate limiting
-            time.sleep(0.5)
+                    with _state_lock:
+                        _processing_state["processed"] += 1
+                        _processing_state["current_url"] = url
+                        if result["status"] == "success":
+                            _processing_state["successful"] += 1
+                        elif result["status"] == "failed":
+                            _processing_state["failed"] += 1
+                            _processing_state["last_error"] = result.get("reason", "Unknown error")
+                        else:
+                            _processing_state["skipped"] += 1
+
+                except Exception as e:
+                    with _state_lock:
+                        _processing_state["processed"] += 1
+                        _processing_state["failed"] += 1
+                        _processing_state["last_error"] = str(e)
+                    print(f"[AI_TITLES] Worker error for {url}: {e}")
 
     except Exception as e:
         print(f"[AI_TITLES] Processing error: {e}")
@@ -495,21 +528,22 @@ def _run_processing(max_urls: int = 100):
         print("[AI_TITLES] Processing complete")
 
 
-def start_processing(batch_size: int = 100) -> Dict:
+def start_processing(batch_size: int = 100, num_workers: int = 15) -> Dict:
     """Start AI title processing in background.
 
     Args:
         batch_size: Number of URLs to process in this batch. If 0, process all pending.
+        num_workers: Number of parallel workers (default 15).
     """
     with _state_lock:
         if _processing_state["is_running"]:
             return {"status": "error", "message": "Processing already running"}
 
-    thread = threading.Thread(target=_run_processing, args=(batch_size,), daemon=True)
+    thread = threading.Thread(target=_run_processing, args=(batch_size, num_workers), daemon=True)
     thread.start()
 
     batch_msg = "all pending URLs" if batch_size == 0 else f"batch of {batch_size}"
-    return {"status": "started", "message": f"AI title processing started ({batch_msg})"}
+    return {"status": "started", "message": f"AI title processing started ({batch_msg}, {num_workers} workers)"}
 
 
 def stop_processing() -> Dict:
