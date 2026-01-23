@@ -33,6 +33,17 @@ window.addEventListener('DOMContentLoaded', () => {
             validationParallelWorkersInput.disabled = false;
         }
     });
+
+    // URL Lookup functionality
+    const lookupBtn = document.getElementById('lookupBtn');
+    const lookupUrlInput = document.getElementById('lookupUrl');
+
+    if (lookupBtn) {
+        lookupBtn.addEventListener('click', lookupContent);
+        lookupUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') lookupContent();
+        });
+    }
 });
 
 async function checkStatus() {
@@ -50,32 +61,92 @@ async function checkStatus() {
     }
 }
 
-async function testAPI() {
-    const prompt = document.getElementById('promptInput').value;
-    const resultDiv = document.getElementById('result');
+async function lookupContent() {
+    const url = document.getElementById('lookupUrl').value.trim();
+    const resultDiv = document.getElementById('lookupResult');
 
-    if (!prompt) {
-        alert('Please enter a prompt');
+    if (!url) {
+        resultDiv.innerHTML = '<div class="alert alert-warning">Please enter a URL</div>';
         return;
     }
 
-    resultDiv.textContent = 'Thinking...';
-    resultDiv.classList.add('show');
+    resultDiv.innerHTML = '<p class="text-muted"><span class="spinner-border spinner-border-sm"></span> Looking up...</p>';
 
     try {
-        const response = await fetch(`${API_BASE}/api/generate`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ prompt })
+        const response = await fetch(`${API_BASE}/api/content/lookup?url=${encodeURIComponent(url)}`);
+        const data = await response.json();
+
+        if (!data.found) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-info">
+                    <strong>Not found:</strong> ${data.url}<br>
+                    <small class="text-muted">${data.message}</small>
+                </div>
+            `;
+            return;
+        }
+
+        // Format the content for display
+        const createdAt = data.created_at ? new Date(data.created_at).toLocaleString() : 'Unknown';
+
+        resultDiv.innerHTML = `
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <code style="word-break: break-all;">${data.url}</code>
+                    <div>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteAndResetUrl('${data.url}')">
+                            Delete & Reset to Pending
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">Created: ${createdAt}</p>
+                    <div class="border rounded p-2 bg-light" style="max-height: 300px; overflow-y: auto; white-space: pre-wrap; font-size: 0.85rem;">${escapeHtml(data.content || 'No content')}</div>
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    }
+}
+
+async function deleteAndResetUrl(url) {
+    if (!confirm(`Delete content and reset URL to pending?\n\n${url}`)) {
+        return;
+    }
+
+    const resultDiv = document.getElementById('lookupResult');
+
+    try {
+        const response = await fetch(`${API_BASE}/api/result/${encodeURIComponent(url)}`, {
+            method: 'DELETE'
         });
 
         const data = await response.json();
-        resultDiv.textContent = data.response || 'No response';
+
+        if (data.status === 'success') {
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>Success:</strong> Content deleted and URL reset to pending.<br>
+                    <code>${url}</code>
+                </div>
+            `;
+            // Refresh stats
+            refreshStatus();
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.message || 'Unknown error'}</div>`;
+        }
+
     } catch (error) {
-        resultDiv.textContent = `Error: ${error.message}`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
     }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 let processingActive = false;

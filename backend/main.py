@@ -640,6 +640,52 @@ async def upload_urls(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/api/content/lookup")
+async def lookup_content(url: str):
+    """Look up content for a specific URL."""
+    try:
+        # Normalize URL
+        clean_url = url.strip().lower()
+        if not clean_url.startswith('/'):
+            # Extract path from full URL
+            if 'beslist.nl' in clean_url:
+                clean_url = '/' + clean_url.split('beslist.nl', 1)[-1].lstrip('/')
+            else:
+                clean_url = '/' + clean_url
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Look up in content table
+        cur.execute("""
+            SELECT url, content, created_at
+            FROM pa.content_urls_joep
+            WHERE url = %s
+        """, (clean_url,))
+        row = cur.fetchone()
+
+        cur.close()
+        return_db_connection(conn)
+
+        if not row:
+            return {
+                "found": False,
+                "url": clean_url,
+                "message": "URL not found in content database"
+            }
+
+        return {
+            "found": True,
+            "url": row['url'],
+            "content": row['content'],
+            "created_at": row['created_at'].isoformat() if row.get('created_at') else None
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/result/{url:path}")
 async def delete_result(url: str):
     """Delete a result and reset the URL back to pending state"""
