@@ -2108,10 +2108,16 @@ async def get_ai_titles_status():
 
 
 @app.post("/api/ai-titles/start")
-async def start_ai_titles_processing(batch_size: int = 100, num_workers: int = 15):
-    """Start AI title generation processing."""
+async def start_ai_titles_processing(batch_size: int = 100, num_workers: int = 15, use_api: bool = True):
+    """Start AI title generation processing.
+
+    Args:
+        batch_size: Number of URLs to process. 0 = all pending.
+        num_workers: Number of parallel workers.
+        use_api: If True, use productsearch API for faceted URLs. If False, use scraping.
+    """
     try:
-        result = start_processing(batch_size, num_workers)
+        result = start_processing(batch_size, num_workers, use_api)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

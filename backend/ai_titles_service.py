@@ -20,11 +20,45 @@ from urllib3.util.retry import Retry
 from openai import OpenAI
 
 from backend.database import get_db_connection, return_db_connection
+from backend.faq_service import fetch_products_api
 
 # Configuration
 USER_AGENT = "Beslist script voor SEO"
 AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
 BASE_URL = "https://www.beslist.nl"
+
+# Words that should be lowercase unless at start of sentence
+LOWERCASE_WORDS = {"met", "in", "zonder", "van", "voor", "tot", "op", "aan", "uit", "bij", "naar", "over", "onder", "tegen", "tussen", "door", "om", "en", "of"}
+
+
+def normalize_preposition_case(text: str) -> str:
+    """
+    Ensure prepositions like 'met', 'in', 'zonder' are lowercase,
+    unless they are at the start of the sentence.
+
+    Examples:
+        "Blauwe Feestwimpers Met Glitter" -> "Blauwe Feestwimpers met Glitter"
+        "Met glitter feestwimpers" -> "Met glitter feestwimpers" (start of sentence)
+    """
+    if not text:
+        return text
+
+    words = text.split()
+    result = []
+
+    for i, word in enumerate(words):
+        # Check if word (without punctuation) is a preposition
+        word_lower = word.lower().rstrip('.,!?;:')
+        if word_lower in LOWERCASE_WORDS and i > 0:
+            # Not at start, make lowercase but preserve any trailing punctuation
+            if word[-1] in '.,!?;:':
+                result.append(word_lower + word[-1])
+            else:
+                result.append(word_lower)
+        else:
+            result.append(word)
+
+    return ' '.join(result)
 
 
 def format_dimensions(text: str) -> str:
@@ -332,6 +366,95 @@ Geef ALLEEN de JSON terug, geen andere tekst."""
         return None
 
 
+def generate_title_from_api(url: str) -> Optional[Dict]:
+    """
+    Generate title using productsearch API + OpenAI improvement.
+
+    This method:
+    1. Fetches H1 and facet data from the productsearch API
+    2. Uses OpenAI to improve the H1 while keeping facet values intact
+    3. Returns the improved H1 and original H1
+
+    Returns dict with h1_title, original_h1, or None on failure.
+    """
+    # Step 1: Fetch from productsearch API
+    page_data = fetch_products_api(url)
+
+    if not page_data:
+        print(f"[AI_TITLES] API fetch failed for {url}")
+        return None
+
+    if page_data.get("error"):
+        print(f"[AI_TITLES] API error for {url}: {page_data.get('error')}")
+        return None
+
+    api_h1 = page_data.get("h1_title", "")
+    selected_facets = page_data.get("selected_facets", [])
+
+    if not api_h1:
+        print(f"[AI_TITLES] No H1 from API for {url}")
+        return None
+
+    # Step 2: Use OpenAI to improve the H1
+    client = get_openai_client()
+    if not client:
+        # If no OpenAI, just return the API H1
+        return {
+            "h1_title": api_h1,
+            "original_h1": api_h1,
+        }
+
+    # Build facet values list - these should stay together
+    facet_values = [f['detail_value'] for f in selected_facets]
+    facet_values_str = ", ".join([f'"{v}"' for v in facet_values])
+
+    # Build facet info for context
+    facet_info = ", ".join([f"{f['facet_name']}: \"{f['detail_value']}\"" for f in selected_facets])
+
+    prompt = f"""Je bent een SEO-expert. Verbeter deze titel tot een goedlopende en grammaticaal correcte H1 zonder "-".
+
+Huidige titel van API: "{api_h1}"
+
+Facetten (naam: waarde): {facet_info}
+
+BELANGRIJK - Facetwaarden die INTACT moeten blijven (niet splitsen of herschikken):
+{facet_values_str}
+
+Regels:
+1. Gebruik ALLEEN de woorden uit de titel en facetten - bedenk geen nieuwe woorden.
+2. Facetwaarden zijn vaste combinaties en mogen NIET opgesplitst worden.
+   Bijvoorbeeld: "Rode Duivels" is één thema, niet "Rode" + "Duivels".
+3. Merk ALTIJD vooraan (bijv. "Apple iPhones" niet "iPhones van Apple").
+4. Kleuren en materialen als bijvoeglijk naamwoord VOOR het zelfstandig naamwoord.
+5. NOOIT "in", "van", "met" of "voor" toevoegen voor kleuren/materialen.
+6. Maak de titel natuurlijk lopend Nederlands.
+
+Geef ALLEEN de verbeterde titel terug, geen uitleg."""
+
+    try:
+        response = client.chat.completions.create(
+            model=AI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0.3
+        )
+
+        improved_h1 = response.choices[0].message.content.strip().strip('"')
+
+        return {
+            "h1_title": improved_h1,
+            "original_h1": api_h1,
+        }
+
+    except Exception as e:
+        print(f"[AI_TITLES] OpenAI improvement error for {url}: {e}")
+        # Return API H1 as fallback
+        return {
+            "h1_title": api_h1,
+            "original_h1": api_h1,
+        }
+
+
 def update_title_record(url: str, h1_title: str, title: str, description: str, original_h1: str = None, error: str = None):
     """Update a unique_titles record with AI-generated content."""
     conn = get_db_connection()
@@ -370,37 +493,61 @@ def update_title_record(url: str, h1_title: str, title: str, description: str, o
         return_db_connection(conn)
 
 
-def process_single_url(url: str) -> Dict:
-    """Process a single URL for AI title generation."""
+def process_single_url(url: str, use_api: bool = True) -> Dict:
+    """Process a single URL for AI title generation.
+
+    Args:
+        url: The URL to process
+        use_api: If True, use productsearch API + OpenAI for faceted URLs.
+                 If False, always use scraping + OpenAI method.
+    """
     result = {"url": url, "status": "pending"}
 
     try:
-        # Step 1: Scrape page for H1
-        scraped = scrape_page_h1(url)
+        # Check if URL has facets (contains "~~" or "/c/")
+        has_facets = "~~" in url or "/c/" in url
 
-        if not scraped or not scraped.get("h1_title"):
-            result["status"] = "failed"
-            result["reason"] = "Could not extract H1 from page"
-            update_title_record(url, None, None, None, error="scrape_failed")
-            return result
+        if use_api and has_facets:
+            # Use productsearch API + OpenAI method for faceted URLs
+            ai_result = generate_title_from_api(url)
 
-        h1_title = scraped["h1_title"]
-        discount = scraped.get("discount")
+            if not ai_result:
+                # Fallback to scraping method
+                print(f"[AI_TITLES] API method failed for {url}, falling back to scraping")
+                ai_result = None
+        else:
+            ai_result = None
 
-        # Step 2: Generate AI title
-        ai_result = generate_ai_title(h1_title, url)
-
+        # Fallback: Use scraping + OpenAI method
         if not ai_result:
-            result["status"] = "failed"
-            result["reason"] = "AI generation failed"
-            update_title_record(url, None, None, None, error="ai_failed")
-            return result
+            # Step 1: Scrape page for H1
+            scraped = scrape_page_h1(url)
+
+            if not scraped or not scraped.get("h1_title"):
+                result["status"] = "failed"
+                result["reason"] = "Could not extract H1 from page"
+                update_title_record(url, None, None, None, error="scrape_failed")
+                return result
+
+            h1_title = scraped["h1_title"]
+
+            # Step 2: Generate AI title
+            ai_result = generate_ai_title(h1_title, url)
+
+            if not ai_result:
+                result["status"] = "failed"
+                result["reason"] = "AI generation failed"
+                update_title_record(url, None, None, None, error="ai_failed")
+                return result
 
         new_h1 = ai_result["h1_title"]
-        original_h1 = ai_result.get("original_h1", h1_title)
+        original_h1 = ai_result.get("original_h1", new_h1)
 
-        # Step 3: Format dimensions (e.g., "31 cm 115 cm" -> "31 cm x 115 cm")
+        # Step 3: Apply text formatting
+        # Format dimensions (e.g., "31 cm 115 cm" -> "31 cm x 115 cm")
         new_h1 = format_dimensions(new_h1)
+        # Normalize preposition case (e.g., "Met glitter" -> "met glitter" unless at start)
+        new_h1 = normalize_preposition_case(new_h1)
 
         # Step 4: Create SEO title
         # Format: "{h1} kopen? | Tot !!DISCOUNT!! korting! | beslist.nl"
@@ -428,14 +575,14 @@ def process_single_url(url: str) -> Dict:
         return result
 
 
-def _process_url_with_delay(url: str) -> Dict:
+def _process_url_with_delay(url: str, use_api: bool = True) -> Dict:
     """Process a single URL with rate limiting delay."""
     # Check stop flag before processing
     with _state_lock:
         if _processing_state["should_stop"]:
             return {"url": url, "status": "skipped", "reason": "stopped"}
 
-    result = process_single_url(url)
+    result = process_single_url(url, use_api=use_api)
 
     # Rate limit: 0.5s delay = max 2 URLs per worker per second
     time.sleep(0.5)
@@ -443,12 +590,13 @@ def _process_url_with_delay(url: str) -> Dict:
     return result
 
 
-def _run_processing(max_urls: int = 100, num_workers: int = 15):
+def _run_processing(max_urls: int = 100, num_workers: int = 15, use_api: bool = True):
     """Background thread for processing URLs with multiple workers.
 
     Args:
         max_urls: Maximum number of URLs to process in this batch. If 0, process all pending.
         num_workers: Number of parallel workers (default 15).
+        use_api: If True, use productsearch API for faceted URLs. If False, use scraping.
     """
     global _processing_state
 
@@ -475,13 +623,14 @@ def _run_processing(max_urls: int = 100, num_workers: int = 15):
             return
 
         batch_msg = "all pending" if max_urls == 0 else f"batch of {max_urls}"
-        print(f"[AI_TITLES] Starting processing of {total} URLs ({batch_msg}) with {num_workers} workers")
+        method_msg = "API+OpenAI" if use_api else "Scraping+OpenAI"
+        print(f"[AI_TITLES] Starting processing of {total} URLs ({batch_msg}) with {num_workers} workers using {method_msg}")
 
         # Process URLs using thread pool
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             # Submit all URLs to the executor
             future_to_url = {
-                executor.submit(_process_url_with_delay, url_data["url"]): url_data["url"]
+                executor.submit(_process_url_with_delay, url_data["url"], use_api): url_data["url"]
                 for url_data in urls
             }
 
@@ -528,22 +677,24 @@ def _run_processing(max_urls: int = 100, num_workers: int = 15):
         print("[AI_TITLES] Processing complete")
 
 
-def start_processing(batch_size: int = 100, num_workers: int = 15) -> Dict:
+def start_processing(batch_size: int = 100, num_workers: int = 15, use_api: bool = True) -> Dict:
     """Start AI title processing in background.
 
     Args:
         batch_size: Number of URLs to process in this batch. If 0, process all pending.
         num_workers: Number of parallel workers (default 15).
+        use_api: If True, use productsearch API for faceted URLs. If False, use scraping.
     """
     with _state_lock:
         if _processing_state["is_running"]:
             return {"status": "error", "message": "Processing already running"}
 
-    thread = threading.Thread(target=_run_processing, args=(batch_size, num_workers), daemon=True)
+    thread = threading.Thread(target=_run_processing, args=(batch_size, num_workers, use_api), daemon=True)
     thread.start()
 
     batch_msg = "all pending URLs" if batch_size == 0 else f"batch of {batch_size}"
-    return {"status": "started", "message": f"AI title processing started ({batch_msg}, {num_workers} workers)"}
+    method_msg = "API+OpenAI" if use_api else "Scraping+OpenAI"
+    return {"status": "started", "message": f"AI title processing started ({batch_msg}, {num_workers} workers, {method_msg})"}
 
 
 def stop_processing() -> Dict:
