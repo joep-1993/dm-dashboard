@@ -24,6 +24,33 @@ USER_AGENT = "Beslist script voor SEO"
 AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
 BASE_URL = "https://www.beslist.nl"
 
+
+def format_dimensions(text: str) -> str:
+    """
+    Format dimension patterns to include 'x' between measurements.
+
+    Examples:
+        "31 cm 115 cm" -> "31 cm x 115 cm"
+        "100 cm 50 cm 30 cm" -> "100 cm x 50 cm x 30 cm"
+        "2 meter 3 meter" -> "2 meter x 3 meter"
+    """
+    if not text:
+        return text
+
+    # Pattern matches: number + unit, followed by space and another number + unit
+    # Units: cm, mm, m, meter, inch, inches, "
+    # This pattern finds consecutive dimension patterns and adds 'x' between them
+    pattern = r'(\d+(?:[.,]\d+)?\s*(?:cm|mm|m|meter|inch|inches|"))\s+(\d+(?:[.,]\d+)?\s*(?:cm|mm|m|meter|inch|inches|"))'
+
+    # Keep applying the pattern until no more matches (handles 3+ dimensions)
+    prev_text = None
+    while prev_text != text:
+        prev_text = text
+        text = re.sub(pattern, r'\1 x \2', text, flags=re.IGNORECASE)
+
+    return text
+
+
 # Processing state
 _processing_state = {
     "is_running": False,
@@ -370,15 +397,18 @@ def process_single_url(url: str) -> Dict:
         new_h1 = ai_result["h1_title"]
         original_h1 = ai_result.get("original_h1", h1_title)
 
-        # Step 3: Create SEO title
+        # Step 3: Format dimensions (e.g., "31 cm 115 cm" -> "31 cm x 115 cm")
+        new_h1 = format_dimensions(new_h1)
+
+        # Step 4: Create SEO title
         # Format: "{h1} kopen? | Tot !!DISCOUNT!! korting! | beslist.nl"
         seo_title = f"{new_h1} kopen? | Tot !!DISCOUNT!! korting! | beslist.nl"
 
-        # Step 4: Create SEO description
+        # Step 5: Create SEO description
         # Format: "Zoek je {h1}? &#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop &#10062; Shop {h1} met !!DISCOUNT!! korting online! &#10062; beslist.nl"
         seo_description = f"Zoek je {new_h1}? &#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop &#10062; Shop {new_h1} met !!DISCOUNT!! korting online! &#10062; beslist.nl"
 
-        # Step 5: Update database
+        # Step 6: Update database
         if update_title_record(url, new_h1, seo_title, seo_description, original_h1):
             result["status"] = "success"
             result["h1_title"] = new_h1
