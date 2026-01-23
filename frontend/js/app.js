@@ -12,33 +12,37 @@ window.addEventListener('DOMContentLoaded', () => {
     const conservativeCheckbox = document.getElementById('conservativeModeCheckbox');
     const parallelWorkersInput = document.getElementById('parallelWorkersInput');
 
-    conservativeCheckbox.addEventListener('change', function() {
-        if (this.checked) {
-            parallelWorkersInput.value = 1;
-            parallelWorkersInput.disabled = true;
-        } else {
-            parallelWorkersInput.disabled = false;
-        }
-    });
+    if (conservativeCheckbox && parallelWorkersInput) {
+        conservativeCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                parallelWorkersInput.value = 1;
+                parallelWorkersInput.disabled = true;
+            } else {
+                parallelWorkersInput.disabled = false;
+            }
+        });
+    }
 
     // Handle conservative mode checkbox for link validation
     const validationConservativeCheckbox = document.getElementById('validationConservativeModeCheckbox');
     const validationParallelWorkersInput = document.getElementById('validationParallelWorkers');
 
-    validationConservativeCheckbox.addEventListener('change', function() {
-        if (this.checked) {
-            validationParallelWorkersInput.value = 1;
-            validationParallelWorkersInput.disabled = true;
-        } else {
-            validationParallelWorkersInput.disabled = false;
-        }
-    });
+    if (validationConservativeCheckbox && validationParallelWorkersInput) {
+        validationConservativeCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                validationParallelWorkersInput.value = 1;
+                validationParallelWorkersInput.disabled = true;
+            } else {
+                validationParallelWorkersInput.disabled = false;
+            }
+        });
+    }
 
     // URL Lookup functionality
     const lookupBtn = document.getElementById('lookupBtn');
     const lookupUrlInput = document.getElementById('lookupUrl');
 
-    if (lookupBtn) {
+    if (lookupBtn && lookupUrlInput) {
         lookupBtn.addEventListener('click', lookupContent);
         lookupUrlInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') lookupContent();
@@ -47,16 +51,19 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 async function checkStatus() {
+    const statusEl = document.getElementById('status');
+    if (!statusEl) return;
+
     try {
         const response = await fetch(`${API_BASE}/`);
         const data = await response.json();
-        document.getElementById('status').innerHTML = `
+        statusEl.innerHTML = `
             <span class="status-ok">✓ Connected</span> |
             Project: ${data.project} |
             Server Time: ${new Date(data.timestamp).toLocaleTimeString()}
         `;
     } catch (error) {
-        document.getElementById('status').innerHTML =
+        statusEl.innerHTML =
             '<span class="status-error">✗ Cannot connect to backend</span>';
     }
 }
@@ -384,11 +391,15 @@ function stopProcessing() {
 }
 
 async function refreshStatus() {
+    // Only run on pages that have the status elements
+    const totalUrlsEl = document.getElementById('totalUrls');
+    if (!totalUrlsEl) return;
+
     try {
         const response = await fetch(`${API_BASE}/api/status`);
         const data = await response.json();
 
-        document.getElementById('totalUrls').textContent = data.total_urls;
+        totalUrlsEl.textContent = data.total_urls;
         document.getElementById('processedUrls').textContent = data.processed;
         document.getElementById('skippedUrls').textContent = data.skipped || 0;
         document.getElementById('failedUrls').textContent = data.failed || 0;
