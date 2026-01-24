@@ -800,6 +800,8 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
         moved_to_pending = 0
         urls_with_gone_products = []  # Only these get kopteksten reset to 0
         urls_to_update_content = []  # URLs where content needs updating (replaced URLs)
+        url_to_content = {url: content for url, content in content_items}  # For backup
+        url_to_gone_details = {}  # Store gone_urls details for backup
 
         # Process validation results
         for validation_result in validation_results:
@@ -835,6 +837,7 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
             # Handle gone products - need to regenerate content
             if has_gone:
                 urls_with_gone_products.append(content_url)
+                url_to_gone_details[content_url] = validation_result['gone_urls']
                 moved_to_pending += 1
 
             results.append({
@@ -859,6 +862,23 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
         # Delete/reset operations for gone products only
         if urls_with_gone_products:
             placeholders = ','.join(['%s'] * len(urls_with_gone_products))
+
+            # Backup content to history table before deletion
+            cur.execute(f"""
+                SELECT url, content, created_at FROM pa.content_urls_joep
+                WHERE url IN ({placeholders})
+            """, urls_with_gone_products)
+            content_to_backup = cur.fetchall()
+
+            for row in content_to_backup:
+                url = row['url']
+                gone_urls = url_to_gone_details.get(url, [])
+                cur.execute("""
+                    INSERT INTO pa.content_history (url, content, reset_reason, reset_details, original_created_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (url, row['content'], 'gone_products', json.dumps({'gone_urls': gone_urls}), row['created_at']))
+
+            print(f"[VALIDATE-LINKS] Backed up {len(content_to_backup)} URLs to content_history")
 
             # Delete from content table (local PostgreSQL)
             cur.execute(f"""
@@ -948,6 +968,8 @@ def validate_all_links(parallel_workers: int = 3):
             moved_to_pending = 0
             urls_with_gone_products = []
             urls_to_update_content = []
+            url_to_content = {url: content for url, content in content_items}  # For backup
+            url_to_gone_details = {}  # Store gone_urls details for backup
 
             # Process validation results
             for validation_result in validation_results:
@@ -979,6 +1001,7 @@ def validate_all_links(parallel_workers: int = 3):
 
                 if has_gone:
                     urls_with_gone_products.append(content_url)
+                    url_to_gone_details[content_url] = validation_result['gone_urls']
                     moved_to_pending += 1
 
             # Update corrected content in local database (batched for performance)
@@ -992,6 +1015,22 @@ def validate_all_links(parallel_workers: int = 3):
             # Delete/reset operations for gone products only
             if urls_with_gone_products:
                 placeholders = ','.join(['%s'] * len(urls_with_gone_products))
+
+                # Backup content to history table before deletion
+                cur.execute(f"""
+                    SELECT url, content, created_at FROM pa.content_urls_joep
+                    WHERE url IN ({placeholders})
+                """, urls_with_gone_products)
+                content_to_backup = cur.fetchall()
+
+                for row in content_to_backup:
+                    url = row['url']
+                    gone_urls = url_to_gone_details.get(url, [])
+                    cur.execute("""
+                        INSERT INTO pa.content_history (url, content, reset_reason, reset_details, original_created_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (url, row['content'], 'gone_products', json.dumps({'gone_urls': gone_urls}), row['created_at']))
+
                 cur.execute(f"""
                     DELETE FROM pa.content_urls_joep
                     WHERE url IN ({placeholders})

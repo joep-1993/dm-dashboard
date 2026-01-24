@@ -128,6 +128,19 @@ def init_db():
         )
     """)
 
+    # Create content history/backup table (stores content before reset/deletion)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pa.content_history (
+            id SERIAL PRIMARY KEY,
+            url TEXT NOT NULL,
+            content TEXT,
+            reset_reason TEXT,
+            reset_details JSONB,
+            original_created_at TIMESTAMP,
+            reset_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Thema Ads tables
     cur.execute("""
         CREATE TABLE IF NOT EXISTS thema_ads_jobs (
@@ -199,6 +212,8 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_werkvoorraad_check_url ON pa.jvs_seo_werkvoorraad_kopteksten_check(url)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_werkvoorraad_check_status ON pa.jvs_seo_werkvoorraad_kopteksten_check(status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_link_validation_content_url ON pa.link_validation_results(content_url)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_content_history_url ON pa.content_history(url)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_content_history_reset_at ON pa.content_history(reset_at)")
 
     conn.commit()
     cur.close()
