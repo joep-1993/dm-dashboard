@@ -8,21 +8,6 @@ window.addEventListener('DOMContentLoaded', () => {
     checkStatus();
     refreshStatus();
 
-    // Handle conservative mode checkbox for SEO content generation
-    const conservativeCheckbox = document.getElementById('conservativeModeCheckbox');
-    const parallelWorkersInput = document.getElementById('parallelWorkersInput');
-
-    if (conservativeCheckbox && parallelWorkersInput) {
-        conservativeCheckbox.addEventListener('change', function() {
-            if (this.checked) {
-                parallelWorkersInput.value = 1;
-                parallelWorkersInput.disabled = true;
-            } else {
-                parallelWorkersInput.disabled = false;
-            }
-        });
-    }
-
     // Handle conservative mode checkbox for link validation
     const validationConservativeCheckbox = document.getElementById('validationConservativeModeCheckbox');
     const validationParallelWorkersInput = document.getElementById('validationParallelWorkers');
@@ -164,10 +149,8 @@ async function processUrls() {
     const resultDiv = document.getElementById('processResult');
     const batchSizeInput = document.getElementById('batchSizeInput');
     const parallelWorkersInput = document.getElementById('parallelWorkersInput');
-    const conservativeModeCheckbox = document.getElementById('conservativeModeCheckbox');
     const batchSize = parseInt(batchSizeInput.value) || 10;
     const parallelWorkers = parseInt(parallelWorkersInput.value) || 1;
-    const conservativeMode = conservativeModeCheckbox.checked;
 
     if (batchSize < 1) {
         alert('Batch size must be at least 1');
@@ -181,11 +164,10 @@ async function processUrls() {
 
     btn.disabled = true;
     btn.textContent = 'Processing...';
-    const modeText = conservativeMode ? ' (Conservative Mode)' : '';
-    resultDiv.innerHTML = `<div class="alert alert-warning">Processing ${batchSize} URL(s) with ${parallelWorkers} parallel worker(s)${modeText}...</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Processing ${batchSize} URL(s) with ${parallelWorkers} parallel worker(s)...</div>`;
 
     try {
-        const response = await fetch(`${API_BASE}/api/process-urls?batch_size=${batchSize}&parallel_workers=${parallelWorkers}&conservative_mode=${conservativeMode}`, {
+        const response = await fetch(`${API_BASE}/api/process-urls?batch_size=${batchSize}&parallel_workers=${parallelWorkers}`, {
             method: 'POST'
         });
 
@@ -245,10 +227,8 @@ async function processAllUrls() {
     const resultDiv = document.getElementById('processResult');
     const batchSizeInput = document.getElementById('batchSizeInput');
     const parallelWorkersInput = document.getElementById('parallelWorkersInput');
-    const conservativeModeCheckbox = document.getElementById('conservativeModeCheckbox');
     const batchSize = parseInt(batchSizeInput.value) || 10;
     const parallelWorkers = parseInt(parallelWorkersInput.value) || 1;
-    const conservativeMode = conservativeModeCheckbox.checked;
 
     // Disable buttons and show stop button
     processBtn.disabled = true;
@@ -286,10 +266,9 @@ async function processAllUrls() {
             batchCount++;
 
             // Update progress text
-            const modeText = conservativeMode ? ' (Conservative Mode)' : '';
-            progressText.textContent = `Batch ${batchCount} - Processing ${batchSize} URLs with ${parallelWorkers} workers${modeText}...`;
+            progressText.textContent = `Batch ${batchCount} - Processing ${batchSize} URLs with ${parallelWorkers} workers...`;
 
-            const response = await fetch(`${API_BASE}/api/process-urls?batch_size=${batchSize}&parallel_workers=${parallelWorkers}&conservative_mode=${conservativeMode}`, {
+            const response = await fetch(`${API_BASE}/api/process-urls?batch_size=${batchSize}&parallel_workers=${parallelWorkers}`, {
                 method: 'POST'
             });
 
