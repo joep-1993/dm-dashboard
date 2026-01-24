@@ -6,27 +6,36 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Date**: 2026-01-23
 
 ## AI Title Generation Service
-- **Purpose**: Generates SEO-optimized titles using OpenAI based on N8N flow logic
+- **Purpose**: Generates SEO-optimized titles using productsearch API + OpenAI
 - **Location**: `backend/ai_titles_service.py`
 - **Frontend**: Unique Titles Manager (`/static/unique-titles.html`)
 - **API Endpoints**:
   - `GET /api/ai-titles/status` - Get processing status and stats
-  - `POST /api/ai-titles/start?batch_size=100` - Start AI title generation (batch size configurable)
+  - `POST /api/ai-titles/start?batch_size=100&num_workers=15` - Start AI title generation
   - `POST /api/ai-titles/stop` - Stop processing
   - `GET /api/ai-titles/recent` - Get recently processed titles
+- **Processing Method**:
+  - **Faceted URLs** (containing `~~` or `/c/`): Uses productsearch API to get H1 and facet data, then OpenAI improves it
+  - **Non-faceted URLs**: Falls back to scraping + OpenAI
+  - **Workers**: Configurable parallel workers (default 15), each with 0.5s delay (max 2 URLs/worker/sec)
 - **Database columns added to `pa.unique_titles`**:
   - `ai_processed` (BOOLEAN) - Whether URL has been processed
   - `ai_processed_at` (TIMESTAMP) - When it was processed
   - `ai_error` (TEXT) - Error message if failed
   - `original_h1` (TEXT) - Original H1 before AI rewrite
 - **Generated Content**:
-  - **H1**: AI-rewritten title using adjectives (e.g., "Zwarte houten tv-meubels")
+  - **H1**: AI-improved title from API (e.g., "FRESK groene RVS BPA vrij waterflessen")
   - **Title**: `{H1} kopen? | Tot !!DISCOUNT!! korting! | beslist.nl`
   - **Description**: `Zoek je {H1}? &#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop &#10062; Shop {H1} met !!DISCOUNT!! korting online! &#10062; beslist.nl`
 - **OpenAI Prompt Rules**:
+  - Facet values must stay intact (e.g., "Rode Duivels" is one theme, not split)
   - Brand always first (e.g., "Apple iPhones" not "iPhones van Apple")
   - ALWAYS use adjectives for colors/materials (e.g., "Houten bank" not "bank van hout")
-  - NEVER use "in" or "van" for colors/materials (e.g., "Zwarte stalen kast" not "kast in zwart")
+  - NEVER use "in" or "van" for colors/materials
+- **Post-processing**:
+  - `format_dimensions()`: "31 cm 115 cm" → "31 cm x 115 cm"
+  - `normalize_preposition_case()`: Lowercase prepositions unless at start of sentence
+  - **Lowercase words**: met, in, zonder, van, voor, tot, op, aan, uit, bij, naar, over, onder, tegen, tussen, door, om, en, of
 - **Date**: 2026-01-23
 
 ## Docker Commands

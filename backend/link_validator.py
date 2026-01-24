@@ -43,11 +43,12 @@ def extract_from_url(url: str, maincat_mapping: Dict[str, str]) -> Tuple[Optiona
     """
     Extract maincat_id and pimId from URL.
 
-    Supports two formats:
+    Supports three formats:
     1. Old: /p/gezond_mooi/nl-nl-gold-6150802976981/ -> maincat from mapping, pimId with prefix
-    2. New: /p/product-name/286/6150802976981/ -> maincat_id and pimId directly from URL
+    2. New numeric: /p/product-name/286/6150802976981/ -> maincat_id and pimId directly from URL
+    3. V4 UUID: /p/product-name/137/V4_2f09146b-402b-48d0-b966-655e1416a43d/ -> maincat_id and V4 UUID pimId
 
-    Returns: (maincat_id, pimId) tuple, with pimId always in 'nl-nl-gold-XXX' format
+    Returns: (maincat_id, pimId) tuple
     """
     url = url.rstrip('/')
     parts = url.split('/')
@@ -59,18 +60,23 @@ def extract_from_url(url: str, maincat_mapping: Dict[str, str]) -> Tuple[Optiona
             pim_id = parts[-1] if parts else None
             return maincat_id, pim_id
 
-    # Try new format: /p/product-name/maincat_id/pimId/
+    # Try new formats: /p/product-name/maincat_id/pimId/
     # Pattern: the second-to-last part should be a number (maincat_id)
-    # and the last part should also be a number (pimId without prefix)
     if len(parts) >= 2:
         potential_maincat = parts[-2]
         potential_pim_id = parts[-1]
 
-        # Check if both are numeric
-        if potential_maincat.isdigit() and potential_pim_id.isdigit():
-            # New format detected - add nl-nl-gold- prefix to pimId
-            pim_id = f"nl-nl-gold-{potential_pim_id}"
-            return potential_maincat, pim_id
+        if potential_maincat.isdigit():
+            # Check for V4 UUID format: V4_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+            if potential_pim_id.startswith('V4_'):
+                # V4 UUID format - use as-is with nl-nl-gold- prefix
+                pim_id = f"nl-nl-gold-{potential_pim_id}"
+                return potential_maincat, pim_id
+            # Check for numeric pimId
+            elif potential_pim_id.isdigit():
+                # New numeric format - add nl-nl-gold- prefix to pimId
+                pim_id = f"nl-nl-gold-{potential_pim_id}"
+                return potential_maincat, pim_id
 
     return None, None
 
