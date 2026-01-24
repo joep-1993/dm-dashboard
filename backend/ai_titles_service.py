@@ -550,8 +550,8 @@ def process_single_url(url: str, use_api: bool = True) -> Dict:
         new_h1 = normalize_preposition_case(new_h1)
 
         # Step 4: Create SEO title
-        # Format: "{h1} kopen? | Tot !!DISCOUNT!! korting! | beslist.nl"
-        seo_title = f"{new_h1} kopen? | Tot !!DISCOUNT!! korting! | beslist.nl"
+        # Format: "{h1} kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl"
+        seo_title = f"{new_h1} kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl"
 
         # Step 5: Create SEO description
         # Format: "Zoek je {h1}? &#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop &#10062; Shop {h1} met !!DISCOUNT!! korting online! &#10062; beslist.nl"
