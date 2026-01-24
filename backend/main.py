@@ -358,44 +358,27 @@ def get_status():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Get total content URLs (processed with content) - use DISTINCT to avoid counting duplicates
-        cur.execute("SELECT COUNT(DISTINCT url) as processed FROM pa.content_urls_joep")
-        processed = cur.fetchone()['processed']
-
-        # Get skipped URLs
+        # Combined query for all counts (reduces 5 queries to 1)
         cur.execute("""
-            SELECT COUNT(*) as skipped
-            FROM pa.jvs_seo_werkvoorraad_kopteksten_check
-            WHERE status = 'skipped'
+            SELECT
+                (SELECT COUNT(DISTINCT url) FROM pa.content_urls_joep) as processed,
+                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'skipped') as skipped,
+                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'failed') as failed,
+                (SELECT COUNT(DISTINCT url) FROM (
+                    SELECT url FROM pa.jvs_seo_werkvoorraad
+                    UNION
+                    SELECT url FROM pa.content_urls_joep
+                ) all_urls) as total,
+                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
+                 LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
+                 WHERE t.url IS NULL) as pending
         """)
-        skipped = cur.fetchone()['skipped']
-
-        # Get failed URLs
-        cur.execute("""
-            SELECT COUNT(*) as failed
-            FROM pa.jvs_seo_werkvoorraad_kopteksten_check
-            WHERE status = 'failed'
-        """)
-        failed = cur.fetchone()['failed']
-
-        # Get total unique URLs across all tables (werkvoorraad + content)
-        cur.execute("""
-            SELECT COUNT(DISTINCT url) as total FROM (
-                SELECT url FROM pa.jvs_seo_werkvoorraad
-                UNION
-                SELECT url FROM pa.content_urls_joep
-            ) all_urls
-        """)
-        total = cur.fetchone()['total']
-
-        # Pending = URLs in werkvoorraad that haven't been tracked yet (using LEFT JOIN)
-        cur.execute("""
-            SELECT COUNT(*) as pending
-            FROM pa.jvs_seo_werkvoorraad w
-            LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
-            WHERE t.url IS NULL
-        """)
-        pending = cur.fetchone()['pending']
+        counts = cur.fetchone()
+        processed = counts['processed']
+        skipped = counts['skipped']
+        failed = counts['failed']
+        total = counts['total']
+        pending = counts['pending']
 
         # Get recent results from local PostgreSQL
         try:
@@ -864,14 +847,13 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
                 'moved_to_pending': has_gone
             })
 
-        # Update corrected content in local database
+        # Update corrected content in local database (batched for performance)
         if urls_to_update_content:
-            for content_url, corrected_content in urls_to_update_content:
-                cur.execute("""
-                    UPDATE pa.content_urls_joep
-                    SET content = %s
-                    WHERE url = %s
-                """, (corrected_content, content_url))
+            cur.executemany("""
+                UPDATE pa.content_urls_joep
+                SET content = %s
+                WHERE url = %s
+            """, urls_to_update_content)
             print(f"[VALIDATE-LINKS] Updated content for {len(urls_to_update_content)} URLs with corrected links")
 
         # Delete/reset operations for gone products only
@@ -890,13 +872,12 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
                 WHERE url IN ({placeholders})
             """, urls_with_gone_products)
 
-            # Add URLs to werkvoorraad for reprocessing (if not already there)
-            for url in urls_with_gone_products:
-                cur.execute("""
-                    INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
-                    VALUES (%s, 0)
-                    ON CONFLICT (url) DO UPDATE SET kopteksten = 0
-                """, (url,))
+            # Add URLs to werkvoorraad for reprocessing (batched for performance)
+            cur.executemany("""
+                INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
+                VALUES (%s, 0)
+                ON CONFLICT (url) DO UPDATE SET kopteksten = 0
+            """, [(url,) for url in urls_with_gone_products])
 
             print(f"[VALIDATE-LINKS] Deleted content for {len(urls_with_gone_products)} URLs with gone products")
 
@@ -1000,14 +981,13 @@ def validate_all_links(parallel_workers: int = 3):
                     urls_with_gone_products.append(content_url)
                     moved_to_pending += 1
 
-            # Update corrected content in local database
+            # Update corrected content in local database (batched for performance)
             if urls_to_update_content:
-                for content_url, corrected_content in urls_to_update_content:
-                    cur.execute("""
-                        UPDATE pa.content_urls_joep
-                        SET content = %s
-                        WHERE url = %s
-                    """, (corrected_content, content_url))
+                cur.executemany("""
+                    UPDATE pa.content_urls_joep
+                    SET content = %s
+                    WHERE url = %s
+                """, urls_to_update_content)
 
             # Delete/reset operations for gone products only
             if urls_with_gone_products:
@@ -1020,13 +1000,12 @@ def validate_all_links(parallel_workers: int = 3):
                     DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
                     WHERE url IN ({placeholders})
                 """, urls_with_gone_products)
-                # Add URLs to werkvoorraad for reprocessing (if not already there)
-                for url in urls_with_gone_products:
-                    cur.execute("""
-                        INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
-                        VALUES (%s, 0)
-                        ON CONFLICT (url) DO UPDATE SET kopteksten = 0
-                    """, (url,))
+                # Add URLs to werkvoorraad for reprocessing (batched for performance)
+                cur.executemany("""
+                    INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
+                    VALUES (%s, 0)
+                    ON CONFLICT (url) DO UPDATE SET kopteksten = 0
+                """, [(url,) for url in urls_with_gone_products])
 
             conn.commit()
             cur.close()

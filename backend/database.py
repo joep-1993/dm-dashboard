@@ -13,7 +13,7 @@ def _get_pg_pool():
     if _pg_pool is None:
         _pg_pool = pool.ThreadedConnectionPool(
             minconn=2,
-            maxconn=10,
+            maxconn=20,  # Increased from 10 to support more parallel workers
             dsn=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@db:5432/myapp"),
             cursor_factory=RealDictCursor
         )
@@ -23,10 +23,9 @@ def _get_redshift_pool():
     """Get or create Redshift connection pool"""
     global _redshift_pool
     if _redshift_pool is None:
-        print("[POOL] Initializing Redshift connection pool (minconn=1, maxconn=5)")
         _redshift_pool = pool.ThreadedConnectionPool(
             minconn=1,
-            maxconn=5,
+            maxconn=10,  # Increased from 5 to support more parallel workers
             host=os.getenv("REDSHIFT_HOST"),
             port=os.getenv("REDSHIFT_PORT", "5439"),
             dbname=os.getenv("REDSHIFT_DB"),
@@ -35,70 +34,47 @@ def _get_redshift_pool():
             cursor_factory=RealDictCursor,
             connect_timeout=10
         )
-        print("[POOL] Redshift pool initialized")
     return _redshift_pool
 
 def get_db_connection():
     """Get PostgreSQL connection from pool"""
-    pool = _get_pg_pool()
-    print(f"[POOL] Getting PG connection...")
-    conn = pool.getconn()
-    print(f"[POOL] Got PG connection")
-    return conn
+    p = _get_pg_pool()
+    return p.getconn()
 
 def return_db_connection(conn):
     """Return PostgreSQL connection to pool"""
     if conn:
-        pool = _get_pg_pool()
-        pool.putconn(conn)
-        print(f"[POOL] Returned PG connection")
+        p = _get_pg_pool()
+        p.putconn(conn)
 
 def get_redshift_connection():
     """Get Redshift connection from pool"""
-    pool = _get_redshift_pool()
-    print(f"[POOL] Getting Redshift connection...")
-    conn = pool.getconn()
+    p = _get_redshift_pool()
+    conn = p.getconn()
     # Set isolation level to READ COMMITTED to reduce serialization conflicts
-    # This is less strict than SERIALIZABLE but sufficient for our use case
     conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
-    print(f"[POOL] Got Redshift connection with READ COMMITTED isolation")
     return conn
 
 def return_redshift_connection(conn):
     """Return Redshift connection to pool"""
     if conn:
-        pool = _get_redshift_pool()
-        pool.putconn(conn)
-        print(f"[POOL] Returned Redshift connection")
+        p = _get_redshift_pool()
+        p.putconn(conn)
 
 def get_output_connection():
     """Get connection for output operations - Redshift or PostgreSQL based on config"""
-    print(f"[POOL] get_output_connection() called")
     use_redshift = os.getenv("USE_REDSHIFT_OUTPUT", "false").lower() == "true"
-    print(f"[POOL] use_redshift={use_redshift}")
     if use_redshift:
-        print(f"[POOL] Calling get_redshift_connection()")
-        conn = get_redshift_connection()
-        print(f"[POOL] Got connection from get_redshift_connection()")
-        return conn
-    print(f"[POOL] Calling get_db_connection()")
-    conn = get_db_connection()
-    print(f"[POOL] Got connection from get_db_connection()")
-    return conn
+        return get_redshift_connection()
+    return get_db_connection()
 
 def return_output_connection(conn):
     """Return output connection to appropriate pool"""
-    print(f"[POOL] return_output_connection() called")
     use_redshift = os.getenv("USE_REDSHIFT_OUTPUT", "false").lower() == "true"
-    print(f"[POOL] use_redshift={use_redshift}")
     if use_redshift:
-        print(f"[POOL] Calling return_redshift_connection()")
         return_redshift_connection(conn)
-        print(f"[POOL] Returned via return_redshift_connection()")
     else:
-        print(f"[POOL] Calling return_db_connection()")
         return_db_connection(conn)
-        print(f"[POOL] Returned via return_db_connection()")
 
 def init_db():
     """Initialize database tables"""
@@ -212,11 +188,17 @@ def init_db():
         )
     """)
 
-    # Create indexes
+    # Create indexes for Thema Ads
     cur.execute("CREATE INDEX IF NOT EXISTS idx_job_items_job_id ON thema_ads_job_items(job_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_job_items_status ON thema_ads_job_items(status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_input_data_job_id ON thema_ads_input_data(job_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON thema_ads_jobs(status)")
+
+    # Create indexes for SEO content tables (performance optimization)
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_content_urls_url ON pa.content_urls_joep(url)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_werkvoorraad_check_url ON pa.jvs_seo_werkvoorraad_kopteksten_check(url)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_werkvoorraad_check_status ON pa.jvs_seo_werkvoorraad_kopteksten_check(status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_link_validation_content_url ON pa.link_validation_results(content_url)")
 
     conn.commit()
     cur.close()

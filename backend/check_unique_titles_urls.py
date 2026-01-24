@@ -18,7 +18,7 @@ def log(msg):
 
 # Configuration
 USER_AGENT = "Beslist script voor SEO"
-MAX_REQUESTS_PER_SECOND = 2
+MAX_REQUESTS_PER_SECOND = 4
 DEFAULT_WORKERS = 20
 REQUEST_TIMEOUT = 30
 BASE_URL = "https://www.beslist.nl"
@@ -319,4 +319,4 @@ async def main(num_workers: int = DEFAULT_WORKERS, max_rps: float = MAX_REQUESTS
 
 
 if __name__ == "__main__":
-    asyncio.run(main(num_workers=20, max_rps=2))
+    asyncio.run(main(num_workers=20, max_rps=4))
