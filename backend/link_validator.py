@@ -39,16 +39,18 @@ def load_maincat_mapping(filepath: Path = MAINCAT_MAPPING_FILE) -> Dict[str, str
     return mapping
 
 
-def extract_from_url(url: str, maincat_mapping: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
+def extract_from_url(url: str, maincat_mapping: Dict[str, str]) -> Tuple[Optional[str], Optional[str], bool]:
     """
-    Extract maincat_id and pimId from URL.
+    Extract maincat_id and lookup value from URL.
 
     Supports three formats:
     1. Old: /p/gezond_mooi/nl-nl-gold-6150802976981/ -> maincat from mapping, pimId with prefix
     2. New numeric: /p/product-name/286/6150802976981/ -> maincat_id and pimId directly from URL
-    3. V4 UUID: /p/product-name/137/V4_2f09146b-402b-48d0-b966-655e1416a43d/ -> maincat_id and V4 UUID pimId
+    3. V4 UUID: /p/product-name/137/V4_xxx/ -> maincat_id and plpUrl path (for plpUrl-based lookup)
 
-    Returns: (maincat_id, pimId) tuple
+    Returns: (maincat_id, lookup_value, is_v4_url) tuple
+    - For V4 URLs: lookup_value is the relative plpUrl path (search by plpUrl in ES)
+    - For other URLs: lookup_value is the pimId (search by pimId in ES)
     """
     url = url.rstrip('/')
     parts = url.split('/')
@@ -58,7 +60,7 @@ def extract_from_url(url: str, maincat_mapping: Dict[str, str]) -> Tuple[Optiona
         if f"/{url_part}/" in url:
             # Old format - pimId is the last part (already has nl-nl-gold- prefix)
             pim_id = parts[-1] if parts else None
-            return maincat_id, pim_id
+            return maincat_id, pim_id, False
 
     # Try new formats: /p/product-name/maincat_id/pimId/
     # Pattern: the second-to-last part should be a number (maincat_id)
@@ -69,16 +71,21 @@ def extract_from_url(url: str, maincat_mapping: Dict[str, str]) -> Tuple[Optiona
         if potential_maincat.isdigit():
             # Check for V4 UUID format: V4_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
             if potential_pim_id.startswith('V4_'):
-                # V4 UUID format - use as-is with nl-nl-gold- prefix
-                pim_id = f"nl-nl-gold-{potential_pim_id}"
-                return potential_maincat, pim_id
+                # V4 UUID format - return the plpUrl path for plpUrl-based lookup
+                # The pimId in ES is different from the V4 UUID in the URL
+                # Find the /p/ part of the URL to get the plpUrl path
+                p_index = url.find('/p/')
+                if p_index != -1:
+                    plp_path = url[p_index:] + '/'
+                    return potential_maincat, plp_path, True
+                return None, None, False
             # Check for numeric pimId
             elif potential_pim_id.isdigit():
                 # New numeric format - add nl-nl-gold- prefix to pimId
                 pim_id = f"nl-nl-gold-{potential_pim_id}"
-                return potential_maincat, pim_id
+                return potential_maincat, pim_id, False
 
-    return None, None
+    return None, None, False
 
 
 def query_elasticsearch(index: str, pim_ids: List[str], min_offers: int = 2) -> Dict[str, str]:
@@ -132,6 +139,54 @@ def query_elasticsearch(index: str, pim_ids: List[str], min_offers: int = 2) -> 
     return result
 
 
+def query_elasticsearch_by_plpurl(index: str, plp_urls: List[str], min_offers: int = 2) -> Dict[str, str]:
+    """
+    Query Elasticsearch for products by their plpUrl paths.
+    Used for V4 UUID URLs where the pimId in ES differs from the URL.
+
+    Args:
+        index: Elasticsearch index name
+        plp_urls: List of plpUrl paths to look up (e.g., '/p/product-name/137/V4_xxx/')
+        min_offers: Minimum number of offers required (default: 2).
+
+    Returns:
+        Dict mapping plpUrl to itself if valid, None if not found or < min_offers.
+    """
+    if not plp_urls:
+        return {}
+
+    query = {
+        "_source": ["plpUrl", "shopCount"],
+        "size": len(plp_urls),
+        "query": {
+            "terms": {
+                "plpUrl": plp_urls
+            }
+        }
+    }
+
+    url = f"{ES_URL}/{index}/_search"
+    response = requests.post(url, json=query, timeout=60)
+    response.raise_for_status()
+
+    data = response.json()
+
+    # Map plpUrl to itself (only if shopCount >= min_offers)
+    result = {}
+    for hit in data.get('hits', {}).get('hits', []):
+        source = hit.get('_source', {})
+        plp_url = source.get('plpUrl')
+        shop_count = source.get('shopCount', 0) or 0
+
+        if plp_url:
+            if shop_count >= min_offers:
+                result[plp_url] = plp_url
+            else:
+                result[plp_url] = None
+
+    return result
+
+
 def extract_hyperlinks_from_content(content: str) -> List[str]:
     """
     Extract all href URLs from HTML content.
@@ -168,46 +223,69 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
         return {}
 
     # Group links by maincat_id for batch ES queries
-    # Structure: {maincat_id: {pim_id: original_url}}
-    maincat_groups: Dict[str, Dict[str, str]] = {}
-    url_to_pim_id: Dict[str, str] = {}
+    # Separate V4 URLs (query by plpUrl) from regular URLs (query by pimId)
+    # Structure: {maincat_id: {lookup_value: original_url}}
+    maincat_pimid_groups: Dict[str, Dict[str, str]] = {}  # For pimId lookups
+    maincat_plpurl_groups: Dict[str, Dict[str, str]] = {}  # For V4 plpUrl lookups
+    url_to_lookup: Dict[str, Tuple[str, bool]] = {}  # url -> (lookup_value, is_v4)
 
     for link in set(links):  # deduplicate
-        maincat_id, pim_id = extract_from_url(link, maincat_mapping)
+        maincat_id, lookup_value, is_v4 = extract_from_url(link, maincat_mapping)
 
-        if maincat_id and pim_id:
-            url_to_pim_id[link] = pim_id
-            if maincat_id not in maincat_groups:
-                maincat_groups[maincat_id] = {}
-            maincat_groups[maincat_id][pim_id] = link
+        if maincat_id and lookup_value:
+            url_to_lookup[link] = (lookup_value, is_v4)
+            if is_v4:
+                # V4 URL - group for plpUrl lookup
+                if maincat_id not in maincat_plpurl_groups:
+                    maincat_plpurl_groups[maincat_id] = {}
+                maincat_plpurl_groups[maincat_id][lookup_value] = link
+            else:
+                # Regular URL - group for pimId lookup
+                if maincat_id not in maincat_pimid_groups:
+                    maincat_pimid_groups[maincat_id] = {}
+                maincat_pimid_groups[maincat_id][lookup_value] = link
 
-    # Query each maincat index
-    pim_id_to_plp_url: Dict[str, Optional[str]] = {}
+    # Results dict: lookup_value -> plpUrl (or None)
+    lookup_to_plp_url: Dict[str, Optional[str]] = {}
 
-    for maincat_id, pim_id_map in maincat_groups.items():
+    # Query by pimId for regular URLs
+    for maincat_id, pim_id_map in maincat_pimid_groups.items():
         index = f"{INDEX_PREFIX}{maincat_id}"
         pim_ids = list(pim_id_map.keys())
 
         try:
             result = query_elasticsearch(index, pim_ids)
-            # result maps pim_id -> plpUrl (or empty if not found)
             for pim_id in pim_ids:
-                pim_id_to_plp_url[pim_id] = result.get(pim_id)
+                lookup_to_plp_url[pim_id] = result.get(pim_id)
         except Exception as e:
-            print(f"[LINK_VALIDATOR] Error querying ES index {index}: {e}")
-            # Mark all as None (will be treated as GONE)
+            print(f"[LINK_VALIDATOR] Error querying ES index {index} by pimId: {e}")
             for pim_id in pim_ids:
-                pim_id_to_plp_url[pim_id] = None
+                lookup_to_plp_url[pim_id] = None
+
+    # Query by plpUrl for V4 URLs
+    for maincat_id, plp_url_map in maincat_plpurl_groups.items():
+        index = f"{INDEX_PREFIX}{maincat_id}"
+        plp_urls = list(plp_url_map.keys())
+
+        try:
+            result = query_elasticsearch_by_plpurl(index, plp_urls)
+            for plp_url in plp_urls:
+                lookup_to_plp_url[plp_url] = result.get(plp_url)
+        except Exception as e:
+            print(f"[LINK_VALIDATOR] Error querying ES index {index} by plpUrl: {e}")
+            for plp_url in plp_urls:
+                lookup_to_plp_url[plp_url] = None
 
     # Build result: original_url -> correct_plpUrl (or None if GONE)
     result = {}
     for link in set(links):
-        pim_id = url_to_pim_id.get(link)
-        if pim_id:
-            plp_url = pim_id_to_plp_url.get(pim_id)
+        lookup_info = url_to_lookup.get(link)
+        if lookup_info:
+            lookup_value, _ = lookup_info
+            plp_url = lookup_to_plp_url.get(lookup_value)
             result[link] = plp_url
         else:
-            # Could not extract pim_id from URL - treat as GONE
+            # Could not extract lookup value from URL - treat as GONE
             result[link] = None
 
     return result
@@ -453,8 +531,10 @@ def validate_faq_links(faq_json: str) -> Dict:
     maincat_mapping = load_maincat_mapping()
 
     # Group links by maincat_id for batch ES queries
-    maincat_groups: Dict[str, Dict[str, str]] = {}
-    url_to_pim_id: Dict[str, str] = {}
+    # Separate V4 URLs (query by plpUrl) from regular URLs (query by pimId)
+    maincat_pimid_groups: Dict[str, Dict[str, str]] = {}
+    maincat_plpurl_groups: Dict[str, Dict[str, str]] = {}
+    url_to_lookup: Dict[str, Tuple[str, bool]] = {}  # url -> (lookup_value, is_v4)
 
     unique_links = list(set(links))
 
@@ -464,38 +544,59 @@ def validate_faq_links(faq_json: str) -> Dict:
         if link.startswith('https://www.beslist.nl'):
             relative_link = link.replace('https://www.beslist.nl', '')
 
-        maincat_id, pim_id = extract_from_url(relative_link, maincat_mapping)
+        maincat_id, lookup_value, is_v4 = extract_from_url(relative_link, maincat_mapping)
 
-        if maincat_id and pim_id:
-            url_to_pim_id[link] = pim_id
-            if maincat_id not in maincat_groups:
-                maincat_groups[maincat_id] = {}
-            maincat_groups[maincat_id][pim_id] = link
+        if maincat_id and lookup_value:
+            url_to_lookup[link] = (lookup_value, is_v4)
+            if is_v4:
+                if maincat_id not in maincat_plpurl_groups:
+                    maincat_plpurl_groups[maincat_id] = {}
+                maincat_plpurl_groups[maincat_id][lookup_value] = link
+            else:
+                if maincat_id not in maincat_pimid_groups:
+                    maincat_pimid_groups[maincat_id] = {}
+                maincat_pimid_groups[maincat_id][lookup_value] = link
 
-    # Query each maincat index
-    pim_id_to_plp_url: Dict[str, Optional[str]] = {}
+    # Results dict
+    lookup_to_plp_url: Dict[str, Optional[str]] = {}
 
-    for maincat_id, pim_id_map in maincat_groups.items():
+    # Query by pimId for regular URLs
+    for maincat_id, pim_id_map in maincat_pimid_groups.items():
         index = f"{INDEX_PREFIX}{maincat_id}"
         pim_ids = list(pim_id_map.keys())
 
         try:
             result = query_elasticsearch(index, pim_ids)
             for pim_id in pim_ids:
-                pim_id_to_plp_url[pim_id] = result.get(pim_id)
+                lookup_to_plp_url[pim_id] = result.get(pim_id)
         except Exception as e:
-            print(f"[FAQ_VALIDATOR] Error querying ES index {index}: {e}")
+            print(f"[FAQ_VALIDATOR] Error querying ES index {index} by pimId: {e}")
             for pim_id in pim_ids:
-                pim_id_to_plp_url[pim_id] = None
+                lookup_to_plp_url[pim_id] = None
+
+    # Query by plpUrl for V4 URLs
+    for maincat_id, plp_url_map in maincat_plpurl_groups.items():
+        index = f"{INDEX_PREFIX}{maincat_id}"
+        plp_urls = list(plp_url_map.keys())
+
+        try:
+            result = query_elasticsearch_by_plpurl(index, plp_urls)
+            for plp_url in plp_urls:
+                lookup_to_plp_url[plp_url] = result.get(plp_url)
+        except Exception as e:
+            print(f"[FAQ_VALIDATOR] Error querying ES index {index} by plpUrl: {e}")
+            for plp_url in plp_urls:
+                lookup_to_plp_url[plp_url] = None
 
     # Determine which links are gone
     gone_links = []
     valid_count = 0
 
     for link in unique_links:
-        pim_id = url_to_pim_id.get(link)
-        if pim_id:
-            plp_url = pim_id_to_plp_url.get(pim_id)
+        lookup_info = url_to_lookup.get(link)
+        if lookup_info:
+            lookup_value, _ = lookup_info
+            plp_url = lookup_to_plp_url.get(lookup_value)
             if plp_url is None:
                 gone_links.append(link)
             else:
