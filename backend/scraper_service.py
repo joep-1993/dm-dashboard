@@ -539,13 +539,13 @@ def scrape_product_page_api(url: str) -> Optional[Dict]:
             description = product.get("description", title)[:150]
             shop_count = product.get("shopCount", 0)
 
-            # Get plpUrl for product link (only if product has at least 2 offers)
+            # Get plpUrl for product link (only if product has at least 3 offers)
             plp_url = product.get("plpUrl", "")
             if plp_url and not plp_url.startswith("http"):
                 plp_url = "https://www.beslist.nl" + plp_url
 
-            # Only include products with at least 2 offers for hyperlinks
-            if plp_url and description and shop_count >= 2:
+            # Only include products with at least 3 offers for hyperlinks
+            if plp_url and description and shop_count >= 3:
                 products.append({
                     "title": title,
                     "url": plp_url,
