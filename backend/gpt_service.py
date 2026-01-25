@@ -98,6 +98,9 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
     if response.choices[0].finish_reason == "length":
         print(f"[GPT] Warning: Response was truncated for '{h1_title}'")
 
+    # Fix truncated URLs (GPT sometimes removes maincat_id/pimId from URLs)
+    content = fix_truncated_urls(content, products)
+
     return content
 
 def check_content_has_valid_links(content: str) -> bool:
@@ -106,6 +109,56 @@ def check_content_has_valid_links(content: str) -> bool:
     Returns True if content has <a href="/p/ or <a href="https://www.beslist.nl/p/ pattern.
     """
     return '<a href="/p/' in content or '<a href="https://www.beslist.nl/p/' in content
+
+
+def fix_truncated_urls(content: str, products: List[Dict]) -> str:
+    """
+    Fix GPT-truncated URLs by matching them against the original product URLs.
+
+    GPT sometimes truncates URLs like:
+      https://www.beslist.nl/p/product-name/452/8718969401258/
+    to just:
+      https://www.beslist.nl/p/product-name/
+
+    This function finds truncated URLs and replaces them with the correct full URLs.
+    """
+    import re
+
+    # Build a mapping of product-name slug to full URL
+    slug_to_url = {}
+    for p in products:
+        url = p.get('url', '')
+        if url and '/p/' in url:
+            # Extract the product-name slug from the URL
+            # URL format: https://www.beslist.nl/p/product-name/maincat/pimId/
+            match = re.search(r'/p/([^/]+)/', url)
+            if match:
+                slug = match.group(1)
+                slug_to_url[slug] = url
+
+    # Find all href URLs in content
+    def replace_truncated(match):
+        href = match.group(1)
+        # Check if this is a truncated URL (only has /p/product-name/ pattern)
+        truncated_match = re.match(r'https://www\.beslist\.nl/p/([^/]+)/?$', href)
+        if truncated_match:
+            slug = truncated_match.group(1)
+            if slug in slug_to_url:
+                return f'href="{slug_to_url[slug]}"'
+        return match.group(0)
+
+    # Replace truncated URLs
+    fixed_content = re.sub(r'href="(https://www\.beslist\.nl/p/[^"]+)"', replace_truncated, content)
+
+    # Count fixes
+    if fixed_content != content:
+        original_truncated = len(re.findall(r'href="https://www\.beslist\.nl/p/[^/]+/?"', content))
+        remaining_truncated = len(re.findall(r'href="https://www\.beslist\.nl/p/[^/]+/?"', fixed_content))
+        fixes = original_truncated - remaining_truncated
+        if fixes > 0:
+            print(f"[GPT] Fixed {fixes} truncated URL(s) in content")
+
+    return fixed_content
 
 # Test function
 if __name__ == "__main__":

@@ -3,7 +3,35 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 ## User Preferences
 - **Default Project**: When user says "the frontend" or "start the frontend" without specifying a project, always assume **dm-tools**
-- **Date**: 2026-01-23
+- **Date**: 2026-01-24
+
+## Link Validator V4 UUID Support
+- **Problem**: Product URLs with V4 UUID format were incorrectly marked as "gone" during link validation
+- **URL Formats Supported**:
+  1. Old: `/p/gezond_mooi/nl-nl-gold-6150802976981/`
+  2. New numeric: `/p/product-name/286/6150802976981/`
+  3. V4 UUID: `/p/product-name/137/V4_2f09146b-402b-48d0-b966-655e1416a43d/`
+- **Cause**: `extract_from_url()` only checked `potential_pim_id.isdigit()`, which returned False for V4 UUIDs
+- **Solution**: Added explicit check for `potential_pim_id.startswith('V4_')` before the numeric check
+- **Impact**: Both SEO content validation and FAQ validation use the same `extract_from_url()` function
+- **Location**: `backend/link_validator.py` - `extract_from_url()`
+- **Date**: 2026-01-24
+
+## Performance Optimizations
+- **Connection Pools**:
+  - PostgreSQL: `maxconn` increased from 10 → 20
+  - Redshift: `maxconn` increased from 5 → 10
+  - Scraper HTTP pool: `pool_connections` and `pool_maxsize` increased from 1 → 10
+- **Verbose Logging Removed**: Connection pool logging was causing I/O overhead on every connection
+- **Combined Status Queries**: Status endpoint reduced from 5 separate COUNT queries to 1 combined query
+- **Batched DB Updates**: Link validation now uses `executemany()` instead of individual UPDATE loops
+- **Database Indexes Added**:
+  - `idx_content_urls_url` (UNIQUE) on `pa.content_urls_joep(url)`
+  - `idx_werkvoorraad_check_url` on `pa.jvs_seo_werkvoorraad_kopteksten_check(url)`
+  - `idx_werkvoorraad_check_status` on `pa.jvs_seo_werkvoorraad_kopteksten_check(status)`
+  - `idx_link_validation_content_url` on `pa.link_validation_results(content_url)`
+- **Location**: `backend/database.py`, `backend/main.py`, `backend/scraper_service.py`
+- **Date**: 2026-01-24
 
 ## AI Title Generation Service
 - **Purpose**: Generates SEO-optimized titles using productsearch API + OpenAI
@@ -25,7 +53,7 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
   - `original_h1` (TEXT) - Original H1 before AI rewrite
 - **Generated Content**:
   - **H1**: AI-improved title from API (e.g., "FRESK groene RVS BPA vrij waterflessen")
-  - **Title**: `{H1} kopen? | Tot !!DISCOUNT!! korting! | beslist.nl`
+  - **Title**: `{H1} kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl`
   - **Description**: `Zoek je {H1}? &#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop &#10062; Shop {H1} met !!DISCOUNT!! korting online! &#10062; beslist.nl`
 - **OpenAI Prompt Rules**:
   - Facet values must stay intact (e.g., "Rode Duivels" is one theme, not split)
