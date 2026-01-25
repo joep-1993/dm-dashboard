@@ -673,9 +673,12 @@ async def lookup_content(url: str):
 async def delete_result(url: str):
     """Delete a result and reset the URL back to pending state"""
     try:
-        # Delete from Redshift output table and update werkvoorraad - with retry on serialization conflicts
+        use_redshift = os.getenv("USE_REDSHIFT_OUTPUT", "false").lower() == "true"
+        werkvoorraad_table = "pa.jvs_seo_werkvoorraad_shopping_season" if use_redshift else "pa.jvs_seo_werkvoorraad"
+
+        # Delete from output table and update werkvoorraad - with retry on serialization conflicts
         @retry_on_redshift_serialization_error(max_retries=5, initial_delay=0.2)
-        def delete_from_redshift():
+        def delete_from_output():
             output_conn = get_output_connection()
             output_cur = output_conn.cursor()
             try:
@@ -686,8 +689,8 @@ async def delete_result(url: str):
                 """, (url,))
 
                 # Reset kopteksten flag in werkvoorraad
-                output_cur.execute("""
-                    UPDATE pa.jvs_seo_werkvoorraad_shopping_season
+                output_cur.execute(f"""
+                    UPDATE {werkvoorraad_table}
                     SET kopteksten = 0
                     WHERE url = %s
                 """, (url,))
@@ -700,7 +703,7 @@ async def delete_result(url: str):
                 output_cur.close()
                 return_output_connection(output_conn)
 
-        delete_from_redshift()
+        delete_from_output()
 
         # Delete from local tracking table
         conn = get_db_connection()
