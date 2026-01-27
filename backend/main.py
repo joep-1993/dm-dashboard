@@ -2208,3 +2208,146 @@ async def get_ai_titles_recent(limit: int = 20):
         return {"results": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# CANONICAL URL GENERATOR
+# =============================================================================
+
+from backend.canonical_service import (
+    fetch_urls_from_redshift,
+    fetch_urls_for_rules,
+    generate_canonicals,
+    parse_rules_from_json,
+    TransformationRules
+)
+from pydantic import BaseModel
+from typing import List, Optional
+
+
+class CanonicalRulesRequest(BaseModel):
+    """Request model for canonical generation"""
+    cat_cat: List[dict] = []
+    facet_facet: List[dict] = []
+    cat_facet: List[dict] = []
+    cat_facet_remove: List[dict] = []
+    bucket_bucket: List[dict] = []
+    remove_bucket: List[dict] = []
+    start_date: str = "20240101"
+    end_date: str = "20261231"
+    fetch_from_redshift: bool = True
+    manual_urls: List[str] = []
+
+
+@app.post("/api/canonical/generate")
+async def generate_canonical_urls(request: CanonicalRulesRequest):
+    """
+    Generate canonical URLs based on transformation rules.
+
+    Either fetches URLs from Redshift based on the rules, or uses manually provided URLs.
+    Then applies all transformation rules to generate canonical versions.
+    """
+    try:
+        # Parse rules
+        rules = parse_rules_from_json(request.dict())
+
+        # Get URLs to transform
+        if request.fetch_from_redshift:
+            urls = fetch_urls_for_rules(rules, request.start_date, request.end_date)
+        else:
+            urls = request.manual_urls
+
+        if not urls:
+            return {
+                "status": "success",
+                "message": "No URLs found matching the rules",
+                "total": 0,
+                "results": []
+            }
+
+        # Generate canonicals
+        results = generate_canonicals(urls, rules)
+
+        # Filter to only include URLs that actually changed
+        changed_results = [r for r in results if r["original"] != r["canonical"]]
+
+        return {
+            "status": "success",
+            "total": len(results),
+            "changed": len(changed_results),
+            "results": changed_results
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/canonical/preview")
+async def preview_canonical_urls(request: CanonicalRulesRequest):
+    """
+    Preview URLs that would be fetched from Redshift based on the rules.
+    Does not apply transformations, just shows what URLs would be affected.
+    """
+    try:
+        rules = parse_rules_from_json(request.dict())
+        urls = fetch_urls_for_rules(rules, request.start_date, request.end_date)
+
+        return {
+            "status": "success",
+            "total": len(urls),
+            "urls": urls[:100]  # Limit preview to first 100
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/canonical/fetch-urls")
+async def fetch_canonical_urls(
+    contains: Optional[str] = None,
+    start_date: str = "20240101",
+    end_date: str = "20261231",
+    limit: int = 1000
+):
+    """
+    Fetch URLs from Redshift that match the given criteria.
+    Useful for exploring what URLs exist before defining transformation rules.
+    """
+    try:
+        urls = fetch_urls_from_redshift(
+            contains=contains,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit
+        )
+
+        return {
+            "status": "success",
+            "total": len(urls),
+            "urls": urls
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/canonical/transform")
+async def transform_single_url(url: str, rules: CanonicalRulesRequest):
+    """
+    Transform a single URL using the provided rules.
+    Useful for testing rules before running on full dataset.
+    """
+    try:
+        from backend.canonical_service import transform_url
+
+        parsed_rules = parse_rules_from_json(rules.dict())
+        canonical = transform_url(url, parsed_rules)
+
+        return {
+            "original": url,
+            "canonical": canonical,
+            "changed": url != canonical
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

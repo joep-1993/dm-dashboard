@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canonical URL Generator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .rule-section { margin-bottom: 1rem; }
+        .rule-row { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; align-items: center; }
+        .rule-row input { flex: 1; }
+        .rule-row .btn-remove { flex: 0 0 auto; }
+        .results-table { max-height: 500px; overflow-y: auto; }
+        .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
+        .changed { background-color: #d4edda !important; }
+        .tab-content { padding-top: 1rem; }
+        pre { background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container">
+            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1">SEO Content Generator</a>
+            <div>
+                <a href="/static/dashboard.html" class="btn btn-outline-light btn-sm fw-bold">Dashboard</a>
+                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
+                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
+                <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+                <h2 class="mb-4">Canonical URL Generator</h2>
+                <p class="text-muted">Generate canonical URLs by applying transformation rules. URLs are fetched from Redshift visits data (last 365 days).</p>
+
+                <!-- Rules Input -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Transformation Rules</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Tabs for rule types -->
+                        <ul class="nav nav-tabs" id="ruleTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#catcat" type="button">CAT-CAT</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#facetfacet" type="button">FACET-FACET</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#catfacet" type="button">CAT+FACET</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#catfacet1" type="button">CAT+FACET1</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bucket" type="button">BUCKET</button>
+                            </li>
+                        </ul>
+
+                        <div class="tab-content" id="ruleTabContent">
+                            <!-- CAT-CAT: Replace category with another -->
+                            <div class="tab-pane fade show active" id="catcat" role="tabpanel">
+                                <p class="small text-muted">Replace one category slug with another.</p>
+                                <div class="rule-section" id="catCatRules">
+                                    <div class="row mb-1">
+                                        <div class="col-4"><small class="text-muted">Old Category</small></div>
+                                        <div class="col-4"><small class="text-muted">New Category</small></div>
+                                        <div class="col-3"><small class="text-muted">New Maincat</small></div>
+                                    </div>
+                                    <!-- Rules will be added here -->
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary" onclick="addCatCatRule()">+ Add Rule</button>
+                            </div>
+
+                            <!-- FACET-FACET: Replace facet with another -->
+                            <div class="tab-pane fade" id="facetfacet" role="tabpanel">
+                                <p class="small text-muted">Replace one facet value with another.</p>
+                                <div class="rule-section" id="facetFacetRules">
+                                    <div class="row mb-1">
+                                        <div class="col-5"><small class="text-muted">Old Facet</small></div>
+                                        <div class="col-5"><small class="text-muted">New Facet</small></div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary" onclick="addFacetFacetRule()">+ Add Rule</button>
+                            </div>
+
+                            <!-- CAT+FACET: Change category for faceted URLs (keep facet) -->
+                            <div class="tab-pane fade" id="catfacet" role="tabpanel">
+                                <p class="small text-muted">Change category for URLs with specific facet (keep the facet).</p>
+                                <div class="rule-section" id="catFacetRules">
+                                    <div class="row mb-1">
+                                        <div class="col-4"><small class="text-muted">Facet</small></div>
+                                        <div class="col-4"><small class="text-muted">Canon Category</small></div>
+                                        <div class="col-3"><small class="text-muted">Category (opt)</small></div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary" onclick="addCatFacetRule()">+ Add Rule</button>
+                            </div>
+
+                            <!-- CAT+FACET1: Change category and remove facet -->
+                            <div class="tab-pane fade" id="catfacet1" role="tabpanel">
+                                <p class="small text-muted">Change category for URLs with specific facet (remove the facet).</p>
+                                <div class="rule-section" id="catFacetRemoveRules">
+                                    <div class="row mb-1">
+                                        <div class="col-4"><small class="text-muted">Facet</small></div>
+                                        <div class="col-4"><small class="text-muted">Canon Category</small></div>
+                                        <div class="col-3"><small class="text-muted">Category (opt)</small></div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary" onclick="addCatFacetRemoveRule()">+ Add Rule</button>
+                            </div>
+
+                            <!-- BUCKET: Replace or remove bucket -->
+                            <div class="tab-pane fade" id="bucket" role="tabpanel">
+                                <p class="small text-muted">Replace bucket with another, or remove bucket from URL.</p>
+                                <h6 class="mt-3">Replace Bucket</h6>
+                                <div class="rule-section" id="bucketBucketRules">
+                                    <div class="row mb-1">
+                                        <div class="col-5"><small class="text-muted">Old Bucket</small></div>
+                                        <div class="col-5"><small class="text-muted">New Bucket</small></div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary mb-3" onclick="addBucketBucketRule()">+ Add Rule</button>
+
+                                <h6>Remove Bucket</h6>
+                                <div class="rule-section" id="removeBucketRules">
+                                    <div class="row mb-1">
+                                        <div class="col-5"><small class="text-muted">Bucket to Remove</small></div>
+                                        <div class="col-5"><small class="text-muted">Category (opt)</small></div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-outline-primary" onclick="addRemoveBucketRule()">+ Add Rule</button>
+                            </div>
+                        </div>
+
+                        <hr>
+
+                        <!-- Manual URLs -->
+                        <div class="mb-3">
+                            <label class="form-label small">Manual URLs (optional - one per line)</label>
+                            <textarea class="form-control form-control-sm" id="manualUrls" rows="3" placeholder="Paste URLs here to transform without fetching from Redshift..."></textarea>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-primary btn-sm" onclick="generateCanonicals()">Generate Canonicals</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="previewUrls()">Preview URLs</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                <div class="card mb-4">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Results</h5>
+                        <div>
+                            <span id="resultCount" class="badge bg-light text-dark me-2">0 URLs</span>
+                            <button class="btn btn-sm btn-outline-light" onclick="downloadResults()">Download CSV</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="loadingSpinner" class="text-center d-none">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Fetching URLs from Redshift...</p>
+                        </div>
+
+                        <div id="resultsContainer">
+                            <p class="text-muted text-center">Enter transformation rules and click "Generate Canonicals" to see results.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Test Single URL -->
+                <div class="card mt-3">
+                    <div class="card-header bg-secondary text-white">
+                        <h6 class="mb-0">Test Single URL</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="testUrl" placeholder="Enter URL to test transformation...">
+                            <button class="btn btn-outline-secondary" onclick="testSingleUrl()">Test</button>
+                        </div>
+                        <div id="testResult" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Store results for download
+        let currentResults = [];
+
+        // Initialize with one empty rule for each type
+        document.addEventListener('DOMContentLoaded', () => {
+            addCatCatRule();
+            addFacetFacetRule();
+            addCatFacetRule();
+            addCatFacetRemoveRule();
+            addBucketBucketRule();
+            addRemoveBucketRule();
+        });
+
+        function addCatCatRule() {
+            const container = document.getElementById('catCatRules');
+            const row = document.createElement('div');
+            row.className = 'rule-row';
+            row.innerHTML = `
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430884" data-field="old_cat">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430885" data-field="new_cat">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen (optional)" data-field="new_maincat">
+                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function addFacetFacetRule() {
+            const container = document.getElementById('facetFacetRules');
+            const row = document.createElement('div');
+            row.className = 'rule-row';
+            row.innerHTML = `
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. merk" data-field="old_facet">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie" data-field="new_facet">
+                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function addCatFacetRule() {
+            const container = document.getElementById('catFacetRules');
+            const row = document.createElement('div');
+            row.className = 'rule-row';
+            row.innerHTML = `
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie" data-field="facet">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881_430956" data-field="canon_cat">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881 (opt)" data-field="cat">
+                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function addCatFacetRemoveRule() {
+            const container = document.getElementById('catFacetRemoveRules');
+            const row = document.createElement('div');
+            row.className = 'rule-row';
+            row.innerHTML = `
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie" data-field="facet">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881_430956" data-field="canon_cat">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881 (opt)" data-field="cat">
+                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function addBucketBucketRule() {
+            const container = document.getElementById('bucketBucketRules');
+            const row = document.createElement('div');
+            row.className = 'rule-row';
+            row.innerHTML = `
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. merk~23597985" data-field="old_bucket">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie~2590809" data-field="new_bucket">
+                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function addRemoveBucketRule() {
+            const container = document.getElementById('removeBucketRules');
+            const row = document.createElement('div');
+            row.className = 'rule-row';
+            row.innerHTML = `
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie" data-field="bucket">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881 (opt)" data-field="cat">
+                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function collectRules(containerId, fields) {
+            const container = document.getElementById(containerId);
+            const rows = container.querySelectorAll('.rule-row');
+            const rules = [];
+
+            rows.forEach(row => {
+                const rule = {};
+                let hasValue = false;
+
+                fields.forEach(field => {
+                    const input = row.querySelector(`[data-field="${field}"]`);
+                    if (input && input.value.trim()) {
+                        rule[field] = input.value.trim();
+                        hasValue = true;
+                    }
+                });
+
+                if (hasValue) {
+                    rules.push(rule);
+                }
+            });
+
+            return rules;
+        }
+
+        function getDateRange() {
+            // Default: last 365 days
+            const today = new Date();
+            const yearAgo = new Date();
+            yearAgo.setDate(today.getDate() - 365);
+
+            const formatDate = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
+            return {
+                start_date: formatDate(yearAgo),
+                end_date: formatDate(today)
+            };
+        }
+
+        function buildRequestPayload() {
+            const manualUrlsText = document.getElementById('manualUrls').value.trim();
+            const manualUrls = manualUrlsText ? manualUrlsText.split('\n').map(u => u.trim()).filter(u => u) : [];
+            const dateRange = getDateRange();
+
+            return {
+                cat_cat: collectRules('catCatRules', ['old_cat', 'new_cat', 'new_maincat']),
+                facet_facet: collectRules('facetFacetRules', ['old_facet', 'new_facet']),
+                cat_facet: collectRules('catFacetRules', ['facet', 'canon_cat', 'cat']),
+                cat_facet_remove: collectRules('catFacetRemoveRules', ['facet', 'canon_cat', 'cat']),
+                bucket_bucket: collectRules('bucketBucketRules', ['old_bucket', 'new_bucket']),
+                remove_bucket: collectRules('removeBucketRules', ['bucket', 'cat']),
+                start_date: dateRange.start_date,
+                end_date: dateRange.end_date,
+                fetch_from_redshift: manualUrls.length === 0,
+                manual_urls: manualUrls
+            };
+        }
+
+        async function generateCanonicals() {
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const resultCount = document.getElementById('resultCount');
+
+            loadingSpinner.classList.remove('d-none');
+            resultsContainer.innerHTML = '';
+
+            try {
+                const payload = buildRequestPayload();
+
+                const response = await fetch('/api/canonical/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to generate canonicals');
+                }
+
+                currentResults = data.results || [];
+                resultCount.textContent = `${data.changed} changed / ${data.total} total`;
+
+                if (currentResults.length === 0) {
+                    resultsContainer.innerHTML = '<p class="text-muted text-center">No URLs were changed by the transformation rules.</p>';
+                } else {
+                    renderResults(currentResults);
+                }
+
+            } catch (error) {
+                resultsContainer.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+            } finally {
+                loadingSpinner.classList.add('d-none');
+            }
+        }
+
+        async function previewUrls() {
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const resultCount = document.getElementById('resultCount');
+
+            loadingSpinner.classList.remove('d-none');
+            resultsContainer.innerHTML = '';
+
+            try {
+                const payload = buildRequestPayload();
+
+                const response = await fetch('/api/canonical/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to preview URLs');
+                }
+
+                resultCount.textContent = `${data.total} URLs found`;
+
+                if (!data.urls || data.urls.length === 0) {
+                    resultsContainer.innerHTML = '<p class="text-muted text-center">No URLs found matching the rules.</p>';
+                } else {
+                    resultsContainer.innerHTML = `
+                        <p class="text-muted small">Showing first ${data.urls.length} of ${data.total} URLs that would be affected:</p>
+                        <div class="results-table">
+                            <table class="table table-sm table-striped">
+                                <thead><tr><th>URL</th></tr></thead>
+                                <tbody>
+                                    ${data.urls.map(u => `<tr><td class="url-cell">${escapeHtml(u)}</td></tr>`).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                }
+
+            } catch (error) {
+                resultsContainer.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+            } finally {
+                loadingSpinner.classList.add('d-none');
+            }
+        }
+
+        async function testSingleUrl() {
+            const testUrl = document.getElementById('testUrl').value.trim();
+            const testResult = document.getElementById('testResult');
+
+            if (!testUrl) {
+                testResult.innerHTML = '<span class="text-warning">Enter a URL to test</span>';
+                return;
+            }
+
+            try {
+                const payload = buildRequestPayload();
+
+                const response = await fetch(`/api/canonical/transform?url=${encodeURIComponent(testUrl)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to transform URL');
+                }
+
+                if (data.changed) {
+                    testResult.innerHTML = `
+                        <div class="alert alert-success py-2">
+                            <strong>Original:</strong> <code>${escapeHtml(data.original)}</code><br>
+                            <strong>Canonical:</strong> <code>${escapeHtml(data.canonical)}</code>
+                        </div>
+                    `;
+                } else {
+                    testResult.innerHTML = `
+                        <div class="alert alert-secondary py-2">
+                            URL unchanged: <code>${escapeHtml(data.original)}</code>
+                        </div>
+                    `;
+                }
+
+            } catch (error) {
+                testResult.innerHTML = `<div class="alert alert-danger py-2">${error.message}</div>`;
+            }
+        }
+
+        function renderResults(results) {
+            const container = document.getElementById('resultsContainer');
+
+            container.innerHTML = `
+                <div class="results-table">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th style="width: 50%">Original URL</th>
+                                <th style="width: 50%">Canonical URL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${results.map(r => `
+                                <tr class="changed">
+                                    <td class="url-cell">${escapeHtml(r.original)}</td>
+                                    <td class="url-cell">${escapeHtml(r.canonical)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function downloadResults() {
+            if (currentResults.length === 0) {
+                alert('No results to download');
+                return;
+            }
+
+            const csv = 'original_url;canonical_url\n' +
+                currentResults.map(r => `"${r.original}";"${r.canonical}"`).join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `canonical_urls_${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
