@@ -37,18 +37,18 @@ def create_product_recommendation_prompt(h1_title: str, products: List[Dict]) ->
     """
     Create the prompt for product recommendation content generation.
     Matches the n8n workflow prompt structure.
-    Optimized: limits to 30 products and truncates descriptions to reduce tokens.
+    Optimized: limits to 30 products and truncates descriptions to 200 chars to reduce tokens.
     """
     # Limit to 30 products max for faster AI processing
     limited_products = products[:30]
 
     products_text = "\n".join([
-        f"Product {i + 1}\nTitle: {p['title']}\nUrl: {p['url']}\nContent: {p['listviewContent'][:150]}\n"  # Truncate to 150 chars
+        f"Product {i + 1}\nTitle: {p['title']}\nUrl: {p['url']}\nContent: {p['listviewContent'][:200]}\n"  # Truncate to 200 chars
         for i, p in enumerate(limited_products)
     ])
 
     prompt = f"""Opdracht
-Een prijsbewuste consumenten landt op een pagina na het zoeken in Google.Op de pagina staan veel producten waaruit hij moet kiezen. Zie de lijst met de 40 populairste producten hieronder.
+Een prijsbewuste consumenten landt op een pagina na het zoeken in Google. Op de pagina staan veel producten waaruit hij moet kiezen. Zie de lijst met de 30 populairste producten hieronder.
 Schrijf een korte tekst (max. 100 woorden) met als doel om de bezoeker te helpen de juiste keuze te maken.
 - Schrijf de tekst als EEN doorlopende alinea, GEEN meerdere paragrafen of witregels.
 - Geef concreet advies: noem bijvoorbeeld verschillen in functies, eigenschappen of gebruiksscenario's
@@ -70,11 +70,12 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
     """
     user_prompt = create_product_recommendation_prompt(h1_title, products)
 
-    system_message = """Je bent een online voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
+    system_message = """Je bent een online marketeer voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
 - Spreek de lezer aan met "je," in een toegankelijke, optimistische toon.
 - Noem nooit prijzen.
 - Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
 - Focus op advies dat écht helpt bij het maken van een keuze (bv. voordelen, verschillen, specifieke kenmerken).
+- Als het zoekwoord een merknaam bevat, zijn ALLE producten van dat merk. Link alleen naar producten uit de lijst - deze zijn al gefilterd op het juiste merk.
 - Als je linkt gebruikt, gebruik de tag <a href> en kies dan de juiste url uit de lijst van meegeleverde producten. Maak nooit zelf een andere url en negeer urls met waarde [empty]
 - Als je een link maakt: HOUD DE LINKTEKST KORT (max 3-5 woorden). Zorg dat de linktekst verwijst naar het correcte product, maar vermijd lange productnamen met specificaties. Bijvoorbeeld: "Beeztees kattentuigje Hearts" in plaats van "Beeztees kattentuigje Hearts zwart 120 x 1 cm".
 - We moeten voorkomen dat de link tekst niet overeenkomt met de url.
