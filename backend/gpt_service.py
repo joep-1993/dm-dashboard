@@ -75,8 +75,9 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
 - Noem nooit prijzen.
 - Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
 - Focus op advies dat écht helpt bij het maken van een keuze (bv. voordelen, verschillen, specifieke kenmerken).
-- Als het zoekwoord een merknaam bevat, zijn ALLE producten van dat merk. Link alleen naar producten uit de lijst - deze zijn al gefilterd op het juiste merk.
-- Als je linkt gebruikt, gebruik de tag <a href> en kies dan de juiste url uit de lijst van meegeleverde producten. Maak nooit zelf een andere url en negeer urls met waarde [empty]
+- BELANGRIJK: Link ALLEEN naar producten die exact overeenkomen met het zoekwoord. Als het zoekwoord "Samsung Galaxy Buds FE" is, link dan NIET naar "Galaxy Buds3" of "Galaxy Buds Pro" - dat zijn andere producten. Link liever naar 1 correct product dan naar meerdere verkeerde producten.
+- Verzin NOOIT producten of URLs die niet in de lijst staan. Als er maar 1 passend product is, gebruik dan alleen die ene link.
+- Als je linkt, gebruik de tag <a href> en kies dan de juiste url uit de lijst van meegeleverde producten. Maak nooit zelf een andere url en negeer urls met een lege waarde.
 - Als je een link maakt: HOUD DE LINKTEKST KORT (max 3-5 woorden). Zorg dat de linktekst verwijst naar het correcte product, maar vermijd lange productnamen met specificaties. Bijvoorbeeld: "Beeztees kattentuigje Hearts" in plaats van "Beeztees kattentuigje Hearts zwart 120 x 1 cm".
 - We moeten voorkomen dat de link tekst niet overeenkomt met de url.
 - Gebruik nooit andere URLs dan degene die voorkomen in de lijst van producten."""
