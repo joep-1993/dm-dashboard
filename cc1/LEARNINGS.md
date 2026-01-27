@@ -3,7 +3,68 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 ## User Preferences
 - **Default Project**: When user says "the frontend" or "start the frontend" without specifying a project, always assume **dm-tools**
-- **Date**: 2026-01-24
+- **Frontend URL**: Always use http://localhost:8003/static/index.html (served by the backend via docker-compose, not a separate server)
+- **Skip Permissions**: User can say "skip-permissions" mid-conversation to skip permission prompts (configured in `~/.claude/settings.json`)
+- **Date**: 2026-01-27
+
+## N8N Integration Setup
+- **N8N Skills**: Installed 7 skills at `~/.claude/skills/` from [n8n-skills](https://github.com/czlonkowski/n8n-skills)
+  - n8n-expression-syntax, n8n-mcp-tools-expert, n8n-workflow-patterns
+  - n8n-validation-expert, n8n-node-configuration, n8n-code-javascript, n8n-code-python
+- **N8N MCP Server**: Configured at `~/.claude/mcp.json`
+  - URL: `https://n8n.aks.mgmt.beslist.nl`
+  - Requires Node.js 22+ (upgraded via nvm)
+  - Full path to npx: `/home/joepvanschagen/.nvm/versions/node/v22.22.0/bin/npx`
+- **Date**: 2026-01-27
+
+## Database Sync to N8N Vector DB
+- **Purpose**: Copied all dm-tools tables to N8N's PostgreSQL for use in n8n workflows
+- **Target Database**:
+  - Host: `10.1.32.9` (internal: `n8n-vector-db-rw.n8n.svc.cluster.local`)
+  - Database: `n8n-vector-db`
+  - User: `dbadmin`
+- **Tables Copied** (15 tables, ~2.3M rows):
+  - `pa.content_urls_joep` (220K rows) - SEO content
+  - `pa.faq_content` (241K rows) - FAQ content
+  - `pa.unique_titles` (1M rows) - AI-generated titles
+  - `pa.jvs_seo_werkvoorraad` - Work queue
+  - `pa.link_validation_results`, `pa.faq_validation_results` - Validation results
+  - `pa.content_history` - Content backup
+  - Plus tracking tables and thema_ads tables
+- **Script Pattern**: Used `psycopg2.extras.execute_values()` with JSONB handling via `Json()` wrapper
+- **Date**: 2026-01-27
+
+## CSV Encoding Fix for Excel
+- **Problem**: Excel shows garbled characters like "CafetiÃ¨res" instead of "Cafetières"
+- **Cause**: Excel defaults to Latin-1 encoding when opening CSV files without BOM
+- **Solution**: Add UTF-8 BOM (Byte Order Mark) at start of file:
+  ```bash
+  printf '\xEF\xBB\xBF' > fixed.csv && cat original.csv >> fixed.csv
+  ```
+- **Verification**: `file` command should show "UTF-8 (with BOM) text"
+- **Date**: 2026-01-27
+
+## Canonical URL Generator
+- **Purpose**: Replaces Google Apps Script + Google Sheets workflow for generating canonical URLs
+- **Data Source**: Redshift (`datamart.fct_visits` + `datamart.dim_visit`) instead of GA4
+- **Transformation Types**:
+  - CAT-CAT: Replace category slug (e.g., `schoenen_430884` → `schoenen_430885`)
+  - FACET-FACET: Replace facet value (e.g., `merk` → `populaire_serie`)
+  - CAT+FACET: Change category for faceted URLs, keep facet
+  - CAT+FACET1: Change category for faceted URLs, remove facet
+  - BUCKET+BUCKET: Replace bucket value (e.g., `merk~23597985` → `populaire_serie~2590809`)
+  - REMOVEBUCKET: Remove bucket from URL
+- **Files**:
+  - Backend: `backend/canonical_service.py`
+  - Frontend: `frontend/canonical.html`
+  - API endpoints in `backend/main.py`
+- **API Endpoints**:
+  - `POST /api/canonical/generate` - Generate canonicals
+  - `POST /api/canonical/preview` - Preview affected URLs
+  - `GET /api/canonical/fetch-urls` - Search Redshift URLs
+  - `POST /api/canonical/transform` - Test single URL
+- **Bug Fix**: Regex `re.sub(r'/+', '/', url)` also replaced `://` in URLs; fixed with `re.sub(r'(?<!:)//+', '/', url)`
+- **Date**: 2026-01-27
 
 ## Link Validator V4 UUID Support
 - **Problem**: Product URLs with V4 UUID format were incorrectly marked as "gone" during link validation
@@ -32,6 +93,44 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
   - `idx_link_validation_content_url` on `pa.link_validation_results(content_url)`
 - **Location**: `backend/database.py`, `backend/main.py`, `backend/scraper_service.py`
 - **Date**: 2026-01-24
+
+## GPT URL Truncation Fix
+- **Problem**: GPT sometimes truncates product URLs in generated content
+  - Full URL: `https://www.beslist.nl/p/product-name/452/8718969401258/`
+  - Truncated: `https://www.beslist.nl/p/product-name/` (missing maincat_id and pimId)
+- **Impact**: Found 6,486 content items with 22,317 truncated/broken links
+- **Solution**: Added `fix_truncated_urls()` function in `backend/gpt_service.py`
+  - Builds mapping of product-name slugs to full URLs from original product list
+  - Finds truncated URLs in GPT output using regex
+  - Replaces them with correct full URLs
+  - Logs how many URLs were fixed
+- **When Applied**: Automatically runs after GPT generates content in `generate_product_content()`
+- **Location**: `backend/gpt_service.py` - `fix_truncated_urls()`
+- **Date**: 2026-01-25
+
+## Content History Backup Table
+- **Purpose**: Backup content before deletion during link validation or resets
+- **Table**: `pa.content_history`
+- **Columns**:
+  - `url` (TEXT) - The category URL
+  - `content` (TEXT) - The backed up content
+  - `reset_reason` (TEXT) - Why it was reset (e.g., 'gone_products', 'truncated_urls')
+  - `reset_details` (JSONB) - Additional details (e.g., list of gone URLs)
+  - `original_created_at` (TIMESTAMP) - When the content was originally created
+  - `reset_at` (TIMESTAMP) - When the backup was made
+- **Used By**: Link validator, manual resets
+- **Location**: `backend/database.py`, `backend/main.py`
+- **Date**: 2026-01-25
+
+## Minimum Offer Count for Content Generation
+- **Change**: Increased minimum shopCount from 2 to 3 for including product links
+- **Applies To**:
+  - SEO Content: `backend/scraper_service.py:548` - `shop_count >= 3`
+  - FAQ Content: `backend/faq_service.py:485` - `shop_count >= 3`
+- **Does NOT Apply To**:
+  - Link Validator: Still uses `min_offers=2` (existing content not affected)
+- **Reason**: Ensures better quality PLPs are linked in generated content
+- **Date**: 2026-01-25
 
 ## AI Title Generation Service
 - **Purpose**: Generates SEO-optimized titles using productsearch API + OpenAI
@@ -1915,5 +2014,24 @@ for row in reader:
 - **Location**: frontend/thema-ads.html
 - **Date**: 2025-12-17
 
+### Canonical URL Generator - UI & Feature Updates
+- **Button Styling**:
+  - "Download CSV" button: Changed from `btn-outline-light` (grey) to `btn-outline-warning` (orange)
+  - "Add Rule" buttons: Changed from `btn-outline-primary` (blue) to `btn-warning` (solid orange)
+- **Tab Styling**:
+  - Tab text color changed to anthracite (#3a3a3a) with bold font
+  - Hover state: darker anthracite (#1a1a1a)
+  ```css
+  .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+  .nav-tabs .nav-link:hover { color: #1a1a1a; }
+  .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+  ```
+- **FACET-FACET Category Filter**: Added optional category filter to FACET-FACET rules (same as CAT+FACET)
+  - Frontend: Added "Category (opt)" column and input field
+  - Backend: Added `cat: Optional[str] = None` to `FacetFacetRule` dataclass
+  - URL fetching and rule application now respect the category filter
+- **Location**: `frontend/canonical.html`, `backend/canonical_service.py`
+- **Date**: 2026-01-27
+
 ---
-_Last updated: 2025-12-17_
+_Last updated: 2026-01-27_

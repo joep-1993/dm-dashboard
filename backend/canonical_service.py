@@ -32,6 +32,7 @@ class FacetFacetRule:
     """Facet to facet replacement rule"""
     old_facet: str
     new_facet: str
+    cat: Optional[str] = None  # Optional category filter
 
 
 @dataclass
@@ -179,13 +180,24 @@ def fetch_urls_for_rules(rules: TransformationRules, start_date: str, end_date: 
 
     # Fetch URLs for FACET-FACET rules
     for rule in rules.facet_facet:
-        urls = fetch_urls_from_redshift(
-            contains=rule.old_facet,
-            start_date=start_date,
-            end_date=end_date
-        )
-        for u in urls:
-            all_urls.add(u["url"])
+        if rule.cat:
+            # If category filter specified, fetch URLs containing both facet and category
+            urls = fetch_urls_from_redshift(
+                contains=rule.old_facet,
+                start_date=start_date,
+                end_date=end_date
+            )
+            for u in urls:
+                if rule.cat in u["url"]:
+                    all_urls.add(u["url"])
+        else:
+            urls = fetch_urls_from_redshift(
+                contains=rule.old_facet,
+                start_date=start_date,
+                end_date=end_date
+            )
+            for u in urls:
+                all_urls.add(u["url"])
 
     # Fetch URLs for CAT+FACET rules
     for rule in rules.cat_facet:
@@ -308,10 +320,13 @@ def _determine_tasks(url: str, rules: TransformationRules) -> List[str]:
     if _contains_any(url, old_cats):
         tasks.append("CAT-CAT")
 
-    # Check FACET-FACET
-    old_facets = [r.old_facet for r in rules.facet_facet]
-    if _contains_any(url, old_facets):
-        tasks.append("FACET-FACET")
+    # Check FACET-FACET (respecting optional category filter)
+    for rule in rules.facet_facet:
+        if rule.old_facet in url:
+            # If no category filter, or URL contains the category, rule applies
+            if not rule.cat or rule.cat in url:
+                tasks.append("FACET-FACET")
+                break
 
     # Check CAT+FACET
     cats = [r.cat for r in rules.cat_facet if r.cat]
@@ -365,6 +380,10 @@ def _apply_cat_cat(url: str, rules: List[CatCatRule]) -> str:
 def _apply_facet_facet(url: str, rules: List[FacetFacetRule]) -> str:
     """Apply facet-to-facet replacement"""
     for rule in rules:
+        # Skip if category filter is specified and URL doesn't contain it
+        if rule.cat and rule.cat not in url:
+            continue
+
         # Handle facet with tilde notation (facet~value~~)
         pattern_between = f"{rule.old_facet}~~"
         pattern_end = f"~~{rule.old_facet}"
@@ -587,7 +606,7 @@ def parse_rules_from_json(data: dict) -> TransformationRules:
     Expected format:
     {
         "cat_cat": [{"old_cat": "...", "new_cat": "...", "new_maincat": "..."}],
-        "facet_facet": [{"old_facet": "...", "new_facet": "..."}],
+        "facet_facet": [{"old_facet": "...", "new_facet": "...", "cat": "..."}],
         "cat_facet": [{"facet": "...", "canon_cat": "...", "cat": "..."}],
         "cat_facet_remove": [{"facet": "...", "canon_cat": "...", "cat": "..."}],
         "bucket_bucket": [{"old_bucket": "...", "new_bucket": "..."}],

@@ -16,6 +16,9 @@
         .changed { background-color: #d4edda !important; }
         .tab-content { padding-top: 1rem; }
         pre { background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; overflow-x: auto; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -52,10 +55,10 @@
                                 <button class="nav-link" data-bs-toggle="tab" data-bs-target="#facetfacet" type="button">FACET-FACET</button>
                             </li>
                             <li class="nav-item" role="presentation">
-                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#catfacet" type="button">CAT+FACET</button>
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#catfacet" type="button">CAT+FACET (keep)</button>
                             </li>
                             <li class="nav-item" role="presentation">
-                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#catfacet1" type="button">CAT+FACET1</button>
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#catfacet1" type="button">CAT+FACET (remove)</button>
                             </li>
                             <li class="nav-item" role="presentation">
                                 <button class="nav-link" data-bs-toggle="tab" data-bs-target="#bucket" type="button">BUCKET</button>
@@ -74,7 +77,7 @@
                                     </div>
                                     <!-- Rules will be added here -->
                                 </div>
-                                <button class="btn btn-sm btn-outline-primary" onclick="addCatCatRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-warning" onclick="addCatCatRule()">+ Add Rule</button>
                             </div>
 
                             <!-- FACET-FACET: Replace facet with another -->
@@ -82,14 +85,15 @@
                                 <p class="small text-muted">Replace one facet value with another.</p>
                                 <div class="rule-section" id="facetFacetRules">
                                     <div class="row mb-1">
-                                        <div class="col-5"><small class="text-muted">Old Facet</small></div>
-                                        <div class="col-5"><small class="text-muted">New Facet</small></div>
+                                        <div class="col-4"><small class="text-muted">Old Facet</small></div>
+                                        <div class="col-4"><small class="text-muted">New Facet</small></div>
+                                        <div class="col-3"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-outline-primary" onclick="addFacetFacetRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-warning" onclick="addFacetFacetRule()">+ Add Rule</button>
                             </div>
 
-                            <!-- CAT+FACET: Change category for faceted URLs (keep facet) -->
+                            <!-- CAT+FACET (keep): Change category for faceted URLs (keep facet) -->
                             <div class="tab-pane fade" id="catfacet" role="tabpanel">
                                 <p class="small text-muted">Change category for URLs with specific facet (keep the facet).</p>
                                 <div class="rule-section" id="catFacetRules">
@@ -99,10 +103,10 @@
                                         <div class="col-3"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-outline-primary" onclick="addCatFacetRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-warning" onclick="addCatFacetRule()">+ Add Rule</button>
                             </div>
 
-                            <!-- CAT+FACET1: Change category and remove facet -->
+                            <!-- CAT+FACET (remove): Change category and remove facet -->
                             <div class="tab-pane fade" id="catfacet1" role="tabpanel">
                                 <p class="small text-muted">Change category for URLs with specific facet (remove the facet).</p>
                                 <div class="rule-section" id="catFacetRemoveRules">
@@ -112,7 +116,7 @@
                                         <div class="col-3"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-outline-primary" onclick="addCatFacetRemoveRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-warning" onclick="addCatFacetRemoveRule()">+ Add Rule</button>
                             </div>
 
                             <!-- BUCKET: Replace or remove bucket -->
@@ -125,7 +129,7 @@
                                         <div class="col-5"><small class="text-muted">New Bucket</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-outline-primary mb-3" onclick="addBucketBucketRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-warning mb-3" onclick="addBucketBucketRule()">+ Add Rule</button>
 
                                 <h6>Remove Bucket</h6>
                                 <div class="rule-section" id="removeBucketRules">
@@ -134,7 +138,7 @@
                                         <div class="col-5"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-outline-primary" onclick="addRemoveBucketRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-warning" onclick="addRemoveBucketRule()">+ Add Rule</button>
                             </div>
                         </div>
 
@@ -160,7 +164,7 @@
                         <h5 class="mb-0">Results</h5>
                         <div>
                             <span id="resultCount" class="badge bg-light text-dark me-2">0 URLs</span>
-                            <button class="btn btn-sm btn-outline-light" onclick="downloadResults()">Download CSV</button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="downloadResults()">Download CSV</button>
                         </div>
                     </div>
                     <div class="card-body">
@@ -229,6 +233,7 @@
             row.innerHTML = `
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. merk" data-field="old_facet">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie" data-field="new_facet">
+                <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881 (opt)" data-field="cat">
                 <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
             `;
             container.appendChild(row);
@@ -329,7 +334,7 @@
 
             return {
                 cat_cat: collectRules('catCatRules', ['old_cat', 'new_cat', 'new_maincat']),
-                facet_facet: collectRules('facetFacetRules', ['old_facet', 'new_facet']),
+                facet_facet: collectRules('facetFacetRules', ['old_facet', 'new_facet', 'cat']),
                 cat_facet: collectRules('catFacetRules', ['facet', 'canon_cat', 'cat']),
                 cat_facet_remove: collectRules('catFacetRemoveRules', ['facet', 'canon_cat', 'cat']),
                 bucket_bucket: collectRules('bucketBucketRules', ['old_bucket', 'new_bucket']),
