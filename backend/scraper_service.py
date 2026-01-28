@@ -535,21 +535,22 @@ def scrape_product_page_api(url: str) -> Optional[Dict]:
         api_products = data.get("products", [])[:70]  # Max 70 products
 
         for idx, product in enumerate(api_products):
+            # Skip orResult products - only include exact matches (type="result")
+            product_type = product.get("type", "")
+            if product_type == "orResult":
+                continue
+
             title = product.get("title", product.get("description", "No Title"))[:100]
             description = product.get("description", title)[:150]
             shop_count = product.get("shopCount", 0)
-            popularity = product.get("popularity", 0)
 
             # Get plpUrl for product link
             plp_url = product.get("plpUrl", "")
             if plp_url and not plp_url.startswith("http"):
                 plp_url = "https://www.beslist.nl" + plp_url
 
-            # Include products if:
-            # 1. Has at least 3 shops (reliable availability), OR
-            # 2. Is in top 10 by popularity AND has at least 2 shops
-            is_high_popularity = idx < 10 and shop_count >= 2
-            if plp_url and description and (shop_count >= 3 or is_high_popularity):
+            # Include products if they have at least 2 shops (reliable availability)
+            if plp_url and description and shop_count >= 2:
                 products.append({
                     "title": title,
                     "url": plp_url,

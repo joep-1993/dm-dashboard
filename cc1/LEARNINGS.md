@@ -1781,25 +1781,46 @@ for row in reader:
   - Example: `/products/accessoires/accessoires_2596345/c/merk~2685977`
   - Also supports: `/products/{maincat}/c/{filters}` (without subcategory)
 - **API Endpoint**: `https://productsearch-v2.api.beslist.nl/search/products`
-- **API Parameters**:
+- **Required API Parameters**:
   ```
-  query=&mainCategory={maincat_id}&category={category}&
-  filters[{filter_name}][0]={value}&
-  sort=popularity&sortDirection=desc&limit=30&
-  isBot=true&countryLanguage=nl-nl
+  query=                           # Can be empty for category browsing
+  mainCategory={maincat_name}      # e.g., "kantoorartikelen" (name, not ID)
+  category={category_urlname}      # e.g., "kantoorartikelen_558052_558970"
+  filters[{facet}][0]={value_id}   # e.g., filters[merk][0]=2829915
+  limit=76                         # Max products to return
+  offset=0                         # Pagination offset
+  isBot=false                      # REQUIRED - API returns 400 without this
+  countryLanguage=nl-nl            # REQUIRED - API returns 500 without this
+  experiment=topProducts           # Optional, for ranking experiment
+  trackTotalHits=false             # Optional
   ```
+- **API Error Messages**:
+  - Missing `isBot`: `{"errors":"isBot is a required parameter."}` (HTTP 400)
+  - Missing `countryLanguage`: `findCategoryIdByCategoryUrlAndCountryLanguage(): Argument #2 ($countryLanguage) must be of type string, null given` (HTTP 500)
+- **Request Headers**:
+  ```
+  Accept: application/json
+  User-Agent: Beslist script voor SEO
+  ```
+- **Product Filtering** (as of 2026-01-28):
+  - **Type filter**: Only include `type="result"` products, skip `type="orResult"`
+    - `result` = exact match for all filters (correct brand, category, etc.)
+    - `orResult` = partial/related match (may be wrong brand or loosely related)
+  - **shopCount filter**: Only include products with `shopCount >= 2`
+  - If URL returns only `orResult` products, it is skipped (no content generated)
+  - Code location: `backend/scraper_service.py`, `backend/faq_service.py`
 - **Implementation**:
   1. Parse URL to extract maincat name, category, and filters
-  2. Look up maincat_id from maincat_mapping.csv
+  2. Build API params with required `isBot=false` and `countryLanguage=nl-nl`
   3. Build API URL with filters encoded as `filters%5B{name}%5D%5B0%5D={value}`
-  4. Fetch products (limit=30, isBot=true)
+  4. Fetch products and filter by shopCount
   5. Extract `plpUrl` and `title` from each product
   6. Generate GPT content using product titles/descriptions
   7. Output includes proper `<a href="{plpUrl}">` links with product titles as anchor text
 - **Output**: Excel file with columns: url, maincat_id, category, products_found, success, content
 - **GPT Settings**: max_tokens=500 (increased from 200 to accommodate HTML links)
-- **Location**: backend/seo_content_generator.py
-- **Date**: 2025-12-10
+- **Location**: backend/scraper_service.py, backend/seo_content_generator.py
+- **Date**: 2025-12-10, updated 2026-01-28
 
 ### Switching from Redshift to Local PostgreSQL Only
 - **Context**: User requested to stop using Redshift and use only local PostgreSQL
@@ -2033,5 +2054,45 @@ for row in reader:
 - **Location**: `frontend/canonical.html`, `backend/canonical_service.py`
 - **Date**: 2026-01-27
 
+### Brand Mismatch Detection and Content Reset for Merk URLs
+- **Problem**: SEO content generated before 2026-01-27 for URLs with `merk~` facet often linked to products from wrong brands
+- **Root Cause**: AI prompt wasn't strict enough about linking only to products matching the URL's brand filter
+- **Detection Method**: SQL-based validation using brand lookup table
+  1. Load brand ID → name mapping from Excel into `pa.merk_lookup` table
+  2. Extract merk ID from URL using regex: `regexp_match(url, '~~merk~([0-9]+)')` or `/merk~([0-9]+)`
+  3. Check if brand name appears in content (missing = problematic)
+  4. Extract product links from content and check if slug starts with brand name (wrong brand links)
+- **Detection Query Pattern**:
+  ```sql
+  -- Find URLs where brand name is missing from content
+  SELECT url FROM pa.content_urls_joep c
+  WHERE c.url LIKE '%/merk~%'
+    AND EXISTS (
+        SELECT 1 FROM pa.merk_lookup m
+        WHERE m.merk_id = (regexp_match(c.url, '/merk~([0-9]+)'))[1]::integer
+        AND c.content NOT ILIKE '%' || m.brand_name || '%'
+    );
+
+  -- Find URLs where links point to wrong brands
+  SELECT url FROM (
+      SELECT url, LOWER(brand_name) as brand_lower,
+          (regexp_matches(content, 'href="https://www.beslist.nl/p/([^/"]+)', 'g'))[1] as product_slug
+      FROM content_with_brands
+  ) WHERE LOWER(product_slug) NOT LIKE brand_lower || '%';
+  ```
+- **Reset Process** (to make URLs pending for regeneration):
+  1. Archive old content: `INSERT INTO pa.content_history ... WHERE reset_reason = 'brand_mismatch_reset'`
+  2. Delete content: `DELETE FROM pa.content_urls_joep WHERE url IN (...)`
+  3. Reset werkvoorraad flag: `UPDATE pa.jvs_seo_werkvoorraad SET kopteksten = 0 WHERE url IN (...)`
+  4. **Critical**: Delete from tracking table: `DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE url IN (...)`
+- **Pending URL Logic**: URLs are pending when they exist in `jvs_seo_werkvoorraad` but NOT in `jvs_seo_werkvoorraad_kopteksten_check`
+- **Results** (2026-01-28):
+  - Total old merk content: 93,459
+  - Missing brand name: 19,888 (21%)
+  - Wrong brand links: 35,442 (38%)
+  - Total reset to pending: 55,330 (59%)
+- **Location**: Database tables `pa.merk_lookup`, `pa.content_history`, `pa.content_urls_joep`, `pa.jvs_seo_werkvoorraad_kopteksten_check`
+- **Date**: 2026-01-28
+
 ---
-_Last updated: 2026-01-27_
+_Last updated: 2026-01-28 (orResult filtering, shopCount >= 2)_

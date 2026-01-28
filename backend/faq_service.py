@@ -469,6 +469,11 @@ def fetch_products_api(url: str) -> Optional[Dict]:
         api_products = data.get("products", [])[:30]  # Limit for FAQ generation
 
         for product in api_products:
+            # Skip orResult products - only include exact matches (type="result")
+            product_type = product.get("type", "")
+            if product_type == "orResult":
+                continue
+
             title = product.get("title", product.get("description", ""))[:100]
             description = product.get("description", title)[:200]
             plp_url = product.get("plpUrl", "")
@@ -481,8 +486,8 @@ def fetch_products_api(url: str) -> Optional[Dict]:
                 })
 
             # Extract product URLs (/p/ URLs) for FAQ hyperlinks
-            # Only include products with at least 3 offers (shopCount >= 3)
-            if plp_url and "/p/" in plp_url and shop_count >= 3:
+            # Only include products with at least 2 offers (shopCount >= 2)
+            if plp_url and "/p/" in plp_url and shop_count >= 2:
                 # Make it a full URL if relative
                 if plp_url.startswith("/"):
                     full_url = f"{BASE_URL}{plp_url}"

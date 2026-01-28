@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 **Project:** Content Top - SEO Content Generation System
-**Last Updated:** 2025-01-22 01:09 CET
+**Last Updated:** 2026-01-28 12:00 CET
 **Timezone:** Europe/Amsterdam (CET/CEST)
 
 ## Table of Contents
@@ -594,6 +594,96 @@ route add -p 65.9.0.0 mask 255.255.0.0 192.168.1.1 metric 1 if 10
 - Simple orchestration with docker-compose
 - No need for Kubernetes complexity (small scale)
 - Easy to version control (docker-compose.yml)
+
+---
+
+## External APIs
+
+### Beslist Product Search API
+
+**Endpoint**: `https://productsearch-v2.api.beslist.nl/search/products`
+
+**Purpose**: Fetch product data for SEO content generation based on category/facet URLs.
+
+#### Required Parameters
+| Parameter | Example | Description |
+|-----------|---------|-------------|
+| `query` | `""` | Search query (can be empty for category browsing) |
+| `mainCategory` | `kantoorartikelen` | Main category name (not ID) |
+| `category` | `kantoorartikelen_558052_558970` | Category URL name |
+| `filters[{facet}][0]` | `filters[merk][0]=2829915` | Facet filters (URL encoded) |
+| `limit` | `76` | Max products to return |
+| `offset` | `0` | Pagination offset |
+| `isBot` | `false` | **REQUIRED** - API returns 400 without this |
+| `countryLanguage` | `nl-nl` | **REQUIRED** - API returns 500 without this |
+
+#### Optional Parameters
+| Parameter | Example | Description |
+|-----------|---------|-------------|
+| `experiment` | `topProducts` | Ranking experiment |
+| `trackTotalHits` | `false` | Include total hit count |
+
+#### Request Headers
+```
+Accept: application/json
+User-Agent: Beslist script voor SEO
+```
+
+#### Error Responses
+| Error | Cause | Response |
+|-------|-------|----------|
+| HTTP 400 | Missing `isBot` | `{"errors":"isBot is a required parameter."}` |
+| HTTP 500 | Missing `countryLanguage` | `findCategoryIdByCategoryUrlAndCountryLanguage(): Argument #2 ($countryLanguage) must be of type string, null given` |
+
+#### Product Response Fields
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Product ID |
+| `title` | string | Product title |
+| `description` | string | Product description |
+| `brandName` | string | Brand name |
+| `plpUrl` | string | Product listing page URL |
+| `shopCount` | integer | Number of shops offering this product |
+| `popularity` | integer | Popularity score (higher = more popular) |
+| `type` | string | **Match type** - `result` or `orResult` |
+| `minPrice` | float | Minimum price |
+| `images` | array | Product images |
+
+#### Product Type Field (Critical for Quality)
+The `type` field indicates how well the product matches the search filters:
+
+| Type | Meaning | Use Case |
+|------|---------|----------|
+| `result` | **Exact match** - Product matches ALL filters (correct brand, category, etc.) | **Include** in content |
+| `orResult` | **Partial/related match** - Product is related but doesn't match all filters | **Exclude** from content |
+
+**Example**: For URL `/products/.../c/merk~2829915` (brand filter):
+- `type=result`: Product is from the specified brand ✓
+- `type=orResult`: Product is from a different brand, included as fallback ✗
+
+#### Product Filtering Rules (as of 2026-01-28)
+```python
+# Skip orResult products - only include exact matches
+if product.get("type") == "orResult":
+    continue
+
+# Only include products with reliable availability
+if shop_count >= 2:
+    products.append(product)
+```
+
+**Filtering Logic**:
+1. Skip all `orResult` products (only include `type="result"`)
+2. Only include products with `shopCount >= 2`
+3. If no products remain after filtering, URL is skipped
+
+#### API Response Ordering
+Products are returned sorted by `popularity` (descending). Higher popularity = shown first.
+
+#### Code Locations
+- **SEO Content**: `backend/scraper_service.py` (lines 533-557)
+- **FAQ Content**: `backend/faq_service.py` (lines 466-500)
+- **API Parameters**: `backend/scraper_service.py` (lines 325-335)
 
 ---
 
