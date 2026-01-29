@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>R-Finder - URL Discovery</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .results-table { max-height: 600px; overflow-y: auto; }
+        .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
+        .visits-cell { text-align: right; font-weight: bold; }
+        .filter-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
+        .filter-row input { flex: 1; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+        .stats-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container">
+            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1" style="text-decoration: none;">R-Finder</a>
+            <div>
+                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">SEO Content</a>
+                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
+                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
+                <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
+                <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
+                <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 pb-5">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+                <!-- Search Filters -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Search Filters</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Find /r/ URLs from Redshift visits data. Filter by category, minimum visits, and date range.</p>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label small">Date Range</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="date" class="form-control" id="startDate">
+                                    <span class="input-group-text">to</span>
+                                    <input type="date" class="form-control" id="endDate">
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">Min Visits</label>
+                                <input type="number" class="form-control form-control-sm" id="minVisits" value="0" min="0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">Limit</label>
+                                <input type="number" class="form-control form-control-sm" id="limit" value="4000" min="1" max="10000">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Category / Query Filters (URL must contain ALL of these - AND logic)</label>
+                            <div id="filterContainer">
+                                <div class="row mb-2">
+                                    <div class="col-md-3">
+                                        <input type="text" class="form-control form-control-sm" id="filter1" placeholder="e.g. laptops">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <input type="text" class="form-control form-control-sm" id="filter2" placeholder="e.g. gaming">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <input type="text" class="form-control form-control-sm" id="filter3" placeholder="e.g. 17_inch">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <input type="text" class="form-control form-control-sm" id="filter4" placeholder="e.g. asus">
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="text-muted">Leave empty to get all /r/ URLs. Spaces are converted to underscores.</small>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-primary" onclick="searchUrls()">Search URLs</button>
+                            <button class="btn btn-outline-secondary" onclick="clearFilters()">Clear Filters</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                <div class="card mb-4">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Results</h5>
+                        <div>
+                            <span id="resultCount" class="badge bg-light text-dark me-2">0 URLs</span>
+                            <button class="btn btn-sm btn-outline-warning" onclick="downloadResults()">Download CSV</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="loadingSpinner" class="text-center d-none">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Fetching URLs from Redshift...</p>
+                        </div>
+
+                        <div id="resultsContainer">
+                            <p class="text-muted text-center">Enter filters and click "Search URLs" to find /r/ pages.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Excluded Patterns Info -->
+                <div class="card mt-3">
+                    <div class="card-header bg-secondary text-white">
+                        <h6 class="mb-0">Excluded URL Patterns</h6>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted mb-2">The following patterns are automatically excluded from results:</p>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <ul class="small mb-0">
+                                    <li><code>device=</code> - Device parameters</li>
+                                    <li><code>/sitemap/</code> - Sitemap pages</li>
+                                    <li><code>sortby=</code> - Sort parameters</li>
+                                    <li><code>/filters/</code> - Filter pages</li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <ul class="small mb-0">
+                                    <li><code>/page_</code> - Pagination</li>
+                                    <li><code>shop_id=</code> - Shop filters</li>
+                                    <li><code>+</code> - Combined queries</li>
+                                    <li>Mismatched category combinations</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Store results for download
+        let currentResults = [];
+
+        // Initialize date range (2015-01-01 to today)
+        document.addEventListener('DOMContentLoaded', () => {
+            const today = new Date();
+            document.getElementById('endDate').value = today.toISOString().split('T')[0];
+            document.getElementById('startDate').value = '2015-01-01';
+        });
+
+        function getDateYYYYMMDD(dateStr) {
+            return dateStr.replace(/-/g, '');
+        }
+
+        function collectFilters() {
+            const filters = [];
+            for (let i = 1; i <= 4; i++) {
+                const val = document.getElementById(`filter${i}`).value.trim();
+                if (val) {
+                    filters.push(val);
+                }
+            }
+            return filters;
+        }
+
+        async function searchUrls() {
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const resultCount = document.getElementById('resultCount');
+
+            loadingSpinner.classList.remove('d-none');
+            resultsContainer.innerHTML = '';
+
+            try {
+                const payload = {
+                    filters: collectFilters(),
+                    min_visits: parseInt(document.getElementById('minVisits').value) || 0,
+                    start_date: getDateYYYYMMDD(document.getElementById('startDate').value),
+                    end_date: getDateYYYYMMDD(document.getElementById('endDate').value),
+                    limit: parseInt(document.getElementById('limit').value) || 4000
+                };
+
+                const response = await fetch('/api/rfinder/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to search URLs');
+                }
+
+                currentResults = data.urls || [];
+                resultCount.textContent = `${data.total} URLs`;
+
+                if (currentResults.length === 0) {
+                    resultsContainer.innerHTML = '<p class="text-muted text-center">No URLs found matching the filters.</p>';
+                } else {
+                    renderResults(currentResults);
+                }
+
+            } catch (error) {
+                resultsContainer.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+            } finally {
+                loadingSpinner.classList.add('d-none');
+            }
+        }
+
+        function renderResults(results) {
+            const container = document.getElementById('resultsContainer');
+
+            // Calculate total visits
+            const totalVisits = results.reduce((sum, r) => sum + (r.visits || 0), 0);
+
+            // Create tab-separated text for Excel (tabs = columns) with relative URLs
+            const toRelativeUrl = (url) => url.replace(/^https?:\/\/[^\/]+/, '');
+            const tsvData = 'url\tvisits\n' + results.map(r => `${toRelativeUrl(r.url)}\t${r.visits}`).join('\n');
+
+            container.innerHTML = `
+                <p class="text-muted small mb-2">Total visits: <strong>${totalVisits.toLocaleString()}</strong></p>
+                <div class="mb-3">
+                    <button class="btn btn-sm btn-outline-primary" onclick="copyToClipboard()">Copy to Clipboard (for Excel)</button>
+                </div>
+                <textarea id="tsvOutput" class="form-control mb-3" rows="10" readonly style="font-family: monospace; font-size: 0.8rem;">${escapeHtml(tsvData)}</textarea>
+                <div class="results-table">
+                    <table class="table table-sm table-striped table-hover">
+                        <thead class="sticky-top bg-white">
+                            <tr>
+                                <th style="width: 80%">URL</th>
+                                <th style="width: 20%" class="text-end">Visits</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${results.map(r => `
+                                <tr>
+                                    <td class="url-cell">
+                                        <a href="${r.url.startsWith('http') ? r.url : 'https://www.beslist.nl' + r.url}" target="_blank" class="text-decoration-none">${escapeHtml(r.url)}</a>
+                                    </td>
+                                    <td class="visits-cell">${(r.visits || 0).toLocaleString()}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function copyToClipboard() {
+            const textarea = document.getElementById('tsvOutput');
+            textarea.select();
+            document.execCommand('copy');
+            alert('Copied to clipboard! Paste directly into Excel.');
+        }
+
+        function clearFilters() {
+            for (let i = 1; i <= 4; i++) {
+                document.getElementById(`filter${i}`).value = '';
+            }
+            document.getElementById('minVisits').value = '0';
+            document.getElementById('limit').value = '4000';
+
+            // Reset dates (2015-01-01 to today)
+            const today = new Date();
+            document.getElementById('endDate').value = today.toISOString().split('T')[0];
+            document.getElementById('startDate').value = '2015-01-01';
+        }
+
+        function downloadResults() {
+            if (currentResults.length === 0) {
+                alert('No results to download');
+                return;
+            }
+
+            const csv = 'url;visits\n' +
+                currentResults.map(r => `"${r.url}";${r.visits}`).join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `r_urls_${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

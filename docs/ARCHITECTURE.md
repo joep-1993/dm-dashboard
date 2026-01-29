@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 **Project:** Content Top - SEO Content Generation System
-**Last Updated:** 2026-01-28 12:00 CET
+**Last Updated:** 2026-01-29 14:00 CET
 **Timezone:** Europe/Amsterdam (CET/CEST)
 
 ## Table of Contents
@@ -72,11 +72,17 @@
 - **File Structure**:
   ```
   frontend/
-  ├── index.html       # Single-page application
+  ├── index.html          # SEO Content Generator
+  ├── faq.html            # FAQ Generator
+  ├── canonical.html      # Canonical URL Generator
+  ├── rfinder.html        # R-Finder (URL Discovery)
+  ├── thema-ads.html      # Thema Ads Processing
+  ├── unique-titles.html  # Unique Titles Manager
+  ├── dashboard.html      # Dashboard (tool overview)
   ├── css/
-  │   └── style.css    # Custom styles
+  │   └── style.css       # Custom styles
   └── js/
-      └── app.js       # Application logic
+      └── app.js          # Application logic
   ```
 
 ### Design Principles
@@ -201,6 +207,12 @@ main.py (API Endpoints)
     │
     ├──▶ link_validator.py (Quality Control)
     │       └──▶ HTTP status checking (301/404 detection)
+    │
+    ├──▶ canonical_service.py (URL Canonicalization)
+    │       └──▶ Redshift queries + URL transformation rules
+    │
+    ├──▶ rfinder_service.py (R-URL Discovery)
+    │       └──▶ Redshift queries for /r/ URLs
     │
     └──▶ database.py (Data Access Layer)
             ├──▶ PostgreSQL (local tracking)

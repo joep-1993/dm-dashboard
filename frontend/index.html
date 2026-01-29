@@ -13,16 +13,17 @@
         <div class="container">
             <a href="/static/dashboard.html" class="navbar-brand mb-0 h1" style="text-decoration: none;">SEO Content Generator</a>
             <div>
-                <a href="/static/dashboard.html" class="btn btn-outline-light btn-sm fw-bold">Dashboard</a>
                 <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
                 <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
                 <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
                 <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
+                <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
+                <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
             </div>
         </div>
     </nav>
 
-    <div class="container mt-5">
+    <div class="container mt-5 pb-5">
         <div class="row">
             <div class="col-md-10 mx-auto">
                 <!-- Upload URLs -->
@@ -263,9 +264,11 @@
                 </div>
 
                 <!-- URL Lookup -->
-                <div class="card">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">URL Lookup</h5>
+                    </div>
                     <div class="card-body">
-                        <h6 class="card-title">URL Lookup</h6>
                         <div class="input-group mb-3">
                             <input type="text" class="form-control" id="lookupUrl" placeholder="Enter URL to lookup...">
                             <button class="btn btn-outline-secondary" id="lookupBtn">Lookup</button>

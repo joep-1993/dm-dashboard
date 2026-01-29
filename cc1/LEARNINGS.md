@@ -66,6 +66,28 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Bug Fix**: Regex `re.sub(r'/+', '/', url)` also replaced `://` in URLs; fixed with `re.sub(r'(?<!:)//+', '/', url)`
 - **Date**: 2026-01-27
 
+## R-Finder Tool
+- **Purpose**: Find /r/ URLs from Redshift visits data (replaces Google Apps Script that queried GA4)
+- **Data Source**: Redshift (`datamart.fct_visits` + `datamart.dim_visit`) - same as Canonical Generator
+- **Features**:
+  - Filter by multiple keywords (AND logic - URL must contain ALL filters)
+  - Date range filtering (default: 2015-01-01 to today)
+  - Minimum visits threshold
+  - Copy-to-clipboard with tab-separated output for Excel
+  - Relative URLs in output for easier copying
+- **Exclusions** (same as original GA4 script):
+  - `device=`, `/sitemap/`, `sortby=`, `/filters/`, `/page_`, `shop_id=`, `+`
+  - Mismatched category combinations (e.g., `/cadeaus_gadgets_culinair/meubilair_`)
+- **Files**:
+  - Backend: `backend/rfinder_service.py`
+  - Frontend: `frontend/rfinder.html`
+  - API endpoints in `backend/main.py`
+- **API Endpoints**:
+  - `POST /api/rfinder/search` - Search for /r/ URLs with filters
+  - `GET /api/rfinder/stats` - Get total URL/visits statistics
+- **Troubleshooting**: URLs with all filter terms may have very few visits - check all-time data if recent date range returns 0 results
+- **Date**: 2026-01-29
+
 ## Link Validator V4 UUID Support
 - **Problem**: Product URLs with V4 UUID format were incorrectly marked as "gone" during link validation
 - **URL Formats Supported**:
@@ -2094,5 +2116,89 @@ for row in reader:
 - **Location**: Database tables `pa.merk_lookup`, `pa.content_history`, `pa.content_urls_joep`, `pa.jvs_seo_werkvoorraad_kopteksten_check`
 - **Date**: 2026-01-28
 
+### Beslist Product Search API Facet Validation Errors
+- **Problem**: API calls fail with HTTP 400 for certain URLs
+- **Cause**: URLs contain facet names or value IDs that are no longer valid for that category
+- **Error Response Types**:
+  - Invalid facet name: `{"context": "facet", "errorInfo": "The given facet is not valid.", "value": "personage"}`
+  - Invalid facet value: `{"context": "merk", "errorInfo": "The given facet value is not valid.", "value": 19957206}`
+- **Solution**: Detect 400 errors with "not valid" in errorInfo, return `facet_not_available` error type
+- **Error Reasons Reference**:
+  - `facet_not_available` - URL contains invalid facet name or value ID for category
+  - `api_failed` - Generic API failure (non-400 or unparseable error)
+  - `no_products_found` - API returned 0 products (skipped)
+- **Location**: backend/scraper_service.py, backend/faq_service.py
+- **Date**: 2025-12-26
+
+### External API SQL Escaping Errors
+- **Problem**: Website-configuration API returns MySQL INSERT exception when content contains apostrophes
+- **Error**: `An exception occurred while executing 'INSERT INTO ... VALUES ('...DVD's...')`
+- **Cause**: External API's MySQL INSERT not properly escaping single quotes
+- **Solution**: Sanitize content before sending to external API:
+```python
+def sanitize_for_api(text: str) -> str:
+    if not text:
+        return ""
+    # Normalize double single quotes to single (legacy data issue)
+    text = text.replace("''", "'")
+    # Replace single quotes with HTML entity
+    return text.replace("'", "&#39;")
+```
+- **Location**: backend/content_publisher.py
+- **Date**: 2026-01-15
+
+### Redshift Serializable Isolation Violation (Error 1023)
+- **Error**: `Error: 1023 DETAIL: Serializable isolation violation on table`
+- **Cause**: Multiple concurrent batch jobs updating the same Redshift table with individual UPDATE statements
+- **Solution**: Replace individual UPDATEs with batch UPDATE using IN clauses:
+```python
+# ❌ Wrong: Individual UPDATEs cause serialization conflicts
+for url in urls:
+    cur.execute("UPDATE ... SET kopteksten = 1 WHERE url = %s", (url,))
+
+# ✅ Correct: Single batch UPDATE
+if urls:
+    placeholders = ','.join(['%s'] * len(urls))
+    cur.execute(f"UPDATE ... SET kopteksten = 1 WHERE url IN ({placeholders})", urls)
+```
+- **Impact**: Eliminates serialization conflicts, 15-20% throughput improvement
+- **Location**: backend/main.py
+- **Date**: 2025-10-28
+
+### FastAPI Async vs Sync Endpoints with psycopg2
+- **Problem**: API endpoint hangs indefinitely at database connection
+- **Cause**: Async endpoint (`async def`) calling synchronous psycopg2 pool operations blocks event loop
+- **Solution**: Use synchronous endpoints (`def`) when using synchronous database drivers
+```python
+# ❌ Wrong: Async endpoint with sync database pool
+@app.post("/api/process-urls")
+async def process_urls():
+    conn = get_db_connection()  # Blocks event loop!
+
+# ✅ Correct: Synchronous endpoint
+@app.post("/api/process-urls")
+def process_urls():
+    conn = get_db_connection()  # No event loop blocking
+```
+- **Rule**: Use `def` with psycopg2, use `async def` only with async-compatible drivers (asyncpg)
+- **Location**: backend/main.py, backend/database.py
+- **Date**: 2025-10-23
+
+### Database Query Performance - LEFT JOIN vs NOT IN
+- **Problem**: Query timeout with 75k+ URLs when using NOT IN subquery
+- **Solution**: Replace with LEFT JOIN ... WHERE IS NULL pattern
+```sql
+-- ❌ Slow: NOT IN subquery (timeout)
+SELECT COUNT(*) FROM table1 WHERE url NOT IN (SELECT url FROM table2);
+
+-- ✅ Fast: LEFT JOIN pattern (<100ms)
+SELECT COUNT(*) FROM table1 t1
+LEFT JOIN table2 t2 ON t1.url = t2.url
+WHERE t2.url IS NULL;
+```
+- **Performance**: 30+ seconds → <100ms
+- **Location**: backend/main.py - `/api/status` endpoint
+- **Date**: 2025-10-22
+
 ---
-_Last updated: 2026-01-28 (orResult filtering, shopCount >= 2)_
+_Last updated: 2026-01-28 (orResult filtering, shopCount >= 2, supplemented from archive)_

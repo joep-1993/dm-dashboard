@@ -2351,3 +2351,72 @@ async def transform_single_url(url: str, rules: CanonicalRulesRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# R-FINDER ENDPOINTS - Find /r/ URLs from Redshift
+# =============================================================================
+
+from backend.rfinder_service import fetch_r_urls, get_r_url_stats
+
+
+class RFinderRequest(BaseModel):
+    """Request model for R-finder search"""
+    filters: Optional[List[str]] = []
+    min_visits: Optional[int] = 0
+    start_date: Optional[str] = "20210101"
+    end_date: Optional[str] = "20261231"
+    limit: Optional[int] = 4000
+
+
+@app.post("/api/rfinder/search")
+async def search_r_urls(request: RFinderRequest):
+    """
+    Search for /r/ URLs from Redshift.
+
+    Applies the same filters as the original GA4-based r-finder script:
+    - Must contain /r/
+    - Excludes device=, /sitemap/, sortby=, /filters/, /page_, shop_id=, etc.
+
+    Optional filters can be provided to narrow down results (e.g., category segments).
+    """
+    try:
+        # Clean up filters - remove empty strings
+        filters = [f for f in (request.filters or []) if f and f.strip()]
+
+        urls = fetch_r_urls(
+            filters=filters if filters else None,
+            min_visits=request.min_visits or 0,
+            start_date=request.start_date or "20210101",
+            end_date=request.end_date or "20261231",
+            limit=request.limit or 4000
+        )
+
+        return {
+            "status": "success",
+            "total": len(urls),
+            "urls": urls
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/rfinder/stats")
+async def get_rfinder_stats(
+    start_date: str = "20210101",
+    end_date: str = "20261231"
+):
+    """
+    Get statistics about /r/ URLs in Redshift.
+
+    Returns total unique URLs and total sessions for the given date range.
+    """
+    try:
+        stats = get_r_url_stats(start_date, end_date)
+        return {
+            "status": "success",
+            **stats
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
