@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 **Project:** Content Top - SEO Content Generation System
-**Last Updated:** 2026-01-29 14:00 CET
+**Last Updated:** 2026-01-30 CET
 **Timezone:** Europe/Amsterdam (CET/CEST)
 
 ## Table of Contents
@@ -76,6 +76,7 @@
   ├── faq.html            # FAQ Generator
   ├── canonical.html      # Canonical URL Generator
   ├── rfinder.html        # R-Finder (URL Discovery)
+  ├── redirect-checker.html # Redirect Checker (HTTP status/redirects/canonicals)
   ├── thema-ads.html      # Thema Ads Processing
   ├── unique-titles.html  # Unique Titles Manager
   ├── dashboard.html      # Dashboard (tool overview)
@@ -213,6 +214,9 @@ main.py (API Endpoints)
     │
     ├──▶ rfinder_service.py (R-URL Discovery)
     │       └──▶ Redshift queries for /r/ URLs
+    │
+    ├──▶ redirect_checker (in main.py)
+    │       └──▶ HTTP status codes, redirects, canonical URLs
     │
     └──▶ database.py (Data Access Layer)
             ├──▶ PostgreSQL (local tracking)
