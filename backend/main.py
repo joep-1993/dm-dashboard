@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, RedirectResponse
+from fastapi.responses import StreamingResponse, RedirectResponse, Response
+import httpx
+from urllib.parse import urljoin
 from datetime import datetime
 from io import StringIO, BytesIO
 import csv
@@ -2418,5 +2420,186 @@ async def get_rfinder_stats(
             "status": "success",
             **stats
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Redirect Checker API
+# =============================================================================
+
+REDIRECT_CHECKER_USER_AGENT = "Beslist script voor SEO"
+REDIRECT_CHECKER_BASE_URL = "https://www.beslist.nl"
+
+def normalize_url(url: str) -> str:
+    """Normalize URL by adding base URL for relative paths."""
+    url = url.strip()
+    if not url:
+        return url
+    # Already absolute URL
+    if url.startswith(('http://', 'https://')):
+        return url
+    # Relative URL starting with /
+    if url.startswith('/'):
+        return REDIRECT_CHECKER_BASE_URL + url
+    # Relative URL without leading slash
+    return REDIRECT_CHECKER_BASE_URL + '/' + url
+
+def extract_canonical_from_html(html: str, base_url: str) -> str:
+    """Extract canonical URL from HTML using regex."""
+    try:
+        patterns = [
+            r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+            r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html, re.IGNORECASE)
+            if match:
+                canonical = match.group(1)
+                if not canonical.startswith(('http://', 'https://')):
+                    canonical = urljoin(base_url, canonical)
+                return canonical
+    except Exception:
+        pass
+    return None
+
+
+class RedirectRateLimiter:
+    """Token bucket rate limiter for redirect checker."""
+    def __init__(self, rate):
+        self.rate = rate
+        self.tokens = rate
+        self.last_update = time.monotonic()
+        self.lock = asyncio.Lock()
+
+    async def __aenter__(self):
+        async with self.lock:
+            now = time.monotonic()
+            elapsed = now - self.last_update
+            self.tokens = min(self.rate, self.tokens + elapsed * self.rate)
+            self.last_update = now
+            if self.tokens < 1:
+                wait_time = (1 - self.tokens) / self.rate
+                await asyncio.sleep(wait_time)
+                self.tokens = 0
+            else:
+                self.tokens -= 1
+
+    async def __aexit__(self, *args):
+        pass
+
+
+async def check_single_url(client: httpx.AsyncClient, url: str, semaphore, rate_limiter, timeout: int):
+    """Check a single URL for status code, redirect, and canonical."""
+    async with semaphore:
+        async with rate_limiter:
+            result = {
+                'input_url': url,
+                'status_code': None,
+                'final_url': None,
+                'redirect_url': None,
+                'canonical_url': None,
+                'error': None
+            }
+            try:
+                # First request without redirects to get initial status
+                response = await client.get(url, follow_redirects=False, timeout=timeout)
+                initial_status = response.status_code
+                result['status_code'] = initial_status
+
+                if initial_status in (301, 302, 303, 307, 308):
+                    redirect_location = response.headers.get('Location')
+                    if redirect_location:
+                        if not redirect_location.startswith(('http://', 'https://')):
+                            redirect_location = urljoin(url, redirect_location)
+                        result['redirect_url'] = redirect_location
+
+                    # Second request following redirects to get final URL and canonical
+                    response = await client.get(url, follow_redirects=True, timeout=timeout)
+                    result['final_url'] = str(response.url)
+                    if response.status_code == 200:
+                        try:
+                            html = response.text
+                            result['canonical_url'] = extract_canonical_from_html(html, str(response.url))
+                        except Exception:
+                            pass
+                else:
+                    # No redirect - final URL is same as input
+                    result['final_url'] = str(response.url)
+                    if initial_status == 200:
+                        try:
+                            html = response.text
+                            result['canonical_url'] = extract_canonical_from_html(html, str(response.url))
+                        except Exception:
+                            pass
+
+            except httpx.TimeoutException:
+                result['status_code'] = 'TIMEOUT'
+                result['error'] = 'Request timed out'
+            except httpx.RequestError as e:
+                result['status_code'] = 'ERROR'
+                result['error'] = str(e)[:100]
+            except Exception as e:
+                result['status_code'] = 'ERROR'
+                result['error'] = str(e)[:100]
+            return result
+
+
+@app.post("/api/redirect-checker/check")
+async def redirect_checker_check(request: dict):
+    """
+    Check URLs for status codes, redirects, and canonical URLs.
+    Returns results as a stream of JSON lines.
+    """
+    urls = request.get('urls', [])
+    workers = min(request.get('workers', 20), 50)
+    rate = min(request.get('rate', 2), 20)
+    timeout = min(request.get('timeout', 15), 60)
+
+    if not urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+
+    # Normalize URLs (handle relative URLs)
+    urls = [normalize_url(url) for url in urls if url.strip()]
+
+    async def generate():
+        semaphore = asyncio.Semaphore(workers)
+        rate_limiter = RedirectRateLimiter(rate)
+        headers = {"User-Agent": REDIRECT_CHECKER_USER_AGENT}
+        limits = httpx.Limits(max_connections=workers, max_keepalive_connections=workers)
+
+        async with httpx.AsyncClient(headers=headers, limits=limits) as client:
+            tasks = [check_single_url(client, url, semaphore, rate_limiter, timeout) for url in urls]
+            for coro in asyncio.as_completed(tasks):
+                result = await coro
+                yield json.dumps({"type": "result", "data": result}) + "\n"
+
+        yield json.dumps({"type": "done"}) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+@app.post("/api/redirect-checker/download")
+async def redirect_checker_download(request: dict):
+    """Download redirect checker results as Excel file."""
+    results = request.get('results', [])
+    if not results:
+        raise HTTPException(status_code=400, detail="No results provided")
+
+    try:
+        import pandas as pd
+        df = pd.DataFrame(results)
+        cols = ['input_url', 'status_code', 'redirect_url', 'canonical_url', 'final_url', 'error']
+        df = df[[c for c in cols if c in df.columns]]
+
+        output = BytesIO()
+        df.to_excel(output, index=False)
+        output.seek(0)
+
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=redirect_check_results.xlsx"}
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

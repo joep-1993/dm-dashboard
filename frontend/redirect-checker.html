@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirect Checker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .results-table { max-height: 600px; overflow-y: auto; }
+        .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
+        .url-cell.copyable { cursor: pointer; }
+        .url-cell.copyable:hover { background-color: #e9ecef; }
+        .url-cell.copied { background-color: #d4edda !important; transition: background-color 0.3s; }
+        .status-200 { color: #198754; font-weight: bold; }
+        .status-301, .status-302, .status-307, .status-308 { color: #0d6efd; font-weight: bold; }
+        .status-404 { color: #dc3545; font-weight: bold; }
+        .status-error { color: #dc3545; font-weight: bold; }
+        .redirect-indicator { background-color: #cfe2ff; }
+        .canonical-diff { background-color: #fff3cd; }
+        pre { background: #f8f9fa; padding: 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; margin: 0; }
+        .copy-toast { position: fixed; bottom: 20px; right: 20px; background: #198754; color: white; padding: 10px 20px; border-radius: 5px; display: none; z-index: 9999; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container">
+            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1">Redirect Checker</a>
+            <div>
+                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">SEO Content</a>
+                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
+                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
+                <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
+                <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
+                <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
+                <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-11 mx-auto">
+                <!-- Input Section -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Input URLs</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <label for="urlInput" class="form-label">Enter URLs (one per line)</label>
+                                <textarea class="form-control" id="urlInput" rows="8" placeholder="/products/elektronica/
+/products/kleding/jassen/
+https://www.beslist.nl/products/tuin/"></textarea>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Settings</label>
+                                <div class="mb-2">
+                                    <label for="workersInput" class="form-label small mb-0">Parallel Workers</label>
+                                    <input type="number" class="form-control form-control-sm" id="workersInput" value="20" min="1" max="50">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="rateInput" class="form-label small mb-0">Requests/sec</label>
+                                    <input type="number" class="form-control form-control-sm" id="rateInput" value="2" min="1" max="20" step="0.5">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="timeoutInput" class="form-label small mb-0">Timeout (sec)</label>
+                                    <input type="number" class="form-control form-control-sm" id="timeoutInput" value="15" min="5" max="60">
+                                </div>
+                                <button class="btn btn-primary w-100" onclick="checkUrls()" id="checkBtn">
+                                    Check URLs
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div class="card mb-4" id="progressCard" style="display: none;">
+                    <div class="card-header bg-warning">
+                        <h5 class="mb-0">Progress</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="progress mb-2" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar" style="width: 0%">0%</div>
+                        </div>
+                        <p class="mb-0 text-muted" id="progressText">Starting...</p>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="card mb-4" id="resultsCard" style="display: none;">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Results</h5>
+                        <div>
+                            <button class="btn btn-light btn-sm" onclick="downloadResults('csv')">Download CSV</button>
+                            <button class="btn btn-light btn-sm" onclick="downloadResults('excel')">Download Excel</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Summary -->
+                        <div class="row mb-3" id="summaryRow">
+                            <div class="col-md-12">
+                                <div class="d-flex gap-3 flex-wrap" id="summaryStats"></div>
+                            </div>
+                        </div>
+
+                        <!-- Results Table -->
+                        <div class="results-table">
+                            <table class="table table-sm table-bordered table-hover">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th style="width: 5%">#</th>
+                                        <th style="width: 30%">Input URL</th>
+                                        <th style="width: 8%">Status</th>
+                                        <th style="width: 28%">Redirect URL</th>
+                                        <th style="width: 28%">Canonical URL</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let results = [];
+
+        async function checkUrls() {
+            const urlInput = document.getElementById('urlInput').value.trim();
+            if (!urlInput) {
+                alert('Please enter URLs to check');
+                return;
+            }
+
+            const urls = urlInput.split('\n').map(u => u.trim()).filter(u => u && (u.startsWith('http') || u.startsWith('/')));
+            if (urls.length === 0) {
+                alert('No valid URLs found. URLs must start with http://, https://, or / (relative)');
+                return;
+            }
+
+            const workers = parseInt(document.getElementById('workersInput').value) || 20;
+            const rate = parseFloat(document.getElementById('rateInput').value) || 2;
+            const timeout = parseInt(document.getElementById('timeoutInput').value) || 15;
+
+            // Show progress
+            document.getElementById('progressCard').style.display = 'block';
+            document.getElementById('resultsCard').style.display = 'none';
+            document.getElementById('checkBtn').disabled = true;
+
+            results = [];
+            const total = urls.length;
+            let completed = 0;
+
+            try {
+                const response = await fetch('/api/redirect-checker/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls, workers, rate, timeout })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const text = decoder.decode(value);
+                    const lines = text.split('\n').filter(l => l.trim());
+
+                    for (const line of lines) {
+                        try {
+                            const data = JSON.parse(line);
+                            if (data.type === 'result') {
+                                results.push(data.data);
+                                completed++;
+                                updateProgress(completed, total);
+                            } else if (data.type === 'done') {
+                                showResults();
+                            }
+                        } catch (e) {}
+                    }
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+
+            document.getElementById('checkBtn').disabled = false;
+            showResults();
+        }
+
+        function updateProgress(completed, total) {
+            const pct = Math.round(100 * completed / total);
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('progressBar').textContent = pct + '%';
+            document.getElementById('progressText').textContent = `Checked ${completed} of ${total} URLs`;
+        }
+
+        function showResults() {
+            document.getElementById('progressCard').style.display = 'none';
+            document.getElementById('resultsCard').style.display = 'block';
+
+            // Calculate summary
+            const statusCounts = {};
+            let redirectCount = 0;
+            let canonicalDiffCount = 0;
+
+            results.forEach(r => {
+                const status = String(r.status_code);
+                statusCounts[status] = (statusCounts[status] || 0) + 1;
+                if (r.redirect_url) redirectCount++;
+                if (r.canonical_url && r.canonical_url !== r.final_url) canonicalDiffCount++;
+            });
+
+            // Show summary
+            let summaryHtml = '';
+            Object.keys(statusCounts).sort().forEach(status => {
+                const badgeClass = status === '200' ? 'bg-success' :
+                                   status.startsWith('3') ? 'bg-primary' :
+                                   status.startsWith('4') ? 'bg-danger' : 'bg-secondary';
+                summaryHtml += `<span class="badge ${badgeClass}">${status}: ${statusCounts[status]}</span>`;
+            });
+            summaryHtml += `<span class="badge bg-info">Redirects: ${redirectCount}</span>`;
+            summaryHtml += `<span class="badge bg-warning text-dark">Canonical differs: ${canonicalDiffCount}</span>`;
+            document.getElementById('summaryStats').innerHTML = summaryHtml;
+
+            // Show results table
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = '';
+
+            results.forEach((r, i) => {
+                const statusClass = r.status_code === 200 ? 'status-200' :
+                                   String(r.status_code).startsWith('3') ? 'status-301' :
+                                   r.status_code === 404 ? 'status-404' : 'status-error';
+                const rowClass = r.redirect_url ? 'redirect-indicator' :
+                                (r.canonical_url && r.canonical_url !== r.final_url) ? 'canonical-diff' : '';
+
+                const tr = document.createElement('tr');
+                tr.className = rowClass;
+                tr.innerHTML = `
+                    <td>${i + 1}</td>
+                    <td class="url-cell copyable" title="Click to copy: ${r.input_url}" onclick="copyToClipboard('${escapeHtml(r.input_url)}', this)">${truncateUrl(r.input_url)}</td>
+                    <td class="${statusClass}">${r.status_code}</td>
+                    <td class="url-cell ${r.redirect_url ? 'copyable' : ''}" title="${r.redirect_url ? 'Click to copy: ' + r.redirect_url : ''}" ${r.redirect_url ? `onclick="copyToClipboard('${escapeHtml(r.redirect_url)}', this)"` : ''}>${r.redirect_url ? truncateUrl(r.redirect_url) : '-'}</td>
+                    <td class="url-cell ${r.canonical_url ? 'copyable' : ''}" title="${r.canonical_url ? 'Click to copy: ' + r.canonical_url : ''}" ${r.canonical_url ? `onclick="copyToClipboard('${escapeHtml(r.canonical_url)}', this)"` : ''}>${r.canonical_url ? truncateUrl(r.canonical_url) : '-'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function truncateUrl(url, maxLen = 60) {
+            if (!url) return '';
+            if (url.length <= maxLen) return url;
+            return url.substring(0, maxLen) + '...';
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
+
+        function copyToClipboard(text, element) {
+            navigator.clipboard.writeText(text).then(() => {
+                element.classList.add('copied');
+                setTimeout(() => element.classList.remove('copied'), 500);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        }
+
+        function downloadResults(format) {
+            if (results.length === 0) return;
+
+            if (format === 'csv') {
+                const headers = ['input_url', 'status_code', 'redirect_url', 'canonical_url', 'final_url', 'error'];
+                const csv = [headers.join(',')];
+                results.forEach(r => {
+                    csv.push(headers.map(h => `"${(r[h] || '').toString().replace(/"/g, '""')}"`).join(','));
+                });
+                downloadFile(csv.join('\n'), 'redirect_check_results.csv', 'text/csv');
+            } else {
+                // For Excel, send to backend
+                fetch('/api/redirect-checker/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ results })
+                })
+                .then(r => r.blob())
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'redirect_check_results.xlsx';
+                    a.click();
+                });
+            }
+        }
+
+        function downloadFile(content, filename, type) {
+            const blob = new Blob([content], { type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+        }
+    </script>
+</body>
+</html>

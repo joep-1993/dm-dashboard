@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Create Redirect Checker tool - checks HTTP status codes, redirect URLs, and canonical URLs with parallel workers and rate limiting, click-to-copy results, CSV/Excel export #claude-session:2026-01-30
+- [x] Update dashboard styling with purple (#5e4a90) icons, orange (#CC5500) bullet points, modern card layout #claude-session:2026-01-30
 - [x] Run canonical REMOVEBUCKET transformation for 780 rules (30 facets, 13 categories) - transformed 7,778 URLs #claude-session:2026-01-30
 - [x] Create R-finder tool - new frontend page + API endpoints to find /r/ redirect URLs from Redshift visits data #claude-session:2026-01-29
 - [x] Standardize navigation headers across all frontend tools (consistent order, Dashboard button inverted at end) #claude-session:2026-01-29

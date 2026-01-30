@@ -66,6 +66,30 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Bug Fix**: Regex `re.sub(r'/+', '/', url)` also replaced `://` in URLs; fixed with `re.sub(r'(?<!:)//+', '/', url)`
 - **Date**: 2026-01-27
 
+## Redirect Checker Tool
+- **Purpose**: Check HTTP status codes, redirect URLs, and canonical URLs for input URLs
+- **User Agent**: `"Beslist script voor SEO"` (same as other scraper tools)
+- **Base URL**: `https://www.beslist.nl` (for relative URL normalization)
+- **Features**:
+  - Check status codes (200, 301, 302, 404, etc.)
+  - Detect redirect URLs (Location header from first request without following redirects)
+  - Extract canonical URLs from HTML using regex
+  - Parallel workers with rate limiting (token bucket algorithm)
+  - Configurable timeout, workers (default: 20), and rate limit (default: 2 req/sec)
+  - Click-to-copy for URL cells in results table
+  - CSV and Excel export
+  - Streaming progress updates via NDJSON
+- **Files**:
+  - CLI Script: `redirect_checker.py` (standalone, can process Excel/CSV files)
+  - Frontend: `frontend/redirect-checker.html`
+  - API endpoints in `backend/main.py`
+- **API Endpoints**:
+  - `POST /api/redirect-checker/check` - Check URLs (streaming NDJSON response)
+  - `POST /api/redirect-checker/download` - Download results as Excel
+- **Status Code Logic**: Shows initial status code (301/302) not final status (200) - captures the redirect before following it
+- **URL Normalization**: Relative URLs starting with `/` are prefixed with `https://www.beslist.nl`
+- **Date**: 2026-01-30
+
 ## R-Finder Tool
 - **Purpose**: Find /r/ URLs from Redshift visits data (replaces Google Apps Script that queried GA4)
 - **Data Source**: Redshift (`datamart.fct_visits` + `datamart.dim_visit`) - same as Canonical Generator

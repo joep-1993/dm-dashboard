@@ -7,187 +7,346 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
+        :root {
+            --purple-primary: #5e4a90;
+            --purple-light: #7a6aa8;
+            --orange-primary: #CC5500;
+            --orange-hover: #E97451;
+            --bg-light: #f8f9fc;
+            --card-shadow: 0 2px 12px rgba(94, 74, 144, 0.08);
+            --card-hover-shadow: 0 8px 30px rgba(94, 74, 144, 0.15);
+        }
+
+        body {
+            background: var(--bg-light);
+            min-height: 100vh;
+        }
+
+        .hero-section {
+            background: var(--purple-primary);
+            color: white;
+            padding: 3rem 0;
+            margin-bottom: 2.5rem;
+        }
+
+        .hero-section h1 {
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+
+        .hero-section .lead {
+            opacity: 0.9;
+            font-weight: 400;
+        }
+
         .tool-card {
-            transition: transform 0.2s, box-shadow 0.2s;
+            background: white;
+            border: none;
+            border-radius: 16px;
+            box-shadow: var(--card-shadow);
+            transition: all 0.3s ease;
             height: 100%;
+            overflow: hidden;
         }
+
         .tool-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            transform: translateY(-6px);
+            box-shadow: var(--card-hover-shadow);
         }
-        .tool-icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-        }
+
         .tool-card .card-body {
             display: flex;
             flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding: 1.75rem;
         }
-        .tool-card .btn {
-            margin-top: auto;
+
+        .tool-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 16px;
+            background: white;
+            border: 2px solid var(--purple-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.25rem;
         }
-        .hero-section {
-            background: #5e4a90;
-            color: white;
-            padding: 3rem 0;
-            margin-bottom: 2rem;
+
+        .tool-icon svg {
+            width: 32px;
+            height: 32px;
+            color: var(--purple-primary);
         }
+
+        .tool-card .card-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            color: var(--purple-primary);
+        }
+
+        .tool-card .card-text {
+            font-size: 0.9rem;
+            color: #636e72;
+            line-height: 1.5;
+        }
+
         .feature-list {
             list-style: none;
             padding: 0;
+            margin: 1rem 0;
+            width: 100%;
+            text-align: left;
         }
+
         .feature-list li {
-            padding: 0.25rem 0;
+            padding: 0.3rem 0;
+            font-size: 0.85rem;
+            color: #636e72;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
+
         .feature-list li::before {
-            content: "✓ ";
-            color: #CC5500;
-            font-weight: bold;
+            content: "";
+            width: 8px;
+            height: 8px;
+            background: var(--orange-primary);
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .btn-tool {
+            background: var(--orange-primary);
+            border: none;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 10px;
+            font-weight: 500;
+            font-size: 0.95rem;
+            margin-top: auto;
+            transition: all 0.2s ease;
+        }
+
+        .btn-tool:hover {
+            background: var(--orange-hover);
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .stats-card {
+            background: white;
+            border: none;
+            border-radius: 16px;
+            box-shadow: var(--card-shadow);
+        }
+
+        .stats-card .card-header {
+            background: transparent;
+            border-bottom: 1px solid #f1f2f6;
+            padding: 1.25rem 1.5rem;
+        }
+
+        .stats-card .card-header h5 {
+            font-weight: 600;
+            color: #2d3436;
+            margin: 0;
+        }
+
+        .stats-card .card-body {
+            padding: 1.5rem;
+        }
+
+        .stat-item h3 {
+            font-weight: 700;
+            font-size: 1.75rem;
+            color: var(--purple-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-item p {
+            font-size: 0.85rem;
+            color: #636e72;
+        }
+
+        footer {
+            color: #b2bec3;
+            font-size: 0.85rem;
+        }
+
+        .row.g-4 {
+            --bs-gutter-x: 1.5rem;
+            --bs-gutter-y: 1.5rem;
         }
     </style>
 </head>
 <body>
     <div class="hero-section">
         <div class="container">
-            <h1 class="display-4">SEO Tools Dashboard</h1>
-            <p class="lead">Unified platform for SEO content generation, FAQ management, and Google Ads campaigns</p>
+            <h1 class="display-5">SEO Tools Dashboard</h1>
+            <p class="lead mb-0">Unified platform for SEO content generation, FAQ management, and Google Ads campaigns</p>
         </div>
     </div>
 
-    <div class="container">
+    <div class="container pb-5">
         <div class="row g-4 mb-5">
             <!-- SEO Content Generator Card -->
-            <div class="col-md-4">
-                <div class="card tool-card h-100">
-                    <div class="card-body text-center">
-                        <div class="tool-icon text-success">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
                                 <path d="M4.5 12.5A.5.5 0 0 1 5 12h3a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm0-2A.5.5 0 0 1 5 10h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm1.639-3.708 1.33.886 1.854-1.855a.25.25 0 0 1 .289-.047l1.888.974V8.5a.5.5 0 0 1-.5.5H5a.5.5 0 0 1-.5-.5V8s1.54-1.274 1.639-1.208z"/>
                             </svg>
                         </div>
-                        <h4 class="card-title">SEO Content Generator</h4>
-                        <p class="card-text text-muted">Generate AI-powered product recommendations for e-commerce pages with automatic hyperlinks.</p>
-                        <ul class="feature-list text-start small">
+                        <h5 class="card-title">SEO Content Generator</h5>
+                        <p class="card-text">Generate AI-powered product recommendations for e-commerce pages with automatic hyperlinks.</p>
+                        <ul class="feature-list">
                             <li>Batch URL processing</li>
                             <li>Parallel workers (1-20)</li>
                             <li>Link validation</li>
                             <li>Excel/JSON export</li>
                         </ul>
-                        <a href="/static/index.html" class="btn btn-success btn-lg w-100">Open Tool</a>
+                        <a href="/static/index.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
             </div>
 
             <!-- FAQ Generator Card -->
-            <div class="col-md-4">
-                <div class="card tool-card h-100">
-                    <div class="card-body text-center">
-                        <div class="tool-icon text-info">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
                                 <path d="M5.255 5.786a.237.237 0 0 0 .241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94z"/>
                             </svg>
                         </div>
-                        <h4 class="card-title">FAQ Generator</h4>
-                        <p class="card-text text-muted">Generate SEO-optimized FAQs with Schema.org structured data for rich search results.</p>
-                        <ul class="feature-list text-start small">
+                        <h5 class="card-title">FAQ Generator</h5>
+                        <p class="card-text">Generate SEO-optimized FAQs with Schema.org structured data for rich search results.</p>
+                        <ul class="feature-list">
                             <li>Schema.org JSON-LD output</li>
                             <li>Configurable FAQ count (1-10)</li>
                             <li>Hyperlinks to related pages</li>
                             <li>Combined export option</li>
                         </ul>
-                        <a href="/static/faq.html" class="btn btn-info btn-lg w-100">Open Tool</a>
+                        <a href="/static/faq.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
             </div>
 
             <!-- Thema Ads Card -->
-            <div class="col-md-4">
-                <div class="card tool-card h-100">
-                    <div class="card-body text-center">
-                        <div class="tool-icon text-warning">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5l2.404.961L10.404 2l-2.218-.887zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/>
                             </svg>
                         </div>
-                        <h4 class="card-title">Thema Ads</h4>
-                        <p class="card-text text-muted">Manage seasonal Google Ads campaigns at scale with themed RSA creation.</p>
-                        <ul class="feature-list text-start small">
+                        <h5 class="card-title">Thema Ads</h5>
+                        <p class="card-text">Manage seasonal Google Ads campaigns at scale with themed RSA creation.</p>
+                        <ul class="feature-list">
                             <li>Black Friday, Cyber Monday themes</li>
                             <li>Sinterklaas, Kerstmis themes</li>
                             <li>Bulk RSA creation</li>
                             <li>Job tracking & resume</li>
                         </ul>
-                        <a href="/static/thema-ads.html" class="btn btn-warning btn-lg w-100">Open Tool</a>
+                        <a href="/static/thema-ads.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
             </div>
 
             <!-- Unique Titles Card -->
-            <div class="col-md-4">
-                <div class="card tool-card h-100">
-                    <div class="card-body text-center">
-                        <div class="tool-icon text-primary">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5z"/>
                                 <path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5L9.5 0zm0 1v2A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"/>
                             </svg>
                         </div>
-                        <h4 class="card-title">Unique Titles</h4>
-                        <p class="card-text text-muted">Upload CSV files with custom titles and descriptions for product pages.</p>
-                        <ul class="feature-list text-start small">
+                        <h5 class="card-title">Unique Titles</h5>
+                        <p class="card-text">Upload CSV files with custom titles and descriptions for product pages.</p>
+                        <ul class="feature-list">
                             <li>CSV upload (semicolon separator)</li>
                             <li>Bulk title/description import</li>
                             <li>Direct API publishing</li>
                             <li>UTF-8 encoding support</li>
                         </ul>
-                        <a href="/static/unique-titles.html" class="btn btn-primary btn-lg w-100">Open Tool</a>
+                        <a href="/static/unique-titles.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
             </div>
 
             <!-- Canonical Generator Card -->
-            <div class="col-md-4">
-                <div class="card tool-card h-100">
-                    <div class="card-body text-center">
-                        <div class="tool-icon text-primary">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1.002 1.002 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4.018 4.018 0 0 1-.128-1.287z"/>
                                 <path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243L6.586 4.672z"/>
                             </svg>
                         </div>
-                        <h4 class="card-title">Canonical Generator</h4>
-                        <p class="card-text text-muted">Generate canonical URLs by applying transformation rules to Redshift data.</p>
-                        <ul class="feature-list text-start small">
+                        <h5 class="card-title">Canonical Generator</h5>
+                        <p class="card-text">Generate canonical URLs by applying transformation rules to Redshift data.</p>
+                        <ul class="feature-list">
                             <li>Category & facet replacements</li>
                             <li>Bucket transformations</li>
                             <li>URLs from Redshift visits</li>
                             <li>CSV export</li>
                         </ul>
-                        <a href="/static/canonical.html" class="btn btn-primary btn-lg w-100">Open Tool</a>
+                        <a href="/static/canonical.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
             </div>
 
             <!-- R-Finder Card -->
-            <div class="col-md-4">
-                <div class="card tool-card h-100">
-                    <div class="card-body text-center">
-                        <div class="tool-icon text-secondary">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" viewBox="0 0 16 16">
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
                                 <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
                             </svg>
                         </div>
-                        <h4 class="card-title">R-Finder</h4>
-                        <p class="card-text text-muted">Discover /r/ URLs from Redshift visits data with category filtering.</p>
-                        <ul class="feature-list text-start small">
+                        <h5 class="card-title">R-Finder</h5>
+                        <p class="card-text">Discover /r/ URLs from Redshift visits data with category filtering.</p>
+                        <ul class="feature-list">
                             <li>Query Redshift visits data</li>
                             <li>Filter by category/keywords</li>
                             <li>Session count metrics</li>
                             <li>CSV export</li>
                         </ul>
-                        <a href="/static/rfinder.html" class="btn btn-secondary btn-lg w-100">Open Tool</a>
+                        <a href="/static/rfinder.html" class="btn btn-tool w-100">Open Tool</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Redirect Checker Card -->
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+                                <path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8z"/>
+                            </svg>
+                        </div>
+                        <h5 class="card-title">Redirect Checker</h5>
+                        <p class="card-text">Check HTTP status codes, redirects, and canonical URLs for multiple URLs.</p>
+                        <ul class="feature-list">
+                            <li>Batch URL checking</li>
+                            <li>Redirect detection</li>
+                            <li>Canonical URL extraction</li>
+                            <li>CSV/Excel export</li>
+                        </ul>
+                        <a href="/static/redirect-checker.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
             </div>
@@ -196,27 +355,27 @@
         <!-- Quick Stats Section -->
         <div class="row mb-4">
             <div class="col-12">
-                <div class="card">
+                <div class="card stats-card">
                     <div class="card-header">
-                        <h5 class="mb-0">Quick Stats</h5>
+                        <h5>Quick Stats</h5>
                     </div>
                     <div class="card-body">
-                        <div class="row text-center" id="quickStats">
-                            <div class="col-md-3 col-6 mb-3">
-                                <h3 id="statTotalUrls" class="text-primary">-</h3>
-                                <p class="text-muted mb-0">Total URLs</p>
+                        <div class="row text-center">
+                            <div class="col-md-3 col-6 mb-3 mb-md-0 stat-item">
+                                <h3 id="statTotalUrls">-</h3>
+                                <p class="mb-0">Total URLs</p>
                             </div>
-                            <div class="col-md-3 col-6 mb-3">
-                                <h3 id="statContentProcessed" class="text-success">-</h3>
-                                <p class="text-muted mb-0">Content Generated</p>
+                            <div class="col-md-3 col-6 mb-3 mb-md-0 stat-item">
+                                <h3 id="statContentProcessed">-</h3>
+                                <p class="mb-0">Content Generated</p>
                             </div>
-                            <div class="col-md-3 col-6 mb-3">
-                                <h3 id="statFaqProcessed" class="text-info">-</h3>
-                                <p class="text-muted mb-0">FAQs Generated</p>
+                            <div class="col-md-3 col-6 stat-item">
+                                <h3 id="statFaqProcessed">-</h3>
+                                <p class="mb-0">FAQs Generated</p>
                             </div>
-                            <div class="col-md-3 col-6 mb-3">
-                                <h3 id="statPending" class="text-warning">-</h3>
-                                <p class="text-muted mb-0">Pending</p>
+                            <div class="col-md-3 col-6 stat-item">
+                                <h3 id="statPending">-</h3>
+                                <p class="mb-0">Pending</p>
                             </div>
                         </div>
                     </div>
@@ -225,35 +384,29 @@
         </div>
 
         <!-- Footer -->
-        <footer class="text-center text-muted py-4">
-            <small>SEO Tools Dashboard - Unified Platform (Port 8003)</small>
+        <footer class="text-center py-4">
+            <small>SEO Tools Dashboard - Unified Platform</small>
         </footer>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Use dynamic API base - works from localhost, WSL IP, or any host
         const API_BASE = window.location.origin;
 
-        // Load quick stats on page load
         window.addEventListener('DOMContentLoaded', loadStats);
 
         async function loadStats() {
             try {
-                // Get content status
                 const contentResponse = await fetch(`${API_BASE}/api/status`);
                 const contentData = await contentResponse.json();
 
-                // Get FAQ status
                 const faqResponse = await fetch(`${API_BASE}/api/faq/status`);
                 const faqData = await faqResponse.json();
 
-                // Update stats
                 document.getElementById('statTotalUrls').textContent = contentData.total_urls?.toLocaleString() || '-';
                 document.getElementById('statContentProcessed').textContent = contentData.processed?.toLocaleString() || '-';
                 document.getElementById('statFaqProcessed').textContent = faqData.processed?.toLocaleString() || '-';
                 document.getElementById('statPending').textContent = contentData.pending?.toLocaleString() || '-';
-
             } catch (error) {
                 console.error('Failed to load stats:', error);
             }
