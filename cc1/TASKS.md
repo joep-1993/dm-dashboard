@@ -10,6 +10,16 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Run canonical REMOVEBUCKET transformation for 780 rules (30 facets, 13 categories) - transformed 7,778 URLs #claude-session:2026-01-30
+- [x] Create R-finder tool - new frontend page + API endpoints to find /r/ redirect URLs from Redshift visits data #claude-session:2026-01-29
+- [x] Standardize navigation headers across all frontend tools (consistent order, Dashboard button inverted at end) #claude-session:2026-01-29
+- [x] Reset all failed/skipped URLs to pending (6,788 URLs) #claude-session:2026-01-28
+- [x] Reset all merk URLs to pending for orResult filtering (45,600 archived, 51,401 removed from tracking) #claude-session:2026-01-28
+- [x] Add orResult product filtering - skip type="orResult" products, only include type="result" exact matches #claude-session:2026-01-28
+- [x] Change shopCount minimum from 3 to 2 for all products in scraper_service.py and faq_service.py #claude-session:2026-01-28
+- [x] Add Product Search API documentation to docs/ARCHITECTURE.md (required params, type field, filtering) #claude-session:2026-01-28
+- [x] Detect and reset 55,330 merk URLs with brand mismatches (19,888 missing brand name + 35,442 wrong brand links) #claude-session:2026-01-28
+- [x] Create pa.merk_lookup table with 97,363 brand ID→name mappings from Excel #claude-session:2026-01-28
 - [x] Change alert-info to alert-warning in app.js for consistent yellow styling across SEO Content Generator #claude-session:2026-01-20
 - [x] Update publishing section in SEO Content Generator to match FAQ Generator (remove dry run, add content type selection, remove dev environment) #claude-session:2026-01-20
 - [x] Remove conservative mode from Link Validation section in SEO Content Generator (HTML + JS) #claude-session:2026-01-20

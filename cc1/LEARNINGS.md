@@ -2200,5 +2200,43 @@ WHERE t2.url IS NULL;
 - **Location**: backend/main.py - `/api/status` endpoint
 - **Date**: 2025-10-22
 
+### R-Finder Tool - Finding /r/ Redirect URLs from Redshift
+- **Purpose**: Find visited /r/ redirect URLs from Redshift for analysis
+- **Endpoint**: `POST /api/rfinder/search` with filters, min_visits, date range, limit
+- **Query Logic**: Uses AND logic for multiple filters (all must match)
+- **Tables**: Same as canonical generator (`datamart.fct_visits`, `datamart.dim_visit`)
+- **Key Features**:
+  - Multiple URL path filters (combined with AND)
+  - Minimum visits threshold
+  - Date range filtering (default: 2015-01-01 to present)
+  - Copy-to-clipboard with tab-separated relative URLs
+- **Frontend**: `frontend/rfinder.html` with `frontend/js/rfinder.js`
+- **Backend**: `backend/rfinder_service.py`
+- **Location**: http://localhost:8003/static/rfinder.html
+- **Date**: 2026-01-29
+
+### Canonical REMOVEBUCKET Transformation
+- **Purpose**: Remove facet buckets from URLs based on facet/category rules
+- **Input**: Excel file with columns: `facet`, `caturl`
+- **Script**: `run_canonical_removebucket.py` (standalone, bypasses API timeout)
+- **Algorithm**:
+  1. Parse facet→category mapping from Excel
+  2. Query Redshift for URLs containing facet patterns (`facet~number`)
+  3. For each URL matching a category, remove specified facet buckets
+  4. Clean up separators (`~~` → `~`, trailing `/c/`, etc.)
+- **Key Function**:
+  ```python
+  def remove_bucket_from_url(url, facet_name):
+      pattern = rf'{re.escape(facet_name)}~\d+'
+      # Handles: facet~~other, other~~facet, /c/facet
+  ```
+- **Results** (2026-01-30):
+  - 780 rules (30 facets, 13 categories)
+  - 10,000 URLs queried
+  - 7,778 URLs transformed
+  - 22 facets had no matching URLs in visited data
+- **Output**: `/tmp/canonicals_output_removebucket.csv`
+- **Date**: 2026-01-30
+
 ---
-_Last updated: 2026-01-28 (orResult filtering, shopCount >= 2, supplemented from archive)_
+_Last updated: 2026-01-30 (R-finder tool, REMOVEBUCKET canonical transformation)_
