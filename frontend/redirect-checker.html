@@ -94,6 +94,7 @@ https://www.beslist.nl/products/tuin/"></textarea>
                     <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Results</h5>
                         <div>
+                            <button class="btn btn-outline-light btn-sm" onclick="copyAllToClipboard()">Copy to Clipboard (for Excel)</button>
                             <button class="btn btn-light btn-sm" onclick="downloadResults('csv')">Download CSV</button>
                             <button class="btn btn-light btn-sm" onclick="downloadResults('excel')">Download Excel</button>
                         </div>
@@ -271,6 +272,29 @@ https://www.beslist.nl/products/tuin/"></textarea>
                 setTimeout(() => element.classList.remove('copied'), 500);
             }).catch(err => {
                 console.error('Failed to copy:', err);
+            });
+        }
+
+        function copyAllToClipboard() {
+            if (results.length === 0) return;
+
+            // Create tab-separated data for Excel
+            const headers = ['input_url', 'status_code', 'redirect_url', 'canonical_url'];
+            const tsv = [headers.join('\t')];
+            results.forEach(r => {
+                tsv.push([
+                    r.input_url || '',
+                    r.status_code || '',
+                    r.redirect_url || '',
+                    r.canonical_url || ''
+                ].join('\t'));
+            });
+
+            navigator.clipboard.writeText(tsv.join('\n')).then(() => {
+                alert('Copied to clipboard! Paste directly into Excel.');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
             });
         }
 
