@@ -922,7 +922,7 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/validate-all-links")
-def validate_all_links(parallel_workers: int = 3):
+def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
     """
     Validate ALL content URLs that haven't been validated yet.
 
@@ -930,16 +930,18 @@ def validate_all_links(parallel_workers: int = 3):
     Returns summary of all validations performed.
 
     Args:
-        parallel_workers: Number of parallel workers (1-10)
+        parallel_workers: Number of parallel workers (1-20)
+        batch_size: Number of URLs to process per batch (1-500)
     """
     try:
         if parallel_workers < 1 or parallel_workers > 20:
             raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+        if batch_size < 1 or batch_size > 500:
+            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
 
         total_validated = 0
         total_urls_corrected = 0
         total_moved_to_pending = 0
-        batch_size = 100  # Process in batches of 100
 
         while True:
             # Use local PostgreSQL for all operations
@@ -1126,6 +1128,142 @@ async def reset_validation_history():
             "status": "success",
             "message": f"Reset validation history for {count} URLs",
             "cleared_count": count
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/recheck-skipped-urls")
+def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
+    """
+    Re-check all skipped SEO content URLs to see if they're now eligible for content creation.
+
+    URLs get skipped when no products are found during initial processing.
+    This endpoint re-scrapes them to check if products are now available.
+
+    Args:
+        parallel_workers: Number of parallel workers (1-20)
+        batch_size: Number of URLs to process per batch (1-200)
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        if parallel_workers < 1 or parallel_workers > 20:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+        if batch_size < 1 or batch_size > 200:
+            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 200")
+
+        total_rechecked = 0
+        total_now_eligible = 0
+
+        print(f"[RECHECK-SKIPPED] Starting re-check of skipped URLs...")
+
+        while True:
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            # Get batch of skipped URLs (only those not yet rechecked)
+            cur.execute("""
+                SELECT url FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+                WHERE status = 'skipped'
+                  AND (skip_reason IS NULL OR skip_reason NOT LIKE '%%(rechecked)%%')
+                LIMIT %s
+            """, (batch_size,))
+            skipped_rows = cur.fetchall()
+
+            if not skipped_rows:
+                cur.close()
+                return_db_connection(conn)
+                break
+
+            skipped_urls = [row['url'] for row in skipped_rows]
+
+            def check_single_url(url):
+                """Check if a URL now has products"""
+                try:
+                    scraped_data = scrape_product_page_api(url)
+                    has_products = scraped_data and scraped_data.get('products') and len(scraped_data['products']) > 0
+                    return {'url': url, 'has_products': has_products}
+                except Exception as e:
+                    print(f"[RECHECK-SKIPPED] Error checking {url}: {e}")
+                    return {'url': url, 'has_products': False}
+
+            # Check URLs in parallel
+            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                results = list(executor.map(check_single_url, skipped_urls))
+
+            now_eligible = [r['url'] for r in results if r['has_products']]
+            still_skipped = [r['url'] for r in results if not r['has_products']]
+
+            # Remove eligible URLs from tracking table so they can be reprocessed
+            if now_eligible:
+                placeholders = ','.join(['%s'] * len(now_eligible))
+                cur.execute(f"""
+                    DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+                    WHERE url IN ({placeholders})
+                """, now_eligible)
+                # Make sure they're in werkvoorraad for reprocessing
+                cur.executemany("""
+                    INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
+                    VALUES (%s, 0)
+                    ON CONFLICT (url) DO NOTHING
+                """, [(url,) for url in now_eligible])
+                total_now_eligible += len(now_eligible)
+
+            # Mark remaining as rechecked to avoid infinite loop
+            if still_skipped:
+                placeholders = ','.join(['%s'] * len(still_skipped))
+                cur.execute(f"""
+                    UPDATE pa.jvs_seo_werkvoorraad_kopteksten_check
+                    SET skip_reason = 'no_products_found (rechecked)'
+                    WHERE url IN ({placeholders})
+                """, still_skipped)
+
+            conn.commit()
+            cur.close()
+            return_db_connection(conn)
+
+            total_rechecked += len(skipped_urls)
+            print(f"[RECHECK-SKIPPED] Batch: {len(skipped_urls)} checked, {len(now_eligible)} now eligible. Total: {total_rechecked}")
+
+        print(f"[RECHECK-SKIPPED] Complete. Rechecked: {total_rechecked}, Now eligible: {total_now_eligible}")
+
+        return {
+            "status": "success",
+            "message": f"Rechecked {total_rechecked} skipped URLs, {total_now_eligible} now eligible for content creation",
+            "rechecked": total_rechecked,
+            "now_eligible": total_now_eligible
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/recheck-skipped-urls/reset")
+def reset_skipped_recheck():
+    """
+    Reset the 'rechecked' marker on skipped URLs, allowing them to be rechecked again.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            UPDATE pa.jvs_seo_werkvoorraad_kopteksten_check
+            SET skip_reason = 'no_products_found'
+            WHERE status = 'skipped' AND skip_reason LIKE '%%(rechecked)%%'
+        """)
+        count = cur.rowcount
+
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+
+        return {
+            "status": "success",
+            "message": f"Reset {count} URLs to allow rechecking",
+            "reset_count": count
         }
 
     except Exception as e:
@@ -1573,19 +1711,27 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
 
 
 @app.post("/api/faq/validate-all-links")
-def validate_all_faq_links(parallel_workers: int = 3):
+def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
     """
     Validate ALL unvalidated FAQ links until complete.
 
     - Only validates FAQs that haven't been validated yet
     - Processes in batches, resetting any with gone products to pending
     - Records validation results to avoid re-validating
+
+    Args:
+        parallel_workers: Number of parallel workers (1-20)
+        batch_size: Number of FAQs to process per batch (1-1000)
     """
     from backend.link_validator import validate_faq_links, reset_faq_to_pending
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     try:
-        batch_size = 500
+        if parallel_workers < 1 or parallel_workers > 20:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+        if batch_size < 1 or batch_size > 1000:
+            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 1000")
+
         total_validated = 0
         total_reset = 0
         total_links_checked = 0
@@ -1701,6 +1847,136 @@ def reset_faq_validation_history():
             "status": "success",
             "message": f"Reset validation history for {deleted} FAQs",
             "deleted": deleted
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/faq/recheck-skipped-urls")
+def recheck_skipped_faq_urls(parallel_workers: int = 3, batch_size: int = 50):
+    """
+    Re-check all skipped FAQ URLs to see if they're now eligible for FAQ generation.
+
+    URLs get skipped when no products are found during initial processing.
+    This endpoint re-scrapes them to check if products are now available.
+
+    Args:
+        parallel_workers: Number of parallel workers (1-20)
+        batch_size: Number of URLs to process per batch (1-200)
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        if parallel_workers < 1 or parallel_workers > 20:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+        if batch_size < 1 or batch_size > 200:
+            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 200")
+
+        total_rechecked = 0
+        total_now_eligible = 0
+
+        print(f"[FAQ-RECHECK-SKIPPED] Starting re-check of skipped FAQ URLs...")
+
+        while True:
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            # Get batch of skipped URLs (only those not yet rechecked)
+            cur.execute("""
+                SELECT url FROM pa.faq_tracking
+                WHERE status = 'skipped'
+                  AND (skip_reason IS NULL OR skip_reason NOT LIKE '%%(rechecked)%%')
+                LIMIT %s
+            """, (batch_size,))
+            skipped_rows = cur.fetchall()
+
+            if not skipped_rows:
+                cur.close()
+                return_db_connection(conn)
+                break
+
+            skipped_urls = [row['url'] for row in skipped_rows]
+
+            def check_single_url(url):
+                """Check if a URL now has products"""
+                try:
+                    scraped_data = scrape_product_page_api(url)
+                    has_products = scraped_data and scraped_data.get('products') and len(scraped_data['products']) > 0
+                    return {'url': url, 'has_products': has_products}
+                except Exception as e:
+                    print(f"[FAQ-RECHECK-SKIPPED] Error checking {url}: {e}")
+                    return {'url': url, 'has_products': False}
+
+            # Check URLs in parallel
+            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                results = list(executor.map(check_single_url, skipped_urls))
+
+            now_eligible = [r['url'] for r in results if r['has_products']]
+            still_skipped = [r['url'] for r in results if not r['has_products']]
+
+            # Remove eligible URLs from tracking table so they can be reprocessed
+            if now_eligible:
+                placeholders = ','.join(['%s'] * len(now_eligible))
+                cur.execute(f"""
+                    DELETE FROM pa.faq_tracking
+                    WHERE url IN ({placeholders})
+                """, now_eligible)
+                total_now_eligible += len(now_eligible)
+
+            # Mark remaining as rechecked to avoid infinite loop
+            if still_skipped:
+                placeholders = ','.join(['%s'] * len(still_skipped))
+                cur.execute(f"""
+                    UPDATE pa.faq_tracking
+                    SET skip_reason = 'no_products_found (rechecked)'
+                    WHERE url IN ({placeholders})
+                """, still_skipped)
+
+            conn.commit()
+            cur.close()
+            return_db_connection(conn)
+
+            total_rechecked += len(skipped_urls)
+            print(f"[FAQ-RECHECK-SKIPPED] Batch: {len(skipped_urls)} checked, {len(now_eligible)} now eligible. Total: {total_rechecked}")
+
+        print(f"[FAQ-RECHECK-SKIPPED] Complete. Rechecked: {total_rechecked}, Now eligible: {total_now_eligible}")
+
+        return {
+            "status": "success",
+            "message": f"Rechecked {total_rechecked} skipped FAQ URLs, {total_now_eligible} now eligible for FAQ generation",
+            "rechecked": total_rechecked,
+            "now_eligible": total_now_eligible
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/faq/recheck-skipped-urls/reset")
+def reset_faq_skipped_recheck():
+    """
+    Reset the 'rechecked' marker on skipped FAQ URLs, allowing them to be rechecked again.
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            UPDATE pa.faq_tracking
+            SET skip_reason = 'no_products_found'
+            WHERE status = 'skipped' AND skip_reason LIKE '%%(rechecked)%%'
+        """)
+        count = cur.rowcount
+
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+
+        return {
+            "status": "success",
+            "message": f"Reset {count} FAQ URLs to allow rechecking",
+            "reset_count": count
         }
 
     except Exception as e:

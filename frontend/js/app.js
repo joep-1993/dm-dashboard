@@ -782,6 +782,7 @@ async function validateAllLinks() {
     const resultDiv = document.getElementById('validationResult');
     const parallelWorkersInput = document.getElementById('validationParallelWorkers');
     const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
+    const batchSize = parseInt(document.getElementById('validationBatchSize').value) || 100;
 
     if (parallelWorkers < 1 || parallelWorkers > 20) {
         alert('Parallel workers must be between 1 and 20');
@@ -793,10 +794,10 @@ async function validateAllLinks() {
     validateAllBtn.disabled = true;
     resetBtn.disabled = true;
     validateAllBtn.textContent = 'Validating All...';
-    resultDiv.innerHTML = `<div class="alert alert-warning">Validating ALL content URLs with ${parallelWorkers} parallel workers... This may take a while.</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating ALL content URLs (batch size: ${batchSize}, workers: ${parallelWorkers})... This may take a while.</div>`;
 
     try {
-        const response = await fetch(`${API_BASE}/api/validate-all-links?parallel_workers=${parallelWorkers}`, {
+        const response = await fetch(`${API_BASE}/api/validate-all-links?parallel_workers=${parallelWorkers}&batch_size=${batchSize}`, {
             method: 'POST'
         });
 
@@ -830,6 +831,75 @@ async function validateAllLinks() {
         validateAllBtn.disabled = false;
         resetBtn.disabled = false;
         validateAllBtn.textContent = 'Validate All';
+    }
+}
+
+async function recheckSkippedUrls() {
+    const recheckBtn = document.getElementById('recheckSkippedBtn');
+    const validateBtn = document.getElementById('validateBtn');
+    const validateAllBtn = document.getElementById('validateAllBtn');
+    const resetBtn = document.getElementById('resetValidationBtn');
+    const resultDiv = document.getElementById('validationResult');
+    const parallelWorkersInput = document.getElementById('validationParallelWorkers');
+    const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
+    const batchSize = parseInt(document.getElementById('validationBatchSize').value) || 50;
+
+    if (parallelWorkers < 1 || parallelWorkers > 20) {
+        alert('Parallel workers must be between 1 and 20');
+        return;
+    }
+
+    if (!confirm('This will re-check all skipped URLs to see if products are now available. Continue?')) {
+        return;
+    }
+
+    // Disable buttons
+    recheckBtn.disabled = true;
+    validateBtn.disabled = true;
+    validateAllBtn.disabled = true;
+    resetBtn.disabled = true;
+    recheckBtn.textContent = 'Rechecking...';
+    resultDiv.innerHTML = `<div class="alert alert-warning">Rechecking skipped URLs (batch size: ${batchSize}, workers: ${parallelWorkers})... This may take a while.</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/recheck-skipped-urls?parallel_workers=${parallelWorkers}&batch_size=${batchSize}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Recheck failed');
+        }
+
+        if (data.rechecked === 0) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-info">
+                    <strong>No skipped URLs to recheck</strong><br>
+                    All skipped URLs have already been rechecked.
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-${data.now_eligible > 0 ? 'success' : 'info'}">
+                    <strong>Recheck Complete!</strong><br>
+                    URLs rechecked: ${data.rechecked}<br>
+                    <strong>Now eligible for content creation: ${data.now_eligible}</strong>
+                </div>
+            `;
+        }
+
+        // Refresh status counts
+        refreshStatus();
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        recheckBtn.disabled = false;
+        validateBtn.disabled = false;
+        validateAllBtn.disabled = false;
+        resetBtn.disabled = false;
+        recheckBtn.textContent = 'Recheck Skipped';
     }
 }
 

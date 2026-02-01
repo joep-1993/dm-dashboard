@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add "Recheck Skipped" feature - re-checks skipped URLs (no_products_found) to see if products are now available, separate button next to "Validate All" on both SEO and FAQ pages, respects batch size and parallel workers inputs #claude-session:2026-02-01
 - [x] Create Redirect Checker tool - checks HTTP status codes, redirect URLs, and canonical URLs with parallel workers and rate limiting, click-to-copy results, CSV/Excel export #claude-session:2026-01-30
 - [x] Update dashboard styling with purple (#5e4a90) icons, orange (#CC5500) bullet points, modern card layout #claude-session:2026-01-30
 - [x] Run canonical REMOVEBUCKET transformation for 780 rules (30 facets, 13 categories) - transformed 7,778 URLs #claude-session:2026-01-30

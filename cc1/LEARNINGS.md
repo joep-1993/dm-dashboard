@@ -7,6 +7,26 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Skip Permissions**: User can say "skip-permissions" mid-conversation to skip permission prompts (configured in `~/.claude/settings.json`)
 - **Date**: 2026-01-27
 
+## Recheck Skipped URLs Feature
+- **Purpose**: Re-check URLs that were skipped during content/FAQ generation to see if products are now available
+- **Reason for Skip**: URLs get status='skipped' with reason 'no_products_found' when scraper finds no products
+- **How It Works**:
+  1. Fetches URLs with `status='skipped'` that haven't been rechecked yet
+  2. Re-scrapes each URL via Product Search API to check if products are now available
+  3. If products found: removes URL from tracking table → gets picked up for content generation
+  4. If still no products: marks as "rechecked" to avoid infinite loops
+- **Tracking Tables**:
+  - SEO: `pa.jvs_seo_werkvoorraad_kopteksten_check` (status='skipped', skip_reason NOT LIKE '%rechecked%')
+  - FAQ: `pa.faq_tracking` (status='skipped', skip_reason NOT LIKE '%rechecked%')
+- **API Endpoints**:
+  - `POST /api/recheck-skipped-urls` - Recheck SEO skipped URLs
+  - `POST /api/faq/recheck-skipped-urls` - Recheck FAQ skipped URLs
+  - `DELETE /api/recheck-skipped-urls/reset` - Reset recheck markers to allow rechecking again
+  - `DELETE /api/faq/recheck-skipped-urls/reset` - Reset FAQ recheck markers
+- **Parameters**: `parallel_workers` (1-20), `batch_size` (configurable via UI)
+- **UI**: "Recheck Skipped" button next to "Validate All" on both SEO and FAQ pages
+- **Date**: 2026-02-01
+
 ## N8N Integration Setup
 - **N8N Skills**: Installed 7 skills at `~/.claude/skills/` from [n8n-skills](https://github.com/czlonkowski/n8n-skills)
   - n8n-expression-syntax, n8n-mcp-tools-expert, n8n-workflow-patterns

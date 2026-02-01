@@ -475,6 +475,7 @@ async function validateAllFaqLinks() {
     const validateBtn = document.getElementById('validateBtn');
     const resultDiv = document.getElementById('validateResult');
     const workers = parseInt(document.getElementById('validateWorkersInput').value) || 3;
+    const batchSize = parseInt(document.getElementById('validateBatchSizeInput').value) || 500;
 
     if (!confirm('This will validate all unvalidated FAQ links. Continue?')) {
         return;
@@ -483,10 +484,10 @@ async function validateAllFaqLinks() {
     btn.disabled = true;
     validateBtn.disabled = true;
     btn.textContent = 'Validating All...';
-    resultDiv.innerHTML = `<div class="alert alert-warning">Validating all unvalidated FAQs... This may take a while.</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating all unvalidated FAQs (batch size: ${batchSize}, workers: ${workers})... This may take a while.</div>`;
 
     try {
-        const response = await fetch(`${API_BASE}/api/faq/validate-all-links?parallel_workers=${workers}`, {
+        const response = await fetch(`${API_BASE}/api/faq/validate-all-links?parallel_workers=${workers}&batch_size=${batchSize}`, {
             method: 'POST'
         });
 
@@ -514,6 +515,69 @@ async function validateAllFaqLinks() {
         btn.disabled = false;
         validateBtn.disabled = false;
         btn.textContent = 'Validate All';
+    }
+}
+
+async function recheckSkippedFaqUrls() {
+    const recheckBtn = document.getElementById('recheckSkippedBtn');
+    const validateBtn = document.getElementById('validateBtn');
+    const validateAllBtn = document.getElementById('validateAllBtn');
+    const resultDiv = document.getElementById('validateResult');
+    const workers = parseInt(document.getElementById('validateWorkersInput').value) || 3;
+    const batchSize = parseInt(document.getElementById('validateBatchSizeInput').value) || 50;
+
+    if (workers < 1 || workers > 20) {
+        alert('Parallel workers must be between 1 and 20');
+        return;
+    }
+
+    if (!confirm('This will re-check all skipped FAQ URLs to see if products are now available. Continue?')) {
+        return;
+    }
+
+    recheckBtn.disabled = true;
+    validateBtn.disabled = true;
+    validateAllBtn.disabled = true;
+    recheckBtn.textContent = 'Rechecking...';
+    resultDiv.innerHTML = `<div class="alert alert-warning">Rechecking skipped FAQ URLs (batch size: ${batchSize}, workers: ${workers})... This may take a while.</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/faq/recheck-skipped-urls?parallel_workers=${workers}&batch_size=${batchSize}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Recheck failed');
+        }
+
+        if (data.rechecked === 0) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-info">
+                    <strong>No skipped URLs to recheck</strong><br>
+                    All skipped FAQ URLs have already been rechecked.
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-${data.now_eligible > 0 ? 'success' : 'info'}">
+                    <strong>Recheck Complete!</strong><br>
+                    URLs rechecked: ${data.rechecked}<br>
+                    <strong>Now eligible for FAQ generation: ${data.now_eligible}</strong>
+                </div>
+            `;
+        }
+
+        await refreshFaqStatus();
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        recheckBtn.disabled = false;
+        validateBtn.disabled = false;
+        validateAllBtn.disabled = false;
+        recheckBtn.textContent = 'Recheck Skipped';
     }
 }
 
