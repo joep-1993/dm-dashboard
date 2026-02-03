@@ -2360,3 +2360,17 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
   - `removeAllFacetRules()` - Remove all facet rules
 - **Location**: `frontend/301-generator.html`
 - **Date**: 2026-02-03
+
+## 301 Generator Auto-Filter from Rules
+- **Problem**: Previously fetched ALL faceted URLs from Redshift (e.g., 100,000), then applied rules to find matches (e.g., 93)
+- **Solution**: Now automatically extracts patterns from rules and filters Redshift query
+- **How It Works**:
+  1. Before querying Redshift, extract `old_facet` values from facet rules and `old_cat` values from category rules
+  2. Build query with OR logic: `WHERE url LIKE '%pattern1%' OR url LIKE '%pattern2%' ...`
+  3. Only fetch URLs that match at least one rule pattern
+- **New Function**: `extract_patterns_from_rules(facet_rules, category_rules)` in `redirect_301_service.py`
+- **New Parameter**: `contains_any: List[str]` in `fetch_urls_with_facets()` for multiple OR filters
+- **API Response**: Now includes `search_patterns` showing which patterns were used
+- **Frontend**: Displays "Searched for URLs containing: `pattern1` OR `pattern2`" in results
+- **Example**: Rule `merk~484575` → `` (remove) will only fetch URLs containing `merk~484575`
+- **Date**: 2026-02-03

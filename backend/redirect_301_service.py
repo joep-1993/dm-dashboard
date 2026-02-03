@@ -179,12 +179,20 @@ def transform_and_sort_url(
 
 def fetch_urls_with_facets(
     contains: str = None,
+    contains_any: List[str] = None,
     start_date: str = "20240101",
     end_date: str = "20261231",
     limit: int = 10000
 ) -> List[Dict]:
     """
     Fetch URLs from Redshift that have facets (/c/ with ~~).
+
+    Args:
+        contains: Single pattern to filter (AND logic with other filters)
+        contains_any: List of patterns - URL must contain ANY of these (OR logic)
+        start_date: Start date in YYYYMMDD format
+        end_date: End date in YYYYMMDD format
+        limit: Maximum number of URLs to return
     """
     conn = None
     try:
@@ -216,9 +224,21 @@ def fetch_urls_with_facets(
 
         params = [int(start_date), int(end_date)]
 
+        # Single contains filter (backwards compatibility)
         if contains:
             query += " AND dv.url LIKE %s"
             params.append(f"%{contains}%")
+
+        # Multiple contains filters with OR logic (from rules)
+        if contains_any and len(contains_any) > 0:
+            # Build OR clause: (url LIKE %pattern1% OR url LIKE %pattern2% OR ...)
+            or_clauses = []
+            for pattern in contains_any:
+                if pattern:  # Skip empty patterns
+                    or_clauses.append("dv.url LIKE %s")
+                    params.append(f"%{pattern}%")
+            if or_clauses:
+                query += f" AND ({' OR '.join(or_clauses)})"
 
         query += """
             GROUP BY 1
@@ -244,6 +264,32 @@ def fetch_urls_with_facets(
     finally:
         if conn:
             return_redshift_connection(conn)
+
+
+def extract_patterns_from_rules(
+    facet_rules: List[FacetRule] = None,
+    category_rules: List[CategoryRule] = None
+) -> List[str]:
+    """
+    Extract search patterns from rules for Redshift query.
+
+    Returns list of patterns to search for (the 'old' values that need to be transformed).
+    """
+    patterns = []
+
+    if facet_rules:
+        for rule in facet_rules:
+            if rule.old_facet:
+                patterns.append(rule.old_facet)
+
+    if category_rules:
+        for rule in category_rules:
+            if rule.old_cat:
+                # Normalize: ensure it has slashes for proper matching
+                old_cat = rule.old_cat.strip("/")
+                patterns.append(f"/{old_cat}/")
+
+    return patterns
 
 
 def generate_301_redirects(

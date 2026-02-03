@@ -498,6 +498,14 @@
             }
             document.getElementById('summaryStats').innerHTML = summaryHtml;
 
+            // Show search patterns if any were used
+            if (data.search_patterns && data.search_patterns.length > 0) {
+                let patternsHtml = `<div class="mt-2"><small class="text-muted">Searched for URLs containing: </small>`;
+                patternsHtml += data.search_patterns.map(p => `<code class="ms-1">${escapeHtml(p)}</code>`).join(' OR ');
+                patternsHtml += `</div>`;
+                document.getElementById('summaryStats').innerHTML += patternsHtml;
+            }
+
             // Table
             const tbody = document.getElementById('resultsBody');
             tbody.innerHTML = '';

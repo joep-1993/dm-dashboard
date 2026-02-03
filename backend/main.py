@@ -2640,7 +2640,8 @@ from backend.redirect_301_service import (
     fetch_urls_with_facets,
     generate_301_redirects,
     parse_facet_rules,
-    parse_category_rules
+    parse_category_rules,
+    extract_patterns_from_rules
 )
 
 
@@ -2669,9 +2670,17 @@ async def generate_301_urls(request: Redirect301Request):
     - Facet transformations without ID: {"old_facet": "merk", "new_facet": "materiaal", "category": "/fietsen/"}
     """
     try:
+        # Parse rules first (needed for both pattern extraction and transformation)
+        facet_rules = parse_facet_rules(request.facet_rules) if request.facet_rules else None
+        category_rules = parse_category_rules(request.category_rules) if request.category_rules else None
+
         if request.fetch_from_redshift:
+            # Extract patterns from rules to automatically filter Redshift query
+            rule_patterns = extract_patterns_from_rules(facet_rules, category_rules)
+
             url_data = fetch_urls_with_facets(
                 contains=request.contains,
+                contains_any=rule_patterns if rule_patterns else None,
                 start_date=request.start_date,
                 end_date=request.end_date,
                 limit=request.limit
@@ -2689,10 +2698,6 @@ async def generate_301_urls(request: Redirect301Request):
                 "results": []
             }
 
-        # Parse rules if provided
-        facet_rules = parse_facet_rules(request.facet_rules) if request.facet_rules else None
-        category_rules = parse_category_rules(request.category_rules) if request.category_rules else None
-
         results = generate_301_redirects(
             urls,
             facet_rules=facet_rules,
@@ -2700,12 +2705,16 @@ async def generate_301_urls(request: Redirect301Request):
             sort_only=request.sort_only
         )
 
+        # Get patterns that were used for query (for UI feedback)
+        rule_patterns = extract_patterns_from_rules(facet_rules, category_rules) if request.fetch_from_redshift else []
+
         return {
             "status": "success",
             "total": len(urls),
             "needs_redirect": len(results),
             "facet_rules_applied": len(request.facet_rules),
             "category_rules_applied": len(request.category_rules),
+            "search_patterns": rule_patterns,
             "results": results
         }
 
