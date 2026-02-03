@@ -13,6 +13,9 @@
         .rule-row .btn-remove { flex: 0 0 auto; }
         .results-table { max-height: 500px; overflow-y: auto; }
         .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
+        .url-cell.copyable { cursor: pointer; }
+        .url-cell.copyable:hover { background-color: #e9ecef; }
+        .url-cell.copied { background-color: #d4edda !important; transition: background-color 0.3s; }
         .changed { background-color: #d4edda !important; }
         .tab-content { padding-top: 1rem; }
         pre { background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; overflow-x: auto; }
@@ -166,6 +169,7 @@
                         <h5 class="mb-0">Results</h5>
                         <div>
                             <span id="resultCount" class="badge bg-light text-dark me-2">0 URLs</span>
+                            <button class="btn btn-sm btn-outline-light" onclick="copyAllToClipboard()">Copy for Excel</button>
                             <button class="btn btn-sm btn-outline-warning" onclick="downloadResults()">Download CSV</button>
                         </div>
                     </div>
@@ -498,14 +502,42 @@
                         <tbody>
                             ${results.map(r => `
                                 <tr class="changed">
-                                    <td class="url-cell">${escapeHtml(r.original)}</td>
-                                    <td class="url-cell">${escapeHtml(r.canonical)}</td>
+                                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtmlAttr(r.original)}', this)">${escapeHtml(r.original)}</td>
+                                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtmlAttr(r.canonical)}', this)">${escapeHtml(r.canonical)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
                     </table>
                 </div>
             `;
+        }
+
+        function copyToClipboard(text, element) {
+            navigator.clipboard.writeText(text).then(() => {
+                element.classList.add('copied');
+                setTimeout(() => element.classList.remove('copied'), 500);
+            });
+        }
+
+        function copyAllToClipboard() {
+            if (currentResults.length === 0) {
+                alert('No results to copy');
+                return;
+            }
+
+            const tsv = ['original\tcanonical'];
+            currentResults.forEach(r => {
+                tsv.push(`${r.original}\t${r.canonical}`);
+            });
+
+            navigator.clipboard.writeText(tsv.join('\n')).then(() => {
+                alert('Copied to clipboard! Paste directly into Excel.');
+            });
+        }
+
+        function escapeHtmlAttr(text) {
+            if (!text) return '';
+            return text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         }
 
         function downloadResults() {
