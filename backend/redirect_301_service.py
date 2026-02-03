@@ -271,25 +271,128 @@ def extract_patterns_from_rules(
     category_rules: List[CategoryRule] = None
 ) -> List[str]:
     """
-    Extract search patterns from rules for Redshift query.
+    Extract SMART search patterns from rules for Redshift query.
 
-    Returns list of patterns to search for (the 'old' values that need to be transformed).
+    Instead of using full facet strings (which could be 100+), this extracts
+    unique facet prefixes to minimize query complexity.
+
+    For example, from rules like:
+        - merk~83723~~model_lamp~23563209~~pl_lampen~6027486
+        - merk~83723~~model_lamp~23563210~~pl_lampen~6027486
+        - merk~484575~~pl_buitenband~9125091
+
+    It extracts unique first facets: ['merk~83723', 'merk~484575']
+
+    Returns list of unique patterns to search for.
     """
-    patterns = []
+    patterns = set()  # Use set to deduplicate
 
     if facet_rules:
         for rule in facet_rules:
             if rule.old_facet:
-                patterns.append(rule.old_facet)
+                # Extract first facet from compound facets
+                # e.g., "merk~83723~~model_lamp~123" -> "merk~83723"
+                first_facet = rule.old_facet.split("~~")[0]
+                patterns.add(first_facet)
 
     if category_rules:
         for rule in category_rules:
             if rule.old_cat:
                 # Normalize: ensure it has slashes for proper matching
                 old_cat = rule.old_cat.strip("/")
-                patterns.append(f"/{old_cat}/")
+                patterns.add(f"/{old_cat}/")
 
-    return patterns
+    return list(patterns)
+
+
+def fetch_urls_with_facets_batched(
+    patterns: List[str],
+    start_date: str = "20240101",
+    end_date: str = "20261231",
+    limit_per_pattern: int = 5000
+) -> List[Dict]:
+    """
+    Fetch URLs from Redshift by querying each pattern separately.
+
+    This is more efficient than combining many patterns with OR,
+    as each query is simple and fast.
+
+    Args:
+        patterns: List of patterns to search for (one query per pattern)
+        start_date: Start date in YYYYMMDD format
+        end_date: End date in YYYYMMDD format
+        limit_per_pattern: Max URLs per pattern query
+
+    Returns:
+        Combined list of unique URLs with visits
+    """
+    if not patterns:
+        return []
+
+    all_results = {}  # Use dict to deduplicate by URL, keeping highest visits
+
+    conn = None
+    try:
+        conn = get_redshift_connection()
+        cur = conn.cursor()
+
+        for i, pattern in enumerate(patterns):
+            print(f"[301-GENERATOR] Querying pattern {i+1}/{len(patterns)}: {pattern}")
+
+            query = """
+                SELECT
+                    SPLIT_PART(dv.url, '?', 1) as url,
+                    COUNT(*) as visits
+                FROM datamart.fct_visits fcv
+                JOIN datamart.dim_visit dv
+                    ON fcv.dim_visit_key = dv.dim_visit_key
+                WHERE dv.is_real_visit = 1
+                  AND fcv.dim_date_key BETWEEN %s AND %s
+                  AND dv.url LIKE '%%beslist.nl%%'
+                  AND dv.url LIKE '%%/products/%%'
+                  AND dv.url LIKE '%%/c/%%'
+                  AND dv.url NOT LIKE '%%/r/%%'
+                  AND dv.url NOT LIKE '%%/l/%%'
+                  AND dv.url NOT LIKE '%%/page_%%'
+                  AND dv.url NOT LIKE '%%#%%'
+                  AND dv.url NOT LIKE '%%device=%%'
+                  AND dv.url NOT LIKE '%%sortby=%%'
+                  AND dv.url NOT LIKE '%%shop_id=%%'
+                  AND dv.url NOT LIKE '%%/sitemap/%%'
+                  AND dv.url NOT LIKE '%%/filters/%%'
+                  AND dv.url LIKE %s
+                GROUP BY 1
+                ORDER BY 2 DESC
+                LIMIT %s
+            """
+
+            params = [int(start_date), int(end_date), f"%{pattern}%", limit_per_pattern]
+            cur.execute(query, params)
+            rows = cur.fetchall()
+
+            # Add to results, keeping highest visit count for duplicates
+            for row in rows:
+                url = row[0] if not isinstance(row, dict) else row.get("url")
+                visits = row[1] if not isinstance(row, dict) else row.get("visits")
+
+                if url not in all_results or all_results[url] < visits:
+                    all_results[url] = visits
+
+            print(f"[301-GENERATOR]   Found {len(rows)} URLs for pattern '{pattern}'")
+
+        # Convert to list format
+        results = [{"url": url, "visits": visits} for url, visits in all_results.items()]
+        results.sort(key=lambda x: x["visits"], reverse=True)
+
+        print(f"[301-GENERATOR] Total unique URLs: {len(results)}")
+        return results
+
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch URLs from Redshift: {e}")
+        raise
+    finally:
+        if conn:
+            return_redshift_connection(conn)
 
 
 def generate_301_redirects(

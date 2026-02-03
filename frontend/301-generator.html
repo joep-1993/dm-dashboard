@@ -99,10 +99,6 @@
                                 </ul>
                                 <div class="tab-content">
                                     <div class="tab-pane fade show active" id="redshiftTab">
-                                        <div class="mb-3">
-                                            <label for="containsInput" class="form-label">URL contains (optional filter)</label>
-                                            <input type="text" class="form-control" id="containsInput" placeholder="e.g., /fietsen/ or merk~123">
-                                        </div>
                                         <div class="row">
                                             <div class="col-md-4">
                                                 <label for="startDate" class="form-label small">Start Date</label>
@@ -412,14 +408,14 @@
             let payload;
             if (isRedshift) {
                 payload = {
-                    contains: document.getElementById('containsInput').value.trim() || null,
                     start_date: document.getElementById('startDate').value,
                     end_date: document.getElementById('endDate').value,
                     limit: parseInt(document.getElementById('limitInput').value) || 10000,
                     fetch_from_redshift: true,
                     manual_urls: [],
                     facet_rules: facetRules,
-                    category_rules: categoryRules
+                    category_rules: categoryRules,
+                    auto_filter: true
                 };
             } else {
                 const urlInput = document.getElementById('urlInput').value.trim();

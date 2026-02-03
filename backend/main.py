@@ -2638,6 +2638,7 @@ async def transform_single_url(url: str, rules: CanonicalRulesRequest):
 from backend.redirect_301_service import (
     check_facets_sorted,
     fetch_urls_with_facets,
+    fetch_urls_with_facets_batched,
     generate_301_redirects,
     parse_facet_rules,
     parse_category_rules,
@@ -2656,6 +2657,7 @@ class Redirect301Request(BaseModel):
     facet_rules: List[dict] = []  # [{"old_facet": "...", "new_facet": "...", "category": "..."}]
     category_rules: List[dict] = []  # [{"old_cat": "...", "new_cat": "...", "new_maincat": "..."}]
     sort_only: bool = False  # If True, only sort facets without applying rules
+    auto_filter: bool = True  # If True, auto-extract patterns from rules for filtering
 
 
 @app.post("/api/301-generator/generate")
@@ -2675,16 +2677,29 @@ async def generate_301_urls(request: Redirect301Request):
         category_rules = parse_category_rules(request.category_rules) if request.category_rules else None
 
         if request.fetch_from_redshift:
-            # Extract patterns from rules to automatically filter Redshift query
-            rule_patterns = extract_patterns_from_rules(facet_rules, category_rules)
+            # Extract patterns from rules to automatically filter Redshift query (if enabled)
+            rule_patterns = []
+            if request.auto_filter:
+                rule_patterns = extract_patterns_from_rules(facet_rules, category_rules)
+                if rule_patterns:
+                    print(f"[301-GENERATOR] Auto-filter enabled: {len(rule_patterns)} unique patterns extracted")
 
-            url_data = fetch_urls_with_facets(
-                contains=request.contains,
-                contains_any=rule_patterns if rule_patterns else None,
-                start_date=request.start_date,
-                end_date=request.end_date,
-                limit=request.limit
-            )
+            if rule_patterns:
+                # Use batched queries - one query per pattern (faster for many patterns)
+                url_data = fetch_urls_with_facets_batched(
+                    patterns=rule_patterns,
+                    start_date=request.start_date,
+                    end_date=request.end_date,
+                    limit_per_pattern=request.limit // len(rule_patterns) if len(rule_patterns) > 1 else request.limit
+                )
+            else:
+                # No patterns - use single query with optional contains filter
+                url_data = fetch_urls_with_facets(
+                    contains=request.contains,
+                    start_date=request.start_date,
+                    end_date=request.end_date,
+                    limit=request.limit
+                )
             urls = [u["url"] for u in url_data]
         else:
             urls = request.manual_urls
@@ -2706,7 +2721,9 @@ async def generate_301_urls(request: Redirect301Request):
         )
 
         # Get patterns that were used for query (for UI feedback)
-        rule_patterns = extract_patterns_from_rules(facet_rules, category_rules) if request.fetch_from_redshift else []
+        search_patterns = []
+        if request.fetch_from_redshift and request.auto_filter:
+            search_patterns = extract_patterns_from_rules(facet_rules, category_rules)
 
         return {
             "status": "success",
@@ -2714,7 +2731,8 @@ async def generate_301_urls(request: Redirect301Request):
             "needs_redirect": len(results),
             "facet_rules_applied": len(request.facet_rules),
             "category_rules_applied": len(request.category_rules),
-            "search_patterns": rule_patterns,
+            "auto_filter_enabled": request.auto_filter,
+            "search_patterns": search_patterns,
             "results": results
         }
 

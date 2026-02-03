@@ -2363,14 +2363,20 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 
 ## 301 Generator Auto-Filter from Rules
 - **Problem**: Previously fetched ALL faceted URLs from Redshift (e.g., 100,000), then applied rules to find matches (e.g., 93)
-- **Solution**: Now automatically extracts patterns from rules and filters Redshift query
-- **How It Works**:
-  1. Before querying Redshift, extract `old_facet` values from facet rules and `old_cat` values from category rules
-  2. Build query with OR logic: `WHERE url LIKE '%pattern1%' OR url LIKE '%pattern2%' ...`
-  3. Only fetch URLs that match at least one rule pattern
-- **New Function**: `extract_patterns_from_rules(facet_rules, category_rules)` in `redirect_301_service.py`
-- **New Parameter**: `contains_any: List[str]` in `fetch_urls_with_facets()` for multiple OR filters
-- **API Response**: Now includes `search_patterns` showing which patterns were used
-- **Frontend**: Displays "Searched for URLs containing: `pattern1` OR `pattern2`" in results
-- **Example**: Rule `merk~484575` → `` (remove) will only fetch URLs containing `merk~484575`
+- **Solution**: Now automatically extracts patterns from rules and uses BATCHED queries
+- **Smart Pattern Extraction**:
+  - Extracts first facet from compound facets: `merk~83723~~model_lamp~123` → `merk~83723`
+  - Deduplicates to get unique prefixes only
+  - Handles many rules efficiently (100+ rules → ~10 unique patterns)
+- **Batched Queries** (better than OR logic):
+  - Runs separate query for each unique pattern
+  - Each query is fast and simple: `WHERE url LIKE '%pattern%'`
+  - Combines and deduplicates results
+  - No limit on number of patterns
+- **New Function**: `fetch_urls_with_facets_batched(patterns, ...)` in `redirect_301_service.py`
+- **API Response**: Includes `search_patterns` showing which patterns were used
+- **Frontend Changes**:
+  - Removed "URL contains" filter (redundant with auto-filter)
+  - Auto-filter always enabled when using Redshift
+- **Example**: 36 rules with `model_lamp~XXXXX` → 36 batched queries (one per unique pattern)
 - **Date**: 2026-02-03
