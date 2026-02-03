@@ -52,7 +52,14 @@
                                 <div class="col-md-5"><small class="text-muted">New Category</small></div>
                             </div>
                         </div>
-                        <button class="btn btn-outline-secondary btn-sm mb-3" onclick="addCategoryRule()">+ Add Category Rule</button>
+                        <button class="btn btn-outline-secondary btn-sm mb-2" onclick="addCategoryRule()">+ Add Category Rule</button>
+                        <button class="btn btn-outline-info btn-sm mb-2 ms-2" onclick="toggleCategoryBulkInput()">Bulk Paste</button>
+                        <button class="btn btn-outline-danger btn-sm mb-2 ms-2" onclick="removeAllCategoryRules()">Remove All</button>
+                        <div id="categoryBulkInput" class="d-none mb-3">
+                            <small class="text-muted d-block mb-1">Paste from Excel (tab-separated): <code>old_category</code> → <code>new_category</code></small>
+                            <textarea class="form-control form-control-sm mb-2" id="categoryBulkText" rows="4"></textarea>
+                            <button class="btn btn-info btn-sm" onclick="parseCategoryBulk()">Add Rules</button>
+                        </div>
 
                         <!-- Facet Rules -->
                         <h6 class="mt-3">Facet rules</h6>
@@ -64,6 +71,13 @@
                             </div>
                         </div>
                         <button class="btn btn-outline-secondary btn-sm" onclick="addFacetRule()">+ Add Facet Rule</button>
+                        <button class="btn btn-outline-info btn-sm ms-2" onclick="toggleFacetBulkInput()">Bulk Paste</button>
+                        <button class="btn btn-outline-danger btn-sm ms-2" onclick="removeAllFacetRules()">Remove All</button>
+                        <div id="facetBulkInput" class="d-none mt-2">
+                            <small class="text-muted d-block mb-1">Paste from Excel (tab-separated): <code>old_facet</code> → <code>new_facet</code> → <code>category_filter</code> (optional)</small>
+                            <textarea class="form-control form-control-sm mb-2" id="facetBulkText" rows="4"></textarea>
+                            <button class="btn btn-info btn-sm" onclick="parseFacetBulk()">Add Rules</button>
+                        </div>
                     </div>
                 </div>
 
@@ -231,6 +245,128 @@
 
         function removeFacetRule(id) {
             document.getElementById(`facet-rule-${id}`).remove();
+        }
+
+        function removeAllCategoryRules() {
+            document.querySelectorAll('.category-rule').forEach(row => row.remove());
+        }
+
+        function removeAllFacetRules() {
+            document.querySelectorAll('.facet-rule').forEach(row => row.remove());
+        }
+
+        function toggleCategoryBulkInput() {
+            document.getElementById('categoryBulkInput').classList.toggle('d-none');
+        }
+
+        function toggleFacetBulkInput() {
+            document.getElementById('facetBulkInput').classList.toggle('d-none');
+        }
+
+        function parseCategoryBulk() {
+            const text = document.getElementById('categoryBulkText').value.trim();
+            if (!text) return;
+
+            // Remove empty existing rules
+            document.querySelectorAll('.category-rule').forEach(row => {
+                const oldCat = row.querySelector('[data-field="old_cat"]').value.trim();
+                const newCat = row.querySelector('[data-field="new_cat"]').value.trim();
+                if (!oldCat && !newCat) row.remove();
+            });
+
+            const lines = text.split('\n');
+            let added = 0;
+            lines.forEach(line => {
+                const parts = line.split('\t');
+                if (parts.length >= 2) {
+                    const oldCat = parts[0].trim();
+                    const newCat = parts[1].trim();
+                    if (oldCat && newCat) {
+                        addCategoryRuleWithValues(oldCat, newCat);
+                        added++;
+                    }
+                }
+            });
+
+            document.getElementById('categoryBulkText').value = '';
+            document.getElementById('categoryBulkInput').classList.add('d-none');
+            if (added > 0) alert(`Added ${added} category rules`);
+        }
+
+        function parseFacetBulk() {
+            const text = document.getElementById('facetBulkText').value.trim();
+            if (!text) return;
+
+            // Remove empty existing rules
+            document.querySelectorAll('.facet-rule').forEach(row => {
+                const oldFacet = row.querySelector('[data-field="old_facet"]').value.trim();
+                const newFacet = row.querySelector('[data-field="new_facet"]').value.trim();
+                if (!oldFacet && !newFacet) row.remove();
+            });
+
+            const lines = text.split('\n');
+            let added = 0;
+            lines.forEach(line => {
+                const parts = line.split('\t');
+                if (parts.length >= 2) {
+                    const oldFacet = parts[0].trim();
+                    const newFacet = parts[1].trim();
+                    const category = parts[2] ? parts[2].trim() : '';
+                    if (oldFacet && newFacet) {
+                        addFacetRuleWithValues(oldFacet, newFacet, category);
+                        added++;
+                    }
+                }
+            });
+
+            document.getElementById('facetBulkText').value = '';
+            document.getElementById('facetBulkInput').classList.add('d-none');
+            if (added > 0) alert(`Added ${added} facet rules`);
+        }
+
+        function addCategoryRuleWithValues(oldCat, newCat) {
+            categoryRuleCount++;
+            const container = document.getElementById('categoryRulesContainer');
+            const ruleHtml = `
+                <div class="rule-row category-rule" id="cat-rule-${categoryRuleCount}">
+                    <div class="row">
+                        <div class="col-md-5">
+                            <input type="text" class="form-control form-control-sm" value="${oldCat}" data-field="old_cat">
+                        </div>
+                        <div class="col-md-5">
+                            <input type="text" class="form-control form-control-sm" value="${newCat}" data-field="new_cat">
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-sm btn-outline-danger btn-remove" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', ruleHtml);
+        }
+
+        function addFacetRuleWithValues(oldFacet, newFacet, category) {
+            facetRuleCount++;
+            const container = document.getElementById('facetRulesContainer');
+            const ruleHtml = `
+                <div class="rule-row facet-rule" id="facet-rule-${facetRuleCount}">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <input type="text" class="form-control form-control-sm" value="${oldFacet}" data-field="old_facet">
+                        </div>
+                        <div class="col-md-4">
+                            <input type="text" class="form-control form-control-sm" value="${newFacet}" data-field="new_facet">
+                        </div>
+                        <div class="col-md-3">
+                            <input type="text" class="form-control form-control-sm" value="${category}" data-field="category">
+                        </div>
+                        <div class="col-md-1">
+                            <button class="btn btn-sm btn-outline-danger btn-remove" onclick="removeFacetRule(${facetRuleCount})">×</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', ruleHtml);
         }
 
         function getCategoryRules() {

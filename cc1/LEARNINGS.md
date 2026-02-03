@@ -2343,3 +2343,20 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 - **Regex**: `urlInput.split(/[\n,]+/)` instead of just newlines
 - **Location**: `frontend/redirect-checker.html`
 - **Date**: 2026-02-03
+
+## 301 Generator Bulk Paste & Remove All
+- **Bulk Paste Feature**: Added ability to paste tab-separated data from Excel into both category and facet rules
+  - Button "Bulk Paste" opens modal with textarea for pasting
+  - Parses tab-separated lines (Excel format): `old_value\tnew_value` or `old_value\tnew_value\tcategory_filter`
+  - Empty existing rules are automatically removed before adding new ones
+  - Placeholder text explains expected format with outlined styling for visibility
+- **Remove All Buttons**: Added "Remove All" button for both category and facet rules
+  - Confirms before removing: "Are you sure you want to remove all category/facet rules?"
+  - Clears all rules and adds one empty rule as placeholder
+- **Key Functions**:
+  - `parseCategoryBulk()` - Parse bulk category rules
+  - `parseFacetBulk()` - Parse bulk facet rules (supports optional 3rd column for category filter)
+  - `removeAllCategoryRules()` - Remove all category rules
+  - `removeAllFacetRules()` - Remove all facet rules
+- **Location**: `frontend/301-generator.html`
+- **Date**: 2026-02-03
