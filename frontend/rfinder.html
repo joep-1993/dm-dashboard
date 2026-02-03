@@ -236,7 +236,7 @@
             container.innerHTML = `
                 <p class="text-muted small mb-2">Total visits: <strong>${totalVisits.toLocaleString()}</strong></p>
                 <div class="mb-3">
-                    <button class="btn btn-sm btn-outline-primary" onclick="copyToClipboard()">Copy to Clipboard (for Excel)</button>
+                    <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyToClipboard()">Copy for Excel</button>
                 </div>
                 <textarea id="tsvOutput" class="form-control mb-3" rows="10" readonly style="font-family: monospace; font-size: 0.8rem;">${escapeHtml(tsvData)}</textarea>
                 <div class="results-table">
