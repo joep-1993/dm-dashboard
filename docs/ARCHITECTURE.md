@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
-**Project:** Content Top - SEO Content Generation System
-**Last Updated:** 2026-01-30 CET
+**Project:** DM Tools - Digital Marketing Tools Platform
+**Last Updated:** 2026-02-03 CET
 **Timezone:** Europe/Amsterdam (CET/CEST)
 
 ## Table of Contents
@@ -72,14 +72,15 @@
 - **File Structure**:
   ```
   frontend/
-  ├── index.html          # SEO Content Generator
+  ├── index.html          # Kopteksten Generator (AI product recommendations)
   ├── faq.html            # FAQ Generator
   ├── canonical.html      # Canonical URL Generator
   ├── rfinder.html        # R-Finder (URL Discovery)
   ├── redirect-checker.html # Redirect Checker (HTTP status/redirects/canonicals)
+  ├── 301-generator.html  # 301 Generator (facet sorting & transformations)
   ├── thema-ads.html      # Thema Ads Processing
   ├── unique-titles.html  # Unique Titles Manager
-  ├── dashboard.html      # Dashboard (tool overview)
+  ├── dashboard.html      # DM Tools Dashboard (tool overview)
   ├── css/
   │   └── style.css       # Custom styles
   └── js/
@@ -211,6 +212,9 @@ main.py (API Endpoints)
     │
     ├──▶ canonical_service.py (URL Canonicalization)
     │       └──▶ Redshift queries + URL transformation rules
+    │
+    ├──▶ redirect_301_service.py (301 Redirect Generation)
+    │       └──▶ Facet sorting + category/facet transformations
     │
     ├──▶ rfinder_service.py (R-URL Discovery)
     │       └──▶ Redshift queries for /r/ URLs

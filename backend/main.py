@@ -2632,6 +2632,137 @@ async def transform_single_url(url: str, rules: CanonicalRulesRequest):
 
 
 # =============================================================================
+# 301 REDIRECT GENERATOR - Sort facets alphabetically
+# =============================================================================
+
+from backend.redirect_301_service import (
+    check_facets_sorted,
+    fetch_urls_with_facets,
+    generate_301_redirects,
+    parse_facet_rules,
+    parse_category_rules
+)
+
+
+class Redirect301Request(BaseModel):
+    """Request model for 301 redirect generation"""
+    contains: Optional[str] = None
+    start_date: str = "20240101"
+    end_date: str = "20261231"
+    fetch_from_redshift: bool = True
+    manual_urls: List[str] = []
+    limit: int = 10000
+    facet_rules: List[dict] = []  # [{"old_facet": "...", "new_facet": "...", "category": "..."}]
+    category_rules: List[dict] = []  # [{"old_cat": "...", "new_cat": "...", "new_maincat": "..."}]
+    sort_only: bool = False  # If True, only sort facets without applying rules
+
+
+@app.post("/api/301-generator/generate")
+async def generate_301_urls(request: Redirect301Request):
+    """
+    Generate 301 redirects for URLs with unsorted facets or transformations.
+
+    Supports:
+    - Sorting facets alphabetically (sort_only=True)
+    - Category transformations: {"old_cat": "fietsen_123_456", "new_cat": "fietsen_123"}
+    - Facet transformations with full ID: {"old_facet": "merk~123", "new_facet": "materiaal~456"}
+    - Facet transformations without ID: {"old_facet": "merk", "new_facet": "materiaal", "category": "/fietsen/"}
+    """
+    try:
+        if request.fetch_from_redshift:
+            url_data = fetch_urls_with_facets(
+                contains=request.contains,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                limit=request.limit
+            )
+            urls = [u["url"] for u in url_data]
+        else:
+            urls = request.manual_urls
+
+        if not urls:
+            return {
+                "status": "success",
+                "message": "No URLs found",
+                "total": 0,
+                "needs_redirect": 0,
+                "results": []
+            }
+
+        # Parse rules if provided
+        facet_rules = parse_facet_rules(request.facet_rules) if request.facet_rules else None
+        category_rules = parse_category_rules(request.category_rules) if request.category_rules else None
+
+        results = generate_301_redirects(
+            urls,
+            facet_rules=facet_rules,
+            category_rules=category_rules,
+            sort_only=request.sort_only
+        )
+
+        return {
+            "status": "success",
+            "total": len(urls),
+            "needs_redirect": len(results),
+            "facet_rules_applied": len(request.facet_rules),
+            "category_rules_applied": len(request.category_rules),
+            "results": results
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/301-generator/fetch-urls")
+async def fetch_301_urls(
+    contains: Optional[str] = None,
+    start_date: str = "20240101",
+    end_date: str = "20261231",
+    limit: int = 10000
+):
+    """
+    Fetch URLs with facets from Redshift for 301 redirect checking.
+    """
+    try:
+        url_data = fetch_urls_with_facets(
+            contains=contains,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit
+        )
+
+        urls = [u["url"] for u in url_data]
+
+        return {
+            "status": "success",
+            "total": len(urls),
+            "urls": urls
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/301-generator/check")
+async def check_single_url_facets(url: str):
+    """
+    Check if a single URL has properly sorted facets.
+    """
+    try:
+        is_sorted, corrected_url = check_facets_sorted(url)
+
+        return {
+            "original": url,
+            "is_sorted": is_sorted,
+            "corrected": corrected_url if not is_sorted else None,
+            "needs_redirect": not is_sorted
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # R-FINDER ENDPOINTS - Find /r/ URLs from Redshift
 # =============================================================================
 

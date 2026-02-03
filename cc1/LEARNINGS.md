@@ -2283,4 +2283,63 @@ WHERE t2.url IS NULL;
 - **Date**: 2026-01-30
 
 ---
-_Last updated: 2026-01-30 (R-finder tool, REMOVEBUCKET canonical transformation)_
+_Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates)_
+
+## 301 Generator Tool
+- **Purpose**: Generate 301 redirects for URLs with unsorted facets or facet/category transformations
+- **Features**:
+  - Sort facets alphabetically (facet names before `~` are sorted)
+  - Category transformations (CAT-CAT): Replace category slugs
+  - Facet transformations (FACET-FACET): Replace facets with/without IDs
+  - Works with facets with IDs (e.g., `merk~4412606` → `materiaal~484491`)
+  - Works with facets without IDs (e.g., `merk` → `materiaal`, keeps the ID)
+  - Category filter for facet rules (apply only to specific categories)
+- **Files**:
+  - Backend: `backend/redirect_301_service.py`
+  - Frontend: `frontend/301-generator.html`
+  - API endpoints in `backend/main.py`
+- **API Endpoints**:
+  - `POST /api/301-generator/generate` - Generate 301 redirects
+  - `POST /api/301-generator/check` - Check single URL sorting
+- **URL Sources**: Redshift visits data or manual URL input
+- **Output**: CSV export with original URL and redirect target
+- **Date**: 2026-02-03
+
+## UI/UX Improvements (2026-02-03)
+- **Project Rename**: "SEO Tools Dashboard" → "DM Tools Dashboard"
+- **Tool Rename**: "SEO Content Generator" → "Kopteksten Generator"
+- **Navigation Updates**:
+  - All tools now linked in all page headers
+  - Sticky navigation header (stays visible when scrolling)
+  - Selected tool highlighted with lighter purple (#8b7bb5)
+  - Removed `target="_blank"` from all navigation links
+- **Dashboard Redesign**:
+  - Inverted icon colors (purple background, white icons)
+  - Removed bullet point feature lists for compact tiles
+  - Removed subtitle text
+  - Updated footer: "Digital Marketing tools by Joep van Schagen - 2026"
+- **Footer**: Added consistent footer to all pages
+- **Default Values Updated**:
+  - FAQ Generator: Batch size 100, Parallel workers 20, Validation batch 500, Validation workers 20
+  - Kopteksten Generator: Same defaults as FAQ Generator
+  - Content Publishing: Default environment changed from "staging" to "production"
+- **301 Generator Cleanup**:
+  - Removed "Sort only" option
+  - Removed info box
+  - Changed rule headers from "Category Rules (CAT-CAT)" to "Category rules"
+  - Changed X-button character from `X` to `×` (matching canonical generator)
+  - Removed "New Maincat" option from category rules
+- **Date**: 2026-02-03
+
+## Combined Reset Validation Functionality
+- **Change**: "Reset Validation" button now also resets skipped URLs recheck status
+- **Behavior**: Calls both `/api/validation-history/reset` and `/api/recheck-skipped-urls/reset`
+- **Purpose**: Single button to reset all validation/recheck state for fresh start
+- **Location**: `frontend/js/app.js` - `resetValidationHistory()` function
+- **Date**: 2026-02-03
+
+## Redirect Checker Comma-Separated Input
+- **Change**: URL input now accepts both newline and comma-separated URLs
+- **Regex**: `urlInput.split(/[\n,]+/)` instead of just newlines
+- **Location**: `frontend/redirect-checker.html`
+- **Date**: 2026-02-03

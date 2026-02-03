@@ -23,16 +23,18 @@
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-dark bg-primary">
+    <nav class="navbar navbar-dark bg-primary sticky-top">
         <div class="container">
             <a href="/static/dashboard.html" class="navbar-brand mb-0 h1">Redirect Checker</a>
             <div>
-                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">SEO Content</a>
+                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
                 <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
                 <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
                 <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
                 <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
                 <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
+                <a href="/static/redirect-checker.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">Redirect Checker</a>
+                <a href="/static/301-generator.html" class="btn btn-outline-light btn-sm fw-bold">301 Generator</a>
                 <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
             </div>
         </div>
@@ -49,10 +51,13 @@
                     <div class="card-body">
                         <div class="row">
                             <div class="col-md-8">
-                                <label for="urlInput" class="form-label">Enter URLs (one per line)</label>
+                                <label for="urlInput" class="form-label">Enter URLs (one per line or comma-separated)</label>
                                 <textarea class="form-control" id="urlInput" rows="8" placeholder="/products/elektronica/
 /products/kleding/jassen/
-https://www.beslist.nl/products/tuin/"></textarea>
+https://www.beslist.nl/products/tuin/
+
+Or comma-separated:
+/products/a/, /products/b/, /products/c/"></textarea>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Settings</label>
@@ -128,6 +133,10 @@ https://www.beslist.nl/products/tuin/"></textarea>
         </div>
     </div>
 
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let results = [];
@@ -139,7 +148,11 @@ https://www.beslist.nl/products/tuin/"></textarea>
                 return;
             }
 
-            const urls = urlInput.split('\n').map(u => u.trim()).filter(u => u && (u.startsWith('http') || u.startsWith('/')));
+            // Support both newline and comma-separated URLs
+            const urls = urlInput
+                .split(/[\n,]+/)
+                .map(u => u.trim())
+                .filter(u => u && (u.startsWith('http') || u.startsWith('/')));
             if (urls.length === 0) {
                 alert('No valid URLs found. URLs must start with http://, https://, or / (relative)');
                 return;

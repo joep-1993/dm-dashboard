@@ -735,9 +735,9 @@ async function validateLinks() {
     }
 }
 
-// Reset validation history
+// Reset validation history AND skipped URLs recheck status
 async function resetValidationHistory() {
-    if (!confirm('Reset all validation history? This will allow all URLs to be re-validated.')) {
+    if (!confirm('Reset all validation history AND skipped URLs status? This will allow all URLs to be re-validated and rechecked.')) {
         return;
     }
 
@@ -746,24 +746,34 @@ async function resetValidationHistory() {
 
     resetBtn.disabled = true;
     resetBtn.textContent = 'Resetting...';
-    resultDiv.innerHTML = '<div class="alert alert-warning">Resetting validation history...</div>';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Resetting validation history and skipped URLs...</div>';
 
     try {
-        const response = await fetch(`${API_BASE}/api/validation-history/reset`, {
+        // Reset validation history
+        const validationResponse = await fetch(`${API_BASE}/api/validation-history/reset`, {
             method: 'DELETE'
         });
+        const validationData = await validationResponse.json();
 
-        const data = await response.json();
+        // Reset skipped URLs recheck status
+        const skippedResponse = await fetch(`${API_BASE}/api/recheck-skipped-urls/reset`, {
+            method: 'DELETE'
+        });
+        const skippedData = await skippedResponse.json();
 
-        if (response.ok) {
+        if (validationResponse.ok && skippedResponse.ok) {
             resultDiv.innerHTML = `
                 <div class="alert alert-warning">
-                    <strong>${data.message}</strong><br>
-                    All URLs can now be re-validated.
+                    <strong>Reset complete:</strong><br>
+                    • Validation history: ${validationData.cleared_count || 0} URLs cleared<br>
+                    • Skipped URLs: ${skippedData.reset_count || 0} URLs can be rechecked
                 </div>
             `;
         } else {
-            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
+            const errors = [];
+            if (!validationResponse.ok) errors.push(`Validation: ${validationData.detail}`);
+            if (!skippedResponse.ok) errors.push(`Skipped: ${skippedData.detail}`);
+            resultDiv.innerHTML = `<div class="alert alert-danger">Errors: ${errors.join(', ')}</div>`;
         }
 
     } catch (error) {

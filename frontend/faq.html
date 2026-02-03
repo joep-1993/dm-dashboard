@@ -9,16 +9,18 @@
     <link href="/static/css/style.css" rel="stylesheet">
 </head>
 <body>
-    <nav class="navbar navbar-dark bg-primary">
+    <nav class="navbar navbar-dark bg-primary sticky-top">
         <div class="container">
             <a href="/static/dashboard.html" class="navbar-brand mb-0 h1" style="text-decoration: none;">FAQ Generator</a>
             <div>
-                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">SEO Content</a>
+                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
+                <a href="/static/faq.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">FAQ Generator</a>
                 <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
                 <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
                 <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
                 <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
                 <a href="/static/redirect-checker.html" class="btn btn-outline-light btn-sm fw-bold">Redirect Checker</a>
+                <a href="/static/301-generator.html" class="btn btn-outline-light btn-sm fw-bold">301 Generator</a>
                 <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
             </div>
         </div>
@@ -37,11 +39,11 @@
                         <div class="row g-2 mb-3">
                             <div class="col-auto">
                                 <label for="batchSizeInput" class="form-label small mb-1">Batch Size</label>
-                                <input type="number" class="form-control" id="batchSizeInput" value="10" min="1" style="width: 120px;">
+                                <input type="number" class="form-control" id="batchSizeInput" value="100" min="1" style="width: 120px;">
                             </div>
                             <div class="col-auto">
                                 <label for="parallelWorkersInput" class="form-label small mb-1">Parallel Workers</label>
-                                <input type="number" class="form-control" id="parallelWorkersInput" value="6" min="1" max="20" style="width: 100px;">
+                                <input type="number" class="form-control" id="parallelWorkersInput" value="20" min="1" max="20" style="width: 100px;">
                             </div>
                             <div class="col-auto">
                                 <label for="numFaqsInput" class="form-label small mb-1">FAQs per Page</label>
@@ -97,7 +99,7 @@
                             </div>
                             <div class="col-auto">
                                 <label for="validateWorkersInput" class="form-label small mb-1">Workers</label>
-                                <input type="number" class="form-control" id="validateWorkersInput" value="3" min="1" max="10" style="width: 100px;">
+                                <input type="number" class="form-control" id="validateWorkersInput" value="20" min="1" max="20" style="width: 100px;">
                             </div>
                             <div class="col-auto d-flex align-items-end">
                                 <button class="btn btn-warning" onclick="validateFaqLinks()" id="validateBtn">
@@ -156,7 +158,7 @@
                                 <label for="publishEnvironment" class="form-label small mb-1">Environment</label>
                                 <select class="form-select" id="publishEnvironment" style="width: 150px;">
                                     <option value="staging">Staging</option>
-                                    <option value="production">Production</option>
+                                    <option value="production" selected>Production</option>
                                 </select>
                             </div>
                             <div class="col-auto">
@@ -242,6 +244,10 @@
             </div>
         </div>
     </div>
+
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
 
     <!-- Bootstrap JS from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

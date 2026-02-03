@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>301 Generator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .results-table { max-height: 600px; overflow-y: auto; }
+        .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
+        .url-cell.copyable { cursor: pointer; }
+        .url-cell.copyable:hover { background-color: #e9ecef; }
+        .url-cell.copied { background-color: #d4edda !important; transition: background-color 0.3s; }
+        .needs-redirect { background-color: #fff3cd; }
+        .rule-row { background-color: #f8f9fa; padding: 8px; margin-bottom: 8px; border-radius: 4px; }
+        pre { background: #f8f9fa; padding: 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; margin: 0; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container">
+            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1">301 Generator</a>
+            <div>
+                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
+                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
+                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
+                <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
+                <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
+                <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
+                <a href="/static/redirect-checker.html" class="btn btn-outline-light btn-sm fw-bold">Redirect Checker</a>
+                <a href="/static/301-generator.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">301 Generator</a>
+                <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-11 mx-auto">
+                <!-- Rules Section -->
+                <div class="card mb-4">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="mb-0">Transformation Rules (optional)</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Category Rules -->
+                        <h6 class="mt-3">Category rules</h6>
+                        <div id="categoryRulesContainer">
+                            <div class="row mb-2">
+                                <div class="col-md-5"><small class="text-muted">Old Category</small></div>
+                                <div class="col-md-5"><small class="text-muted">New Category</small></div>
+                            </div>
+                        </div>
+                        <button class="btn btn-outline-secondary btn-sm mb-3" onclick="addCategoryRule()">+ Add Category Rule</button>
+
+                        <!-- Facet Rules -->
+                        <h6 class="mt-3">Facet rules</h6>
+                        <div id="facetRulesContainer">
+                            <div class="row mb-2">
+                                <div class="col-md-4"><small class="text-muted">Old Facet</small></div>
+                                <div class="col-md-4"><small class="text-muted">New Facet</small></div>
+                                <div class="col-md-3"><small class="text-muted">Category filter (optional)</small></div>
+                            </div>
+                        </div>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="addFacetRule()">+ Add Facet Rule</button>
+                    </div>
+                </div>
+
+                <!-- Input Section -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">URL Source</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <ul class="nav nav-tabs mb-3" id="inputTabs">
+                                    <li class="nav-item">
+                                        <a class="nav-link active" data-bs-toggle="tab" href="#redshiftTab">Fetch from Redshift</a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" data-bs-toggle="tab" href="#manualTab">Manual URLs</a>
+                                    </li>
+                                </ul>
+                                <div class="tab-content">
+                                    <div class="tab-pane fade show active" id="redshiftTab">
+                                        <div class="mb-3">
+                                            <label for="containsInput" class="form-label">URL contains (optional filter)</label>
+                                            <input type="text" class="form-control" id="containsInput" placeholder="e.g., /fietsen/ or merk~123">
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-4">
+                                                <label for="startDate" class="form-label small">Start Date</label>
+                                                <input type="text" class="form-control form-control-sm" id="startDate" value="20240101">
+                                            </div>
+                                            <div class="col-md-4">
+                                                <label for="endDate" class="form-label small">End Date</label>
+                                                <input type="text" class="form-control form-control-sm" id="endDate" value="20261231">
+                                            </div>
+                                            <div class="col-md-4">
+                                                <label for="limitInput" class="form-label small">Limit</label>
+                                                <input type="number" class="form-control form-control-sm" id="limitInput" value="10000">
+                                            </div>
+                                        </div>
+                                        <button class="btn btn-primary mt-3" onclick="generate()" id="generateBtn">
+                                            Generate 301 Redirects
+                                        </button>
+                                    </div>
+                                    <div class="tab-pane fade" id="manualTab">
+                                        <label for="urlInput" class="form-label">Enter URLs (one per line or comma-separated)</label>
+                                        <textarea class="form-control" id="urlInput" rows="6" placeholder="/products/fietsen/fietsen_123/c/merk~456~~materiaal~789
+/products/horloge/horloge_123/c/serie~456~~kleur~789"></textarea>
+                                        <button class="btn btn-primary mt-3" onclick="generate()" id="generateBtnManual">
+                                            Generate 301 Redirects
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div class="card mb-4" id="progressCard" style="display: none;">
+                    <div class="card-header bg-warning">
+                        <h5 class="mb-0">Progress</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="progress mb-2" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar" style="width: 0%">0%</div>
+                        </div>
+                        <p class="mb-0 text-muted" id="progressText">Processing...</p>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="card mb-4" id="resultsCard" style="display: none;">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Results</h5>
+                        <div>
+                            <button class="btn btn-outline-light btn-sm" onclick="copyAllToClipboard()">Copy to Clipboard</button>
+                            <button class="btn btn-light btn-sm" onclick="downloadResults()">Download CSV</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Summary -->
+                        <div class="row mb-3" id="summaryRow">
+                            <div class="col-md-12">
+                                <div class="d-flex gap-3 flex-wrap" id="summaryStats"></div>
+                            </div>
+                        </div>
+
+                        <!-- Results Table -->
+                        <div class="results-table">
+                            <table class="table table-sm table-bordered table-hover">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th style="width: 5%">#</th>
+                                        <th style="width: 47%">Original URL</th>
+                                        <th style="width: 47%">Redirect To</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let results = [];
+        let facetRuleCount = 0;
+        let categoryRuleCount = 0;
+
+        function addCategoryRule() {
+            categoryRuleCount++;
+            const container = document.getElementById('categoryRulesContainer');
+            const ruleHtml = `
+                <div class="rule-row category-rule" id="cat-rule-${categoryRuleCount}">
+                    <div class="row">
+                        <div class="col-md-5">
+                            <input type="text" class="form-control form-control-sm" placeholder="e.g., fietsen_484521_484542" data-field="old_cat">
+                        </div>
+                        <div class="col-md-5">
+                            <input type="text" class="form-control form-control-sm" placeholder="e.g., fietsen_484521" data-field="new_cat">
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-sm btn-outline-danger btn-remove" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', ruleHtml);
+        }
+
+        function removeCategoryRule(id) {
+            document.getElementById(`cat-rule-${id}`).remove();
+        }
+
+        function addFacetRule() {
+            facetRuleCount++;
+            const container = document.getElementById('facetRulesContainer');
+            const ruleHtml = `
+                <div class="rule-row facet-rule" id="facet-rule-${facetRuleCount}">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <input type="text" class="form-control form-control-sm" placeholder="e.g., merk~123 or merk" data-field="old_facet">
+                        </div>
+                        <div class="col-md-4">
+                            <input type="text" class="form-control form-control-sm" placeholder="e.g., materiaal~456 or materiaal" data-field="new_facet">
+                        </div>
+                        <div class="col-md-3">
+                            <input type="text" class="form-control form-control-sm" placeholder="e.g., /fietsen/" data-field="category">
+                        </div>
+                        <div class="col-md-1">
+                            <button class="btn btn-sm btn-outline-danger btn-remove" onclick="removeFacetRule(${facetRuleCount})">×</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', ruleHtml);
+        }
+
+        function removeFacetRule(id) {
+            document.getElementById(`facet-rule-${id}`).remove();
+        }
+
+        function getCategoryRules() {
+            const rules = [];
+            document.querySelectorAll('.category-rule').forEach(row => {
+                const oldCat = row.querySelector('[data-field="old_cat"]').value.trim();
+                const newCat = row.querySelector('[data-field="new_cat"]').value.trim();
+
+                if (oldCat && newCat) {
+                    rules.push({
+                        old_cat: oldCat,
+                        new_cat: newCat
+                    });
+                }
+            });
+            return rules;
+        }
+
+        function getFacetRules() {
+            const rules = [];
+            document.querySelectorAll('.facet-rule').forEach(row => {
+                const oldFacet = row.querySelector('[data-field="old_facet"]').value.trim();
+                const newFacet = row.querySelector('[data-field="new_facet"]').value.trim();
+                const category = row.querySelector('[data-field="category"]').value.trim();
+
+                if (oldFacet && newFacet) {
+                    rules.push({
+                        old_facet: oldFacet,
+                        new_facet: newFacet,
+                        category: category || null
+                    });
+                }
+            });
+            return rules;
+        }
+
+        async function generate() {
+            const activeTab = document.querySelector('#inputTabs .nav-link.active').getAttribute('href');
+            const isRedshift = activeTab === '#redshiftTab';
+            const facetRules = getFacetRules();
+            const categoryRules = getCategoryRules();
+
+            let payload;
+            if (isRedshift) {
+                payload = {
+                    contains: document.getElementById('containsInput').value.trim() || null,
+                    start_date: document.getElementById('startDate').value,
+                    end_date: document.getElementById('endDate').value,
+                    limit: parseInt(document.getElementById('limitInput').value) || 10000,
+                    fetch_from_redshift: true,
+                    manual_urls: [],
+                    facet_rules: facetRules,
+                    category_rules: categoryRules
+                };
+            } else {
+                const urlInput = document.getElementById('urlInput').value.trim();
+                if (!urlInput) {
+                    alert('Please enter URLs');
+                    return;
+                }
+                const urls = urlInput
+                    .split(/[\n,]+/)
+                    .map(u => u.trim())
+                    .filter(u => u && (u.startsWith('http') || u.startsWith('/')));
+
+                if (urls.length === 0) {
+                    alert('No valid URLs found');
+                    return;
+                }
+
+                payload = {
+                    fetch_from_redshift: false,
+                    manual_urls: urls,
+                    facet_rules: facetRules,
+                    category_rules: categoryRules
+                };
+            }
+
+            document.getElementById('progressCard').style.display = 'block';
+            document.getElementById('resultsCard').style.display = 'none';
+            document.getElementById('generateBtn').disabled = true;
+            if (document.getElementById('generateBtnManual')) {
+                document.getElementById('generateBtnManual').disabled = true;
+            }
+            document.getElementById('progressText').textContent = 'Fetching and processing URLs...';
+            document.getElementById('progressBar').style.width = '50%';
+            document.getElementById('progressBar').textContent = 'Processing...';
+
+            try {
+                const response = await fetch('/api/301-generator/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    results = data.results || [];
+                    showResults(data);
+                } else {
+                    alert('Error: ' + (data.detail || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                document.getElementById('generateBtn').disabled = false;
+                if (document.getElementById('generateBtnManual')) {
+                    document.getElementById('generateBtnManual').disabled = false;
+                }
+                document.getElementById('progressCard').style.display = 'none';
+            }
+        }
+
+        function showResults(data) {
+            document.getElementById('resultsCard').style.display = 'block';
+
+            // Summary
+            let summaryHtml = `
+                <span class="badge bg-secondary">Total URLs checked: ${data.total}</span>
+                <span class="badge bg-warning text-dark">Needs redirect: ${data.needs_redirect}</span>
+                <span class="badge bg-success">No change needed: ${data.total - data.needs_redirect}</span>
+            `;
+            if (data.category_rules_applied > 0) {
+                summaryHtml += `<span class="badge bg-info">Category rules: ${data.category_rules_applied}</span>`;
+            }
+            if (data.facet_rules_applied > 0) {
+                summaryHtml += `<span class="badge bg-info">Facet rules: ${data.facet_rules_applied}</span>`;
+            }
+            document.getElementById('summaryStats').innerHTML = summaryHtml;
+
+            // Table
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = '';
+
+            results.forEach((r, i) => {
+                const tr = document.createElement('tr');
+                tr.className = 'needs-redirect';
+                tr.innerHTML = `
+                    <td>${i + 1}</td>
+                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtml(r.original)}', this)">${truncateUrl(r.original)}</td>
+                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtml(r.redirect)}', this)">${truncateUrl(r.redirect)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            if (results.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No URLs need redirects!</td></tr>';
+            }
+        }
+
+        function truncateUrl(url, maxLen = 80) {
+            if (!url) return '';
+            if (url.length <= maxLen) return url;
+            return url.substring(0, maxLen) + '...';
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
+
+        function copyToClipboard(text, element) {
+            navigator.clipboard.writeText(text).then(() => {
+                element.classList.add('copied');
+                setTimeout(() => element.classList.remove('copied'), 500);
+            });
+        }
+
+        function copyAllToClipboard() {
+            if (results.length === 0) return;
+
+            const tsv = ['original\tredirect'];
+            results.forEach(r => {
+                tsv.push(`${r.original}\t${r.redirect}`);
+            });
+
+            navigator.clipboard.writeText(tsv.join('\n')).then(() => {
+                alert('Copied to clipboard! Paste directly into Excel.');
+            });
+        }
+
+        function downloadResults() {
+            if (results.length === 0) return;
+
+            const csv = ['original,redirect'];
+            results.forEach(r => {
+                csv.push(`"${r.original}","${r.redirect}"`);
+            });
+
+            const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '301_redirects.csv';
+            a.click();
+        }
+
+        // Add one empty rule row of each type on load
+        addCategoryRule();
+        addFacetRule();
+    </script>
+</body>
+</html>

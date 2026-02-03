@@ -53,3 +53,4 @@ backend/check_*.py
 
 # Log files
 logs/
+Vector database N8N:

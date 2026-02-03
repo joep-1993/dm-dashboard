@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SEO Tools Dashboard</title>
+    <title>DM Tools Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
@@ -66,8 +66,8 @@
             width: 64px;
             height: 64px;
             border-radius: 16px;
-            background: white;
-            border: 2px solid var(--purple-primary);
+            background: var(--purple-primary);
+            border: none;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -75,9 +75,9 @@
         }
 
         .tool-icon svg {
-            width: 32px;
-            height: 32px;
-            color: var(--purple-primary);
+            width: 36px;
+            height: 36px;
+            color: white;
         }
 
         .tool-card .card-title {
@@ -186,14 +186,13 @@
 <body>
     <div class="hero-section">
         <div class="container">
-            <h1 class="display-5">SEO Tools Dashboard</h1>
-            <p class="lead mb-0">Unified platform for SEO content generation, FAQ management, and Google Ads campaigns</p>
+            <h1 class="display-5">DM Tools Dashboard</h1>
         </div>
     </div>
 
     <div class="container pb-5">
         <div class="row g-4 mb-5">
-            <!-- SEO Content Generator Card -->
+            <!-- Kopteksten Generator Card -->
             <div class="col-lg-4 col-md-6">
                 <div class="card tool-card">
                     <div class="card-body">
@@ -203,14 +202,8 @@
                                 <path d="M4.5 12.5A.5.5 0 0 1 5 12h3a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm0-2A.5.5 0 0 1 5 10h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm1.639-3.708 1.33.886 1.854-1.855a.25.25 0 0 1 .289-.047l1.888.974V8.5a.5.5 0 0 1-.5.5H5a.5.5 0 0 1-.5-.5V8s1.54-1.274 1.639-1.208z"/>
                             </svg>
                         </div>
-                        <h5 class="card-title">SEO Content Generator</h5>
+                        <h5 class="card-title">Kopteksten Generator</h5>
                         <p class="card-text">Generate AI-powered product recommendations for e-commerce pages with automatic hyperlinks.</p>
-                        <ul class="feature-list">
-                            <li>Batch URL processing</li>
-                            <li>Parallel workers (1-20)</li>
-                            <li>Link validation</li>
-                            <li>Excel/JSON export</li>
-                        </ul>
                         <a href="/static/index.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
@@ -228,12 +221,6 @@
                         </div>
                         <h5 class="card-title">FAQ Generator</h5>
                         <p class="card-text">Generate SEO-optimized FAQs with Schema.org structured data for rich search results.</p>
-                        <ul class="feature-list">
-                            <li>Schema.org JSON-LD output</li>
-                            <li>Configurable FAQ count (1-10)</li>
-                            <li>Hyperlinks to related pages</li>
-                            <li>Combined export option</li>
-                        </ul>
                         <a href="/static/faq.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
@@ -250,12 +237,6 @@
                         </div>
                         <h5 class="card-title">Thema Ads</h5>
                         <p class="card-text">Manage seasonal Google Ads campaigns at scale with themed RSA creation.</p>
-                        <ul class="feature-list">
-                            <li>Black Friday, Cyber Monday themes</li>
-                            <li>Sinterklaas, Kerstmis themes</li>
-                            <li>Bulk RSA creation</li>
-                            <li>Job tracking & resume</li>
-                        </ul>
                         <a href="/static/thema-ads.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
@@ -273,12 +254,6 @@
                         </div>
                         <h5 class="card-title">Unique Titles</h5>
                         <p class="card-text">Upload CSV files with custom titles and descriptions for product pages.</p>
-                        <ul class="feature-list">
-                            <li>CSV upload (semicolon separator)</li>
-                            <li>Bulk title/description import</li>
-                            <li>Direct API publishing</li>
-                            <li>UTF-8 encoding support</li>
-                        </ul>
                         <a href="/static/unique-titles.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
@@ -296,12 +271,6 @@
                         </div>
                         <h5 class="card-title">Canonical Generator</h5>
                         <p class="card-text">Generate canonical URLs by applying transformation rules to Redshift data.</p>
-                        <ul class="feature-list">
-                            <li>Category & facet replacements</li>
-                            <li>Bucket transformations</li>
-                            <li>URLs from Redshift visits</li>
-                            <li>CSV export</li>
-                        </ul>
                         <a href="/static/canonical.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
@@ -318,12 +287,6 @@
                         </div>
                         <h5 class="card-title">R-Finder</h5>
                         <p class="card-text">Discover /r/ URLs from Redshift visits data with category filtering.</p>
-                        <ul class="feature-list">
-                            <li>Query Redshift visits data</li>
-                            <li>Filter by category/keywords</li>
-                            <li>Session count metrics</li>
-                            <li>CSV export</li>
-                        </ul>
                         <a href="/static/rfinder.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
@@ -340,13 +303,24 @@
                         </div>
                         <h5 class="card-title">Redirect Checker</h5>
                         <p class="card-text">Check HTTP status codes, redirects, and canonical URLs for multiple URLs.</p>
-                        <ul class="feature-list">
-                            <li>Batch URL checking</li>
-                            <li>Redirect detection</li>
-                            <li>Canonical URL extraction</li>
-                            <li>CSV/Excel export</li>
-                        </ul>
                         <a href="/static/redirect-checker.html" class="btn btn-tool w-100">Open Tool</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 301 Generator Card -->
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
+                                <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm10-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1z"/>
+                            </svg>
+                        </div>
+                        <h5 class="card-title">301 Generator</h5>
+                        <p class="card-text">Generate 301 redirects for URLs with unsorted facets or facet/category transformations.</p>
+                        <a href="/static/301-generator.html" class="btn btn-tool w-100">Open Tool</a>
                     </div>
                 </div>
             </div>
@@ -385,7 +359,7 @@
 
         <!-- Footer -->
         <footer class="text-center py-4">
-            <small>SEO Tools Dashboard - Unified Platform</small>
+            <small>Digital Marketing tools by Joep van Schagen - 2026</small>
         </footer>
     </div>
 
