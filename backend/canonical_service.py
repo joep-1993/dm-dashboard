@@ -202,11 +202,16 @@ def fetch_urls_for_rules(rules: TransformationRules, start_date: str, end_date: 
     # Fetch URLs for CAT+FACET rules
     for rule in rules.cat_facet:
         if rule.cat:
+            # Fetch URLs containing the facet, then filter by category
             urls = fetch_urls_from_redshift(
                 contains=rule.facet,
                 start_date=start_date,
                 end_date=end_date
             )
+            # Only include URLs that also contain the category filter
+            for u in urls:
+                if rule.cat in u["url"]:
+                    all_urls.add(u["url"])
         else:
             urls = fetch_urls_from_redshift(
                 contains=rule.facet,
@@ -214,17 +219,22 @@ def fetch_urls_for_rules(rules: TransformationRules, start_date: str, end_date: 
                 start_date=start_date,
                 end_date=end_date
             )
-        for u in urls:
-            all_urls.add(u["url"])
+            for u in urls:
+                all_urls.add(u["url"])
 
     # Fetch URLs for CAT+FACET1 rules (remove facet)
     for rule in rules.cat_facet_remove:
         if rule.cat:
+            # Fetch URLs containing the facet, then filter by category
             urls = fetch_urls_from_redshift(
                 contains=rule.facet,
                 start_date=start_date,
                 end_date=end_date
             )
+            # Only include URLs that also contain the category filter
+            for u in urls:
+                if rule.cat in u["url"]:
+                    all_urls.add(u["url"])
         else:
             urls = fetch_urls_from_redshift(
                 contains=rule.facet,
@@ -232,8 +242,8 @@ def fetch_urls_for_rules(rules: TransformationRules, start_date: str, end_date: 
                 start_date=start_date,
                 end_date=end_date
             )
-        for u in urls:
-            all_urls.add(u["url"])
+            for u in urls:
+                all_urls.add(u["url"])
 
     # Fetch URLs for BUCKET+BUCKET rules
     for rule in rules.bucket_bucket:
@@ -328,21 +338,21 @@ def _determine_tasks(url: str, rules: TransformationRules) -> List[str]:
                 tasks.append("FACET-FACET")
                 break
 
-    # Check CAT+FACET
-    cats = [r.cat for r in rules.cat_facet if r.cat]
-    facets = [r.facet for r in rules.cat_facet]
-    if _contains_any(url, cats) and _contains_any(url, facets):
-        tasks.append("CAT+FACET")
-    elif _contains_any(url, facets):
-        tasks.append("CAT+FACET")
+    # Check CAT+FACET (respecting per-rule category filter)
+    for rule in rules.cat_facet:
+        if rule.facet in url:
+            # If rule has category filter, URL must contain it
+            if not rule.cat or rule.cat in url:
+                tasks.append("CAT+FACET")
+                break
 
-    # Check CAT+FACET1
-    cats1 = [r.cat for r in rules.cat_facet_remove if r.cat]
-    facets1 = [r.facet for r in rules.cat_facet_remove]
-    if _contains_any(url, cats1) and _contains_any(url, facets1):
-        tasks.append("CAT+FACET1")
-    elif _contains_any(url, facets1):
-        tasks.append("CAT+FACET1")
+    # Check CAT+FACET1 (respecting per-rule category filter)
+    for rule in rules.cat_facet_remove:
+        if rule.facet in url:
+            # If rule has category filter, URL must contain it
+            if not rule.cat or rule.cat in url:
+                tasks.append("CAT+FACET1")
+                break
 
     # Check BUCKET+BUCKET
     old_buckets = [r.old_bucket for r in rules.bucket_bucket]
@@ -407,6 +417,10 @@ def _apply_cat_facet(url: str, rules: List[CatFacetRule]) -> str:
         if rule.facet not in url:
             continue
 
+        # Skip if category filter is specified and URL doesn't contain it
+        if rule.cat and rule.cat not in url:
+            continue
+
         canon_cat = _normalize_path(rule.canon_cat)
 
         if cat == "/c/":
@@ -431,6 +445,10 @@ def _apply_cat_facet_remove(url: str, rules: List[CatFacetRemoveRule]) -> str:
 
     for rule in rules:
         if rule.facet not in url:
+            continue
+
+        # Skip if category filter is specified and URL doesn't contain it
+        if rule.cat and rule.cat not in url:
             continue
 
         canon_cat = _normalize_path(rule.canon_cat)

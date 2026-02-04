@@ -10,6 +10,17 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Export skipped kopteksten URLs with skip_reason to Excel (58,271 URLs from PostgreSQL) #claude-session:2026-02-04
+- [x] Add skip_reason column to Redshift pa.jvs_seo_werkvoorraad_kopteksten_check table #claude-session:2026-02-04
+- [x] Reset 4,230 skipped URLs (non-no_products_found) to pending for retry #claude-session:2026-02-04
+- [x] Fix canonical generator CAT+FACET category filter bug - wasn't filtering by category in fetch_urls_for_rules #claude-session:2026-02-04
+- [x] Update campaign_processor.py to use separate file for reverse exclusions (REVERSE_EXCLUSION_FILE_PATH) #claude-session:2026-02-04
+- [x] Fix Google Ads authentication in campaign_processor.py - use GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET env vars like working script #claude-session:2026-02-04
+- [x] Update process_reverse_exclusion_sheet to use cat_ids mapping (maincat_id → deepest_cats lookup) #claude-session:2026-02-04
+- [x] Fix campaign name pattern in reverse exclusion from "PLA/{deepest_cat} store_{cl1}" to "PLA/{deepest_cat}_{cl1}" #claude-session:2026-02-04
+- [x] Add rate limiting (0.3s delay) and retry logic (3 attempts with exponential backoff) to reverse exclusion API calls #claude-session:2026-02-04
+- [x] Fix google_ads_helpers.py import path - add script directory to sys.path #claude-session:2026-02-04
+- [x] Add enable_negative_list_for_campaign function to google_ads_helpers.py (looks up shared set by name) #claude-session:2026-02-04
 - [x] Add "Recheck Skipped" feature - re-checks skipped URLs (no_products_found) to see if products are now available, separate button next to "Validate All" on both SEO and FAQ pages, respects batch size and parallel workers inputs #claude-session:2026-02-01
 - [x] Create Redirect Checker tool - checks HTTP status codes, redirect URLs, and canonical URLs with parallel workers and rate limiting, click-to-copy results, CSV/Excel export #claude-session:2026-01-30
 - [x] Update dashboard styling with purple (#5e4a90) icons, orange (#CC5500) bullet points, modern card layout #claude-session:2026-01-30

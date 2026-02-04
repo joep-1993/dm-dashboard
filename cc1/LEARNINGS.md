@@ -2380,3 +2380,58 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
   - Auto-filter always enabled when using Redshift
 - **Example**: 36 rules with `model_lamp~XXXXX` → 36 batched queries (one per unique pattern)
 - **Date**: 2026-02-03
+
+## Google Ads WSA Error 10048 (Port Exhaustion)
+- **Error**: "failed to connect to all addresses; WSA Error 10048"
+- **Cause**: Too many API connections opened too quickly, exhausting available local ports
+- **Windows Socket Error 10048** = "Address already in use" (WSAEADDRINUSE)
+- **Solutions**:
+  - Add delays between API calls (0.3s recommended)
+  - Implement retry logic with exponential backoff
+  - Wait 2-4 minutes after errors for ports to release (TIME_WAIT state)
+- **Implementation**: Added to `process_reverse_exclusion_sheet` in campaign_processor.py
+- **Date**: 2026-02-04
+
+## Google Ads "unauthorized_client" Error
+- **Error**: "unauthorized_client: Unauthorized" when initializing GoogleAdsClient
+- **Root Cause**: refresh_token was generated with different client_id/client_secret than those in google-ads.yaml
+- **Working Script Pattern** (`create GSD-campaigns WB.py`):
+  - Hardcodes refresh_token and developer_token
+  - Loads client_id/client_secret from environment variables (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+  - Uses `GoogleAdsClient.load_from_dict()` instead of `load_from_storage()`
+- **Fix**: Updated campaign_processor.py to use same approach as working script
+- **Date**: 2026-02-04
+
+## cat_ids Mapping for Campaign Matching
+- **Purpose**: Map maincat_id to list of deepest_cats for finding related campaigns
+- **Sheet**: `cat_ids` sheet in workbook with columns: maincat, maincat_id, deepest_cat, cat_id
+- **Function**: `load_cat_ids_mapping(workbook)` returns `{maincat_id: [deepest_cat1, deepest_cat2, ...]}`
+- **Usage Pattern**:
+  1. Get maincat_id from input row
+  2. Look up all deepest_cats: `cat_ids_mapping.get(maincat_id_str, [])`
+  3. For each deepest_cat, construct campaign name: `PLA/{deepest_cat}_{cl1}`
+- **Used By**: `process_exclusion_sheet_v2`, `process_reverse_exclusion_sheet`
+- **Date**: 2026-02-04
+
+## Canonical Generator Category Filter Bug
+- **Problem**: CAT+FACET rules with category filter weren't respecting the filter
+- **Root Cause**: `fetch_urls_for_rules()` fetched all URLs with facet but didn't filter by category
+- **Affected Functions**:
+  - `fetch_urls_for_rules()` - wasn't filtering fetched URLs
+  - `_determine_tasks()` - applied rule to URLs not matching category
+  - `_apply_cat_facet()` - didn't skip rules where category didn't match
+- **Fix**: Added category filter checks in all three functions
+- **Location**: `backend/canonical_service.py`
+- **Date**: 2026-02-04
+
+## Kopteksten Skip Reasons
+- **Table**: `pa.jvs_seo_werkvoorraad_kopteksten_check` (PostgreSQL in seo_tools_db)
+- **Columns**: url, status (success/skipped/failed), skip_reason
+- **Skip Reasons**:
+  - `no_products_found` (54,053) - page has no products
+  - `api_failed` (3,670) - scraper API call failed
+  - `no_valid_links` (402) - AI content has no valid /p/ links
+  - `ai_generation_error: {msg}` - OpenAI generation failed
+  - `rate_limited_503` - 503 error (rate limiting)
+- **Reset Query**: `DELETE FROM ... WHERE status IN ('skipped', 'failed') AND skip_reason <> 'no_products_found'`
+- **Date**: 2026-02-04
