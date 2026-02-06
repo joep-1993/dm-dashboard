@@ -1236,6 +1236,8 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
             "now_eligible": total_now_eligible
         }
 
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is (e.g., 400 validation errors)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1949,6 +1951,8 @@ def recheck_skipped_faq_urls(parallel_workers: int = 3, batch_size: int = 50):
             "now_eligible": total_now_eligible
         }
 
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is (e.g., 400 validation errors)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

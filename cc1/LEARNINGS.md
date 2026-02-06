@@ -1,6 +1,109 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Database Connection Quick Reference
+
+### Primary Database (used by dm-tools app)
+- **Container**: `seo_tools_db`
+- **Database**: `seo_tools`
+- **User**: `postgres` / **Password**: `postgres`
+- **Schema**: `pa`
+- **Access**: `docker exec seo_tools_db psql -U postgres -d seo_tools -c "SELECT ..."`
+
+### N8N Vector DB (COPY of data, used by n8n workflows only)
+- **Host**: `10.1.32.9` (internal: `n8n-vector-db-rw.n8n.svc.cluster.local`)
+- **Database**: `n8n-vector-db`
+- **User**: `dbadmin` / **Password**: `Q9fGRKtUdvdtxsiCM12HeFe0Nki0PvmjZRFLZ9ArmlWdMnDQXX8SdxKnPniqGmq6`
+- **Access**: `docker exec -e PGPASSWORD='...' seo_tools_db psql -h 10.1.32.9 -U dbadmin -d n8n-vector-db -c "SELECT ..."`
+
+### Redshift (LEGACY - not actively used, USE_REDSHIFT_OUTPUT=false)
+- **Credentials**: See `.env` file in dm-tools project
+
+**IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
+
+## Stuck Pending URLs - Tracking Table Covers All Werkvoorraad URLs
+- **Problem**: Frontend shows 0 pending URLs despite ~32K URLs not having content
+- **Cause**: ALL URLs in `pa.jvs_seo_werkvoorraad` also exist in `pa.jvs_seo_werkvoorraad_kopteksten_check` (tracking table), even those with status='pending' that were never actually processed
+- **Root Cause**: The pending calculation uses:
+  ```sql
+  SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
+  LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
+  WHERE t.url IS NULL
+  ```
+  This returns 0 when every werkvoorraad URL has a corresponding tracking entry, regardless of status.
+- **Symptoms**:
+  - Frontend kopteksten status shows "Pending: 0"
+  - Tracking table has entries with status='pending' that block the LEFT JOIN
+  - Total URLs and content counts don't add up
+- **Diagnosis**:
+  ```sql
+  -- Check if tracking table covers all werkvoorraad
+  SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad;          -- e.g., 243,702
+  SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check;  -- same number = problem
+
+  -- Check tracking status breakdown
+  SELECT status, COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check GROUP BY status;
+  -- Look for 'pending' entries - these are blocking the pending count
+  ```
+- **Solution**: Delete the 'pending' (and optionally 'failed') entries from tracking table:
+  ```sql
+  DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'pending';
+  -- Optionally also: DELETE ... WHERE status = 'failed';
+  ```
+- **Result**: URLs removed from tracking become truly pending and show up in frontend
+- **Prevention**: This happens when URLs are bulk-loaded into both werkvoorraad AND tracking simultaneously. Only load URLs into werkvoorraad; the tracking table should only be populated by the processing workflow.
+- **Date**: 2026-02-06
+
+## DMA Script Batch Processing Optimization
+- **Purpose**: Optimize Google Ads campaign processing functions to reduce API calls by 90%+
+- **Pattern**: Group shops by (maincat_id, custom_label_1) and process together instead of individually
+- **Key Functions Optimized**:
+  1. `process_reverse_exclusion_sheet()` - Removes shop exclusions (CL3) in batches
+  2. `process_exclusion_sheet_v2()` - Adds shop exclusions (CL3) in batches
+  3. `process_uitbreiding_sheet()` - Creates campaigns/ad groups, now finds campaign once per group
+- **New Batch Functions**:
+  - `reverse_exclusion_batch(client, customer_id, ad_group_id, ad_group_name, shop_names)` - Removes multiple shop exclusions in one API call
+  - `add_shop_exclusions_batch(client, customer_id, ad_group_id, ad_group_name, shop_names)` - Adds multiple shop exclusions in one API call
+- **How It Works**:
+  1. Read sheet and group rows by (maincat_id, cl1) key
+  2. For each group, look up deepest_cats from cat_ids sheet ONCE
+  3. For each campaign/ad group, read listing tree ONCE for all shops
+  4. Add/remove all exclusions in single batch mutate operation
+- **Efficiency Gain**: ~318,468 API calls → ~28,152 API calls (91% reduction) for typical workload
+- **File**: `/home/joepvanschagen/projects/dma_script/campaign_processor.py`
+- **Test Files**: `test_reverse_exclusion_optimized.py`, `test_reverse_exclusion_integration.py`
+- **Date**: 2026-02-04
+
+## Excel UTF-8 Encoding Fix
+- **Problem**: Excel shows garbled text like "KÃ¼ppersbusch" instead of "Küppersbusch"
+- **Cause**: UTF-8 text was incorrectly decoded as Latin-1/Windows-1252
+- **Solution**: Re-encode as Latin-1 then decode as UTF-8:
+  ```python
+  def fix_encoding(text):
+      return str(text).encode('latin-1').decode('utf-8')
+  ```
+- **Use Case**: Fixed 635 entries in symbols.xlsx
+- **Date**: 2026-02-04
+
+## Efficient Bucket Performance Query Pattern
+- **Problem**: Need to aggregate visits/revenue for 628K+ buckets without 628K queries
+- **Solution**: Single query approach:
+  1. Query ALL URLs with visits/revenue from Redshift (no bucket filtering)
+  2. Extract bucket patterns from URLs using regex: `r'([a-zA-Z0-9_]+~\d+)'`
+  3. Match to bucket set in Python (O(1) lookup per bucket)
+  4. Aggregate results per bucket
+- **Performance**: ~2-3 minutes for 628K buckets vs days with individual queries
+- **Example Query**:
+  ```sql
+  SELECT SPLIT_PART(dv.url, '?', 1) as url, count(*) as visits,
+         sum(fcv.cpc_revenue) + sum(fcv.ww_revenue) as revenue
+  FROM datamart.fct_visits fcv
+  JOIN datamart.dim_visit dv ON fcv.dim_visit_key = dv.dim_visit_key
+  WHERE dv.url LIKE '%beslist.nl/products/%/c/%'
+  GROUP BY 1
+  ```
+- **Date**: 2026-02-04
+
 ## User Preferences
 - **Default Project**: When user says "the frontend" or "start the frontend" without specifying a project, always assume **dm-tools**
 - **Frontend URL**: Always use http://localhost:8003/static/index.html (served by the backend via docker-compose, not a separate server)

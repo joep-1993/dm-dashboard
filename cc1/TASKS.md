@@ -10,6 +10,17 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Fix stuck pending kopteksten URLs - deleted 32,477 'pending' entries from tracking table that blocked LEFT JOIN pending calculation #claude-session:2026-02-06
+- [x] Update ARCHITECTURE.md database section - replaced outdated Redshift-primary docs with current seo_tools_db-primary architecture, 3-database reference table #claude-session:2026-02-06
+- [x] Add database connection quick reference and "Stuck Pending URLs" issue to LEARNINGS.md #claude-session:2026-02-06
+- [x] Clean up project directory - removed 21 unused files (~85MB total: scripts, data files, logs), moved redirect_checker.py to scripts/, 301-generator_script.js to docs/ #claude-session:2026-02-06
+- [x] Remove content_top Docker containers (content_top_db, content_top_app) - dm-tools is the active project #claude-session:2026-02-06
+- [x] Optimize campaign_processor.py functions with batch processing and grouping by (maincat_id, cl1) - 90%+ reduction in API calls #claude-session:2026-02-04
+- [x] Create add_shop_exclusions_batch() function for adding multiple shop exclusions in one API call #claude-session:2026-02-04
+- [x] Optimize process_exclusion_sheet_v2() to group shops and batch exclusion operations #claude-session:2026-02-04
+- [x] Optimize process_uitbreiding_sheet() to group shops by campaign and find/create campaign once per group #claude-session:2026-02-04
+- [x] Fix Excel encoding issue - convert UTF-8 text incorrectly decoded as Latin-1 (KÃ¼ppersbusch → Küppersbusch) #claude-session:2026-02-04
+- [x] Query and aggregate bucket performance data from Redshift for 628K facets in single efficient query #claude-session:2026-02-04
 - [x] Export skipped kopteksten URLs with skip_reason to Excel (58,271 URLs from PostgreSQL) #claude-session:2026-02-04
 - [x] Add skip_reason column to Redshift pa.jvs_seo_werkvoorraad_kopteksten_check table #claude-session:2026-02-04
 - [x] Reset 4,230 skipped URLs (non-no_products_found) to pending for retry #claude-session:2026-02-04

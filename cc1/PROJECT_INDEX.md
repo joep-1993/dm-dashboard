@@ -2,100 +2,79 @@
 _Project structure and technical specs. Update when: creating files, adding dependencies, defining schemas._
 
 ## Stack
-Backend: FastAPI (Python 3.11, ThreadPoolExecutor for parallel processing, psycopg2 connection pooling 2-10 conns) | Frontend: Bootstrap 5 + Vanilla JS | Database: PostgreSQL 15 (local tracking) + AWS Redshift (data storage, COPY command for bulk inserts) | AI: OpenAI API | Deploy: Docker + docker-compose | Google Ads: AsyncIO + Batch API (v28) | Automation: Docker multi-stage builds
+Backend: FastAPI (Python 3.11, ThreadPoolExecutor for parallel processing, psycopg2 connection pooling 2-20 conns) | Frontend: Bootstrap 5 + Vanilla JS | Database: PostgreSQL 15 (seo_tools_db - primary for all data) + N8N Vector DB (copy for n8n workflows) + AWS Redshift (legacy, disabled) | AI: OpenAI API | Deploy: Docker + docker-compose | Google Ads: AsyncIO + Batch API (v28)
 
 ## Directory Structure
 ```
-content_top/                 # Unified SEO Tools Platform (Port 8003)
+dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port 8003)
 ├── .claude/              # Claude Code configuration
-│   ├── commands/         # Custom slash commands
-│   │   ├── skip-permissions.md     # Toggle bypassPermissions mode
-│   │   └── restore-permissions.md  # Restore default permissions
-│   ├── skills/           # Domain-specific knowledge packs for Claude
-│   │   ├── ai-engineer/      # OpenAI, Gemini, Claude API reference (models, pricing, prompting)
-│   │   ├── beslist-query/    # Redshift SQL query assistant (tables, filters, metrics)
-│   │   ├── beslist-apis/     # Beslist.nl API integrations
-│   │   ├── laiza/            # Laiza platform integration
-│   │   └── google-ads-query.md  # Google Ads query reference
-│   └── settings.local.json  # Local settings (git ignored)
-├── thema_ads_optimized/  # Google Ads theme management (merged from theme_ads)
-│   ├── themes.py         # Theme definitions (black_friday, cyber_monday, etc.)
-│   ├── config.py         # Configuration management
-│   └── ...               # Google Ads automation utilities
-├── themes/               # Theme template data (merged from theme_ads)
-├── cc1/                   # CC1 documentation + utilities
-│   ├── TASKS.md          # Task tracking
-│   ├── LEARNINGS.md      # Knowledge capture
-│   ├── BACKLOG.md        # Future planning
-│   ├── PROJECT_INDEX.md  # This file
-│   ├── lookup_plp_urls.py    # Elasticsearch plpUrl lookup script (batch queries, maincat mapping)
-│   ├── input_urls.csv        # Input URLs for lookup
-│   └── output_plp_urls.csv   # Output with original URL and plpUrl (or GONE)
-├── SEO_koptekst/         # Legacy SEO data directory
-├── backend/
-│   ├── main.py           # FastAPI app - Unified SEO Tools Platform
-│   │                     # Includes: SEO content, FAQ, Thema Ads (via router)
-│   │                     # CSV parsing: empty row handling, dash removal, optional columns
-│   │                     # SEO content generation uses Product Search API via scrape_product_page_api()
-│   ├── thema_ads_router.py  # APIRouter for all /api/thema-ads/* endpoints
-│   ├── thema_ads_service.py # Thema Ads business logic (merged from theme_ads)
-│   ├── thema_ads_db.py      # Thema Ads database functions (merged from theme_ads)
-│   ├── database.py       # Hybrid database connections (PostgreSQL + Redshift)
-│   │                     # Functions: get_db_connection(), get_redshift_connection(), get_output_connection()
-│   │                     # Schema: campaign_id and campaign_name columns added
-│   ├── gpt_service.py    # AI integration with optimized prompts for concise hyperlink text (3-5 words max)
-│   ├── link_validator.py # Hyperlink validation via Elasticsearch plpUrl lookup (uses local PostgreSQL only)
-│   │                     # Auto-corrects outdated URLs, resets GONE products to pending
-│   │                     # Adds gone URLs to werkvoorraad for reprocessing
-│   │                     # FAQ validation: extract_hyperlinks_from_faq_json(), validate_faq_links(), reset_faq_to_pending()
-│   ├── content_publisher.py # Publishes content (content_top + FAQ) to website-configuration API
-│   │                     # Supports dev/staging/production environments with different API keys
-│   │                     # Background task with polling for large payloads (~512MB)
-│   │                     # SQL sanitization: apostrophes replaced with &#39;
-│   ├── seo_content_generator.py  # SEO content from Product Search API
-│   │                     # Parses /products/{maincat}/{category}/c/{filters} URLs
-│   │                     # Fetches 30 products, generates GPT content with plpUrl links
-│   │                     # Outputs to Excel (url, maincat_id, category, content)
-│   ├── import_content.py # CSV import utility for bulk content upload (semicolon delimiter)
-│   ├── sync_werkvoorraad.py  # Utility: Synchronize werkvoorraad with content table
-│   ├── sync_redshift_flags.py # Utility: Sync Redshift kopteksten flags with local content table (fixes data consistency)
-│   ├── deduplicate_content.py # Utility: Remove duplicate URLs from content table
-│   ├── thema_ads_service.py  # Thema Ads job management with state persistence
-│   │                          # Features: delete job, campaign info fetching at runtime
-│   ├── thema_ads_schema.sql  # Database schema for job tracking
-│   ├── schema.sql        # SEO workflow database schema
-│   └── scraper_service.py    # Web scraping utilities with 0.2-0.3s delay (optimized mode) or 0.5-0.7s delay (conservative mode), custom UA 'Beslist script voor SEO' (bypasses VPN, whitelisted IP has no rate limits), hidden 503 detection (checks HTML body, returns {'error': '503'} for immediate batch stop)
-│                             # Key functions: scrape_product_page_api() - Product Search API integration
-│                             # parse_beslist_url(), build_api_params(), extract_selected_facets(), build_product_subject()
-│                             # Extracts selected facets (detailValue) for product subjects with smart category inclusion
-├── openvpn               # OpenVPN client config (with pull-filter for split tunneling)
+├── backend/              # FastAPI app + all services
+│   ├── main.py           # FastAPI app (~3000 lines, 56 API endpoints)
+│   ├── database.py       # Database connections (PostgreSQL primary, Redshift legacy)
+│   ├── gpt_service.py    # OpenAI API integration
+│   ├── scraper_service.py    # Product Search API + web scraping
+│   ├── link_validator.py     # Elasticsearch plpUrl link validation
+│   ├── faq_service.py        # FAQ generation service
+│   ├── content_publisher.py  # Publishes content to website-configuration API
+│   ├── ai_titles_service.py  # AI-powered title generation
+│   ├── canonical_service.py  # Canonical URL transformation
+│   ├── redirect_301_service.py # 301 redirect management
+│   ├── rfinder_service.py    # /r/ URL discovery from Redshift
+│   ├── seo_content_generator.py # SEO content from Product Search API
+│   ├── unique_titles.py      # Unique title generation
+│   ├── thema_ads_router.py   # Thema Ads APIRouter
+│   ├── thema_ads_service.py  # Thema Ads business logic (150KB)
+│   ├── thema_ads_db.py       # Thema Ads database layer
+│   ├── maincat_mapping.csv   # Category ID mapping (used by link_validator + seo_content_generator)
+│   ├── import_content.py     # Utility: CSV content import
+│   ├── sync_werkvoorraad.py  # Utility: Sync werkvoorraad with content
+│   ├── sync_redshift_flags.py # Utility: Sync Redshift flags (legacy)
+│   └── deduplicate_content.py # Utility: Remove duplicate URLs
 ├── frontend/
-│   ├── dashboard.html    # Unified dashboard - entry point
-│   ├── index.html        # SEO Content Generation page
-│   ├── faq.html          # FAQ Generation page
-│   ├── thema-ads.html    # Thema Ads page (merged from theme_ads)
-│   ├── css/
-│   │   └── style.css     # Custom styles (purple navbar, grey headers, orange buttons)
+│   ├── dashboard.html    # Entry point - tool overview
+│   ├── index.html        # SEO Content Generation (kopteksten)
+│   ├── faq.html          # FAQ Generation
+│   ├── canonical.html    # Canonical URL Generator
+│   ├── rfinder.html      # R-Finder (URL Discovery)
+│   ├── redirect-checker.html # Redirect Checker
+│   ├── 301-generator.html    # 301 Generator
+│   ├── thema-ads.html    # Thema Ads Processing
+│   ├── unique-titles.html # Unique Titles Manager
+│   ├── css/style.css     # Custom theme (#059CDF blue, #9C3095 purple, #A0D168 green)
 │   └── js/
 │       ├── app.js        # SEO content frontend logic
 │       ├── faq.js        # FAQ frontend logic
-│       └── thema-ads.js  # Thema Ads frontend logic with polling
-│                         # Features: delete job UI with confirmation
-├── docker-compose.yml    # Service orchestration - includes db (postgres:15) and app services with healthcheck
-├── Dockerfile           # Python container
-├── requirements.txt     # Python dependencies
-├── .env.example        # Environment template
-├── .env                # Local environment (git ignored)
-├── .gitignore          # Version control excludes
-│                       # Ignores: .env files, Excel files (*.xlsx, *.xls), old thema_ads_project/
-├── ARCHITECTURE.md     # System architecture and design decisions
-├── README.md           # Quick start guide
-├── CLAUDE.md           # Claude Code instructions
-├── THEMA_ADS_GUIDE.md  # Complete Thema Ads documentation
-├── START_HERE.md       # Quick start for web interface
-├── start-thema-ads.sh  # Automated setup script
-├── sample_input.csv    # Example CSV for Thema Ads upload
-└── seo_urls            # Input file with URLs to process (75,858 URLs)
+│       └── thema-ads.js  # Thema Ads frontend logic
+├── cc1/                  # Claude Code documentation
+│   ├── TASKS.md          # Task tracking
+│   ├── LEARNINGS.md      # Knowledge capture + DB connection reference
+│   ├── BACKLOG.md        # Future planning
+│   └── PROJECT_INDEX.md  # This file
+├── data/                 # Data files
+│   └── sample_input.csv  # Example CSV for Thema Ads
+├── docs/                 # Documentation + reference files
+│   ├── ARCHITECTURE.md   # System architecture
+│   ├── PROXY_SETUP.md    # VPN/proxy configuration
+│   ├── START_HERE.md     # Quick start guide
+│   ├── THEMA_ADS_GUIDE.md # Thema Ads documentation
+│   ├── 301-generator_script.js # Google Sheets reference script
+│   └── kopteksten_uitrol (1).json # n8n workflow reference
+├── logs/                 # Log output (cleared regularly)
+├── scripts/              # Standalone CLI tools + utilities
+│   ├── redirect_checker.py   # HTTP redirect/canonical checker
+│   ├── setup.sh              # Project setup script
+│   ├── start-thema-ads.sh    # Thema ads startup
+│   ├── csv_utils/            # CSV manipulation scripts
+│   └── testing/              # Rate limit test scripts
+├── themes/               # Thema Ads templates (black_friday, cyber_monday, etc.)
+├── thema_ads_optimized/  # Docker volume mount target (external)
+├── docker-compose.yml    # Services: seo_tools_db (PostgreSQL) + dm_tools_app (FastAPI)
+├── Dockerfile            # Python 3.11-slim container
+├── requirements.txt      # Python dependencies
+├── CLAUDE.md             # Claude Code instructions
+├── README.md             # Quick start guide
+├── .env / .env.example   # Environment configuration
+└── .gitignore
 ```
 
 ## Network Configuration
@@ -122,9 +101,9 @@ DATABASE_URL=postgresql://postgres:postgres@db:5432/myapp
 AI_MODEL=gpt-4o-mini  # Or other OpenAI model (max_tokens: 1000 for content with HTML links)
 ```
 
-### Required (Redshift - Output Storage)
+### Optional (Redshift - Legacy, disabled by default)
 ```bash
-USE_REDSHIFT_OUTPUT=true  # Enable Redshift for output tables
+USE_REDSHIFT_OUTPUT=false  # Disabled - all data in local PostgreSQL
 REDSHIFT_HOST=production-redshift.amazonaws.com
 REDSHIFT_PORT=5439
 REDSHIFT_DB=database_name
@@ -185,15 +164,22 @@ SERVICE_ACCOUNT_FILE=C:\Users\YourName\Downloads\Python\service-account.json
 
 ## Database Schema
 
-### Architecture: Hybrid (PostgreSQL + Redshift)
-**Local PostgreSQL** (tracking & temporary):
-- `pa.jvs_seo_werkvoorraad_kopteksten_check` - Processing status tracking
-- `pa.link_validation_results` - Link validation history
+### Architecture: Local PostgreSQL Primary (seo_tools_db)
+All data lives in the local PostgreSQL container. See LEARNINGS.md for connection details.
+
+**Primary tables (schema `pa`)**:
+- `pa.jvs_seo_werkvoorraad` - URL work queue (~243K URLs, kopteksten: 0=pending, 1=has content)
+- `pa.jvs_seo_werkvoorraad_kopteksten_check` - Processing status tracking (success/skipped/failed)
+- `pa.content_urls_joep` - Generated SEO content (~152K entries)
+- `pa.faq_content` - Generated FAQ content
+- `pa.faq_tracking` - FAQ processing status
+- `pa.unique_titles` - AI-generated titles (~1M entries)
+- `pa.link_validation_results` - SEO link validation history
+- `pa.faq_validation_results` - FAQ link validation history
+- `pa.content_history` - Content backup before resets
 - Thema Ads tables (jobs, job_items, input_data)
 
-**Redshift** (persistent data):
-- `pa.jvs_seo_werkvoorraad_shopping_season` - Work queue (72,992 URLs for shopping season, kopteksten: 0=pending, 1=has content, 2=processed without content)
-- `pa.content_urls_joep` - Generated content (columns: url, content)
+**Pending URL calculation**: `WHERE werkvoorraad.url NOT IN tracking_table` (LEFT JOIN, see LEARNINGS.md "Stuck Pending URLs")
 
 ### Thema Ads Job Tracking
 ```sql
@@ -243,10 +229,11 @@ CREATE TABLE thema_ads_input_data (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- SEO workflow tables
-CREATE TABLE pa.jvs_seo_werkvoorraad_shopping_season (
-    url VARCHAR(500) PRIMARY KEY,
-    kopteksten INTEGER DEFAULT 0,  -- 0=pending, 1=has content, 2=processed without content
+-- SEO workflow tables (in seo_tools_db, schema pa)
+CREATE TABLE pa.jvs_seo_werkvoorraad (
+    id SERIAL PRIMARY KEY,
+    url TEXT NOT NULL UNIQUE,
+    kopteksten INTEGER DEFAULT 0,  -- 0=pending, 1=has content
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -457,4 +444,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-01-15_
+_Last updated: 2026-02-06_

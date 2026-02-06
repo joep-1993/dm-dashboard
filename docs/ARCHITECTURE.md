@@ -39,11 +39,11 @@
 ```
 
 ### Core Workflow
-1. **Input**: URLs loaded from Redshift table (`pa.jvs_seo_werkvoorraad_shopping_season`)
-2. **Scraping**: Web scraper fetches product data with custom user agent
+1. **Input**: URLs loaded from local PostgreSQL table (`pa.jvs_seo_werkvoorraad` in `seo_tools_db`)
+2. **Scraping**: Product Search API fetches product data (or web scraper with custom user agent)
 3. **AI Generation**: OpenAI generates SEO-optimized content (100 words)
-4. **Storage**: Content saved to Redshift, tracking to local PostgreSQL
-5. **Quality Control**: Link validation checks for broken hyperlinks (301/404)
+4. **Storage**: Content saved to local PostgreSQL (`pa.content_urls_joep`), tracking to `pa.jvs_seo_werkvoorraad_kopteksten_check`
+5. **Quality Control**: Link validation via Elasticsearch lookup (replaces HTTP checking)
 
 ### Recent Fixes (2025-01-22)
 1. **Three-State URL Tracking**: Implemented kopteksten=0/1/2 system for better analytics and preventing infinite retry loops
@@ -305,64 +305,97 @@ output_cur.executemany("INSERT INTO pa.content_urls_joep (url, content) VALUES (
 
 ## Database Architecture
 
-### Hybrid Architecture: PostgreSQL + Redshift
+### Primary Database: Local PostgreSQL (`seo_tools_db`)
 
-**Decision**: Split responsibilities between local and cloud databases
+**Current state**: All data lives in the local PostgreSQL container. Redshift is legacy/optional (`USE_REDSHIFT_OUTPUT=false`).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                        │
+│              DM Tools App (dm_tools_app:8003)               │
 └─────────────────────────────────────────────────────────────┘
-                │                              │
-                ▼                              ▼
-    ┌───────────────────────┐      ┌──────────────────────────┐
-    │  PostgreSQL (Local)   │      │  Redshift (Cloud)        │
-    │  - Fast tracking      │      │  - Persistent data       │
-    │  - Temporary data     │      │  - Shared across systems │
-    └───────────────────────┘      └──────────────────────────┘
+                │
+                ▼
+    ┌───────────────────────┐
+    │  seo_tools_db         │      ┌──────────────────────────┐
+    │  PostgreSQL (Local)   │      │  N8N Vector DB (Copy)    │
+    │  Container: seo_tools_db     │  Host: 10.1.32.9         │
+    │  Database: seo_tools  │      │  Database: n8n-vector-db │
+    │  Port: 5432 (internal)│      │  User: dbadmin           │
+    │  User: postgres       │      │  Schema: pa (copy)       │
+    │  Password: postgres   │      └──────────────────────────┘
+    │  Schema: pa           │
+    │  ALL tables live here │
+    └───────────────────────┘
 ```
 
-### Table Allocation
+### Three Databases (and their roles)
 
-**Local PostgreSQL** (tracking & ephemeral):
-- `pa.jvs_seo_werkvoorraad_kopteksten_check` - Processing status
+| Database | Role | Used By |
+|----------|------|---------|
+| **seo_tools_db** (local PostgreSQL) | **PRIMARY** - all werkvoorraad, tracking, content, validation | dm-tools app (frontend/backend) |
+| **n8n-vector-db** (10.1.32.9) | **COPY** - synced from seo_tools_db for n8n workflows | n8n workflows only |
+| **Redshift** (AWS) | **LEGACY** - optional, disabled by default (`USE_REDSHIFT_OUTPUT=false`) | Not actively used |
+
+**IMPORTANT**: When debugging kopteksten issues, always query **seo_tools_db** (the local Docker PostgreSQL), NOT the n8n vector DB or Redshift. The app reads/writes exclusively to seo_tools_db.
+
+### Quick Access to Primary Database
+```bash
+# Query from host via Docker
+docker exec seo_tools_db psql -U postgres -d seo_tools -c "SELECT ..."
+
+# Connect interactively
+docker exec -it seo_tools_db psql -U postgres -d seo_tools
+```
+
+### Table Allocation (all in `seo_tools_db`, schema `pa`)
+
+**Work Queue & Content**:
+- `pa.jvs_seo_werkvoorraad` - URL work queue (~243K URLs), `kopteksten` flag (0=pending, 1=has content)
+- `pa.content_urls_joep` - Generated SEO content (~152K entries)
+- `pa.faq_content` - Generated FAQ content
+- `pa.unique_titles` - AI-generated titles (~1M entries)
+
+**Tracking**:
+- `pa.jvs_seo_werkvoorraad_kopteksten_check` - Processing status (success/skipped/failed/pending)
+- `pa.faq_tracking` - FAQ processing status
 - `pa.link_validation_results` - Link validation history
-- `thema_ads_jobs` / `thema_ads_job_items` - Google Ads job tracking
+- `pa.faq_validation_results` - FAQ link validation history
+- `pa.content_history` - Content backup before resets
 
-**Redshift** (persistent & shared):
-- `pa.jvs_seo_werkvoorraad_shopping_season` - Work queue (72,992 URLs)
-- `pa.content_urls_joep` - Generated content
+**Other**:
+- `thema_ads_jobs` / `thema_ads_job_items` / `thema_ads_input_data` - Google Ads job tracking
+
+### Pending URL Calculation (Kopteksten)
+
+The frontend's "pending" count uses this query:
+```sql
+SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
+LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
+WHERE t.url IS NULL
+```
+
+**Pending = URLs in werkvoorraad that are NOT in the tracking table.**
+
+This means if ALL URLs end up in the tracking table (even with status='pending'), the frontend shows 0 pending. See LEARNINGS.md "Stuck Pending URLs" for the fix.
 
 ### Database Connection Strategy
 
 ```python
-# Three connection types
-def get_db_connection():          # Local PostgreSQL only
-def get_redshift_connection():    # Redshift only
-def get_output_connection():      # Smart router (uses Redshift if enabled)
+# Connection pool connects to seo_tools_db via DATABASE_URL env var
+def get_db_connection():          # Local PostgreSQL (primary)
+def get_redshift_connection():    # Redshift (legacy, rarely used)
+def get_output_connection():      # Routes to Redshift or PostgreSQL based on USE_REDSHIFT_OUTPUT
 ```
-
-### Rationale for Hybrid Approach
-
-**Benefits**:
-1. **Performance**: Local tracking has zero network latency
-2. **Scalability**: Redshift optimized for large datasets (166K+ URLs)
-3. **Shared Access**: Other systems can query Redshift tables
-4. **Independence**: Can scale each database separately
-
-**Trade-offs**:
-- Increased complexity (two connection types)
-- Schema differences must be handled (Redshift has no `created_at`)
-- Sync operations required (delete from both, update in both)
 
 ### Schema Design Decisions
 
-#### 1. Three-State URL Tracking
-**Pattern**: Tri-state flag for granular tracking instead of boolean
+#### 1. Kopteksten URL Tracking
+**Pattern**: Flag-based tracking on werkvoorraad table
 ```sql
-CREATE TABLE pa.jvs_seo_werkvoorraad_shopping_season (
-    url VARCHAR(500) PRIMARY KEY,  -- Natural key
-    kopteksten INTEGER DEFAULT 0,  -- 0=pending, 1=has content, 2=processed without content
+CREATE TABLE pa.jvs_seo_werkvoorraad (
+    id SERIAL PRIMARY KEY,
+    url TEXT NOT NULL UNIQUE,
+    kopteksten INTEGER DEFAULT 0,  -- 0=pending, 1=has content
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
@@ -438,7 +471,7 @@ SELECT url, content FROM content_deduped;
 
 **Solution**: `backend/sync_werkvoorraad.py`
 ```sql
-UPDATE pa.jvs_seo_werkvoorraad_shopping_season w
+UPDATE pa.jvs_seo_werkvoorraad w
 SET kopteksten = 1
 FROM pa.content_urls_joep c
 WHERE w.url = c.url AND w.kopteksten = 0;
