@@ -10,6 +10,11 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add process_check_sheet() to campaign_processor.py - replaces pipe-version shop exclusions (e.g. "Artandcraft.com|NL" → "artandcraft.com") via cat_ids/deepest_cats lookup #claude-session:2026-02-06
+- [x] Add replace_shop_exclusions_batch() helper - REMOVE old + CREATE new CL3 exclusions in single atomic mutate call #claude-session:2026-02-06
+- [x] Add process_check_cl1_sheet() to campaign_processor.py - checks listing trees for CL1 targeting, rebuilds with CL1 + CL4 if missing, preserves CL3 exclusions #claude-session:2026-02-06
+- [x] Add build_listing_tree_with_cl1() tree builder - creates CL3→CL4(subdivision)→CL1 structure supporting multiple maincat_ids #claude-session:2026-02-06
+- [x] Add process_check_new_sheet() to campaign_processor.py - replaces CL3 subdivision pipe-version targeting via direct campaign/ad group reference from "check_new" sheet #claude-session:2026-02-06
 - [x] Fix stuck pending kopteksten URLs - deleted 32,477 'pending' entries from tracking table that blocked LEFT JOIN pending calculation #claude-session:2026-02-06
 - [x] Update ARCHITECTURE.md database section - replaced outdated Redshift-primary docs with current seo_tools_db-primary architecture, 3-database reference table #claude-session:2026-02-06
 - [x] Add database connection quick reference and "Stuck Pending URLs" issue to LEARNINGS.md #claude-session:2026-02-06

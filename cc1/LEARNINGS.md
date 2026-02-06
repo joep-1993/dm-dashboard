@@ -54,6 +54,38 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Prevention**: This happens when URLs are bulk-loaded into both werkvoorraad AND tracking simultaneously. Only load URLs into werkvoorraad; the tracking table should only be populated by the processing workflow.
 - **Date**: 2026-02-06
 
+## DMA Script Tree Structure Reference
+
+### Listing Group Tree Variants (campaign_processor.py)
+
+**V2 tree (build_listing_tree_for_inclusion_v2)** — no CL1:
+```
+ROOT → CL3=shop_name(subdiv) → CL4=maincat_id(unit, positive) + CL4 OTHERS(negative)
+     → CL3 OTHERS(negative)
+```
+
+**V1+CL1 tree (build_listing_tree_with_cl1)** — with CL1:
+```
+ROOT → CL3=shop_name(subdiv) → CL4=maincat_id(subdiv) → CL1=cl1(unit, positive) + CL1 OTHERS(negative)
+                               → CL4 OTHERS(negative)
+     → CL3 OTHERS(negative)
+```
+
+### Key Constraints
+- **No UPDATE on listing groups** — only CREATE and REMOVE. To change a value (e.g. CL3 shop name), remove entire tree and rebuild.
+- **SUBDIVISION requires OTHERS** — when creating a subdivision node, its OTHERS case MUST be in the same mutate operation.
+- **Temporary resource names** — use `next_id()` to link nodes within the same mutate, then extract actual names from response for subsequent mutates.
+- **Response index formula** — for `build_listing_tree_with_cl1` MUTATE 1: CL4 subdivision for maincat at index `i` is at `resp1.results[4 + i*2]`.
+
+### Sheet Processing Functions
+| Function | Sheet | Input | Purpose |
+|----------|-------|-------|---------|
+| `process_check_sheet` | "check" | shop_name, maincat_id, cl1 | Replace pipe-version CL3 exclusions via cat_ids lookup |
+| `process_check_cl1_sheet` | "toevoegen" | shop_name, maincat, maincat_id, cl1 | Check and rebuild trees missing CL1 targeting |
+| `process_check_new_sheet` | "check_new" | shop_name, ad_group_name, campaign_name | Replace pipe-version CL3 subdivision targeting directly |
+
+- **Date**: 2026-02-06
+
 ## DMA Script Batch Processing Optimization
 - **Purpose**: Optimize Google Ads campaign processing functions to reduce API calls by 90%+
 - **Pattern**: Group shops by (maincat_id, custom_label_1) and process together instead of individually
