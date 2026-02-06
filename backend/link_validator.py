@@ -258,9 +258,7 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
             for pim_id in pim_ids:
                 lookup_to_plp_url[pim_id] = result.get(pim_id)
         except Exception as e:
-            print(f"[LINK_VALIDATOR] Error querying ES index {index} by pimId: {e}")
-            for pim_id in pim_ids:
-                lookup_to_plp_url[pim_id] = None
+            print(f"[LINK_VALIDATOR] Error querying ES index {index} by pimId: {e} - skipping batch (not marking as gone)")
 
     # Query by plpUrl for V4 URLs
     for maincat_id, plp_url_map in maincat_plpurl_groups.items():
@@ -272,9 +270,7 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
             for plp_url in plp_urls:
                 lookup_to_plp_url[plp_url] = result.get(plp_url)
         except Exception as e:
-            print(f"[LINK_VALIDATOR] Error querying ES index {index} by plpUrl: {e}")
-            for plp_url in plp_urls:
-                lookup_to_plp_url[plp_url] = None
+            print(f"[LINK_VALIDATOR] Error querying ES index {index} by plpUrl: {e} - skipping batch (not marking as gone)")
 
     # Build result: original_url -> correct_plpUrl (or None if GONE)
     result = {}
@@ -282,8 +278,9 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
         lookup_info = url_to_lookup.get(link)
         if lookup_info:
             lookup_value, _ = lookup_info
-            plp_url = lookup_to_plp_url.get(lookup_value)
-            result[link] = plp_url
+            if lookup_value in lookup_to_plp_url:
+                result[link] = lookup_to_plp_url[lookup_value]
+            # else: ES query failed for this link - skip it entirely (don't mark as gone)
         else:
             # Could not extract lookup value from URL - treat as GONE
             result[link] = None
@@ -570,9 +567,7 @@ def validate_faq_links(faq_json: str) -> Dict:
             for pim_id in pim_ids:
                 lookup_to_plp_url[pim_id] = result.get(pim_id)
         except Exception as e:
-            print(f"[FAQ_VALIDATOR] Error querying ES index {index} by pimId: {e}")
-            for pim_id in pim_ids:
-                lookup_to_plp_url[pim_id] = None
+            print(f"[FAQ_VALIDATOR] Error querying ES index {index} by pimId: {e} - skipping batch (not marking as gone)")
 
     # Query by plpUrl for V4 URLs
     for maincat_id, plp_url_map in maincat_plpurl_groups.items():
@@ -584,19 +579,21 @@ def validate_faq_links(faq_json: str) -> Dict:
             for plp_url in plp_urls:
                 lookup_to_plp_url[plp_url] = result.get(plp_url)
         except Exception as e:
-            print(f"[FAQ_VALIDATOR] Error querying ES index {index} by plpUrl: {e}")
-            for plp_url in plp_urls:
-                lookup_to_plp_url[plp_url] = None
+            print(f"[FAQ_VALIDATOR] Error querying ES index {index} by plpUrl: {e} - skipping batch (not marking as gone)")
 
     # Determine which links are gone
     gone_links = []
     valid_count = 0
+    skipped_count = 0
 
     for link in unique_links:
         lookup_info = url_to_lookup.get(link)
         if lookup_info:
             lookup_value, _ = lookup_info
-            plp_url = lookup_to_plp_url.get(lookup_value)
+            if lookup_value not in lookup_to_plp_url:
+                skipped_count += 1
+                continue
+            plp_url = lookup_to_plp_url[lookup_value]
             if plp_url is None:
                 gone_links.append(link)
             else:

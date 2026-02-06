@@ -21,6 +21,20 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
+## Link Validator False Positives from ES Failures
+- **Problem**: Validation run flagged 28,999 URLs as "gone products", but many products were actually valid (shopCount >= 2 in ES)
+- **Root Cause**: Exception handlers in `lookup_plp_urls_for_content()` (line ~260) and FAQ validator (line ~570) set ALL products to `None` (gone) when an ES query fails:
+  ```python
+  except Exception as e:
+      for pim_id in pim_ids:
+          lookup_to_plp_url[pim_id] = None  # BUG: marks all as gone!
+  ```
+- **Fix**: On ES failure, skip the batch entirely instead of marking as gone. In the result builder, only include links whose `lookup_value` exists in `lookup_to_plp_url` — missing entries are simply omitted (not treated as gone)
+- **Impact**: Re-validation after fix: 13,133 URLs (45%) were false positives and kept their content; 15,866 had genuinely gone products
+- **Restore process**: Content backed up in `pa.content_history` → re-insert into `content_urls_joep`, set `kopteksten_check` to 'completed', set `werkvoorraad.kopteksten = 1`, clear `link_validation_results` entries, re-run validation
+- **File**: `backend/link_validator.py` — both content validator and FAQ validator had the same bug
+- **Date**: 2026-02-06
+
 ## Canonical Generator FACET+FACET Logic
 - **Purpose**: Canonicalize URLs with multiple facets to URLs with fewer facets (remove redundant facet)
 - **How it works**: Given old_facet (e.g. `merk~nike`) and new_facet (e.g. `productlijn~air-max`):
