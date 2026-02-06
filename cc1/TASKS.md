@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Fix FACET+FACET canonical generator - now fetches URLs containing BOTH facets and removes old facet instead of replacing it #claude-session:2026-02-06
 - [x] Add process_check_sheet() to campaign_processor.py - replaces pipe-version shop exclusions (e.g. "Artandcraft.com|NL" → "artandcraft.com") via cat_ids/deepest_cats lookup #claude-session:2026-02-06
 - [x] Add replace_shop_exclusions_batch() helper - REMOVE old + CREATE new CL3 exclusions in single atomic mutate call #claude-session:2026-02-06
 - [x] Add process_check_cl1_sheet() to campaign_processor.py - checks listing trees for CL1 targeting, rebuilds with CL1 + CL4 if missing, preserves CL3 exclusions #claude-session:2026-02-06

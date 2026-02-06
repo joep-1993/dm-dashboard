@@ -79,6 +79,7 @@ class TransformationRules:
 def fetch_urls_from_redshift(
     contains: Optional[str] = None,
     not_contains: Optional[List[str]] = None,
+    contains_all: Optional[List[str]] = None,
     start_date: str = "20240101",
     end_date: str = "20261231",
     limit: int = 10000
@@ -89,6 +90,7 @@ def fetch_urls_from_redshift(
     Args:
         contains: URL must contain this string
         not_contains: URL must NOT contain these strings
+        contains_all: URL must contain ALL of these strings
         start_date: Start date in YYYYMMDD format
         end_date: End date in YYYYMMDD format
         limit: Maximum number of URLs to return
@@ -129,6 +131,11 @@ def fetch_urls_from_redshift(
         if contains:
             query += " AND dv.url LIKE %s"
             params.append(f"%{contains}%")
+
+        if contains_all:
+            for ca in contains_all:
+                query += " AND dv.url LIKE %s"
+                params.append(f"%{ca}%")
 
         if not_contains:
             for nc in not_contains:
@@ -178,26 +185,18 @@ def fetch_urls_for_rules(rules: TransformationRules, start_date: str, end_date: 
         for u in urls:
             all_urls.add(u["url"])
 
-    # Fetch URLs for FACET-FACET rules
+    # Fetch URLs for FACET+FACET rules (URLs must contain BOTH old and new facet)
     for rule in rules.facet_facet:
+        facet_filters = [rule.old_facet, rule.new_facet]
         if rule.cat:
-            # If category filter specified, fetch URLs containing both facet and category
-            urls = fetch_urls_from_redshift(
-                contains=rule.old_facet,
-                start_date=start_date,
-                end_date=end_date
-            )
-            for u in urls:
-                if rule.cat in u["url"]:
-                    all_urls.add(u["url"])
-        else:
-            urls = fetch_urls_from_redshift(
-                contains=rule.old_facet,
-                start_date=start_date,
-                end_date=end_date
-            )
-            for u in urls:
-                all_urls.add(u["url"])
+            facet_filters.append(rule.cat)
+        urls = fetch_urls_from_redshift(
+            contains_all=facet_filters,
+            start_date=start_date,
+            end_date=end_date
+        )
+        for u in urls:
+            all_urls.add(u["url"])
 
     # Fetch URLs for CAT+FACET rules
     for rule in rules.cat_facet:
@@ -330,10 +329,9 @@ def _determine_tasks(url: str, rules: TransformationRules) -> List[str]:
     if _contains_any(url, old_cats):
         tasks.append("CAT-CAT")
 
-    # Check FACET-FACET (respecting optional category filter)
+    # Check FACET+FACET (URL must contain BOTH old and new facet)
     for rule in rules.facet_facet:
-        if rule.old_facet in url:
-            # If no category filter, or URL contains the category, rule applies
+        if rule.old_facet in url and rule.new_facet in url:
             if not rule.cat or rule.cat in url:
                 tasks.append("FACET-FACET")
                 break
@@ -388,22 +386,24 @@ def _apply_cat_cat(url: str, rules: List[CatCatRule]) -> str:
 
 
 def _apply_facet_facet(url: str, rules: List[FacetFacetRule]) -> str:
-    """Apply facet-to-facet replacement"""
+    """Apply facet+facet canonicalization: remove old facet from URLs that have both old and new facet."""
     for rule in rules:
         # Skip if category filter is specified and URL doesn't contain it
         if rule.cat and rule.cat not in url:
             continue
 
-        # Handle facet with tilde notation (facet~value~~)
-        pattern_between = f"{rule.old_facet}~~"
-        pattern_end = f"~~{rule.old_facet}"
+        # Only apply when URL contains BOTH facets
+        if rule.old_facet not in url or rule.new_facet not in url:
+            continue
 
-        if pattern_between in url:
-            url = url.replace(rule.old_facet, rule.new_facet)
-        elif pattern_end in url:
-            url = url.replace(rule.old_facet, rule.new_facet)
-        elif rule.old_facet in url:
-            url = url.replace(rule.old_facet, rule.new_facet)
+        # Remove the old facet from the URL (keep the new facet)
+        # Handle three positions: start (facet~~...), middle (~~facet~~), end (~~facet)
+        if f"{rule.old_facet}~~" in url:
+            # Old facet is at start or middle: remove it and its trailing ~~
+            url = url.replace(f"{rule.old_facet}~~", "")
+        elif f"~~{rule.old_facet}" in url:
+            # Old facet is at end: remove the leading ~~ and the facet
+            url = url.replace(f"~~{rule.old_facet}", "")
 
     return url
 

@@ -21,6 +21,16 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
+## Canonical Generator FACET+FACET Logic
+- **Purpose**: Canonicalize URLs with multiple facets to URLs with fewer facets (remove redundant facet)
+- **How it works**: Given old_facet (e.g. `merk~nike`) and new_facet (e.g. `productlijn~air-max`):
+  1. Fetch URLs containing BOTH old_facet AND new_facet from Redshift (`contains_all` parameter)
+  2. Remove the old_facet from the URL, keeping the new_facet
+  3. Example: `beslist.nl/c/merk~nike~~productlijn~air-max` → `beslist.nl/c/productlijn~air-max`
+- **Key**: Uses `contains_all` (multiple AND LIKE conditions) in SQL, not just a single `contains`
+- **File**: `backend/canonical_service.py` — functions: `_apply_facet_facet()`, `fetch_urls_from_redshift()`, `fetch_urls_for_rules()`
+- **Date**: 2026-02-06
+
 ## Stuck Pending URLs - Tracking Table Covers All Werkvoorraad URLs
 - **Problem**: Frontend shows 0 pending URLs despite ~32K URLs not having content
 - **Cause**: ALL URLs in `pa.jvs_seo_werkvoorraad` also exist in `pa.jvs_seo_werkvoorraad_kopteksten_check` (tracking table), even those with status='pending' that were never actually processed
