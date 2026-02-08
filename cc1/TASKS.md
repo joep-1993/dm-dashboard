@@ -10,6 +10,10 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Fix V4 UUID slug change false positives - `query_elasticsearch_by_plpurl()` now uses wildcard on V4 UUID instead of exact plpUrl match; prevents reset loop when product slugs change #claude-session:2026-02-08
+- [x] Fix content lookup URL format mismatch - `/api/content/lookup` now queries both relative path and full URL variants #claude-session:2026-02-08
+- [x] Restore content from backup for `/products/schoenen/schoenen_430884/c/populaire_serie~12895260` with corrected URL slug #claude-session:2026-02-08
+- [x] Increase recheck-skipped-urls max batch size from 200 to 500 #claude-session:2026-02-08
 - [x] Fix link validator false positives - ES query failures were marking all products as "gone", now skips batch instead; restored 13,133 falsely reset URLs #claude-session:2026-02-06
 - [x] Fix FACET+FACET canonical generator - now fetches URLs containing BOTH facets and removes old facet instead of replacing it #claude-session:2026-02-06
 - [x] Add process_check_sheet() to campaign_processor.py - replaces pipe-version shop exclusions (e.g. "Artandcraft.com|NL" → "artandcraft.com") via cat_ids/deepest_cats lookup #claude-session:2026-02-06

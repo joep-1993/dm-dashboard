@@ -630,24 +630,35 @@ async def upload_urls(file: UploadFile = File(...)):
 async def lookup_content(url: str):
     """Look up content for a specific URL."""
     try:
-        # Normalize URL
+        # Normalize URL - build both relative and absolute variants to match DB
         clean_url = url.strip().lower()
-        if not clean_url.startswith('/'):
-            # Extract path from full URL
+        base_url = "https://www.beslist.nl"
+
+        if clean_url.startswith('http'):
+            # Full URL provided - extract path as well
             if 'beslist.nl' in clean_url:
-                clean_url = '/' + clean_url.split('beslist.nl', 1)[-1].lstrip('/')
+                path_url = '/' + clean_url.split('beslist.nl', 1)[-1].lstrip('/')
+                full_url = base_url + path_url
             else:
+                path_url = clean_url
+                full_url = clean_url
+        else:
+            # Relative path provided - build full URL
+            if not clean_url.startswith('/'):
                 clean_url = '/' + clean_url
+            path_url = clean_url
+            full_url = base_url + path_url
 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Look up in content table
+        # Look up in content table - try both full URL and relative path
         cur.execute("""
             SELECT url, content, created_at
             FROM pa.content_urls_joep
-            WHERE url = %s
-        """, (clean_url,))
+            WHERE url = %s OR url = %s
+            LIMIT 1
+        """, (full_url, path_url))
         row = cur.fetchone()
 
         cur.close()
@@ -1144,15 +1155,15 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
 
     Args:
         parallel_workers: Number of parallel workers (1-20)
-        batch_size: Number of URLs to process per batch (1-200)
+        batch_size: Number of URLs to process per batch (1-500)
     """
     from concurrent.futures import ThreadPoolExecutor
 
     try:
         if parallel_workers < 1 or parallel_workers > 20:
             raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
-        if batch_size < 1 or batch_size > 200:
-            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 200")
+        if batch_size < 1 or batch_size > 500:
+            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
 
         total_rechecked = 0
         total_now_eligible = 0

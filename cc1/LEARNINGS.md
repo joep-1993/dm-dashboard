@@ -21,6 +21,23 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
+## Link Validator V4 UUID Slug Changes Cause False "Gone" Products
+- **Problem**: Products with V4 UUID plpUrls were repeatedly marked as "gone" even though they existed in ES, causing a reset loop (content deleted → regenerated → deleted again)
+- **Root Cause**: `query_elasticsearch_by_plpurl()` did exact match on the full plpUrl, but product slugs can change while the V4 UUID stays the same
+  - Content linked to: `/p/nike-air-max-1-wmns-dusty-cactus-.../32000/V4_00b90e84-.../`
+  - ES had: `/p/nike-air-max-1-sneakers-dusty-cactus-wit-grijs/32000/V4_00b90e84-.../` (same UUID, different slug)
+  - Exact `terms` query on `plpUrl` returned 0 hits → falsely marked as "gone"
+- **Fix**: Changed `query_elasticsearch_by_plpurl()` to extract V4 UUID from the URL and search with `wildcard` query (`*V4_xxx*`) instead of exact match. Now returns the current plpUrl from ES, so changed slugs are treated as replacements (auto-corrected) instead of gone products
+- **File**: `backend/link_validator.py` — function `query_elasticsearch_by_plpurl()`
+- **Date**: 2026-02-08
+
+## Content Lookup URL Format Mismatch
+- **Problem**: URL lookup function in dm-tools frontend returned "URL not found in content database" for URLs that existed
+- **Root Cause**: `lookup_content()` in `main.py` normalized input to relative path (`/products/...`) but DB could store full URLs (`https://www.beslist.nl/products/...`) or vice versa
+- **Fix**: Build both relative path and full URL variants, query with `WHERE url = %s OR url = %s`
+- **File**: `backend/main.py` — endpoint `/api/content/lookup`
+- **Date**: 2026-02-08
+
 ## Link Validator False Positives from ES Failures
 - **Problem**: Validation run flagged 28,999 URLs as "gone products", but many products were actually valid (shopCount >= 2 in ES)
 - **Root Cause**: Exception handlers in `lookup_plp_urls_for_content()` (line ~260) and FAQ validator (line ~570) set ALL products to `None` (gone) when an ES query fails:

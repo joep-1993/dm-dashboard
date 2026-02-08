@@ -144,23 +144,41 @@ def query_elasticsearch_by_plpurl(index: str, plp_urls: List[str], min_offers: i
     Query Elasticsearch for products by their plpUrl paths.
     Used for V4 UUID URLs where the pimId in ES differs from the URL.
 
+    Searches by V4 UUID suffix using wildcard to handle slug changes
+    (product name in URL may change while V4 UUID stays the same).
+
     Args:
         index: Elasticsearch index name
         plp_urls: List of plpUrl paths to look up (e.g., '/p/product-name/137/V4_xxx/')
         min_offers: Minimum number of offers required (default: 2).
 
     Returns:
-        Dict mapping plpUrl to itself if valid, None if not found or < min_offers.
+        Dict mapping original plpUrl to the current plpUrl if valid, None if not found or < min_offers.
     """
     if not plp_urls:
         return {}
 
+    # Extract V4 UUID from each plpUrl for wildcard matching
+    # plpUrl format: /p/product-name/maincat/V4_uuid/
+    v4_to_original: Dict[str, str] = {}
+    should_clauses = []
+    for plp_url in plp_urls:
+        parts = plp_url.rstrip('/').split('/')
+        v4_part = parts[-1] if parts else ''
+        if v4_part.startswith('V4_'):
+            v4_to_original[v4_part] = plp_url
+            should_clauses.append({"wildcard": {"plpUrl": f"*{v4_part}*"}})
+
+    if not should_clauses:
+        return {}
+
     query = {
         "_source": ["plpUrl", "shopCount"],
-        "size": len(plp_urls),
+        "size": len(should_clauses),
         "query": {
-            "terms": {
-                "plpUrl": plp_urls
+            "bool": {
+                "should": should_clauses,
+                "minimum_should_match": 1
             }
         }
     }
@@ -171,18 +189,22 @@ def query_elasticsearch_by_plpurl(index: str, plp_urls: List[str], min_offers: i
 
     data = response.json()
 
-    # Map plpUrl to itself (only if shopCount >= min_offers)
+    # Map original plpUrl to current plpUrl (only if shopCount >= min_offers)
+    # Match ES results back to original URLs via V4 UUID
     result = {}
     for hit in data.get('hits', {}).get('hits', []):
         source = hit.get('_source', {})
-        plp_url = source.get('plpUrl')
+        es_plp_url = source.get('plpUrl', '')
         shop_count = source.get('shopCount', 0) or 0
 
-        if plp_url:
-            if shop_count >= min_offers:
-                result[plp_url] = plp_url
-            else:
-                result[plp_url] = None
+        # Find which V4 UUID this result matches
+        for v4_part, original_url in v4_to_original.items():
+            if v4_part in es_plp_url:
+                if shop_count >= min_offers and es_plp_url:
+                    result[original_url] = es_plp_url
+                else:
+                    result[original_url] = None
+                break
 
     return result
 
