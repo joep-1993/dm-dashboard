@@ -21,15 +21,37 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
-## Link Validator V4 UUID Slug Changes Cause False "Gone" Products
-- **Problem**: Products with V4 UUID plpUrls were repeatedly marked as "gone" even though they existed in ES, causing a reset loop (content deleted → regenerated → deleted again)
-- **Root Cause**: `query_elasticsearch_by_plpurl()` did exact match on the full plpUrl, but product slugs can change while the V4 UUID stays the same
-  - Content linked to: `/p/nike-air-max-1-wmns-dusty-cactus-.../32000/V4_00b90e84-.../`
-  - ES had: `/p/nike-air-max-1-sneakers-dusty-cactus-wit-grijs/32000/V4_00b90e84-.../` (same UUID, different slug)
-  - Exact `terms` query on `plpUrl` returned 0 hits → falsely marked as "gone"
-- **Fix**: Changed `query_elasticsearch_by_plpurl()` to extract V4 UUID from the URL and search with `wildcard` query (`*V4_xxx*`) instead of exact match. Now returns the current plpUrl from ES, so changed slugs are treated as replacements (auto-corrected) instead of gone products
-- **File**: `backend/link_validator.py` — function `query_elasticsearch_by_plpurl()`
-- **Date**: 2026-02-08
+## Link Validator V4 UUID Lookup: Wildcard Queries Kill ES Performance
+- **Problem**: V4 UUID plpUrl lookups used `wildcard` queries (`*V4_xxx*`) which caused constant 60s timeouts on Elasticsearch, making the "Validate All" feature extremely slow (~180K URLs taking hours)
+- **Root Cause**: Leading wildcards (`*V4_xxx*`) force a full index scan in ES. With 20 parallel workers, each content item having 2-4 V4 links, hundreds of 60s timeouts cascade across batches
+- **Fix (two-phase lookup)**:
+  1. **Phase 1**: Fast `terms` query on `pimId` field with V4 UUIDs (instant, uses ES index)
+  2. **Phase 2**: Wildcard disabled entirely — V4 URLs not found via pimId are skipped (not marked as gone). Wildcard queries on these ES indices always timeout and never return results anyway
+- **Key lesson**: `result.get(key)` returns `None` for missing keys, which was then stored as `lookup_to_plp_url[key] = None` and interpreted as "product is GONE". Fix: only store results for keys actually present in the result dict (`if key in result: lookup_to_plp_url[key] = result[key]`), so unfound V4 URLs are skipped instead of falsely marked as gone
+- **Impact**: Validator went from timing out/appearing stuck to completing 139K URLs in reasonable time
+- **File**: `backend/link_validator.py` — function `query_elasticsearch_by_plpurl()` + callers in `lookup_plp_urls_for_content()` and `validate_faq_links()`
+- **Date**: 2026-02-09 (supersedes 2026-02-08 wildcard fix)
+
+## Detecting Cut-Off Content in Database
+- **Problem**: Some generated content was cut off mid-sentence/mid-word (e.g., "om je h"), likely due to OpenAI token limits truncating the response
+- **Detection query**: Strip HTML tags and check if text ends without sentence-ending punctuation:
+  ```sql
+  SELECT url FROM pa.content_urls_joep
+  WHERE TRIM(regexp_replace(content, '<[^>]+>', '', 'g')) !~ '[.!?")'']$'
+  ```
+- **Scale**: Found 349 out of 179,949 content items (~0.2%) with cut-off content
+- **Fix**: Back up to `content_history` (reason: `cut_off_content`), delete from `content_urls_joep`, add to `werkvoorraad` with `kopteksten=0` for regeneration
+- **Date**: 2026-02-09
+
+## Restoring Falsely Reset URLs: Don't Forget kopteksten_check
+- **Problem**: After restoring content from `content_history` back to `content_urls_joep`, frontend status numbers didn't add up (processed + pending + skipped + failed > total)
+- **Root Cause**: The validator deletes `kopteksten_check` entries when moving URLs to pending. Restoring content without re-adding `kopteksten_check` entries causes double-counting: URLs appear as both "processed" (have content) and "pending" (in werkvoorraad, no kopteksten_check entry)
+- **Full restore checklist**:
+  1. Restore content from `content_history` → `content_urls_joep`
+  2. Re-add `kopteksten_check` entries with status `success`
+  3. Clear `link_validation_results` for re-validation
+  4. Optionally clean up `content_history` backup entries
+- **Date**: 2026-02-09
 
 ## Content Lookup URL Format Mismatch
 - **Problem**: URL lookup function in dm-tools frontend returned "URL not found in content database" for URLs that existed

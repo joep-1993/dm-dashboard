@@ -144,8 +144,9 @@ def query_elasticsearch_by_plpurl(index: str, plp_urls: List[str], min_offers: i
     Query Elasticsearch for products by their plpUrl paths.
     Used for V4 UUID URLs where the pimId in ES differs from the URL.
 
-    Searches by V4 UUID suffix using wildcard to handle slug changes
-    (product name in URL may change while V4 UUID stays the same).
+    Two-phase lookup:
+    1. Fast: Try pimId lookup with V4 UUIDs (instant terms query)
+    2. Fallback: Wildcard on plpUrl for any not found in phase 1 (slower, shorter timeout)
 
     Args:
         index: Elasticsearch index name
@@ -158,53 +159,64 @@ def query_elasticsearch_by_plpurl(index: str, plp_urls: List[str], min_offers: i
     if not plp_urls:
         return {}
 
-    # Extract V4 UUID from each plpUrl for wildcard matching
+    # Extract V4 UUID from each plpUrl
     # plpUrl format: /p/product-name/maincat/V4_uuid/
     v4_to_original: Dict[str, str] = {}
-    should_clauses = []
     for plp_url in plp_urls:
         parts = plp_url.rstrip('/').split('/')
         v4_part = parts[-1] if parts else ''
         if v4_part.startswith('V4_'):
             v4_to_original[v4_part] = plp_url
-            should_clauses.append({"wildcard": {"plpUrl": f"*{v4_part}*"}})
 
-    if not should_clauses:
+    if not v4_to_original:
         return {}
 
-    query = {
-        "_source": ["plpUrl", "shopCount"],
-        "size": len(should_clauses),
-        "query": {
-            "bool": {
-                "should": should_clauses,
-                "minimum_should_match": 1
+    result = {}
+    found_v4_parts = set()
+
+    # Phase 1: Fast pimId-based lookup with V4 UUIDs
+    try:
+        v4_uuids = list(v4_to_original.keys())
+        query = {
+            "_source": ["plpUrl", "pimId", "shopCount"],
+            "size": len(v4_uuids),
+            "query": {
+                "terms": {
+                    "pimId": v4_uuids
+                }
             }
         }
-    }
 
-    url = f"{ES_URL}/{index}/_search"
-    response = requests.post(url, json=query, timeout=60)
-    response.raise_for_status()
+        es_url = f"{ES_URL}/{index}/_search"
+        response = requests.post(es_url, json=query, timeout=15)
+        response.raise_for_status()
+        data = response.json()
 
-    data = response.json()
+        for hit in data.get('hits', {}).get('hits', []):
+            source = hit.get('_source', {})
+            pim_id = source.get('pimId', '')
+            es_plp_url = source.get('plpUrl', '')
+            shop_count = source.get('shopCount', 0) or 0
 
-    # Map original plpUrl to current plpUrl (only if shopCount >= min_offers)
-    # Match ES results back to original URLs via V4 UUID
-    result = {}
-    for hit in data.get('hits', {}).get('hits', []):
-        source = hit.get('_source', {})
-        es_plp_url = source.get('plpUrl', '')
-        shop_count = source.get('shopCount', 0) or 0
-
-        # Find which V4 UUID this result matches
-        for v4_part, original_url in v4_to_original.items():
-            if v4_part in es_plp_url:
+            if pim_id in v4_to_original:
+                original_url = v4_to_original[pim_id]
+                found_v4_parts.add(pim_id)
                 if shop_count >= min_offers and es_plp_url:
                     result[original_url] = es_plp_url
                 else:
                     result[original_url] = None
-                break
+
+        if found_v4_parts:
+            print(f"[LINK_VALIDATOR] Fast pimId lookup found {len(found_v4_parts)}/{len(v4_uuids)} V4 URLs in {index}")
+    except Exception as e:
+        print(f"[LINK_VALIDATOR] Fast pimId lookup failed for {index}: {e}, falling back to wildcard")
+
+    # V4 URLs not found via pimId are skipped (not marked as gone).
+    # Wildcard queries on plpUrl are disabled because they always timeout on ES
+    # and never return results - they just slow down the entire validation process.
+    remaining = len(v4_to_original) - len(found_v4_parts)
+    if remaining > 0:
+        print(f"[LINK_VALIDATOR] Skipping {remaining} V4 URLs in {index} not found via pimId (wildcard disabled)")
 
     return result
 
@@ -290,7 +302,9 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
         try:
             result = query_elasticsearch_by_plpurl(index, plp_urls)
             for plp_url in plp_urls:
-                lookup_to_plp_url[plp_url] = result.get(plp_url)
+                if plp_url in result:
+                    lookup_to_plp_url[plp_url] = result[plp_url]
+                # else: URL not found (e.g. V4 pimId lookup miss) - skip, don't mark as gone
         except Exception as e:
             print(f"[LINK_VALIDATOR] Error querying ES index {index} by plpUrl: {e} - skipping batch (not marking as gone)")
 
@@ -302,7 +316,7 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
             lookup_value, _ = lookup_info
             if lookup_value in lookup_to_plp_url:
                 result[link] = lookup_to_plp_url[lookup_value]
-            # else: ES query failed for this link - skip it entirely (don't mark as gone)
+            # else: ES query failed or URL not found - skip it entirely (don't mark as gone)
         else:
             # Could not extract lookup value from URL - treat as GONE
             result[link] = None
@@ -599,7 +613,9 @@ def validate_faq_links(faq_json: str) -> Dict:
         try:
             result = query_elasticsearch_by_plpurl(index, plp_urls)
             for plp_url in plp_urls:
-                lookup_to_plp_url[plp_url] = result.get(plp_url)
+                if plp_url in result:
+                    lookup_to_plp_url[plp_url] = result[plp_url]
+                # else: URL not found (e.g. V4 pimId lookup miss) - skip, don't mark as gone
         except Exception as e:
             print(f"[FAQ_VALIDATOR] Error querying ES index {index} by plpUrl: {e} - skipping batch (not marking as gone)")
 

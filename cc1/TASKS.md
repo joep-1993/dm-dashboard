@@ -10,6 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Fix V4 UUID lookup performance - replaced slow wildcard queries with two-phase pimId lookup + disabled wildcard fallback; fixed `result.get()` bug that falsely marked unfound V4 URLs as "gone" #claude-session:2026-02-09
+- [x] Detect and reset 349 cut-off content items - found content truncated mid-sentence using regex, backed up and re-queued for regeneration #claude-session:2026-02-09
+- [x] Restore 49,591 falsely reset URLs - validator bug marked V4 URLs as gone, restored from content_history + re-added kopteksten_check entries #claude-session:2026-02-09
 - [x] Fix V4 UUID slug change false positives - `query_elasticsearch_by_plpurl()` now uses wildcard on V4 UUID instead of exact plpUrl match; prevents reset loop when product slugs change #claude-session:2026-02-08
 - [x] Fix content lookup URL format mismatch - `/api/content/lookup` now queries both relative path and full URL variants #claude-session:2026-02-08
 - [x] Restore content from backup for `/products/schoenen/schoenen_430884/c/populaire_serie~12895260` with corrected URL slug #claude-session:2026-02-08

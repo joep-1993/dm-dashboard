@@ -551,28 +551,27 @@ route add -p 65.9.0.0 mask 255.255.0.0 192.168.1.1 metric 1 if 10
 - Easy to pause/resume jobs
 
 ### 3. Quality Control Strategy
-**Decision**: Automatic link validation with auto-reset to pending
+**Decision**: Automatic link validation via Elasticsearch lookup with auto-reset to pending
 
 **Workflow**:
-1. Extract hyperlinks from generated content
-2. Check HTTP status (301/404 = broken)
-3. If broken links found → delete content + reset to pending
-4. Content regenerated in next batch
+1. Extract `<a href="/p/...">` hyperlinks from generated content
+2. Look up each product in Elasticsearch by pimId (fast `terms` query)
+3. Check shopCount >= 2 (product still has offers)
+4. Three outcomes per link:
+   - **Valid**: Product found with same plpUrl → no action
+   - **Replaced**: Product found but plpUrl changed (slug update) → auto-correct link in content
+   - **Gone**: Product not found or shopCount < 2 → back up content to `content_history`, delete, reset to pending for regeneration
 
-**Link Validation Modes**:
-- **Optimized Mode** (default): No delay between checks
-  - ~60,000 items/hour with 5 workers
-  - Recommended for link validation (lightweight HEAD requests)
-- **Conservative Mode**: 0.5-0.7s delay per link check
-  - ~1,552 items/hour with 1 worker
-  - Available for maximum caution
+**V4 UUID Product Lookup** (two-phase):
+1. **Phase 1 (fast)**: Try `terms` query on `pimId` field with V4 UUID values
+2. **Phase 2 (skip)**: V4 URLs not found via pimId are skipped (not marked as gone). Wildcard queries (`*V4_xxx*`) on plpUrl were disabled because they always timeout on ES due to leading wildcard full index scans
 
 **Rationale**:
-- Automated quality control
+- Automated quality control via ES lookup (no HTTP requests to production)
 - No manual intervention required
-- Historical tracking for debugging
-- Incremental validation (only unvalidated URLs)
-- Conservative mode matches scraper safety settings
+- Historical tracking via `pa.link_validation_results`
+- Incremental validation (only unvalidated URLs via LEFT JOIN)
+- Parallel processing with ThreadPoolExecutor (configurable workers)
 
 ### 4. Content Generation Constraints
 **Decision**: GPT-4o-mini with 300 max_tokens
