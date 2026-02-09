@@ -46,9 +46,9 @@
 </head>
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
-        <div class="container">
-            <span class="navbar-brand mb-0 h1">Thema Ads Processing</span>
-            <div>
+        <div class="container-fluid d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1 me-auto" style="white-space: nowrap;">Thema Ads Processing</span>
+            <div class="d-flex flex-nowrap gap-1">
                 <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
                 <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
                 <a href="/static/thema-ads.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">Thema Ads</a>
@@ -57,6 +57,7 @@
                 <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
                 <a href="/static/redirect-checker.html" class="btn btn-outline-light btn-sm fw-bold">Redirect Checker</a>
                 <a href="/static/301-generator.html" class="btn btn-outline-light btn-sm fw-bold">301 Generator</a>
+                <a href="/static/keyword-planner.html" class="btn btn-outline-light btn-sm fw-bold">Keyword Planner</a>
                 <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
             </div>
         </div>
@@ -439,23 +440,23 @@
                         <!-- Statistics -->
                         <div class="row text-center mb-3">
                             <div class="col">
-                                <h4 id="totalItems" class="text-primary">0</h4>
+                                <h4 id="totalItems" style="color: #5e4a90; font-weight: 700;">0</h4>
                                 <p class="text-muted small">Total</p>
                             </div>
                             <div class="col">
-                                <h4 id="successfulItems" class="text-success">0</h4>
+                                <h4 id="successfulItems" style="color: #5e4a90; font-weight: 700;">0</h4>
                                 <p class="text-muted small">Successful</p>
                             </div>
                             <div class="col">
-                                <h4 id="skippedItems" class="text-info">0</h4>
+                                <h4 id="skippedItems" style="color: #5e4a90; font-weight: 700;">0</h4>
                                 <p class="text-muted small">Skipped</p>
                             </div>
                             <div class="col">
-                                <h4 id="failedItems" class="text-danger">0</h4>
+                                <h4 id="failedItems" style="color: #5e4a90; font-weight: 700;">0</h4>
                                 <p class="text-muted small">Failed</p>
                             </div>
                             <div class="col">
-                                <h4 id="pendingItems" class="text-warning">0</h4>
+                                <h4 id="pendingItems" style="color: #5e4a90; font-weight: 700;">0</h4>
                                 <p class="text-muted small">Pending</p>
                             </div>
                         </div>

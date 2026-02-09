@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Keyword Planner</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .results-table { max-height: 600px; overflow-y: auto; }
+        .volume-high { color: #198754; font-weight: bold; }
+        .volume-medium { color: #0d6efd; }
+        .volume-low { color: #636e72; }
+        .volume-zero { color: #dc3545; }
+        .keyword-cell { font-family: monospace; font-size: 0.85rem; }
+        .upload-zone { border: 2px dashed #dee2e6; border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .upload-zone:hover { border-color: #5e4a90; background: #f8f9fc; }
+        .upload-zone.dragover { border-color: #5e4a90; background: #f0eef5; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container-fluid d-flex flex-nowrap align-items-center gap-2">
+            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1 me-auto" style="white-space: nowrap;">Keyword Planner</a>
+            <div class="d-flex flex-nowrap gap-1">
+                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
+                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
+                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
+                <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
+                <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
+                <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
+                <a href="/static/redirect-checker.html" class="btn btn-outline-light btn-sm fw-bold">Redirect Checker</a>
+                <a href="/static/301-generator.html" class="btn btn-outline-light btn-sm fw-bold">301 Generator</a>
+                <a href="/static/keyword-planner.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">Keyword Planner</a>
+                <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-11 mx-auto">
+                <!-- Input Section -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Keyword Input</h5>
+                        <button class="btn btn-sm btn-outline-light" onclick="testConnection()">Test API Connection</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <ul class="nav nav-tabs mb-3" id="inputTabs">
+                                    <li class="nav-item">
+                                        <a class="nav-link active" data-bs-toggle="tab" href="#textInput">Text Input</a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" data-bs-toggle="tab" href="#excelInput">Excel Upload</a>
+                                    </li>
+                                </ul>
+                                <div class="tab-content">
+                                    <div class="tab-pane active" id="textInput">
+                                        <label for="keywordInput" class="form-label">Enter keywords (one per line)</label>
+                                        <textarea class="form-control" id="keywordInput" rows="10" placeholder="e-bike
+hardloopschoenen
+koffiezetapparaat
+wasmachine samsung
+stofzuiger"></textarea>
+                                    </div>
+                                    <div class="tab-pane" id="excelInput">
+                                        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('excelFile').click()">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="#5e4a90" viewBox="0 0 16 16" class="mb-2">
+                                                <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                                                <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/>
+                                            </svg>
+                                            <p class="mb-1 fw-bold">Drop Excel file here or click to browse</p>
+                                            <p class="text-muted mb-0 small">Keywords will be read from the first column (.xlsx)</p>
+                                        </div>
+                                        <input type="file" id="excelFile" accept=".xlsx,.xls" class="d-none" onchange="handleFileSelect(event)">
+                                        <div id="fileInfo" class="mt-2 d-none">
+                                            <span class="badge bg-success" id="fileName"></span>
+                                            <button class="btn btn-sm btn-outline-danger ms-2" onclick="clearFile()">Remove</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Actions</label>
+                                <div class="d-grid gap-2">
+                                    <button class="btn btn-primary" onclick="getSearchVolumes()">
+                                        <span id="searchBtnText">Get Search Volumes</span>
+                                        <span id="searchSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                    </button>
+                                    <button class="btn btn-outline-secondary" onclick="downloadResults()" id="downloadBtn" disabled>Download Excel</button>
+                                    <button class="btn btn-outline-danger" onclick="clearAll()">Clear All</button>
+                                </div>
+                                <div id="connectionStatus" class="mt-3"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div class="card mb-4 d-none" id="progressCard">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="progressText">Processing...</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary Section -->
+                <div class="card mb-4 d-none" id="summaryCard">
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-md-2 col-4">
+                                <h5 id="statTotal" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">Total</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statSuccessful" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">With Volume</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statNoVolume" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">No Volume</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statSkipped" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">Skipped</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statUnique" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">Unique Queried</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statCustomerIds" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">Customer IDs Used</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="card d-none" id="resultsCard">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Results</h5>
+                        <div>
+                            <input type="text" class="form-control form-control-sm d-inline-block" style="width: 200px;" placeholder="Filter results..." id="filterInput" oninput="filterResults()">
+                            <select class="form-select form-select-sm d-inline-block" style="width: 150px;" id="sortSelect" onchange="sortResults()">
+                                <option value="volume_desc">Volume (high-low)</option>
+                                <option value="volume_asc">Volume (low-high)</option>
+                                <option value="keyword_asc">Keyword (A-Z)</option>
+                                <option value="keyword_desc">Keyword (Z-A)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="results-table">
+                            <table class="table table-striped table-hover mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Original Keyword</th>
+                                        <th>Normalized Keyword</th>
+                                        <th class="text-end">Search Volume</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = window.location.origin;
+        let currentResults = [];
+        let selectedFile = null;
+
+        // Drag and drop
+        const uploadZone = document.getElementById('uploadZone');
+        uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
+                selectedFile = file;
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileInfo').classList.remove('d-none');
+            } else {
+                alert('Please upload an .xlsx or .xls file');
+            }
+        });
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                selectedFile = file;
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileInfo').classList.remove('d-none');
+            }
+        }
+
+        function clearFile() {
+            selectedFile = null;
+            document.getElementById('excelFile').value = '';
+            document.getElementById('fileInfo').classList.add('d-none');
+        }
+
+        async function testConnection() {
+            const statusDiv = document.getElementById('connectionStatus');
+            statusDiv.innerHTML = '<div class="alert alert-info py-1 small">Testing connection...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/test`, { method: 'POST' });
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    statusDiv.innerHTML = `<div class="alert alert-success py-1 small">${data.message}</div>`;
+                } else {
+                    statusDiv.innerHTML = `<div class="alert alert-danger py-1 small">${data.message}</div>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="alert alert-danger py-1 small">Connection failed: ${error.message}</div>`;
+            }
+        }
+
+        async function getSearchVolumes() {
+            const activeTab = document.querySelector('#inputTabs .nav-link.active').getAttribute('href');
+            const isExcel = activeTab === '#excelInput';
+
+            const btnText = document.getElementById('searchBtnText');
+            const spinner = document.getElementById('searchSpinner');
+            btnText.textContent = 'Processing...';
+            spinner.classList.remove('d-none');
+
+            document.getElementById('progressCard').classList.remove('d-none');
+            document.getElementById('progressBar').style.width = '50%';
+            document.getElementById('progressText').textContent = 'Querying Google Ads API...';
+            document.getElementById('progressPercent').textContent = '';
+
+            try {
+                let response;
+
+                if (isExcel && selectedFile) {
+                    const formData = new FormData();
+                    formData.append('file', selectedFile);
+                    response = await fetch(`${API_BASE}/api/keyword-planner/upload-excel`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                } else {
+                    const text = document.getElementById('keywordInput').value.trim();
+                    if (!text) {
+                        alert('Please enter keywords or upload an Excel file');
+                        resetButton();
+                        return;
+                    }
+                    const keywords = text.split('\n').map(k => k.trim()).filter(k => k);
+                    response = await fetch(`${API_BASE}/api/keyword-planner/search-volumes`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ keywords })
+                    });
+                }
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Request failed');
+                }
+
+                const data = await response.json();
+                currentResults = data.results || [];
+
+                // Update progress
+                document.getElementById('progressBar').style.width = '100%';
+                document.getElementById('progressText').textContent = 'Complete!';
+                document.getElementById('progressPercent').textContent = '100%';
+
+                // Update summary
+                document.getElementById('summaryCard').classList.remove('d-none');
+                document.getElementById('statTotal').textContent = (data.total || 0).toLocaleString();
+                document.getElementById('statSuccessful').textContent = (data.successful || 0).toLocaleString();
+                document.getElementById('statNoVolume').textContent = (data.no_volume || 0).toLocaleString();
+                document.getElementById('statSkipped').textContent = (data.skipped || 0).toLocaleString();
+                document.getElementById('statUnique').textContent = (data.unique_keywords_queried || 0).toLocaleString();
+                document.getElementById('statCustomerIds').textContent = data.customer_ids_used || '-';
+
+                // Render results
+                renderResults(currentResults);
+                document.getElementById('resultsCard').classList.remove('d-none');
+                document.getElementById('downloadBtn').disabled = false;
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                document.getElementById('progressCard').classList.add('d-none');
+            }
+
+            resetButton();
+        }
+
+        function resetButton() {
+            document.getElementById('searchBtnText').textContent = 'Get Search Volumes';
+            document.getElementById('searchSpinner').classList.add('d-none');
+        }
+
+        function renderResults(results) {
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = '';
+
+            results.forEach((r, i) => {
+                const volumeClass = r.search_volume >= 1000 ? 'volume-high' :
+                                   r.search_volume >= 100 ? 'volume-medium' :
+                                   r.search_volume > 0 ? 'volume-low' : 'volume-zero';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${i + 1}</td>
+                    <td class="keyword-cell">${escapeHtml(r.original_keyword)}</td>
+                    <td class="keyword-cell text-muted">${escapeHtml(r.normalized_keyword || '')}</td>
+                    <td class="text-end ${volumeClass}">${(r.search_volume || 0).toLocaleString()}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filterResults() {
+            const filter = document.getElementById('filterInput').value.toLowerCase();
+            const filtered = currentResults.filter(r =>
+                r.original_keyword.toLowerCase().includes(filter) ||
+                (r.normalized_keyword || '').toLowerCase().includes(filter)
+            );
+            renderResults(filtered);
+        }
+
+        function sortResults() {
+            const sort = document.getElementById('sortSelect').value;
+            const sorted = [...currentResults];
+
+            switch (sort) {
+                case 'volume_desc': sorted.sort((a, b) => (b.search_volume || 0) - (a.search_volume || 0)); break;
+                case 'volume_asc': sorted.sort((a, b) => (a.search_volume || 0) - (b.search_volume || 0)); break;
+                case 'keyword_asc': sorted.sort((a, b) => a.original_keyword.localeCompare(b.original_keyword)); break;
+                case 'keyword_desc': sorted.sort((a, b) => b.original_keyword.localeCompare(a.original_keyword)); break;
+            }
+
+            renderResults(sorted);
+        }
+
+        async function downloadResults() {
+            if (!currentResults.length) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/download`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ results: currentResults })
+                });
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `keyword_planner_${new Date().toISOString().slice(0,10)}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Download failed: ' + error.message);
+            }
+        }
+
+        function clearAll() {
+            document.getElementById('keywordInput').value = '';
+            clearFile();
+            currentResults = [];
+            document.getElementById('resultsCard').classList.add('d-none');
+            document.getElementById('summaryCard').classList.add('d-none');
+            document.getElementById('progressCard').classList.add('d-none');
+            document.getElementById('downloadBtn').disabled = true;
+            document.getElementById('connectionStatus').innerHTML = '';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

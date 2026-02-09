@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add Keyword Planner tool - Google Ads search volume lookup with keyword normalization, Excel upload/download, customer_id quota rotation, consistent purple UI styling across all tools #claude-session:2026-02-09
 - [x] Fix V4 UUID lookup performance - replaced slow wildcard queries with two-phase pimId lookup + disabled wildcard fallback; fixed `result.get()` bug that falsely marked unfound V4 URLs as "gone" #claude-session:2026-02-09
 - [x] Detect and reset 349 cut-off content items - found content truncated mid-sentence using regex, backed up and re-queued for regeneration #claude-session:2026-02-09
 - [x] Restore 49,591 falsely reset URLs - validator bug marked V4 URLs as gone, restored from content_history + re-added kopteksten_check entries #claude-session:2026-02-09

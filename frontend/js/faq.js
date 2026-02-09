@@ -561,7 +561,7 @@ async function recheckSkippedFaqUrls() {
             `;
         } else {
             resultDiv.innerHTML = `
-                <div class="alert alert-${data.now_eligible > 0 ? 'success' : 'info'}">
+                <div class="alert alert-warning">
                     <strong>Recheck Complete!</strong><br>
                     URLs rechecked: ${data.rechecked}<br>
                     <strong>Now eligible for FAQ generation: ${data.now_eligible}</strong>

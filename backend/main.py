@@ -21,6 +21,7 @@ from backend.gpt_service import generate_product_content, check_content_has_vali
 from backend.link_validator import validate_content_links, validate_and_fix_content_links
 from backend.faq_service import process_single_url_faq
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
+from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.content_publisher import (
     get_total_content_count,
     get_content_batch,
@@ -1876,15 +1877,15 @@ def recheck_skipped_faq_urls(parallel_workers: int = 3, batch_size: int = 50):
 
     Args:
         parallel_workers: Number of parallel workers (1-20)
-        batch_size: Number of URLs to process per batch (1-200)
+        batch_size: Number of URLs to process per batch (1-500)
     """
     from concurrent.futures import ThreadPoolExecutor
 
     try:
         if parallel_workers < 1 or parallel_workers > 20:
             raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
-        if batch_size < 1 or batch_size > 200:
-            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 200")
+        if batch_size < 1 or batch_size > 500:
+            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
 
         total_rechecked = 0
         total_now_eligible = 0
@@ -3049,6 +3050,104 @@ async def redirect_checker_download(request: dict):
             content=output.getvalue(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=redirect_check_results.xlsx"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Keyword Planner API
+# ============================================================================
+
+@app.post("/api/keyword-planner/search-volumes")
+async def keyword_planner_search_volumes(request: dict):
+    """
+    Get search volumes for a list of keywords.
+    Accepts {"keywords": ["e-bike", "hardloopschoenen", ...]}
+    Returns results with original keyword, normalized keyword, and search volume.
+    """
+    keywords = request.get("keywords", [])
+    if not keywords:
+        raise HTTPException(status_code=400, detail="No keywords provided")
+    if len(keywords) > 50000:
+        raise HTTPException(status_code=400, detail="Maximum 50,000 keywords per request")
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, get_search_volumes, keywords)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/keyword-planner/upload-excel")
+async def keyword_planner_upload_excel(file: UploadFile = File(...)):
+    """
+    Upload an Excel file containing keywords. Reads keywords from the first column.
+    Returns search volumes for all keywords found.
+    """
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be .xlsx or .xls")
+
+    try:
+        import pandas as pd
+        contents = await file.read()
+        df = pd.read_excel(BytesIO(contents))
+
+        if df.empty:
+            raise HTTPException(status_code=400, detail="Excel file is empty")
+
+        # Read keywords from the first column
+        keywords = df.iloc[:, 0].dropna().astype(str).tolist()
+        keywords = [k.strip() for k in keywords if k.strip()]
+
+        if not keywords:
+            raise HTTPException(status_code=400, detail="No keywords found in the first column")
+        if len(keywords) > 50000:
+            raise HTTPException(status_code=400, detail="Maximum 50,000 keywords per file")
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, get_search_volumes, keywords)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/keyword-planner/test")
+async def keyword_planner_test():
+    """Test the Google Ads Keyword Planner API connection."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, test_keyword_planner_connection)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/keyword-planner/download")
+async def keyword_planner_download(request: dict):
+    """Download keyword planner results as Excel file."""
+    results = request.get('results', [])
+    if not results:
+        raise HTTPException(status_code=400, detail="No results provided")
+
+    try:
+        import pandas as pd
+        df = pd.DataFrame(results)
+        cols = ['original_keyword', 'normalized_keyword', 'search_volume']
+        df = df[[c for c in cols if c in df.columns]]
+        df = df.sort_values('search_volume', ascending=False)
+
+        output = BytesIO()
+        df.to_excel(output, index=False)
+        output.seek(0)
+
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=keyword_planner_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

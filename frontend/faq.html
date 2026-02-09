@@ -10,9 +10,9 @@
 </head>
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
-        <div class="container">
-            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1" style="text-decoration: none;">FAQ Generator</a>
-            <div>
+        <div class="container-fluid d-flex flex-nowrap align-items-center gap-2">
+            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1 me-auto" style="text-decoration: none; white-space: nowrap;">FAQ Generator</a>
+            <div class="d-flex flex-nowrap gap-1">
                 <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
                 <a href="/static/faq.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">FAQ Generator</a>
                 <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
@@ -21,6 +21,7 @@
                 <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
                 <a href="/static/redirect-checker.html" class="btn btn-outline-light btn-sm fw-bold">Redirect Checker</a>
                 <a href="/static/301-generator.html" class="btn btn-outline-light btn-sm fw-bold">301 Generator</a>
+                <a href="/static/keyword-planner.html" class="btn btn-outline-light btn-sm fw-bold">Keyword Planner</a>
                 <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
             </div>
         </div>
@@ -193,23 +194,23 @@
                     <div class="card-body">
                         <div class="row text-center">
                             <div class="col-md-3 col-6 mb-3">
-                                <h3 id="totalUrls" class="text-primary">-</h3>
+                                <h3 id="totalUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
                                 <p class="text-muted mb-0">Total URLs</p>
                             </div>
                             <div class="col-md-3 col-6 mb-3">
-                                <h3 id="processedUrls" class="text-primary">-</h3>
+                                <h3 id="processedUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
                                 <p class="text-muted mb-0">Processed</p>
                             </div>
                             <div class="col-md-2 col-4 mb-3">
-                                <h3 id="skippedUrls" class="text-primary">-</h3>
+                                <h3 id="skippedUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
                                 <p class="text-muted mb-0">Skipped</p>
                             </div>
                             <div class="col-md-2 col-4 mb-3">
-                                <h3 id="failedUrls" class="text-primary">-</h3>
+                                <h3 id="failedUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
                                 <p class="text-muted mb-0">Failed</p>
                             </div>
                             <div class="col-md-2 col-4 mb-3">
-                                <h3 id="pendingUrls" class="text-primary">-</h3>
+                                <h3 id="pendingUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
                                 <p class="text-muted mb-0">Pending</p>
                             </div>
                         </div>

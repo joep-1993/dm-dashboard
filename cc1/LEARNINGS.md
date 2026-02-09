@@ -53,6 +53,17 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
   4. Optionally clean up `content_history` backup entries
 - **Date**: 2026-02-09
 
+## Keyword Planner Integration with Google Ads API
+- **Purpose**: Look up Google Ads search volumes for keywords, with normalization that preserves traceability back to original keyword
+- **Key pattern**: Build `cleaned_to_originals` mapping (e.g., `{"e bike": ["e-bike", "E-Bike"]}`) → query API with deduplicated cleaned keywords → map results back to originals
+- **Normalization**: Replace `-` and `_` with spaces, remove special chars, lowercase, collapse whitespace (via `clean_keyword()`)
+- **Quota management**: 35 hardcoded customer_ids with rotation on `RESOURCE_EXHAUSTED` + exponential backoff
+- **API**: `GenerateKeywordHistoricalMetricsRequest` with geo=2528 (NL), language=1010 (Dutch), batch_size=10000
+- **Google Ads credentials**: Already in `.env` / Docker container env vars (`GOOGLE_DEVELOPER_TOKEN`, `GOOGLE_REFRESH_TOKEN`, etc.)
+- **Package**: `google-ads` v29.0.0 already installed in Docker container
+- **Files**: `backend/keyword_planner_service.py` (service), `backend/main.py` (4 endpoints), `frontend/keyword-planner.html` (UI)
+- **Date**: 2026-02-09
+
 ## Content Lookup URL Format Mismatch
 - **Problem**: URL lookup function in dm-tools frontend returned "URL not found in content database" for URLs that existed
 - **Root Cause**: `lookup_content()` in `main.py` normalized input to relative path (`/products/...`) but DB could store full URLs (`https://www.beslist.nl/products/...`) or vice versa
