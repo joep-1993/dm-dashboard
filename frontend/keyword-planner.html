@@ -102,6 +102,70 @@ stofzuiger"></textarea>
                     </div>
                 </div>
 
+                <!-- Category Keyword Volumes Section -->
+                <div class="card mb-4">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background-color: #5e4a90;">
+                        <h5 class="mb-0">Category Keyword Volumes</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">Combine a keyword with all 3,535 category names (singular + plural, both orders). Volumes are aggregated per deepest category and main category.</p>
+                        <div class="row align-items-end">
+                            <div class="col-md-6">
+                                <label for="catKeywordInput" class="form-label">Keyword</label>
+                                <input type="text" class="form-control" id="catKeywordInput" placeholder="e.g. nike">
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn text-white w-100" style="background-color: #5e4a90;" onclick="getCategoryVolumes()">
+                                    <span id="catBtnText">Get Category Volumes</span>
+                                    <span id="catSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                </button>
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-outline-secondary w-100" onclick="downloadCategoryResults()" id="catDownloadBtn" disabled>Download Excel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Category Volumes Progress -->
+                <div class="card mb-4 d-none" id="catProgressCard">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="catProgressText">Processing...</span>
+                            <span id="catProgressPercent"></span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" id="catProgressBar" role="progressbar" style="width: 0%; background-color: #5e4a90;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Category Volumes Results -->
+                <div class="card mb-4 d-none" id="catResultsCard">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background-color: #198754;">
+                        <h5 class="mb-0">Category Volume Results</h5>
+                        <span class="badge bg-light text-dark" id="catGrandTotal"></span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="results-table">
+                            <table class="table table-striped table-hover mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Main Category</th>
+                                        <th class="text-end">Search Volume</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="catResultsBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card-body pt-2 pb-2">
+                        <small class="text-muted" id="catStatsText"></small>
+                    </div>
+                </div>
+
                 <!-- Progress Section -->
                 <div class="card mb-4 d-none" id="progressCard">
                     <div class="card-body">
@@ -187,6 +251,119 @@ stofzuiger"></textarea>
         const API_BASE = window.location.origin;
         let currentResults = [];
         let selectedFile = null;
+        let catResultsData = null;
+
+        // ====== Category Keyword Volumes ======
+
+        async function getCategoryVolumes() {
+            const keyword = document.getElementById('catKeywordInput').value.trim();
+            if (!keyword) {
+                alert('Please enter a keyword');
+                return;
+            }
+
+            const btnText = document.getElementById('catBtnText');
+            const spinner = document.getElementById('catSpinner');
+            btnText.textContent = 'Processing...';
+            spinner.classList.remove('d-none');
+
+            document.getElementById('catProgressCard').classList.remove('d-none');
+            document.getElementById('catProgressBar').style.width = '50%';
+            document.getElementById('catProgressText').textContent = 'Generating combinations & querying Google Ads API...';
+            document.getElementById('catProgressPercent').textContent = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/category-volumes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keyword })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Request failed');
+                }
+
+                const data = await response.json();
+                catResultsData = data;
+
+                // Update progress
+                document.getElementById('catProgressBar').style.width = '100%';
+                document.getElementById('catProgressText').textContent = 'Complete!';
+                document.getElementById('catProgressPercent').textContent = '100%';
+
+                // Render maincat results
+                const tbody = document.getElementById('catResultsBody');
+                tbody.innerHTML = '';
+
+                const maincatResults = data.maincat_results || [];
+                maincatResults.forEach((r, i) => {
+                    const volumeClass = r.search_volume >= 1000 ? 'volume-high' :
+                                       r.search_volume >= 100 ? 'volume-medium' :
+                                       r.search_volume > 0 ? 'volume-low' : 'volume-zero';
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td>${escapeHtml(r.maincat)}</td>
+                        <td class="text-end ${volumeClass}">${(r.search_volume || 0).toLocaleString()}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                // Grand total row
+                const totalTr = document.createElement('tr');
+                totalTr.classList.add('table-dark');
+                totalTr.innerHTML = `
+                    <td></td>
+                    <td class="fw-bold">Grand Total</td>
+                    <td class="text-end fw-bold">${(data.grand_total || 0).toLocaleString()}</td>
+                `;
+                tbody.appendChild(totalTr);
+
+                document.getElementById('catGrandTotal').textContent = `Grand Total: ${(data.grand_total || 0).toLocaleString()}`;
+
+                const stats = data.stats || {};
+                document.getElementById('catStatsText').textContent =
+                    `${stats.total_categories || 0} categories | ${stats.total_combinations_queried || 0} combinations queried | ${stats.unique_keywords_queried || 0} unique keywords | ${stats.customer_ids_used || 0} customer IDs used`;
+
+                document.getElementById('catResultsCard').classList.remove('d-none');
+                document.getElementById('catDownloadBtn').disabled = false;
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                document.getElementById('catProgressCard').classList.add('d-none');
+            }
+
+            btnText.textContent = 'Get Category Volumes';
+            spinner.classList.add('d-none');
+        }
+
+        async function downloadCategoryResults() {
+            if (!catResultsData || !catResultsData.deepest_cat_results) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/category-volumes/download`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deepest_cat_results: catResultsData.deepest_cat_results })
+                });
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const keyword = document.getElementById('catKeywordInput').value.trim() || 'category';
+                a.download = `category_volumes_${keyword}_${new Date().toISOString().slice(0,10)}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Download failed: ' + error.message);
+            }
+        }
+
+        // ====== Keyword Input (existing) ======
 
         // Drag and drop
         const uploadZone = document.getElementById('uploadZone');

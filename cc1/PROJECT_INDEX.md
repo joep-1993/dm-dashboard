@@ -9,7 +9,7 @@ Backend: FastAPI (Python 3.11, ThreadPoolExecutor for parallel processing, psyco
 dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port 8003)
 ├── .claude/              # Claude Code configuration
 ├── backend/              # FastAPI app + all services
-│   ├── main.py           # FastAPI app (~3000 lines, 56 API endpoints)
+│   ├── main.py           # FastAPI app (~3250 lines, 58+ API endpoints)
 │   ├── database.py       # Database connections (PostgreSQL primary, Redshift legacy)
 │   ├── gpt_service.py    # OpenAI API integration
 │   ├── scraper_service.py    # Product Search API + web scraping
@@ -21,6 +21,10 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── redirect_301_service.py # 301 redirect management
 │   ├── rfinder_service.py    # /r/ URL discovery from Redshift
 │   ├── seo_content_generator.py # SEO content from Product Search API
+│   ├── keyword_planner_service.py # Keyword Planner: Google Ads search volume lookup
+│   ├── category_keyword_service.py # Category Keyword Volumes: keyword+category combinations
+│   ├── category_forms.json     # Pre-computed Dutch singular/plural forms (3,564 entries)
+│   ├── categories.xlsx         # Preloaded category data (3,543 rows: maincat/deepest_cat)
 │   ├── unique_titles.py      # Unique title generation
 │   ├── thema_ads_router.py   # Thema Ads APIRouter
 │   ├── thema_ads_service.py  # Thema Ads business logic (150KB)
@@ -39,6 +43,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── redirect-checker.html # Redirect Checker
 │   ├── 301-generator.html    # 301 Generator
 │   ├── thema-ads.html    # Thema Ads Processing
+│   ├── keyword-planner.html # Keyword Planner (search volumes + category volumes)
 │   ├── unique-titles.html # Unique Titles Manager
 │   ├── css/style.css     # Custom theme (#059CDF blue, #9C3095 purple, #A0D168 green)
 │   └── js/
@@ -345,6 +350,14 @@ python-dotenv==1.0.0      # Environment variable management
 - `POST /api/content-publish?dry_run=true&environment=dev` - Publish content (dry_run=true returns stats, false starts background task)
 - `GET /api/content-publish/status/{task_id}` - Poll background task status (pending/running/completed/failed)
 
+### Keyword Planner
+- `POST /api/keyword-planner/search-volumes` - Get search volumes for keyword list (JSON: `{"keywords": [...]}`, max 50,000)
+- `POST /api/keyword-planner/upload-excel` - Upload Excel with keywords in first column
+- `POST /api/keyword-planner/test` - Test Google Ads API connection
+- `POST /api/keyword-planner/download` - Download results as Excel
+- `POST /api/keyword-planner/category-volumes` - Combine keyword with all preloaded categories (JSON: `{"keyword": "nike"}`), returns volumes per deepest_cat and maincat
+- `POST /api/keyword-planner/category-volumes/download` - Download category volume results as Excel (JSON: `{"deepest_cat_results": [...]}`)
+
 ### Labels Applied by Thema Ads
 **Ad Groups get labeled with:**
 - `BF_2025` - Black Friday 2025 campaign marker
@@ -444,4 +457,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-02-06_
+_Last updated: 2026-02-10_

@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add Category Keyword Volumes sub-function to Keyword Planner - combines keyword with 3,535 preloaded category names (singular+plural, both orders), aggregates search volumes per deepest_cat and maincat, Excel download with search_volume_deepest_cat and search_volume_maincat columns, includes maincat name as its own deepest_cat row #claude-session:2026-02-10
 - [x] Add Keyword Planner tool - Google Ads search volume lookup with keyword normalization, Excel upload/download, customer_id quota rotation, consistent purple UI styling across all tools #claude-session:2026-02-09
 - [x] Fix V4 UUID lookup performance - replaced slow wildcard queries with two-phase pimId lookup + disabled wildcard fallback; fixed `result.get()` bug that falsely marked unfound V4 URLs as "gone" #claude-session:2026-02-09
 - [x] Detect and reset 349 cut-off content items - found content truncated mid-sentence using regex, backed up and re-queued for regeneration #claude-session:2026-02-09

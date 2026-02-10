@@ -21,6 +21,17 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
+## Category Keyword Volumes: Keyword + Category Combination Tool
+- **What**: Combines a keyword (e.g., "nike") with all 3,535 deepest category names in both singular/plural forms and both word orders (4 combos per category: "nike schoenen", "schoenen nike", "nike schoen", "schoen nike")
+- **Singular/plural forms**: Pre-computed and stored in `backend/category_forms.json` (3,564 entries including maincat names). Generated with Dutch heuristics: remove -en (with doubled consonant fix: "brillen"→"bril"), remove -s, handle -'s. Falls back to appending -en for assumed-singular words
+- **Maincat entries**: Each unique maincat name is also combined with the keyword, stored as a deepest_cat row where `deepest_cat = maincat` and `cat_id = maincat_id`
+- **Categories preloaded**: `backend/categories.xlsx` loaded at startup into `PRELOADED_CATEGORIES` (no file upload needed). 4 columns: maincat (A), maincat_id (B), deepest_cat (C), cat_id (D)
+- **Output Excel**: Same as input + column E (search_volume_deepest_cat) + column F (search_volume_maincat)
+- **API batch behavior**: ~14,200 keyword combinations → 2 batches of 10,000. Google Ads `GenerateKeywordHistoricalMetrics` may return slightly different rounded volumes when batch payload changes (adding/removing keywords from same request). This is NOT API variance (consecutive identical requests return identical results)
+- **Files**: `backend/category_keyword_service.py` (service), `backend/category_forms.json` (pre-computed forms), `backend/categories.xlsx` (preloaded data), `frontend/keyword-planner.html` (UI section)
+- **Endpoints**: `POST /api/keyword-planner/category-volumes` (JSON: `{"keyword": "nike"}`), `POST /api/keyword-planner/category-volumes/download` (JSON: `{"deepest_cat_results": [...]}`)
+- **Date**: 2026-02-10
+
 ## Link Validator V4 UUID Lookup: Wildcard Queries Kill ES Performance
 - **Problem**: V4 UUID plpUrl lookups used `wildcard` queries (`*V4_xxx*`) which caused constant 60s timeouts on Elasticsearch, making the "Validate All" feature extremely slow (~180K URLs taking hours)
 - **Root Cause**: Leading wildcards (`*V4_xxx*`) force a full index scan in ES. With 20 parallel workers, each content item having 2-4 V4 links, hundreds of 60s timeouts cascade across batches

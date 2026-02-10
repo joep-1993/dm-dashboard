@@ -22,6 +22,7 @@ from backend.link_validator import validate_content_links, validate_and_fix_cont
 from backend.faq_service import process_single_url_faq
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
+from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.content_publisher import (
     get_total_content_count,
     get_content_batch,
@@ -3148,6 +3149,79 @@ async def keyword_planner_download(request: dict):
             content=output.getvalue(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f"attachment; filename=keyword_planner_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Category Keyword Volumes API
+# ============================================================================
+
+@app.post("/api/keyword-planner/category-volumes")
+async def keyword_planner_category_volumes(request: dict):
+    """
+    Combine a keyword with all preloaded category names.
+    Generates singular/plural + keyword/category order combinations,
+    looks up search volumes, and aggregates per deepest_cat and maincat.
+
+    Categories are preloaded from backend/categories.xlsx at startup.
+    """
+    keyword = request.get("keyword", "").strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="No keyword provided")
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, process_category_keywords, keyword, PRELOADED_CATEGORIES)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/keyword-planner/category-volumes/download")
+async def keyword_planner_category_volumes_download(request: dict):
+    """
+    Download category volume results as Excel file.
+    Expects the same format as the input Excel but with added search volume columns.
+    """
+    import pandas as pd
+
+    deepest_results = request.get('deepest_cat_results', [])
+    if not deepest_results:
+        raise HTTPException(status_code=400, detail="No results provided")
+
+    try:
+        # Build maincat volume lookup
+        maincat_volumes = {}
+        for r in deepest_results:
+            mc = r.get("maincat", "")
+            vol = r.get("search_volume", 0)
+            if mc not in maincat_volumes:
+                maincat_volumes[mc] = 0
+            maincat_volumes[mc] += vol
+
+        # Build output DataFrame matching input format + volume columns
+        rows = []
+        for r in deepest_results:
+            rows.append({
+                "maincat": r.get("maincat", ""),
+                "maincat_id": r.get("maincat_id", ""),
+                "deepest_cat": r.get("deepest_cat", ""),
+                "cat_id": r.get("cat_id", ""),
+                "search_volume_deepest_cat": r.get("search_volume", 0),
+                "search_volume_maincat": maincat_volumes.get(r.get("maincat", ""), 0),
+            })
+
+        df = pd.DataFrame(rows)
+        output = BytesIO()
+        df.to_excel(output, index=False)
+        output.seek(0)
+
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=category_volumes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
