@@ -10,6 +10,11 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Filter URLs containing "+" from canonical generator results (no-index URLs) - added SQL exclusion in fetch_urls_from_redshift #claude-session:2026-02-10
+- [x] Fix canonical generator facet sorting bug - `kleur` now correctly sorts before `kleurtint` by sorting on facet name only (before `~` separator) #claude-session:2026-02-10
+- [x] Add facet volume batch processing - process 140K+ facet values × deepest cats per maincat, SIC/SOD-aware keyword generation, resume-capable runner script, output CSV with search_volume column #claude-session:2026-02-10
+- [x] Fix Google Ads API quota rotation - catch gRPC `ResourceExhausted` exception (separate from `GoogleAdsException`) for proper customer_id rotation on 429 rate limits #claude-session:2026-02-10
+- [x] Fix Redshift SSL SYSCALL errors - add TCP keepalives and connection health checks to psycopg2 pool #claude-session:2026-02-10
 - [x] Add Category Keyword Volumes sub-function to Keyword Planner - combines keyword with 3,535 preloaded category names (singular+plural, both orders), aggregates search volumes per deepest_cat and maincat, Excel download with search_volume_deepest_cat and search_volume_maincat columns, includes maincat name as its own deepest_cat row #claude-session:2026-02-10
 - [x] Add Keyword Planner tool - Google Ads search volume lookup with keyword normalization, Excel upload/download, customer_id quota rotation, consistent purple UI styling across all tools #claude-session:2026-02-09
 - [x] Fix V4 UUID lookup performance - replaced slow wildcard queries with two-phase pimId lookup + disabled wildcard fallback; fixed `result.get()` bug that falsely marked unfound V4 URLs as "gone" #claude-session:2026-02-09

@@ -22,7 +22,8 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── rfinder_service.py    # /r/ URL discovery from Redshift
 │   ├── seo_content_generator.py # SEO content from Product Search API
 │   ├── keyword_planner_service.py # Keyword Planner: Google Ads search volume lookup
-│   ├── category_keyword_service.py # Category Keyword Volumes: keyword+category combinations
+│   ├── category_keyword_service.py # Category Keyword Volumes: keyword+category combinations + facet volume processing
+│   ├── run_facet_volumes.py    # Batch facet volume processing script (all maincats, resume-capable)
 │   ├── category_forms.json     # Pre-computed Dutch singular/plural forms (3,564 entries)
 │   ├── categories.xlsx         # Preloaded category data (3,543 rows: maincat/deepest_cat)
 │   ├── unique_titles.py      # Unique title generation

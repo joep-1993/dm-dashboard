@@ -150,7 +150,7 @@
                             </div>
                             <div class="mb-3">
                                 <label for="titleDescription" class="form-label">Description <span class="text-danger">*</span></label>
-                                <textarea class="form-control" id="titleDescription" rows="3" placeholder="Meta description..." required></textarea>
+                                <textarea class="form-control" id="titleDescription" rows="3" placeholder="Meta description..." required>&#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop &#10062; beslist.nl</textarea>
                             </div>
                             <div class="mb-3">
                                 <label for="titleH1" class="form-label">H1 Title <span class="text-danger">*</span></label>
@@ -481,6 +481,7 @@
         // Clear form
         document.getElementById('clearBtn').addEventListener('click', () => {
             document.getElementById('titleForm').reset();
+            document.getElementById('titleDescription').value = '\u2762 Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop \u2762 beslist.nl';
             document.getElementById('saveResult').classList.add('d-none');
         });
 

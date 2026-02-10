@@ -11,6 +11,7 @@ import time
 from typing import List, Dict, Optional
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from google.api_core.exceptions import ResourceExhausted
 
 # Customer IDs for quota rotation
 CUSTOMER_IDS = [
@@ -85,19 +86,37 @@ def _query_search_volumes(client: GoogleAdsClient, keywords: List[str], customer
                 metrics = result.keyword_metrics
                 results[result.text] = metrics.avg_monthly_searches
             return results
+        except ResourceExhausted as ex:
+            # gRPC-level rate limit (429) - immediately rotate to next customer_id
+            print(f"[KEYWORD_PLANNER] Rate limited (gRPC 429) for customer_id {customer_id}, rotating")
+            return None
         except GoogleAdsException as ex:
             error_details = "\n".join([f"{error.error_code}: {error.message}" for error in ex.failure.errors])
             print(f"[KEYWORD_PLANNER] API error for customer {customer_id}: {error_details}")
-            if ex.error.code().name == "RESOURCE_EXHAUSTED":
+            # Check for quota exhaustion in API-level errors
+            is_quota = any("quota" in str(e.error_code).lower() or "resource_exhausted" in str(e.error_code).lower()
+                          for e in ex.failure.errors)
+            if is_quota:
+                print(f"[KEYWORD_PLANNER] Quota exhausted for customer_id {customer_id}, rotating")
+                return None
+            else:
                 attempt += 1
                 if attempt >= MAX_RETRY_ATTEMPTS:
-                    print(f"[KEYWORD_PLANNER] Quota exhausted for customer_id {customer_id}")
-                    return None  # Signal quota exhaustion
-                wait_time = min(2 ** attempt * 10, 600)
-                print(f"[KEYWORD_PLANNER] Quota exceeded, waiting {wait_time}s before retry...")
+                    raise
+                wait_time = min(2 ** attempt * 5, 60)
+                print(f"[KEYWORD_PLANNER] Retrying in {wait_time}s (attempt {attempt}/{MAX_RETRY_ATTEMPTS})...")
                 time.sleep(wait_time)
-            else:
+        except Exception as ex:
+            # Catch-all for unexpected exceptions that mention resource exhaustion
+            if "resource" in str(ex).lower() and "exhausted" in str(ex).lower():
+                print(f"[KEYWORD_PLANNER] Rate limited (unexpected type) for customer_id {customer_id}, rotating: {ex}")
+                return None
+            attempt += 1
+            if attempt >= MAX_RETRY_ATTEMPTS:
                 raise
+            wait_time = min(2 ** attempt * 5, 60)
+            print(f"[KEYWORD_PLANNER] Unexpected error, retrying in {wait_time}s (attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {ex}")
+            time.sleep(wait_time)
 
     return None
 

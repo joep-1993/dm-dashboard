@@ -100,6 +100,7 @@
                         <h5 class="mb-0">Results</h5>
                         <div>
                             <span id="resultCount" class="badge bg-light text-dark me-2">0 URLs</span>
+                            <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyToClipboard()">Copy for Excel</button>
                             <button class="btn btn-sm btn-outline-warning" onclick="downloadResults()">Download CSV</button>
                         </div>
                     </div>
@@ -236,9 +237,6 @@
 
             container.innerHTML = `
                 <p class="text-muted small mb-2">Total visits: <strong>${totalVisits.toLocaleString()}</strong></p>
-                <div class="mb-3">
-                    <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyToClipboard()">Copy for Excel</button>
-                </div>
                 <textarea id="tsvOutput" class="form-control mb-3" rows="10" readonly style="font-family: monospace; font-size: 0.8rem;">${escapeHtml(tsvData)}</textarea>
                 <div class="results-table">
                     <table class="table table-sm table-striped table-hover">

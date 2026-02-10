@@ -12,6 +12,7 @@ import json
 import os
 import re
 import pandas as pd
+from collections import defaultdict
 from typing import List, Dict, Tuple
 from backend.keyword_planner_service import get_search_volumes
 
@@ -38,6 +39,107 @@ for _, _row in _df.iterrows():
             "cat_id": str(_row['cat_id']),
         })
 print(f"[CATEGORY_KEYWORDS] Preloaded {len(PRELOADED_CATEGORIES)} categories from {_CATEGORIES_PATH}")
+
+
+def clean_facet_value(raw_value: str) -> str:
+    """
+    Clean a facet value by removing HTML comments and normalizing whitespace.
+    Keeps & as-is (e.g., 'Black & Decker').
+    """
+    cleaned = re.sub(r'<!--.*?-->', '', raw_value)
+    cleaned = cleaned.strip()
+    cleaned = ' '.join(cleaned.split())
+    return cleaned
+
+
+def parse_sic_sod(raw_value: str) -> Dict:
+    """
+    Parse SIC: and SOD: from a facet value.
+
+    Returns dict with:
+      - sic: SIC text or None (form used AFTER the category name)
+      - sod: SOD text or None (form used BEFORE the category name)
+      - plain: remaining text outside comments, or None
+    """
+    sic_match = re.search(r'<!--\s*SIC:\s*(.*?)\s*-->', raw_value)
+    sod_match = re.search(r'<!--\s*SOD:\s*(.*?)\s*-->', raw_value)
+
+    sic = sic_match.group(1).strip() if sic_match else None
+    sod = sod_match.group(1).strip() if sod_match else None
+
+    plain = re.sub(r'<!--.*?-->', '', raw_value).strip()
+    plain = ' '.join(plain.split()) if plain else None
+
+    return {"sic": sic, "sod": sod, "plain": plain}
+
+
+def generate_facet_combinations(
+    facet_values: List[Dict],
+    categories: List[Dict],
+) -> Tuple[List[str], Dict[str, Dict]]:
+    """
+    Generate keyword combinations from facet values × category names.
+
+    For SIC/SOD facet values (both present):
+      - SOD + cat_form  (e.g., "zwarte schoenen", "zwarte schoen")
+      - cat_form + SIC  (e.g., "schoenen zwart", "schoen zwart")
+
+    For normal facet values:
+      - facet + cat_form  and  cat_form + facet
+
+    Args:
+        facet_values: List of dicts with at least 'facet_value' key
+        categories: List of category dicts (maincat, maincat_id, deepest_cat, cat_id)
+
+    Returns:
+        (all_keywords, combination_map)
+    """
+    all_keywords = []
+    combination_map = {}
+
+    for facet in facet_values:
+        raw = facet["facet_value"]
+        parsed = parse_sic_sod(raw)
+        has_sic_sod = bool(parsed["sic"] and parsed["sod"])
+
+        if has_sic_sod:
+            before_text = parsed["sod"].lower()
+            after_text = parsed["sic"].lower()
+        else:
+            cleaned = clean_facet_value(raw)
+            if not cleaned:
+                # Fallback: use SIC, SOD, or plain if available
+                cleaned = parsed["sod"] or parsed["sic"] or parsed["plain"] or ""
+            if not cleaned:
+                continue
+            before_text = cleaned.lower()
+            after_text = cleaned.lower()
+
+        for cat in categories:
+            deepest_cat = cat["deepest_cat"]
+            forms = get_category_forms(deepest_cat)
+
+            for form in forms:
+                form = form.strip().lower()
+                if not form:
+                    continue
+
+                combo_before = f"{before_text} {form}"
+                combo_after = f"{form} {after_text}"
+
+                for combo in [combo_before, combo_after]:
+                    if combo not in combination_map:
+                        combination_map[combo] = {
+                            "maincat": cat["maincat"],
+                            "maincat_id": cat.get("maincat_id", ""),
+                            "deepest_cat": deepest_cat,
+                            "cat_id": cat.get("cat_id", ""),
+                            "facet_value": raw,
+                            "facet_name": facet.get("facet_name", ""),
+                        }
+                        all_keywords.append(combo)
+
+    return all_keywords, combination_map
 
 
 def get_category_forms(deepest_cat: str) -> List[str]:
@@ -198,4 +300,129 @@ def process_category_keywords(keyword: str, categories: List[Dict]) -> Dict:
             "unique_keywords_queried": sv_result.get("unique_keywords_queried", 0),
             "customer_ids_used": sv_result.get("customer_ids_used", 0),
         },
+    }
+
+
+def _normalize_keyword(kw: str) -> str:
+    """Normalize a keyword the same way clean_keyword does in keyword_planner_service."""
+    norm = re.sub(r'[-_]', ' ', kw)
+    norm = re.sub(r'[^a-zA-Z0-9\s]', '', norm)
+    return ' '.join(norm.split()).lower()
+
+
+def process_facet_volumes(maincat_name: str, facet_rows: List[Dict]) -> Dict:
+    """
+    Process facet values for a maincat: generate keyword combinations with
+    all deepest categories in that maincat, look up search volumes, and
+    aggregate per facet row.
+
+    Output matches input CSV columns + search_volume in column H.
+
+    Args:
+        maincat_name: Main category name (e.g., "Huishoudelijk")
+        facet_rows: List of dicts with keys matching the input CSV columns:
+                    main_category, main_category_id, facet_name, bucket,
+                    url_name, id, facet_value
+
+    Returns:
+        Dict with:
+          - results: list of dicts (input columns + search_volume)
+          - stats: processing statistics
+          - grand_total: sum of all search volumes
+    """
+    mc_cats = [c for c in PRELOADED_CATEGORIES if c["maincat"] == maincat_name]
+
+    if not mc_cats:
+        print(f"[FACET_VOLUMES] No deepest categories found for maincat '{maincat_name}'")
+        return {
+            "results": [{**row, "search_volume": 0} for row in facet_rows],
+            "stats": {"facet_values": len(facet_rows), "deepest_cats": 0},
+            "grand_total": 0,
+        }
+
+    # Generate all keyword combinations, tracking which facet rows produced each keyword
+    all_keywords_ordered = []
+    keyword_seen = set()
+    keyword_to_rows = defaultdict(set)
+    skipped = 0
+
+    for idx, facet in enumerate(facet_rows):
+        raw = facet["facet_value"]
+        parsed = parse_sic_sod(raw)
+        has_sic_sod = bool(parsed["sic"] and parsed["sod"])
+
+        if has_sic_sod:
+            before_text = parsed["sod"].lower()
+            after_text = parsed["sic"].lower()
+        else:
+            cleaned = clean_facet_value(raw)
+            if not cleaned:
+                cleaned = parsed["sod"] or parsed["sic"] or parsed["plain"] or ""
+            if not cleaned:
+                skipped += 1
+                continue
+            before_text = cleaned.lower()
+            after_text = cleaned.lower()
+
+        for cat in mc_cats:
+            forms = get_category_forms(cat["deepest_cat"])
+            for form in forms:
+                form = form.strip().lower()
+                if not form:
+                    continue
+                for combo in [f"{before_text} {form}", f"{form} {after_text}"]:
+                    keyword_to_rows[combo].add(idx)
+                    if combo not in keyword_seen:
+                        keyword_seen.add(combo)
+                        all_keywords_ordered.append(combo)
+
+    print(f"[FACET_VOLUMES] Maincat '{maincat_name}': {len(facet_rows)} facet values × "
+          f"{len(mc_cats)} deepest cats = {len(all_keywords_ordered)} unique keywords "
+          f"(skipped {skipped} empty values)")
+
+    # Look up search volumes
+    sv_result = get_search_volumes(all_keywords_ordered)
+
+    # Build normalized volume lookup
+    volume_lookup = {}
+    for r in sv_result.get("results", []):
+        norm = _normalize_keyword(r.get("normalized_keyword", ""))
+        vol = r.get("search_volume", 0)
+        volume_lookup[norm] = max(volume_lookup.get(norm, 0), vol)
+
+    # Sum volumes per facet row
+    row_volumes = [0] * len(facet_rows)
+    for combo, row_indices in keyword_to_rows.items():
+        norm = _normalize_keyword(combo)
+        vol = volume_lookup.get(norm, 0)
+        for idx in row_indices:
+            row_volumes[idx] += vol
+
+    # Build output: input CSV columns + search_volume
+    results = []
+    for idx, row in enumerate(facet_rows):
+        results.append({
+            "main_category": row["main_category"],
+            "main_category_id": row["main_category_id"],
+            "facet_name": row["facet_name"],
+            "bucket": row["bucket"],
+            "url_name": row["url_name"],
+            "id": row["id"],
+            "facet_value": row["facet_value"],
+            "search_volume": row_volumes[idx],
+        })
+
+    grand_total = sum(row_volumes)
+
+    return {
+        "results": results,
+        "stats": {
+            "facet_values": len(facet_rows),
+            "skipped": skipped,
+            "deepest_cats": len(mc_cats),
+            "unique_keywords": len(all_keywords_ordered),
+            "batches": sv_result.get("batches_used", 0),
+            "customer_ids_used": sv_result.get("customer_ids_used", 0),
+        },
+        "grand_total": grand_total,
     }

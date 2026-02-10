@@ -32,7 +32,11 @@ def _get_redshift_pool():
             user=os.getenv("REDSHIFT_USER"),
             password=os.getenv("REDSHIFT_PASSWORD"),
             cursor_factory=RealDictCursor,
-            connect_timeout=10
+            connect_timeout=10,
+            keepalives=1,
+            keepalives_idle=60,
+            keepalives_interval=10,
+            keepalives_count=5
         )
     return _redshift_pool
 
@@ -48,11 +52,23 @@ def return_db_connection(conn):
         p.putconn(conn)
 
 def get_redshift_connection():
-    """Get Redshift connection from pool"""
+    """Get Redshift connection from pool, with stale connection recovery"""
     p = _get_redshift_pool()
     conn = p.getconn()
-    # Set isolation level to READ COMMITTED to reduce serialization conflicts
-    conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
+    # Test if the connection is still alive
+    try:
+        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.close()
+    except Exception:
+        # Connection is dead, close it and get a fresh one
+        try:
+            p.putconn(conn, close=True)
+        except Exception:
+            pass
+        conn = p.getconn()
+        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
     return conn
 
 def return_redshift_connection(conn):

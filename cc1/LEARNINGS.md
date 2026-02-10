@@ -21,6 +21,46 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
+## Canonical Generator: Facet Sorting Bug with ~ Separator
+- **Problem**: When two facets share a prefix (e.g., `kleur` and `kleurtint`), the URL sorted the longer facet first: `/c/kleurtint~17171868~~kleur~393175`
+- **Root Cause**: `facets.sort()` sorted the full `facet~value` string. Since `~` (ASCII 126) > `t` (ASCII 116), `kleurtint~...` sorted before `kleur~...`
+- **Fix**: Sort by facet name only (part before `~`): `facets.sort(key=lambda f: f.split("~")[0] if "~" in f else f)`
+- **Result**: `kleur~393175~~kleurtint~17171868` (correct alphabetical order)
+- **File**: `backend/canonical_service.py` — function `_sort_facets()`
+- **Date**: 2026-02-10
+
+## Canonical Generator: Filter No-Index URLs with "+"
+- **Problem**: URLs containing `+` are no-index and should not appear in canonical generator results
+- **Fix**: Added `AND dv.url NOT LIKE '%%+%%'` to the Redshift query in `fetch_urls_from_redshift()`
+- **File**: `backend/canonical_service.py` — function `fetch_urls_from_redshift()`
+- **Date**: 2026-02-10
+
+## Facet Volume Processing: Batch Search Volumes for All Facet Values
+- **What**: Process 140K+ facet values across 31 maincats, combining each facet with all deepest category names within its maincat, looking up search volumes via Google Ads API
+- **SIC/SOD handling**: Facet values containing `<!-- SIC: X --><!-- SOD: Y -->` use SOD before category ("zwarte schoenen") and SIC after category ("schoenen zwart"). Plain facet values use the same text in both positions
+- **Facet cleaning**: `clean_facet_value()` strips HTML comments (`<!-- ... -->`), normalizes whitespace. `parse_sic_sod()` extracts SIC/SOD/plain text
+- **Keyword-to-row tracking**: Uses `keyword_to_rows` dict mapping each keyword combo to a set of facet row indices, allowing volume distribution back to source rows
+- **Output**: Same columns as input CSV + `search_volume` column (grand total of all keyword combos for that facet across all deepest cats)
+- **Resume capability**: `facets_progress.txt` tracks completed maincats; script skips them on restart
+- **Scale**: ~81M keyword combinations, ~8,128 API batches, 35 customer IDs for quota rotation
+- **Files**: `backend/category_keyword_service.py` (functions: `clean_facet_value`, `parse_sic_sod`, `process_facet_volumes`, `_normalize_keyword`), `backend/run_facet_volumes.py` (batch runner script)
+- **Date**: 2026-02-10
+
+## Google Ads API: gRPC ResourceExhausted vs GoogleAdsException
+- **Problem**: Quota rotation wasn't working — rate limit errors (429) crashed entire maincats instead of rotating to next customer_id
+- **Root Cause**: The code only caught `GoogleAdsException`, but 429 rate limits throw `google.api_core.exceptions.ResourceExhausted` (a gRPC-level exception), which is a different exception class
+- **Fix**: Import `ResourceExhausted` from `google.api_core.exceptions` and catch it separately before `GoogleAdsException`. Also added catch-all `Exception` handler that checks for "resource exhausted" in message string
+- **Key lesson**: Google Ads API errors come in two flavors: (1) API-level `GoogleAdsException` with `.failure.errors` list, and (2) gRPC-level exceptions like `ResourceExhausted` which bypass the `GoogleAdsException` handler entirely
+- **File**: `backend/keyword_planner_service.py` — function `_query_search_volumes()`
+- **Date**: 2026-02-10
+
+## Redshift Connection Pool: SSL SYSCALL Error Fix
+- **Problem**: "SSL SYSCALL error: EOF detected" in canonical generator when querying Redshift
+- **Root Cause**: Stale connections in psycopg2 ThreadedConnectionPool — connections go idle, Redshift drops them, but the pool doesn't know
+- **Fix**: (1) Added TCP keepalive settings to pool (keepalives=1, keepalives_idle=60, keepalives_interval=10, keepalives_count=5), (2) Added health check in `get_redshift_connection()` — runs `SELECT 1` before returning pooled connection, gets fresh one if stale
+- **File**: `backend/database.py` — functions `_get_redshift_pool()`, `get_redshift_connection()`
+- **Date**: 2026-02-10
+
 ## Category Keyword Volumes: Keyword + Category Combination Tool
 - **What**: Combines a keyword (e.g., "nike") with all 3,535 deepest category names in both singular/plural forms and both word orders (4 combos per category: "nike schoenen", "schoenen nike", "nike schoen", "schoen nike")
 - **Singular/plural forms**: Pre-computed and stored in `backend/category_forms.json` (3,564 entries including maincat names). Generated with Dutch heuristics: remove -en (with doubled consonant fix: "brillen"→"bril"), remove -s, handle -'s. Falls back to appending -en for assumed-singular words

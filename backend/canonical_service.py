@@ -124,6 +124,7 @@ def fetch_urls_from_redshift(
               AND dv.url NOT LIKE '%%shop_id=%%'
               AND dv.url NOT LIKE '%%/sitemap/%%'
               AND dv.url NOT LIKE '%%/filters/%%'
+              AND dv.url NOT LIKE '%%+%%'
         """
 
         params = [int(start_date), int(end_date)]
@@ -306,7 +307,9 @@ def _sort_facets(url: str) -> str:
     if "~~" in facet_str:
         facets = facet_str.split("~~")
         facets = [f.lower() for f in facets if f]
-        facets.sort()
+        # Sort by facet name only (part before ~), not full string,
+        # because ~ (ASCII 126) > letters, causing e.g. kleurtint~... < kleur~...
+        facets.sort(key=lambda f: f.split("~")[0] if "~" in f else f)
         return f"{base}/c/{'~~'.join(facets)}"
 
     return url
