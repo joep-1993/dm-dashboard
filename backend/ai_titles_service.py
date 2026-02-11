@@ -331,10 +331,16 @@ Regels:
    - FOUT: "schoenen in rood"
    - GOED: "Rode schoenen"
 3. Zet kleuren en materialen als bijvoeglijk naamwoord VOOR het zelfstandig naamwoord.
+4. Zet maten (zoals S, M, L, XL, 38, 42, etc.) ACHTER de productnaam, niet ervoor.
+   - FOUT: "Nike Heren Maat L tanktops"
+   - GOED: "Nike Heren tanktops Maat L"
+   - FOUT: "Maat 42 sneakers"
+   - GOED: "Sneakers Maat 42"
 
 Voorbeeld:
 "Schoenen - Nike - Rode - Met veters" wordt "Rode Nike schoenen met veters".
 "Saniclear - Zilver - Messing - Design Fonteinkranen" wordt "Zilveren messing Saniclear design fonteinkranen".
+"Nike - Heren - Maat L - Tanktops" wordt "Nike Heren tanktops Maat L".
 
 Ik wil het antwoord graag in dit json formaat terug:
 {{"oude_titel": "{h1_title}", "h1_title": "nieuwe_titel_hier", "url": "{url}"}}
@@ -427,7 +433,9 @@ Regels:
 3. Merk ALTIJD vooraan (bijv. "Apple iPhones" niet "iPhones van Apple").
 4. Kleuren en materialen als bijvoeglijk naamwoord VOOR het zelfstandig naamwoord.
 5. NOOIT "in", "van", "met" of "voor" toevoegen voor kleuren/materialen.
-6. Maak de titel natuurlijk lopend Nederlands.
+6. Zet maten (zoals S, M, L, XL, 38, 42, etc.) ACHTER de productnaam, niet ervoor.
+   Bijvoorbeeld: "Nike Heren tanktops Maat L" niet "Nike Heren Maat L tanktops".
+7. Maak de titel natuurlijk lopend Nederlands.
 
 Geef ALLEEN de verbeterde titel terug, geen uitleg."""
 

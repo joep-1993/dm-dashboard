@@ -2695,3 +2695,32 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
   - `rate_limited_503` - 503 error (rate limiting)
 - **Reset Query**: `DELETE FROM ... WHERE status IN ('skipped', 'failed') AND skip_reason <> 'no_products_found'`
 - **Date**: 2026-02-04
+
+## IndexNow Integration
+- **Service**: `backend/indexnow_service.py` - adapted from standalone `index_now.py`
+- **Uses**: `database.py` Redshift connection pool (not hardcoded credentials)
+- **API**: POST to `https://api.indexnow.org/IndexNow` with host, key, keyLocation, urlList
+- **Redshift table**: `pa.index_now_joep` for submission tracking
+- **Endpoints**: POST `/api/indexnow/submit`, POST `/api/indexnow/upload-excel`, GET `/api/indexnow/history`
+- **Date**: 2026-02-10
+
+## SEO Index Checker Integration
+- **Service**: `backend/index_checker_service.py` - Google Search Console URL Inspection API
+- **Uses**: Service account JSON files in `backend/service_accounts/` (gitignored)
+- **Quota**: 2,000 requests/day per service account, rotates on quota exhaustion
+- **Service account credentials**: Different from Keyword Planner (service account JSON vs OAuth2) - NOT interchangeable
+- **Endpoints**: POST `/api/index-checker/check`, POST `/api/index-checker/upload-excel`, GET `/api/index-checker/quota`
+- **Date**: 2026-02-10
+
+## AI Title Generation - Size Placement Rule
+- **Issue**: Sizes (Maat L, XL, 42, etc.) were placed before the product name ("Nike Heren Maat L tanktops")
+- **Fix**: Added rule to both prompts in `ai_titles_service.py` to place sizes AFTER the product name
+- **Correct**: "Nike Heren tanktops Maat L"
+- **Both prompts updated**: `generate_ai_title()` (rule 4) and `generate_title_from_api()` (rule 6)
+- **Reset**: 2,231 URLs with `maat` facets reset to pending for reprocessing
+- **Date**: 2026-02-10
+
+## Silent Docker Exec Output
+- **Issue**: `docker exec` with inline Python (`python3 -c "..."`) sometimes produces no output
+- **Workaround**: Write a .py script file and run it with `python3 -m backend.script_name` from `/app`
+- **Date**: 2026-02-10

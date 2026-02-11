@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IndexNow</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .result-badge { font-size: 0.85rem; }
+        .batch-row td { vertical-align: middle; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container-fluid d-flex flex-nowrap align-items-center gap-2">
+            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1 me-auto" style="white-space: nowrap;">IndexNow</a>
+            <div class="d-flex flex-nowrap gap-1">
+                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
+                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
+                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
+                <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
+                <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
+                <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
+                <a href="/static/redirect-checker.html" class="btn btn-outline-light btn-sm fw-bold">Redirect Checker</a>
+                <a href="/static/301-generator.html" class="btn btn-outline-light btn-sm fw-bold">301 Generator</a>
+                <a href="/static/keyword-planner.html" class="btn btn-outline-light btn-sm fw-bold">Keyword Planner</a>
+                <a href="/static/indexnow.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">IndexNow</a>
+                <a href="/static/index-checker.html" class="btn btn-outline-light btn-sm fw-bold">SEO Index Checker</a>
+                <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+
+                <!-- Input Section -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Submit URLs to IndexNow</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Tabs -->
+                        <ul class="nav nav-tabs mb-3" role="tablist">
+                            <li class="nav-item">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#manualTab">Manual Input</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#excelTab">Excel Upload</button>
+                            </li>
+                        </ul>
+
+                        <div class="tab-content">
+                            <!-- Manual Input Tab -->
+                            <div class="tab-pane fade show active" id="manualTab">
+                                <div class="mb-3">
+                                    <label for="urlInput" class="form-label">URLs (one per line)</label>
+                                    <textarea class="form-control" id="urlInput" rows="8" placeholder="https://www.beslist.nl/products/...&#10;https://www.beslist.nl/products/..."></textarea>
+                                </div>
+                                <button class="btn btn-primary" onclick="submitManual()" id="submitManualBtn">
+                                    Submit to IndexNow
+                                </button>
+                            </div>
+
+                            <!-- Excel Upload Tab -->
+                            <div class="tab-pane fade" id="excelTab">
+                                <div class="mb-3">
+                                    <label for="excelFile" class="form-label">Upload Excel file with URL column</label>
+                                    <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
+                                </div>
+                                <button class="btn btn-primary" onclick="submitExcel()" id="submitExcelBtn">
+                                    Upload & Submit
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="card mb-4 d-none" id="resultsCard">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0">Results</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-3">
+                            <div class="col-md-3 text-center">
+                                <h4 id="statInput">0</h4>
+                                <small class="text-muted">Total Input</small>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <h4 id="statSubmitted" class="text-success">0</h4>
+                                <small class="text-muted">Submitted</small>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <h4 id="statSkipped" class="text-warning">0</h4>
+                                <small class="text-muted">Duplicates Skipped</small>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <h4 id="statFailed" class="text-danger">0</h4>
+                                <small class="text-muted">Failed</small>
+                            </div>
+                        </div>
+                        <div id="messageArea"></div>
+                        <div id="batchResults"></div>
+                    </div>
+                </div>
+
+                <!-- History Section -->
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Submission History</h5>
+                        <button class="btn btn-sm btn-outline-light" onclick="loadHistory()">Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <div id="historyContent">
+                            <p class="text-muted">Click Refresh to load history.</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = window.location.origin;
+
+        function setLoading(btnId, loading) {
+            const btn = document.getElementById(btnId);
+            if (loading) {
+                btn.disabled = true;
+                btn.dataset.originalText = btn.textContent;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Submitting...';
+            } else {
+                btn.disabled = false;
+                btn.textContent = btn.dataset.originalText;
+            }
+        }
+
+        function showResults(data) {
+            const card = document.getElementById('resultsCard');
+            card.classList.remove('d-none');
+
+            document.getElementById('statInput').textContent = data.total_input || 0;
+            document.getElementById('statSubmitted').textContent = data.total_submitted || 0;
+            document.getElementById('statSkipped').textContent = data.skipped_duplicates || 0;
+            document.getElementById('statFailed').textContent = data.total_failed || 0;
+
+            const msgArea = document.getElementById('messageArea');
+            if (data.message) {
+                msgArea.innerHTML = `<div class="alert alert-warning">${data.message}</div>`;
+            } else {
+                msgArea.innerHTML = '';
+            }
+
+            const batchDiv = document.getElementById('batchResults');
+            if (data.batches && data.batches.length > 0) {
+                let html = '<table class="table table-sm table-striped"><thead><tr><th>Batch</th><th>URLs</th><th>Status</th></tr></thead><tbody>';
+                data.batches.forEach(b => {
+                    const badge = b.success
+                        ? `<span class="badge bg-success result-badge">${b.response_code} OK</span>`
+                        : `<span class="badge bg-danger result-badge">${b.response_code} Error</span>`;
+                    html += `<tr class="batch-row"><td>${b.batch_number}</td><td>${b.urls_count.toLocaleString()}</td><td>${badge}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                batchDiv.innerHTML = html;
+            } else {
+                batchDiv.innerHTML = '';
+            }
+        }
+
+        async function submitManual() {
+            const text = document.getElementById('urlInput').value.trim();
+            if (!text) return alert('Please enter at least one URL.');
+
+            const urls = text.split('\n').map(u => u.trim()).filter(u => u);
+            if (urls.length === 0) return alert('No valid URLs found.');
+
+            setLoading('submitManualBtn', true);
+            try {
+                const response = await fetch(`${API_BASE}/api/indexnow/submit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Request failed');
+                }
+
+                const data = await response.json();
+                showResults(data);
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                setLoading('submitManualBtn', false);
+            }
+        }
+
+        async function submitExcel() {
+            const fileInput = document.getElementById('excelFile');
+            if (!fileInput.files.length) return alert('Please select an Excel file.');
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            setLoading('submitExcelBtn', true);
+            try {
+                const response = await fetch(`${API_BASE}/api/indexnow/upload-excel`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Request failed');
+                }
+
+                const data = await response.json();
+                showResults(data);
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                setLoading('submitExcelBtn', false);
+            }
+        }
+
+        async function loadHistory() {
+            const container = document.getElementById('historyContent');
+            container.innerHTML = '<p class="text-muted">Loading...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/indexnow/history`);
+                if (!response.ok) throw new Error('Failed to load history');
+
+                const data = await response.json();
+                const history = data.history || [];
+
+                if (history.length === 0) {
+                    container.innerHTML = '<p class="text-muted">No submissions yet.</p>';
+                    return;
+                }
+
+                let html = '<table class="table table-sm table-striped"><thead><tr><th>Date</th><th>Response</th><th>URLs</th></tr></thead><tbody>';
+                history.forEach(h => {
+                    const badge = h.response_code === 200
+                        ? `<span class="badge bg-success">${h.response_code}</span>`
+                        : `<span class="badge bg-danger">${h.response_code}</span>`;
+                    html += `<tr><td>${h.date}</td><td>${badge}</td><td>${h.url_count.toLocaleString()}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch (error) {
+                container.innerHTML = `<p class="text-danger">Error: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

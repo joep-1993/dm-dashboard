@@ -3225,3 +3225,174 @@ async def keyword_planner_category_volumes_download(request: dict):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# IndexNow Endpoints
+# ============================================================
+
+@app.post("/api/indexnow/submit")
+async def indexnow_submit(request: dict):
+    """
+    Submit URLs to IndexNow API.
+    Accepts {"urls": ["https://...", ...]}
+    Deduplicates against previously submitted URLs in Redshift.
+    """
+    from backend.indexnow_service import submit_urls
+
+    urls = request.get("urls", [])
+    if not urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+
+    urls = [u.strip() for u in urls if u and u.strip()]
+    if not urls:
+        raise HTTPException(status_code=400, detail="No valid URLs provided")
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, submit_urls, urls)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/indexnow/upload-excel")
+async def indexnow_upload_excel(file: UploadFile = File(...)):
+    """
+    Upload an Excel file with a URL column and submit to IndexNow.
+    """
+    from backend.indexnow_service import submit_urls
+
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be .xlsx or .xls")
+
+    try:
+        contents = await file.read()
+        df = pd.read_excel(BytesIO(contents))
+
+        if df.empty:
+            raise HTTPException(status_code=400, detail="Excel file is empty")
+
+        # Find URL column (case-insensitive)
+        url_col = None
+        for col in df.columns:
+            if col.strip().upper() == "URL":
+                url_col = col
+                break
+
+        if url_col is None:
+            # Fall back to first column
+            url_col = df.columns[0]
+
+        urls = df[url_col].dropna().astype(str).tolist()
+        urls = [u.strip() for u in urls if u.strip() and u.strip().startswith("http")]
+
+        if not urls:
+            raise HTTPException(status_code=400, detail="No valid URLs found in the file")
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, submit_urls, urls)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/indexnow/history")
+async def indexnow_history(limit: int = 100):
+    """Get submission history grouped by date and response code."""
+    from backend.indexnow_service import get_submission_history
+
+    try:
+        loop = asyncio.get_event_loop()
+        history = await loop.run_in_executor(None, get_submission_history, limit)
+        return {"status": "success", "history": history}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# SEO Index Checker Endpoints
+# ============================================================
+
+@app.post("/api/index-checker/check")
+async def index_checker_check(request: dict):
+    """
+    Check index status for a list of URLs via Google Search Console URL Inspection API.
+    Accepts {"urls": ["https://...", ...]}
+    """
+    from backend.index_checker_service import check_urls
+
+    urls = request.get("urls", [])
+    if not urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+
+    urls = [u.strip() for u in urls if u and u.strip()]
+    if not urls:
+        raise HTTPException(status_code=400, detail="No valid URLs provided")
+    if len(urls) > 8000:
+        raise HTTPException(status_code=400, detail="Maximum 8,000 URLs per request (daily quota limit)")
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, check_urls, urls)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/index-checker/upload-excel")
+async def index_checker_upload_excel(file: UploadFile = File(...)):
+    """
+    Upload an Excel file with URLs and check their index status.
+    """
+    from backend.index_checker_service import check_urls
+
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be .xlsx or .xls")
+
+    try:
+        contents = await file.read()
+        df = pd.read_excel(BytesIO(contents))
+
+        if df.empty:
+            raise HTTPException(status_code=400, detail="Excel file is empty")
+
+        # Find URL column (case-insensitive)
+        url_col = None
+        for col in df.columns:
+            if col.strip().upper() == "URL":
+                url_col = col
+                break
+        if url_col is None:
+            url_col = df.columns[0]
+
+        urls = df[url_col].dropna().astype(str).tolist()
+        urls = [u.strip() for u in urls if u.strip() and u.strip().startswith("http")]
+
+        if not urls:
+            raise HTTPException(status_code=400, detail="No valid URLs found in the file")
+        if len(urls) > 8000:
+            raise HTTPException(status_code=400, detail="Maximum 8,000 URLs per request (daily quota limit)")
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, check_urls, urls)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/index-checker/quota")
+async def index_checker_quota():
+    """Get info about available service accounts and estimated daily quota."""
+    from backend.index_checker_service import get_quota_info
+
+    try:
+        loop = asyncio.get_event_loop()
+        info = await loop.run_in_executor(None, get_quota_info)
+        return info
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

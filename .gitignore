@@ -40,6 +40,7 @@ cc1/
 
 # Credentials
 redshift
+backend/service_accounts/
 
 # Google Ads automation (contains sensitive config)
 thema_ads_optimized/

@@ -10,6 +10,10 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Integrate IndexNow tool into dm-tools - service layer, 3 API endpoints, frontend with manual/Excel input, dashboard card, nav links in all tools #claude-session:2026-02-10
+- [x] Integrate SEO Index Checker into dm-tools - Google Search Console URL Inspection API, service account quota rotation, frontend with results filtering and CSV download, dashboard card, nav links in all tools #claude-session:2026-02-10
+- [x] Fix AI title size placement - sizes (Maat L, XL, 42) now placed after product name, reset 2,231 URLs with maat facets to pending #claude-session:2026-02-10
+- [x] Import 15,666 new URLs into kopteksten/FAQ databases and 15,085 into unique titles from ut_new_urls.xlsx #claude-session:2026-02-10
 - [x] Filter URLs containing "+" from canonical generator results (no-index URLs) - added SQL exclusion in fetch_urls_from_redshift #claude-session:2026-02-10
 - [x] Fix canonical generator facet sorting bug - `kleur` now correctly sorts before `kleurtint` by sorting on facet name only (before `~` separator) #claude-session:2026-02-10
 - [x] Add facet volume batch processing - process 140K+ facet values × deepest cats per maincat, SIC/SOD-aware keyword generation, resume-capable runner script, output CSV with search_volume column #claude-session:2026-02-10

@@ -9,7 +9,7 @@ Backend: FastAPI (Python 3.11, ThreadPoolExecutor for parallel processing, psyco
 dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port 8003)
 ├── .claude/              # Claude Code configuration
 ├── backend/              # FastAPI app + all services
-│   ├── main.py           # FastAPI app (~3250 lines, 58+ API endpoints)
+│   ├── main.py           # FastAPI app (~3400 lines, 64+ API endpoints)
 │   ├── database.py       # Database connections (PostgreSQL primary, Redshift legacy)
 │   ├── gpt_service.py    # OpenAI API integration
 │   ├── scraper_service.py    # Product Search API + web scraping
@@ -24,6 +24,9 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── keyword_planner_service.py # Keyword Planner: Google Ads search volume lookup
 │   ├── category_keyword_service.py # Category Keyword Volumes: keyword+category combinations + facet volume processing
 │   ├── run_facet_volumes.py    # Batch facet volume processing script (all maincats, resume-capable)
+│   ├── indexnow_service.py     # IndexNow: submit URLs to IndexNow API with Redshift dedup
+│   ├── index_checker_service.py # SEO Index Checker: Google Search Console URL Inspection API
+│   ├── index_checker.py        # Standalone index checker script
 │   ├── category_forms.json     # Pre-computed Dutch singular/plural forms (3,564 entries)
 │   ├── categories.xlsx         # Preloaded category data (3,543 rows: maincat/deepest_cat)
 │   ├── unique_titles.py      # Unique title generation
@@ -45,6 +48,8 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── 301-generator.html    # 301 Generator
 │   ├── thema-ads.html    # Thema Ads Processing
 │   ├── keyword-planner.html # Keyword Planner (search volumes + category volumes)
+│   ├── indexnow.html       # IndexNow (submit URLs for indexing)
+│   ├── index-checker.html  # SEO Index Checker (Google index status)
 │   ├── unique-titles.html # Unique Titles Manager
 │   ├── css/style.css     # Custom theme (#059CDF blue, #9C3095 purple, #A0D168 green)
 │   └── js/
@@ -359,6 +364,16 @@ python-dotenv==1.0.0      # Environment variable management
 - `POST /api/keyword-planner/category-volumes` - Combine keyword with all preloaded categories (JSON: `{"keyword": "nike"}`), returns volumes per deepest_cat and maincat
 - `POST /api/keyword-planner/category-volumes/download` - Download category volume results as Excel (JSON: `{"deepest_cat_results": [...]}`)
 
+### IndexNow
+- `POST /api/indexnow/submit` - Submit URLs to IndexNow API (JSON: `{"urls": [...]}`)
+- `POST /api/indexnow/upload-excel` - Upload Excel with URL column, deduplicate, submit
+- `GET /api/indexnow/history` - Recent submission history from Redshift
+
+### SEO Index Checker
+- `POST /api/index-checker/check` - Check index status via Google Search Console (JSON: `{"urls": [...]}`, max 8,000)
+- `POST /api/index-checker/upload-excel` - Upload Excel with URLs, check index status
+- `GET /api/index-checker/quota` - Service account quota info
+
 ### Labels Applied by Thema Ads
 **Ad Groups get labeled with:**
 - `BF_2025` - Black Friday 2025 campaign marker
@@ -458,4 +473,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-02-10_
+_Last updated: 2026-02-11_
