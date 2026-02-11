@@ -24,19 +24,27 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 ## AI Title Generation: Code-Level Facet Classification
 - **Problem**: OpenAI (gpt-4o-mini) persistently adds "met" before sizes ("met Maat L", "met Grote maten") despite extensive prompt rules forbidding it. Prompt-only fixes failed after 5+ iterations.
 - **Solution**: Moved facet handling from prompt rules to Python code preprocessing in `generate_title_from_api()`:
-  1. **Size values stripped before AI**: Facets where `facet_name` starts with "maat", or `detail_value` is "Maat X"/"Grote maten"/"Kleine maten" are removed from the H1 and facet list before sending to the AI. Appended in code after AI response.
-  2. **Met-feature pre-combination**: Feature values are pre-combined into a ready-made clause (e.g., "met korte mouwen, print en borstzak") and passed as an exact string for the AI to use.
-  3. **Conditional met rule**: When no features exist, prompt says "Voeg NOOIT 'met' toe". When features exist, provides exact clause to copy.
-  4. **Value-based classification** (not facet-name-based):
+  1. **Spec/size auto-detection** (`is_spec_value()`): Automatically detects values that belong at the end of the title using regex pattern matching — number+unit (liter, watt, cm, kg, persoons, etc.), bare numbers, size abbreviations (S/M/L/XL), "Maat X"/"Wijdte X", "Grote/Kleine maten", and maat/wijdte facet name fallback. No hardcoded facet name list needed.
+  2. **Bare number "Maat" prefix**: Numbers from maat facets get "Maat" prepended (e.g., "57" → "Maat 57")
+  3. **Met-feature pre-combination**: Feature values are pre-combined into a ready-made clause (e.g., "met korte mouwen, print en borstzak") and passed as an exact string for the AI to use.
+  4. **Conditional met rule**: When no features exist, prompt says "Voeg NOOIT 'met' toe". When features exist, provides exact clause to copy.
+  5. **Value-based met-classification** (not facet-name-based):
      - API `detail_value` starting with "met "/"zonder " → automatic met_values
-     - Small hardcoded set of feature values needing "met" added: mouwen, capuchon, hals, rits, knopen, veters
+     - Small hardcoded set of feature values needing "met" added: mouwen, capuchon, hals, rits, knopen, veters, draaiplateau, grill, strepen, bloemen, camouflage, panter, luipaard
+     - Opties/functies/features facets are NOT blanket-classified (some are adjectives like "Ademende", "Hittebestendige")
      - Everything else → regular (adjective before product name)
-  5. **Brand deduplication**: If Merk value appears inside another facet (e.g., Merk="Epson" + Productlijn="Epson EcoTank"), standalone brand facet is dropped
-  6. **Color shade deduplication**: If both Kleur and Kleurtint* are present, base color dropped in favor of specific shade
-  7. **Audience deduplication**: If general audience (Kinder/Baby) + specific (Meisjes/Jongens) both present, general is dropped
-  8. **Hallucination removal**: Post-processing strips Heren/Dames/Kinderen/Nieuwe etc. from output if not present in input facets/title
-  9. **Trailing "met" safety net**: Strips dangling " met" from AI output before size appending
+  6. **Brand deduplication**: If Merk value appears inside another facet (e.g., Merk="Epson" + Productlijn="Epson EcoTank"), standalone brand facet is dropped
+  7. **Color deduplication**: If both Kleur and Kleurtint*/Kleurcombinati* are present, base color dropped in favor of specific shade/combination
+  8. **Audience deduplication**: If general audience (Kinder/Baby) + specific (Meisjes/Jongens) both present, general is dropped
+  9. **Hallucination removal**: Post-processing strips Heren/Dames/Kinderen/Nieuwe etc. from output if not present in input. Recognizes inflected forms (Nieuw→Nieuwe) to avoid stripping valid adjective inflections.
+  10. **Trailing "met" safety net**: Strips dangling " met" from AI output before appending
+  11. **Suffix values**: Color combinations (Kleurcombinaties) appended after title but before size values
+  12. **First letter capitalization**: Ensures title starts with capital, unless first word is a lowercase brand (e.g., "iPhone")
+  13. **Category name fallback**: Appends deepest category name when missing from H1 (e.g., "Vrijstaande 23 liter" → "Vrijstaande 23 liter magnetrons")
+  14. **Adjective inflection prompt rule**: Rule 10 tells AI to inflect adjectives correctly ("Nieuw" → "Nieuwe")
 - **Key lesson**: When LLM prompt rules fail repeatedly for a specific pattern, move that logic to deterministic code. Code-level preprocessing is 100% reliable vs prompt rules being probabilistic.
+- **Key lesson 2**: Don't classify entire facet groups (opties/functies) as met-features — they contain both adjectives ("Ademende", "Hittebestendige") and nouns ("Draaiplateau"). Use value-based classification.
+- **Key lesson 3**: Auto-detect spec/size values with regex (number+unit) instead of hardcoding facet names — more robust across categories.
 - **File**: `backend/ai_titles_service.py` — function `generate_title_from_api()`
 - **Date**: 2026-02-11
 

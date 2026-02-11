@@ -506,6 +506,7 @@ def fetch_products_api(url: str) -> Optional[Dict]:
         return {
             "url": clean,
             "h1_title": h1_title,
+            "category_name": deepest_category_name,
             "products": products,
             "selected_facets": selected_facets,
             "product_urls": product_urls[:15]  # Limit to 15 product URLs for FAQ hyperlinks

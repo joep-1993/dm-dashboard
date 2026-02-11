@@ -430,10 +430,15 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
 
     api_h1 = page_data.get("h1_title", "")
     selected_facets = page_data.get("selected_facets", [])
+    category_name = page_data.get("category_name", "")
 
     if not api_h1:
         print(f"[AI_TITLES] No H1 from API for {url}")
         return None
+
+    # Append category name if missing from H1 (e.g., "Vrijstaande 23 liter" → "Vrijstaande 23 liter magnetrons")
+    if category_name and category_name.lower() not in api_h1.lower():
+        api_h1 = api_h1.rstrip() + " " + category_name.lower()
 
     # Step 2: Use OpenAI to improve the H1
     client = get_openai_client()
@@ -455,10 +460,10 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             # Also strip the standalone brand from the API H1
             api_h1 = api_h1.replace(brand_name + ' ', '', 1) if api_h1.count(brand_name) > 1 else api_h1
 
-    # Drop base color (Kleur) when a more specific shade (Kleurtint) is present
-    # e.g., Kleur="Blauwe" + Kleurtint blauw="Donkerblauwe" → drop "Blauwe"
+    # Drop base color (Kleur) when a more specific shade (Kleurtint) or combination (Kleurcombinaties) is present
+    # e.g., Kleur="Zwarte" + Kleurcombinaties="Zwart/goud" → drop "Zwarte"
     kleur_facet = next((f for f in selected_facets if f['facet_name'].lower() == 'kleur'), None)
-    kleurtint_facet = next((f for f in selected_facets if f['facet_name'].lower().startswith('kleurtint')), None)
+    kleurtint_facet = next((f for f in selected_facets if f['facet_name'].lower().startswith('kleurtint') or f['facet_name'].lower().startswith('kleurcombi')), None)
     if kleur_facet and kleurtint_facet:
         selected_facets = [f for f in selected_facets if f is not kleur_facet]
         # Strip base color from H1
@@ -491,16 +496,62 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         'capuchon',
         'ronde hals', 'v-hals', 'col', 'opstaande kraag',
         'rits', 'knopen', 'drukknopen', 'veters',
+        'draaiplateau', 'grill',
+        'strepen', 'bloemen', 'camouflage', 'panter', 'luipaard',
     }
 
-    size_values = []
+    # Auto-detect spec/size values: number+unit, bare numbers, size abbreviations, "Maat X", "Wijdte X"
+    _spec_units_re = re.compile(
+        r'^\d+[\.,]?\d*\s*'
+        r'(liter|liters|watt|volt|bar|pk|rpm|mph|kwh|kw'
+        r'|cm|mm|meter|m|inch|"'
+        r'|kg|gram|g|mg|ml|cl|dl|l'
+        r'|persoons|personen|deurs|zits)\b',
+        re.IGNORECASE
+    )
+    _size_abbrevs = {'xs', 'xxs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', '2xl', '3xl', '4xl', '5xl'}
+
+    def is_spec_value(val, fname):
+        """Detect if a facet value is a specification that should go at the end."""
+        vl = val.lower().strip()
+        # Starts with "Maat" or "Wijdte"
+        if vl.startswith('maat ') or vl.startswith('wijdte'):
+            return True
+        # "Grote maten" / "Kleine maten"
+        if vl in ('grote maten', 'kleine maten'):
+            return True
+        # Number + unit pattern: "30 liter", "900 Watt", "23 cm", etc.
+        if _spec_units_re.match(vl):
+            return True
+        # Bare number (e.g., "57" from maat facets)
+        if val.replace('.', '').replace(',', '').replace('-', '').strip().isdigit():
+            return True
+        # Standard size abbreviations
+        if vl in _size_abbrevs:
+            return True
+        # Facet name hints (fallback for less common facet names)
+        if fname.startswith('maat') or fname.startswith('wijdte'):
+            return True
+        return False
+
+    size_values = []       # Display values to append at end (e.g., "Maat 57")
+    size_originals = []    # Original values to strip from H1 (e.g., "57")
+    suffix_values = []     # Values appended after title but before size (e.g., "Zwart/goud")
+    suffix_originals = []  # Original values to strip from H1
     met_values = []
     non_size_facets = []
     for f in selected_facets:
         val = f['detail_value']
         fname = f['facet_name'].lower()
-        if fname.startswith('maat') or val.lower().startswith('maat ') or val.lower() in ('grote maten', 'kleine maten'):
+        if is_spec_value(val, fname):
+            size_originals.append(val)
+            # Prepend "Maat" to bare numbers from maat facets (e.g., "57" → "Maat 57")
+            if fname.startswith('maat') and not val.lower().startswith('maat') and val.replace('.', '').replace(',', '').replace('-', '').strip().isdigit():
+                val = f"Maat {val}"
             size_values.append(val)
+        elif fname.startswith('kleurcombi'):
+            suffix_originals.append(val)
+            suffix_values.append(val)
         else:
             non_size_facets.append(f)
             # Values already starting with "met"/"zonder" (from API detail_value)
@@ -510,9 +561,9 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             elif val.lower() in met_feature_values:
                 met_values.append(val)
 
-    # Strip size values from the API H1 so the AI doesn't see them
+    # Strip size and suffix values from the API H1 so the AI doesn't see them
     ai_h1 = api_h1
-    for sv in size_values:
+    for sv in size_originals + suffix_originals:
         ai_h1 = ai_h1.replace(sv, '').strip()
     # Clean up double spaces
     while '  ' in ai_h1:
@@ -573,7 +624,8 @@ Regels:
 6. NOOIT "in", "van" of "voor" toevoegen.
 {met_rule}8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
 9. Als de facetten woorden bevatten zoals "Nieuw" of "Kleine"/"Grote", zet die als bijvoeglijk naamwoord VOOR de productnaam. Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
-10. Maak de titel natuurlijk lopend Nederlands.
+10. Verbuig bijvoeglijke naamwoorden correct (bijv. "Nieuw" → "Nieuwe" voor de-woorden, "Vrijstaand" → "Vrijstaande").
+11. Maak de titel natuurlijk lopend Nederlands.
 
 Geef ALLEEN de verbeterde titel terug, geen uitleg."""
 
@@ -595,15 +647,35 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
         all_input_words = set(w.lower() for w in ai_h1.split())
         for f in non_size_facets:
             all_input_words.update(w.lower() for w in f['detail_value'].split())
+        # Also add common inflected forms so valid adjective inflections aren't stripped
+        # e.g., input "Nieuw" → allow "Nieuwe" in output
+        inflected = set()
+        for w in all_input_words:
+            inflected.add(w + 'e')    # Nieuw → Nieuwe
+            inflected.add(w + 'en')   # Kind → Kinderen
+            if w.endswith('e'):
+                inflected.add(w[:-1])  # Nieuwe → Nieuw
+        all_input_words.update(inflected)
         # Check for common hallucinated words
         hallucination_checks = ['Heren', 'Dames', 'Kinderen', 'Jongens', 'Meisjes', 'Baby', 'Nieuwe', 'Nieuw']
         for word in hallucination_checks:
             if word.lower() not in all_input_words and word in improved_h1.split():
                 improved_h1 = ' '.join(w for w in improved_h1.split() if w != word)
 
-        # Append size values at the end (handled in code, not by AI)
+        # Append suffix values (e.g., color combos) then size values at the end
+        if suffix_values:
+            improved_h1 = improved_h1.rstrip() + " " + " ".join(suffix_values)
         if size_values:
             improved_h1 = improved_h1.rstrip() + " " + " ".join(size_values)
+
+        # Capitalize first letter (unless it's a brand that starts lowercase, e.g. "iPhone")
+        if improved_h1 and improved_h1[0].islower():
+            first_word = improved_h1.split()[0]
+            # Check if the first word is a brand with intentional lowercase start
+            brand_facet = next((f for f in selected_facets if f['facet_name'].lower() == 'merk'), None)
+            is_lowercase_brand = brand_facet and brand_facet['detail_value'] == first_word
+            if not is_lowercase_brand:
+                improved_h1 = improved_h1[0].upper() + improved_h1[1:]
 
         return {
             "h1_title": improved_h1,
