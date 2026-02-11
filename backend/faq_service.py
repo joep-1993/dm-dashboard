@@ -456,9 +456,17 @@ def fetch_products_api(url: str) -> Optional[Dict]:
         # Extract related PLP URLs for hyperlinks in FAQ answers
         related_plp_urls = extract_related_plp_urls(data)
 
-        # Get category name from the deepest category level
+        # Get category name matching the URL's depth (not always the deepest product category)
+        # e.g., huis_tuin_505061 = Badkameraccessoires (depth 1), not Douchegordijnen (deepest)
         categories = data.get("products", [{}])[0].get("categories", []) if data.get("products") else []
-        deepest_category_name = categories[-1].get("name", "") if categories else ""
+        sub_path = category[len(main_category):] if category and main_category and category != main_category else ""
+        url_depth = len([s for s in sub_path.split('_') if s.isdigit()])
+        if categories and url_depth < len(categories):
+            deepest_category_name = categories[url_depth].get("name", "")
+        elif categories:
+            deepest_category_name = categories[-1].get("name", "")
+        else:
+            deepest_category_name = ""
 
         # Build product subject from selected facets
         product_subject = build_product_subject(selected_facets, deepest_category_name)

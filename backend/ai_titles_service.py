@@ -459,6 +459,23 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             selected_facets = [f for f in selected_facets if f is not brand_facet]
             # Also strip the standalone brand from the API H1
             api_h1 = api_h1.replace(brand_name + ' ', '', 1) if api_h1.count(brand_name) > 1 else api_h1
+            brand_facet = None  # Brand was deduplicated
+
+    # Collect brand/productlijn to strip from AI input and prepend in code after
+    # This avoids AI misplacing multi-word brands like "The Indian Maharadja"
+    lead_values = []  # Will be prepended to final title in order
+    for lead_facet_name in ('merk', 'productlijn'):
+        lead_facet = next((f for f in selected_facets if f['facet_name'].lower() == lead_facet_name), None)
+        if lead_facet:
+            lead_val = lead_facet['detail_value']
+            lead_values.append(lead_val)
+            # Strip from H1 so AI doesn't see it
+            if lead_val in api_h1:
+                api_h1 = api_h1.replace(lead_val, '').strip()
+                while '  ' in api_h1:
+                    api_h1 = api_h1.replace('  ', ' ')
+            # Remove from selected_facets so AI doesn't get it as facet either
+            selected_facets = [f for f in selected_facets if f is not lead_facet]
 
     # Drop base color (Kleur) when a more specific shade (Kleurtint) or combination (Kleurcombinaties) is present
     # e.g., Kleur="Zwarte" + Kleurcombinaties="Zwart/goud" → drop "Zwarte"
@@ -497,7 +514,7 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         'ronde hals', 'v-hals', 'col', 'opstaande kraag',
         'rits', 'knopen', 'drukknopen', 'veters',
         'draaiplateau', 'grill',
-        'strepen', 'bloemen', 'camouflage', 'panter', 'luipaard',
+        'strepen',
     }
 
     # Auto-detect spec/size values: number+unit, bare numbers, size abbreviations, "Maat X", "Wijdte X"
@@ -556,6 +573,9 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             non_size_facets.append(f)
             # Values already starting with "met"/"zonder" (from API detail_value)
             if val.lower().startswith('met ') or val.lower().startswith('zonder '):
+                met_values.append(val)
+            # Values ending with "print" (e.g., "Panterprint", "Dierenprint")
+            elif val.lower().endswith('print'):
                 met_values.append(val)
             # Known feature values that need "met" added
             elif val.lower() in met_feature_values:
@@ -619,8 +639,8 @@ Regels:
 1. ALLERBELANGRIJKSTE REGEL: Gebruik UITSLUITEND woorden die voorkomen in de titel OF in de facetten hierboven. Voeg ABSOLUUT GEEN nieuwe woorden toe. Geen "Nieuwe", geen extra bijvoeglijke naamwoorden, geen woorden die niet letterlijk in de input staan.
 2. Facetwaarden zijn vaste combinaties en mogen NIET opgesplitst worden.
 3. Merk ALTIJD vooraan (bijv. "Apple iPhones" niet "iPhones van Apple").
-4. Kleuren en materialen als bijvoeglijk naamwoord VOOR het zelfstandig naamwoord.
-5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan ALTIJD direct VOOR de productnaam, NOOIT met "voor" ervoor.
+4. Kleuren en materialen als bijvoeglijk naamwoord VOOR de doelgroep en VOOR het zelfstandig naamwoord (bijv. "blauwe Heren hoodies", NIET "Heren blauwe hoodies").
+5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan direct VOOR de productnaam maar NA kleuren/materialen, NOOIT met "voor" ervoor.
 6. NOOIT "in", "van" of "voor" toevoegen.
 {met_rule}8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
 9. Als de facetten woorden bevatten zoals "Nieuw" of "Kleine"/"Grote", zet die als bijvoeglijk naamwoord VOOR de productnaam. Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
@@ -662,6 +682,10 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
             if word.lower() not in all_input_words and word in improved_h1.split():
                 improved_h1 = ' '.join(w for w in improved_h1.split() if w != word)
 
+        # Prepend brand/productlijn (stripped before AI, prepended in code)
+        if lead_values:
+            improved_h1 = ' '.join(lead_values) + ' ' + improved_h1
+
         # Append suffix values (e.g., color combos) then size values at the end
         if suffix_values:
             improved_h1 = improved_h1.rstrip() + " " + " ".join(suffix_values)
@@ -671,9 +695,8 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
         # Capitalize first letter (unless it's a brand that starts lowercase, e.g. "iPhone")
         if improved_h1 and improved_h1[0].islower():
             first_word = improved_h1.split()[0]
-            # Check if the first word is a brand with intentional lowercase start
-            brand_facet = next((f for f in selected_facets if f['facet_name'].lower() == 'merk'), None)
-            is_lowercase_brand = brand_facet and brand_facet['detail_value'] == first_word
+            # Check if the first word is a lead value (brand/productlijn) with intentional lowercase
+            is_lowercase_brand = first_word in lead_values
             if not is_lowercase_brand:
                 improved_h1 = improved_h1[0].upper() + improved_h1[1:]
 
