@@ -42,6 +42,24 @@ body {
     color: red;
 }
 
+/* Navbar buttons - vertical centering and no wrapping */
+.navbar .d-flex .btn {
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Shrink nav button text on smaller screens to prevent wrapping */
+@media (max-width: 1600px) {
+    .navbar .d-flex .btn { font-size: 0.75rem; padding: 0.2rem 0.4rem; }
+}
+@media (max-width: 1200px) {
+    .navbar .d-flex .btn { font-size: 0.65rem; padding: 0.15rem 0.3rem; }
+}
+@media (max-width: 992px) {
+    .navbar .d-flex .btn { font-size: 0.55rem; padding: 0.1rem 0.25rem; }
+}
+
 /* Override Bootstrap Colors */
 
 /* Top navbar - Purple */
