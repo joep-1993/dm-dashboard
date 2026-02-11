@@ -62,6 +62,14 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **File**: `backend/faq_service.py` — function `fetch_products_api()`
 - **Date**: 2026-02-11
 
+## Bad URL Detection: facet_not_available (400) from Product Search API
+- **Problem**: ~3-5% of pending URLs in `unique_titles` return HTTP 400 (`facet_not_available`) from the Product Search API — facets or categories that no longer exist
+- **Detection**: `backend/find_bad_urls.py` — checks each URL against `productsearch-v2.api.beslist.nl` with 20 parallel workers, flags 400 responses
+- **Scale**: Partial scan of 155K/916K URLs found ~4,589 bad URLs. Bad rate varies by alphabetical range (0.1-18% per batch)
+- **Pattern**: These are redirect source URLs (old facet IDs, renamed categories) that should have been caught by the Redirects Admin sheet
+- **Tables to clean**: `pa.unique_titles`, `pa.jvs_seo_werkvoorraad`, `pa.jvs_seo_werkvoorraad_kopteksten_check`, `pa.faq_tracking`, `pa.faq_content`
+- **Date**: 2026-02-11
+
 ## AI Title Prompt Engineering: Earlier Iterative Fixes
 - **Issues fixed via prompt rules** (before code-level approach):
   1. **"met" for features**: FOUT/GOED examples + exception to allow "met"/"zonder"

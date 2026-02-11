@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Bad URL scan: created find_bad_urls.py to detect facet_not_available (400) URLs via Product Search API — partial scan of 155K/916K found ~4,589 bad URLs (~3%) before stopping #claude-session:2026-02-11
 - [x] AI title: suffix placement for "Volwassenen" (levensfase) and "Vanaf X jaar" (geschikte_leeftijd) values, reset 200 URLs #claude-session:2026-02-11
 - [x] DB cleanup: cross-reference Redirects Admin Excel (459K redirects) — found 41,886 old URLs in DB, added 206,580 missing redirect targets from column B, removed 295,946 /l/ /p/ /r/ URLs #claude-session:2026-02-11
 - [x] AI title: brand strip-and-prepend (deterministic brand positioning), print refinement (only "met" when value ends with "print"), color-before-audience prompt rules, category depth-based extraction fix, reset 8,109 parent-level URLs #claude-session:2026-02-11
