@@ -21,6 +21,36 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
+## AI Title Prompt Engineering: Iterative Rule Refinement
+- **Problem**: OpenAI (gpt-4o-mini) frequently ignores or over-generalizes prompt rules for Dutch title generation
+- **Key issues encountered and fixes**:
+  1. **"met" for features**: Facet values like "Korte mouwen", "Lange mouwen", "Capuchon" need "met" prepended and placed after product name. AI initially left them as bare words before the noun. Fix: Explicit rule with FOUT/GOED examples + exception in "no new words" intro to allow adding "met"/"zonder"
+  2. **"met" before sizes**: After adding the "met" rule, AI over-applied it to sizes ("Imprimétops met Maat 40"). Fix: Explicit "ZONDER met ervoor" in size rule with counter-example
+  3. **"voor" with audiences**: AI added "voor" before Heren/Dames/Kinderen ("vesten voor heren"). Fix: Explicit rule that audiences go directly before product name, added "voor" to forbidden words (but allowed when already in facet value)
+  4. **Hallucinated content**: AI invented "Maat S, Maat M, Maat L, Maat XL" from nowhere. Fix: Lowered temperature from 0.7→0.3, strengthened anti-hallucination wording ("UITSLUITEND", "ABSOLUUT GEEN")
+  5. **Conflicting rules**: Rule saying "NOOIT met toevoegen" for colors conflicted with rule requiring "met" for features. Fix: Scoped "NOOIT" to only "in/van/voor" for colors, with explicit "Maar WEL met" cross-reference
+  6. **Word order**: "met/zonder" clause must come before size (Maat) at end of title
+- **Lesson**: LLM prompts for structured output need very specific FOUT/GOED examples for every edge case. Rules that say "NOOIT X" will be over-generalized unless precisely scoped. Temperature 0.3 is better than 0.7 for factual rewriting tasks.
+- **File**: `backend/ai_titles_service.py` — functions `generate_ai_title()` (prompt 1) and `generate_title_from_api()` (prompt 2)
+- **Date**: 2026-02-11
+
+## Database Cleanup: German URLs and Garbage Data
+- **Problem**: Databases contained ~210 German URLs (from beslist.de), ~112 garbage URLs (empty facet values, truncated names), and ~66 landing/theme pages
+- **Detection methods**:
+  1. German category paths: `möbel`, `schuhe`, `essen_getränke`, `haus_garten`, etc. (mojibake encoding: `Ã¶`=ö, `Ã¤`=ä)
+  2. German facet names: `farbe`, `marke`, `zielgruppe`, `materialien`, `sportbekleidung`
+  3. Cross-reference: Loaded 2,719 Dutch facet url_names from `facets_20260204.csv`, compared against facet names in pending URLs — remaining 84 mismatches were all Dutch variants/typos, no more German
+  4. Garbage: URLs with empty facet values (`url ~ '/c/.*~($|~~|/)'`), `no-text` strings, leading spaces, `pricemax`/`pricemin`
+- **Cleanup**: Deleted from all 5 tables (unique_titles, werkvoorraad, werkvoorraad_kopteksten_check, faq_tracking, faq_content)
+- **Date**: 2026-02-11
+
+## AI Titles: Stop Button and Scraping Fallback Removal
+- **Stop button fix**: Changed `_run_processing()` from submitting all URLs to ThreadPoolExecutor at once to chunked processing (chunk_size = num_workers * 2). Stop flag checked between chunks for responsive stopping.
+- **Scraping fallback removed**: `process_single_url()` now only uses productsearch API method. Returns `api_failed` error when API returns None, instead of falling back to scraping.
+- **Error message improvement**: Last error now includes the failing URL: `f"{reason} ({url})"`
+- **File**: `backend/ai_titles_service.py`
+- **Date**: 2026-02-11
+
 ## Canonical Generator: Facet Sorting Bug with ~ Separator
 - **Problem**: When two facets share a prefix (e.g., `kleur` and `kleurtint`), the URL sorted the longer facet first: `/c/kleurtint~17171868~~kleur~393175`
 - **Root Cause**: `facets.sort()` sorted the full `facet~value` string. Since `~` (ASCII 126) > `t` (ASCII 116), `kleurtint~...` sorted before `kleur~...`

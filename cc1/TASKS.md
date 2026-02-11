@@ -10,6 +10,13 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] AI title prompt: sizes after product name, no duplicate brands, condition/format before product, met/zonder features after product in single clause, audiences before product without "voor", anti-hallucination (temp 0.3) #claude-session:2026-02-11
+- [x] Fix AI title stop button - chunked ThreadPoolExecutor submission for responsive stopping #claude-session:2026-02-11
+- [x] Remove scraping fallback from AI title generation - API-only with error on failure #claude-session:2026-02-11
+- [x] Add failing URL to AI title error messages #claude-session:2026-02-11
+- [x] Fix Search Titles to accept full URLs and show exact match first #claude-session:2026-02-11
+- [x] Clean up databases: remove /l/ URLs (45 each from 4 tables), German URLs (206+108), landing/theme pages (66), garbage URLs (112+48) #claude-session:2026-02-11
+- [x] Cross-reference facet names against Dutch facets CSV to verify no remaining German URLs #claude-session:2026-02-11
 - [x] Integrate IndexNow tool into dm-tools - service layer, 3 API endpoints, frontend with manual/Excel input, dashboard card, nav links in all tools #claude-session:2026-02-10
 - [x] Integrate SEO Index Checker into dm-tools - Google Search Console URL Inspection API, service account quota rotation, frontend with results filtering and CSV download, dashboard card, nav links in all tools #claude-session:2026-02-10
 - [x] Fix AI title size placement - sizes (Maat L, XL, 42) now placed after product name, reset 2,231 URLs with maat facets to pending #claude-session:2026-02-10

@@ -319,7 +319,7 @@ def generate_ai_title(h1_title: str, url: str) -> Optional[Dict]:
         print("[AI_TITLES] No OpenAI API key configured")
         return None
 
-    prompt = f"""Je bent een SEO-expert. Maak van '{h1_title}' een goedlopende en grammaticaal correcte titel zonder "-". Gebruik alléén de woorden die je krijgt - bedenk geen woorden zelf. Overbodige woorden mag je weglaten. Je mag de volgorde aanpassen om een beter lopende zin te maken.
+    prompt = f"""Je bent een SEO-expert. Maak van '{h1_title}' een goedlopende en grammaticaal correcte titel zonder "-". Gebruik UITSLUITEND de woorden die je krijgt - verzin ABSOLUUT GEEN nieuwe woorden, maten, kleuren of andere informatie. Je mag WEL "met" of "zonder" toevoegen waar grammaticaal nodig (zie regel 8). Voeg NOOIT zelf "voor", "van" of "in" toe, maar als deze woorden al in een facetwaarde staan, behoud ze dan. Overbodige woorden mag je weglaten. Je mag de volgorde aanpassen om een beter lopende zin te maken.
 
 Regels:
 1. Zorg dat het merk ALTIJD vooraan in de titel staat, dus "Apple iPhones" in plaats van "iPhones van Apple".
@@ -331,16 +331,49 @@ Regels:
    - FOUT: "schoenen in rood"
    - GOED: "Rode schoenen"
 3. Zet kleuren en materialen als bijvoeglijk naamwoord VOOR het zelfstandig naamwoord.
-4. Zet maten (zoals S, M, L, XL, 38, 42, etc.) ACHTER de productnaam, niet ervoor.
+4. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan ALTIJD direct VOOR de productnaam, NOOIT met "voor" ervoor.
+   - FOUT: "vesten voor heren"
+   - GOED: "Heren vesten"
+   - FOUT: "schoenen voor kinderen"
+   - GOED: "Kinderen schoenen"
+5. Zet maten (zoals Maat S, Maat M, Maat L, Maat XL, Maat 38, Maat 42, etc.) helemaal ACHTERAAN in de titel, ZONDER "met" ervoor. Maten staan altijd los achteraan.
    - FOUT: "Nike Heren Maat L tanktops"
    - GOED: "Nike Heren tanktops Maat L"
    - FOUT: "Maat 42 sneakers"
    - GOED: "Sneakers Maat 42"
+   - FOUT: "Blauwe cardigans Maat XS met lange mouwen"
+   - GOED: "Blauwe cardigans met lange mouwen Maat XS"
+   - FOUT: "Imprimétops met Maat 40" (NOOIT "met" voor maten!)
+   - GOED: "Imprimétops Maat 40"
+6. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
+   - FOUT: "Adidas Groene Kinderen Adidas Originals trainingspakken" (Adidas dubbel)
+   - GOED: "Groene Adidas Originals Kinderen trainingspakken"
+   - FOUT: "Samsung Samsung Galaxy smartphones"
+   - GOED: "Samsung Galaxy smartphones"
+7. Zet conditie (Nieuw/Nieuwe) en formaat (Kleine/Grote) als bijvoeglijk naamwoord VOOR de productnaam, nooit erachter.
+   - FOUT: "Low frost Tafelmodel D Nieuwe Kleine"
+   - GOED: "Nieuwe kleine Low Frost tafelmodel Energieklasse D"
+   - FOUT: "Inductie kookplaat Nieuwe"
+   - GOED: "Nieuwe inductie kookplaat"
+8. BELANGRIJK: Producteigenschappen zoals "Korte mouwen", "Lange mouwen", "Capuchon", "Ronde hals", "V-hals" mogen NOOIT los voor de productnaam staan. Voeg ALTIJD "met" toe en zet ze NA de productnaam. Dit geldt ook voor facetwaarden die beginnen met "Met" of "Zonder".
+   Bundel alles in ÉÉN "met X, Y en Z" clause. Gebruik "met" maar één keer, daarna komma's en "en".
+   - FOUT: "Heren Slim fit poloshirts Lange mouwen" (ALTIJD "met" toevoegen!)
+   - GOED: "Heren Slim fit poloshirts met lange mouwen"
+   - FOUT: "Heren poloshirts met borstzak en print met korte mouwen" (twee keer "met")
+   - GOED: "Heren poloshirts met korte mouwen, borstzak en print"
+   - FOUT: "Stretch Heren Korte mouwen Poloshirts"
+   - GOED: "Stretch Heren Poloshirts met korte mouwen"
+   - FOUT: "Capuchon Heren jassen met rits"
+   - GOED: "Heren jassen met capuchon en rits"
 
 Voorbeeld:
 "Schoenen - Nike - Rode - Met veters" wordt "Rode Nike schoenen met veters".
 "Saniclear - Zilver - Messing - Design Fonteinkranen" wordt "Zilveren messing Saniclear design fonteinkranen".
 "Nike - Heren - Maat L - Tanktops" wordt "Nike Heren tanktops Maat L".
+"Adidas - Groen - Kinderen - Adidas Originals Trainingspakken" wordt "Groene Adidas Originals Kinderen trainingspakken".
+"Tafelmodel Low frost D Nieuw Kleine" wordt "Nieuwe kleine Low Frost tafelmodel Energieklasse D".
+"Stretch - Heren - Korte mouwen - Met borstzak - Met print - Poloshirts" wordt "Stretch Heren Poloshirts met korte mouwen, borstzak en print".
+"Dutch Dandies - Heren - Slim fit - Lange mouwen - Poloshirts" wordt "Dutch Dandies Heren Slim fit poloshirts met lange mouwen".
 
 Ik wil het antwoord graag in dit json formaat terug:
 {{"oude_titel": "{h1_title}", "h1_title": "nieuwe_titel_hier", "url": "{url}"}}
@@ -352,7 +385,7 @@ Geef ALLEEN de JSON terug, geen andere tekst."""
             model=AI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
-            temperature=0.7,
+            temperature=0.3,
             response_format={"type": "json_object"}
         )
 
@@ -427,15 +460,27 @@ BELANGRIJK - Facetwaarden die INTACT moeten blijven (niet splitsen of herschikke
 {facet_values_str}
 
 Regels:
-1. Gebruik ALLEEN de woorden uit de titel en facetten - bedenk geen nieuwe woorden.
+1. Gebruik UITSLUITEND de woorden uit de titel en facetten hierboven. Verzin ABSOLUUT GEEN nieuwe woorden, maten, kleuren of andere informatie die niet in de titel of facetten staat. Je mag WEL "met" of "zonder" toevoegen waar grammaticaal nodig (zie regel 10). Voeg NOOIT zelf "voor", "van" of "in" toe, maar als deze woorden al in een facetwaarde staan, behoud ze dan.
 2. Facetwaarden zijn vaste combinaties en mogen NIET opgesplitst worden.
    Bijvoorbeeld: "Rode Duivels" is één thema, niet "Rode" + "Duivels".
 3. Merk ALTIJD vooraan (bijv. "Apple iPhones" niet "iPhones van Apple").
 4. Kleuren en materialen als bijvoeglijk naamwoord VOOR het zelfstandig naamwoord.
-5. NOOIT "in", "van", "met" of "voor" toevoegen voor kleuren/materialen.
-6. Zet maten (zoals S, M, L, XL, 38, 42, etc.) ACHTER de productnaam, niet ervoor.
-   Bijvoorbeeld: "Nike Heren tanktops Maat L" niet "Nike Heren Maat L tanktops".
-7. Maak de titel natuurlijk lopend Nederlands.
+5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan ALTIJD direct VOOR de productnaam, NOOIT met "voor" ervoor.
+   Bijvoorbeeld: "Nylon Heren vesten met capuchon" niet "Nylon vesten voor heren met capuchon".
+6. NOOIT "in", "van" of "voor" toevoegen. (Maar WEL "met" toevoegen voor producteigenschappen, zie regel 10.)
+7. Zet maten (zoals Maat S, Maat M, Maat L, Maat XL, Maat 38, Maat 42, etc.) helemaal ACHTERAAN in de titel, ZONDER "met" ervoor. Maten staan altijd los achteraan.
+   Bijvoorbeeld: "Blauwe cardigans met lange mouwen Maat XS" niet "Blauwe cardigans Maat XS met lange mouwen".
+   Bijvoorbeeld: "Imprimétops Maat 40" niet "Imprimétops met Maat 40".
+8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
+   Bijvoorbeeld: "Groene Adidas Originals Kinderen trainingspakken" niet "Adidas Groene Kinderen Adidas Originals trainingspakken".
+9. Zet conditie (Nieuw/Nieuwe) en formaat (Kleine/Grote) als bijvoeglijk naamwoord VOOR de productnaam, nooit erachter.
+   Bijvoorbeeld: "Nieuwe kleine Low Frost tafelmodel" niet "Low frost Tafelmodel Nieuwe Kleine".
+10. BELANGRIJK: Producteigenschappen zoals "Korte mouwen", "Lange mouwen", "Capuchon", "Ronde hals", "V-hals" mogen NOOIT los voor de productnaam staan. Voeg ALTIJD "met" toe en zet ze NA de productnaam. Dit geldt ook voor facetwaarden die beginnen met "Met" of "Zonder".
+   Bundel alles in ÉÉN "met X, Y en Z" clause. Gebruik "met" maar één keer, daarna komma's en "en".
+   Bijvoorbeeld: "Heren Slim fit poloshirts met lange mouwen" niet "Heren Slim fit poloshirts Lange mouwen".
+   Bijvoorbeeld: "Heren poloshirts met korte mouwen, borstzak en print" niet "Heren poloshirts met borstzak en print met korte mouwen".
+   Bijvoorbeeld: "Heren jassen met capuchon en rits" niet "Capuchon Heren jassen met rits".
+11. Maak de titel natuurlijk lopend Nederlands.
 
 Geef ALLEEN de verbeterde titel terug, geen uitleg."""
 
@@ -515,38 +560,15 @@ def process_single_url(url: str, use_api: bool = True) -> Dict:
         # Check if URL has facets (contains "~~" or "/c/")
         has_facets = "~~" in url or "/c/" in url
 
-        if use_api and has_facets:
-            # Use productsearch API + OpenAI method for faceted URLs
-            ai_result = generate_title_from_api(url)
+        # Use productsearch API + OpenAI method
+        ai_result = generate_title_from_api(url)
 
-            if not ai_result:
-                # Fallback to scraping method
-                print(f"[AI_TITLES] API method failed for {url}, falling back to scraping")
-                ai_result = None
-        else:
-            ai_result = None
-
-        # Fallback: Use scraping + OpenAI method
         if not ai_result:
-            # Step 1: Scrape page for H1
-            scraped = scrape_page_h1(url)
-
-            if not scraped or not scraped.get("h1_title"):
-                result["status"] = "failed"
-                result["reason"] = "Could not extract H1 from page"
-                update_title_record(url, None, None, None, error="scrape_failed")
-                return result
-
-            h1_title = scraped["h1_title"]
-
-            # Step 2: Generate AI title
-            ai_result = generate_ai_title(h1_title, url)
-
-            if not ai_result:
-                result["status"] = "failed"
-                result["reason"] = "AI generation failed"
-                update_title_record(url, None, None, None, error="ai_failed")
-                return result
+            result["status"] = "failed"
+            result["reason"] = "API could not fetch data for URL"
+            update_title_record(url, None, None, None, error="api_failed")
+            print(f"[AI_TITLES] API failed for {url}")
+            return result
 
         new_h1 = ai_result["h1_title"]
         original_h1 = ai_result.get("original_h1", new_h1)
@@ -634,44 +656,59 @@ def _run_processing(max_urls: int = 100, num_workers: int = 15, use_api: bool = 
         method_msg = "API+OpenAI" if use_api else "Scraping+OpenAI"
         print(f"[AI_TITLES] Starting processing of {total} URLs ({batch_msg}) with {num_workers} workers using {method_msg}")
 
-        # Process URLs using thread pool
+        # Process URLs using thread pool - submit in small chunks to allow stopping
+        chunk_size = num_workers * 2
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            # Submit all URLs to the executor
-            future_to_url = {
-                executor.submit(_process_url_with_delay, url_data["url"], use_api): url_data["url"]
-                for url_data in urls
-            }
-
-            # Process results as they complete
-            for future in as_completed(future_to_url):
-                # Check stop flag
+            url_index = 0
+            while url_index < total:
+                # Check stop flag before submitting next chunk
                 with _state_lock:
                     if _processing_state["should_stop"]:
                         print("[AI_TITLES] Processing stopped by user")
-                        executor.shutdown(wait=False, cancel_futures=True)
                         break
 
-                url = future_to_url[future]
-                try:
-                    result = future.result()
+                # Submit a chunk of URLs
+                chunk_end = min(url_index + chunk_size, total)
+                future_to_url = {
+                    executor.submit(_process_url_with_delay, urls[i]["url"], use_api): urls[i]["url"]
+                    for i in range(url_index, chunk_end)
+                }
 
+                # Process results as they complete
+                stopped = False
+                for future in as_completed(future_to_url):
                     with _state_lock:
-                        _processing_state["processed"] += 1
-                        _processing_state["current_url"] = url
-                        if result["status"] == "success":
-                            _processing_state["successful"] += 1
-                        elif result["status"] == "failed":
+                        if _processing_state["should_stop"]:
+                            print("[AI_TITLES] Processing stopped by user")
+                            stopped = True
+                            break
+
+                    url = future_to_url[future]
+                    try:
+                        result = future.result()
+
+                        with _state_lock:
+                            _processing_state["processed"] += 1
+                            _processing_state["current_url"] = url
+                            if result["status"] == "success":
+                                _processing_state["successful"] += 1
+                            elif result["status"] == "failed":
+                                _processing_state["failed"] += 1
+                                _processing_state["last_error"] = f"{result.get('reason', 'Unknown error')} ({url})"
+                            else:
+                                _processing_state["skipped"] += 1
+
+                    except Exception as e:
+                        with _state_lock:
+                            _processing_state["processed"] += 1
                             _processing_state["failed"] += 1
-                            _processing_state["last_error"] = result.get("reason", "Unknown error")
-                        else:
-                            _processing_state["skipped"] += 1
+                            _processing_state["last_error"] = str(e)
 
-                except Exception as e:
-                    with _state_lock:
-                        _processing_state["processed"] += 1
-                        _processing_state["failed"] += 1
-                        _processing_state["last_error"] = str(e)
-                    print(f"[AI_TITLES] Worker error for {url}: {e}")
+                if stopped:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+
+                url_index = chunk_end
 
     except Exception as e:
         print(f"[AI_TITLES] Processing error: {e}")

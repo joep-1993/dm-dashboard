@@ -271,19 +271,31 @@ def delete_title(url: str) -> bool:
 
 def search_titles(query: str, limit: int = 100) -> List[Dict]:
     """Search titles by URL or title content."""
+    # Strip domain prefix so full URLs match relative paths in DB
+    search_query = query
+    for prefix in ("https://www.beslist.nl", "http://www.beslist.nl", "https://beslist.nl", "http://beslist.nl"):
+        if search_query.lower().startswith(prefix):
+            search_query = search_query[len(prefix):]
+            break
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
         cur.execute("""
-            SELECT url, title, description, h1_title, created_at
+            SELECT url, title, description, h1_title, created_at,
+                CASE
+                    WHEN LOWER(url) = LOWER(%s) THEN 0
+                    WHEN LOWER(url) LIKE LOWER(%s) THEN 1
+                    ELSE 2
+                END AS sort_rank
             FROM pa.unique_titles
             WHERE url ILIKE %s OR title ILIKE %s
-            ORDER BY url
+            ORDER BY sort_rank, url
             LIMIT %s
-        """, (f'%{query}%', f'%{query}%', limit))
+        """, (search_query, f'%{search_query}%', f'%{search_query}%', f'%{search_query}%', limit))
         rows = cur.fetchall()
-        return [dict(row) for row in rows]
+        return [{k: v for k, v in dict(row).items() if k != 'sort_rank'} for row in rows]
     finally:
         cur.close()
         return_db_connection(conn)
