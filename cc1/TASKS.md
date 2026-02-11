@@ -10,6 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] AI title: suffix placement for "Volwassenen" (levensfase) and "Vanaf X jaar" (geschikte_leeftijd) values, reset 200 URLs #claude-session:2026-02-11
+- [x] DB cleanup: cross-reference Redirects Admin Excel (459K redirects) — found 41,886 old URLs in DB, added 206,580 missing redirect targets from column B, removed 295,946 /l/ /p/ /r/ URLs #claude-session:2026-02-11
+- [x] AI title: brand strip-and-prepend (deterministic brand positioning), print refinement (only "met" when value ends with "print"), color-before-audience prompt rules, category depth-based extraction fix, reset 8,109 parent-level URLs #claude-session:2026-02-11
 - [x] AI title post-processing: auto-detect spec/size values (regex number+unit), category name fallback, first-letter capitalization, adjective inflection, color combo suffix placement, kleurcombinatie dedup, "Maat" prefix for bare numbers, print patterns (strepen/bloemen) as met-values #claude-session:2026-02-11
 - [x] AI title code-level facet classification: sizes stripped/appended in code (not AI), met-features pre-combined, brand/color/audience dedup, hallucination post-filter #claude-session:2026-02-11
 - [x] AI title prompt: sizes after product name, no duplicate brands, condition/format before product, met/zonder features after product in single clause, audiences before product without "voor", anti-hallucination (temp 0.3) #claude-session:2026-02-11

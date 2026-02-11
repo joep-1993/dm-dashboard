@@ -30,7 +30,8 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
   4. **Conditional met rule**: When no features exist, prompt says "Voeg NOOIT 'met' toe". When features exist, provides exact clause to copy.
   5. **Value-based met-classification** (not facet-name-based):
      - API `detail_value` starting with "met "/"zonder " → automatic met_values
-     - Small hardcoded set of feature values needing "met" added: mouwen, capuchon, hals, rits, knopen, veters, draaiplateau, grill, strepen, bloemen, camouflage, panter, luipaard
+     - Small hardcoded set of feature values needing "met" added: mouwen, capuchon, hals, rits, knopen, veters, draaiplateau, grill, strepen
+     - Values ending with "print" (e.g., "panterprint", "dierenprint") get "met" automatically; without "print" suffix they're treated as adjectives (e.g., "panter t-shirt" not "t-shirt met panter")
      - Opties/functies/features facets are NOT blanket-classified (some are adjectives like "Ademende", "Hittebestendige")
      - Everything else → regular (adjective before product name)
   6. **Brand deduplication**: If Merk value appears inside another facet (e.g., Merk="Epson" + Productlijn="Epson EcoTank"), standalone brand facet is dropped
@@ -38,14 +39,27 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
   8. **Audience deduplication**: If general audience (Kinder/Baby) + specific (Meisjes/Jongens) both present, general is dropped
   9. **Hallucination removal**: Post-processing strips Heren/Dames/Kinderen/Nieuwe etc. from output if not present in input. Recognizes inflected forms (Nieuw→Nieuwe) to avoid stripping valid adjective inflections.
   10. **Trailing "met" safety net**: Strips dangling " met" from AI output before appending
-  11. **Suffix values**: Color combinations (Kleurcombinaties) appended after title but before size values
-  12. **First letter capitalization**: Ensures title starts with capital, unless first word is a lowercase brand (e.g., "iPhone")
+  11. **Suffix values**: Color combinations (Kleurcombinaties), "Volwassenen" (levensfase), and "Vanaf X jaar" (geschikte_leeftijd) appended after title but before size values
+  12. **First letter capitalization**: Ensures title starts with capital, checks against `lead_values` (brand/productlijn) for intentional lowercase (e.g., "iPhone")
   13. **Category name fallback**: Appends deepest category name when missing from H1 (e.g., "Vrijstaande 23 liter" → "Vrijstaande 23 liter magnetrons")
   14. **Adjective inflection prompt rule**: Rule 10 tells AI to inflect adjectives correctly ("Nieuw" → "Nieuwe")
+  15. **Brand/productlijn strip-and-prepend**: Brand and productlijn are stripped from AI input and prepended in code after, preventing AI from misplacing multi-word brands like "The Indian Maharadja"
+  16. **Color before audience in prompt**: Prompt rules 4+5 specify colors/materials come before audience ("blauwe Heren hoodies" not "Heren blauwe hoodies")
 - **Key lesson**: When LLM prompt rules fail repeatedly for a specific pattern, move that logic to deterministic code. Code-level preprocessing is 100% reliable vs prompt rules being probabilistic.
 - **Key lesson 2**: Don't classify entire facet groups (opties/functies) as met-features — they contain both adjectives ("Ademende", "Hittebestendige") and nouns ("Draaiplateau"). Use value-based classification.
 - **Key lesson 3**: Auto-detect spec/size values with regex (number+unit) instead of hardcoding facet names — more robust across categories.
 - **File**: `backend/ai_titles_service.py` — function `generate_title_from_api()`
+- **Date**: 2026-02-11
+
+## Category Depth-Based Extraction for AI Titles
+- **Problem**: AI titles used wrong category name for parent-level URLs. E.g., `/products/huis_tuin/huis_tuin_505061/c/...` (Badkameraccessoires) got title saying "douchegordijnen" (a child subcategory)
+- **Root Cause**: `faq_service.py` extracted `categories[-1]` (deepest product category) instead of the URL's own category level. Products belong to deep subcategories, but the URL targets a higher level.
+- **Fix**: Count numeric sub-IDs in URL's category segment to determine depth, then use `categories[url_depth]` instead of `categories[-1]`
+  - `huis_tuin_505061` → 1 sub-ID → `categories[1]` = "Badkameraccessoires"
+  - `huis_tuin_505061_505308` → 2 sub-IDs → `categories[2]` = "Douchegordijnen"
+- **Exception**: URLs with type facets (t_, type_) are correct because type facets replace the category name (e.g., `t_transportwagens` overrides the URL's category)
+- **Reset**: 8,109 parent-level URLs without type facets reset to pending for reprocessing
+- **File**: `backend/faq_service.py` — function `fetch_products_api()`
 - **Date**: 2026-02-11
 
 ## AI Title Prompt Engineering: Earlier Iterative Fixes

@@ -569,6 +569,9 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         elif fname.startswith('kleurcombi'):
             suffix_originals.append(val)
             suffix_values.append(val)
+        elif val.lower() == 'volwassenen' or val.lower().startswith('vanaf '):
+            suffix_originals.append(val)
+            suffix_values.append(val)
         else:
             non_size_facets.append(f)
             # Values already starting with "met"/"zonder" (from API detail_value)
