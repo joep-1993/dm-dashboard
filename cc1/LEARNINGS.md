@@ -21,17 +21,33 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
-## AI Title Prompt Engineering: Iterative Rule Refinement
-- **Problem**: OpenAI (gpt-4o-mini) frequently ignores or over-generalizes prompt rules for Dutch title generation
-- **Key issues encountered and fixes**:
-  1. **"met" for features**: Facet values like "Korte mouwen", "Lange mouwen", "Capuchon" need "met" prepended and placed after product name. AI initially left them as bare words before the noun. Fix: Explicit rule with FOUT/GOED examples + exception in "no new words" intro to allow adding "met"/"zonder"
-  2. **"met" before sizes**: After adding the "met" rule, AI over-applied it to sizes ("Imprimétops met Maat 40"). Fix: Explicit "ZONDER met ervoor" in size rule with counter-example
-  3. **"voor" with audiences**: AI added "voor" before Heren/Dames/Kinderen ("vesten voor heren"). Fix: Explicit rule that audiences go directly before product name, added "voor" to forbidden words (but allowed when already in facet value)
-  4. **Hallucinated content**: AI invented "Maat S, Maat M, Maat L, Maat XL" from nowhere. Fix: Lowered temperature from 0.7→0.3, strengthened anti-hallucination wording ("UITSLUITEND", "ABSOLUUT GEEN")
-  5. **Conflicting rules**: Rule saying "NOOIT met toevoegen" for colors conflicted with rule requiring "met" for features. Fix: Scoped "NOOIT" to only "in/van/voor" for colors, with explicit "Maar WEL met" cross-reference
-  6. **Word order**: "met/zonder" clause must come before size (Maat) at end of title
-- **Lesson**: LLM prompts for structured output need very specific FOUT/GOED examples for every edge case. Rules that say "NOOIT X" will be over-generalized unless precisely scoped. Temperature 0.3 is better than 0.7 for factual rewriting tasks.
-- **File**: `backend/ai_titles_service.py` — functions `generate_ai_title()` (prompt 1) and `generate_title_from_api()` (prompt 2)
+## AI Title Generation: Code-Level Facet Classification
+- **Problem**: OpenAI (gpt-4o-mini) persistently adds "met" before sizes ("met Maat L", "met Grote maten") despite extensive prompt rules forbidding it. Prompt-only fixes failed after 5+ iterations.
+- **Solution**: Moved facet handling from prompt rules to Python code preprocessing in `generate_title_from_api()`:
+  1. **Size values stripped before AI**: Facets where `facet_name` starts with "maat", or `detail_value` is "Maat X"/"Grote maten"/"Kleine maten" are removed from the H1 and facet list before sending to the AI. Appended in code after AI response.
+  2. **Met-feature pre-combination**: Feature values are pre-combined into a ready-made clause (e.g., "met korte mouwen, print en borstzak") and passed as an exact string for the AI to use.
+  3. **Conditional met rule**: When no features exist, prompt says "Voeg NOOIT 'met' toe". When features exist, provides exact clause to copy.
+  4. **Value-based classification** (not facet-name-based):
+     - API `detail_value` starting with "met "/"zonder " → automatic met_values
+     - Small hardcoded set of feature values needing "met" added: mouwen, capuchon, hals, rits, knopen, veters
+     - Everything else → regular (adjective before product name)
+  5. **Brand deduplication**: If Merk value appears inside another facet (e.g., Merk="Epson" + Productlijn="Epson EcoTank"), standalone brand facet is dropped
+  6. **Color shade deduplication**: If both Kleur and Kleurtint* are present, base color dropped in favor of specific shade
+  7. **Audience deduplication**: If general audience (Kinder/Baby) + specific (Meisjes/Jongens) both present, general is dropped
+  8. **Hallucination removal**: Post-processing strips Heren/Dames/Kinderen/Nieuwe etc. from output if not present in input facets/title
+  9. **Trailing "met" safety net**: Strips dangling " met" from AI output before size appending
+- **Key lesson**: When LLM prompt rules fail repeatedly for a specific pattern, move that logic to deterministic code. Code-level preprocessing is 100% reliable vs prompt rules being probabilistic.
+- **File**: `backend/ai_titles_service.py` — function `generate_title_from_api()`
+- **Date**: 2026-02-11
+
+## AI Title Prompt Engineering: Earlier Iterative Fixes
+- **Issues fixed via prompt rules** (before code-level approach):
+  1. **"met" for features**: FOUT/GOED examples + exception to allow "met"/"zonder"
+  2. **"voor" with audiences**: Audiences before product name, "voor" forbidden
+  3. **Hallucinated sizes**: Temperature 0.7→0.3, anti-hallucination wording
+  4. **Conflicting rules**: Scoped "NOOIT" to specific prepositions
+- **Lesson**: LLM prompts need FOUT/GOED examples for every edge case. Rules saying "NOOIT X" get over-generalized unless precisely scoped.
+- **File**: `backend/ai_titles_service.py` — both `generate_ai_title()` (prompt 1) and `generate_title_from_api()` (prompt 2)
 - **Date**: 2026-02-11
 
 ## Database Cleanup: German URLs and Garbage Data

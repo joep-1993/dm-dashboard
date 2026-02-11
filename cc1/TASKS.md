@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] AI title code-level facet classification: sizes stripped/appended in code (not AI), met-features pre-combined, brand/color/audience dedup, hallucination post-filter #claude-session:2026-02-11
 - [x] AI title prompt: sizes after product name, no duplicate brands, condition/format before product, met/zonder features after product in single clause, audiences before product without "voor", anti-hallucination (temp 0.3) #claude-session:2026-02-11
 - [x] Fix AI title stop button - chunked ThreadPoolExecutor submission for responsive stopping #claude-session:2026-02-11
 - [x] Remove scraping fallback from AI title generation - API-only with error on failure #claude-session:2026-02-11

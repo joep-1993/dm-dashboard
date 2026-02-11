@@ -357,12 +357,13 @@ Regels:
    - GOED: "Nieuwe inductie kookplaat"
 8. BELANGRIJK: Producteigenschappen zoals "Korte mouwen", "Lange mouwen", "Capuchon", "Ronde hals", "V-hals" mogen NOOIT los voor de productnaam staan. Voeg ALTIJD "met" toe en zet ze NA de productnaam. Dit geldt ook voor facetwaarden die beginnen met "Met" of "Zonder".
    Bundel alles in ÉÉN "met X, Y en Z" clause. Gebruik "met" maar één keer, daarna komma's en "en".
+   LET OP: Maten (Maat S/M/L/XL/38/42 etc.) zijn GEEN producteigenschappen! Zet NOOIT "met" voor maten. Maten staan los achteraan.
    - FOUT: "Heren Slim fit poloshirts Lange mouwen" (ALTIJD "met" toevoegen!)
    - GOED: "Heren Slim fit poloshirts met lange mouwen"
    - FOUT: "Heren poloshirts met borstzak en print met korte mouwen" (twee keer "met")
    - GOED: "Heren poloshirts met korte mouwen, borstzak en print"
-   - FOUT: "Stretch Heren Korte mouwen Poloshirts"
-   - GOED: "Stretch Heren Poloshirts met korte mouwen"
+   - FOUT: "Puma Heren blauwe joggingbroeken met Maat L" (NOOIT "met" voor maten!)
+   - GOED: "Puma Heren blauwe joggingbroeken Maat L"
    - FOUT: "Capuchon Heren jassen met rits"
    - GOED: "Heren jassen met capuchon en rits"
 
@@ -443,44 +444,136 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             "original_h1": api_h1,
         }
 
-    # Build facet values list - these should stay together
-    facet_values = [f['detail_value'] for f in selected_facets]
+    # Remove standalone brand if another facet already contains the brand name
+    # e.g., Merk="Epson" + Productlijn="Epson EcoTank" → drop the standalone "Epson"
+    brand_facet = next((f for f in selected_facets if f['facet_name'].lower() == 'merk'), None)
+    if brand_facet:
+        brand_name = brand_facet['detail_value']
+        other_values = [f['detail_value'] for f in selected_facets if f is not brand_facet]
+        if any(brand_name in ov for ov in other_values):
+            selected_facets = [f for f in selected_facets if f is not brand_facet]
+            # Also strip the standalone brand from the API H1
+            api_h1 = api_h1.replace(brand_name + ' ', '', 1) if api_h1.count(brand_name) > 1 else api_h1
+
+    # Drop base color (Kleur) when a more specific shade (Kleurtint) is present
+    # e.g., Kleur="Blauwe" + Kleurtint blauw="Donkerblauwe" → drop "Blauwe"
+    kleur_facet = next((f for f in selected_facets if f['facet_name'].lower() == 'kleur'), None)
+    kleurtint_facet = next((f for f in selected_facets if f['facet_name'].lower().startswith('kleurtint')), None)
+    if kleur_facet and kleurtint_facet:
+        selected_facets = [f for f in selected_facets if f is not kleur_facet]
+        # Strip base color from H1
+        kleur_val = kleur_facet['detail_value']
+        if kleur_val in api_h1:
+            api_h1 = api_h1.replace(kleur_val + ' ', '', 1).strip()
+
+    # Drop general audience (Kinder/Baby) when a more specific one (Meisjes/Jongens) is present
+    # Works across categories: Doelgroep + Kinderafdeling, Doelgroep + Doelgroep kind, etc.
+    general_audiences = {'kinder', 'kinderen', 'baby'}
+    doelgroep_facets = [f for f in selected_facets if f['facet_name'].lower() in ('doelgroep', 'doelgroep mode', 'doelgroep schoenen')]
+    specific_facets = [f for f in selected_facets if f['facet_name'].lower() in ('kinderafdeling', 'afdeling baby/kind', 'doelgroep kind') or f['facet_name'].lower().startswith('doelgroep_kind')]
+    if doelgroep_facets and specific_facets:
+        for df in doelgroep_facets:
+            if df['detail_value'].lower() in general_audiences:
+                selected_facets = [f for f in selected_facets if f is not df]
+                doelgroep_val = df['detail_value']
+                if doelgroep_val in api_h1:
+                    api_h1 = api_h1.replace(doelgroep_val + ' ', '', 1).strip()
+
+    # Classify facets for placement
+    # Sizes: will be appended in code AFTER AI generates title (to prevent "met Maat" errors)
+    # Met-features: passed to AI with hint to add "met"
+    # Regular: passed to AI normally
+    # Feature values that need "met" added — these are product parts/features
+    # that the API returns WITHOUT "met" prefix in detail_value.
+    # (Values already starting with "met "/"zonder " are handled automatically)
+    met_feature_values = {
+        'korte mouwen', 'lange mouwen', 'driekwart mouwen',
+        'capuchon',
+        'ronde hals', 'v-hals', 'col', 'opstaande kraag',
+        'rits', 'knopen', 'drukknopen', 'veters',
+    }
+
+    size_values = []
+    met_values = []
+    non_size_facets = []
+    for f in selected_facets:
+        val = f['detail_value']
+        fname = f['facet_name'].lower()
+        if fname.startswith('maat') or val.lower().startswith('maat ') or val.lower() in ('grote maten', 'kleine maten'):
+            size_values.append(val)
+        else:
+            non_size_facets.append(f)
+            # Values already starting with "met"/"zonder" (from API detail_value)
+            if val.lower().startswith('met ') or val.lower().startswith('zonder '):
+                met_values.append(val)
+            # Known feature values that need "met" added
+            elif val.lower() in met_feature_values:
+                met_values.append(val)
+
+    # Strip size values from the API H1 so the AI doesn't see them
+    ai_h1 = api_h1
+    for sv in size_values:
+        ai_h1 = ai_h1.replace(sv, '').strip()
+    # Clean up double spaces
+    while '  ' in ai_h1:
+        ai_h1 = ai_h1.replace('  ', ' ')
+
+    # Build facet values list - only non-size facets
+    facet_values = [f['detail_value'] for f in non_size_facets]
     facet_values_str = ", ".join([f'"{v}"' for v in facet_values])
 
-    # Build facet info for context
-    facet_info = ", ".join([f"{f['facet_name']}: \"{f['detail_value']}\"" for f in selected_facets])
+    # Build facet info for context - only non-size facets
+    facet_info = ", ".join([f"{f['facet_name']}: \"{f['detail_value']}\"" for f in non_size_facets])
+
+    # Build met-features rule (only include if there are met values)
+    met_section = ""
+    if met_values:
+        # Strip "Met "/"Zonder " prefixes so AI can bundle into one clause
+        clean_met = []
+        zonder_values = []
+        for mv in met_values:
+            if mv.lower().startswith('met '):
+                clean_met.append(mv[4:])  # strip "Met "
+            elif mv.lower().startswith('zonder '):
+                zonder_values.append(mv[7:])  # strip "Zonder "
+            else:
+                clean_met.append(mv)
+
+        met_parts = []
+        if clean_met:
+            met_parts.append(f"met {', '.join(clean_met[:-1]) + ' en ' + clean_met[-1] if len(clean_met) > 1 else clean_met[0]}")
+        if zonder_values:
+            met_parts.append(f"zonder {', '.join(zonder_values[:-1]) + ' en ' + zonder_values[-1] if len(zonder_values) > 1 else zonder_values[0]}")
+        example_clause = " ".join(met_parts)
+
+        met_section = f"""
+PRODUCTEIGENSCHAPPEN — combineer tot één clause na productnaam: "{example_clause}"
+"""
+        met_rule = f"""7. PRODUCTEIGENSCHAPPEN: Zet de bovenstaande clause ("{example_clause}") direct NA de productnaam. Gebruik precies deze formulering.
+"""
+    else:
+        met_rule = """7. Voeg NOOIT het woord "met" toe aan de titel.
+"""
 
     prompt = f"""Je bent een SEO-expert. Verbeter deze titel tot een goedlopende en grammaticaal correcte H1 zonder "-".
 
-Huidige titel van API: "{api_h1}"
+Huidige titel van API: "{ai_h1}"
 
 Facetten (naam: waarde): {facet_info}
 
 BELANGRIJK - Facetwaarden die INTACT moeten blijven (niet splitsen of herschikken):
 {facet_values_str}
-
+{met_section}
 Regels:
-1. Gebruik UITSLUITEND de woorden uit de titel en facetten hierboven. Verzin ABSOLUUT GEEN nieuwe woorden, maten, kleuren of andere informatie die niet in de titel of facetten staat. Je mag WEL "met" of "zonder" toevoegen waar grammaticaal nodig (zie regel 10). Voeg NOOIT zelf "voor", "van" of "in" toe, maar als deze woorden al in een facetwaarde staan, behoud ze dan.
+1. ALLERBELANGRIJKSTE REGEL: Gebruik UITSLUITEND woorden die voorkomen in de titel OF in de facetten hierboven. Voeg ABSOLUUT GEEN nieuwe woorden toe. Geen "Nieuwe", geen extra bijvoeglijke naamwoorden, geen woorden die niet letterlijk in de input staan.
 2. Facetwaarden zijn vaste combinaties en mogen NIET opgesplitst worden.
-   Bijvoorbeeld: "Rode Duivels" is één thema, niet "Rode" + "Duivels".
 3. Merk ALTIJD vooraan (bijv. "Apple iPhones" niet "iPhones van Apple").
 4. Kleuren en materialen als bijvoeglijk naamwoord VOOR het zelfstandig naamwoord.
 5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan ALTIJD direct VOOR de productnaam, NOOIT met "voor" ervoor.
-   Bijvoorbeeld: "Nylon Heren vesten met capuchon" niet "Nylon vesten voor heren met capuchon".
-6. NOOIT "in", "van" of "voor" toevoegen. (Maar WEL "met" toevoegen voor producteigenschappen, zie regel 10.)
-7. Zet maten (zoals Maat S, Maat M, Maat L, Maat XL, Maat 38, Maat 42, etc.) helemaal ACHTERAAN in de titel, ZONDER "met" ervoor. Maten staan altijd los achteraan.
-   Bijvoorbeeld: "Blauwe cardigans met lange mouwen Maat XS" niet "Blauwe cardigans Maat XS met lange mouwen".
-   Bijvoorbeeld: "Imprimétops Maat 40" niet "Imprimétops met Maat 40".
-8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
-   Bijvoorbeeld: "Groene Adidas Originals Kinderen trainingspakken" niet "Adidas Groene Kinderen Adidas Originals trainingspakken".
-9. Zet conditie (Nieuw/Nieuwe) en formaat (Kleine/Grote) als bijvoeglijk naamwoord VOOR de productnaam, nooit erachter.
-   Bijvoorbeeld: "Nieuwe kleine Low Frost tafelmodel" niet "Low frost Tafelmodel Nieuwe Kleine".
-10. BELANGRIJK: Producteigenschappen zoals "Korte mouwen", "Lange mouwen", "Capuchon", "Ronde hals", "V-hals" mogen NOOIT los voor de productnaam staan. Voeg ALTIJD "met" toe en zet ze NA de productnaam. Dit geldt ook voor facetwaarden die beginnen met "Met" of "Zonder".
-   Bundel alles in ÉÉN "met X, Y en Z" clause. Gebruik "met" maar één keer, daarna komma's en "en".
-   Bijvoorbeeld: "Heren Slim fit poloshirts met lange mouwen" niet "Heren Slim fit poloshirts Lange mouwen".
-   Bijvoorbeeld: "Heren poloshirts met korte mouwen, borstzak en print" niet "Heren poloshirts met borstzak en print met korte mouwen".
-   Bijvoorbeeld: "Heren jassen met capuchon en rits" niet "Capuchon Heren jassen met rits".
-11. Maak de titel natuurlijk lopend Nederlands.
+6. NOOIT "in", "van" of "voor" toevoegen.
+{met_rule}8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
+9. Als de facetten woorden bevatten zoals "Nieuw" of "Kleine"/"Grote", zet die als bijvoeglijk naamwoord VOOR de productnaam. Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
+10. Maak de titel natuurlijk lopend Nederlands.
 
 Geef ALLEEN de verbeterde titel terug, geen uitleg."""
 
@@ -493,6 +586,24 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
         )
 
         improved_h1 = response.choices[0].message.content.strip().strip('"')
+
+        # Strip trailing "met" if AI left it dangling (happens when no features)
+        if improved_h1.endswith(' met'):
+            improved_h1 = improved_h1[:-4]
+
+        # Remove hallucinated words that aren't in the input
+        all_input_words = set(w.lower() for w in ai_h1.split())
+        for f in non_size_facets:
+            all_input_words.update(w.lower() for w in f['detail_value'].split())
+        # Check for common hallucinated words
+        hallucination_checks = ['Heren', 'Dames', 'Kinderen', 'Jongens', 'Meisjes', 'Baby', 'Nieuwe', 'Nieuw']
+        for word in hallucination_checks:
+            if word.lower() not in all_input_words and word in improved_h1.split():
+                improved_h1 = ' '.join(w for w in improved_h1.split() if w != word)
+
+        # Append size values at the end (handled in code, not by AI)
+        if size_values:
+            improved_h1 = improved_h1.rstrip() + " " + " ".join(size_values)
 
         return {
             "h1_title": improved_h1,
