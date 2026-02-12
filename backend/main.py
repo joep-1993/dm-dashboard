@@ -3312,6 +3312,19 @@ async def indexnow_history(limit: int = 100):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/indexnow/today-count")
+async def indexnow_today_count():
+    """Get the number of URLs submitted today and the daily limit."""
+    from backend.indexnow_service import get_today_count, DAILY_LIMIT
+
+    try:
+        loop = asyncio.get_event_loop()
+        count = await loop.run_in_executor(None, get_today_count)
+        return {"status": "success", "today_count": count, "daily_limit": DAILY_LIMIT}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================
 # SEO Index Checker Endpoints
 # ============================================================

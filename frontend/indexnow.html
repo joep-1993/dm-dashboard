@@ -38,6 +38,24 @@
         <div class="row">
             <div class="col-md-10 mx-auto">
 
+                <!-- Daily Counter -->
+                <div class="card mb-4" id="counterCard">
+                    <div class="card-body py-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <strong>Today's usage:</strong>
+                                <span id="todayCount">-</span> / <span id="dailyLimit">10,000</span> URLs
+                            </div>
+                            <div class="flex-grow-1 mx-3">
+                                <div class="progress" style="height: 20px;">
+                                    <div class="progress-bar" id="usageBar" role="progressbar" style="width: 0%;">0%</div>
+                                </div>
+                            </div>
+                            <span class="badge" id="remainingBadge">- remaining</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Input Section -->
                 <div class="card mb-4">
                     <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
@@ -87,19 +105,27 @@
                     </div>
                     <div class="card-body">
                         <div class="row mb-3">
-                            <div class="col-md-3 text-center">
+                            <div class="col text-center">
                                 <h4 id="statInput">0</h4>
                                 <small class="text-muted">Total Input</small>
                             </div>
-                            <div class="col-md-3 text-center">
+                            <div class="col text-center">
+                                <h4 id="statNew">0</h4>
+                                <small class="text-muted">New URLs</small>
+                            </div>
+                            <div class="col text-center">
                                 <h4 id="statSubmitted" class="text-success">0</h4>
                                 <small class="text-muted">Submitted</small>
                             </div>
-                            <div class="col-md-3 text-center">
+                            <div class="col text-center">
                                 <h4 id="statSkipped" class="text-warning">0</h4>
-                                <small class="text-muted">Duplicates Skipped</small>
+                                <small class="text-muted">Already Submitted</small>
                             </div>
-                            <div class="col-md-3 text-center">
+                            <div class="col text-center d-none" id="statTruncatedCol">
+                                <h4 id="statTruncated" class="text-warning">0</h4>
+                                <small class="text-muted">Limit Truncated</small>
+                            </div>
+                            <div class="col text-center">
                                 <h4 id="statFailed" class="text-danger">0</h4>
                                 <small class="text-muted">Failed</small>
                             </div>
@@ -134,6 +160,34 @@
     <script>
         const API_BASE = window.location.origin;
 
+        function updateCounter(todayCount, dailyLimit) {
+            const pct = Math.min(100, Math.round((todayCount / dailyLimit) * 100));
+            const remaining = Math.max(0, dailyLimit - todayCount);
+            document.getElementById('todayCount').textContent = todayCount.toLocaleString();
+            document.getElementById('dailyLimit').textContent = dailyLimit.toLocaleString();
+            const bar = document.getElementById('usageBar');
+            bar.style.width = pct + '%';
+            bar.textContent = pct + '%';
+            bar.className = 'progress-bar' + (pct >= 90 ? ' bg-danger' : pct >= 70 ? ' bg-warning' : ' bg-success');
+            const badge = document.getElementById('remainingBadge');
+            badge.textContent = remaining.toLocaleString() + ' remaining';
+            badge.className = 'badge ' + (pct >= 90 ? 'bg-danger' : pct >= 70 ? 'bg-warning' : 'bg-success');
+        }
+
+        async function loadTodayCount() {
+            try {
+                const response = await fetch(`${API_BASE}/api/indexnow/today-count`);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateCounter(data.today_count, data.daily_limit);
+                }
+            } catch (e) { /* silent */ }
+        }
+
+        // Load counter and history on page load
+        loadTodayCount();
+        loadHistory();
+
         function setLoading(btnId, loading) {
             const btn = document.getElementById(btnId);
             if (loading) {
@@ -147,17 +201,32 @@
         }
 
         function showResults(data) {
+            // Update daily counter from response
+            if (data.today_count !== undefined && data.daily_limit !== undefined) {
+                updateCounter(data.today_count, data.daily_limit);
+            }
             const card = document.getElementById('resultsCard');
             card.classList.remove('d-none');
 
-            document.getElementById('statInput').textContent = data.total_input || 0;
-            document.getElementById('statSubmitted').textContent = data.total_submitted || 0;
-            document.getElementById('statSkipped').textContent = data.skipped_duplicates || 0;
-            document.getElementById('statFailed').textContent = data.total_failed || 0;
+            document.getElementById('statInput').textContent = (data.total_input || 0).toLocaleString();
+            document.getElementById('statNew').textContent = (data.new_urls || 0).toLocaleString();
+            document.getElementById('statSubmitted').textContent = (data.total_submitted || 0).toLocaleString();
+            document.getElementById('statSkipped').textContent = (data.skipped_duplicates || 0).toLocaleString();
+            document.getElementById('statFailed').textContent = (data.total_failed || 0).toLocaleString();
+
+            // Show truncated column only when applicable
+            const truncCol = document.getElementById('statTruncatedCol');
+            if (data.truncated) {
+                document.getElementById('statTruncated').textContent = data.truncated.toLocaleString();
+                truncCol.classList.remove('d-none');
+            } else {
+                truncCol.classList.add('d-none');
+            }
 
             const msgArea = document.getElementById('messageArea');
             if (data.message) {
-                msgArea.innerHTML = `<div class="alert alert-warning">${data.message}</div>`;
+                const alertClass = data.status === 'error' ? 'alert-danger' : 'alert-warning';
+                msgArea.innerHTML = `<div class="alert ${alertClass}">${data.message}</div>`;
             } else {
                 msgArea.innerHTML = '';
             }
@@ -176,6 +245,9 @@
             } else {
                 batchDiv.innerHTML = '';
             }
+
+            // Refresh history after submission
+            loadHistory();
         }
 
         async function submitManual() {

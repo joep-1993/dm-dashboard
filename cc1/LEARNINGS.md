@@ -21,6 +21,50 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
+## AI Title Generation: Met-Feature Duplication Fix
+- **Problem**: Met-feature values (e.g., "Korte mouwen") appeared twice in titles — once in the base H1 from the API (e.g., "Korte mouwen nachthemden") and again as a "met" clause ("met Korte mouwen")
+- **Root Cause**: Size and suffix values were stripped from `ai_h1` before sending to OpenAI, but met-feature values were NOT stripped. The AI saw "Korte mouwen nachthemden" AND received instructions to add "met korte mouwen"
+- **Fix**: After classifying met-features, strip them from `ai_h1` using case-insensitive regex replace (handles "met "/"zonder " prefixed values too). Applied to ALL met-features: mouwen, capuchon, rits, knopen, veters, strepen, print, etc.
+- **Scale**: 106 affected URLs found and reset (17 for korte mouwen + 89 for other met-features)
+- **File**: `backend/ai_titles_service.py` — lines 593-610
+- **Date**: 2026-02-12
+
+## AI Title Generation: Met-Feature by Facet Name (Materiaal Band)
+- **Problem**: Facet `m_band` (URL parameter) has API facet name "Materiaal band" — not "m_band". Code was checking `fname == 'm_band'` which never matched
+- **Lesson**: Always check the actual API facet name (via `fetch_products_api()`) rather than assuming it matches the URL parameter name
+- **Fix**: Changed check to `fname == 'materiaal band'`
+- **Scale**: 356 URLs reset
+- **File**: `backend/ai_titles_service.py`
+- **Date**: 2026-02-12
+
+## AI Title Generation: Vermogen/Power Facets as Spec Values
+- **Problem**: Facet `watt_frituurpannen` (API name "Vermogen (Watt)") with values like "2001 tot 3000" wasn't detected as a spec value. The range format without unit didn't match the number+unit regex
+- **Fix**: Added `fname.startswith('vermogen')` to `is_spec_value()` — catches all power/output facets regardless of value format
+- **Scale**: 121 URLs reset
+- **File**: `backend/ai_titles_service.py` — function `is_spec_value()`
+- **Date**: 2026-02-12
+
+## AI Title Generation: Soort Facet Category Replacement
+- **Problem**: "Soort" facets with product-type values (e.g., "Parka jassen", "Bomberjacks") created redundant titles: "G-Star Parka jassen jacks" where "jacks" is the generic category already superseded by the specific Soort value
+- **Detection**: The API returns `category_name` (e.g., "Jacks", "Winterjassen") separately. When a Soort facet's value ends with a product type suffix, the trailing category name in the H1 is redundant
+- **Fix**: Detect Soort facets whose last word ends with a product type suffix (jassen, jacks, broeken, shirts, schoenen, jurken, truien, etc.). Strip trailing `category_name` from `api_h1` using case-insensitive regex
+- **Key**: Uses `endswith()` on the last word of the Soort value against a tuple of ~30 common Dutch product type suffixes
+- **File**: `backend/ai_titles_service.py` — between facet dedup and facet classification sections
+- **Date**: 2026-02-12
+
+## IndexNow: Migrated from Redshift to Local PostgreSQL
+- **Problem**: IndexNow service used Redshift for URL deduplication tracking. `SELECT DISTINCT url FROM pa.index_now_joep` on 800K+ rows was slow and competed with other Redshift queries, causing the frontend to become unresponsive
+- **Fix**: Switched all IndexNow DB operations from `get_redshift_connection()` to `get_db_connection()` (local PostgreSQL). Added proper indexes (`idx_indexnow_url`, `idx_indexnow_date`). Migrated 813,978 rows from Redshift
+- **Daily limit**: Added 10K daily URL limit with counter, progress bar in UI, and enforcement in `submit_urls()`
+- **UI improvements**: Auto-loading history on page load, submission details (new/submitted/skipped/truncated), auto-refresh history after submission
+- **File**: `backend/indexnow_service.py`
+- **Date**: 2026-02-12
+
+## Winkel (Shop) Facet URLs Are Useless for AI Titles
+- **Problem**: URLs with `winkel~` facets return no selected facets from the Product Search API — only the bare category name. Results in empty titles like "bedden"
+- **Action**: Deleted 48,578 winkel URLs from `pa.unique_titles`. These should not be processed for AI titles
+- **Date**: 2026-02-12
+
 ## AI Title Generation: Code-Level Facet Classification
 - **Problem**: OpenAI (gpt-4o-mini) persistently adds "met" before sizes ("met Maat L", "met Grote maten") despite extensive prompt rules forbidding it. Prompt-only fixes failed after 5+ iterations.
 - **Solution**: Moved facet handling from prompt rules to Python code preprocessing in `generate_title_from_api()`:

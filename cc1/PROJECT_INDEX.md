@@ -24,7 +24,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── keyword_planner_service.py # Keyword Planner: Google Ads search volume lookup
 │   ├── category_keyword_service.py # Category Keyword Volumes: keyword+category combinations + facet volume processing
 │   ├── run_facet_volumes.py    # Batch facet volume processing script (all maincats, resume-capable)
-│   ├── indexnow_service.py     # IndexNow: submit URLs to IndexNow API with Redshift dedup
+│   ├── indexnow_service.py     # IndexNow: submit URLs to IndexNow API with local PostgreSQL dedup + 10K daily limit
 │   ├── index_checker_service.py # SEO Index Checker: Google Search Console URL Inspection API
 │   ├── index_checker.py        # Standalone index checker script
 │   ├── category_forms.json     # Pre-computed Dutch singular/plural forms (3,564 entries)

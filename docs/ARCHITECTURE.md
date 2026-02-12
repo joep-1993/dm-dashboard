@@ -210,6 +210,12 @@ main.py (API Endpoints)
     ├──▶ link_validator.py (Quality Control)
     │       └──▶ HTTP status checking (301/404 detection)
     │
+    ├──▶ ai_titles_service.py (Unique Title Generation)
+    │       └──▶ Product Search API + OpenAI (facet classification, met-features, spec values)
+    │
+    ├──▶ indexnow_service.py (IndexNow URL Submission)
+    │       └──▶ IndexNow API + local PostgreSQL dedup (10K daily limit)
+    │
     ├──▶ canonical_service.py (URL Canonicalization)
     │       └──▶ Redshift queries + URL transformation rules
     │
@@ -223,7 +229,7 @@ main.py (API Endpoints)
     │       └──▶ HTTP status codes, redirects, canonical URLs
     │
     └──▶ database.py (Data Access Layer)
-            ├──▶ PostgreSQL (local tracking)
+            ├──▶ PostgreSQL (local tracking + IndexNow dedup)
             └──▶ Redshift (persistent storage)
 ```
 

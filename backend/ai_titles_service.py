@@ -501,6 +501,27 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
                 if doelgroep_val in api_h1:
                     api_h1 = api_h1.replace(doelgroep_val + ' ', '', 1).strip()
 
+    # Strip redundant category name when a "Soort" facet already contains the product type
+    # e.g., Soort="Parka jassen" + category_name="Jacks" → H1 "Parka jassen jacks" → strip "jacks"
+    _product_type_suffixes = (
+        'jassen', 'jacks', 'broeken', 'shirts', 'hemden', 'tops', 'blouses',
+        'schoenen', 'laarzen', 'sandalen', 'sneakers', 'boots', 'pumps', 'instappers',
+        'jurken', 'rokken', 'truien', 'vesten', 'pakken',
+        'tassen', 'horloges', 'brillen', 'sieraden',
+        'pannen', 'ovens', 'magnetrons', 'koelkasten', 'wasmachines',
+        'banken', 'stoelen', 'tafels', 'kasten', 'bedden',
+    )
+    soort_facet = next((f for f in selected_facets if f['facet_name'].lower() == 'soort'), None)
+    if soort_facet and category_name:
+        soort_val = soort_facet['detail_value']
+        # Check if the soort value ends with a product type word
+        soort_last_word = soort_val.rsplit(None, 1)[-1].lower() if soort_val else ''
+        is_product_type = soort_last_word.endswith(_product_type_suffixes)
+        if is_product_type:
+            # Strip trailing category name from H1 (case-insensitive)
+            cat_pattern = re.compile(r'\s+' + re.escape(category_name) + r'\s*$', re.IGNORECASE)
+            api_h1 = cat_pattern.sub('', api_h1).strip()
+
     # Classify facets for placement
     # Sizes: will be appended in code AFTER AI generates title (to prevent "met Maat" errors)
     # Met-features: passed to AI with hint to add "met"
@@ -549,6 +570,9 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         # Facet name hints (fallback for less common facet names)
         if fname.startswith('maat') or fname.startswith('wijdte'):
             return True
+        # Power/output facets (e.g., "Vermogen (Watt)")
+        if fname.startswith('vermogen'):
+            return True
         return False
 
     size_values = []       # Display values to append at end (e.g., "Maat 57")
@@ -565,6 +589,12 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             # Prepend "Maat" to bare numbers from maat facets (e.g., "57" → "Maat 57")
             if fname.startswith('maat') and not val.lower().startswith('maat') and val.replace('.', '').replace(',', '').replace('-', '').strip().isdigit():
                 val = f"Maat {val}"
+            # Strip trailing inflected adjective for end-placement
+            # "60 cm brede" → "60 cm breed" (uninflect Dutch adjective at end of title)
+            _adj_uninflect = {'brede': 'breed', 'lange': 'lang', 'hoge': 'hoog', 'diepe': 'diep', 'smalle': 'smal'}
+            last_word = val.rsplit(None, 1)[-1].lower() if ' ' in val else ''
+            if last_word in _adj_uninflect:
+                val = val[:-(len(last_word))] + _adj_uninflect[last_word]
             size_values.append(val)
         elif fname.startswith('kleurcombi'):
             suffix_originals.append(val)
@@ -583,11 +613,25 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             # Known feature values that need "met" added
             elif val.lower() in met_feature_values:
                 met_values.append(val)
+            # Facet names that should always be met-features
+            elif fname == 'materiaal band':
+                met_values.append(val)
 
-    # Strip size and suffix values from the API H1 so the AI doesn't see them
+    # Strip size, suffix, and met-feature values from the API H1 so the AI doesn't see them
+    # (met-features are re-added by AI as "met ..." clause, so strip to avoid duplication)
     ai_h1 = api_h1
     for sv in size_originals + suffix_originals:
         ai_h1 = ai_h1.replace(sv, '').strip()
+    for mv in met_values:
+        # Strip the raw value (e.g., "Korte mouwen") from the H1
+        clean_mv = mv
+        if clean_mv.lower().startswith('met '):
+            clean_mv = clean_mv[4:]
+        elif clean_mv.lower().startswith('zonder '):
+            clean_mv = clean_mv[7:]
+        # Case-insensitive replace to catch "Korte mouwen" and "korte mouwen"
+        pattern = re.compile(re.escape(clean_mv), re.IGNORECASE)
+        ai_h1 = pattern.sub('', ai_h1).strip()
     # Clean up double spaces
     while '  ' in ai_h1:
         ai_h1 = ai_h1.replace('  ', ' ')
