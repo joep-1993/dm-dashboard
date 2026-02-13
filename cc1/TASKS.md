@@ -10,6 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add URL Checker tool - check status codes, meta title, meta description, H1, product count (from selected facet productCount), canonical URL. Streaming API with max 10 workers / 2 req/sec. Supports paste URLs + file upload (.xlsx/.csv/.txt). Dashboard card + nav links in all 13 pages #claude-session:2026-02-13
+- [x] Add structured data itemCondition RefurbishedCondition to structured_data_iphone file #claude-session:2026-02-13
+- [x] Check status codes for 67 meubilair facet URLs — 55x 200, 12x 301 (facet values no longer active) #claude-session:2026-02-13
 - [x] Bad URL scan: created find_bad_urls.py to detect facet_not_available (400) URLs via Product Search API — partial scan of 155K/916K found ~4,589 bad URLs (~3%) before stopping #claude-session:2026-02-11
 - [x] AI title: suffix placement for "Volwassenen" (levensfase) and "Vanaf X jaar" (geschikte_leeftijd) values, reset 200 URLs #claude-session:2026-02-11
 - [x] DB cleanup: cross-reference Redirects Admin Excel (459K redirects) — found 41,886 old URLs in DB, added 206,580 missing redirect targets from column B, removed 295,946 /l/ /p/ /r/ URLs #claude-session:2026-02-11

@@ -23,6 +23,7 @@
                 <a href="/static/keyword-planner.html" class="btn btn-outline-light btn-sm fw-bold">Keyword Planner</a>
                 <a href="/static/indexnow.html" class="btn btn-outline-light btn-sm fw-bold">IndexNow</a>
                 <a href="/static/index-checker.html" class="btn btn-outline-light btn-sm fw-bold">SEO Index Checker</a>
+                <a href="/static/url-checker.html" class="btn btn-outline-light btn-sm fw-bold">URL Checker</a>
                 <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
             </div>
         </div>
@@ -125,6 +126,50 @@
                             <h6 class="mb-3">Recent Results</h6>
                             <div id="recentResults" style="max-height: 400px; overflow-y: auto;">
                                 <p class="text-muted text-center small">No recent results</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Predicted Failure Analysis -->
+        <div class="row mb-4">
+            <div class="col-lg-8 mx-auto">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Predicted Failure Analysis</h5>
+                        <span id="flagBadge" class="badge bg-secondary d-none">0 flagged</span>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">Analyzes api_failed URLs for structural and subcategory patterns, then flags pending URLs likely to fail.</p>
+                        <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+                            <div class="input-group" style="width: 180px;">
+                                <span class="input-group-text">Min Fail %</span>
+                                <input type="number" class="form-control" id="minFailRate" value="80" min="50" max="100">
+                            </div>
+                            <div class="input-group" style="width: 180px;">
+                                <span class="input-group-text">Min Failures</span>
+                                <input type="number" class="form-control" id="minFailures" value="5" min="1" max="100">
+                            </div>
+                            <button id="flagDryRunBtn" class="btn btn-outline-info">
+                                <span id="flagDryRunText">Preview</span>
+                                <span id="flagDryRunSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                            <button id="flagApplyBtn" class="btn btn-danger" disabled>
+                                <span id="flagApplyText">Flag URLs</span>
+                                <span id="flagApplySpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                        </div>
+                        <div id="flagResults" class="d-none">
+                            <div id="flagSummary" class="alert alert-info py-2 mb-3"></div>
+                            <div style="max-height: 350px; overflow-y: auto;">
+                                <table class="table table-sm table-striped mb-0">
+                                    <thead class="table-light sticky-top">
+                                        <tr><th>Pattern</th><th>Type</th><th class="text-end">Fail Rate</th><th class="text-end">Pending to Flag</th></tr>
+                                    </thead>
+                                    <tbody id="flagTableBody"></tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -625,6 +670,73 @@
             document.getElementById('titleH1').value = item.h1_title;
             document.getElementById('titleUrl').focus();
         }
+
+        // --- Predicted Failure Analysis ---
+        async function runFlagAnalysis(dryRun) {
+            const btn = dryRun ? document.getElementById('flagDryRunBtn') : document.getElementById('flagApplyBtn');
+            const spinner = dryRun ? document.getElementById('flagDryRunSpinner') : document.getElementById('flagApplySpinner');
+            const text = dryRun ? document.getElementById('flagDryRunText') : document.getElementById('flagApplyText');
+
+            btn.disabled = true;
+            spinner.classList.remove('d-none');
+            text.textContent = dryRun ? 'Analyzing...' : 'Flagging...';
+
+            try {
+                const resp = await fetch('/api/ai-titles/flag-predicted-failures', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        dry_run: dryRun,
+                        min_fail_rate: parseFloat(document.getElementById('minFailRate').value) || 80,
+                        min_failures: parseInt(document.getElementById('minFailures').value) || 5,
+                    })
+                });
+                const data = await resp.json();
+
+                // Show results
+                const resultsDiv = document.getElementById('flagResults');
+                const summaryDiv = document.getElementById('flagSummary');
+                const tbody = document.getElementById('flagTableBody');
+                const badge = document.getElementById('flagBadge');
+
+                resultsDiv.classList.remove('d-none');
+                badge.classList.remove('d-none');
+                badge.textContent = `${data.total_flagged.toLocaleString()} ${dryRun ? 'would be flagged' : 'flagged'}`;
+                badge.className = `badge ${dryRun ? 'bg-info' : 'bg-danger'}`;
+
+                summaryDiv.innerHTML = dryRun
+                    ? `<strong>Preview:</strong> ${data.total_flagged.toLocaleString()} pending URLs match failure patterns (${data.structural.length} structural, ${data.subcategory.length} subcategory patterns)`
+                    : `<strong>Done:</strong> ${data.total_flagged.toLocaleString()} URLs flagged as predicted failures`;
+                summaryDiv.className = `alert ${dryRun ? 'alert-info' : 'alert-success'} py-2 mb-3`;
+
+                let rows = '';
+                for (const s of data.structural) {
+                    rows += `<tr><td><code>${s.pattern}</code></td><td><span class="badge bg-warning text-dark">structural</span></td><td class="text-end">100%</td><td class="text-end">${s.pending_flagged.toLocaleString()}</td></tr>`;
+                }
+                for (const s of data.subcategory) {
+                    rows += `<tr><td><code>${s.subcat_path}</code></td><td><span class="badge bg-secondary">subcategory</span></td><td class="text-end">${s.fail_rate}%</td><td class="text-end">${s.pending_flagged.toLocaleString()}</td></tr>`;
+                }
+                tbody.innerHTML = rows;
+
+                // Enable the apply button after a dry run
+                if (dryRun && data.total_flagged > 0) {
+                    document.getElementById('flagApplyBtn').disabled = false;
+                }
+            } catch (error) {
+                alert('Analysis failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                spinner.classList.add('d-none');
+                text.textContent = dryRun ? 'Preview' : 'Flag URLs';
+            }
+        }
+
+        document.getElementById('flagDryRunBtn').addEventListener('click', () => runFlagAnalysis(true));
+        document.getElementById('flagApplyBtn').addEventListener('click', () => {
+            if (confirm('This will flag matching pending URLs as predicted failures. They will be skipped during AI processing. Continue?')) {
+                runFlagAnalysis(false);
+            }
+        });
     </script>
 </body>
 </html>

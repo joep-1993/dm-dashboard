@@ -1,0 +1,86 @@
+[
+  {
+    "@context": "http://schema.org",
+    "@type": "Product",
+    "@id": "/p/apple-iphone-15-blauw-smartphone-128-gb-zwart/655/2341504c-2b4c-4280-8ac8-441ab7e656c0/1284_99950-6705_23814211/#product",
+    "description": "<p>De Apple iPhone 15 - 128GB - Blauw is een smartphone die zich onderscheidt door zijn elegante ontwerp en krachtige prestaties. Deze telefoon is ontworpen voor gebruikers die waarde hechten aan zowel stijl als functionaliteit.</p><p>Met een opslagcapaciteit van 128GB biedt deze smartphone voldoende ruimte voor al je foto's, video's en apps, waardoor je geen belangrijke momenten hoeft te missen. De indrukwekkende camera stelt je in staat om elke belangrijke gebeurtenis vast te leggen in hoge kwaliteit, terwijl de lange batterijduur ervoor zorgt dat je de hele dag verbonden kunt blijven zonder je zorgen te maken over opladen.</p><p>De krachtige A16 Bionic-chip zorgt voor razendsnelle prestaties, waardoor multitasking en het gebruik van veeleisende apps soepel verloopt. Het heldere Super Retina-display biedt een levendige kijkervaring, ideaal voor het bekijken van video's, foto's en het browsen op het internet.</p><p>Deze smartphone is niet alleen een communicatiemiddel, maar ook een veelzijdige gadget die je dagelijkse leven gemakkelijker maakt. Of je nu foto's maakt, berichten verstuurt of je favoriete apps gebruikt, de Apple iPhone 15 biedt een betrouwbare en stijlvolle oplossing voor al je behoeften.</p>",
+    "gtin13": "0195949036064",
+    "image": [
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/394/F300/057ce9ab44d57b2671d1091297cfc914/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15376/F300/699a4eebe6e6a8edc6ee79846dfebbde/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15377/F300/ec6de6d3bf544fc87eaacff3e8c86a39/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15378/F300/1e332788fb0ef8e8d466403ceb9bc824/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15379/F300/203fdee80579b3449f63ecd87432db2e/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15380/F300/d533dedcd42ff445f582515b899d5682/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15381/F300/a7cc95364958d5a63c7d5582c327bea5/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15382/F300/ea6815b61a47a0dc61157eb631342cf9/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15383/F300/1bc15a742b239870bf9aafde3303529f/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15384/F300/b41b532927e6cc34d4fb38511c6bcc70/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15385/F300/9c94be7cb3d2d5c1af735e7f62128976/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg",
+      "https://hwimages.beslist.net/beslist-images/pim/0195949036064/15386/F300/cdf5475e1b9a308143348be092f01099/Mobiele-telefoons/Apple-iPhone-15-128GB-Blauw.jpg"
+    ],
+    "name": "Apple - iPhone 15 - Blauw - Smartphone 128 GB Zwart",
+    "brand": {
+      "@type": "Brand",
+      "name": "Apple"
+    },
+    "offers": {
+      "@type": "AggregateOffer",
+      "offerCount": 14,
+      "highPrice": 838.72,
+      "lowPrice": 597.86,
+      "priceCurrency": "EUR",
+      "itemCondition": "https://schema.org/RefurbishedCondition"
+    }
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "item": {
+          "@type": "WebPage",
+          "@id": "/",
+          "name": "home"
+        }
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "item": {
+          "@type": "WebPage",
+          "@id": "/products/elektronica/",
+          "name": "Elektronica"
+        }
+      },
+      {
+        "@type": "ListItem",
+        "position": 3,
+        "item": {
+          "@type": "WebPage",
+          "@id": "/products/elektronica/elektronica_19875536/",
+          "name": "Telefonie"
+        }
+      },
+      {
+        "@type": "ListItem",
+        "position": 4,
+        "item": {
+          "@type": "WebPage",
+          "@id": "/products/elektronica/elektronica_19875536_19934132/",
+          "name": "Mobiele telefoons"
+        }
+      },
+      {
+        "@type": "ListItem",
+        "position": 5,
+        "item": {
+          "@type": "WebPage",
+          "name": "Apple - iPhone 15 - Blauw - Smartphone 128 GB Zwart"
+        }
+      }
+    ]
+  }
+]

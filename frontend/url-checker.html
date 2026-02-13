@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL Checker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .results-table { max-height: 600px; overflow-y: auto; }
+        .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
+        .url-cell.copyable { cursor: pointer; }
+        .url-cell.copyable:hover { background-color: #e9ecef; }
+        .url-cell.copied { background-color: #d4edda !important; transition: background-color 0.3s; }
+        .meta-cell { font-size: 0.8rem; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .meta-cell:hover { white-space: normal; overflow: visible; }
+        .status-200 { color: #198754; font-weight: bold; }
+        .status-301, .status-302, .status-307, .status-308 { color: #0d6efd; font-weight: bold; }
+        .status-404 { color: #dc3545; font-weight: bold; }
+        .status-error { color: #dc3545; font-weight: bold; }
+        .upload-zone { border: 2px dashed #dee2e6; border-radius: 8px; padding: 1.5rem; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .upload-zone:hover { border-color: #5e4a90; background: #f8f9fc; }
+        .upload-zone.dragover { border-color: #5e4a90; background: #f0eef5; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container-fluid d-flex flex-nowrap align-items-center gap-2">
+            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1 me-auto" style="white-space: nowrap;">URL Checker</a>
+            <div class="d-flex flex-nowrap gap-1">
+                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
+                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
+                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
+                <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
+                <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
+                <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
+                <a href="/static/redirect-checker.html" class="btn btn-outline-light btn-sm fw-bold">Redirect Checker</a>
+                <a href="/static/301-generator.html" class="btn btn-outline-light btn-sm fw-bold">301 Generator</a>
+                <a href="/static/keyword-planner.html" class="btn btn-outline-light btn-sm fw-bold">Keyword Planner</a>
+                <a href="/static/indexnow.html" class="btn btn-outline-light btn-sm fw-bold">IndexNow</a>
+                <a href="/static/index-checker.html" class="btn btn-outline-light btn-sm fw-bold">SEO Index Checker</a>
+                <a href="/static/url-checker.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">URL Checker</a>
+                <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="col-md-11 mx-auto">
+            <!-- Input Section -->
+            <div class="card mb-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Input URLs</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="urlInput" class="form-label">Enter URLs (one per line or comma-separated)</label>
+                            <textarea class="form-control" id="urlInput" rows="8" placeholder="/products/elektronica/
+https://www.beslist.nl/products/mode/
+/products/parfum_aftershave/parfum_aftershave_422757/c/merk~422790"></textarea>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Or upload a file</label>
+                            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                                <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.txt" style="display: none;" onchange="handleFileSelect(event)">
+                                <p class="mb-1"><strong>Drop file here</strong></p>
+                                <small class="text-muted">.xlsx, .csv, or .txt</small>
+                                <p class="mb-0 mt-1 text-success small" id="fileStatus" style="display: none;"></p>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Settings</label>
+                            <div class="mb-2">
+                                <label for="workersInput" class="form-label small mb-0">Parallel Workers (max 10)</label>
+                                <input type="number" class="form-control form-control-sm" id="workersInput" value="10" min="1" max="10">
+                            </div>
+                            <div class="mb-2">
+                                <label for="rateInput" class="form-label small mb-0">Requests/sec (max 2)</label>
+                                <input type="number" class="form-control form-control-sm" id="rateInput" value="2" min="0.5" max="2" step="0.5">
+                            </div>
+                            <div class="mb-3">
+                                <label for="timeoutInput" class="form-label small mb-0">Timeout (sec)</label>
+                                <input type="number" class="form-control form-control-sm" id="timeoutInput" value="15" min="5" max="60">
+                            </div>
+                            <button class="btn btn-primary w-100" onclick="checkUrls()" id="checkBtn">
+                                Check URLs
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress Section -->
+            <div class="card mb-4" id="progressCard" style="display: none;">
+                <div class="card-header bg-warning">
+                    <h5 class="mb-0">Progress</h5>
+                </div>
+                <div class="card-body">
+                    <div class="progress mb-2" style="height: 25px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar" style="width: 0%">0%</div>
+                    </div>
+                    <p class="mb-0 text-muted" id="progressText">Starting...</p>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div class="card mb-4" id="resultsCard" style="display: none;">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Results</h5>
+                    <div>
+                        <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyAllToClipboard()">Copy for Excel</button>
+                        <button class="btn btn-light btn-sm" onclick="downloadResults('csv')">Download CSV</button>
+                        <button class="btn btn-light btn-sm" onclick="downloadResults('excel')">Download Excel</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- Summary -->
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <div class="d-flex gap-3 flex-wrap" id="summaryStats"></div>
+                        </div>
+                    </div>
+
+                    <!-- Results Table -->
+                    <div class="results-table">
+                        <table class="table table-sm table-bordered table-hover">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width: 3%">#</th>
+                                    <th style="width: 20%">URL</th>
+                                    <th style="width: 5%">Status</th>
+                                    <th style="width: 15%">Redirect URL</th>
+                                    <th style="width: 18%">Title</th>
+                                    <th style="width: 18%">Description</th>
+                                    <th style="width: 12%">H1</th>
+                                    <th style="width: 5%">Results</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = window.location.origin;
+        let results = [];
+        let selectedFile = null;
+
+        // File upload handling
+        const uploadZone = document.getElementById('uploadZone');
+        uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) setFile(file);
+        });
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) setFile(file);
+        }
+
+        function setFile(file) {
+            selectedFile = file;
+            const status = document.getElementById('fileStatus');
+            status.textContent = file.name;
+            status.style.display = 'block';
+        }
+
+        async function getUrlsFromInput() {
+            // If a file is selected, upload it first
+            if (selectedFile) {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                const resp = await fetch(`${API_BASE}/api/url-checker/upload`, { method: 'POST', body: formData });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.detail || 'File upload failed');
+                }
+                const data = await resp.json();
+                return data.urls;
+            }
+
+            // Otherwise parse from textarea
+            const urlInput = document.getElementById('urlInput').value.trim();
+            if (!urlInput) return [];
+
+            return urlInput
+                .split(/[\n,]+/)
+                .map(u => u.trim())
+                .filter(u => u && (u.startsWith('http') || u.startsWith('/')));
+        }
+
+        async function checkUrls() {
+            let urls;
+            try {
+                urls = await getUrlsFromInput();
+            } catch (e) {
+                alert(e.message);
+                return;
+            }
+
+            if (!urls || urls.length === 0) {
+                alert('No valid URLs found. Enter URLs starting with http://, https://, or / (relative).');
+                return;
+            }
+
+            const workers = Math.min(parseInt(document.getElementById('workersInput').value) || 10, 10);
+            const rate = Math.min(parseFloat(document.getElementById('rateInput').value) || 2, 2);
+            const timeout = parseInt(document.getElementById('timeoutInput').value) || 15;
+
+            document.getElementById('progressCard').style.display = 'block';
+            document.getElementById('resultsCard').style.display = 'none';
+            document.getElementById('checkBtn').disabled = true;
+
+            results = [];
+            const total = urls.length;
+            let completed = 0;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/url-checker/check`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls, workers, rate, timeout })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const text = decoder.decode(value);
+                    const lines = text.split('\n').filter(l => l.trim());
+
+                    for (const line of lines) {
+                        try {
+                            const data = JSON.parse(line);
+                            if (data.type === 'result') {
+                                results.push(data.data);
+                                completed++;
+                                updateProgress(completed, total);
+                            } else if (data.type === 'done') {
+                                showResults();
+                            }
+                        } catch (e) {}
+                    }
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+
+            document.getElementById('checkBtn').disabled = false;
+            showResults();
+        }
+
+        function updateProgress(completed, total) {
+            const pct = Math.round(100 * completed / total);
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('progressBar').textContent = pct + '%';
+            document.getElementById('progressText').textContent = `Checked ${completed} of ${total} URLs`;
+        }
+
+        function showResults() {
+            document.getElementById('progressCard').style.display = 'none';
+            document.getElementById('resultsCard').style.display = 'block';
+
+            // Sort results by input order (preserve original URL order)
+            // Results come back in completion order from asyncio, so we don't reorder
+
+            // Summary stats
+            const statusCounts = {};
+            let redirectCount = 0;
+            results.forEach(r => {
+                const status = String(r.status_code);
+                statusCounts[status] = (statusCounts[status] || 0) + 1;
+                if (r.redirect_url) redirectCount++;
+            });
+
+            let summaryHtml = `<span class="badge bg-secondary">Total: ${results.length}</span>`;
+            Object.keys(statusCounts).sort().forEach(status => {
+                const badgeClass = status === '200' ? 'bg-success' :
+                                   status.startsWith('3') ? 'bg-primary' :
+                                   status.startsWith('4') ? 'bg-danger' : 'bg-secondary';
+                summaryHtml += `<span class="badge ${badgeClass}">${status}: ${statusCounts[status]}</span>`;
+            });
+            if (redirectCount > 0) summaryHtml += `<span class="badge bg-info">Redirects: ${redirectCount}</span>`;
+            document.getElementById('summaryStats').innerHTML = summaryHtml;
+
+            // Results table
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = '';
+
+            results.forEach((r, i) => {
+                const statusClass = r.status_code === 200 ? 'status-200' :
+                                   String(r.status_code).startsWith('3') ? 'status-301' :
+                                   r.status_code === 404 ? 'status-404' : 'status-error';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${i + 1}</td>
+                    <td class="url-cell copyable" title="${escapeAttr(r.input_url)}" onclick="copyToClipboard('${escapeJs(r.input_url)}', this)">${truncate(r.input_url, 50)}</td>
+                    <td class="${statusClass}">${r.status_code}</td>
+                    <td class="url-cell ${r.redirect_url ? 'copyable' : ''}" title="${escapeAttr(r.redirect_url || '')}" ${r.redirect_url ? `onclick="copyToClipboard('${escapeJs(r.redirect_url)}', this)"` : ''}>${r.redirect_url ? truncate(r.redirect_url, 40) : '-'}</td>
+                    <td class="meta-cell" title="${escapeAttr(r.meta_title || '')}">${escapeHtml(r.meta_title || '-')}</td>
+                    <td class="meta-cell" title="${escapeAttr(r.meta_description || '')}">${escapeHtml(r.meta_description || '-')}</td>
+                    <td class="meta-cell" title="${escapeAttr(r.h1 || '')}">${escapeHtml(r.h1 || '-')}</td>
+                    <td>${r.product_count !== null && r.product_count !== undefined ? r.product_count : '-'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function truncate(str, maxLen) {
+            if (!str) return '';
+            return str.length <= maxLen ? str : str.substring(0, maxLen) + '...';
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function escapeAttr(text) {
+            if (!text) return '';
+            return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function escapeJs(text) {
+            if (!text) return '';
+            return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+        }
+
+        function copyToClipboard(text, element) {
+            navigator.clipboard.writeText(text).then(() => {
+                element.classList.add('copied');
+                setTimeout(() => element.classList.remove('copied'), 500);
+            });
+        }
+
+        function copyAllToClipboard() {
+            if (results.length === 0) return;
+            const headers = ['input_url', 'status_code', 'redirect_url', 'meta_title', 'meta_description', 'h1', 'product_count'];
+            const tsv = [headers.join('\t')];
+            results.forEach(r => {
+                tsv.push(headers.map(h => r[h] != null ? String(r[h]) : '').join('\t'));
+            });
+            navigator.clipboard.writeText(tsv.join('\n')).then(() => {
+                alert('Copied to clipboard! Paste directly into Excel.');
+            });
+        }
+
+        function downloadResults(format) {
+            if (results.length === 0) return;
+
+            if (format === 'csv') {
+                const headers = ['input_url', 'status_code', 'redirect_url', 'meta_title', 'meta_description', 'h1', 'product_count', 'canonical_url', 'error'];
+                const csv = [headers.join(',')];
+                results.forEach(r => {
+                    csv.push(headers.map(h => `"${(r[h] != null ? String(r[h]) : '').replace(/"/g, '""')}"`).join(','));
+                });
+                const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'url_checker_results.csv';
+                a.click();
+            } else {
+                fetch(`${API_BASE}/api/url-checker/download`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ results })
+                })
+                .then(r => r.blob())
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'url_checker_results.xlsx';
+                    a.click();
+                });
+            }
+        }
+    </script>
+</body>
+</html>

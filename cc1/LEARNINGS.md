@@ -21,6 +21,13 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
 
+## Beslist.nl Product Count Extraction
+- **Pattern**: `"productCount":(\d+),"selected":true` — finds the product count of selected facets in the embedded JSON
+- **Context**: Beslist pages embed facet data as JSON in the HTML. Every facet value has a `productCount`, but only the `selected:true` ones reflect the current page's result count
+- **Multiple matches**: When multiple facets are selected, they all share the same productCount — take the first match
+- **File**: `backend/main.py` — function `extract_product_count()`
+- **Date**: 2026-02-13
+
 ## AI Title Generation: Met-Feature Duplication Fix
 - **Problem**: Met-feature values (e.g., "Korte mouwen") appeared twice in titles — once in the base H1 from the API (e.g., "Korte mouwen nachthemden") and again as a "met" clause ("met Korte mouwen")
 - **Root Cause**: Size and suffix values were stripped from `ai_h1` before sending to OpenAI, but met-feature values were NOT stripped. The AI saw "Korte mouwen nachthemden" AND received instructions to add "met korte mouwen"

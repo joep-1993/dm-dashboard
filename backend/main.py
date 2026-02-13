@@ -2446,6 +2446,7 @@ from backend.ai_titles_service import (
     get_ai_titles_stats,
     get_unprocessed_count,
     get_recent_results,
+    analyze_and_flag_failures,
 )
 
 # Initialize AI titles columns on startup
@@ -2501,6 +2502,23 @@ async def get_ai_titles_recent(limit: int = 20):
     try:
         results = get_recent_results(limit)
         return {"results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ai-titles/flag-predicted-failures")
+async def ai_titles_flag_predicted_failures(request: dict):
+    """Analyze failed URLs for patterns and flag pending URLs likely to fail."""
+    dry_run = request.get("dry_run", True)
+    min_fail_rate = request.get("min_fail_rate", 80)
+    min_failures = request.get("min_failures", 5)
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, analyze_and_flag_failures, dry_run, min_fail_rate, min_failures
+        )
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -3051,6 +3069,206 @@ async def redirect_checker_download(request: dict):
             content=output.getvalue(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": "attachment; filename=redirect_check_results.xlsx"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# URL Checker API
+# ============================================================================
+
+def extract_meta_title(html: str) -> str:
+    """Extract <title> content from HTML."""
+    match = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else None
+
+def extract_meta_description(html: str) -> str:
+    """Extract meta description from HTML."""
+    patterns = [
+        r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']*)["\']',
+        r'<meta[^>]+content=["\']([^"\']*)["\'][^>]+name=["\']description["\']',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
+def extract_h1(html: str) -> str:
+    """Extract first H1 content from HTML (strip tags inside H1)."""
+    match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.IGNORECASE | re.DOTALL)
+    if match:
+        h1_content = match.group(1).strip()
+        # Strip inner HTML tags
+        h1_content = re.sub(r'<[^>]+>', '', h1_content).strip()
+        return h1_content
+    return None
+
+def extract_product_count(html: str) -> int:
+    """Extract product count from Beslist.nl page by finding productCount of a selected facet."""
+    match = re.search(r'"productCount":(\d+),"selected":true', html)
+    if match:
+        return int(match.group(1))
+    # Try reversed order
+    match = re.search(r'"selected":true[^}]*?"productCount":(\d+)', html)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+async def check_single_url_metadata(client: httpx.AsyncClient, url: str, semaphore, rate_limiter, timeout: int):
+    """Check a single URL and extract metadata: status, redirect, title, description, H1, product count."""
+    async with semaphore:
+        async with rate_limiter:
+            result = {
+                'input_url': url,
+                'status_code': None,
+                'redirect_url': None,
+                'final_url': None,
+                'meta_title': None,
+                'meta_description': None,
+                'h1': None,
+                'product_count': None,
+                'canonical_url': None,
+                'error': None
+            }
+            try:
+                # First request without redirects to get initial status
+                response = await client.get(url, follow_redirects=False, timeout=timeout)
+                initial_status = response.status_code
+                result['status_code'] = initial_status
+
+                html = None
+
+                if initial_status in (301, 302, 303, 307, 308):
+                    redirect_location = response.headers.get('Location')
+                    if redirect_location:
+                        if not redirect_location.startswith(('http://', 'https://')):
+                            redirect_location = urljoin(url, redirect_location)
+                        result['redirect_url'] = redirect_location
+
+                    # Follow redirects to get final URL and parse HTML
+                    response = await client.get(url, follow_redirects=True, timeout=timeout)
+                    result['final_url'] = str(response.url)
+                    if response.status_code == 200:
+                        html = response.text
+                else:
+                    result['final_url'] = str(response.url)
+                    if initial_status == 200:
+                        html = response.text
+
+                # Extract metadata from HTML
+                if html:
+                    result['meta_title'] = extract_meta_title(html)
+                    result['meta_description'] = extract_meta_description(html)
+                    result['h1'] = extract_h1(html)
+                    result['product_count'] = extract_product_count(html)
+                    result['canonical_url'] = extract_canonical_from_html(html, result['final_url'])
+
+            except httpx.TimeoutException:
+                result['status_code'] = 'TIMEOUT'
+                result['error'] = 'Request timed out'
+            except httpx.RequestError as e:
+                result['status_code'] = 'ERROR'
+                result['error'] = str(e)[:100]
+            except Exception as e:
+                result['status_code'] = 'ERROR'
+                result['error'] = str(e)[:100]
+            return result
+
+
+@app.post("/api/url-checker/check")
+async def url_checker_check(request: dict):
+    """
+    Check URLs for status codes, metadata (title, description, H1, product count).
+    Returns results as a stream of JSON lines.
+    """
+    urls = request.get('urls', [])
+    workers = min(request.get('workers', 10), 10)
+    rate = min(request.get('rate', 2), 2)
+    timeout = min(request.get('timeout', 15), 60)
+
+    if not urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+
+    urls = [normalize_url(url) for url in urls if url.strip()]
+
+    async def generate():
+        semaphore = asyncio.Semaphore(workers)
+        rate_limiter = RedirectRateLimiter(rate)
+        headers = {"User-Agent": REDIRECT_CHECKER_USER_AGENT}
+        limits = httpx.Limits(max_connections=workers, max_keepalive_connections=workers)
+
+        async with httpx.AsyncClient(headers=headers, limits=limits) as client:
+            tasks = [check_single_url_metadata(client, url, semaphore, rate_limiter, timeout) for url in urls]
+            for coro in asyncio.as_completed(tasks):
+                result = await coro
+                yield json.dumps({"type": "result", "data": result}) + "\n"
+
+        yield json.dumps({"type": "done"}) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+@app.post("/api/url-checker/upload")
+async def url_checker_upload(file: UploadFile = File(...)):
+    """Upload a file (.xlsx, .csv, .txt) containing URLs. Returns the list of URLs found."""
+    filename = file.filename.lower()
+    contents = await file.read()
+
+    try:
+        urls = []
+        if filename.endswith(('.xlsx', '.xls')):
+            import pandas as pd
+            df = pd.read_excel(BytesIO(contents))
+            if not df.empty:
+                urls = df.iloc[:, 0].dropna().astype(str).tolist()
+        elif filename.endswith('.csv'):
+            import pandas as pd
+            df = pd.read_csv(BytesIO(contents))
+            if not df.empty:
+                urls = df.iloc[:, 0].dropna().astype(str).tolist()
+        elif filename.endswith('.txt'):
+            text = contents.decode('utf-8', errors='ignore')
+            urls = [line.strip() for line in text.splitlines()]
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type. Use .xlsx, .csv, or .txt")
+
+        # Filter to valid URLs
+        urls = [u.strip() for u in urls if u.strip() and (u.strip().startswith('http') or u.strip().startswith('/'))]
+
+        if not urls:
+            raise HTTPException(status_code=400, detail="No valid URLs found in file")
+
+        return {"urls": urls, "count": len(urls)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/url-checker/download")
+async def url_checker_download(request: dict):
+    """Download URL checker results as Excel file."""
+    results = request.get('results', [])
+    if not results:
+        raise HTTPException(status_code=400, detail="No results provided")
+
+    try:
+        import pandas as pd
+        df = pd.DataFrame(results)
+        cols = ['input_url', 'status_code', 'redirect_url', 'meta_title', 'meta_description', 'h1', 'product_count', 'canonical_url', 'error']
+        df = df[[c for c in cols if c in df.columns]]
+
+        output = BytesIO()
+        df.to_excel(output, index=False)
+        output.seek(0)
+
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=url_checker_results.xlsx"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

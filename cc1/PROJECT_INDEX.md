@@ -2,14 +2,14 @@
 _Project structure and technical specs. Update when: creating files, adding dependencies, defining schemas._
 
 ## Stack
-Backend: FastAPI (Python 3.11, ThreadPoolExecutor for parallel processing, psycopg2 connection pooling 2-20 conns) | Frontend: Bootstrap 5 + Vanilla JS | Database: PostgreSQL 15 (seo_tools_db - primary for all data) + N8N Vector DB (copy for n8n workflows) + AWS Redshift (legacy, disabled) | AI: OpenAI API | Deploy: Docker + docker-compose | Google Ads: AsyncIO + Batch API (v28)
+Backend: FastAPI (Python 3.11, ThreadPoolExecutor for parallel processing, psycopg2 connection pooling 2-20 conns, httpx AsyncClient for URL checking) | Frontend: Bootstrap 5 + Vanilla JS | Database: PostgreSQL 15 (seo_tools_db - primary for all data) + N8N Vector DB (copy for n8n workflows) + AWS Redshift (legacy, disabled) | AI: OpenAI API | Deploy: Docker + docker-compose | Google Ads: AsyncIO + Batch API (v28)
 
 ## Directory Structure
 ```
 dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port 8003)
 ├── .claude/              # Claude Code configuration
 ├── backend/              # FastAPI app + all services
-│   ├── main.py           # FastAPI app (~3400 lines, 64+ API endpoints)
+│   ├── main.py           # FastAPI app (~3600 lines, 67+ API endpoints)
 │   ├── database.py       # Database connections (PostgreSQL primary, Redshift legacy)
 │   ├── gpt_service.py    # OpenAI API integration
 │   ├── scraper_service.py    # Product Search API + web scraping
@@ -51,6 +51,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── indexnow.html       # IndexNow (submit URLs for indexing)
 │   ├── index-checker.html  # SEO Index Checker (Google index status)
 │   ├── unique-titles.html # Unique Titles Manager
+│   ├── url-checker.html   # URL Checker (status, title, description, H1, product count)
 │   ├── css/style.css     # Custom theme (#059CDF blue, #9C3095 purple, #A0D168 green)
 │   └── js/
 │       ├── app.js        # SEO content frontend logic
