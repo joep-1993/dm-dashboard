@@ -2851,3 +2851,62 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 - **Issue**: `docker exec` with inline Python (`python3 -c "..."`) sometimes produces no output
 - **Workaround**: Write a .py script file and run it with `python3 -m backend.script_name` from `/app`
 - **Date**: 2026-02-10
+
+## Dutch Singular/Plural Form Rules (category_forms.json)
+- **Dutch words never end in 'z'**: Always wrong — should be s, es, uis, ars, oos, aus, etc.
+  - Examples: hoez→hoes, doz→doos, kluiz→kluis, laarz→laars, sauz→saus, muiz→muis
+- **Dutch words never end in 'v'**: Always wrong — should be f
+  - Examples: schroev→schroef, schijv→schijf, bruv→bruf
+- **-el endings need case-by-case analysis**: Many -el words are correct (artikel, stoel, meubel, wiel, doel)
+  - Only fix genuine errors: onderdel→onderdeel, panel→paneel (doubled vowel before -el)
+- **File**: `backend/category_forms.json` — 148 fixes applied (94 z-endings, 14 v-endings, 40 -el forms)
+- **Date**: 2026-02-17
+
+## AI Title Generation: doelgroep_drogisterij as Voor-Facet
+- **Problem**: Target group facet values (mannen, vrouwen, kinderen) were placed directly before product name
+- **Fix**: Added `voor_values`/`voor_originals` lists in `ai_titles_service.py`. When `fname == 'doelgroep_drogisterij'`, values are wrapped as "voor {value}" and appended after the title
+- **Flow**: Detected in facet classification → stripped from H1 → appended as "voor mannen" etc. after title
+- **Reset**: 765 URLs containing this facet reset to pending
+- **File**: `backend/ai_titles_service.py`
+- **Date**: 2026-02-17
+
+## AI Title Generation: aantal_puzzelstukjes as Spec Value
+- **Problem**: Puzzle piece count facet (e.g., "500 Stukjes") was placed before product name instead of after
+- **Fix**: Added `fname == 'aantal_puzzelstukjes'` check to `is_spec_value()` function
+- **Reset**: 432 URLs reset to pending
+- **File**: `backend/ai_titles_service.py`
+- **Date**: 2026-02-17
+
+## Kopteksten Generator Uses jvs_seo_werkvoorraad Table
+- **Problem**: New URLs appeared in unique titles generator but not in kopteksten generator
+- **Root Cause**: Kopteksten generator pulls from `pa.jvs_seo_werkvoorraad`, NOT `pa.content_urls_joep`
+- **Lesson**: `content_urls_joep` is for unique titles tracking only; `jvs_seo_werkvoorraad` is for kopteksten
+- **Date**: 2026-02-17
+
+## Facet Volume Batch Processing (New Excel Input)
+- **Script**: `backend/run_facet_volumes_new.py` — processes facet/category search volumes from Excel input
+- **Input**: Excel with 'facets' sheet (maincat IDs in col B, facet values in col G) and 'cats' sheet (maincat IDs in col B, deepest cats in col C)
+- **SIC/SOD handling**: HTML comment format `<!--SIC-->value<!--/SIC-->` for after-category form, `<!--SOD-->value<!--/SOD-->` for before-category form
+- **Resume-capable**: Uses progress file to track completed maincats, saves Excel after each maincat
+- **Output**: Search volume written to column K of the facets sheet
+- **Scale**: 236,232 facets across 31 maincats, 2.1B total search volume
+- **Date**: 2026-02-17
+
+## UTF-8 Mojibake Fix for Excel Files
+- **Problem**: "KÃ¤rcher" displayed instead of "Kärcher" — UTF-8 bytes read as latin-1
+- **Fix**: `val.encode('latin-1').decode('utf-8')` — re-encode as latin-1 then decode as UTF-8
+- **Scale**: Fixed 2,928 values in faet_values_new.xlsx
+- **Date**: 2026-02-17
+
+## Visits/Revenue Aggregation per Facet from Redshift
+- **Script**: `backend/add_visits_revenue.py` — aggregates URL visits/revenue per facet bucket
+- **Data source**: Redshift query extracting URLs with `/c/` path, visits count, and CPC+WW revenue since 2024
+- **Matching logic**: URLs split on `/c/` then on `~~` to extract individual facet buckets
+- **Scale**: 1.56M URLs → 74,145 facets matched, 33.6M total visits, 3.15M total revenue
+- **Output**: Visits in column I, revenue in column J of output Excel
+- **Date**: 2026-02-17
+
+## Docker-Owned File Permission Workaround
+- **Problem**: Output Excel file created by Docker (root) couldn't be overwritten by user process
+- **Workaround**: Save to a different filename (e.g., `_final.xlsx`) owned by the user, then copy
+- **Date**: 2026-02-17

@@ -10,6 +10,14 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Export Category Keyword Volumes script to single .txt file with credentials, all code, data files, and run instructions #claude-session:2026-02-17
+- [x] Fix 148 singular/plural forms in category_forms.json — words ending in z (94, e.g., hoez→hoes, doz→doos, kluiz→kluis), v (14, e.g., schroev→schroef, schijv→schijf), and wrong -el (40, onderdel→onderdeel, panel→paneel) #claude-session:2026-02-17
+- [x] Export 824,450 IndexNow submitted URLs to CSV (url, submitted_date, response_code) #claude-session:2026-02-17
+- [x] AI title: doelgroep_drogisterij facet as "voor-facet" — values appended as "voor mannen", "voor vrouwen" etc. instead of before product name, reset 765 URLs #claude-session:2026-02-17
+- [x] AI title: aantal_puzzelstukjes facet at end of title (e.g., "Ravensburger Circus Puzzel 500 Stukjes"), reset 432 URLs #claude-session:2026-02-17
+- [x] Import 18,329 new URLs into unique_titles (12,529 new), faq_tracking (12,560 new), content_urls_joep (14,889 new), and jvs_seo_werkvoorraad (12,560 new) #claude-session:2026-02-17
+- [x] Run facet volume batch for 236,232 facets across 31 maincats (new input with 'cats' sheet for categories) — grand total 2.1B search volume, fix UTF-8 mojibake (2,928 values), 324 min runtime #claude-session:2026-02-17
+- [x] Add visits and revenue per facet from Redshift (1.56M URLs since 2024) — matched 74,145 facets, 33.6M total visits, 3.15M total revenue, written to columns I/J of output Excel #claude-session:2026-02-17
 - [x] Add URL Checker tool - check status codes, meta title, meta description, H1, product count (from selected facet productCount), canonical URL. Streaming API with max 10 workers / 2 req/sec. Supports paste URLs + file upload (.xlsx/.csv/.txt). Dashboard card + nav links in all 13 pages #claude-session:2026-02-13
 - [x] Add structured data itemCondition RefurbishedCondition to structured_data_iphone file #claude-session:2026-02-13
 - [x] Check status codes for 67 meubilair facet URLs — 55x 200, 12x 301 (facet values no longer active) #claude-session:2026-02-13

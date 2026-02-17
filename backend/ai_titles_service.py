@@ -573,12 +573,17 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         # Power/output facets (e.g., "Vermogen (Watt)")
         if fname.startswith('vermogen'):
             return True
+        # Puzzle piece counts (e.g., "500 Stukjes", "1000 Stukken")
+        if fname == 'aantal_puzzelstukjes':
+            return True
         return False
 
     size_values = []       # Display values to append at end (e.g., "Maat 57")
     size_originals = []    # Original values to strip from H1 (e.g., "57")
     suffix_values = []     # Values appended after title but before size (e.g., "Zwart/goud")
     suffix_originals = []  # Original values to strip from H1
+    voor_values = []       # "voor" target group values (e.g., "voor mannen") - appended after title
+    voor_originals = []    # Original values to strip from H1
     met_values = []
     non_size_facets = []
     for f in selected_facets:
@@ -596,6 +601,9 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             if last_word in _adj_uninflect:
                 val = val[:-(len(last_word))] + _adj_uninflect[last_word]
             size_values.append(val)
+        elif fname == 'doelgroep_drogisterij':
+            voor_originals.append(val)
+            voor_values.append(f"voor {val.lower()}")
         elif fname.startswith('kleurcombi'):
             suffix_originals.append(val)
             suffix_values.append(val)
@@ -617,10 +625,10 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             elif fname == 'materiaal band':
                 met_values.append(val)
 
-    # Strip size, suffix, and met-feature values from the API H1 so the AI doesn't see them
+    # Strip size, suffix, voor, and met-feature values from the API H1 so the AI doesn't see them
     # (met-features are re-added by AI as "met ..." clause, so strip to avoid duplication)
     ai_h1 = api_h1
-    for sv in size_originals + suffix_originals:
+    for sv in size_originals + suffix_originals + voor_originals:
         ai_h1 = ai_h1.replace(sv, '').strip()
     for mv in met_values:
         # Strip the raw value (e.g., "Korte mouwen") from the H1
@@ -688,7 +696,7 @@ Regels:
 3. Merk ALTIJD vooraan (bijv. "Apple iPhones" niet "iPhones van Apple").
 4. Kleuren en materialen als bijvoeglijk naamwoord VOOR de doelgroep en VOOR het zelfstandig naamwoord (bijv. "blauwe Heren hoodies", NIET "Heren blauwe hoodies").
 5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan direct VOOR de productnaam maar NA kleuren/materialen, NOOIT met "voor" ervoor.
-6. NOOIT "in", "van" of "voor" toevoegen.
+6. NOOIT "in", "van" of "voor" toevoegen (doelgroep-achtervoegsel wordt automatisch toegevoegd).
 {met_rule}8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
 9. Als de facetten woorden bevatten zoals "Nieuw" of "Kleine"/"Grote", zet die als bijvoeglijk naamwoord VOOR de productnaam. Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
 10. Verbuig bijvoeglijke naamwoorden correct (bijv. "Nieuw" → "Nieuwe" voor de-woorden, "Vrijstaand" → "Vrijstaande").
@@ -733,9 +741,11 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
         if lead_values:
             improved_h1 = ' '.join(lead_values) + ' ' + improved_h1
 
-        # Append suffix values (e.g., color combos) then size values at the end
+        # Append suffix values (e.g., color combos), voor values, then size values at the end
         if suffix_values:
             improved_h1 = improved_h1.rstrip() + " " + " ".join(suffix_values)
+        if voor_values:
+            improved_h1 = improved_h1.rstrip() + " " + " ".join(voor_values)
         if size_values:
             improved_h1 = improved_h1.rstrip() + " " + " ".join(size_values)
 
@@ -1051,6 +1061,135 @@ def get_recent_results(limit: int = 20) -> List[Dict]:
         """, (limit,))
         rows = cur.fetchall()
         return [dict(row) for row in rows]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def analyze_and_flag_failures(dry_run: bool = True, min_fail_rate: float = 80, min_failures: int = 5) -> Dict:
+    """
+    Analyze api_failed URLs for patterns and flag pending URLs that are likely to fail.
+
+    Checks two pattern types:
+    1. Structural: malformed URLs (empty facets, triple tildes, wrong prefixes)
+    2. Subcategory paths: paths with high historical fail rates
+
+    Args:
+        dry_run: If True, only report counts without updating the database
+        min_fail_rate: Minimum fail rate % for subcategory paths (default 80)
+        min_failures: Minimum number of failures for a subcategory to be considered (default 5)
+
+    Returns:
+        Summary dict with flagged counts and breakdown
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        results = {"structural": [], "subcategory": [], "total_flagged": 0}
+
+        # --- 1. Structural patterns ---
+        structural_patterns = [
+            ("empty_start_facet", "url LIKE '%/c/~~%'"),
+            ("triple_tilde", "url LIKE '%~~~%'"),
+            ("trailing_tilde", "url LIKE '%~~'"),
+            ("facet_without_c_prefix", "url LIKE '/products/%' AND url NOT LIKE '%/c/%' AND url LIKE '%~%'"),
+            ("brand_url", "url LIKE '/brand/%'"),
+            ("filter_url", "url LIKE '/filters/%'"),
+            ("non_product_url", "url NOT LIKE '/products/%' AND url NOT LIKE '/brand/%' AND url NOT LIKE '/filters/%'"),
+        ]
+
+        for pattern_name, where_clause in structural_patterns:
+            cur.execute(f"""
+                SELECT COUNT(*) as cnt FROM pa.unique_titles
+                WHERE (ai_processed IS NULL OR ai_processed = FALSE)
+                AND ({where_clause})
+            """)
+            count = cur.fetchone()["cnt"]
+
+            if count > 0:
+                if not dry_run:
+                    cur.execute(f"""
+                        UPDATE pa.unique_titles
+                        SET ai_processed = TRUE,
+                            ai_error = 'predicted_fail:structural:{pattern_name}',
+                            ai_processed_at = CURRENT_TIMESTAMP
+                        WHERE (ai_processed IS NULL OR ai_processed = FALSE)
+                        AND ({where_clause})
+                    """)
+
+                results["structural"].append({
+                    "pattern": pattern_name,
+                    "pending_flagged": count,
+                })
+                results["total_flagged"] += count
+
+        # --- 2. Subcategory path patterns ---
+        cur.execute("""
+            WITH subcat_stats AS (
+                SELECT
+                    SUBSTRING(url FROM '^(/products/[^/]+/[^/]+)') as subcat_path,
+                    SUM(CASE WHEN ai_error = 'api_failed' THEN 1 ELSE 0 END) as failed,
+                    SUM(CASE WHEN ai_processed = TRUE AND ai_error IS NULL THEN 1 ELSE 0 END) as succeeded
+                FROM pa.unique_titles
+                WHERE url LIKE '/products/%%/c/%%'
+                GROUP BY 1
+            )
+            SELECT subcat_path, failed, succeeded,
+                ROUND(100.0 * failed / NULLIF(failed + succeeded, 0), 1) as fail_rate
+            FROM subcat_stats
+            WHERE failed >= %s
+            AND 100.0 * failed / NULLIF(failed + succeeded, 0) >= %s
+            ORDER BY fail_rate DESC, failed DESC
+        """, (min_failures, min_fail_rate))
+
+        high_risk_paths = cur.fetchall()
+
+        for row in high_risk_paths:
+            subcat_path = row["subcat_path"]
+            # Count pending URLs in this subcategory
+            cur.execute("""
+                SELECT COUNT(*) as cnt FROM pa.unique_titles
+                WHERE (ai_processed IS NULL OR ai_processed = FALSE)
+                AND url LIKE %s
+            """, (subcat_path + '%',))
+            pending_count = cur.fetchone()["cnt"]
+
+            if pending_count > 0:
+                if not dry_run:
+                    cur.execute("""
+                        UPDATE pa.unique_titles
+                        SET ai_processed = TRUE,
+                            ai_error = %s,
+                            ai_processed_at = CURRENT_TIMESTAMP
+                        WHERE (ai_processed IS NULL OR ai_processed = FALSE)
+                        AND url LIKE %s
+                    """, (f"predicted_fail:subcat:{subcat_path}:{row['fail_rate']}%", subcat_path + '%'))
+
+                results["subcategory"].append({
+                    "subcat_path": subcat_path,
+                    "historical_failed": row["failed"],
+                    "historical_succeeded": row["succeeded"],
+                    "fail_rate": float(row["fail_rate"]),
+                    "pending_flagged": pending_count,
+                })
+                results["total_flagged"] += pending_count
+
+        if not dry_run:
+            conn.commit()
+
+        results["dry_run"] = dry_run
+        results["min_fail_rate"] = min_fail_rate
+        results["min_failures"] = min_failures
+
+        print(f"[AI_TITLES] Failure analysis complete: {results['total_flagged']} URLs {'would be' if dry_run else ''} flagged "
+              f"({len(results['structural'])} structural patterns, {len(results['subcategory'])} subcategory patterns)")
+
+        return results
+
+    except Exception as e:
+        conn.rollback()
+        raise e
     finally:
         cur.close()
         return_db_connection(conn)
