@@ -365,7 +365,7 @@ def get_status():
         # Combined query for all counts (reduces 5 queries to 1)
         cur.execute("""
             SELECT
-                (SELECT COUNT(DISTINCT url) FROM pa.content_urls_joep) as processed,
+                (SELECT COUNT(DISTINCT url) FROM pa.content_urls_joep WHERE content IS NOT NULL) as processed,
                 (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'skipped') as skipped,
                 (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'failed') as failed,
                 (SELECT COUNT(DISTINCT url) FROM (
@@ -1466,6 +1466,7 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
             cur.executemany("""
                 INSERT INTO pa.faq_content (url, page_title, faq_json, schema_org)
                 VALUES (%s, %s, %s, %s)
+                ON CONFLICT (url) DO UPDATE SET page_title = EXCLUDED.page_title, faq_json = EXCLUDED.faq_json, schema_org = EXCLUDED.schema_org
             """, content_data)
 
         conn.commit()
@@ -1541,10 +1542,9 @@ async def export_faq_xlsx():
         illegal_chars = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
 
         for row in rows:
-            # Build JSON-LD script tag for content_faq column
+            # JSON-LD for content_faq column (raw JSON, no script tags)
             schema_org = row['schema_org'] if row['schema_org'] else '{}'
-            content_faq = f'<script type="application/ld+json">\n{schema_org}\n</script>'
-            content_faq = illegal_chars.sub('', content_faq)
+            content_faq = illegal_chars.sub('', schema_org)
 
             # Build HTML for content_bottom column
             content_bottom = faq_json_to_html(row['faq_json'])
@@ -2043,10 +2043,9 @@ async def export_combined_xlsx():
         illegal_chars = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
 
         for row in rows:
-            # Build JSON-LD script tag for content_faq column (empty if no FAQ data)
+            # JSON-LD for content_faq column (raw JSON, no script tags)
             if row['content_faq']:
-                content_faq = f'<script type="application/ld+json">\n{row["content_faq"]}\n</script>'
-                content_faq = illegal_chars.sub('', content_faq)
+                content_faq = illegal_chars.sub('', row['content_faq'])
             else:
                 content_faq = ''
 

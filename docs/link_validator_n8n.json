@@ -31,7 +31,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       }
     },
@@ -130,7 +130,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -151,7 +151,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -172,7 +172,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -193,7 +193,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -245,7 +245,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -266,7 +266,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -287,7 +287,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -308,7 +308,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"

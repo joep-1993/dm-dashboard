@@ -3,23 +3,23 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 ## Database Connection Quick Reference
 
-### Primary Database (used by dm-tools app)
-- **Container**: `seo_tools_db`
-- **Database**: `seo_tools`
-- **User**: `postgres` / **Password**: `postgres`
-- **Schema**: `pa`
-- **Access**: `docker exec seo_tools_db psql -U postgres -d seo_tools -c "SELECT ..."`
-
-### N8N Vector DB (COPY of data, used by n8n workflows only)
+### Primary Database (used by BOTH dm-tools app AND n8n workflows)
 - **Host**: `10.1.32.9` (internal: `n8n-vector-db-rw.n8n.svc.cluster.local`)
 - **Database**: `n8n-vector-db`
 - **User**: `dbadmin` / **Password**: `Q9fGRKtUdvdtxsiCM12HeFe0Nki0PvmjZRFLZ9ArmlWdMnDQXX8SdxKnPniqGmq6`
-- **Access**: `docker exec -e PGPASSWORD='...' seo_tools_db psql -h 10.1.32.9 -U dbadmin -d n8n-vector-db -c "SELECT ..."`
+- **Schema**: `pa`
+- **Access**: `docker exec -e PGPASSWORD='Q9fGRKtUdvdtxsiCM12HeFe0Nki0PvmjZRFLZ9ArmlWdMnDQXX8SdxKnPniqGmq6' seo_tools_db psql -h 10.1.32.9 -U dbadmin -d n8n-vector-db -c "SELECT ..."`
+- **Changed**: 2026-02-19 — migrated from local seo_tools_db to remote DB so n8n can run without laptop
+
+### Local Docker DB (still running but no longer primary)
+- **Container**: `seo_tools_db` (exposed on port 5433)
+- **Database**: `seo_tools`
+- **User**: `postgres` / **Password**: `postgres`
 
 ### Redshift (LEGACY - not actively used, USE_REDSHIFT_OUTPUT=false)
 - **Credentials**: See `.env` file in dm-tools project
 
-**IMPORTANT**: The dm-tools frontend/backend queries `seo_tools_db` ONLY. When debugging kopteksten issues, always check `seo_tools_db` first. The n8n vector DB is a copy and may be out of sync.
+**IMPORTANT**: Frontend, backend, AND n8n all use the remote DB at 10.1.32.9. The local seo_tools_db container is still running but is no longer the primary database.
 
 ## Beslist.nl Product Count Extraction
 - **Pattern**: `"productCount":(\d+),"selected":true` — finds the product count of selected facets in the embedded JSON
@@ -30,11 +30,79 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 ## N8N Workflow Conversion from Python Scripts
 - **Pattern**: When converting Python backend logic to n8n workflows, use Code nodes for complex logic (URL parsing, API response processing, content post-processing) and native n8n nodes for simple operations (DB queries, HTTP requests, OpenAI calls)
-- **Credential reuse**: Reference existing n8n credentials by ID (e.g., `"id": "vN1gzct2yLh0E1pi"` for PostgreSQL) — find these in any existing workflow JSON
 - **Node type versions**: Match existing workflows for compatibility (postgres v2.6, openAi v1.8, code v2, if v2.2, splitInBatches v3, httpRequest v4.2, scheduleTrigger v1.2)
-- **Error handling**: Use `onError: "continueRegularOutput"` on all nodes to prevent single item failures from stopping batches
+- **Error handling**: Use `onError: "continueRegularOutput"` on all nodes — WARNING: this silently swallows errors! Check node outputs carefully when debugging
 - **ES in n8n**: Use `fetch()` API in Code nodes for Elasticsearch HTTP queries (n8n Code nodes support fetch natively)
+- **n8n Code node limitations**: `URLSearchParams` is NOT available — use manual `encodeURIComponent()` + string concatenation. `new URL()` IS available for URL parsing.
+- **Bulk DB writes**: Don't use per-item Postgres nodes inside SplitInBatches loops — use pure SQL with `INSERT INTO ... SELECT` or run bulk queries in parallel from the source node. Data references like `$('nodeName').all()` don't work from the loop's "done" branch.
+- **n8n vector DB was missing PKs/sequences**: Tables synced from Redshift had no primary keys, unique constraints, or auto-increment sequences. Had to add these manually for INSERT operations to work.
 - **Files**: `docs/kopteksten_generator_n8n.json`, `docs/link_validator_n8n.json`
+- **Date**: 2026-02-19
+
+## N8N Code Node Capabilities and Limitations
+- **Available in Code nodes**: `$input`, `$json`, `$env`, `fetch()`, `DateTime`, `console`, `new URL()`, `$('nodeName').all()`
+- **NOT available in Code nodes**: `$helpers`, `$helpers.httpRequestWithAuthentication`, credential access, `URLSearchParams`
+- **For HTTP requests**: Must use `fetch()` with manual auth headers (no credential helper access)
+- **For OpenAI in Code nodes**: Call the API directly via `fetch('https://api.openai.com/v1/chat/completions', {...})` with manual `Authorization: Bearer ${apiKey}` header
+- **Environment variables**: Access via `$env.VARIABLE_NAME` — OPENAI_API_KEY must be set as n8n environment variable on the server
+- **Parallel HTTP pattern**: Use `async function` + `Promise.all()` with a concurrency limiter:
+  ```javascript
+  async function withConcurrency(items, limit, fn) {
+    const results = [];
+    let index = 0;
+    async function worker() {
+      while (index < items.length) {
+        const i = index++;
+        results[i] = await fn(items[i], i);
+      }
+    }
+    await Promise.all(Array.from({length: Math.min(limit, items.length)}, () => worker()));
+    return results;
+  }
+  ```
+- **Date**: 2026-02-19
+
+## N8N Flow Optimization: Bulk Operations Pattern
+- **Problem**: SplitInBatches loops with per-item DB queries and API calls are extremely slow in n8n
+- **Solution**: Replace loops with single Code nodes that do ALL work internally using bulk operations
+- **Link Validation optimization**:
+  - ONE Elasticsearch query per maincat instead of per URL (was ~100+ queries, now ~31 max)
+  - All DB operations use bulk SQL (7 queries instead of ~100 per-item queries)
+  - Removed 14 nodes, replaced with 7 bulk nodes
+- **Kopteksten Generation optimization**:
+  - `fetch_all_products`: Parallel Product Search API calls (5 concurrent) in single Code node
+  - `generate_all_content`: Parallel OpenAI API calls (3 concurrent) via fetch() in single Code node
+  - Bulk DB writes for write_result and remove_from_check
+  - Removed SplitInBatches loop entirely
+  - Reduced maxTokens from 2000 to 1000
+  - Total nodes reduced from 35 to 20
+- **Key lesson**: n8n is much faster when heavy logic is inside Code nodes with parallel processing, rather than using SplitInBatches with many sequential nodes
+- **Date**: 2026-02-19
+
+## N8N Production Push to Beslist API
+- **Purpose**: Push generated SEO content (content_top, content_bottom, content_faq) to production website
+- **API endpoint**: `POST https://website-configuration.api.beslist.nl/automated-content`
+- **Auth header**: `X-Api-Key: Sectional~Publisher~Dumpling1`
+- **Data transformation**:
+  - `content_top`: From `content_urls_joep.content`
+  - `content_bottom`: From FAQ internal links (beslist.nl links in faq_content)
+  - `content_faq`: From FAQ content converted to schema.org JSON-LD format (script tag wrapper)
+- **Query**: FULL OUTER JOIN between `content_urls_joep` and `faq_content` to get ALL URLs with any content
+- **Batching**: Splits items into batches of 5000, POSTs each batch sequentially
+- **n8n nodes**: `get_all_publish_content` (Postgres) + `push_to_production` (Code node)
+- **File**: `kopteksten_validator_generator.json` (n8n workflow)
+- **Date**: 2026-02-19
+
+## ON CONFLICT Requires UNIQUE Constraint in PostgreSQL
+- **Problem**: `INSERT ... ON CONFLICT (url) DO UPDATE` silently does a plain INSERT when there is no UNIQUE constraint or index on the `url` column
+- **Root cause**: PostgreSQL's ON CONFLICT clause needs a unique index/constraint to detect conflicts. Without it, no conflict is ever detected, so every INSERT succeeds — creating duplicates
+- **Context**: Tables migrated from Redshift to PostgreSQL lose all constraints (primary keys, unique indexes, foreign keys). Redshift supports these syntactically but doesn't enforce them, so they're often missing in the source DDL
+- **Impact**: `faq_content` had 79,523 duplicate rows (241,033 total, 161,510 unique). `faq_tracking` had 94,387 duplicate rows (243,671 total, 149,284 unique)
+- **Fix**:
+  1. Deduplicate existing data: `DELETE FROM table WHERE ctid NOT IN (SELECT MIN(ctid) FROM table GROUP BY url)`
+  2. Add UNIQUE constraint: `ALTER TABLE table ADD CONSTRAINT table_url_unique UNIQUE (url)`
+  3. Add ON CONFLICT to INSERT: `INSERT INTO table (url, ...) VALUES (...) ON CONFLICT (url) DO UPDATE SET ...`
+- **Key lesson**: After migrating tables from Redshift (or any system), ALWAYS verify and re-add: primary keys, unique constraints, indexes, and foreign keys
 - **Date**: 2026-02-19
 
 ## AI Title Generation: Met-Feature Duplication Fix

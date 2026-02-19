@@ -31,7 +31,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       }
     },
@@ -284,7 +284,7 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -305,26 +305,38 @@
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const allItems = $input.all();\nconst urls = allItems.map(item => item.json.url).filter(Boolean);\nif (urls.length === 0) {\n  return [{ json: { check_query: 'SELECT 1', werkvoorraad_query: 'SELECT 1', url_count: 0 } }];\n}\nconst escaped = urls.map(u => u.replace(/'/g, \"''\"));\nconst values = escaped.map(u => \"('\" + u + \"')\").join(',');\nconst checkQuery = 'INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url) VALUES ' + values;\nconst inList = escaped.map(u => \"'\" + u + \"'\").join(',');\nconst werkQuery = 'UPDATE pa.jvs_seo_werkvoorraad SET kopteksten = 1 WHERE url IN (' + inList + ')';\nreturn [{ json: { check_query: checkQuery, werkvoorraad_query: werkQuery, url_count: urls.length } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 560],
+      "id": "a0000001-0000-0000-0000-000000000015",
+      "name": "build_bulk_queries",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url) SELECT w.url FROM pa.jvs_seo_werkvoorraad w LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check c ON w.url = c.url WHERE c.url IS NULL LIMIT 10000",
+        "query": "={{ $json.check_query }}",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [-480, 560],
-      "id": "a0000001-0000-0000-0000-000000000015",
+      "position": [-200, 500],
+      "id": "a0000001-0000-0000-0000-000000000017",
       "name": "bulk_write_check",
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -332,18 +344,18 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE pa.jvs_seo_werkvoorraad SET kopteksten = 1 WHERE url IN (SELECT w.url FROM pa.jvs_seo_werkvoorraad w LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check c ON w.url = c.url WHERE c.url IS NULL LIMIT 10000)",
+        "query": "={{ $json.werkvoorraad_query }}",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
-      "position": [-480, 760],
-      "id": "a0000001-0000-0000-0000-000000000016",
+      "position": [-200, 680],
+      "id": "a0000001-0000-0000-0000-000000000018",
       "name": "bulk_write_werkvoorraad",
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
-          "name": "Postgres account"
+          "name": "Postgres n8n db"
         }
       },
       "onError": "continueRegularOutput"
@@ -371,12 +383,7 @@
             "index": 0
           },
           {
-            "node": "bulk_write_check",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "bulk_write_werkvoorraad",
+            "node": "build_bulk_queries",
             "type": "main",
             "index": 0
           }
@@ -537,14 +544,20 @@
         ]
       ]
     },
-    "bulk_write_check": {
+    "build_bulk_queries": {
       "main": [
-        []
-      ]
-    },
-    "bulk_write_werkvoorraad": {
-      "main": [
-        []
+        [
+          {
+            "node": "bulk_write_check",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "bulk_write_werkvoorraad",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },

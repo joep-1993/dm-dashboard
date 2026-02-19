@@ -75,15 +75,15 @@ def faq_json_to_html(faq_json_str: str) -> str:
 
 def schema_org_to_script_tag(schema_org_str: str) -> str:
     """
-    Wrap schema.org JSON-LD in a script tag for content_faq.
+    Return schema.org JSON-LD for content_faq (raw JSON, no script tags).
 
     Input: JSON-LD string (FAQPage schema)
-    Output: <script type="application/ld+json">...</script>
+    Output: JSON-LD string as-is
     """
     if not schema_org_str:
         return ""
 
-    return f'<script type="application/ld+json">\n{schema_org_str}\n</script>'
+    return schema_org_str
 
 
 def faq_json_to_content_bottom(faq_json_str: str) -> str:

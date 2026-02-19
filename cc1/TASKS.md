@@ -10,6 +10,14 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add production push to n8n flow: `get_all_publish_content` (FULL OUTER JOIN content_urls_joep + faq_content), `push_to_production` Code node (transforms content_top/content_bottom/content_faq, batches 5000 items, POSTs to `https://website-configuration.api.beslist.nl/automated-content`), updated Slack message with push results #claude-session:2026-02-19
+- [x] Optimize n8n link validation: replaced per-item SplitInBatches loop with single `validate_all_links` Code node — ONE ES query per maincat instead of per URL (~31 queries instead of ~100+), all DB operations use bulk SQL (7 queries instead of ~100 per-item), removed 14 nodes replaced with 7 bulk nodes #claude-session:2026-02-19
+- [x] Optimize n8n kopteksten generation: added `fetch_all_products` (parallel Product Search API, 5 concurrent) and `generate_all_content` (parallel OpenAI via fetch(), 3 concurrent) Code nodes, bulk DB writes, removed SplitInBatches loop entirely, reduced maxTokens 2000→1000, total nodes 35→20. Requires OPENAI_API_KEY env var on n8n server #claude-session:2026-02-19
+- [x] Fix FAQ duplicate issue: deduped faq_content (79,523 dupes, 241K→161K unique) and faq_tracking (94,387 dupes, 243K→149K unique), added UNIQUE constraints on url column, added ON CONFLICT DO UPDATE to main.py INSERT. Root cause: no ON CONFLICT + no UNIQUE constraint on remote DB after Redshift migration. Fixed 58,857 URLs with content but no tracking (showed as "pending") #claude-session:2026-02-19
+- [x] Migrate frontend DATABASE_URL from local seo_tools_db to remote n8n vector DB (10.1.32.9) — unified DB for frontend + n8n, works without laptop #claude-session:2026-02-19
+- [x] Sync data from local DB to remote: werkvoorraad (271K), kopteksten_check (271K), content (225K merged). Deduped remote tables, added PKs and auto-increment sequences #claude-session:2026-02-19
+- [x] Fix n8n kopteksten generator: bulk write_check/write_werkvoorraad (pure SQL, no per-item queries), URL path parsing (new URL() instead of broken split), manual query string (no URLSearchParams in n8n) #claude-session:2026-02-19
+- [x] Expose seo_tools_db on port 5433 in docker-compose.yml for external access #claude-session:2026-02-19
 - [x] Convert kopteksten generator Python script to n8n workflow JSON (16 nodes: Schedule Trigger → PostgreSQL → Loop → Code → HTTP Request → OpenAI → write results) using Product Search API instead of web scraping #claude-session:2026-02-19
 - [x] Convert link validator Python script to n8n workflow JSON (16 nodes: Schedule Trigger → PostgreSQL → Loop → extract links → Elasticsearch → compare/decide → update/delete/backup) #claude-session:2026-02-19
 - [x] Export Category Keyword Volumes script to single .txt file with credentials, all code, data files, and run instructions #claude-session:2026-02-17
