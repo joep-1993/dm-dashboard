@@ -50,7 +50,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Parse URL to extract maincat, category, filters and build Product Search API URL\n// Based on scraper_service.py:parse_beslist_url() and build_api_params()\n\nconst url = ($json.url || '').split('?')[0];\n\n// Maincat name -> API ID mapping (from scraper_service.py MAIN_CATEGORY_IDS)\nconst MAIN_CATEGORY_IDS = {\n  'autos': 37000, 'baby_peuter': 8, 'boeken': 701,\n  'cadeaus_gadgets_culinair': 262, 'computers': 6, 'dieren_accessoires': 34000,\n  'gezond_mooi': 286, 'elektronica': 655, 'voor_volwassenen': 452,\n  'eten_drinken': 11, 'fietsen': 38000, 'films-series': 700,\n  'cddvdrom': 4, 'horloge': 30000, 'huishoudelijke_apparatuur': 12000,\n  'kantoorartikelen': 361, 'mode': 137, 'klussen': 35000,\n  'meubilair': 10, 'mode_accessoires': 33000, 'accessoires': 40000,\n  'muziekinstrument': 31000, 'parfum_aftershave': 29000, 'main_sanitair': 27000,\n  'schoenen': 32000, 'sieraden_horloges': 347, 'software': 155,\n  'speelgoed_spelletjes': 332, 'sport_outdoor_vrije-tijd': 206,\n  'tuin_accessoires': 36000, 'huis_tuin': 165\n};\n\n// Remove domain if present\nlet path = url;\nif (path.startsWith('http')) {\n  path = '/' + path.split('/', 3).slice(3).join('/') || path.replace(/^https?:\\/\\/[^/]+/, '');\n}\npath = path.replace(/\\/$/, '');\n\nlet maincat_name = null;\nlet category = null;\nlet filters = {};\n\n// Pattern 1: /products/{maincat}/{category}/c/{filters}\nlet match = path.match(/^\\/products\\/([^/]+)\\/([^/]+)\\/c\\/(.+)$/);\nif (match) {\n  maincat_name = match[1];\n  category = match[2];\n  const filterPairs = match[3].split('~~');\n  for (const pair of filterPairs) {\n    const idx = pair.indexOf('~');\n    if (idx > 0) {\n      const name = pair.substring(0, idx);\n      const value = pair.substring(idx + 1);\n      if (!filters[name]) filters[name] = [];\n      filters[name].push(value);\n    }\n  }\n}\n\n// Pattern 2: /products/{maincat}/c/{filters}\nif (!match) {\n  match = path.match(/^\\/products\\/([^/]+)\\/c\\/(.+)$/);\n  if (match) {\n    maincat_name = match[1];\n    const filterPairs = match[2].split('~~');\n    for (const pair of filterPairs) {\n      const idx = pair.indexOf('~');\n      if (idx > 0) {\n        const name = pair.substring(0, idx);\n        const value = pair.substring(idx + 1);\n        if (!filters[name]) filters[name] = [];\n        filters[name].push(value);\n      }\n    }\n  }\n}\n\n// Pattern 3: /products/{maincat}/{category}\nif (!match) {\n  match = path.match(/^\\/products\\/([^/]+)\\/([^/]+)$/);\n  if (match) {\n    maincat_name = match[1];\n    category = match[2];\n  }\n}\n\n// Pattern 4: /products/{maincat}\nif (!match) {\n  match = path.match(/^\\/products\\/([^/]+)$/);\n  if (match) {\n    maincat_name = match[1];\n  }\n}\n\nconst maincat_id = MAIN_CATEGORY_IDS[maincat_name] || null;\n\nif (!maincat_id) {\n  return { json: { url, parse_success: false, api_url: '' } };\n}\n\n// Build API URL\nconst params = new URLSearchParams();\nparams.set('mainCategory', maincat_id.toString());\nif (category) params.set('category', category);\nparams.set('sort', 'popularity');\nparams.set('sortDirection', 'desc');\nparams.set('limit', '76');\nparams.set('offset', '0');\nparams.set('isBot', 'false');\nparams.set('countryLanguage', 'nl-nl');\nparams.set('experiment', 'topProducts');\nparams.set('trackTotalHits', 'false');\n\nfor (const [filterName, values] of Object.entries(filters)) {\n  for (let i = 0; i < values.length; i++) {\n    params.set(`filters[${filterName}][${i}]`, values[i]);\n  }\n}\n\nconst api_url = `https://productsearch-v2.api.beslist.nl/search/products?${params.toString()}`;\n\nreturn {\n  json: {\n    url,\n    maincat_name,\n    maincat_id,\n    category: category || null,\n    filters,\n    parse_success: true,\n    api_url\n  }\n};"
+        "jsCode": "// Parse URL to extract maincat, category, filters and build Product Search API URL\n// Based on scraper_service.py:parse_beslist_url() and build_api_params()\n\nconst url = ($json.url || '').split('?')[0];\n\n// Maincat name -> API ID mapping (from scraper_service.py MAIN_CATEGORY_IDS)\nconst MAIN_CATEGORY_IDS = {\n  'autos': 37000, 'baby_peuter': 8, 'boeken': 701,\n  'cadeaus_gadgets_culinair': 262, 'computers': 6, 'dieren_accessoires': 34000,\n  'gezond_mooi': 286, 'elektronica': 655, 'voor_volwassenen': 452,\n  'eten_drinken': 11, 'fietsen': 38000, 'films-series': 700,\n  'cddvdrom': 4, 'horloge': 30000, 'huishoudelijke_apparatuur': 12000,\n  'kantoorartikelen': 361, 'mode': 137, 'klussen': 35000,\n  'meubilair': 10, 'mode_accessoires': 33000, 'accessoires': 40000,\n  'muziekinstrument': 31000, 'parfum_aftershave': 29000, 'main_sanitair': 27000,\n  'schoenen': 32000, 'sieraden_horloges': 347, 'software': 155,\n  'speelgoed_spelletjes': 332, 'sport_outdoor_vrije-tijd': 206,\n  'tuin_accessoires': 36000, 'huis_tuin': 165\n};\n\n// Remove domain if present\nlet path = url;\nif (path.startsWith('http')) {\n  try { path = new URL(url).pathname; } catch(e) { path = url.replace(/^https?:\\/\\/[^/]+/, ''); }\n}\npath = path.replace(/\\/$/, '');\n\nlet maincat_name = null;\nlet category = null;\nlet filters = {};\n\n// Pattern 1: /products/{maincat}/{category}/c/{filters}\nlet match = path.match(/^\\/products\\/([^/]+)\\/([^/]+)\\/c\\/(.+)$/);\nif (match) {\n  maincat_name = match[1];\n  category = match[2];\n  const filterPairs = match[3].split('~~');\n  for (const pair of filterPairs) {\n    const idx = pair.indexOf('~');\n    if (idx > 0) {\n      const name = pair.substring(0, idx);\n      const value = pair.substring(idx + 1);\n      if (!filters[name]) filters[name] = [];\n      filters[name].push(value);\n    }\n  }\n}\n\n// Pattern 2: /products/{maincat}/c/{filters}\nif (!match) {\n  match = path.match(/^\\/products\\/([^/]+)\\/c\\/(.+)$/);\n  if (match) {\n    maincat_name = match[1];\n    const filterPairs = match[2].split('~~');\n    for (const pair of filterPairs) {\n      const idx = pair.indexOf('~');\n      if (idx > 0) {\n        const name = pair.substring(0, idx);\n        const value = pair.substring(idx + 1);\n        if (!filters[name]) filters[name] = [];\n        filters[name].push(value);\n      }\n    }\n  }\n}\n\n// Pattern 3: /products/{maincat}/{category}\nif (!match) {\n  match = path.match(/^\\/products\\/([^/]+)\\/([^/]+)$/);\n  if (match) {\n    maincat_name = match[1];\n    category = match[2];\n  }\n}\n\n// Pattern 4: /products/{maincat}\nif (!match) {\n  match = path.match(/^\\/products\\/([^/]+)$/);\n  if (match) {\n    maincat_name = match[1];\n  }\n}\n\nconst maincat_id = MAIN_CATEGORY_IDS[maincat_name] || null;\n\nif (!maincat_id) {\n  return { json: { url, parse_success: false, api_url: '' } };\n}\n\n// Build API URL query string manually (URLSearchParams not available in n8n)\nconst enc = (s) => encodeURIComponent(s);\nconst qparts = [\n  'mainCategory=' + enc(maincat_id.toString()),\n];\nif (category) qparts.push('category=' + enc(category));\nqparts.push('sort=popularity');\nqparts.push('sortDirection=desc');\nqparts.push('limit=76');\nqparts.push('offset=0');\nqparts.push('isBot=false');\nqparts.push('countryLanguage=nl-nl');\nqparts.push('experiment=topProducts');\nqparts.push('trackTotalHits=false');\n\nfor (const [filterName, values] of Object.entries(filters)) {\n  for (let i = 0; i < values.length; i++) {\n    qparts.push(enc('filters[' + filterName + '][' + i + ']') + '=' + enc(values[i]));\n  }\n}\n\nconst api_url = 'https://productsearch-v2.api.beslist.nl/search/products?' + qparts.join('&');\n\nreturn {\n  json: {\n    url,\n    maincat_name,\n    maincat_id,\n    category: category || null,\n    filters,\n    parse_success: true,\n    api_url\n  }\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -313,16 +313,14 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url) VALUES ('{{ $json.url }}')",
-        "options": {
-          "queryBatching": "independently"
-        }
+        "query": "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url) SELECT w.url FROM pa.jvs_seo_werkvoorraad w LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check c ON w.url = c.url WHERE c.url IS NULL LIMIT 10000",
+        "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [-480, 560],
       "id": "a0000001-0000-0000-0000-000000000015",
-      "name": "write_check",
+      "name": "bulk_write_check",
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
@@ -334,16 +332,14 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE pa.jvs_seo_werkvoorraad SET kopteksten = 1 WHERE url = '{{ $json.url }}'",
-        "options": {
-          "queryBatching": "independently"
-        }
+        "query": "UPDATE pa.jvs_seo_werkvoorraad SET kopteksten = 1 WHERE url IN (SELECT w.url FROM pa.jvs_seo_werkvoorraad w LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check c ON w.url = c.url WHERE c.url IS NULL LIMIT 10000)",
+        "options": {}
       },
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.6,
       "position": [-480, 760],
       "id": "a0000001-0000-0000-0000-000000000016",
-      "name": "write_werkvoorraad",
+      "name": "bulk_write_werkvoorraad",
       "credentials": {
         "postgres": {
           "id": "vN1gzct2yLh0E1pi",
@@ -373,6 +369,16 @@
             "node": "Loop Over Items",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "bulk_write_check",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "bulk_write_werkvoorraad",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -383,16 +389,6 @@
         [
           {
             "node": "parse_url_and_build_api",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "write_check",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "write_werkvoorraad",
             "type": "main",
             "index": 0
           }
@@ -541,12 +537,12 @@
         ]
       ]
     },
-    "write_check": {
+    "bulk_write_check": {
       "main": [
         []
       ]
     },
-    "write_werkvoorraad": {
+    "bulk_write_werkvoorraad": {
       "main": [
         []
       ]

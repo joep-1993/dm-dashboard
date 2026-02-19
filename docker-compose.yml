@@ -6,6 +6,8 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=seo_tools
+    ports:
+      - "5433:5432"
     volumes:
       - seo_tools_postgres_data:/var/lib/postgresql/data
     networks:
@@ -33,7 +35,7 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AI_MODEL=${AI_MODEL:-gpt-4o-mini}
-      - DATABASE_URL=postgresql://postgres:postgres@seo_tools_db:5432/seo_tools
+      - DATABASE_URL=postgresql://dbadmin:Q9fGRKtUdvdtxsiCM12HeFe0Nki0PvmjZRFLZ9ArmlWdMnDQXX8SdxKnPniqGmq6@10.1.32.9:5432/n8n-vector-db
       - USE_REDSHIFT_OUTPUT=${USE_REDSHIFT_OUTPUT:-false}
       - REDSHIFT_HOST=${REDSHIFT_HOST}
       - REDSHIFT_PORT=${REDSHIFT_PORT:-5439}
