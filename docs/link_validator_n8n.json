@@ -1,0 +1,524 @@
+{
+  "name": "link_validator_kopteksten",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 14
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 300],
+      "id": "b0000001-0000-0000-0000-000000000001",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT c.url, c.content, c.created_at FROM pa.content_urls_joep c LEFT JOIN pa.link_validation_results v ON c.url = v.content_url WHERE v.content_url IS NULL AND c.content IS NOT NULL LIMIT 500",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [-960, 300],
+      "id": "b0000001-0000-0000-0000-000000000002",
+      "name": "get_unvalidated_content",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-720, 300],
+      "id": "b0000001-0000-0000-0000-000000000003",
+      "name": "Loop Over Items",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract all product links from HTML content, parse URLs, group by maincat\n// Based on link_validator.py: extract_hyperlinks_from_content(), extract_from_url(), lookup_plp_urls_for_content()\n\nconst content = $json.content || '';\nconst contentUrl = $json.url || '';\nconst createdAt = $json.created_at || '';\n\n// Maincat URL -> maincat_id mapping (from maincat_mapping.csv)\nconst maincatMapping = {\n  'meubilair': '10', 'speelgoed_spelletjes': '332', 'parfum_aftershave': '29000',\n  'cddvdrom': '4', 'sieraden_horloges': '347', 'muziekinstrument': '31000',\n  'schoenen': '32000', 'mode': '137', 'mode_accessoires': '33000',\n  'dieren_accessoires': '34000', 'autos': '37000', 'sport_outdoor_vrije-tijd': '206',\n  'fietsen': '38000', 'klussen': '35000', 'tuin_accessoires': '36000',\n  'huis_tuin': '165', 'kantoorartikelen': '361', 'main_sanitair': '27000',\n  'gezond_mooi': '286', 'voor_volwassenen': '452', 'baby_peuter': '8',\n  'cadeaus_gadgets_culinair': '262', 'eten_drinken': '11', 'accessoires': '40000',\n  'horloge': '30000', 'films-series': '700', 'boeken': '701',\n  'software': '155', 'computers': '6', 'elektronica': '655',\n  'huishoudelijke_apparatuur': '12000'\n};\n\n// 1. Extract all <a href=\"/p/...\"> links using regex\nconst hrefRegex = /<a[^>]*href=\"([^\"]*\\/p\\/[^\"]*?)\"[^>]*>/gi;\nconst links = [];\nlet match;\nwhile ((match = hrefRegex.exec(content)) !== null) {\n  let href = match[1];\n  if (href.startsWith('https://www.beslist.nl')) {\n    href = href.replace('https://www.beslist.nl', '');\n  }\n  links.push(href);\n}\nconst uniqueLinks = [...new Set(links)];\n\n// 2. Parse each link to get maincat_id and lookup value\nfunction extractFromUrl(url) {\n  const cleanUrl = url.replace(/\\/$/, '');\n  const parts = cleanUrl.split('/');\n\n  // Try old format: /{maincat_url}/{pimId_with_prefix}/\n  for (const [urlPart, maincatId] of Object.entries(maincatMapping)) {\n    if (url.includes(`/${urlPart}/`)) {\n      const pimId = parts[parts.length - 1] || null;\n      return { maincatId, lookupValue: pimId, isV4: false };\n    }\n  }\n\n  // Try new format: /p/name/{maincat_id}/{pimId}/\n  if (parts.length >= 2) {\n    const potentialMaincat = parts[parts.length - 2];\n    const potentialPimId = parts[parts.length - 1];\n\n    if (/^\\d+$/.test(potentialMaincat)) {\n      if (potentialPimId.startsWith('V4_')) {\n        // V4 UUID format\n        const pIdx = url.indexOf('/p/');\n        if (pIdx !== -1) {\n          const plpPath = url.substring(pIdx) + '/';\n          return { maincatId: potentialMaincat, lookupValue: plpPath, isV4: true };\n        }\n        return { maincatId: null, lookupValue: null, isV4: false };\n      } else if (/^\\d+$/.test(potentialPimId)) {\n        // New numeric format - add nl-nl-gold- prefix\n        return { maincatId: potentialMaincat, lookupValue: `nl-nl-gold-${potentialPimId}`, isV4: false };\n      }\n    }\n  }\n\n  return { maincatId: null, lookupValue: null, isV4: false };\n}\n\n// 3. Group by maincat_id for batch ES queries\nconst pimIdGroups = {};  // { maincatId: { pimId: originalUrl } }\nconst v4Groups = {};     // { maincatId: { v4Uuid: originalUrl } }\nconst urlToLookup = {};  // { originalUrl: { lookupValue, isV4 } }\n\nfor (const link of uniqueLinks) {\n  const { maincatId, lookupValue, isV4 } = extractFromUrl(link);\n  if (maincatId && lookupValue) {\n    urlToLookup[link] = { lookupValue, isV4 };\n    if (isV4) {\n      if (!v4Groups[maincatId]) v4Groups[maincatId] = {};\n      v4Groups[maincatId][lookupValue] = link;\n    } else {\n      if (!pimIdGroups[maincatId]) pimIdGroups[maincatId] = {};\n      pimIdGroups[maincatId][lookupValue] = link;\n    }\n  }\n}\n\nreturn {\n  json: {\n    contentUrl,\n    content,\n    createdAt,\n    uniqueLinks,\n    pimIdGroups,\n    v4Groups,\n    urlToLookup,\n    totalLinks: uniqueLinks.length\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 300],
+      "id": "b0000001-0000-0000-0000-000000000004",
+      "name": "extract_and_parse_links",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Query Elasticsearch for each maincat group and collect results\n// Based on link_validator.py: query_elasticsearch() and query_elasticsearch_by_plpurl()\n\nconst ES_URL = 'https://elasticsearch-job-cluster-eck.beslist.nl';\nconst INDEX_PREFIX = 'product_search_v4_nl-nl_';\n\nconst pimIdGroups = $json.pimIdGroups || {};\nconst v4Groups = $json.v4Groups || {};\n\n// Results: lookupValue -> plpUrl (or null if gone)\nconst lookupResults = {};\n\n// Query by pimId for regular URLs\nfor (const [maincatId, pimIdMap] of Object.entries(pimIdGroups)) {\n  const index = `${INDEX_PREFIX}${maincatId}`;\n  const pimIds = Object.keys(pimIdMap);\n\n  if (pimIds.length === 0) continue;\n\n  try {\n    const response = await fetch(`${ES_URL}/${index}/_search`, {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({\n        _source: ['plpUrl', 'pimId', 'shopCount'],\n        size: pimIds.length,\n        query: { terms: { pimId: pimIds } }\n      })\n    });\n\n    const data = await response.json();\n    const hits = (data.hits && data.hits.hits) || [];\n\n    const found = new Set();\n    for (const hit of hits) {\n      const src = hit._source || {};\n      const pimId = src.pimId;\n      const plpUrl = src.plpUrl;\n      const shopCount = src.shopCount || 0;\n\n      if (pimId) {\n        found.add(pimId);\n        lookupResults[pimId] = (shopCount >= 2 && plpUrl) ? plpUrl : null;\n      }\n    }\n\n    // Mark unfound pimIds as gone\n    for (const pimId of pimIds) {\n      if (!found.has(pimId)) {\n        lookupResults[pimId] = null;\n      }\n    }\n  } catch (e) {\n    // ES query failed - skip this batch, don't mark as gone\n    console.log(`ES error for ${index}: ${e.message}`);\n  }\n}\n\n// Query by pimId for V4 URLs (fast path only, wildcard disabled)\nfor (const [maincatId, v4Map] of Object.entries(v4Groups)) {\n  const index = `${INDEX_PREFIX}${maincatId}`;\n  const plpUrls = Object.keys(v4Map);\n\n  // Extract V4 UUIDs for pimId lookup\n  const v4Uuids = [];\n  const v4ToOriginal = {};\n  for (const plpUrl of plpUrls) {\n    const parts = plpUrl.replace(/\\/$/, '').split('/');\n    const v4Part = parts[parts.length - 1];\n    if (v4Part && v4Part.startsWith('V4_')) {\n      v4Uuids.push(v4Part);\n      v4ToOriginal[v4Part] = plpUrl;\n    }\n  }\n\n  if (v4Uuids.length === 0) continue;\n\n  try {\n    const response = await fetch(`${ES_URL}/${index}/_search`, {\n      method: 'POST',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({\n        _source: ['plpUrl', 'pimId', 'shopCount'],\n        size: v4Uuids.length,\n        query: { terms: { pimId: v4Uuids } }\n      })\n    });\n\n    const data = await response.json();\n    const hits = (data.hits && data.hits.hits) || [];\n\n    for (const hit of hits) {\n      const src = hit._source || {};\n      const pimId = src.pimId || '';\n      const plpUrl = src.plpUrl;\n      const shopCount = src.shopCount || 0;\n\n      if (pimId in v4ToOriginal) {\n        const originalPath = v4ToOriginal[pimId];\n        lookupResults[originalPath] = (shopCount >= 2 && plpUrl) ? plpUrl : null;\n      }\n    }\n    // V4 URLs not found are skipped (not marked as gone) - wildcard disabled\n  } catch (e) {\n    console.log(`V4 ES error for ${index}: ${e.message}`);\n  }\n}\n\nreturn {\n  json: {\n    ...$json,\n    lookupResults\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-200, 300],
+      "id": "b0000001-0000-0000-0000-000000000005",
+      "name": "query_elasticsearch",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Compare ES results with original URLs, categorize and build corrected content\n// Based on link_validator.py: validate_and_fix_content_links()\n\nconst content = $json.content;\nconst contentUrl = $json.contentUrl;\nconst createdAt = $json.createdAt || '';\nconst urlToLookup = $json.urlToLookup || {};\nconst lookupResults = $json.lookupResults || {};\nconst uniqueLinks = $json.uniqueLinks || [];\nconst totalLinks = $json.totalLinks || 0;\n\nconst validUrls = [];\nconst replacedUrls = [];\nconst goneUrls = [];\n\nlet correctedContent = content;\n\nfor (const link of uniqueLinks) {\n  const info = urlToLookup[link];\n  if (!info) {\n    // Could not parse URL - treat as gone\n    goneUrls.push(link);\n    continue;\n  }\n\n  const { lookupValue } = info;\n\n  if (!(lookupValue in lookupResults)) {\n    // ES query failed or not found - skip, don't mark as gone\n    validUrls.push(link);\n    continue;\n  }\n\n  const correctPlpUrl = lookupResults[lookupValue];\n\n  if (correctPlpUrl === null) {\n    // Product is GONE (not found or shopCount < 2)\n    goneUrls.push(link);\n  } else if (correctPlpUrl !== link) {\n    // URL needs replacement\n    correctedContent = correctedContent.split(link).join(correctPlpUrl);\n    replacedUrls.push({ old_url: link, new_url: correctPlpUrl });\n  } else {\n    validUrls.push(link);\n  }\n}\n\n// Sanitize corrected content for SQL\nconst sanitizedCorrected = correctedContent.replace(/'/g, \"''\");\n\nconst hasGone = goneUrls.length > 0;\nconst hasReplacements = replacedUrls.length > 0;\nconst hasChanges = hasReplacements && !hasGone;\n\n// Build broken_link_details JSON for validation results table\nconst brokenLinkDetails = JSON.stringify({\n  gone_urls: goneUrls,\n  replaced_urls: replacedUrls\n}).replace(/'/g, \"''\");\n\nreturn {\n  json: {\n    contentUrl,\n    content,\n    createdAt,\n    correctedContent: sanitizedCorrected,\n    validUrls,\n    replacedUrls,\n    goneUrls,\n    hasGone,\n    hasReplacements,\n    hasChanges,\n    totalLinks,\n    validCount: validUrls.length + replacedUrls.length,\n    goneCount: goneUrls.length,\n    brokenLinkDetails\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [60, 300],
+      "id": "b0000001-0000-0000-0000-000000000006",
+      "name": "compare_and_decide",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b0000001-cond-0001",
+              "leftValue": "={{ $json.hasGone }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [320, 300],
+      "id": "b0000001-0000-0000-0000-000000000007",
+      "name": "check_gone_products",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pa.content_history (url, content, reset_reason, reset_details, original_created_at, reset_at) SELECT url, content, 'gone_products', '{{ $json.brokenLinkDetails }}'::jsonb, created_at, NOW() FROM pa.content_urls_joep WHERE url = '{{ $json.contentUrl }}'",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [600, 160],
+      "id": "b0000001-0000-0000-0000-000000000008",
+      "name": "backup_to_history",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM pa.content_urls_joep WHERE url = '{{ $json.contentUrl }}'",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [860, 160],
+      "id": "b0000001-0000-0000-0000-000000000009",
+      "name": "delete_from_content",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE url = '{{ $json.contentUrl }}'",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1120, 160],
+      "id": "b0000001-0000-0000-0000-000000000010",
+      "name": "delete_from_tracking",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten) VALUES ('{{ $json.contentUrl }}', 0) ON CONFLICT (url) DO UPDATE SET kopteksten = 0",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1380, 160],
+      "id": "b0000001-0000-0000-0000-000000000011",
+      "name": "add_to_werkvoorraad",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b0000001-cond-0002",
+              "leftValue": "={{ $json.hasChanges }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [600, 440],
+      "id": "b0000001-0000-0000-0000-000000000012",
+      "name": "check_replacements",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE pa.content_urls_joep SET content = '{{ $json.correctedContent }}' WHERE url = '{{ $json.contentUrl }}'",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [860, 380],
+      "id": "b0000001-0000-0000-0000-000000000013",
+      "name": "update_content",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pa.link_validation_results (content_url, total_links, broken_links, valid_links, broken_link_details, validated_at) VALUES ('{{ $json.contentUrl }}', {{ $json.totalLinks }}, {{ $json.goneCount }}, {{ $json.validCount }}, '{{ $json.brokenLinkDetails }}'::jsonb, NOW())",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1640, 300],
+      "id": "b0000001-0000-0000-0000-000000000014",
+      "name": "save_validation_gone",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pa.link_validation_results (content_url, total_links, broken_links, valid_links, broken_link_details, validated_at) VALUES ('{{ $json.contentUrl }}', {{ $json.totalLinks }}, {{ $json.goneCount }}, {{ $json.validCount }}, '{{ $json.brokenLinkDetails }}'::jsonb, NOW())",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1120, 380],
+      "id": "b0000001-0000-0000-0000-000000000015",
+      "name": "save_validation_replaced",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pa.link_validation_results (content_url, total_links, broken_links, valid_links, broken_link_details, validated_at) VALUES ('{{ $json.contentUrl }}', {{ $json.totalLinks }}, {{ $json.goneCount }}, {{ $json.validCount }}, '{{ $json.brokenLinkDetails }}'::jsonb, NOW())",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [860, 540],
+      "id": "b0000001-0000-0000-0000-000000000016",
+      "name": "save_validation_valid",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "get_unvalidated_content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_unvalidated_content": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "extract_and_parse_links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extract_and_parse_links": {
+      "main": [
+        [
+          {
+            "node": "query_elasticsearch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "query_elasticsearch": {
+      "main": [
+        [
+          {
+            "node": "compare_and_decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "compare_and_decide": {
+      "main": [
+        [
+          {
+            "node": "check_gone_products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_gone_products": {
+      "main": [
+        [
+          {
+            "node": "backup_to_history",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "check_replacements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "backup_to_history": {
+      "main": [
+        [
+          {
+            "node": "delete_from_content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "delete_from_content": {
+      "main": [
+        [
+          {
+            "node": "delete_from_tracking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "delete_from_tracking": {
+      "main": [
+        [
+          {
+            "node": "add_to_werkvoorraad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "add_to_werkvoorraad": {
+      "main": [
+        [
+          {
+            "node": "save_validation_gone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "save_validation_gone": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_replacements": {
+      "main": [
+        [
+          {
+            "node": "update_content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "save_validation_valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_content": {
+      "main": [
+        [
+          {
+            "node": "save_validation_replaced",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "save_validation_replaced": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "save_validation_valid": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "name": "SEO Content"
+    }
+  ]
+}

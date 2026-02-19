@@ -28,6 +28,15 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **File**: `backend/main.py` — function `extract_product_count()`
 - **Date**: 2026-02-13
 
+## N8N Workflow Conversion from Python Scripts
+- **Pattern**: When converting Python backend logic to n8n workflows, use Code nodes for complex logic (URL parsing, API response processing, content post-processing) and native n8n nodes for simple operations (DB queries, HTTP requests, OpenAI calls)
+- **Credential reuse**: Reference existing n8n credentials by ID (e.g., `"id": "vN1gzct2yLh0E1pi"` for PostgreSQL) — find these in any existing workflow JSON
+- **Node type versions**: Match existing workflows for compatibility (postgres v2.6, openAi v1.8, code v2, if v2.2, splitInBatches v3, httpRequest v4.2, scheduleTrigger v1.2)
+- **Error handling**: Use `onError: "continueRegularOutput"` on all nodes to prevent single item failures from stopping batches
+- **ES in n8n**: Use `fetch()` API in Code nodes for Elasticsearch HTTP queries (n8n Code nodes support fetch natively)
+- **Files**: `docs/kopteksten_generator_n8n.json`, `docs/link_validator_n8n.json`
+- **Date**: 2026-02-19
+
 ## AI Title Generation: Met-Feature Duplication Fix
 - **Problem**: Met-feature values (e.g., "Korte mouwen") appeared twice in titles — once in the base H1 from the API (e.g., "Korte mouwen nachthemden") and again as a "met" clause ("met Korte mouwen")
 - **Root Cause**: Size and suffix values were stripped from `ai_h1` before sending to OpenAI, but met-feature values were NOT stripped. The AI saw "Korte mouwen nachthemden" AND received instructions to add "met korte mouwen"

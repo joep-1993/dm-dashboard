@@ -1,0 +1,568 @@
+{
+  "name": "kopteksten_generator_api",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 10
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 300],
+      "id": "a0000001-0000-0000-0000-000000000001",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT w.url FROM pa.jvs_seo_werkvoorraad w LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check c ON w.url = c.url WHERE c.url IS NULL LIMIT 10000",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [-960, 300],
+      "id": "a0000001-0000-0000-0000-000000000002",
+      "name": "get_pending_urls",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-720, 300],
+      "id": "a0000001-0000-0000-0000-000000000003",
+      "name": "Loop Over Items",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Parse URL to extract maincat, category, filters and build Product Search API URL\n// Based on scraper_service.py:parse_beslist_url() and build_api_params()\n\nconst url = ($json.url || '').split('?')[0];\n\n// Maincat name -> API ID mapping (from scraper_service.py MAIN_CATEGORY_IDS)\nconst MAIN_CATEGORY_IDS = {\n  'autos': 37000, 'baby_peuter': 8, 'boeken': 701,\n  'cadeaus_gadgets_culinair': 262, 'computers': 6, 'dieren_accessoires': 34000,\n  'gezond_mooi': 286, 'elektronica': 655, 'voor_volwassenen': 452,\n  'eten_drinken': 11, 'fietsen': 38000, 'films-series': 700,\n  'cddvdrom': 4, 'horloge': 30000, 'huishoudelijke_apparatuur': 12000,\n  'kantoorartikelen': 361, 'mode': 137, 'klussen': 35000,\n  'meubilair': 10, 'mode_accessoires': 33000, 'accessoires': 40000,\n  'muziekinstrument': 31000, 'parfum_aftershave': 29000, 'main_sanitair': 27000,\n  'schoenen': 32000, 'sieraden_horloges': 347, 'software': 155,\n  'speelgoed_spelletjes': 332, 'sport_outdoor_vrije-tijd': 206,\n  'tuin_accessoires': 36000, 'huis_tuin': 165\n};\n\n// Remove domain if present\nlet path = url;\nif (path.startsWith('http')) {\n  path = '/' + path.split('/', 3).slice(3).join('/') || path.replace(/^https?:\\/\\/[^/]+/, '');\n}\npath = path.replace(/\\/$/, '');\n\nlet maincat_name = null;\nlet category = null;\nlet filters = {};\n\n// Pattern 1: /products/{maincat}/{category}/c/{filters}\nlet match = path.match(/^\\/products\\/([^/]+)\\/([^/]+)\\/c\\/(.+)$/);\nif (match) {\n  maincat_name = match[1];\n  category = match[2];\n  const filterPairs = match[3].split('~~');\n  for (const pair of filterPairs) {\n    const idx = pair.indexOf('~');\n    if (idx > 0) {\n      const name = pair.substring(0, idx);\n      const value = pair.substring(idx + 1);\n      if (!filters[name]) filters[name] = [];\n      filters[name].push(value);\n    }\n  }\n}\n\n// Pattern 2: /products/{maincat}/c/{filters}\nif (!match) {\n  match = path.match(/^\\/products\\/([^/]+)\\/c\\/(.+)$/);\n  if (match) {\n    maincat_name = match[1];\n    const filterPairs = match[2].split('~~');\n    for (const pair of filterPairs) {\n      const idx = pair.indexOf('~');\n      if (idx > 0) {\n        const name = pair.substring(0, idx);\n        const value = pair.substring(idx + 1);\n        if (!filters[name]) filters[name] = [];\n        filters[name].push(value);\n      }\n    }\n  }\n}\n\n// Pattern 3: /products/{maincat}/{category}\nif (!match) {\n  match = path.match(/^\\/products\\/([^/]+)\\/([^/]+)$/);\n  if (match) {\n    maincat_name = match[1];\n    category = match[2];\n  }\n}\n\n// Pattern 4: /products/{maincat}\nif (!match) {\n  match = path.match(/^\\/products\\/([^/]+)$/);\n  if (match) {\n    maincat_name = match[1];\n  }\n}\n\nconst maincat_id = MAIN_CATEGORY_IDS[maincat_name] || null;\n\nif (!maincat_id) {\n  return { json: { url, parse_success: false, api_url: '' } };\n}\n\n// Build API URL\nconst params = new URLSearchParams();\nparams.set('mainCategory', maincat_id.toString());\nif (category) params.set('category', category);\nparams.set('sort', 'popularity');\nparams.set('sortDirection', 'desc');\nparams.set('limit', '76');\nparams.set('offset', '0');\nparams.set('isBot', 'false');\nparams.set('countryLanguage', 'nl-nl');\nparams.set('experiment', 'topProducts');\nparams.set('trackTotalHits', 'false');\n\nfor (const [filterName, values] of Object.entries(filters)) {\n  for (let i = 0; i < values.length; i++) {\n    params.set(`filters[${filterName}][${i}]`, values[i]);\n  }\n}\n\nconst api_url = `https://productsearch-v2.api.beslist.nl/search/products?${params.toString()}`;\n\nreturn {\n  json: {\n    url,\n    maincat_name,\n    maincat_id,\n    category: category || null,\n    filters,\n    parse_success: true,\n    api_url\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 300],
+      "id": "a0000001-0000-0000-0000-000000000004",
+      "name": "parse_url_and_build_api",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a0000001-cond-0001",
+              "leftValue": "={{ $json.parse_success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-240, 300],
+      "id": "a0000001-0000-0000-0000-000000000005",
+      "name": "check_parse_success",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.api_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Beslist script voor SEO"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 200],
+      "id": "a0000001-0000-0000-0000-000000000006",
+      "name": "fetch_products",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract products from Product Search API response\n// Based on scraper_service.py:scrape_product_page_api() lines 534-558\n\nconst apiResponse = $json;\nconst parsedData = $('parse_url_and_build_api').item.json;\nconst url = parsedData.url;\n\n// Extract selected facets for product subject\nconst facets = apiResponse.facets || [];\nconst selectedFacets = [];\nfor (const facetGroup of facets) {\n  const facetName = facetGroup.name || '';\n  const values = facetGroup.values || [];\n  for (const value of values) {\n    if (value.selected) {\n      selectedFacets.push({\n        facet_name: facetName,\n        facet_value: value.facetValue || '',\n        detail_value: value.detailValue || value.facetValue || ''\n      });\n    }\n  }\n}\n\n// Get deepest category name\nconst apiProducts = apiResponse.products || [];\nconst categories = apiProducts.length > 0 ? (apiProducts[0].categories || []) : [];\nconst deepestCategoryName = categories.length > 0 ? categories[categories.length - 1].name || '' : '';\n\n// Build product subject from selected facets\nconst colorFacets = ['kleur', 'kleurtint'];\nconst productNameFacets = ['serie', 'modelnaam', 'modelnaam_mob', 'model', 'type'];\nconst brandFacets = ['merk'];\nconst targetGroupFacets = ['doelgroep'];\n\nlet hasSpecificProduct = false;\nconst parts = [];\nconst colors = [];\nconst productNames = [];\nconst brands = [];\nconst targetGroups = [];\nconst other = [];\n\nfor (const facet of selectedFacets) {\n  const nameLower = facet.facet_name.toLowerCase();\n  if (colorFacets.some(c => nameLower.includes(c))) {\n    colors.push(facet.detail_value);\n  } else if (productNameFacets.some(p => nameLower.includes(p))) {\n    productNames.push(facet.detail_value);\n    hasSpecificProduct = true;\n  } else if (brandFacets.some(b => nameLower.includes(b))) {\n    brands.push(facet.detail_value);\n  } else if (targetGroupFacets.some(t => nameLower.includes(t))) {\n    targetGroups.push(facet.detail_value);\n  } else {\n    other.push(facet.detail_value);\n  }\n}\n\nconst subjectParts = [...colors, ...productNames, ...brands, ...targetGroups, ...other];\nif (!hasSpecificProduct && deepestCategoryName && subjectParts.length > 0) {\n  subjectParts.push(deepestCategoryName.toLowerCase());\n}\nconst productSubject = subjectParts.join(' ');\nconst h1_title = productSubject || deepestCategoryName || parsedData.maincat_name || 'Unknown';\n\n// Extract products (max 30, shopCount >= 2, skip orResult)\nconst products = [];\nfor (const product of apiProducts.slice(0, 70)) {\n  if (product.type === 'orResult') continue;\n  \n  const title = (product.title || product.description || 'No Title').substring(0, 100);\n  const description = (product.description || title).substring(0, 200);\n  const shopCount = product.shopCount || 0;\n  let plpUrl = product.plpUrl || '';\n  \n  if (plpUrl && !plpUrl.startsWith('http')) {\n    plpUrl = 'https://www.beslist.nl' + plpUrl;\n  }\n  \n  if (plpUrl && description && shopCount >= 2) {\n    products.push({\n      title,\n      url: plpUrl,\n      listviewContent: description\n    });\n  }\n}\n\n// Limit to 30 for prompt\nconst limitedProducts = products.slice(0, 30);\n\nreturn {\n  json: {\n    url,\n    h1_title,\n    products: limitedProducts,\n    products_count: limitedProducts.length\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 200],
+      "id": "a0000001-0000-0000-0000-000000000007",
+      "name": "extract_products",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a0000001-cond-0002",
+              "leftValue": "={{ $json.products_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 200],
+      "id": "a0000001-0000-0000-0000-000000000008",
+      "name": "check_products_found",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a0000001-set-0001",
+              "name": "=promptWriteText",
+              "value": "=Opdracht\nEen prijsbewuste consumenten landt op een pagina na het zoeken in Google. Op de pagina staan veel producten waaruit hij moet kiezen. Zie de lijst met de 30 populairste producten hieronder.\nSchrijf een korte tekst (max. 100 woorden) met als doel om de bezoeker te helpen de juiste keuze te maken.\n- Schrijf de tekst als EEN doorlopende alinea, GEEN meerdere paragrafen of witregels.\n- Geef concreet advies: noem bijvoorbeeld verschillen in functies, eigenschappen of gebruiksscenario's\n- Vermijd het noemen van prijzen.\n- Gebruik waar relevant, klikbare links naar producten en gebruik hierbij HTML-links met de tag <a href=\"url\"> en als linktekst een KORTE, heldere omschrijving (max 3-5 woorden). Maak bijvoorbeeld van \"Beeztees kattentuigje Hearts zwart 120 x 1 cm\" gewoon \"Beeztees kattentuigje Hearts\". Gebruik alleen \"urls\" die hieronder in deze lijst voorkomen en negeer urls met een lege waarde.\n\nHieronder de context:\nZoekwoord in Google: {{ $json.h1_title }}\n\nDe 30 populairste producten met titel, prijs en de bijbehorede link:\n{{ $json.products.map((item, index) => `Product ${index + 1}\\nTitle: ${item.title}\\nUrl: ${item.url}\\nContent: ${item.listviewContent}\\n`).join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [720, 100],
+      "id": "a0000001-0000-0000-0000-000000000009",
+      "name": "create_prompt",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.promptWriteText }}"
+            },
+            {
+              "content": "Je bent een online marketeer voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.\n- Spreek de lezer aan met \"je,\" in een toegankelijke, optimistische toon.\n- Noem nooit prijzen.\n- Schrijf ALTIJD als \u00e9\u00e9n doorlopende alinea zonder witregels of meerdere paragrafen.\n- Focus op advies dat \u00e9cht helpt bij het maken van een keuze (bv. voordelen, verschillen, specifieke kenmerken).\n- BELANGRIJK: Link ALLEEN naar producten die exact overeenkomen met het zoekwoord. Als het zoekwoord \"Samsung Galaxy Buds FE\" is, link dan NIET naar \"Galaxy Buds3\" of \"Galaxy Buds Pro\" - dat zijn andere producten. Link liever naar 1 correct product dan naar meerdere verkeerde producten.\n- Verzin NOOIT producten of URLs die niet in de lijst staan. Als er maar 1 passend product is, gebruik dan alleen die ene link.\n- Als je linkt, gebruik de tag <a href> en kies dan de juiste url uit de lijst van meegeleverde producten. Maak nooit zelf een andere url en negeer urls met een lege waarde.\n- Als je een link maakt: HOUD DE LINKTEKST KORT (max 3-5 woorden). Zorg dat de linktekst verwijst naar het correcte product, maar vermijd lange productnamen met specificaties.\n- We moeten voorkomen dat de link tekst niet overeenkomt met de url.\n- Gebruik nooit andere URLs dan degene die voorkomen in de lijst van producten.",
+              "role": "system"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 2000,
+          "temperature": 0.7
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [960, 100],
+      "id": "a0000001-0000-0000-0000-000000000010",
+      "name": "OpenAI",
+      "retryOnFail": true,
+      "credentials": {
+        "openAiApi": {
+          "id": "kno0bSOaIGRLaJmG",
+          "name": "OpenAi account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Post-process GPT output: fix truncated URLs, sanitize, validate links\n// Based on gpt_service.py:fix_truncated_urls() and scraper_service.py:sanitize_content()\n\nconst content = $json.message?.content || '';\nconst products = $('extract_products').item.json.products || [];\nconst url = $('extract_products').item.json.url;\n\n// 1. Fix truncated URLs (GPT sometimes shortens /p/name/maincat/pimId/ to /p/name/)\nconst slugToUrl = {};\nfor (const p of products) {\n  if (p.url && p.url.includes('/p/')) {\n    const m = p.url.match(/\\/p\\/([^/]+)\\//);\n    if (m) slugToUrl[m[1]] = p.url;\n  }\n}\n\nlet fixed = content.replace(\n  /href=\"(https:\\/\\/www\\.beslist\\.nl\\/p\\/[^\"]+)\"/g,\n  (full, href) => {\n    const truncMatch = href.match(/^https:\\/\\/www\\.beslist\\.nl\\/p\\/([^/]+)\\/?$/);\n    if (truncMatch && slugToUrl[truncMatch[1]]) {\n      return `href=\"${slugToUrl[truncMatch[1]]}\"`;\n    }\n    return full;\n  }\n);\n\n// 2. Sanitize content for SQL (escape single quotes, decode HTML entities)\nconst sanitized = fixed\n  .replace(/'/g, \"''\")\n  .replace(/&amp;/g, '&')\n  .replace(/&quot;/g, '\"')\n  .replace(/&apos;/g, \"'\")\n  .replace(/&#039;/g, \"'\")\n  .replace(/&lt;/g, '<')\n  .replace(/&gt;/g, '>')\n  .replace(/&nbsp;/g, ' ')\n  .replace(/&euro;/g, '\\u20AC')\n  .replace(/&copy;/g, '\\u00A9')\n  .replace(/&trade;/g, '\\u2122');\n\n// 3. Check if content has valid product links\nconst hasValidLinks = sanitized.includes('<a href=\"/p/') ||\n                      sanitized.includes('<a href=\"https://www.beslist.nl/p/');\n\nreturn {\n  json: {\n    url,\n    sanitized_content: sanitized,\n    has_valid_links: hasValidLinks\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 100],
+      "id": "a0000001-0000-0000-0000-000000000011",
+      "name": "post_process",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a0000001-cond-0003",
+              "leftValue": "={{ $json.has_valid_links }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1440, 100],
+      "id": "a0000001-0000-0000-0000-000000000012",
+      "name": "check_has_links",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pa.content_urls_joep (url, content) VALUES('{{ $json.url }}', '{{ $json.sanitized_content }}')",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1680, 0],
+      "id": "a0000001-0000-0000-0000-000000000013",
+      "name": "write_result",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE url = '{{ $json.url }}'",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1680, 200],
+      "id": "a0000001-0000-0000-0000-000000000014",
+      "name": "remove_from_check",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url) VALUES ('{{ $json.url }}')",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [-480, 560],
+      "id": "a0000001-0000-0000-0000-000000000015",
+      "name": "write_check",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE pa.jvs_seo_werkvoorraad SET kopteksten = 1 WHERE url = '{{ $json.url }}'",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [-480, 760],
+      "id": "a0000001-0000-0000-0000-000000000016",
+      "name": "write_werkvoorraad",
+      "credentials": {
+        "postgres": {
+          "id": "vN1gzct2yLh0E1pi",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "get_pending_urls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_pending_urls": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "parse_url_and_build_api",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "write_check",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "write_werkvoorraad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parse_url_and_build_api": {
+      "main": [
+        [
+          {
+            "node": "check_parse_success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_parse_success": {
+      "main": [
+        [
+          {
+            "node": "fetch_products",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetch_products": {
+      "main": [
+        [
+          {
+            "node": "extract_products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extract_products": {
+      "main": [
+        [
+          {
+            "node": "check_products_found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_products_found": {
+      "main": [
+        [
+          {
+            "node": "create_prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_prompt": {
+      "main": [
+        [
+          {
+            "node": "OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI": {
+      "main": [
+        [
+          {
+            "node": "post_process",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "post_process": {
+      "main": [
+        [
+          {
+            "node": "check_has_links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_has_links": {
+      "main": [
+        [
+          {
+            "node": "write_result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "remove_from_check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "write_result": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "remove_from_check": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "write_check": {
+      "main": [
+        []
+      ]
+    },
+    "write_werkvoorraad": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "name": "SEO Content"
+    }
+  ]
+}

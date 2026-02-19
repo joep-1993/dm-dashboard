@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Convert kopteksten generator Python script to n8n workflow JSON (16 nodes: Schedule Trigger → PostgreSQL → Loop → Code → HTTP Request → OpenAI → write results) using Product Search API instead of web scraping #claude-session:2026-02-19
+- [x] Convert link validator Python script to n8n workflow JSON (16 nodes: Schedule Trigger → PostgreSQL → Loop → extract links → Elasticsearch → compare/decide → update/delete/backup) #claude-session:2026-02-19
 - [x] Export Category Keyword Volumes script to single .txt file with credentials, all code, data files, and run instructions #claude-session:2026-02-17
 - [x] Fix 148 singular/plural forms in category_forms.json — words ending in z (94, e.g., hoez→hoes, doz→doos, kluiz→kluis), v (14, e.g., schroev→schroef, schijv→schijf), and wrong -el (40, onderdel→onderdeel, panel→paneel) #claude-session:2026-02-17
 - [x] Export 824,450 IndexNow submitted URLs to CSV (url, submitted_date, response_code) #claude-session:2026-02-17
