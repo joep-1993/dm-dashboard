@@ -1,6 +1,19 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## categories.xlsx is gitignored — regenerate from DB if missing
+- **File**: `backend/categories.xlsx` — loaded at startup by `category_keyword_service.py`
+- **Source**: `SELECT main_category_name, category_id, category_name FROM category_descriptions` (remote DB)
+- **Columns**: maincat, maincat_id (MIN category_id per main_category), deepest_cat, cat_id
+- **Impact**: Backend crash-loops with `FileNotFoundError` if missing
+- **Date**: 2026-02-20
+
+## pa.unique_titles had no UNIQUE constraint — duplicates accumulated
+- **Root cause**: No PK or unique index on `url` column → same URLs inserted multiple times
+- **Fix**: Deduped via `CREATE TABLE ... AS SELECT DISTINCT ON (url)`, swapped tables, added `CREATE UNIQUE INDEX idx_unique_titles_url ON pa.unique_titles (url)`
+- **Scale**: 361,861 duplicate rows removed (1,016,763 → 654,902)
+- **Date**: 2026-02-20
+
 ## Database Connection Quick Reference
 
 ### Primary Database (used by BOTH dm-tools app AND n8n workflows)

@@ -8,6 +8,7 @@ _Active tasks for immediate work_
 _Tasks currently being worked on_
 
 ## Completed
+- [x] Fix missing categories.xlsx (regenerated from category_descriptions DB table, 3233 categories), fix duplicate URLs in AI title recent results (deduped pa.unique_titles: 1,016,763→654,902 rows, added UNIQUE index on url) #claude-session:2026-02-20
 _Finished tasks (move here when done)_
 
 - [x] Add production push to n8n flow: `get_all_publish_content` (FULL OUTER JOIN content_urls_joep + faq_content), `push_to_production` Code node (transforms content_top/content_bottom/content_faq, batches 5000 items, POSTs to `https://website-configuration.api.beslist.nl/automated-content`), updated Slack message with push results #claude-session:2026-02-19
