@@ -128,18 +128,21 @@ def bulk_upsert_titles(titles: List[Dict]) -> Dict:
     }
 
 
-def get_all_titles() -> List[Dict]:
-    """Get all titles from database."""
+def get_all_titles(limit: int = 0) -> List[Dict]:
+    """Get all titles from database. Optional limit for batched uploads."""
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
-        cur.execute("""
+        query = """
             SELECT url, title, description, h1_title, created_at
             FROM pa.unique_titles
             WHERE h1_title IS NOT NULL OR title IS NOT NULL
             ORDER BY url
-        """)
+        """
+        if limit > 0:
+            query += f" LIMIT {limit}"
+        cur.execute(query)
         rows = cur.fetchall()
         return [dict(row) for row in rows]
     finally:

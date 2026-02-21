@@ -117,10 +117,38 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
   - `content_bottom`: From FAQ internal links (beslist.nl links in faq_content)
   - `content_faq`: From FAQ content converted to schema.org JSON-LD format (script tag wrapper)
 - **Query**: FULL OUTER JOIN between `content_urls_joep` and `faq_content` to get ALL URLs with any content
-- **Batching**: Splits items into batches of 5000, POSTs each batch sequentially
+- **CRITICAL: Send ALL items in a SINGLE request** — the API replaces ALL content per call, so batching (e.g. 5000 per batch) means only the last batch survives
 - **n8n nodes**: `get_all_publish_content` (Postgres) + `push_to_production` (Code node)
-- **File**: `kopteksten_validator_generator.json` (n8n workflow)
-- **Date**: 2026-02-19
+- **Date**: 2026-02-19, updated 2026-02-21
+
+## N8N Postgres Node: NEVER use queryBatching "independently" with dynamic content
+- **Problem**: `queryBatching: "independently"` naively splits SQL on semicolons — including semicolons inside string literals (HTML, CSS, JSON content)
+- **Impact**: INSERT/UPDATE statements with HTML content (e.g., `style="color: red; font-size: 12px"`) get split into broken fragments
+- **Fix**: Remove `queryBatching: "independently"` from ALL exec nodes that run dynamically built SQL. These nodes each execute a single SQL statement, so batching is unnecessary
+- **Date**: 2026-02-21
+
+## N8N Postgres Node: Chained exec nodes lose $json context
+- **Problem**: When Postgres exec nodes are chained (A → B → C), node B's output replaces `$json` for node C. So `$json.field` in C references B's query result, not the original Code node output
+- **Fix**: Use `$node["sourceCodeNode"].json.field` instead of `$json.field` for all chained Postgres nodes after the first one
+- **Exception**: The FIRST exec node after a Code node CAN use `$json.field` since it receives data directly
+- **Date**: 2026-02-21
+
+## Unique Titles Publish: Case-sensitive duplicates cause API failure
+- **Problem**: `pa.unique_titles` uses PostgreSQL (case-sensitive PK), but the API's MySQL has case-insensitive unique constraint on `url`
+- **Impact**: URLs like `/c/dGVsZXZpc2` and `/c/dgvszxzpc2` coexist in PG but MySQL rejects the CSV with "Duplicate entry" error
+- **Fix**: Deleted 422 mixed-case duplicates, lowercased remaining 72 URLs with caps. The `upsert_title()` function already lowercases on insert
+- **All URLs in unique_titles should be lowercase**
+- **Date**: 2026-02-21
+
+## N8N Workflows: Split into 4 separate flows
+- **Old**: Single combined workflow `kopteksten_validator_generator.json` (26 nodes, hard to debug)
+- **New**: 4 independent workflows in `Downloads/flows/`:
+  1. `1_content_generator.json` — 50K URL content generation (10:00)
+  2. `2_seo_link_validator.json` — 50K SEO link validation (14:00)
+  3. `3_faq_link_validator.json` — 50K FAQ link validation (15:00)
+  4. `4_publisher.json` — Publish SEO+FAQ to production (18:00)
+- **Benefits**: Independent scheduling, easier debugging, no cascading failures
+- **Date**: 2026-02-21
 
 ## ON CONFLICT Requires UNIQUE Constraint in PostgreSQL
 - **Problem**: `INSERT ... ON CONFLICT (url) DO UPDATE` silently does a plain INSERT when there is no UNIQUE constraint or index on the `url` column

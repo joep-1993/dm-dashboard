@@ -10,6 +10,10 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Split n8n workflow into 4 independent flows: content_generator (50K URLs), seo_link_validator (50K), faq_link_validator (50K), publisher. All bulk, no loops, no queryBatching. Output: `Downloads/flows/` #claude-session:2026-02-21
+- [x] Fix unique titles publish: root cause was 422 case-sensitive duplicate URLs (PG case-sensitive PK vs MySQL case-insensitive unique). Deleted dupes, lowercased 72 remaining URLs with caps. Full 1M+ publish works #claude-session:2026-02-21
+- [x] Fix exec_write_results error: removed `queryBatching: "independently"` from all 12 exec Postgres nodes (semicolons in HTML content broke query splitting) #claude-session:2026-02-21
+- [x] Fix faq_validation_results missing UNIQUE constraint: added `faq_validation_results_url_key UNIQUE (url)` — required by ON CONFLICT in backend code #claude-session:2026-02-21
 - [x] Fix content publishing: increased timeout 600s→1800s, use `data=` instead of `json=` to avoid double-serialization, add progress tracking + timing breakdown. Tested all 252K items (1.36 GB) successfully in ~10 min #claude-session:2026-02-21
 - [x] Restore 267,031 missing unique_titles from local DB (lost during Feb 19 migration). Remote DB now 1,035,455 URLs (was 654,902). Filter publish/count to only rows with titles #claude-session:2026-02-21
 - [x] Import 113,522 URLs from werkvoorraad into unique_titles (never synced) #claude-session:2026-02-21
