@@ -137,6 +137,7 @@ def get_all_titles() -> List[Dict]:
         cur.execute("""
             SELECT url, title, description, h1_title, created_at
             FROM pa.unique_titles
+            WHERE h1_title IS NOT NULL OR title IS NOT NULL
             ORDER BY url
         """)
         rows = cur.fetchall()
@@ -152,7 +153,7 @@ def get_titles_count() -> int:
     cur = conn.cursor()
 
     try:
-        cur.execute("SELECT COUNT(*) as count FROM pa.unique_titles")
+        cur.execute("SELECT COUNT(*) as count FROM pa.unique_titles WHERE h1_title IS NOT NULL OR title IS NOT NULL")
         return cur.fetchone()['count']
     finally:
         cur.close()

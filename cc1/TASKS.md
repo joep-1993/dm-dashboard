@@ -8,8 +8,12 @@ _Active tasks for immediate work_
 _Tasks currently being worked on_
 
 ## Completed
-- [x] Fix missing categories.xlsx (regenerated from category_descriptions DB table, 3233 categories), fix duplicate URLs in AI title recent results (deduped pa.unique_titles: 1,016,763→654,902 rows, added UNIQUE index on url) #claude-session:2026-02-20
 _Finished tasks (move here when done)_
+
+- [x] Fix content publishing: increased timeout 600s→1800s, use `data=` instead of `json=` to avoid double-serialization, add progress tracking + timing breakdown. Tested all 252K items (1.36 GB) successfully in ~10 min #claude-session:2026-02-21
+- [x] Restore 267,031 missing unique_titles from local DB (lost during Feb 19 migration). Remote DB now 1,035,455 URLs (was 654,902). Filter publish/count to only rows with titles #claude-session:2026-02-21
+- [x] Import 113,522 URLs from werkvoorraad into unique_titles (never synced) #claude-session:2026-02-21
+- [x] Fix missing categories.xlsx (regenerated from category_descriptions DB table, 3233 categories), fix duplicate URLs in AI title recent results (deduped pa.unique_titles: 1,016,763→654,902 rows, added UNIQUE index on url) #claude-session:2026-02-20
 
 - [x] Add production push to n8n flow: `get_all_publish_content` (FULL OUTER JOIN content_urls_joep + faq_content), `push_to_production` Code node (transforms content_top/content_bottom/content_faq, batches 5000 items, POSTs to `https://website-configuration.api.beslist.nl/automated-content`), updated Slack message with push results #claude-session:2026-02-19
 - [x] Optimize n8n link validation: replaced per-item SplitInBatches loop with single `validate_all_links` Code node — ONE ES query per maincat instead of per URL (~31 queries instead of ~100+), all DB operations use bulk SQL (7 queries instead of ~100 per-item), removed 14 nodes replaced with 7 bulk nodes #claude-session:2026-02-19

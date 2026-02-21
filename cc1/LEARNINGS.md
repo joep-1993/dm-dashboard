@@ -11,8 +11,24 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 ## pa.unique_titles had no UNIQUE constraint — duplicates accumulated
 - **Root cause**: No PK or unique index on `url` column → same URLs inserted multiple times
 - **Fix**: Deduped via `CREATE TABLE ... AS SELECT DISTINCT ON (url)`, swapped tables, added `CREATE UNIQUE INDEX idx_unique_titles_url ON pa.unique_titles (url)`
-- **Scale**: 361,861 duplicate rows removed (1,016,763 → 654,902)
+- **Scale**: 361,861 duplicate rows removed (1,016,763 → 654,902), then restored 267,031 missing from local DB → final 1,035,455
 - **Date**: 2026-02-20
+
+## Feb 19 migration missed unique_titles data
+- Local DB (`seo_tools_db` container, `pa.unique_titles`) had 843,812 URLs
+- Remote DB only received 654,902 — **267,031 URLs were never synced**
+- Also 113,522 URLs in werkvoorraad were never in unique_titles at all
+- **Always check local DB** (`docker exec seo_tools_db psql -U postgres -d seo_tools`) for missing data after migration issues
+- **Date**: 2026-02-21
+
+## Content publishing: timeout and serialization
+- Full payload is ~1.36 GB (252K items) — takes ~10 min to upload
+- DB fetch takes ~7 min (FULL OUTER JOIN content_urls_joep + faq_content)
+- **Must use `data=payload_json`** not `json=payload` (avoids requests double-serialization)
+- **Timeout must be ≥1800s** (old 600s was killing uploads mid-way)
+- Staging environment may be down (504) — test against production directly
+- The unique_titles publish (`/api/unique-titles/publish`) is a SEPARATE endpoint from content publish — uploads CSV to `custom-title-description/import-per-url`
+- **Date**: 2026-02-21
 
 ## Database Connection Quick Reference
 

@@ -1003,11 +1003,25 @@ async function pollPublishStatus(taskId, resultDiv, publishBtn) {
         const response = await fetch(`${API_BASE}/api/content-publish/status/${taskId}`);
         const data = await response.json();
 
+        if (!response.ok) {
+            // Task not found (e.g. after container restart)
+            resultDiv.innerHTML = `<div class="alert alert-danger"><strong>Task lost</strong> — the server was restarted while publishing. Please try again.</div>`;
+            publishBtn.disabled = false;
+            return;
+        }
+
         if (data.status === 'running' || data.status === 'pending') {
             // Still running - update status text and poll again
             const statusText = document.getElementById('publishStatusText');
             if (statusText) {
-                statusText.textContent = data.status === 'running' ? 'Sending content to API...' : 'Starting...';
+                const progress = data.progress || {};
+                const phase = progress.phase || data.status;
+                let msg = 'Starting...';
+                if (phase === 'fetching') msg = 'Fetching content from database...';
+                else if (phase === 'building_payload') msg = `Building payload (${(progress.total_items || 0).toLocaleString()} items)...`;
+                else if (phase === 'uploading') msg = `Uploading ${progress.payload_size_mb || '?'} MB to API...`;
+                else if (data.status === 'running') msg = 'Processing...';
+                statusText.textContent = msg;
             }
             setTimeout(() => pollPublishStatus(taskId, resultDiv, publishBtn), 2000);
         } else if (data.status === 'completed') {
@@ -1024,6 +1038,7 @@ async function pollPublishStatus(taskId, resultDiv, publishBtn) {
                     Items published: ${result.items_published?.toLocaleString() || 0}<br>
                     Payload size: ${result.payload_size_mb || 0} MB<br>
                     Status code: ${result.status_code || 'N/A'}
+                    ${result.timing ? `<br>Time: ${result.timing.total_sec}s (DB: ${result.timing.fetch_db_sec}s, serialize: ${result.timing.serialize_sec}s, upload: ${result.timing.upload_sec}s)` : ''}
                 </div>
             `;
 

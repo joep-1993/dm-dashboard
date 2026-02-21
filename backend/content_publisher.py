@@ -336,13 +336,14 @@ def get_all_content_items() -> List[Dict]:
         return_db_connection(conn)
 
 
-def publish_all_content(environment: str = None, content_type: str = "all") -> Dict:
+def publish_all_content(environment: str = None, content_type: str = "all", task_id: str = None) -> Dict:
     """
-    Publish content in a single API call (no batching).
+    Publish content in a single API call.
 
     Args:
         environment: Target environment (dev, staging, production)
         content_type: What to publish - "all", "seo_only", or "faq_only"
+        task_id: Optional task ID for progress tracking
 
     Returns:
         Dict with results
@@ -350,24 +351,32 @@ def publish_all_content(environment: str = None, content_type: str = "all") -> D
     env = environment or DEFAULT_ENV
     api_url, api_key = get_api_config(env)
 
+    def _update_progress(phase: str, **kwargs):
+        if task_id:
+            with _task_lock:
+                if task_id in _publish_tasks:
+                    _publish_tasks[task_id]["progress"] = {"phase": phase, **kwargs}
+
+    t0 = time.time()
     print(f"[Publisher] Fetching content from database...")
+    _update_progress("fetching")
     content_items = get_all_content_items()
+    t1 = time.time()
+    print(f"[Publisher] Fetched {len(content_items)} items in {t1-t0:.1f}s")
 
     # Filter based on content_type
     if content_type == "seo_only":
-        # Only publish content_top, clear FAQ fields
         content_items = [
             {**item, "content_faq": "", "content_bottom": ""}
             for item in content_items
-            if item.get("content_top")  # Only include items that have content_top
+            if item.get("content_top")
         ]
         print(f"[Publisher] Publishing SEO content only")
     elif content_type == "faq_only":
-        # Only publish content_faq and content_bottom, clear content_top
         content_items = [
             {**item, "content_top": ""}
             for item in content_items
-            if item.get("content_faq")  # Only include items that have content_faq
+            if item.get("content_faq")
         ]
         print(f"[Publisher] Publishing FAQ content only")
     else:
@@ -376,6 +385,7 @@ def publish_all_content(environment: str = None, content_type: str = "all") -> D
     total_count = len(content_items)
     print(f"[Publisher] Total URLs to publish: {total_count}")
     print(f"[Publisher] Target environment: {env} ({api_url})")
+    _update_progress("building_payload", total_items=total_count)
 
     if not content_items:
         return {
@@ -387,8 +397,15 @@ def publish_all_content(environment: str = None, content_type: str = "all") -> D
 
     # Build payload
     payload = {"data": content_items}
-    payload_size = len(json.dumps(payload))
-    print(f"[Publisher] Payload size: {payload_size / 1024 / 1024:.2f} MB")
+    t2 = time.time()
+    payload_json = json.dumps(payload)
+    payload_size = len(payload_json)
+    t3 = time.time()
+    print(f"[Publisher] Payload size: {payload_size / 1024 / 1024:.2f} MB (serialized in {t3-t2:.1f}s)")
+
+    # Free the list to reduce memory usage during upload
+    del content_items
+    del payload
 
     headers = {
         "X-Api-Key": api_key,
@@ -397,12 +414,15 @@ def publish_all_content(environment: str = None, content_type: str = "all") -> D
 
     try:
         print(f"[Publisher] Sending request to {api_url}...")
+        _update_progress("uploading", total_items=total_count, payload_size_mb=round(payload_size / 1024 / 1024, 2))
         response = requests.post(
             api_url,
             headers=headers,
-            json=payload,
-            timeout=600  # 10 minute timeout for large payload
+            data=payload_json,
+            timeout=1800  # 30 minute timeout for large payload
         )
+        t4 = time.time()
+        print(f"[Publisher] Response: {response.status_code} in {t4-t3:.1f}s (total: {t4-t0:.1f}s)")
 
         return {
             "success": response.status_code in (200, 201),
@@ -412,6 +432,12 @@ def publish_all_content(environment: str = None, content_type: str = "all") -> D
             "total_urls": total_count,
             "items_published": total_count if response.status_code in (200, 201) else 0,
             "payload_size_mb": round(payload_size / 1024 / 1024, 2),
+            "timing": {
+                "fetch_db_sec": round(t1-t0, 1),
+                "serialize_sec": round(t3-t2, 1),
+                "upload_sec": round(t4-t3, 1),
+                "total_sec": round(t4-t0, 1)
+            },
             "response": response.text[:1000] if response.text else None
         }
     except requests.RequestException as e:
@@ -565,14 +591,16 @@ def _run_publish_task(task_id: str, environment: str, content_type: str = "all")
     with _task_lock:
         _publish_tasks[task_id]["status"] = "running"
         _publish_tasks[task_id]["started_at"] = time.time()
+        _publish_tasks[task_id]["progress"] = {"phase": "fetching", "total_items": 0}
 
     try:
-        result = publish_all_content(environment=environment, content_type=content_type)
+        result = publish_all_content(environment=environment, content_type=content_type, task_id=task_id)
         with _task_lock:
             _publish_tasks[task_id]["status"] = "completed"
             _publish_tasks[task_id]["result"] = result
             _publish_tasks[task_id]["completed_at"] = time.time()
     except Exception as e:
+        print(f"[Publisher] Error: {str(e)}")
         with _task_lock:
             _publish_tasks[task_id]["status"] = "failed"
             _publish_tasks[task_id]["error"] = str(e)
