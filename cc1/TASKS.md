@@ -10,6 +10,10 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Create combined n8n workflow `seo_content_pipeline.json` (30 nodes, 5 phases): SEO validation → SEO generation → FAQ validation → FAQ generation → publish → Slack. Single Schedule Trigger (10:00), all phases sequential, 50K URL limits per phase #claude-session:2026-02-23
+- [x] Create 5th n8n workflow `5_faq_generator.json` (7 nodes): FAQ generation in bulk (50K URLs) — fetch products from Product Search API, generate FAQs via OpenAI, validate URLs in answers, write to faq_content + faq_tracking #claude-session:2026-02-23
+- [x] Fix OpenAI API key in n8n Code nodes: hardcoded key directly in `generate_all_content` and `generate_all_faqs` (n8n `process.env` not reliable for env vars) #claude-session:2026-02-23
+- [x] Fix publishing OOM: replaced n8n Code node payload building (244K rows × ~4KB = ~1GB) with call to FastAPI backend's `POST /api/content-publish?environment=production`. Backend handles DB fetch, payload build, and API call in Python. Also tried PostgreSQL `json_agg` approach — also OOMs at 1GB text buffer limit #claude-session:2026-02-23
 - [x] Split n8n workflow into 4 independent flows: content_generator (50K URLs), seo_link_validator (50K), faq_link_validator (50K), publisher. All bulk, no loops, no queryBatching. Output: `Downloads/flows/` #claude-session:2026-02-21
 - [x] Fix unique titles publish: root cause was 422 case-sensitive duplicate URLs (PG case-sensitive PK vs MySQL case-insensitive unique). Deleted dupes, lowercased 72 remaining URLs with caps. Full 1M+ publish works #claude-session:2026-02-21
 - [x] Fix exec_write_results error: removed `queryBatching: "independently"` from all 12 exec Postgres nodes (semicolons in HTML content broke query splitting) #claude-session:2026-02-21

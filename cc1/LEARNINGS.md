@@ -112,14 +112,13 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Purpose**: Push generated SEO content (content_top, content_bottom, content_faq) to production website
 - **API endpoint**: `POST https://website-configuration.api.beslist.nl/automated-content`
 - **Auth header**: `X-Api-Key: Sectional~Publisher~Dumpling1`
-- **Data transformation**:
-  - `content_top`: From `content_urls_joep.content`
-  - `content_bottom`: From FAQ internal links (beslist.nl links in faq_content)
-  - `content_faq`: From FAQ content converted to schema.org JSON-LD format (script tag wrapper)
-- **Query**: FULL OUTER JOIN between `content_urls_joep` and `faq_content` to get ALL URLs with any content
-- **CRITICAL: Send ALL items in a SINGLE request** — the API replaces ALL content per call, so batching (e.g. 5000 per batch) means only the last batch survives
-- **n8n nodes**: `get_all_publish_content` (Postgres) + `push_to_production` (Code node)
-- **Date**: 2026-02-19, updated 2026-02-21
+- **Data transformation** (handled by `content_publisher.py`):
+  - `content_top`: From `content_urls_joep.content`, sanitized ('' → ' → &#39;)
+  - `content_bottom`: From FAQ Q&As with internal beslist.nl links only
+  - `content_faq`: From FAQ schema.org JSON-LD
+- **CRITICAL: Send ALL items in a SINGLE request** — the API replaces ALL content per call
+- **n8n approach**: `push_to_production` Code node calls FastAPI `POST /api/content-publish?environment=production`, polls for completion (backend handles DB fetch + payload build + API call)
+- **Date**: 2026-02-19, updated 2026-02-23
 
 ## N8N Postgres Node: NEVER use queryBatching "independently" with dynamic content
 - **Problem**: `queryBatching: "independently"` naively splits SQL on semicolons — including semicolons inside string literals (HTML, CSS, JSON content)
@@ -140,15 +139,28 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **All URLs in unique_titles should be lowercase**
 - **Date**: 2026-02-21
 
-## N8N Workflows: Split into 4 separate flows
-- **Old**: Single combined workflow `kopteksten_validator_generator.json` (26 nodes, hard to debug)
-- **New**: 4 independent workflows in `Downloads/flows/`:
+## N8N Workflows: 5 individual flows + 1 combined pipeline
+- **Individual workflows** in `Downloads/flows/`:
   1. `1_content_generator.json` — 50K URL content generation (10:00)
   2. `2_seo_link_validator.json` — 50K SEO link validation (14:00)
   3. `3_faq_link_validator.json` — 50K FAQ link validation (15:00)
   4. `4_publisher.json` — Publish SEO+FAQ to production (18:00)
-- **Benefits**: Independent scheduling, easier debugging, no cascading failures
-- **Date**: 2026-02-21
+  5. `5_faq_generator.json` — 50K FAQ generation (12:00)
+- **Combined workflow**: `seo_content_pipeline.json` — 30 nodes, all 5 phases sequential in one flow (Schedule 10:00 → SEO validate → SEO generate → FAQ validate → FAQ generate → publish → Slack)
+- **Date**: 2026-02-21, combined 2026-02-23
+
+## N8N Publishing: Delegate to FastAPI backend to avoid OOM
+- **Problem**: Publishing 244K rows creates ~1GB JSON payload. n8n Code node OOMs building contentItems array + JSON.stringify + fetch body (~3-4GB peak). PostgreSQL `json_agg` also OOMs at 1GB text buffer limit
+- **Solution**: n8n Code node calls `POST http://app:8003/api/content-publish?environment=production`, then polls `GET /api/content-publish/status/{taskId}` every 15s (up to 40 min). Backend (`content_publisher.py`) handles DB fetch, payload build, and API call in Python where memory management is better
+- **Key**: The Beslist API replaces ALL content per call — no append/upsert. Must send everything in one request
+- **Output fields**: `success`, `total_urls`, `total_published` — matches Slack message template
+- **Date**: 2026-02-23
+
+## N8N OpenAI API Key: Hardcode in Code nodes
+- **Problem**: `process.env.OPENAI_API_KEY` in n8n Code nodes may throw ReferenceError (process not available) or return undefined
+- **Fix**: Hardcode the key directly: `const OPENAI_API_KEY = 'sk-proj-...'`
+- **Updated in**: `generate_all_content`, `generate_all_faqs` (both combined and individual workflows)
+- **Date**: 2026-02-23
 
 ## ON CONFLICT Requires UNIQUE Constraint in PostgreSQL
 - **Problem**: `INSERT ... ON CONFLICT (url) DO UPDATE` silently does a plain INSERT when there is no UNIQUE constraint or index on the `url` column
