@@ -105,6 +105,79 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
 
     return content
 
+def create_main_category_prompt(h1_title: str, products: List[Dict]) -> str:
+    """
+    Create the prompt for main category content generation.
+    Main categories are broader, so the content should be more general/introductory
+    while still including product links for popular items.
+    """
+    limited_products = products[:30]
+
+    products_text = "\n".join([
+        f"Product {i + 1}\nTitle: {p['title']}\nUrl: {p['url']}\nContent: {p['listviewContent'][:200]}\n"
+        for i, p in enumerate(limited_products)
+    ])
+
+    prompt = f"""Opdracht
+Een prijsbewuste consument landt op de hoofdcategoriepagina "{h1_title}" op beslist.nl na het zoeken in Google. Deze pagina is een overzichtspagina met producten uit veel verschillende subcategorieën.
+Schrijf een korte, uitnodigende introductietekst (max. 100 woorden) die:
+- Een breed overzicht geeft van wat er te vinden is op deze pagina
+- Een paar populaire subcategorieën of producttypen benoemt die onder {h1_title} vallen
+- Waar mogelijk 2-4 klikbare links bevat naar populaire producten uit de lijst hieronder, verspreid over verschillende subcategorieën
+- Schrijf als EEN doorlopende alinea, GEEN meerdere paragrafen of witregels
+- Vermijd het noemen van prijzen
+- Gebruik HTML-links met <a href="url"> en als linktekst een KORTE omschrijving (max 3-5 woorden). Gebruik alleen URLs die hieronder voorkomen.
+
+Hieronder de context:
+Categorie: {h1_title}
+
+De 30 populairste producten met titel en de bijbehorende link:
+{products_text}
+"""
+    return prompt
+
+
+def generate_main_category_content(h1_title: str, products: List[Dict]) -> str:
+    """
+    Generate content for main category pages.
+    Uses a more general/introductory prompt than subcategory pages.
+    """
+    user_prompt = create_main_category_prompt(h1_title, products)
+
+    system_message = """Je bent een online marketeer voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
+- Spreek de lezer aan met "je," in een toegankelijke, optimistische toon.
+- Noem nooit prijzen.
+- Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
+- Dit is een hoofdcategoriepagina, dus schrijf een breed, uitnodigend overzicht - niet te specifiek op één producttype.
+- Begin NOOIT met "Welkom op de ... pagina" of vergelijkbare welkomstformuleringen.
+- Gebruik NOOIT "ons", "onze", "wij" of "we" - schrijf vanuit het perspectief van de bezoeker, niet vanuit het bedrijf.
+- BELANGRIJK: Link ALLEEN naar producten die in de meegeleverde lijst staan. Verzin NOOIT producten of URLs.
+- Als je linkt, gebruik de tag <a href> en kies de juiste url uit de lijst. Maak nooit zelf een andere url.
+- HOUD DE LINKTEKST KORT (max 3-5 woorden).
+- Gebruik nooit andere URLs dan degene die voorkomen in de lijst van producten."""
+
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        max_tokens=2000,
+        temperature=0.7
+    )
+
+    content = response.choices[0].message.content
+
+    if response.choices[0].finish_reason == "length":
+        print(f"[GPT] Warning: Response was truncated for main category '{h1_title}'")
+
+    content = fix_truncated_urls(content, products)
+
+    return content
+
+
 def check_content_has_valid_links(content: str) -> bool:
     """
     Check if generated content contains valid product links.

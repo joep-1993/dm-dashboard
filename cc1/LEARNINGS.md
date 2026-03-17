@@ -50,6 +50,14 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 
 **IMPORTANT**: Frontend, backend, AND n8n all use the remote DB at 10.1.32.9. The local seo_tools_db container is still running but is no longer the primary database.
 
+## Main Category URLs: Separate Content Generation Path
+- **Problem**: 31 main category URLs (`/products/{maincat}/`) have no subcategory — products span many different subcategories, so the API-derived h1_title/product_subject is wrong (picks deepest category from first product)
+- **Solution**: Added `MAIN_CATEGORY_H1` mapping in `scraper_service.py` with fixed H1 titles from `maincaturls.xlsx`. `is_main_category_url()` detects these URLs (no subcategory, no filters). `generate_main_category_content()` in `gpt_service.py` uses a broader introductory prompt
+- **Prompt rules**: No "Welkom op de ... pagina", no "ons/onze/wij/we", broader overview mentioning subcategories, 2-4 product links from diverse subcategories
+- **Database**: URLs in `pa.jvs_seo_werkvoorraad` (for kopteksten processing), excluded from FAQ via `pa.faq_tracking` with `status='skipped', skip_reason='main_category_url'`
+- **Files**: `scraper_service.py`, `gpt_service.py`, `main.py`
+- **Date**: 2026-03-17
+
 ## Beslist.nl Product Count Extraction
 - **Pattern**: `"productCount":(\d+),"selected":true` — finds the product count of selected facets in the embedded JSON
 - **Context**: Beslist pages embed facet data as JSON in the HTML. Every facet value has a `productCount`, but only the `selected:true` ones reflect the current page's result count

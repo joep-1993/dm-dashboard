@@ -16,8 +16,8 @@ import re
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection
-from backend.scraper_service import scrape_product_page, scrape_product_page_api, sanitize_content
-from backend.gpt_service import generate_product_content, check_content_has_valid_links
+from backend.scraper_service import scrape_product_page, scrape_product_page_api, sanitize_content, is_main_category_url, MAIN_CATEGORY_H1
+from backend.gpt_service import generate_product_content, generate_main_category_content, check_content_has_valid_links
 from backend.link_validator import validate_content_links, validate_and_fix_content_links
 from backend.faq_service import process_single_url_faq
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
@@ -161,13 +161,24 @@ def process_single_url(url: str, conservative_mode: bool = False):
         else:
             # Generate AI content using product_subject from selected facets
             try:
-                # Use product_subject if available (from API), otherwise fall back to h1_title
-                content_topic = scraped_data.get('product_subject') or scraped_data['h1_title']
-                print(f"[DEBUG] Generating AI content for {url[:80]}... with topic '{content_topic}' and {len(scraped_data['products'])} products")
-                ai_content = generate_product_content(
-                    content_topic,
-                    scraped_data['products']
-                )
+                # Check if this is a main category URL - use special prompt + H1 from mapping
+                if is_main_category_url(url):
+                    from backend.scraper_service import parse_beslist_url
+                    main_cat_slug, _, _ = parse_beslist_url(url)
+                    content_topic = MAIN_CATEGORY_H1.get(main_cat_slug, scraped_data['h1_title'])
+                    print(f"[DEBUG] Main category detected: {url[:80]}... using H1 '{content_topic}' and {len(scraped_data['products'])} products")
+                    ai_content = generate_main_category_content(
+                        content_topic,
+                        scraped_data['products']
+                    )
+                else:
+                    # Use product_subject if available (from API), otherwise fall back to h1_title
+                    content_topic = scraped_data.get('product_subject') or scraped_data['h1_title']
+                    print(f"[DEBUG] Generating AI content for {url[:80]}... with topic '{content_topic}' and {len(scraped_data['products'])} products")
+                    ai_content = generate_product_content(
+                        content_topic,
+                        scraped_data['products']
+                    )
                 print(f"[DEBUG] AI content generated, length: {len(ai_content)}")
 
                 # Sanitize content for SQL

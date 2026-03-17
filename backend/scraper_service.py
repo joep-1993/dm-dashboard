@@ -256,6 +256,48 @@ MAIN_CATEGORY_IDS = {
 }
 
 
+# Main category URL slug to H1 title mapping (from maincaturls.xlsx)
+MAIN_CATEGORY_H1 = {
+    "autos": "Auto's",
+    "main_sanitair": "Sanitair",
+    "meubilair": "Meubels",
+    "elektronica": "Elektronische apparaten",
+    "tuin_accessoires": "Tuinartikelen",
+    "horloge": "Horloges",
+    "computers": "Computers",
+    "schoenen": "Schoenen",
+    "mode_accessoires": "Modeaccessoires",
+    "voor_volwassenen": "Erotiek",
+    "huishoudelijke_apparatuur": "Huishoudelijk",
+    "huis_tuin": "Woonaccessoires",
+    "sieraden_horloges": "Sieraden",
+    "accessoires": "Multimedia-accessoires",
+    "eten_drinken": "Eten en drinken",
+    "kantoorartikelen": "Kantoorartikelen",
+    "boeken": "Boeken",
+    "software": "Software",
+    "fietsen": "Fietsen",
+    "muziekinstrument": "Muziekinstrumenten",
+    "cadeaus_gadgets_culinair": "Cadeaus en Gadgets",
+    "mode": "Kleding",
+    "dieren_accessoires": "Dierenbenodigdheden",
+    "films-series": "Films en series",
+    "speelgoed_spelletjes": "Speelgoed",
+    "parfum_aftershave": "Parfumerie",
+    "klussen": "Klussen",
+    "gezond_mooi": "Drogisterij",
+    "cddvdrom": "Games",
+    "sport_outdoor_vrije-tijd": "Sport & outdoor",
+    "baby_peuter": "Baby & Peuter",
+}
+
+
+def is_main_category_url(url: str) -> bool:
+    """Check if a URL is a main category page (e.g. /products/autos/) with no subcategory or filters."""
+    main_category, category, filters = parse_beslist_url(url)
+    return main_category is not None and category is None and len(filters) == 0
+
+
 def parse_beslist_url(url: str) -> Tuple[Optional[str], Optional[str], Dict[str, List[str]]]:
     """
     Parse a Beslist.nl URL and extract category and filter information.

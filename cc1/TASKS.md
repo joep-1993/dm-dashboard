@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add main category URL support — 31 main category URLs (`/products/{maincat}/`) now generate broader introductory content using fixed H1 titles (from maincaturls.xlsx), special GPT prompt for general category overviews with product links. URLs added to werkvoorraad, excluded from FAQ generator via faq_tracking skip. Files changed: scraper_service.py (MAIN_CATEGORY_H1 mapping, is_main_category_url()), gpt_service.py (generate_main_category_content()), main.py (routing in process_single_url) #claude-session:2026-03-17
 - [x] Create combined n8n workflow `seo_content_pipeline.json` (30 nodes, 5 phases): SEO validation → SEO generation → FAQ validation → FAQ generation → publish → Slack. Single Schedule Trigger (10:00), all phases sequential, 50K URL limits per phase #claude-session:2026-02-23
 - [x] Create 5th n8n workflow `5_faq_generator.json` (7 nodes): FAQ generation in bulk (50K URLs) — fetch products from Product Search API, generate FAQs via OpenAI, validate URLs in answers, write to faq_content + faq_tracking #claude-session:2026-02-23
 - [x] Fix OpenAI API key in n8n Code nodes: hardcoded key directly in `generate_all_content` and `generate_all_faqs` (n8n `process.env` not reliable for env vars) #claude-session:2026-02-23
