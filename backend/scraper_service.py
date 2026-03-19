@@ -7,6 +7,7 @@ import random
 from urllib.parse import urlencode
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from backend.category_lookup import lookup_category
 
 # User agent - Custom identifier for Beslist scraper
 USER_AGENT = "Beslist script voor SEO"
@@ -565,9 +566,13 @@ def scrape_product_page_api(url: str) -> Optional[Dict]:
         # Extract selected facets
         selected_facets = extract_selected_facets(data)
 
-        # Get category name from the deepest category level (for use in subject building)
-        categories = data.get("products", [{}])[0].get("categories", []) if data.get("products") else []
-        deepest_category_name = categories[-1].get("name", "") if categories else ""
+        # Get category name from CSV lookup (preferred) or fall back to first product's categories
+        csv_maincat, csv_deepest = lookup_category(main_category, category)
+        if csv_deepest:
+            deepest_category_name = csv_deepest
+        else:
+            categories = data.get("products", [{}])[0].get("categories", []) if data.get("products") else []
+            deepest_category_name = categories[-1].get("name", "") if categories else ""
 
         # Build product subject from selected facets, passing category for context when needed
         product_subject = build_product_subject(selected_facets, deepest_category_name)

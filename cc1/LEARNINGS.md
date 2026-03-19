@@ -1,6 +1,18 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Taxonomy API v2 — Facet & Category Management
+- **Base URL**: `http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl`
+- **Auth**: None needed from internal network (JWT Bearer in spec but not enforced)
+- **Spec**: `scripts/swagger_taxv2.json`
+- **Key fields**: `noIndexNoFollow` (on facet), `seoPriority` (on category-facet setting or facet value)
+- **seoPriority status** (2026-03-17): Not set anywhere in production — all null/inherit across 3,575 categories
+- **Upsert seoPriority**: `PUT /api/CategoryFacetSettings` with `{"categoryId": int, "facetId": int, "seoPriority": bool}`
+- **Categories have nl-NL labels** with `name` + `urlSlug` — fetch via `GET /api/Categories/{id}`
+- **Facets have nl-NL labels** — fetch via `GET /api/Facets/{id}` or search `GET /api/Facets?searchTerm=...`
+- **Full docs**: See `docs/ARCHITECTURE.md` → "Beslist Taxonomy API v2" section
+- **Date**: 2026-03-17
+
 ## categories.xlsx is gitignored — regenerate from DB if missing
 - **File**: `backend/categories.xlsx` — loaded at startup by `category_keyword_service.py`
 - **Source**: `SELECT main_category_name, category_id, category_name FROM category_descriptions` (remote DB)
@@ -49,6 +61,15 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Credentials**: See `.env` file in dm-tools project
 
 **IMPORTANT**: Frontend, backend, AND n8n all use the remote DB at 10.1.32.9. The local seo_tools_db container is still running but is no longer the primary database.
+
+## Category Lookup from CSV (cat_urls.csv)
+- **Problem**: Category name was derived from first product's `categories` array in API response — could be wrong (e.g., robot vacuum cleaners instead of regular vacuum cleaners)
+- **Solution**: `backend/data/cat_urls.csv` (3,557 rows, `;`-delimited) maps URL parts to category names. Loaded lazily by `backend/category_lookup.py`
+- **CSV columns**: `maincat;deepest_cat;url_name;cat_id` — `url_name` like `/meubilair_389369/` matched against parsed URL `category` variable
+- **Usage**: Both `scraper_service.py` (kopteksten) and `faq_service.py` (FAQ) call `lookup_category(main_category, category)` before falling back to API-derived category
+- **Fallback**: Top-level pages (`category=None`) and unknown URL parts fall back to old behavior (first product's categories)
+- **Files**: `backend/category_lookup.py`, `backend/data/cat_urls.csv`, `backend/scraper_service.py`, `backend/faq_service.py`
+- **Date**: 2026-03-19
 
 ## Main Category URLs: Separate Content Generation Path
 - **Problem**: 31 main category URLs (`/products/{maincat}/`) have no subcategory — products span many different subcategories, so the API-derived h1_title/product_subject is wrong (picks deepest category from first product)
@@ -482,6 +503,7 @@ ROOT → CL3=shop_name(subdiv) → CL4=maincat_id(subdiv) → CL1=cl1(unit, posi
 - **SUBDIVISION requires OTHERS** — when creating a subdivision node, its OTHERS case MUST be in the same mutate operation.
 - **Temporary resource names** — use `next_id()` to link nodes within the same mutate, then extract actual names from response for subsequent mutates.
 - **Response index formula** — for `build_listing_tree_with_cl1` MUTATE 1: CL4 subdivision for maincat at index `i` is at `resp1.results[4 + i*2]`.
+- **UNIT→SUBDIVISION conversion pattern** — when a node (e.g. CL4) is a UNIT but needs children added (e.g. CL1), you must: (1) REMOVE the old UNIT, (2) CREATE a SUBDIVISION with same dimension/parent, (3) CREATE children under the new SUBDIVISION — all in one atomic mutate. Used in both `_add_cl0_exclusion_to_ad_group` (CL0 under leaf) and `validate_cl1_targeting_for_ad_group` (CL1 under CL4). **Date**: 2026-03-19
 
 ### Sheet Processing Functions
 | Function | Sheet | Input | Purpose |
