@@ -37,7 +37,8 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── import_content.py     # Utility: CSV content import
 │   ├── sync_werkvoorraad.py  # Utility: Sync werkvoorraad with content
 │   ├── sync_redshift_flags.py # Utility: Sync Redshift flags (legacy)
-│   └── deduplicate_content.py # Utility: Remove duplicate URLs
+│   ├── deduplicate_content.py # Utility: Remove duplicate URLs
+│   └── migrate_shared_validation.py # Utility: Merge skipped URLs into shared tracking table
 ├── frontend/
 │   ├── dashboard.html    # Entry point - tool overview
 │   ├── index.html        # SEO Content Generation (kopteksten)
@@ -185,6 +186,7 @@ All data lives in the local PostgreSQL container. See LEARNINGS.md for connectio
 - `pa.content_urls_joep` - Generated SEO content (~152K entries)
 - `pa.faq_content` - Generated FAQ content
 - `pa.faq_tracking` - FAQ processing status
+- `pa.url_validation_tracking` - Shared skipped URL tracking (no_products_found) across kopteksten and FAQ
 - `pa.unique_titles` - AI-generated titles (~1M entries)
 - `pa.link_validation_results` - SEO link validation history
 - `pa.faq_validation_results` - FAQ link validation history
@@ -288,6 +290,17 @@ CREATE TABLE pa.faq_validation_results (
     validated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_faq_validation_url ON pa.faq_validation_results(url);
+
+-- Shared URL validation tracking (unified skipped URL tracking across features)
+CREATE TABLE pa.url_validation_tracking (
+    url VARCHAR(500) PRIMARY KEY,
+    status VARCHAR(50) DEFAULT 'skipped',  -- 'skipped', 'rechecked'
+    skip_reason VARCHAR(255),              -- e.g., 'no_products_found'
+    feature_source VARCHAR(50),            -- 'kopteksten', 'faq', 'both'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_url_validation_tracking_status ON pa.url_validation_tracking(status);
 ```
 
 ## Dependencies
@@ -474,4 +487,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-02-11_
+_Last updated: 2026-03-20_

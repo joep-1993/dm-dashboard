@@ -1,6 +1,19 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Shared URL Validation Tracking (pa.url_validation_tracking)
+- **Purpose**: Unified table for tracking skipped URLs (`no_products_found`) across both kopteksten and FAQ features
+- **Problem**: Previously, kopteksten used `pa.jvs_seo_werkvoorraad_kopteksten_check` and FAQ used `pa.faq_tracking` separately for tracking skipped URLs. This caused different "Skipped" counts in the frontend dashboard (e.g., kopteksten showing 58K skipped, FAQ showing 62K skipped)
+- **Solution**: Created `pa.url_validation_tracking` with columns: `url` (PK), `status` (skipped/rechecked), `skip_reason`, `feature_source` (kopteksten/faq/both), `created_at`, `updated_at`
+- **What goes in shared table**: Only `no_products_found` skips — these are URL-level issues (URL has no products), not feature-specific
+- **What stays in feature tables**: Feature-specific failures (`no_valid_links`, `ai_generation_error`, `faq_generation_failed`) remain in `pa.jvs_seo_werkvoorraad_kopteksten_check` and `pa.faq_tracking`
+- **Status endpoints**: Both `/api/status` and `/api/faq/status` now read skipped count from the shared table, ensuring identical numbers
+- **Total count formula**: `total = processed + skipped + failed + pending` — always adds up
+- **Recheck**: Both recheck endpoints operate on the shared table. FAQ recheck delegates to kopteksten recheck
+- **Migration**: `backend/migrate_shared_validation.py` merges existing skipped URLs from both feature tables into the shared table
+- **Files changed**: `backend/schema.sql`, `backend/database.py`, `backend/main.py`, `backend/link_validator.py`, `backend/migrate_shared_validation.py` (new)
+- **Date**: 2026-03-20
+
 ## Taxonomy API v2 — Facet & Category Management
 - **Base URL**: `http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl`
 - **Auth**: None needed from internal network (JWT Bearer in spec but not enforced)
@@ -578,17 +591,18 @@ ROOT → CL3=shop_name(subdiv) → CL4=maincat_id(subdiv) → CL1=cl1(unit, posi
   2. Re-scrapes each URL via Product Search API to check if products are now available
   3. If products found: removes URL from tracking table → gets picked up for content generation
   4. If still no products: marks as "rechecked" to avoid infinite loops
-- **Tracking Tables**:
-  - SEO: `pa.jvs_seo_werkvoorraad_kopteksten_check` (status='skipped', skip_reason NOT LIKE '%rechecked%')
-  - FAQ: `pa.faq_tracking` (status='skipped', skip_reason NOT LIKE '%rechecked%')
+- **Tracking Table**: `pa.url_validation_tracking` (shared across kopteksten and FAQ since 2026-03-20)
+  - Previously: SEO used `pa.jvs_seo_werkvoorraad_kopteksten_check`, FAQ used `pa.faq_tracking` separately
+  - Now: Both features read/write skipped URLs from the shared table
+  - FAQ recheck delegates to kopteksten recheck endpoint
 - **API Endpoints**:
-  - `POST /api/recheck-skipped-urls` - Recheck SEO skipped URLs
-  - `POST /api/faq/recheck-skipped-urls` - Recheck FAQ skipped URLs
+  - `POST /api/recheck-skipped-urls` - Recheck skipped URLs (used by both SEO and FAQ)
+  - `POST /api/faq/recheck-skipped-urls` - Recheck FAQ skipped URLs (delegates to kopteksten recheck)
   - `DELETE /api/recheck-skipped-urls/reset` - Reset recheck markers to allow rechecking again
   - `DELETE /api/faq/recheck-skipped-urls/reset` - Reset FAQ recheck markers
 - **Parameters**: `parallel_workers` (1-20), `batch_size` (configurable via UI)
 - **UI**: "Recheck Skipped" button next to "Validate All" on both SEO and FAQ pages
-- **Date**: 2026-02-01
+- **Date**: 2026-02-01, updated 2026-03-20 (shared tracking table)
 
 ## N8N Integration Setup
 - **N8N Skills**: Installed 7 skills at `~/.claude/skills/` from [n8n-skills](https://github.com/czlonkowski/n8n-skills)
