@@ -226,9 +226,16 @@ def process_single_url(url: str, conservative_mode: bool = False):
         conn = get_db_connection()
         cur = conn.cursor()
 
-        if final_reason:
-            # Truncate skip_reason to 255 characters to fit VARCHAR(255) column
-            truncated_reason = final_reason[:255] if len(final_reason) > 255 else final_reason
+        truncated_reason = final_reason[:255] if final_reason and len(final_reason) > 255 else final_reason
+
+        if final_status == 'skipped' and final_reason and 'no_products_found' in final_reason:
+            # Write to shared validation table (applies to both kopteksten and FAQ)
+            cur.execute("""
+                INSERT INTO pa.url_validation_tracking (url, status, skip_reason)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason, checked_at = CURRENT_TIMESTAMP
+            """, (url, final_status, truncated_reason))
+        elif final_reason:
             cur.execute("""
                 INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason)
                 VALUES (%s, %s, %s)
@@ -308,7 +315,8 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
                 SELECT w.url
                 FROM pa.jvs_seo_werkvoorraad w
                 LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
-                WHERE t.url IS NULL
+                LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
+                WHERE t.url IS NULL AND v.url IS NULL
                 LIMIT %s
             """, (batch_size,))
 
@@ -377,23 +385,19 @@ def get_status():
         cur.execute("""
             SELECT
                 (SELECT COUNT(DISTINCT url) FROM pa.content_urls_joep WHERE content IS NOT NULL) as processed,
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'skipped') as skipped,
+                (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
                 (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'failed') as failed,
-                (SELECT COUNT(DISTINCT url) FROM (
-                    SELECT url FROM pa.jvs_seo_werkvoorraad
-                    UNION
-                    SELECT url FROM pa.content_urls_joep
-                ) all_urls) as total,
                 (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
                  LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
-                 WHERE t.url IS NULL) as pending
+                 LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
+                 WHERE t.url IS NULL AND v.url IS NULL) as pending
         """)
         counts = cur.fetchone()
         processed = counts['processed']
         skipped = counts['skipped']
         failed = counts['failed']
-        total = counts['total']
         pending = counts['pending']
+        total = processed + skipped + failed + pending
 
         # Get recent results from local PostgreSQL
         try:
@@ -433,7 +437,11 @@ def get_failure_reasons():
 
         cur.execute("""
             SELECT status, skip_reason, COUNT(*) as count
-            FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+            FROM (
+                SELECT status, skip_reason FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+                UNION ALL
+                SELECT status, skip_reason FROM pa.url_validation_tracking
+            ) combined
             GROUP BY status, skip_reason
             ORDER BY count DESC
         """)
@@ -731,11 +739,15 @@ async def delete_result(url: str):
 
         delete_from_output()
 
-        # Delete from local tracking table
+        # Delete from local tracking table and shared validation table
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
             DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+            WHERE url = %s
+        """, (url,))
+        cur.execute("""
+            DELETE FROM pa.url_validation_tracking
             WHERE url = %s
         """, (url,))
         conn.commit()
@@ -915,9 +927,13 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
                 WHERE url IN ({placeholders})
             """, urls_with_gone_products)
 
-            # Delete from tracking table (local PostgreSQL)
+            # Delete from tracking tables (local PostgreSQL)
             cur.execute(f"""
                 DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+                WHERE url IN ({placeholders})
+            """, urls_with_gone_products)
+            cur.execute(f"""
+                DELETE FROM pa.url_validation_tracking
                 WHERE url IN ({placeholders})
             """, urls_with_gone_products)
 
@@ -1070,6 +1086,10 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                     DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
                     WHERE url IN ({placeholders})
                 """, urls_with_gone_products)
+                cur.execute(f"""
+                    DELETE FROM pa.url_validation_tracking
+                    WHERE url IN ({placeholders})
+                """, urls_with_gone_products)
                 # Add URLs to werkvoorraad for reprocessing (batched for performance)
                 cur.executemany("""
                     INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
@@ -1187,9 +1207,9 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
             conn = get_db_connection()
             cur = conn.cursor()
 
-            # Get batch of skipped URLs (only those not yet rechecked)
+            # Get batch of skipped URLs from shared table (only those not yet rechecked)
             cur.execute("""
-                SELECT url FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+                SELECT url FROM pa.url_validation_tracking
                 WHERE status = 'skipped'
                   AND (skip_reason IS NULL OR skip_reason NOT LIKE '%%(rechecked)%%')
                 LIMIT %s
@@ -1220,12 +1240,21 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
             now_eligible = [r['url'] for r in results if r['has_products']]
             still_skipped = [r['url'] for r in results if not r['has_products']]
 
-            # Remove eligible URLs from tracking table so they can be reprocessed
+            # Remove eligible URLs from shared table + both feature tables so they can be reprocessed
             if now_eligible:
                 placeholders = ','.join(['%s'] * len(now_eligible))
                 cur.execute(f"""
+                    DELETE FROM pa.url_validation_tracking
+                    WHERE url IN ({placeholders})
+                """, now_eligible)
+                cur.execute(f"""
                     DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
                     WHERE url IN ({placeholders})
+                """, now_eligible)
+                cur.execute(f"""
+                    DELETE FROM pa.faq_tracking
+                    WHERE url IN ({placeholders})
+                      AND (skip_reason IS NULL OR skip_reason != 'main_category_url')
                 """, now_eligible)
                 # Make sure they're in werkvoorraad for reprocessing
                 cur.executemany("""
@@ -1235,11 +1264,11 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
                 """, [(url,) for url in now_eligible])
                 total_now_eligible += len(now_eligible)
 
-            # Mark remaining as rechecked to avoid infinite loop
+            # Mark remaining as rechecked in shared table to avoid infinite loop
             if still_skipped:
                 placeholders = ','.join(['%s'] * len(still_skipped))
                 cur.execute(f"""
-                    UPDATE pa.jvs_seo_werkvoorraad_kopteksten_check
+                    UPDATE pa.url_validation_tracking
                     SET skip_reason = 'no_products_found (rechecked)'
                     WHERE url IN ({placeholders})
                 """, still_skipped)
@@ -1276,7 +1305,7 @@ def reset_skipped_recheck():
         cur = conn.cursor()
 
         cur.execute("""
-            UPDATE pa.jvs_seo_werkvoorraad_kopteksten_check
+            UPDATE pa.url_validation_tracking
             SET skip_reason = 'no_products_found'
             WHERE status = 'skipped' AND skip_reason LIKE '%%(rechecked)%%'
         """)
@@ -1313,40 +1342,23 @@ def get_faq_status():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Get total FAQ content (processed with FAQs)
-        cur.execute("SELECT COUNT(*) as processed FROM pa.faq_content")
-        processed = cur.fetchone()['processed']
-
-        # Get skipped URLs
+        # Combined query for FAQ counts
         cur.execute("""
-            SELECT COUNT(*) as skipped
-            FROM pa.faq_tracking
-            WHERE status = 'skipped'
+            SELECT
+                (SELECT COUNT(*) FROM pa.faq_content) as processed,
+                (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
+                (SELECT COUNT(*) FROM pa.faq_tracking WHERE status = 'failed') as failed,
+                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
+                 LEFT JOIN pa.faq_tracking t ON w.url = t.url
+                 LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
+                 WHERE (t.url IS NULL OR t.status = 'pending') AND v.url IS NULL) as pending
         """)
-        skipped = cur.fetchone()['skipped']
-
-        # Get failed URLs
-        cur.execute("""
-            SELECT COUNT(*) as failed
-            FROM pa.faq_tracking
-            WHERE status = 'failed'
-        """)
-        failed = cur.fetchone()['failed']
-
-        # Get total unique URLs from werkvoorraad (same as content status)
-        cur.execute("""
-            SELECT COUNT(*) as total FROM pa.jvs_seo_werkvoorraad
-        """)
-        total = cur.fetchone()['total']
-
-        # Pending = werkvoorraad URLs that don't have FAQs yet OR have status='pending' in tracking
-        cur.execute("""
-            SELECT COUNT(*) as pending
-            FROM pa.jvs_seo_werkvoorraad w
-            LEFT JOIN pa.faq_tracking t ON w.url = t.url
-            WHERE t.url IS NULL OR t.status = 'pending'
-        """)
-        pending = cur.fetchone()['pending']
+        counts = cur.fetchone()
+        processed = counts['processed']
+        skipped = counts['skipped']
+        failed = counts['failed']
+        pending = counts['pending']
+        total = processed + skipped + failed + pending
 
         # Get recent FAQ results
         try:
@@ -1411,12 +1423,13 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Fetch unprocessed URLs (URLs not yet in FAQ tracking table OR with status='pending')
+        # Fetch unprocessed URLs (not in FAQ tracking, not in shared validation, or pending)
         cur.execute("""
             SELECT w.url
             FROM pa.jvs_seo_werkvoorraad w
             LEFT JOIN pa.faq_tracking t ON w.url = t.url
-            WHERE t.url IS NULL OR t.status = 'pending'
+            LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
+            WHERE (t.url IS NULL OR t.status = 'pending') AND v.url IS NULL
             LIMIT %s
         """, (batch_size,))
 
@@ -1442,8 +1455,9 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Prepare batch data
+        # Prepare batch data — skipped (no_products_found) goes to shared table, rest to faq_tracking
         tracking_data = []
+        shared_skip_data = []
         content_data = []
 
         for result in results:
@@ -1452,7 +1466,10 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
             reason = result.get('reason')
             truncated_reason = reason[:255] if reason and len(reason) > 255 else reason
 
-            tracking_data.append((url, status, truncated_reason))
+            if status == 'skipped' and reason and 'no_products_found' in reason:
+                shared_skip_data.append((url, status, truncated_reason))
+            else:
+                tracking_data.append((url, status, truncated_reason))
 
             if status == 'success':
                 content_data.append((
@@ -1464,7 +1481,15 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
 
             print(f"[FAQ] {url} - Status: {status}" + (f" - Reason: {reason}" if reason else f" - {result.get('faq_count', 0)} FAQs"))
 
-        # Batch insert tracking data
+        # Batch insert shared skip data (no_products_found)
+        if shared_skip_data:
+            cur.executemany("""
+                INSERT INTO pa.url_validation_tracking (url, status, skip_reason)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason, checked_at = CURRENT_TIMESTAMP
+            """, shared_skip_data)
+
+        # Batch insert feature-specific tracking data (success, failed)
         if tracking_data:
             cur.executemany("""
                 INSERT INTO pa.faq_tracking (url, status, skip_reason)
@@ -1882,133 +1907,18 @@ def reset_faq_validation_history():
 @app.post("/api/faq/recheck-skipped-urls")
 def recheck_skipped_faq_urls(parallel_workers: int = 3, batch_size: int = 50):
     """
-    Re-check all skipped FAQ URLs to see if they're now eligible for FAQ generation.
-
-    URLs get skipped when no products are found during initial processing.
-    This endpoint re-scrapes them to check if products are now available.
-
-    Args:
-        parallel_workers: Number of parallel workers (1-20)
-        batch_size: Number of URLs to process per batch (1-500)
+    Re-check all skipped URLs (shared table) to see if they're now eligible.
+    Delegates to the shared recheck endpoint.
     """
-    from concurrent.futures import ThreadPoolExecutor
-
-    try:
-        if parallel_workers < 1 or parallel_workers > 20:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
-        if batch_size < 1 or batch_size > 500:
-            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
-
-        total_rechecked = 0
-        total_now_eligible = 0
-
-        print(f"[FAQ-RECHECK-SKIPPED] Starting re-check of skipped FAQ URLs...")
-
-        while True:
-            conn = get_db_connection()
-            cur = conn.cursor()
-
-            # Get batch of skipped URLs (only those not yet rechecked)
-            cur.execute("""
-                SELECT url FROM pa.faq_tracking
-                WHERE status = 'skipped'
-                  AND (skip_reason IS NULL OR skip_reason NOT LIKE '%%(rechecked)%%')
-                LIMIT %s
-            """, (batch_size,))
-            skipped_rows = cur.fetchall()
-
-            if not skipped_rows:
-                cur.close()
-                return_db_connection(conn)
-                break
-
-            skipped_urls = [row['url'] for row in skipped_rows]
-
-            def check_single_url(url):
-                """Check if a URL now has products"""
-                try:
-                    scraped_data = scrape_product_page_api(url)
-                    has_products = scraped_data and scraped_data.get('products') and len(scraped_data['products']) > 0
-                    return {'url': url, 'has_products': has_products}
-                except Exception as e:
-                    print(f"[FAQ-RECHECK-SKIPPED] Error checking {url}: {e}")
-                    return {'url': url, 'has_products': False}
-
-            # Check URLs in parallel
-            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-                results = list(executor.map(check_single_url, skipped_urls))
-
-            now_eligible = [r['url'] for r in results if r['has_products']]
-            still_skipped = [r['url'] for r in results if not r['has_products']]
-
-            # Remove eligible URLs from tracking table so they can be reprocessed
-            if now_eligible:
-                placeholders = ','.join(['%s'] * len(now_eligible))
-                cur.execute(f"""
-                    DELETE FROM pa.faq_tracking
-                    WHERE url IN ({placeholders})
-                """, now_eligible)
-                total_now_eligible += len(now_eligible)
-
-            # Mark remaining as rechecked to avoid infinite loop
-            if still_skipped:
-                placeholders = ','.join(['%s'] * len(still_skipped))
-                cur.execute(f"""
-                    UPDATE pa.faq_tracking
-                    SET skip_reason = 'no_products_found (rechecked)'
-                    WHERE url IN ({placeholders})
-                """, still_skipped)
-
-            conn.commit()
-            cur.close()
-            return_db_connection(conn)
-
-            total_rechecked += len(skipped_urls)
-            print(f"[FAQ-RECHECK-SKIPPED] Batch: {len(skipped_urls)} checked, {len(now_eligible)} now eligible. Total: {total_rechecked}")
-
-        print(f"[FAQ-RECHECK-SKIPPED] Complete. Rechecked: {total_rechecked}, Now eligible: {total_now_eligible}")
-
-        return {
-            "status": "success",
-            "message": f"Rechecked {total_rechecked} skipped FAQ URLs, {total_now_eligible} now eligible for FAQ generation",
-            "rechecked": total_rechecked,
-            "now_eligible": total_now_eligible
-        }
-
-    except HTTPException:
-        raise  # Re-raise HTTP exceptions as-is (e.g., 400 validation errors)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return recheck_skipped_urls(parallel_workers=parallel_workers, batch_size=batch_size)
 
 
 @app.delete("/api/faq/recheck-skipped-urls/reset")
 def reset_faq_skipped_recheck():
     """
-    Reset the 'rechecked' marker on skipped FAQ URLs, allowing them to be rechecked again.
+    Reset the 'rechecked' marker on skipped URLs. Delegates to shared endpoint.
     """
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute("""
-            UPDATE pa.faq_tracking
-            SET skip_reason = 'no_products_found'
-            WHERE status = 'skipped' AND skip_reason LIKE '%%(rechecked)%%'
-        """)
-        count = cur.rowcount
-
-        conn.commit()
-        cur.close()
-        return_db_connection(conn)
-
-        return {
-            "status": "success",
-            "message": f"Reset {count} FAQ URLs to allow rechecking",
-            "reset_count": count
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return reset_skipped_recheck()
 
 
 @app.get("/api/export/combined/xlsx")
@@ -2106,9 +2016,13 @@ async def delete_faq_result(url: str):
             WHERE url = %s
         """, (url,))
 
-        # Delete from FAQ tracking table
+        # Delete from FAQ tracking table and shared validation table
         cur.execute("""
             DELETE FROM pa.faq_tracking
+            WHERE url = %s
+        """, (url,))
+        cur.execute("""
+            DELETE FROM pa.url_validation_tracking
             WHERE url = %s
         """, (url,))
 

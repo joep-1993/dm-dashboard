@@ -9,7 +9,7 @@ from pathlib import Path
 from backend.database import get_db_connection, return_db_connection
 
 # Elasticsearch configuration
-ES_URL = "https://elasticsearch-job-cluster-eck.beslist.nl"
+ES_URL = "https://elasticsearch-job-cluster-eck-v9.beslist.nl"
 INDEX_PREFIX = "product_search_v4_nl-nl_"
 
 # Maincat mapping file path (relative to this file)
@@ -713,6 +713,12 @@ def reset_faq_to_pending(urls: List[str]) -> int:
             # Delete existing FAQ content
             cur.execute("""
                 DELETE FROM pa.faq_content
+                WHERE url = %s
+            """, (url,))
+
+            # Also remove from shared validation table so URL gets re-scraped
+            cur.execute("""
+                DELETE FROM pa.url_validation_tracking
                 WHERE url = %s
             """, (url,))
 

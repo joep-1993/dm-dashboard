@@ -131,6 +131,16 @@ def init_db():
         )
     """)
 
+    # Shared URL validation tracking (skipped URLs across kopteksten + FAQ)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pa.url_validation_tracking (
+            url VARCHAR(500) PRIMARY KEY,
+            status VARCHAR(50) DEFAULT 'skipped',
+            skip_reason VARCHAR(255),
+            checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Create link validation tracking table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS pa.link_validation_results (
@@ -230,6 +240,7 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_link_validation_content_url ON pa.link_validation_results(content_url)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_content_history_url ON pa.content_history(url)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_content_history_reset_at ON pa.content_history(reset_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_url_validation_status ON pa.url_validation_tracking(status)")
 
     conn.commit()
     cur.close()
