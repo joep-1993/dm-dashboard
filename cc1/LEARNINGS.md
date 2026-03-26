@@ -1,6 +1,18 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## CloudFront Log Downloader (cloudfront-logs project)
+- **Location**: `/home/joepvanschagen/projects/cloudfront-logs/`
+- **Purpose**: Python script to download CloudFront access logs from S3 bucket
+- **S3 Bucket**: `production-projectstack-1hts6sh41-logbucketbucket-10tf48d8lt2pt`
+- **AWS Credentials**: stored in `dm-tools/scripts/amazon_cred` (access key + secret)
+- **Script**: `download_cloudfront_logs.py` — self-contained, no config file needed (credentials + bucket as constants)
+- **Features**: date filter, from_date (all logs from date onwards), days (last N days), list_only mode, skip already-downloaded files (resume-safe), configurable download_dir
+- **Default download dir**: `C:\Users\JoepvanSchagen\Downloads\Cloudfront`
+- **Run from**: PyCharm (WSL-based), call `main()` with keyword args
+- **Scale**: ~67K log files in bucket (as of 2026-03-26)
+- **Date**: 2026-03-26
+
 ## Shared URL Validation Tracking (pa.url_validation_tracking)
 - **Purpose**: Unified table for tracking skipped URLs (`no_products_found`) across both kopteksten and FAQ features
 - **Problem**: Previously, kopteksten used `pa.jvs_seo_werkvoorraad_kopteksten_check` and FAQ used `pa.faq_tracking` separately for tracking skipped URLs. This caused different "Skipped" counts in the frontend dashboard (e.g., kopteksten showing 58K skipped, FAQ showing 62K skipped)
@@ -24,7 +36,8 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Categories have nl-NL labels** with `name` + `urlSlug` — fetch via `GET /api/Categories/{id}`
 - **Facets have nl-NL labels** — fetch via `GET /api/Facets/{id}` or search `GET /api/Facets?searchTerm=...`
 - **Full docs**: See `docs/ARCHITECTURE.md` → "Beslist Taxonomy API v2" section
-- **Date**: 2026-03-17
+- **PUT /api/Facets/values/{id} clears omitted fields**: When updating a facet value, always include ALL fields in the body (nameInColumn, nameOnDetail, seoPriority). Omitted fields are reset to empty strings. Always GET the current value first, then merge your changes before PUTting.
+- **Date**: 2026-03-17, updated 2026-03-25
 
 ## categories.xlsx is gitignored — regenerate from DB if missing
 - **File**: `backend/categories.xlsx` — loaded at startup by `category_keyword_service.py`

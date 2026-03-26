@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Build CloudFront log downloader script — Python/boto3, downloads .gz logs from S3 bucket to local dir. Self-contained (no config file), supports date/from_date/days/list_only params, resume-safe (skips already-downloaded). Location: `/home/joepvanschagen/projects/cloudfront-logs/` #claude-session:2026-03-26
+
 - [x] Create shared URL validation tracking table `pa.url_validation_tracking` — unifies `no_products_found` skip tracking across kopteksten and FAQ features so both dashboards show identical skipped counts. Migration script merges existing data. Total counts now always add up (processed + skipped + failed + pending). Files: `schema.sql`, `database.py`, `main.py`, `link_validator.py`, `migrate_shared_validation.py` (new) #claude-session:2026-03-20
 - [x] Add CSV-based category lookup for kopteksten and FAQ generation — uses `backend/data/cat_urls.csv` (3,557 mappings of URL parts to category names) instead of deriving category from first API product. Falls back to old behavior when URL not in CSV. New module: `backend/category_lookup.py`, modified: `scraper_service.py`, `faq_service.py` #claude-session:2026-03-19
 - [x] Fix validate_cl1_targeting_for_ad_group to handle CL4 UNIT nodes — when CL4 (maincat) is a UNIT instead of SUBDIVISION, convert it to SUBDIVISION first (remove UNIT, create SUBDIVISION with same dimension/parent), then add CL1 children underneath. Same pattern as _add_cl0_exclusion_to_ad_group fix. File: campaign_processor.py #claude-session:2026-03-19
