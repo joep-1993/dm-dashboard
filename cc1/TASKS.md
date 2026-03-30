@@ -10,6 +10,9 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Create DMA bid strategy automation script (`DMA_verhogingen_verlagingen.py`) — adjusts campaigns between Level 1/2/3 bid strategies based on DMA/CLA Profit (conversion action "Omzet DMA en CLA" - cost), OPB (conv_value/clicks), and click thresholds. Dry run mode, email report with CSV attachment, test script for profit verification. Account 3800751597, MCC 3011145605 #claude-session:2026-03-30
+- [x] Fix IndexNow n8n workflow `submit_to_indexnow` node — enabled fullResponse on HTTP Request, fixed tracking insert to read URLs from upstream node instead of empty response body #claude-session:2026-03-30
+
 - [x] Build CloudFront log downloader script — Python/boto3, downloads .gz logs from S3 bucket to local dir. Self-contained (no config file), supports date/from_date/days/list_only params, resume-safe (skips already-downloaded). Location: `/home/joepvanschagen/projects/cloudfront-logs/` #claude-session:2026-03-26
 
 - [x] Create shared URL validation tracking table `pa.url_validation_tracking` — unifies `no_products_found` skip tracking across kopteksten and FAQ features so both dashboards show identical skipped counts. Migration script merges existing data. Total counts now always add up (processed + skipped + failed + pending). Files: `schema.sql`, `database.py`, `main.py`, `link_validator.py`, `migrate_shared_validation.py` (new) #claude-session:2026-03-20

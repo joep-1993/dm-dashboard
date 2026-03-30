@@ -1,6 +1,27 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## DMA Bid Strategy Automation Script
+- **Location**: `C:\Users\JoepvanSchagen\Downloads\Python\scripts_def\DMA_verhogingen_verlagingen.py`
+- **Purpose**: Automatically adjust DMA campaign bid strategies (Level 1/2/3) based on profit, OPB, and clicks
+- **Account**: 3800751597 (DMA NL), MCC: 3011145605
+- **Bid strategies**: `DMA: Level 1 - 0,07`, `DMA: Level 2 - 0,11`, `DMA: Level 3 - 0,15` — defined in MCC account but referenced by sub-account campaigns with different customer prefix in resource name (must match on strategy ID, not full resource name)
+- **DMA/CLA Profit formula**: Conversion value of "Omzet DMA en CLA" conversion action - cost. Queried via Google Ads API `metrics.all_conversions_value` filtered by `segments.conversion_action_name = 'Omzet DMA en CLA'`
+- **OPB (Conv.-waarde/klik)**: Standard metric calculated as `conversions_value / clicks` — despite appearing as custom column in Google Ads UI, it's derivable from standard metrics
+- **Google Ads API custom columns**: NOT queryable via GAQL (`custom_column` resource doesn't exist in Google Ads API v22). `CustomColumnService` also removed in v22. Custom columns are UI-only; replicate their formulas using standard metrics instead
+- **SA360 API**: Can query custom columns via `custom_columns.id[{id}]` syntax, but only for columns defined in SA360 (not Google Ads custom columns)
+- **Cross-account bid strategies**: MCC bid strategies have resource names like `customers/3011145605/biddingStrategies/123`, but campaigns reference them as `customers/3800751597/biddingStrategies/123`. Match on the numeric strategy ID only, not the full resource name
+- **Credentials**: Uses env vars `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` + hardcoded refresh token (different from GSD script credentials)
+- **DRY_RUN mode**: Set `DRY_RUN = True` to skip actual bid strategy changes but still fetch data, evaluate rules, and send email report
+- **Test script**: `test_dma_profit.py` — verifies DMA/CLA Profit calculation matches Google Ads UI for a specific campaign/date
+- **Date**: 2026-03-30
+
+## IndexNow n8n Workflow Fix
+- **File**: `docs/indexnow_n8n.json`
+- **Issue**: `submit_to_indexnow` HTTP Request node showed no output — IndexNow API returns HTTP 200 with empty body on success
+- **Fix**: Enabled `fullResponse` option on HTTP Request node so status code is visible in output. Fixed `build_tracking_insert` to read URLs from upstream `has_urls?` node (not from HTTP response body, which is empty)
+- **Date**: 2026-03-30
+
 ## CloudFront Log Downloader (cloudfront-logs project)
 - **Location**: `/home/joepvanschagen/projects/cloudfront-logs/`
 - **Purpose**: Python script to download CloudFront access logs from S3 bucket
