@@ -8,6 +8,11 @@
     --color-button-hover: #E97451;  /* Coral orange - for button hover */
 }
 
+/* Match section header size with topbar menu items */
+.card-header h5 {
+    font-size: 1.1rem;
+}
+
 body {
     background-color: #f8f9fa;
 }
@@ -42,22 +47,123 @@ body {
     color: red;
 }
 
-/* Navbar buttons - vertical centering and no wrapping */
-.navbar .d-flex .btn {
+/* Navbar - taller with centered content, edges aligned with page sections */
+.navbar {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+}
+
+.navbar > .container {
+    flex-wrap: nowrap !important;
+}
+
+.navbar .navbar-brand {
+    font-size: 1.5rem !important;
+    font-weight: 700;
+}
+
+/* Subtle shadow on all buttons throughout the frontend */
+.btn {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Navbar dropdown menu system */
+.nav-dropdown {
+    position: relative;
+}
+
+.nav-dropdown-toggle {
+    background: transparent;
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    padding: 0.75rem 1.5rem;
+    font-size: 1.5rem;
+    font-weight: 600;
+    cursor: pointer;
     white-space: nowrap;
     display: inline-flex;
     align-items: center;
+    border-radius: 0.3rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* Shrink nav button text on smaller screens to prevent wrapping */
+.nav-dropdown-toggle:hover,
+.nav-dropdown-active {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.nav-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    padding-top: 0.25rem;
+    background-color: #7b6aa8;
+    border-radius: 0.4rem;
+    padding-bottom: 0.4rem;
+    min-width: 210px;
+    z-index: 1050;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.nav-dropdown:hover .nav-dropdown-menu {
+    display: block;
+}
+
+.nav-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 1rem;
+    color: white;
+    text-decoration: none;
+    font-size: 0.95rem;
+    font-weight: 500;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.nav-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.nav-dropdown-item svg {
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+.nav-dropdown-item:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: white;
+}
+
+.nav-dropdown-item.active {
+    background-color: rgba(255, 255, 255, 0.25);
+    color: white;
+}
+
+/* Dashboard button - match top-level menu style */
+.nav-dashboard-btn {
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    padding: 0.75rem 1.5rem !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    border-radius: 0.3rem !important;
+}
+
+/* Shrink nav text on smaller screens to prevent wrapping */
 @media (max-width: 1600px) {
-    .navbar .d-flex .btn { font-size: 0.75rem; padding: 0.2rem 0.4rem; }
+    .nav-dropdown-toggle, .nav-dashboard-btn { font-size: 0.9rem !important; padding: 0.35rem 0.6rem !important; }
+    .nav-dropdown-item { font-size: 0.85rem; padding: 0.45rem 0.8rem; }
 }
 @media (max-width: 1200px) {
-    .navbar .d-flex .btn { font-size: 0.65rem; padding: 0.15rem 0.3rem; }
+    .nav-dropdown-toggle, .nav-dashboard-btn { font-size: 0.8rem !important; padding: 0.3rem 0.5rem !important; }
+    .nav-dropdown-item { font-size: 0.75rem; padding: 0.4rem 0.7rem; }
 }
 @media (max-width: 992px) {
-    .navbar .d-flex .btn { font-size: 0.55rem; padding: 0.1rem 0.25rem; }
+    .nav-dropdown-toggle, .nav-dashboard-btn { font-size: 0.7rem !important; padding: 0.25rem 0.4rem !important; }
+    .nav-dropdown-item { font-size: 0.65rem; padding: 0.35rem 0.6rem; }
 }
 
 /* Override Bootstrap Colors */

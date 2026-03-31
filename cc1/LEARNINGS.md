@@ -1,6 +1,23 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## GSD Campaigns Tool
+- **Backend service**: `backend/gsd_campaigns_service.py` (1,247 lines) — ported from `C:\Users\JoepvanSchagen\Downloads\Python\scripts_def\create GSD-campaigns WB.py` (2,757 lines)
+- **Router**: `backend/gsd_campaigns_router.py` — 7 endpoints under `/api/gsd-campaigns/`
+- **Frontend**: `frontend/gsd-campaigns.html` — stats, sortable/paginated campaign table, run script, activity log
+- **GAQL gotcha**: `FROM campaign_label` resource cannot be combined with metrics (clicks, cost, impressions). Must use two queries: first get campaign IDs from `campaign_label`, then fetch metrics from `campaign` with `WHERE campaign.id IN (...)`.
+- **Google Ads accounts**: NL CPR=7938980174, BE CPR=2454295509, DE CPR=4192567576, NL CPC=7938980174, BE CPC=7565255758. MCC=3011145605
+- **Creation label**: `GSD_SCRIPT` — used to identify campaigns created by the script
+- **Credentials**: All from env vars (GOOGLE_DEVELOPER_TOKEN, GOOGLE_REFRESH_TOKEN, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_LOGIN_CUSTOMER_ID, REDSHIFT_*). Service account for Merchant Center via `GSD_SERVICE_ACCOUNT_FILE` env var
+- **Date**: 2026-03-31
+
+## Frontend Redesign — Dropdown Menu + Dashboard
+- **Menu system**: 4 dropdown categories (Generators, Indexation, Google Ads, SEO tools) + Dashboard button. CSS in `frontend/css/style.css` with `.nav-dropdown*` classes
+- **Dashboard**: `frontend/dashboard.html` — categorized tool cards with color-coded icon backgrounds (purple=Generators, blue=Indexation, coral=Google Ads, green=SEO tools), stroke-style SVG icons, hover effects (icon becomes outlined, shadow intensifies)
+- **Responsive**: Top-level menu items and dropdown items scale down at breakpoints (1600/1200/992px)
+- **Tool renames**: Kopteksten Generator→Kopteksten, FAQ Generator→FAQ's, 301 Generator→Redirects, Canonical Generator→Canonicals, SEO Index Checker→Index Checker
+- **Date**: 2026-03-31
+
 ## FAQ Structured Data — Item Name Fix
 - **Issue**: Google Rich Results Tool / Search Console showed "item name: N/A" for FAQ structured data
 - **Root cause**: `FAQPage` JSON-LD had no `"name"` property at the top level — only the nested `Question` objects had `"name"`

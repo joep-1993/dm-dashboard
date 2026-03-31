@@ -15,22 +15,43 @@
 </head>
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
-        <div class="container-fluid d-flex flex-nowrap align-items-center gap-2">
-            <a href="/static/dashboard.html" class="navbar-brand mb-0 h1 me-auto" style="white-space: nowrap;">IndexNow</a>
-            <div class="d-flex flex-nowrap gap-1">
-                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
-                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
-                <a href="/static/thema-ads.html" class="btn btn-outline-light btn-sm fw-bold">Thema Ads</a>
-                <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
-                <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
-                <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
-                <a href="/static/redirect-checker.html" class="btn btn-outline-light btn-sm fw-bold">Redirect Checker</a>
-                <a href="/static/301-generator.html" class="btn btn-outline-light btn-sm fw-bold">301 Generator</a>
-                <a href="/static/keyword-planner.html" class="btn btn-outline-light btn-sm fw-bold">Keyword Planner</a>
-                <a href="/static/indexnow.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">IndexNow</a>
-                <a href="/static/index-checker.html" class="btn btn-outline-light btn-sm fw-bold">SEO Index Checker</a>
-                <a href="/static/url-checker.html" class="btn btn-outline-light btn-sm fw-bold">URL Checker</a>
-                <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">IndexNow</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
             </div>
         </div>
     </nav>
@@ -138,9 +159,9 @@
 
                 <!-- History Section -->
                 <div class="card mb-4">
-                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background: #5e4a90;">
                         <h5 class="mb-0">Submission History</h5>
-                        <button class="btn btn-sm btn-outline-light" onclick="loadHistory()">Refresh</button>
+                        <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="loadHistory()">Refresh</button>
                     </div>
                     <div class="card-body">
                         <div id="historyContent">
@@ -172,7 +193,8 @@
             bar.className = 'progress-bar' + (pct >= 90 ? ' bg-danger' : pct >= 70 ? ' bg-warning' : ' bg-success');
             const badge = document.getElementById('remainingBadge');
             badge.textContent = remaining.toLocaleString() + ' remaining';
-            badge.className = 'badge ' + (pct >= 90 ? 'bg-danger' : pct >= 70 ? 'bg-warning' : 'bg-success');
+            badge.style.cssText = 'border: 1px solid #5e4a90; color: #5e4a90; background: transparent;';
+            badge.className = 'badge';
         }
 
         async function loadTodayCount() {
@@ -237,8 +259,8 @@
                 let html = '<table class="table table-sm table-striped"><thead><tr><th>Batch</th><th>URLs</th><th>Status</th></tr></thead><tbody>';
                 data.batches.forEach(b => {
                     const badge = b.success
-                        ? `<span class="badge bg-success result-badge">${b.response_code} OK</span>`
-                        : `<span class="badge bg-danger result-badge">${b.response_code} Error</span>`;
+                        ? `<span class="badge result-badge" style="border: 1px solid #00b894; color: #00b894; background: transparent;">${b.response_code} OK</span>`
+                        : `<span class="badge result-badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">${b.response_code} Error</span>`;
                     html += `<tr class="batch-row"><td>${b.batch_number}</td><td>${b.urls_count.toLocaleString()}</td><td>${badge}</td></tr>`;
                 });
                 html += '</tbody></table>';
@@ -324,12 +346,15 @@
                     return;
                 }
 
-                let html = '<table class="table table-sm table-striped"><thead><tr><th>Date</th><th>Response</th><th>URLs</th></tr></thead><tbody>';
+                let html = '<table class="table table-sm table-striped"><thead><tr><th>Date</th><th>Response</th><th>URLs</th><th></th></tr></thead><tbody>';
                 history.forEach(h => {
-                    const badge = h.response_code === 200
-                        ? `<span class="badge bg-success">${h.response_code}</span>`
-                        : `<span class="badge bg-danger">${h.response_code}</span>`;
-                    html += `<tr><td>${h.date}</td><td>${badge}</td><td>${h.url_count.toLocaleString()}</td></tr>`;
+                    let badgeStyle;
+                    if (h.response_code === 200) badgeStyle = 'border: 1px solid #00b894; color: #00b894;';
+                    else if (h.response_code >= 400 && h.response_code < 500) badgeStyle = 'border: 1px solid #e0a800; color: #e0a800;';
+                    else badgeStyle = 'border: 1px solid #d63031; color: #d63031;';
+                    const badge = `<span class="badge" style="${badgeStyle} background: transparent;">${h.response_code}</span>`;
+                    const exportBtn = `<a href="${API_BASE}/api/indexnow/export/${h.date}" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'">Export</a>`;
+                    html += `<tr><td>${h.date}</td><td>${badge}</td><td>${h.url_count.toLocaleString()}</td><td>${exportBtn}</td></tr>`;
                 });
                 html += '</tbody></table>';
                 container.innerHTML = html;

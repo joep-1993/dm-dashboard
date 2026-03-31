@@ -12,17 +12,19 @@
             flex-wrap: nowrap;
         }
         .nav-tabs .nav-link {
-            color: #2d3436 !important;
+            color: #3a3a3a;
+            font-weight: bold;
             transition: color 0.2s ease;
             white-space: nowrap;
             padding: 0.5rem 0.75rem;
             font-size: 0.9rem;
         }
         .nav-tabs .nav-link:hover {
-            color: #E97451 !important;
+            color: #1a1a1a;
         }
         .nav-tabs .nav-link.active {
-            color: #CC5500 !important;
+            color: #3a3a3a;
+            font-weight: bold;
         }
         /* More info button styling */
         .more-info-btn {
@@ -46,22 +48,43 @@
 </head>
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
-        <div class="container-fluid d-flex flex-nowrap align-items-center gap-2">
-            <span class="navbar-brand mb-0 h1 me-auto" style="white-space: nowrap;">Thema Ads Processing</span>
-            <div class="d-flex flex-nowrap gap-1">
-                <a href="/static/index.html" class="btn btn-outline-light btn-sm fw-bold">Kopteksten Generator</a>
-                <a href="/static/faq.html" class="btn btn-outline-light btn-sm fw-bold">FAQ Generator</a>
-                <a href="/static/thema-ads.html" class="btn btn-sm fw-bold" style="background-color: #8b7bb5; color: white;">Thema Ads</a>
-                <a href="/static/unique-titles.html" class="btn btn-outline-light btn-sm fw-bold">Unique Titles</a>
-                <a href="/static/canonical.html" class="btn btn-outline-light btn-sm fw-bold">Canonical Generator</a>
-                <a href="/static/rfinder.html" class="btn btn-outline-light btn-sm fw-bold">R-Finder</a>
-                <a href="/static/redirect-checker.html" class="btn btn-outline-light btn-sm fw-bold">Redirect Checker</a>
-                <a href="/static/301-generator.html" class="btn btn-outline-light btn-sm fw-bold">301 Generator</a>
-                <a href="/static/keyword-planner.html" class="btn btn-outline-light btn-sm fw-bold">Keyword Planner</a>
-                <a href="/static/indexnow.html" class="btn btn-outline-light btn-sm fw-bold">IndexNow</a>
-                <a href="/static/index-checker.html" class="btn btn-outline-light btn-sm fw-bold">SEO Index Checker</a>
-                <a href="/static/url-checker.html" class="btn btn-outline-light btn-sm fw-bold">URL Checker</a>
-                <a href="/static/dashboard.html" class="btn btn-light btn-sm fw-bold">Dashboard</a>
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Thema Ads</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
             </div>
         </div>
     </nav>
@@ -71,40 +94,42 @@
             <div class="col-md-10 mx-auto">
                 <!-- Upload CSV or Auto-Discover -->
                 <div class="card mb-4">
-                    <div class="card-header">
-                        <ul class="nav nav-tabs card-header-tabs mb-0" role="tablist">
-                            <li class="nav-item">
-                                <a class="nav-link active" id="excel-tab" data-bs-toggle="tab" href="#excelUpload" role="tab">Plan</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" id="csv-tab" data-bs-toggle="tab" href="#csvUpload" role="tab">Ad Groups</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" id="discover-tab" data-bs-toggle="tab" href="#autoDiscover" role="tab">Discover</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" id="checkup-tab" data-bs-toggle="tab" href="#checkup" role="tab">Check-up</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" id="cleanup-tab" data-bs-toggle="tab" href="#cleanup" role="tab">Cleanup</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" id="run-all-themes-tab" data-bs-toggle="tab" href="#runAllThemes" role="tab">All Themes</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" id="activate-ads-tab" data-bs-toggle="tab" href="#activateAds" role="tab">Activate</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" id="remove-duplicates-tab" data-bs-toggle="tab" href="#removeDuplicates" role="tab">Duplicates</a>
-                            </li>
-                        </ul>
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Thema Ads</h5>
                     </div>
                     <div class="card-body">
-                        <div class="tab-content">
+                        <ul class="nav nav-tabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#excelUpload" type="button">Plan</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#csvUpload" type="button">Ad Groups</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#autoDiscover" type="button">Discover</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#checkup" type="button">Check-up</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#cleanup" type="button">Cleanup</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#runAllThemes" type="button">All Themes</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#activateAds" type="button">Activate</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#removeDuplicates" type="button">Duplicates</button>
+                            </li>
+                        </ul>
+
+                        <div class="tab-content mt-3">
                             <!-- Excel Upload Tab -->
                             <div class="tab-pane fade show active" id="excelUpload" role="tabpanel">
                                 <p class="text-muted mb-2">Upload Excel with <code>customer_id</code> + <code>theme</code> columns.
-                                    <a class="more-info-btn btn btn-link p-0" data-bs-toggle="collapse" href="#excelMoreInfo">More info</a>
+                                    <a class="more-info-btn" data-bs-toggle="collapse" href="#excelMoreInfo">More info</a>
                                 </p>
                                 <div class="collapse more-info-content mb-3" id="excelMoreInfo">
                                     <div class="alert alert-info mb-0">
@@ -134,7 +159,7 @@
                             <!-- CSV Upload Tab -->
                             <div class="tab-pane fade" id="csvUpload" role="tabpanel">
                                 <p class="text-muted mb-2">Upload CSV with <code>customer_id</code> and optional <code>ad_group_id</code>/<code>theme</code>.
-                                    <a class="more-info-btn btn btn-link p-0" data-bs-toggle="collapse" href="#csvMoreInfo">More info</a>
+                                    <a class="more-info-btn" data-bs-toggle="collapse" href="#csvMoreInfo">More info</a>
                                 </p>
                                 <div class="collapse more-info-content mb-3" id="csvMoreInfo">
                                     <div class="alert alert-info mb-0">
@@ -189,7 +214,7 @@
                             <!-- Check-up Tab -->
                             <div class="tab-pane fade" id="checkup" role="tabpanel">
                                 <p class="text-muted mb-2">Verify DONE labels and themed ads exist. Creates repair jobs for missing ads.
-                                    <a class="more-info-btn btn btn-link p-0" data-bs-toggle="collapse" href="#checkupMoreInfo">More info</a>
+                                    <a class="more-info-btn" data-bs-toggle="collapse" href="#checkupMoreInfo">More info</a>
                                 </p>
                                 <div class="collapse more-info-content mb-3" id="checkupMoreInfo">
                                     <div class="alert alert-info mb-0">

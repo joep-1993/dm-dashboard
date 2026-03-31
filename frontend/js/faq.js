@@ -471,8 +471,9 @@ async function validateFaqLinks() {
 }
 
 async function validateAllFaqLinks() {
-    const btn = document.getElementById('validateAllBtn');
     const validateBtn = document.getElementById('validateBtn');
+    const validateAllBtn = document.getElementById('validateAllBtn');
+    const resetBtn = document.getElementById('resetValidationBtn');
     const resultDiv = document.getElementById('validateResult');
     const workers = parseInt(document.getElementById('validateWorkersInput').value) || 3;
     const batchSize = parseInt(document.getElementById('validateBatchSizeInput').value) || 500;
@@ -481,10 +482,11 @@ async function validateAllFaqLinks() {
         return;
     }
 
-    btn.disabled = true;
     validateBtn.disabled = true;
-    btn.textContent = 'Validating All...';
-    resultDiv.innerHTML = `<div class="alert alert-warning">Validating all unvalidated FAQs (batch size: ${batchSize}, workers: ${workers})... This may take a while.</div>`;
+    validateAllBtn.disabled = true;
+    resetBtn.disabled = true;
+    validateAllBtn.textContent = 'Validating All...';
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating ALL FAQ URLs (batch size: ${batchSize}, workers: ${workers})... This may take a while.</div>`;
 
     try {
         const response = await fetch(`${API_BASE}/api/faq/validate-all-links?parallel_workers=${workers}&batch_size=${batchSize}`, {
@@ -497,24 +499,33 @@ async function validateAllFaqLinks() {
             throw new Error(data.detail || 'Validation failed');
         }
 
-        let alertClass = data.reset_to_pending > 0 ? 'alert-warning' : 'alert-success';
-        resultDiv.innerHTML = `
-            <div class="alert ${alertClass}">
-                <strong>${data.message}</strong><br>
-                Links checked: ${data.total_links_checked}<br>
-                Gone links: ${data.gone_links}<br>
-                <strong>Reset to pending: ${data.reset_to_pending}</strong>
-            </div>
-        `;
+        if (data.total_links_checked === 0) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>No content to validate</strong><br>
+                    All URLs have already been validated.
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert ${data.reset_to_pending > 0 ? 'alert-warning' : 'alert-success'}">
+                    <strong>Validation Complete!</strong><br>
+                    Total validated: ${data.total_links_checked} items<br>
+                    Gone links: ${data.gone_links || 0}<br>
+                    Moved to pending (gone products): ${data.reset_to_pending}
+                </div>
+            `;
+        }
 
         await refreshFaqStatus();
 
     } catch (error) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
     } finally {
-        btn.disabled = false;
         validateBtn.disabled = false;
-        btn.textContent = 'Validate All';
+        validateAllBtn.disabled = false;
+        resetBtn.disabled = false;
+        validateAllBtn.textContent = 'Validate All';
     }
 }
 
@@ -522,6 +533,7 @@ async function recheckSkippedFaqUrls() {
     const recheckBtn = document.getElementById('recheckSkippedBtn');
     const validateBtn = document.getElementById('validateBtn');
     const validateAllBtn = document.getElementById('validateAllBtn');
+    const resetBtn = document.getElementById('resetValidationBtn');
     const resultDiv = document.getElementById('validateResult');
     const workers = parseInt(document.getElementById('validateWorkersInput').value) || 3;
     const batchSize = parseInt(document.getElementById('validateBatchSizeInput').value) || 50;
@@ -538,6 +550,7 @@ async function recheckSkippedFaqUrls() {
     recheckBtn.disabled = true;
     validateBtn.disabled = true;
     validateAllBtn.disabled = true;
+    resetBtn.disabled = true;
     recheckBtn.textContent = 'Rechecking...';
     resultDiv.innerHTML = `<div class="alert alert-warning">Rechecking skipped FAQ URLs (batch size: ${batchSize}, workers: ${workers})... This may take a while.</div>`;
 
@@ -561,7 +574,7 @@ async function recheckSkippedFaqUrls() {
             `;
         } else {
             resultDiv.innerHTML = `
-                <div class="alert alert-warning">
+                <div class="alert ${data.now_eligible > 0 ? 'alert-success' : 'alert-info'}">
                     <strong>Recheck Complete!</strong><br>
                     URLs rechecked: ${data.rechecked}<br>
                     <strong>Now eligible for FAQ generation: ${data.now_eligible}</strong>
@@ -577,42 +590,56 @@ async function recheckSkippedFaqUrls() {
         recheckBtn.disabled = false;
         validateBtn.disabled = false;
         validateAllBtn.disabled = false;
+        resetBtn.disabled = false;
         recheckBtn.textContent = 'Recheck Skipped';
     }
 }
 
 async function resetFaqValidationHistory() {
-    if (!confirm('This will reset all FAQ validation history, allowing all FAQs to be re-validated. Continue?')) {
+    if (!confirm('Reset all validation history AND skipped URLs status? This will allow all URLs to be re-validated and rechecked.')) {
         return;
     }
 
-    const btn = document.getElementById('resetValidationBtn');
+    const resetBtn = document.getElementById('resetValidationBtn');
     const resultDiv = document.getElementById('validateResult');
 
-    btn.disabled = true;
+    resetBtn.disabled = true;
+    resetBtn.textContent = 'Resetting...';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Resetting validation history and skipped URLs...</div>';
 
     try {
-        const response = await fetch(`${API_BASE}/api/faq/validation-history/reset`, {
+        // Reset validation history
+        const validationResponse = await fetch(`${API_BASE}/api/faq/validation-history/reset`, {
             method: 'DELETE'
         });
+        const validationData = await validationResponse.json();
 
-        const data = await response.json();
+        // Reset skipped URLs recheck status
+        const skippedResponse = await fetch(`${API_BASE}/api/faq/recheck-skipped-urls/reset`, {
+            method: 'DELETE'
+        });
+        const skippedData = await skippedResponse.json();
 
-        if (!response.ok) {
-            throw new Error(data.detail || 'Reset failed');
+        if (validationResponse.ok && skippedResponse.ok) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>Reset complete:</strong><br>
+                    • Validation history: ${validationData.cleared_count || 0} URLs cleared<br>
+                    • Skipped URLs: ${skippedData.reset_count || 0} URLs can be rechecked
+                </div>
+            `;
+        } else {
+            const errors = [];
+            if (!validationResponse.ok) errors.push(`Validation: ${validationData.detail}`);
+            if (!skippedResponse.ok) errors.push(`Skipped: ${skippedData.detail}`);
+            resultDiv.innerHTML = `<div class="alert alert-danger">Errors: ${errors.join(', ')}</div>`;
         }
-
-        resultDiv.innerHTML = `
-            <div class="alert alert-success">
-                <strong>Validation History Reset</strong><br>
-                ${data.message}
-            </div>
-        `;
 
     } catch (error) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
     } finally {
-        btn.disabled = false;
+        resetBtn.disabled = false;
+        resetBtn.textContent = 'Reset Validation';
     }
 }
 

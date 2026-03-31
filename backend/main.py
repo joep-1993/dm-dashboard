@@ -21,6 +21,7 @@ from backend.gpt_service import generate_product_content, generate_main_category
 from backend.link_validator import validate_content_links, validate_and_fix_content_links
 from backend.faq_service import process_single_url_faq
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
+from backend.gsd_campaigns_router import router as gsd_campaigns_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.content_publisher import (
@@ -37,6 +38,9 @@ app = FastAPI(title="SEO Tools - Unified Platform", version="1.0.0")
 
 # Include thema_ads router
 app.include_router(thema_ads_router)
+
+# Include gsd_campaigns router
+app.include_router(gsd_campaigns_router)
 
 @app.on_event("startup")
 async def startup_event():
@@ -1897,7 +1901,8 @@ def reset_faq_validation_history():
         return {
             "status": "success",
             "message": f"Reset validation history for {deleted} FAQs",
-            "deleted": deleted
+            "deleted": deleted,
+            "cleared_count": deleted
         }
 
     except Exception as e:
@@ -3450,6 +3455,45 @@ async def indexnow_history(limit: int = 100):
         loop = asyncio.get_event_loop()
         history = await loop.run_in_executor(None, get_submission_history, limit)
         return {"status": "success", "history": history}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/indexnow/export/{date}")
+async def indexnow_export_by_date(date: str):
+    """Export submitted URLs for a specific date as XLSX."""
+    from backend.database import get_db_connection, return_db_connection
+    from openpyxl import Workbook
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT url, submitted_date, response_code
+            FROM pa.index_now_joep
+            WHERE submitted_date = %s
+            ORDER BY url
+        """, (date,))
+        rows = cur.fetchall()
+        cur.close()
+        return_db_connection(conn)
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "IndexNow"
+        ws.append(["url", "submitted_date", "response_code"])
+        for row in rows:
+            ws.append([row["url"], str(row["submitted_date"]), row["response_code"]])
+
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=indexnow_{date}.xlsx"}
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

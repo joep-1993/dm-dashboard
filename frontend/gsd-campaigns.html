@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSD Campaigns</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .stat-card {
+            border-radius: 12px;
+            background: white;
+            color: #2d3436;
+            padding: 1.25rem;
+            text-align: center;
+            min-width: 140px;
+            box-shadow: 0 4px 16px rgba(94, 74, 144, 0.14);
+        }
+        .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; }
+        .stat-card .label { font-size: 0.85rem; color: #636e72; }
+        .stat-card .detail { font-size: 0.75rem; color: #999; margin-top: 0.25rem; }
+
+        .filter-row { background: #f8f9fc; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
+        .filter-row select, .filter-row input { font-size: 0.9rem; }
+
+        .campaign-table { font-size: 0.9rem; }
+        .campaign-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .campaign-table td { vertical-align: middle; }
+        .campaign-table .col-country { text-align: center; }
+
+        .btn-action { font-size: 0.8rem; padding: 0.25rem 0; border-radius: 4px; width: 70px; text-align: center; display: inline-block; }
+        .btn-pause { border: 1px solid #e0a800; color: #e0a800; background: transparent; }
+        .btn-pause:hover { background: #e0a800; color: white; }
+        .btn-activate { border: 1px solid #00b894; color: #00b894; background: transparent; }
+        .btn-activate:hover { background: #00b894; color: white; }
+
+        .badge-active { background-color: #00b894 !important; }
+
+        .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
+        .pagination-controls select { font-size: 0.85rem; width: auto; }
+        .pagination-controls .page-info { color: #636e72; }
+        .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+
+        .campaign-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+        .campaign-table th.sortable:hover { opacity: 0.85; }
+        .campaign-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .campaign-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
+        .campaign-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
+        .btn-remove:hover { background: #d63031; color: white; }
+
+        .run-card { border-left: 4px solid #5e4a90; }
+        .activity-log { max-height: 300px; overflow-y: auto; font-size: 0.82rem; }
+        .activity-log .log-entry { padding: 0.4rem 0; border-bottom: 1px solid #f1f2f6; }
+        .activity-log .log-time { color: #636e72; min-width: 140px; display: inline-block; }
+        .activity-log .log-action { font-weight: 600; }
+        .activity-log .log-success { color: #00b894; }
+        .activity-log .log-error { color: #d63031; }
+
+        .row-new { background-color: #e8f4fd !important; }
+        .badge-new { background-color: #74b9ff !important; font-size: 0.7rem; margin-left: 0.4rem; vertical-align: middle; }
+
+        .progress-area { background: #f8f9fc; border-radius: 8px; padding: 1rem; min-height: 60px; }
+        .spinner-border-sm { width: 1rem; height: 1rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">GSD Campaigns</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 pb-5">
+        <!-- Stats Cards -->
+        <div class="d-flex flex-wrap gap-3 mb-4 justify-content-center" id="statsRow">
+            <div class="stat-card">
+                <h3 id="statNL">-</h3>
+                <div class="label">NL</div>
+                <div class="detail" id="statNLDetail"></div>
+            </div>
+            <div class="stat-card">
+                <h3 id="statBE">-</h3>
+                <div class="label">BE</div>
+                <div class="detail" id="statBEDetail"></div>
+            </div>
+            <div class="stat-card">
+                <h3 id="statDE">-</h3>
+                <div class="label">DE</div>
+                <div class="detail" id="statDEDetail"></div>
+            </div>
+            <div class="stat-card">
+                <h3 id="statTotal">-</h3>
+                <div class="label">Total</div>
+                <div class="detail" id="statTotalDetail"></div>
+            </div>
+        </div>
+
+        <!-- Run Script -->
+        <div class="card run-card mb-4">
+            <div class="card-header" style="background: #5e4a90; color: white;">
+                <h5 class="mb-0">Run GSD Script</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label for="runDate" class="form-label">Date (optional)</label>
+                        <input type="date" class="form-control" id="runDate" placeholder="Leave empty for today">
+                    </div>
+                    <div class="col-md-5">
+                        <label for="shopNames" class="form-label">Shop names (optional, one per line)</label>
+                        <textarea class="form-control" id="shopNames" rows="3" placeholder="shop_name_1&#10;shop_name_2"></textarea>
+                    </div>
+                    <div class="col-md-4 d-flex flex-column">
+                        <label class="form-label">Shop filter mode</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="shopMode" id="modeExclude" value="exclude" checked>
+                            <label class="form-check-label" for="modeExclude">Exclude these shops</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="shopMode" id="modeInclude" value="include">
+                            <label class="form-check-label" for="modeInclude">Include only these shops</label>
+                        </div>
+                        <div class="mt-auto d-flex justify-content-end">
+                            <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runScript()" id="runBtn">
+                                Run
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="progress-area mt-3" id="progressArea" style="display: none;">
+                    <div id="progressContent"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Campaign Table -->
+        <div class="card mb-4">
+            <div class="card-header" style="background: #5e4a90; color: white;">
+                <h5 class="mb-0">Campaigns</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="filter-row d-flex gap-2 align-items-center m-3">
+                    <select class="form-select form-select-sm" id="filterCountry" style="max-width: 120px;" onchange="applyFilters()">
+                        <option value="">All Countries</option>
+                        <option value="NL">NL</option>
+                        <option value="BE">BE</option>
+                        <option value="DE">DE</option>
+                    </select>
+                    <select class="form-select form-select-sm" id="filterStatus" style="max-width: 120px;" onchange="applyFilters()">
+                        <option value="">All Statuses</option>
+                        <option value="ENABLED">Active</option>
+                        <option value="PAUSED">Paused</option>
+                    </select>
+                    <input type="text" class="form-control form-control-sm" id="filterCampaignName" placeholder="Search campaign name..." oninput="applyFilters()" style="max-width: 250px;">
+                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="newCampaignIds.clear(); loadCampaigns(); loadStats();">Refresh</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="exportXlsx()">Export .xlsx</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="copyForExcel()">Copy</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover campaign-table mb-0">
+                        <thead>
+                            <tr>
+                                <th class="col-country sortable" data-sort="country" onclick="sortBy('country')">Country</th>
+                                <th class="sortable" data-sort="campaign_name" onclick="sortBy('campaign_name')">Campaign Name</th>
+                                <th class="sortable" data-sort="status" onclick="sortBy('status')">Status</th>
+                                <th class="sortable" data-sort="impressions" onclick="sortBy('impressions')">Impressions</th>
+                                <th class="sortable" data-sort="clicks" onclick="sortBy('clicks')">Clicks</th>
+                                <th class="sortable" data-sort="cost" onclick="sortBy('cost')">Cost</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="campaignTableBody">
+                            <tr><td colspan="7" class="text-center text-muted py-4">Loading campaigns...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination-controls" id="paginationControls">
+                    <span>Per page:</span>
+                    <select class="form-select form-select-sm" id="perPage" onchange="currentPage=1; applyFilters();">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="all">Show all</option>
+                    </select>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                    <span class="page-info" id="pageInfo">-</span>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="card mb-4">
+            <div class="card-header" style="background: #5e4a90; color: white;">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center">
+                    Activity Log
+                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="clearLog()">Clear</button>
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="activity-log p-3" id="activityLog">
+                    <div class="text-muted text-center py-2">No activity yet.</div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="text-center py-4">
+            <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <script>
+        const API_BASE = window.location.origin;
+        let allCampaigns = [];
+        let filteredCampaigns = [];
+        let currentPage = 1;
+        let sortColumn = null;
+        let sortDirection = 'asc';
+        let newCampaignIds = new Set();
+
+        window.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            loadCampaigns();
+            renderLog();
+        });
+
+        // --- Stats ---
+        async function loadStats() {
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/stats`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                const accounts = data.accounts || {};
+                const campaigns = data.campaigns || [];
+
+                // Per-country stats
+                ['NL', 'BE', 'DE'].forEach(c => {
+                    const acc = accounts[c] || {};
+                    const total = acc.total || 0;
+                    const active = acc.active || 0;
+                    const paused = acc.paused || 0;
+                    document.getElementById(`stat${c}`).textContent = total;
+                    document.getElementById(`stat${c}Detail`).textContent = `${active} active / ${paused} paused`;
+                });
+
+                // Total
+                const totalAll = campaigns.length;
+                const totalActive = campaigns.filter(c => c.status === 'ENABLED').length;
+                const totalPaused = campaigns.filter(c => c.status === 'PAUSED').length;
+                document.getElementById('statTotal').textContent = totalAll;
+                document.getElementById('statTotalDetail').textContent = `${totalActive} active / ${totalPaused} paused`;
+            } catch (err) {
+                console.error('Failed to load stats:', err);
+            }
+        }
+
+        // --- Campaigns ---
+        async function loadCampaigns() {
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/campaigns`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                allCampaigns = data.campaigns || [];
+                applyFilters();
+            } catch (err) {
+                console.error('Failed to load campaigns:', err);
+                document.getElementById('campaignTableBody').innerHTML =
+                    '<tr><td colspan="9" class="text-center text-danger py-4">Failed to load campaigns.</td></tr>';
+            }
+        }
+
+        function applyFilters() {
+            const country = document.getElementById('filterCountry').value;
+            const status = document.getElementById('filterStatus').value;
+            const campaignSearch = document.getElementById('filterCampaignName').value.toLowerCase();
+
+            filteredCampaigns = allCampaigns;
+            if (country) filteredCampaigns = filteredCampaigns.filter(c => (c.country || '').toUpperCase() === country);
+            if (status) filteredCampaigns = filteredCampaigns.filter(c => (c.status || '').toUpperCase() === status);
+            if (campaignSearch) filteredCampaigns = filteredCampaigns.filter(c =>
+                (c.campaign_name || '').toLowerCase().includes(campaignSearch) ||
+                (c.shop_name || '').toLowerCase().includes(campaignSearch) ||
+                String(c.shop_id || '').includes(campaignSearch)
+            );
+
+            renderPage();
+        }
+
+        function sortBy(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+
+            // Update header classes
+            document.querySelectorAll('.campaign-table th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === column) {
+                    th.classList.add(sortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+
+            const numericCols = ['impressions', 'clicks', 'cost', 'shop_id'];
+            filteredCampaigns.sort((a, b) => {
+                let valA = a[column] ?? '';
+                let valB = b[column] ?? '';
+                if (numericCols.includes(column)) {
+                    valA = Number(valA) || 0;
+                    valB = Number(valB) || 0;
+                } else {
+                    valA = String(valA).toLowerCase();
+                    valB = String(valB).toLowerCase();
+                }
+                if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+                if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            currentPage = 1;
+            renderPage();
+        }
+
+        function getPerPage() {
+            const val = document.getElementById('perPage').value;
+            return val === 'all' ? Infinity : parseInt(val);
+        }
+
+        function renderPage() {
+            const perPage = getPerPage();
+            const total = filteredCampaigns.length;
+            const totalPages = perPage === Infinity ? 1 : Math.ceil(total / perPage);
+            if (currentPage > totalPages) currentPage = totalPages || 1;
+
+            const start = perPage === Infinity ? 0 : (currentPage - 1) * perPage;
+            const end = perPage === Infinity ? total : start + perPage;
+            const pageItems = filteredCampaigns.slice(start, end);
+
+            renderTable(pageItems);
+
+            // Update pagination controls
+            document.getElementById('prevBtn').disabled = currentPage <= 1;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+            const showing = total === 0 ? '0' : `${start + 1}-${Math.min(end, total)}`;
+            document.getElementById('pageInfo').textContent = `${showing} of ${total.toLocaleString()}`;
+        }
+
+        function changePage(delta) {
+            currentPage += delta;
+            renderPage();
+        }
+
+        function renderTable(campaigns) {
+            const tbody = document.getElementById('campaignTableBody');
+            if (!campaigns.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No campaigns found.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = campaigns.map(c => {
+                const isEnabled = (c.status || '').toUpperCase() === 'ENABLED';
+                const isPaused = (c.status || '').toUpperCase() === 'PAUSED';
+                const isNew = newCampaignIds.has(String(c.campaign_id));
+                const statusBadge = isEnabled
+                    ? '<span class="badge badge-active">Active</span>'
+                    : isPaused
+                        ? '<span class="badge bg-warning text-dark">Paused</span>'
+                        : `<span class="badge bg-secondary">${c.status || 'Unknown'}</span>`;
+                const newBadge = isNew ? ' <span class="badge badge-new">new</span>' : '';
+
+                const actions = [];
+                if (isEnabled) {
+                    actions.push(`<button class="btn btn-action btn-pause" onclick="pauseCampaign('${c.customer_id}','${c.campaign_id}','${escapeHtml(c.campaign_name || '')}')">Pause</button>`);
+                }
+                if (isPaused) {
+                    actions.push(`<button class="btn btn-action btn-activate" onclick="enableCampaign('${c.customer_id}','${c.campaign_id}','${escapeHtml(c.campaign_name || '')}')">Activate</button>`);
+                }
+                actions.push(`<button class="btn btn-action btn-remove" onclick="removeCampaign('${c.customer_id}','${c.campaign_id}','${escapeHtml(c.campaign_name || '')}')">Remove</button>`);
+
+                return `<tr class="${isNew ? 'row-new' : ''}">
+                    <td class="col-country">${c.country || '-'}</td>
+                    <td>${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
+                    <td>${statusBadge}</td>
+                    <td>${(c.impressions || 0).toLocaleString()}</td>
+                    <td>${(c.clicks || 0).toLocaleString()}</td>
+                    <td>${formatCost(c.cost)}</td>
+                    <td class="d-flex gap-1">${actions.join('')}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function formatCost(cost) {
+            if (cost == null) return '-';
+            return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(cost);
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+
+        // --- Export / Copy ---
+        function getCampaignRows() {
+            return filteredCampaigns.map(c => ({
+                Country: c.country || '',
+                'Campaign Name': c.campaign_name || '',
+                Status: c.status || '',
+                Impressions: c.impressions || 0,
+                Clicks: c.clicks || 0,
+                Cost: Math.round((c.cost || 0) * 100) / 100,
+            }));
+        }
+
+        function exportXlsx() {
+            const rows = getCampaignRows();
+            if (!rows.length) return alert('No campaigns to export.');
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'GSD Campaigns');
+            XLSX.writeFile(wb, `gsd_campaigns_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        function copyForExcel() {
+            const rows = getCampaignRows();
+            if (!rows.length) return alert('No campaigns to copy.');
+            const headers = Object.keys(rows[0]);
+            const tsv = [headers.join('\t'), ...rows.map(r => headers.map(h => r[h]).join('\t'))].join('\n');
+            navigator.clipboard.writeText(tsv).then(() => {
+                const btn = document.querySelector('[onclick="copyForExcel()"]');
+                const orig = btn.textContent;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = orig, 1500);
+            });
+        }
+
+        // --- Actions ---
+        async function pauseCampaign(customerId, campaignId, name) {
+            if (!confirm(`Pause campaign "${name}"?`)) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/campaigns/${customerId}/${campaignId}/pause`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                logActivity('Pause', `${name} - Success`, true);
+                loadCampaigns();
+                loadStats();
+            } catch (err) {
+                logActivity('Pause', `${name} - Error: ${err.message}`, false);
+            }
+        }
+
+        async function enableCampaign(customerId, campaignId, name) {
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/campaigns/${customerId}/${campaignId}/enable`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                logActivity('Enable', `${name} - Success`, true);
+                loadCampaigns();
+                loadStats();
+            } catch (err) {
+                logActivity('Enable', `${name} - Error: ${err.message}`, false);
+            }
+        }
+
+        async function removeCampaign(customerId, campaignId, name) {
+            if (!confirm(`Are you sure you want to REMOVE campaign "${name}"? This cannot be undone.`)) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/campaigns/${customerId}/${campaignId}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                logActivity('Remove', `${name} - Success`, true);
+                loadCampaigns();
+                loadStats();
+            } catch (err) {
+                logActivity('Remove', `${name} - Error: ${err.message}`, false);
+            }
+        }
+
+        // --- Run Script ---
+        async function runScript() {
+            const btn = document.getElementById('runBtn');
+            const area = document.getElementById('progressArea');
+            const content = document.getElementById('progressContent');
+
+            const date = document.getElementById('runDate').value || '';
+            const shopText = document.getElementById('shopNames').value.trim();
+            const included = document.getElementById('modeInclude').checked;
+
+            const params = new URLSearchParams();
+            if (date) params.set('date', date);
+            if (shopText) params.set('shop_names', shopText.split('\n').map(s => s.trim()).filter(Boolean).join(','));
+            params.set('included', included);
+
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+            area.style.display = 'block';
+            content.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Running GSD script... This may take a while.</div>';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/run?${params.toString()}`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                // Track newly created campaigns
+                newCampaignIds = new Set();
+                if (data.results) {
+                    (data.results || []).forEach(r => {
+                        if (r.campaigns_created) {
+                            (r.campaign_ids || []).forEach(id => newCampaignIds.add(String(id)));
+                        }
+                    });
+                }
+                content.innerHTML = `<div class="text-success fw-bold">Done!</div><pre class="mt-2 mb-0" style="font-size:0.82rem; max-height:200px; overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+                logActivity('Run Script', `Completed${date ? ' for ' + date : ''}`, true);
+                loadCampaigns();
+                loadStats();
+            } catch (err) {
+                content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
+                logActivity('Run Script', `Error: ${err.message}`, false);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Run';
+            }
+        }
+
+        // --- Activity Log ---
+        function logActivity(action, details, success) {
+            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+            log.unshift({
+                time: new Date().toISOString(),
+                action,
+                details,
+                success
+            });
+            // Keep last 50
+            if (log.length > 50) log.length = 50;
+            localStorage.setItem('gsd_activity_log', JSON.stringify(log));
+            renderLog();
+        }
+
+        function renderLog() {
+            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+            const el = document.getElementById('activityLog');
+            if (!log.length) {
+                el.innerHTML = '<div class="text-muted text-center py-2">No activity yet.</div>';
+                return;
+            }
+            el.innerHTML = log.map(entry => {
+                const time = new Date(entry.time).toLocaleString('nl-NL');
+                const cls = entry.success ? 'log-success' : 'log-error';
+                return `<div class="log-entry">
+                    <span class="log-time">${time}</span>
+                    <span class="log-action">${escapeHtml(entry.action)}</span> -
+                    <span class="${cls}">${escapeHtml(entry.details)}</span>
+                </div>`;
+            }).join('');
+        }
+
+        function clearLog() {
+            localStorage.removeItem('gsd_activity_log');
+            renderLog();
+        }
+    </script>
+</body>
+</html>

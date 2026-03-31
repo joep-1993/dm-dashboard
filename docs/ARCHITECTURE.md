@@ -72,19 +72,25 @@
 - **File Structure**:
   ```
   frontend/
-  ├── index.html          # Kopteksten Generator (AI product recommendations)
-  ├── faq.html            # FAQ Generator
-  ├── canonical.html      # Canonical URL Generator
-  ├── rfinder.html        # R-Finder (URL Discovery)
+  ├── index.html           # Kopteksten (AI product recommendations)
+  ├── faq.html             # FAQ's (SEO-optimized FAQs with Schema.org)
+  ├── canonical.html       # Canonicals (canonical URL generation)
+  ├── rfinder.html         # R-Finder (URL Discovery)
   ├── redirect-checker.html # Redirect Checker (HTTP status/redirects/canonicals)
-  ├── 301-generator.html  # 301 Generator (facet sorting & transformations)
-  ├── thema-ads.html      # Thema Ads Processing
-  ├── unique-titles.html  # Unique Titles Manager
-  ├── dashboard.html      # DM Tools Dashboard (tool overview)
+  ├── 301-generator.html   # Redirects (facet sorting & transformations)
+  ├── thema-ads.html       # Thema Ads Processing
+  ├── gsd-campaigns.html   # GSD Campaigns (Google Shopping campaign management)
+  ├── unique-titles.html   # Unique Titles Manager
+  ├── keyword-planner.html # Keyword Planner (Google Ads search volumes)
+  ├── indexnow.html        # IndexNow (URL submission for indexing)
+  ├── index-checker.html   # Index Checker (Google index status via Search Console)
+  ├── url-checker.html     # URL Checker (status codes, meta, H1, products)
+  ├── dashboard.html       # DM Tools Dashboard (categorized tool overview)
   ├── css/
-  │   └── style.css       # Custom styles
+  │   └── style.css        # Custom styles (dropdown menus, responsive nav, shadows)
   └── js/
-      └── app.js          # Application logic
+      ├── app.js           # Kopteksten application logic
+      └── faq.js           # FAQ application logic
   ```
 
 ### Design Principles
@@ -742,6 +748,52 @@ Products are returned sorted by `popularity` (descending). Higher popularity = s
 - **SEO Content**: `backend/scraper_service.py` (lines 533-557)
 - **FAQ Content**: `backend/faq_service.py` (lines 466-500)
 - **API Parameters**: `backend/scraper_service.py` (lines 325-335)
+
+### Beslist Taxonomy API v2
+
+**Base URL**: `http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl`
+**Swagger**: `http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl/swagger/index.html`
+**Auth**: JWT Bearer token required per spec, but **no auth needed from internal network**
+**Spec file**: `scripts/swagger_taxv2.json`
+
+**Purpose**: Manage product taxonomy — categories, facets, facet values, and their relationships. Used for updating SEO-relevant fields like `noIndexNoFollow` and `seoPriority`.
+
+#### Key Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/Categories?rootCategoriesOnly=false` | List all 3,575 categories |
+| `GET` | `/api/Categories/{id}` | Get category detail (includes subcategories, linked facets) |
+| `GET` | `/api/Facets?searchTerm=...` | Search facets by name |
+| `GET` | `/api/Facets/{id}` | Get facet detail (includes `noIndexNoFollow`) |
+| `PUT` | `/api/Facets/{id}` | Update facet (`noIndexNoFollow`, `isEnabled`, etc.) |
+| `GET` | `/api/Facets/{facetId}/values` | Get facet values (with `seoPriority`) |
+| `PUT` | `/api/Facets/values/{facetValueId}` | Update facet value (`seoPriority`) |
+| `GET` | `/api/CategoryFacets?categoryId=...` | Get linked facets for a category (with inheritance) |
+| `GET` | `/api/CategoryFacetSettings?categoryId=...` | Get explicit settings per category |
+| `GET` | `/api/CategoryFacetSettings/{categoryId}/{facetId}` | Get setting for specific combo |
+| `PUT` | `/api/CategoryFacetSettings` | Upsert category-facet setting (`seoPriority`, `isHidden`, etc.) |
+
+#### SEO-Relevant Fields
+
+- **`noIndexNoFollow`** (boolean) — on `FacetDto`. Facet-wide: all values of this facet become noindex/nofollow.
+  - Read: `GET /api/Facets/{id}` → `noIndexNoFollow`
+  - Write: `PUT /api/Facets/{id}` with `UpdateFacetRequest`
+
+- **`seoPriority`** (boolean, nullable) — exists at two levels:
+  1. **Category-Facet level**: `CategoryFacetSettingDto` — priority for a facet within a specific category
+     - Read: `GET /api/CategoryFacetSettings/{categoryId}/{facetId}`
+     - Write: `PUT /api/CategoryFacetSettings` with `UpsertCategoryFacetSettingRequest` (`categoryId`, `facetId`, `seoPriority`)
+  2. **Facet Value level**: `FacetValueDto` — priority per individual value
+     - Read: `GET /api/Facets/{facetId}/values`
+     - Write: `PUT /api/Facets/values/{facetValueId}` with `UpdateFacetValueRequest`
+  - `null` means "inherit from parent", explicit `true`/`false` overrides
+
+#### Data Model Notes
+- Categories have nl-NL labels with `name` and `urlSlug` (e.g., name="Tuintafels", urlSlug="meubilair_389373_393687")
+- Facets also have nl-NL labels (e.g., name="Kleur", urlSlug="kleur")
+- As of 2026-03-17: `seoPriority` is not set anywhere in production (all `null`/inherit)
+- `noIndexNoFollow` is set on some facets (e.g., facet 2906 "Kleur" has `noIndexNoFollow: false`)
 
 ---
 
