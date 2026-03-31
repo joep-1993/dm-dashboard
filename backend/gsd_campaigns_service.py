@@ -124,10 +124,19 @@ def _get_redshift_connection():
 
 def _get_mc_service():
     """Build a Merchant Center Content API service using a service account."""
-    sa_file = os.environ.get(
-        "GSD_SERVICE_ACCOUNT_FILE",
-        os.path.join(os.path.dirname(__file__), "service_accounts", "cla-campaign-creation-a366aea607a8.json"),
-    )
+    sa_file = os.environ.get("GSD_SERVICE_ACCOUNT_FILE", "")
+    if not sa_file:
+        # Auto-detect: use first .json in service_accounts dir
+        sa_dir = os.path.join(os.path.dirname(__file__), "service_accounts")
+        if os.path.isdir(sa_dir):
+            json_files = [f for f in os.listdir(sa_dir) if f.endswith(".json")]
+            if json_files:
+                sa_file = os.path.join(sa_dir, json_files[0])
+    if not sa_file or not os.path.exists(sa_file):
+        raise RuntimeError(
+            "Service account file not found. Set GSD_SERVICE_ACCOUNT_FILE env var "
+            "or place a .json key file in backend/service_accounts/"
+        )
     credentials = service_account.Credentials.from_service_account_file(sa_file, scopes=MC_SCOPES)
     return build("content", "v2.1", credentials=credentials, cache_discovery=False)
 

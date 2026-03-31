@@ -3465,6 +3465,12 @@ async def indexnow_export_by_date(date: str):
     from backend.database import get_db_connection, return_db_connection
     from openpyxl import Workbook
 
+    # Validate date format
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
     try:
         conn = get_db_connection()
         cur = conn.cursor()

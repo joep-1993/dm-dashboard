@@ -418,27 +418,5 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        const API_BASE = window.location.origin;
-
-        window.addEventListener('DOMContentLoaded', loadStats);
-
-        async function loadStats() {
-            try {
-                const contentResponse = await fetch(`${API_BASE}/api/status`);
-                const contentData = await contentResponse.json();
-
-                const faqResponse = await fetch(`${API_BASE}/api/faq/status`);
-                const faqData = await faqResponse.json();
-
-                document.getElementById('statTotalUrls').textContent = contentData.total_urls?.toLocaleString() || '-';
-                document.getElementById('statContentProcessed').textContent = contentData.processed?.toLocaleString() || '-';
-                document.getElementById('statFaqProcessed').textContent = faqData.processed?.toLocaleString() || '-';
-                document.getElementById('statPending').textContent = contentData.pending?.toLocaleString() || '-';
-            } catch (error) {
-                console.error('Failed to load stats:', error);
-            }
-        }
-    </script>
 </body>
 </html>
