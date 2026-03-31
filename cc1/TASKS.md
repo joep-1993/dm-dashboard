@@ -10,6 +10,10 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Fix FAQ structured data "item name: N/A" in Google Rich Results — added `"name": page_title` to FAQPage JSON-LD in `faq_service.py:to_schema_org()`, migrated all 204,216 existing `pa.faq_content` rows via pure SQL `regexp_replace` on `schema_org` column. Script: `backend/fix_faq_sql.py` #claude-session:2026-03-31
+- [x] Add ROAS >= 130% condition to DMA bid strategy increases (`DMA_verhogingen_verlagingen.py`) — ROAS calculated as DMA/CLA omzet / cost, added to increase rules, console log, email tables, and CSV attachment #claude-session:2026-03-31
+- [x] Create simplified basements homepage n8n workflow (`basements_homepage_simple.json`) — processes in-memory instead of writing to DB tables, still checks redirects/duplicates, posts directly to keywords API. Removed SplitInBatches (caused data loss), all items flow inline through HTTP Request node #claude-session:2026-03-31
+
 - [x] Create DMA bid strategy automation script (`DMA_verhogingen_verlagingen.py`) — adjusts campaigns between Level 1/2/3 bid strategies based on DMA/CLA Profit (conversion action "Omzet DMA en CLA" - cost), OPB (conv_value/clicks), and click thresholds. Dry run mode, email report with CSV attachment, test script for profit verification. Account 3800751597, MCC 3011145605 #claude-session:2026-03-30
 - [x] Fix IndexNow n8n workflow `submit_to_indexnow` node — enabled fullResponse on HTTP Request, fixed tracking insert to read URLs from upstream node instead of empty response body #claude-session:2026-03-30
 

@@ -94,6 +94,7 @@ class FAQPage:
         return {
             "@context": "https://schema.org",
             "@type": "FAQPage",
+            "name": self.page_title,
             "mainEntity": [
                 {
                     "@type": "Question",

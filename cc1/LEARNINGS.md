@@ -1,6 +1,32 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## FAQ Structured Data — Item Name Fix
+- **Issue**: Google Rich Results Tool / Search Console showed "item name: N/A" for FAQ structured data
+- **Root cause**: `FAQPage` JSON-LD had no `"name"` property at the top level — only the nested `Question` objects had `"name"`
+- **Fix (new FAQs)**: Added `"name": self.page_title` to `FAQPage.to_schema_org()` in `backend/faq_service.py:95`
+- **Fix (existing FAQs)**: Pure SQL migration using `replace()` to inject `"name": "<page_title>"` after `"@type": "FAQPage"` in the `schema_org` column. Script: `backend/fix_faq_sql.py`. Updated 204,216 rows
+- **Gotcha**: Python `-c` inline scripts have double-quote escaping issues with SQL — use a `.py` file instead
+- **Gotcha**: Row-by-row UPDATE of 204K rows over remote DB is extremely slow — use single SQL `replace()` statement for bulk string manipulation in JSON columns
+- **Date**: 2026-03-31
+
+## DMA Bid Strategy — ROAS Condition
+- **Change**: Added ROAS >= 130% as additional condition for bid strategy increases (L1→L2, L2→L3)
+- **ROAS formula**: DMA/CLA omzet (from "Omzet DMA en CLA" conversion action) / cost
+- **Verified**: Campaign Auto's_a (21806762283) on 2026-03-19 returned ROAS 71.49% — matched Google Ads UI
+- **Files**: `DMA_verhogingen_verlagingen.py` — added `roas` to data collection, increase conditions, email headers, CSV
+- **Date**: 2026-03-31
+
+## Basements Homepage — Simplified n8n Workflow
+- **File**: `C:\Users\JoepvanSchagen\Downloads\basements_homepage_simple.json`
+- **Purpose**: Simpler version of `basements_homepage.json` that skips DB table writes and posts directly to keywords API
+- **Key difference**: Original writes to `pa.basements_hp_joep` table, checks redirects via DB updates, then reads back and posts. Simplified version processes everything in-memory
+- **Homepage basement**: ALL URLs must be posted as `deepestCategoryId: 0` (homepage), not per cat_id from Redshift
+- **n8n SplitInBatches gotcha**: "done" output only passes through items from the last batch, not all accumulated items. For ~100 items, skip SplitInBatches entirely — HTTP Request node iterates over all items automatically
+- **n8n HTTP body gotcha**: `contentType: "raw"` with `body: "={{$json}}"` may not serialize objects correctly. Pre-stringify with `JSON.stringify()` in a Code node and pass the string as body
+- **Redshift query returns strings**: `cat_id` and `order` come back as strings — cast with `Number()` before posting to keywords API
+- **Date**: 2026-03-31
+
 ## DMA Bid Strategy Automation Script
 - **Location**: `C:\Users\JoepvanSchagen\Downloads\Python\scripts_def\DMA_verhogingen_verlagingen.py`
 - **Purpose**: Automatically adjust DMA campaign bid strategies (Level 1/2/3) based on profit, OPB, and clicks
