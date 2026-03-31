@@ -470,6 +470,10 @@ async function validateFaqLinks() {
     }
 }
 
+async function cancelFaqValidation(taskId) {
+    try { await fetch(`${API_BASE}/api/faq/validate-all-links/cancel/${taskId}`, { method: 'POST' }); } catch (e) {}
+}
+
 async function validateAllFaqLinks() {
     const validateBtn = document.getElementById('validateBtn');
     const validateAllBtn = document.getElementById('validateAllBtn');
@@ -507,7 +511,15 @@ async function validateAllFaqLinks() {
                         <div class="d-flex justify-content-between mb-1"><span>Validating... ${(data.validated || 0).toLocaleString()} / ${(data.total_to_validate || 0).toLocaleString()} FAQs</span><span>${pct}%</span></div>
                         <small class="text-muted d-block">Links checked: ${(data.total_links_checked || 0).toLocaleString()} | Gone: ${data.gone_links || 0} | Corrected: ${data.reset_to_pending || 0}</small>
                     </div>
-                    <div class="progress" style="height: 14px; border-radius: 7px;"><div class="progress-bar" role="progressbar" style="width: ${pct}%; background-color: #5e4a90;" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"></div></div>`;
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="progress flex-grow-1" style="height: 14px; border-radius: 7px;"><div class="progress-bar" role="progressbar" style="width: ${pct}%; background-color: #5e4a90;" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"></div></div>
+                        <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelFaqValidation('${taskId}')">Cancel</button>
+                    </div>`;
+                } else if (data.status === 'cancelled') {
+                    clearInterval(poll);
+                    resultDiv.innerHTML = `<div class="alert alert-info"><strong>Validation cancelled.</strong><br>Validated ${(data.validated || 0).toLocaleString()} FAQs before stopping.</div>`;
+                    await refreshFaqStatus();
+                    validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
                 } else if (data.status === 'completed') {
                     clearInterval(poll);
                     if (data.total_links_checked === 0) {

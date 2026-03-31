@@ -981,6 +981,16 @@ def get_validate_all_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
+@app.post("/api/validate-all-links/cancel/{task_id}")
+def cancel_validate_all(task_id: str):
+    """Cancel a running validate-all task."""
+    task = _get_validation_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task["cancel"] = True
+    _set_validation_task(task_id, task)
+    return {"status": "cancelling", "message": "Cancellation requested. Will stop after current batch."}
+
 @app.post("/api/validate-all-links")
 def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
     """Start background validation of ALL content URLs. Returns task_id for polling."""
@@ -1013,6 +1023,13 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
             total_moved_to_pending = 0
 
             while True:
+                # Check for cancellation
+                task_state = _get_validation_task(task_id)
+                if task_state and task_state.get("cancel"):
+                    _set_validation_task(task_id, {"status": "cancelled", "total_to_validate": total_to_validate, "validated": total_validated, "urls_corrected": total_urls_corrected, "moved_to_pending": total_moved_to_pending})
+                    print(f"[VALIDATE-ALL] Cancelled at {total_validated} URLs.")
+                    return
+
                 conn = get_db_connection()
                 cur = conn.cursor()
 
@@ -1756,6 +1773,16 @@ def get_faq_validate_all_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
+@app.post("/api/faq/validate-all-links/cancel/{task_id}")
+def cancel_faq_validate_all(task_id: str):
+    """Cancel a running FAQ validate-all task."""
+    task = _get_validation_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task["cancel"] = True
+    _set_validation_task(task_id, task)
+    return {"status": "cancelling", "message": "Cancellation requested. Will stop after current batch."}
+
 @app.post("/api/faq/validate-all-links")
 def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
     """Start background validation of ALL FAQ links. Returns task_id for polling."""
@@ -1791,10 +1818,16 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
         total_gone_links = 0
 
         while True:
+            # Check for cancellation
+            task_state = _get_validation_task(task_id)
+            if task_state and task_state.get("cancel"):
+                _set_validation_task(task_id, {"status": "cancelled", "total_to_validate": total_to_validate, "validated": total_validated, "total_links_checked": total_links_checked, "gone_links": total_gone_links, "reset_to_pending": total_reset})
+                print(f"[FAQ-VALIDATE] Cancelled at {total_validated} FAQs.")
+                return
+
             conn = get_db_connection()
             cur = conn.cursor()
 
-            # Get next batch of unvalidated FAQs (LEFT JOIN)
             cur.execute("""
                 SELECT c.url, c.faq_json
                 FROM pa.faq_content c
