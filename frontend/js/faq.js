@@ -78,7 +78,7 @@ async function refreshFaqStatus() {
                                 <div class="full-content d-none" id="faq-full-${index}">
                                     <div class="mb-1" style="font-size: 0.875rem;"></div>
                                 </div>
-                                <button class="btn btn-sm btn-link p-0" onclick="toggleFaqContent(${index})">
+                                <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onclick="toggleFaqContent(${index})">
                                     <span id="faq-toggle-text-${index}">View All FAQs</span>
                                 </button>
                             </div>
