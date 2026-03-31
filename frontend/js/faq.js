@@ -492,40 +492,37 @@ async function validateAllFaqLinks() {
         const response = await fetch(`${API_BASE}/api/faq/validate-all-links?parallel_workers=${workers}&batch_size=${batchSize}`, {
             method: 'POST'
         });
+        const startData = await response.json();
+        const taskId = startData.task_id;
 
-        const data = await response.json();
+        // Poll for progress
+        const poll = setInterval(async () => {
+            try {
+                const statusRes = await fetch(`${API_BASE}/api/faq/validate-all-links/status/${taskId}`);
+                const data = await statusRes.json();
 
-        if (!response.ok) {
-            throw new Error(data.detail || 'Validation failed');
-        }
-
-        if (data.total_links_checked === 0) {
-            resultDiv.innerHTML = `
-                <div class="alert alert-warning">
-                    <strong>No content to validate</strong><br>
-                    All URLs have already been validated.
-                </div>
-            `;
-        } else {
-            resultDiv.innerHTML = `
-                <div class="alert ${data.reset_to_pending > 0 ? 'alert-warning' : 'alert-success'}">
-                    <strong>Validation Complete!</strong><br>
-                    Total validated: ${data.total_links_checked} items<br>
-                    Gone links: ${data.gone_links || 0}<br>
-                    Moved to pending (gone products): ${data.reset_to_pending}
-                </div>
-            `;
-        }
-
-        await refreshFaqStatus();
+                if (data.status === 'running') {
+                    resultDiv.innerHTML = `<div class="alert alert-warning">Validating... ${(data.validated || 0).toLocaleString()} FAQs processed so far. Links checked: ${(data.total_links_checked || 0).toLocaleString()}, Gone: ${data.gone_links || 0}, Reset: ${data.reset_to_pending || 0}</div>`;
+                } else if (data.status === 'completed') {
+                    clearInterval(poll);
+                    if (data.total_links_checked === 0) {
+                        resultDiv.innerHTML = `<div class="alert alert-warning"><strong>No content to validate</strong><br>All URLs have already been validated.</div>`;
+                    } else {
+                        resultDiv.innerHTML = `<div class="alert ${data.reset_to_pending > 0 ? 'alert-warning' : 'alert-success'}"><strong>Validation Complete!</strong><br>Total validated: ${(data.total_links_checked || 0).toLocaleString()} items<br>Gone links: ${data.gone_links || 0}<br>Moved to pending (gone products): ${data.reset_to_pending}</div>`;
+                    }
+                    await refreshFaqStatus();
+                    validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
+                } else if (data.status === 'error') {
+                    clearInterval(poll);
+                    resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+                    validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
+                }
+            } catch (e) { /* polling error, keep trying */ }
+        }, 3000);
 
     } catch (error) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
-    } finally {
-        validateBtn.disabled = false;
-        validateAllBtn.disabled = false;
-        resetBtn.disabled = false;
-        validateAllBtn.textContent = 'Validate All';
+        validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
     }
 }
 

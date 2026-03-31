@@ -13,8 +13,19 @@ import asyncio
 import tempfile
 import time
 import re
+import threading
+import uuid
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
+
+# In-memory store for background validation tasks
+_validation_tasks = {}
+
+def _get_validation_task(task_id):
+    return _validation_tasks.get(task_id)
+
+def _set_validation_task(task_id, data):
+    _validation_tasks[task_id] = data
 from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection
 from backend.scraper_service import scrape_product_page, scrape_product_page_api, sanitize_content, is_main_category_url, MAIN_CATEGORY_H1
 from backend.gpt_service import generate_product_content, generate_main_category_content, check_content_has_valid_links
@@ -962,162 +973,126 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/validate-all-links/status/{task_id}")
+def get_validate_all_status(task_id: str):
+    """Poll progress of a running validate-all task."""
+    task = _get_validation_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
 @app.post("/api/validate-all-links")
 def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
-    """
-    Validate ALL content URLs that haven't been validated yet.
+    """Start background validation of ALL content URLs. Returns task_id for polling."""
+    if parallel_workers < 1 or parallel_workers > 20:
+        raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+    if batch_size < 1 or batch_size > 500:
+        raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
 
-    This runs until all URLs are validated or an error occurs.
-    Returns summary of all validations performed.
+    task_id = str(uuid.uuid4())[:8]
+    _set_validation_task(task_id, {"status": "running", "validated": 0, "urls_corrected": 0, "moved_to_pending": 0})
 
-    Args:
-        parallel_workers: Number of parallel workers (1-20)
-        batch_size: Number of URLs to process per batch (1-500)
-    """
-    try:
-        if parallel_workers < 1 or parallel_workers > 20:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
-        if batch_size < 1 or batch_size > 500:
-            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
+    def run_validation():
+        try:
+            total_validated = 0
+            total_urls_corrected = 0
+            total_moved_to_pending = 0
 
-        total_validated = 0
-        total_urls_corrected = 0
-        total_moved_to_pending = 0
+            while True:
+                conn = get_db_connection()
+                cur = conn.cursor()
 
-        while True:
-            # Use local PostgreSQL for all operations
-            conn = get_db_connection()
-            cur = conn.cursor()
+                cur.execute("""
+                    SELECT c.url, c.content
+                    FROM pa.content_urls_joep c
+                    LEFT JOIN pa.link_validation_results v ON c.url = v.content_url
+                    WHERE v.content_url IS NULL
+                    LIMIT %s
+                """, (batch_size,))
 
-            # Fetch unvalidated content URLs using LEFT JOIN for efficiency
-            cur.execute("""
-                SELECT c.url, c.content
-                FROM pa.content_urls_joep c
-                LEFT JOIN pa.link_validation_results v ON c.url = v.content_url
-                WHERE v.content_url IS NULL
-                LIMIT %s
-            """, (batch_size,))
+                rows = cur.fetchall()
 
-            rows = cur.fetchall()
+                if not rows:
+                    cur.close()
+                    return_db_connection(conn)
+                    break
 
-            if not rows:
+                content_items = [(row['url'], row['content']) for row in rows]
+
+                with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                    validation_results = list(executor.map(validate_single_content_es, content_items))
+
+                urls_corrected = 0
+                moved_to_pending = 0
+                urls_with_gone_products = []
+                urls_to_update_content = []
+                url_to_gone_details = {}
+
+                for validation_result in validation_results:
+                    content_url = validation_result['content_url']
+                    has_replaced = len(validation_result['replaced_urls']) > 0
+                    has_gone = len(validation_result['gone_urls']) > 0
+                    total_links = len(validation_result['valid_urls']) + len(validation_result['replaced_urls']) + len(validation_result['gone_urls'])
+
+                    cur.execute("""
+                        INSERT INTO pa.link_validation_results
+                        (content_url, total_links, broken_links, valid_links, broken_link_details)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (
+                        content_url, total_links,
+                        len(validation_result['gone_urls']),
+                        len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),
+                        json.dumps({'gone_urls': validation_result['gone_urls'], 'replaced_urls': validation_result['replaced_urls']})
+                    ))
+
+                    if has_replaced and not has_gone:
+                        urls_to_update_content.append((content_url, validation_result['corrected_content']))
+                        urls_corrected += 1
+
+                    if has_gone:
+                        urls_with_gone_products.append(content_url)
+                        url_to_gone_details[content_url] = validation_result['gone_urls']
+                        moved_to_pending += 1
+
+                if urls_to_update_content:
+                    cur.executemany("""
+                        UPDATE pa.content_urls_joep SET content = %s WHERE url = %s
+                    """, urls_to_update_content)
+
+                if urls_with_gone_products:
+                    placeholders = ','.join(['%s'] * len(urls_with_gone_products))
+                    cur.execute(f"SELECT url, content, created_at FROM pa.content_urls_joep WHERE url IN ({placeholders})", urls_with_gone_products)
+                    for row in cur.fetchall():
+                        gone_urls = url_to_gone_details.get(row['url'], [])
+                        cur.execute("INSERT INTO pa.content_history (url, content, reset_reason, reset_details, original_created_at) VALUES (%s, %s, %s, %s, %s)",
+                            (row['url'], row['content'], 'gone_products', json.dumps({'gone_urls': gone_urls}), row['created_at']))
+                    cur.execute(f"DELETE FROM pa.content_urls_joep WHERE url IN ({placeholders})", urls_with_gone_products)
+                    cur.execute(f"DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE url IN ({placeholders})", urls_with_gone_products)
+                    cur.execute(f"DELETE FROM pa.url_validation_tracking WHERE url IN ({placeholders})", urls_with_gone_products)
+                    cur.executemany("INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten) VALUES (%s, 0) ON CONFLICT (url) DO UPDATE SET kopteksten = 0",
+                        [(url,) for url in urls_with_gone_products])
+
+                conn.commit()
                 cur.close()
                 return_db_connection(conn)
-                break  # No more URLs to validate
 
-            # Prepare content items for parallel validation
-            content_items = [(row['url'], row['content']) for row in rows]
+                total_validated += len(rows)
+                total_urls_corrected += urls_corrected
+                total_moved_to_pending += moved_to_pending
+                print(f"[VALIDATE-ALL] Batch complete: {len(rows)} validated, {urls_corrected} corrected, {moved_to_pending} moved to pending. Total so far: {total_validated}")
+                _set_validation_task(task_id, {"status": "running", "validated": total_validated, "urls_corrected": total_urls_corrected, "moved_to_pending": total_moved_to_pending})
 
-            # Process validations in parallel using ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-                validation_results = list(executor.map(validate_single_content_es, content_items))
+            _set_validation_task(task_id, {
+                "status": "completed",
+                "validated": total_validated,
+                "urls_corrected": total_urls_corrected,
+                "moved_to_pending": total_moved_to_pending
+            })
+        except Exception as e:
+            _set_validation_task(task_id, {"status": "error", "error": str(e)})
 
-            urls_corrected = 0
-            moved_to_pending = 0
-            urls_with_gone_products = []
-            urls_to_update_content = []
-            url_to_content = {url: content for url, content in content_items}  # For backup
-            url_to_gone_details = {}  # Store gone_urls details for backup
-
-            # Process validation results
-            for validation_result in validation_results:
-                content_url = validation_result['content_url']
-                has_replaced = len(validation_result['replaced_urls']) > 0
-                has_gone = len(validation_result['gone_urls']) > 0
-
-                total_links = len(validation_result['valid_urls']) + len(validation_result['replaced_urls']) + len(validation_result['gone_urls'])
-
-                # Save validation results to local tracking table
-                cur.execute("""
-                    INSERT INTO pa.link_validation_results
-                    (content_url, total_links, broken_links, valid_links, broken_link_details)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (
-                    content_url,
-                    total_links,
-                    len(validation_result['gone_urls']),
-                    len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),
-                    json.dumps({
-                        'gone_urls': validation_result['gone_urls'],
-                        'replaced_urls': validation_result['replaced_urls']
-                    })
-                ))
-
-                if has_replaced and not has_gone:
-                    urls_to_update_content.append((content_url, validation_result['corrected_content']))
-                    urls_corrected += 1
-
-                if has_gone:
-                    urls_with_gone_products.append(content_url)
-                    url_to_gone_details[content_url] = validation_result['gone_urls']
-                    moved_to_pending += 1
-
-            # Update corrected content in local database (batched for performance)
-            if urls_to_update_content:
-                cur.executemany("""
-                    UPDATE pa.content_urls_joep
-                    SET content = %s
-                    WHERE url = %s
-                """, urls_to_update_content)
-
-            # Delete/reset operations for gone products only
-            if urls_with_gone_products:
-                placeholders = ','.join(['%s'] * len(urls_with_gone_products))
-
-                # Backup content to history table before deletion
-                cur.execute(f"""
-                    SELECT url, content, created_at FROM pa.content_urls_joep
-                    WHERE url IN ({placeholders})
-                """, urls_with_gone_products)
-                content_to_backup = cur.fetchall()
-
-                for row in content_to_backup:
-                    url = row['url']
-                    gone_urls = url_to_gone_details.get(url, [])
-                    cur.execute("""
-                        INSERT INTO pa.content_history (url, content, reset_reason, reset_details, original_created_at)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (url, row['content'], 'gone_products', json.dumps({'gone_urls': gone_urls}), row['created_at']))
-
-                cur.execute(f"""
-                    DELETE FROM pa.content_urls_joep
-                    WHERE url IN ({placeholders})
-                """, urls_with_gone_products)
-                cur.execute(f"""
-                    DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
-                    WHERE url IN ({placeholders})
-                """, urls_with_gone_products)
-                cur.execute(f"""
-                    DELETE FROM pa.url_validation_tracking
-                    WHERE url IN ({placeholders})
-                """, urls_with_gone_products)
-                # Add URLs to werkvoorraad for reprocessing (batched for performance)
-                cur.executemany("""
-                    INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
-                    VALUES (%s, 0)
-                    ON CONFLICT (url) DO UPDATE SET kopteksten = 0
-                """, [(url,) for url in urls_with_gone_products])
-
-            conn.commit()
-            cur.close()
-            return_db_connection(conn)
-
-            total_validated += len(rows)
-            total_urls_corrected += urls_corrected
-            total_moved_to_pending += moved_to_pending
-
-            print(f"[VALIDATE-ALL] Batch complete: {len(rows)} validated, {urls_corrected} corrected, {moved_to_pending} moved to pending. Total so far: {total_validated}")
-
-        return {
-            "status": "success",
-            "message": f"Validated all {total_validated} content URLs",
-            "validated": total_validated,
-            "urls_corrected": total_urls_corrected,
-            "moved_to_pending": total_moved_to_pending
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    threading.Thread(target=run_validation, daemon=True).start()
+    return {"task_id": task_id, "status": "started", "message": "Validation started in background. Poll /api/validate-all-links/status/{task_id} for progress."}
 
 @app.get("/api/validation-history")
 async def get_validation_history(limit: int = 20):
@@ -1759,28 +1734,30 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/faq/validate-all-links/status/{task_id}")
+def get_faq_validate_all_status(task_id: str):
+    """Poll progress of a running FAQ validate-all task."""
+    task = _get_validation_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
 @app.post("/api/faq/validate-all-links")
 def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
-    """
-    Validate ALL unvalidated FAQ links until complete.
-
-    - Only validates FAQs that haven't been validated yet
-    - Processes in batches, resetting any with gone products to pending
-    - Records validation results to avoid re-validating
-
-    Args:
-        parallel_workers: Number of parallel workers (1-20)
-        batch_size: Number of FAQs to process per batch (1-1000)
-    """
+    """Start background validation of ALL FAQ links. Returns task_id for polling."""
     from backend.link_validator import validate_faq_links, reset_faq_to_pending
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    try:
-        if parallel_workers < 1 or parallel_workers > 20:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
-        if batch_size < 1 or batch_size > 1000:
-            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 1000")
+    if parallel_workers < 1 or parallel_workers > 20:
+        raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+    if batch_size < 1 or batch_size > 1000:
+        raise HTTPException(status_code=400, detail="Batch size must be between 1 and 1000")
 
+    task_id = str(uuid.uuid4())[:8]
+    _set_validation_task(task_id, {"status": "running", "validated": 0, "total_links_checked": 0, "gone_links": 0, "reset_to_pending": 0})
+
+    def run_faq_validation():
+      try:
         total_validated = 0
         total_reset = 0
         total_links_checked = 0
@@ -1862,18 +1839,20 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
 
             total_validated += len(rows)
             print(f"[FAQ-VALIDATE] Batch complete: {len(rows)} validated, {len(batch_urls_with_gone)} reset. Total: {total_validated}")
+            _set_validation_task(task_id, {"status": "running", "validated": total_validated, "total_links_checked": total_links_checked, "gone_links": total_gone_links, "reset_to_pending": total_reset})
 
-        return {
-            "status": "success",
-            "message": f"Validated all {total_validated} unvalidated FAQs",
+        _set_validation_task(task_id, {
+            "status": "completed",
             "validated": total_validated,
             "total_links_checked": total_links_checked,
             "gone_links": total_gone_links,
             "reset_to_pending": total_reset
-        }
+        })
+      except Exception as e:
+        _set_validation_task(task_id, {"status": "error", "error": str(e)})
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    threading.Thread(target=run_faq_validation, daemon=True).start()
+    return {"task_id": task_id, "status": "started", "message": "FAQ validation started in background. Poll /api/faq/validate-all-links/status/{task_id} for progress."}
 
 
 @app.delete("/api/faq/validation-history/reset")
