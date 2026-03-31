@@ -990,7 +990,21 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
         raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
 
     task_id = str(uuid.uuid4())[:8]
-    _set_validation_task(task_id, {"status": "running", "validated": 0, "urls_corrected": 0, "moved_to_pending": 0})
+
+    # Count total to validate upfront
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""SELECT COUNT(*) as cnt FROM pa.content_urls_joep c
+            LEFT JOIN pa.link_validation_results v ON c.url = v.content_url
+            WHERE v.content_url IS NULL""")
+        total_to_validate = cur.fetchone()['cnt']
+        cur.close()
+        return_db_connection(conn)
+    except Exception:
+        total_to_validate = 0
+
+    _set_validation_task(task_id, {"status": "running", "validated": 0, "total_to_validate": total_to_validate, "urls_corrected": 0, "moved_to_pending": 0})
 
     def run_validation():
         try:
@@ -1080,7 +1094,7 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                 total_urls_corrected += urls_corrected
                 total_moved_to_pending += moved_to_pending
                 print(f"[VALIDATE-ALL] Batch complete: {len(rows)} validated, {urls_corrected} corrected, {moved_to_pending} moved to pending. Total so far: {total_validated}")
-                _set_validation_task(task_id, {"status": "running", "validated": total_validated, "urls_corrected": total_urls_corrected, "moved_to_pending": total_moved_to_pending})
+                _set_validation_task(task_id, {"status": "running", "total_to_validate": total_to_validate, "validated": total_validated, "urls_corrected": total_urls_corrected, "moved_to_pending": total_moved_to_pending})
 
             _set_validation_task(task_id, {
                 "status": "completed",
@@ -1754,7 +1768,20 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
         raise HTTPException(status_code=400, detail="Batch size must be between 1 and 1000")
 
     task_id = str(uuid.uuid4())[:8]
-    _set_validation_task(task_id, {"status": "running", "validated": 0, "total_links_checked": 0, "gone_links": 0, "reset_to_pending": 0})
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""SELECT COUNT(*) as cnt FROM pa.faq_content c
+            LEFT JOIN pa.faq_validation_results v ON c.url = v.url
+            WHERE c.faq_json IS NOT NULL AND v.url IS NULL""")
+        total_to_validate = cur.fetchone()['cnt']
+        cur.close()
+        return_db_connection(conn)
+    except Exception:
+        total_to_validate = 0
+
+    _set_validation_task(task_id, {"status": "running", "validated": 0, "total_to_validate": total_to_validate, "total_links_checked": 0, "gone_links": 0, "reset_to_pending": 0})
 
     def run_faq_validation():
       try:
@@ -1839,7 +1866,7 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
 
             total_validated += len(rows)
             print(f"[FAQ-VALIDATE] Batch complete: {len(rows)} validated, {len(batch_urls_with_gone)} reset. Total: {total_validated}")
-            _set_validation_task(task_id, {"status": "running", "validated": total_validated, "total_links_checked": total_links_checked, "gone_links": total_gone_links, "reset_to_pending": total_reset})
+            _set_validation_task(task_id, {"status": "running", "total_to_validate": total_to_validate, "validated": total_validated, "total_links_checked": total_links_checked, "gone_links": total_gone_links, "reset_to_pending": total_reset})
 
         _set_validation_task(task_id, {
             "status": "completed",

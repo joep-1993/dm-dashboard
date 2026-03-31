@@ -824,7 +824,12 @@ async function validateAllLinks() {
                 const data = await statusRes.json();
 
                 if (data.status === 'running') {
-                    resultDiv.innerHTML = `<div class="alert alert-warning">Validating... ${(data.validated || 0).toLocaleString()} URLs processed so far. Corrected: ${data.urls_corrected || 0}, Moved to pending: ${data.moved_to_pending || 0}</div>`;
+                    const pct = data.total_to_validate > 0 ? Math.round((data.validated / data.total_to_validate) * 100) : 0;
+                    resultDiv.innerHTML = `<div class="alert alert-warning">
+                        <div class="d-flex justify-content-between mb-1"><span>Validating... ${(data.validated || 0).toLocaleString()} / ${(data.total_to_validate || 0).toLocaleString()} URLs</span><span>${pct}%</span></div>
+                        <div class="progress" style="height: 8px;"><div class="progress-bar bg-primary" style="width: ${pct}%"></div></div>
+                        <small class="text-muted mt-1 d-block">Corrected: ${data.urls_corrected || 0} | Moved to pending: ${data.moved_to_pending || 0}</small>
+                    </div>`;
                 } else if (data.status === 'completed') {
                     clearInterval(poll);
                     if (data.validated === 0) {
