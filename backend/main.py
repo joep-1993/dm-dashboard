@@ -385,23 +385,26 @@ def get_status():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Combined query for all counts (reduces 5 queries to 1)
+        # All counts from werkvoorraad — each URL in exactly one bucket
+        # Priority: processed > failed > skipped > pending
         cur.execute("""
             SELECT
-                (SELECT COUNT(DISTINCT url) FROM pa.content_urls_joep WHERE content IS NOT NULL) as processed,
-                (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'failed') as failed,
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
-                 LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
-                 LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
-                 WHERE t.url IS NULL AND v.url IS NULL) as pending
+                COUNT(*) as total,
+                COUNT(CASE WHEN c.url IS NOT NULL THEN 1 END) as processed,
+                COUNT(CASE WHEN c.url IS NULL AND k.status = 'failed' THEN 1 END) as failed,
+                COUNT(CASE WHEN c.url IS NULL AND k.status IS DISTINCT FROM 'failed' AND v.status = 'skipped' THEN 1 END) as skipped,
+                COUNT(CASE WHEN c.url IS NULL AND k.status IS DISTINCT FROM 'failed' AND v.status IS DISTINCT FROM 'skipped' THEN 1 END) as pending
+            FROM pa.jvs_seo_werkvoorraad w
+            LEFT JOIN (SELECT DISTINCT url FROM pa.content_urls_joep WHERE content IS NOT NULL) c ON w.url = c.url
+            LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check k ON w.url = k.url
+            LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
         """)
         counts = cur.fetchone()
+        total = counts['total']
         processed = counts['processed']
-        skipped = counts['skipped']
         failed = counts['failed']
+        skipped = counts['skipped']
         pending = counts['pending']
-        total = processed + skipped + failed + pending
 
         # Get recent results from local PostgreSQL
         try:
@@ -1346,23 +1349,26 @@ def get_faq_status():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Combined query for FAQ counts
+        # All counts from werkvoorraad — each URL in exactly one bucket
+        # Priority: processed > failed > skipped > pending
         cur.execute("""
             SELECT
-                (SELECT COUNT(*) FROM pa.faq_content) as processed,
-                (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
-                (SELECT COUNT(*) FROM pa.faq_tracking WHERE status = 'failed') as failed,
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
-                 LEFT JOIN pa.faq_tracking t ON w.url = t.url
-                 LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
-                 WHERE (t.url IS NULL OR t.status = 'pending') AND v.url IS NULL) as pending
+                COUNT(*) as total,
+                COUNT(CASE WHEN f.url IS NOT NULL THEN 1 END) as processed,
+                COUNT(CASE WHEN f.url IS NULL AND t.status = 'failed' THEN 1 END) as failed,
+                COUNT(CASE WHEN f.url IS NULL AND t.status IS DISTINCT FROM 'failed' AND v.status = 'skipped' THEN 1 END) as skipped,
+                COUNT(CASE WHEN f.url IS NULL AND t.status IS DISTINCT FROM 'failed' AND v.status IS DISTINCT FROM 'skipped' THEN 1 END) as pending
+            FROM pa.jvs_seo_werkvoorraad w
+            LEFT JOIN pa.faq_content f ON w.url = f.url
+            LEFT JOIN pa.faq_tracking t ON w.url = t.url
+            LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
         """)
         counts = cur.fetchone()
+        total = counts['total']
         processed = counts['processed']
-        skipped = counts['skipped']
         failed = counts['failed']
+        skipped = counts['skipped']
         pending = counts['pending']
-        total = processed + skipped + failed + pending
 
         # Get recent FAQ results
         try:

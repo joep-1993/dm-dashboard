@@ -799,6 +799,10 @@ async function validateAllLinks() {
         return;
     }
 
+    if (!confirm('This will validate all unvalidated content links. Continue?')) {
+        return;
+    }
+
     // Disable buttons
     validateBtn.disabled = true;
     validateAllBtn.disabled = true;
