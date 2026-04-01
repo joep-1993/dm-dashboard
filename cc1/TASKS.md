@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add DMA Bidding tool — backend service (438 lines), router (5 endpoints), frontend with stats/dry run/include-exclude/results tables/CSV export/history. Ported from standalone DMA_verhogingen_verlagingen.py script #claude-session:2026-04-01
+- [x] Background task pattern for recheck-skipped-urls — progress bar + cancel button, matching validate-all pattern, both Kopteksten and FAQ #claude-session:2026-04-01
 - [x] Unify URL counts — werkvoorraad as single source of truth for total, added 33 missing URLs to werkvoorraad, fast subqueries (no heavy JOINs), both tools show same total (292,975). Also synced validate-all confirm dialog + button colors between Kopteksten and FAQ #claude-session:2026-03-31
 - [x] Quality audit + fixes — removed orphaned dashboard loadStats() JS, added date validation to IndexNow export endpoint, made GSD service account auto-detect, added missing footer to Keyword Planner, styled Test API Connection button #claude-session:2026-03-31
 - [x] Build GSD Campaigns tool — full Google Shopping campaign management in DM Tools. Backend: `gsd_campaigns_service.py` (1,247 lines ported from standalone script), `gsd_campaigns_router.py` (7 API endpoints). Frontend: `gsd-campaigns.html` with stats cards, campaign table (sortable, paginated, filterable), run script with date/shop filters, pause/enable/remove per campaign, activity log, xlsx export. Queries Google Ads API for campaigns with `GSD_SCRIPT` label across 5 accounts (NL/BE/DE CPR + NL/BE CPC) #claude-session:2026-03-31
