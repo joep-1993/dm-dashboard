@@ -396,20 +396,24 @@ def get_status():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Fast subqueries — werkvoorraad as total, pending derived
+        # Count pending directly (same logic as process_urls query)
         cur.execute("""
             SELECT
                 (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad) as total,
                 (SELECT COUNT(DISTINCT url) FROM pa.content_urls_joep WHERE content IS NOT NULL) as processed,
                 (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'failed') as failed
+                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'failed') as failed,
+                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
+                 LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
+                 LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
+                 WHERE t.url IS NULL AND v.url IS NULL) as pending
         """)
         counts = cur.fetchone()
         total = counts['total']
-        processed = min(counts['processed'], total)
+        processed = counts['processed']
         skipped = counts['skipped']
         failed = counts['failed']
-        pending = max(0, total - processed - skipped - failed)
+        pending = counts['pending']
 
         # Get recent results from local PostgreSQL
         try:
@@ -1349,20 +1353,24 @@ def get_faq_status():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Fast subqueries — werkvoorraad as total, pending derived
+        # Count pending directly (same logic as process_faq_urls query)
         cur.execute("""
             SELECT
                 (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad) as total,
                 (SELECT COUNT(*) FROM pa.faq_content) as processed,
                 (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
-                (SELECT COUNT(*) FROM pa.faq_tracking WHERE status = 'failed') as failed
+                (SELECT COUNT(*) FROM pa.faq_tracking WHERE status = 'failed') as failed,
+                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
+                 LEFT JOIN pa.faq_tracking t ON w.url = t.url
+                 LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
+                 WHERE (t.url IS NULL OR t.status = 'pending') AND v.url IS NULL) as pending
         """)
         counts = cur.fetchone()
         total = counts['total']
-        processed = min(counts['processed'], total)
+        processed = counts['processed']
         skipped = counts['skipped']
         failed = counts['failed']
-        pending = max(0, total - processed - skipped - failed)
+        pending = counts['pending']
 
         # Get recent FAQ results
         try:
