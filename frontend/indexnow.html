@@ -8,6 +8,9 @@
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
         .result-badge { font-size: 0.85rem; }
+        .history-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0; font-size: 0.9rem; }
+        .history-grid .hg-header { font-weight: bold; padding: 0.5rem; border-bottom: 2px solid #dee2e6; text-align: center; }
+        .history-grid .hg-cell { padding: 0.5rem; border-bottom: 1px solid #dee2e6; display: flex; align-items: center; justify-content: center; }
         .batch-row td { vertical-align: middle; }
         .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
@@ -346,7 +349,8 @@
                     return;
                 }
 
-                let html = '<table class="table table-sm table-striped"><thead><tr><th>Date</th><th>Response</th><th>URLs</th><th></th></tr></thead><tbody>';
+                let html = '<div class="history-grid">';
+                html += '<div class="hg-header">Date</div><div class="hg-header hg-center">Response</div><div class="hg-header">URLs</div><div class="hg-header hg-end">Export</div>';
                 history.forEach(h => {
                     let badgeStyle;
                     if (h.response_code === 200) badgeStyle = 'border: 1px solid #00b894; color: #00b894;';
@@ -354,9 +358,9 @@
                     else badgeStyle = 'border: 1px solid #d63031; color: #d63031;';
                     const badge = `<span class="badge" style="${badgeStyle} background: transparent;">${h.response_code}</span>`;
                     const exportBtn = `<a href="${API_BASE}/api/indexnow/export/${h.date}" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'">Export</a>`;
-                    html += `<tr><td>${h.date}</td><td>${badge}</td><td>${h.url_count.toLocaleString()}</td><td>${exportBtn}</td></tr>`;
+                    html += `<div class="hg-cell">${h.date}</div><div class="hg-cell hg-center">${badge}</div><div class="hg-cell">${h.url_count.toLocaleString()}</div><div class="hg-cell hg-end">${exportBtn}</div>`;
                 });
-                html += '</tbody></table>';
+                html += '</div>';
                 container.innerHTML = html;
             } catch (error) {
                 container.innerHTML = `<p class="text-danger">Error: ${error.message}</p>`;

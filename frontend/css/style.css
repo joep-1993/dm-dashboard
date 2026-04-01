@@ -76,8 +76,8 @@ body {
     background: transparent;
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.5);
-    padding: 0.75rem 1.5rem;
-    font-size: 1.5rem;
+    padding: 0.4rem 0.85rem;
+    font-size: 1.1rem;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
@@ -144,9 +144,9 @@ body {
 
 /* Dashboard button - match top-level menu style */
 .nav-dashboard-btn {
-    font-size: 1.5rem !important;
+    font-size: 1.1rem !important;
     font-weight: 700 !important;
-    padding: 0.75rem 1.5rem !important;
+    padding: 0.4rem 0.85rem !important;
     display: inline-flex !important;
     align-items: center !important;
     border-radius: 0.3rem !important;
