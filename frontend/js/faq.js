@@ -13,6 +13,16 @@ window.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('publishStats')) {
         refreshPublishStats();
     }
+
+    // FAQ URL Lookup
+    const faqLookupBtn = document.getElementById('faqLookupBtn');
+    const faqLookupUrlInput = document.getElementById('faqLookupUrl');
+    if (faqLookupBtn && faqLookupUrlInput) {
+        faqLookupBtn.addEventListener('click', lookupFaqContent);
+        faqLookupUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') lookupFaqContent();
+        });
+    }
 });
 
 // Auto-refresh status every 30 seconds
@@ -78,7 +88,7 @@ async function refreshFaqStatus() {
                                 <div class="full-content d-none" id="faq-full-${index}">
                                     <div class="mb-1" style="font-size: 0.875rem;"></div>
                                 </div>
-                                <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onclick="toggleFaqContent(${index})">
+                                <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="toggleFaqContent(${index})">
                                     <span id="faq-toggle-text-${index}">View All FAQs</span>
                                 </button>
                             </div>
@@ -815,4 +825,90 @@ async function pollPublishStatus(taskId, resultDiv, publishBtn) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error checking status: ${error.message}</div>`;
         publishBtn.disabled = false;
     }
+}
+
+// ============================================================================
+// FAQ URL Lookup
+// ============================================================================
+
+async function lookupFaqContent() {
+    const url = document.getElementById('faqLookupUrl').value.trim();
+    const resultDiv = document.getElementById('faqLookupResult');
+
+    if (!url) {
+        resultDiv.innerHTML = '<div class="alert alert-warning">Please enter a URL</div>';
+        return;
+    }
+
+    resultDiv.innerHTML = '<p class="text-muted"><span class="spinner-border spinner-border-sm"></span> Looking up...</p>';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/faq/lookup?url=${encodeURIComponent(url)}`);
+        const data = await response.json();
+
+        if (!data.found) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-info">
+                    <strong>Not found:</strong> ${data.url}<br>
+                    <small class="text-muted">${data.message}</small>
+                </div>
+            `;
+            return;
+        }
+
+        const createdAt = data.created_at ? new Date(data.created_at).toLocaleString() : 'Unknown';
+        let faqHtml = '';
+        try {
+            const faqs = JSON.parse(data.faq_json || '[]');
+            faqHtml = faqs.map((faq, i) => `
+                <div class="mb-2 p-2 border rounded bg-light">
+                    <strong>Q${i+1}:</strong> ${escapeHtml(faq.question || '')}<br>
+                    <strong>A:</strong> <span style="font-size: 0.85rem;">${faq.answer || ''}</span>
+                </div>
+            `).join('');
+        } catch (e) {
+            faqHtml = '<p class="text-muted">Could not parse FAQ JSON</p>';
+        }
+
+        resultDiv.innerHTML = `
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <code style="word-break: break-all;">${data.url}</code>
+                    <div>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteFaqAndReset('${encodeURIComponent(data.url)}')">
+                            Delete & Reset to Pending
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">Title: <strong>${escapeHtml(data.page_title || 'N/A')}</strong> | Created: ${createdAt}</p>
+                    <div style="max-height: 400px; overflow-y: auto;">${faqHtml}</div>
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    }
+}
+
+async function deleteFaqAndReset(encodedUrl) {
+    const url = decodeURIComponent(encodedUrl);
+    if (!confirm(`Delete FAQ content and reset URL to pending?\n\n${url}`)) return;
+
+    const resultDiv = document.getElementById('faqLookupResult');
+    try {
+        const response = await fetch(`${API_BASE}/api/faq/result/${encodeURIComponent(url)}`, { method: 'DELETE' });
+        const data = await response.json();
+        resultDiv.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+        refreshFaqStatus();
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }

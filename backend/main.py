@@ -1953,6 +1953,67 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
     return {"task_id": task_id, "status": "started", "message": "FAQ validation started in background. Poll /api/faq/validate-all-links/status/{task_id} for progress."}
 
 
+@app.get("/api/faq/lookup")
+async def lookup_faq(url: str):
+    """Look up FAQ content for a specific URL."""
+    try:
+        clean_url = url.strip().lower()
+        base_url = "https://www.beslist.nl"
+        if clean_url.startswith('http'):
+            if 'beslist.nl' in clean_url:
+                path_url = '/' + clean_url.split('beslist.nl', 1)[-1].lstrip('/')
+            else:
+                path_url = clean_url
+        else:
+            if not clean_url.startswith('/'):
+                clean_url = '/' + clean_url
+            path_url = clean_url
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT url, page_title, faq_json, schema_org, created_at
+            FROM pa.faq_content
+            WHERE url = %s OR url = %s
+            LIMIT 1
+        """, (base_url + path_url, path_url))
+        row = cur.fetchone()
+        cur.close()
+        return_db_connection(conn)
+
+        if not row:
+            return {"found": False, "url": clean_url, "message": "URL not found in FAQ database"}
+
+        return {
+            "found": True,
+            "url": row['url'],
+            "page_title": row['page_title'],
+            "faq_json": row['faq_json'],
+            "schema_org": row['schema_org'],
+            "created_at": row['created_at'].isoformat() if row.get('created_at') else None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/faq/result/{url:path}")
+async def delete_faq_result(url: str):
+    """Delete FAQ content and reset URL to pending."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM pa.faq_content WHERE url = %s", (url,))
+        cur.execute("DELETE FROM pa.faq_tracking WHERE url = %s", (url,))
+        cur.execute("DELETE FROM pa.faq_validation_results WHERE url = %s", (url,))
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+        return {"status": "success", "message": f"FAQ deleted and URL reset to pending", "url": url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/faq/validation-history/reset")
 def reset_faq_validation_history():
     """
