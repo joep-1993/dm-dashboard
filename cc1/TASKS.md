@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add URL Lookup to FAQ tool — lookup endpoint, FAQ preview with Q&A display, delete & reset to pending. Purple hover on all toggle buttons (View All FAQs, View Full Content, Contract) #claude-session:2026-04-01
 - [x] Add DMA Bidding tool — backend service (438 lines), router (5 endpoints), frontend with stats/dry run/include-exclude/results tables/CSV export/history. Ported from standalone DMA_verhogingen_verlagingen.py script #claude-session:2026-04-01
 - [x] Background task pattern for recheck-skipped-urls — progress bar + cancel button, matching validate-all pattern, both Kopteksten and FAQ #claude-session:2026-04-01
 - [x] Unify URL counts — werkvoorraad as single source of truth for total, added 33 missing URLs to werkvoorraad, fast subqueries (no heavy JOINs), both tools show same total (292,975). Also synced validate-all confirm dialog + button colors between Kopteksten and FAQ #claude-session:2026-03-31
