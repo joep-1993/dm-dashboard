@@ -785,6 +785,10 @@ async function resetValidationHistory() {
 }
 
 // Validate ALL links function
+async function cancelRecheck(taskId) {
+    try { await fetch(`${API_BASE}/api/recheck-skipped-urls/cancel/${taskId}`, { method: 'POST' }); } catch (e) {}
+}
+
 async function cancelValidation(taskId) {
     try { await fetch(`${API_BASE}/api/validate-all-links/cancel/${taskId}`, { method: 'POST' }); } catch (e) {}
 }
@@ -890,53 +894,64 @@ async function recheckSkippedUrls() {
         return;
     }
 
-    // Disable buttons
     recheckBtn.disabled = true;
     validateBtn.disabled = true;
     validateAllBtn.disabled = true;
     resetBtn.disabled = true;
     recheckBtn.textContent = 'Rechecking...';
-    resultDiv.innerHTML = `<div class="alert alert-warning">Rechecking skipped URLs (batch size: ${batchSize}, workers: ${parallelWorkers})... This may take a while.</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Starting recheck of skipped URLs...</div>`;
 
     try {
-        const response = await fetch(`${API_BASE}/api/recheck-skipped-urls?parallel_workers=${parallelWorkers}&batch_size=${batchSize}`, {
-            method: 'POST'
-        });
+        const response = await fetch(`${API_BASE}/api/recheck-skipped-urls?parallel_workers=${parallelWorkers}&batch_size=${batchSize}`, { method: 'POST' });
+        const startData = await response.json();
+        const taskId = startData.task_id;
 
-        const data = await response.json();
+        const poll = setInterval(async () => {
+            try {
+                const statusRes = await fetch(`${API_BASE}/api/recheck-skipped-urls/status/${taskId}`);
+                const data = await statusRes.json();
 
-        if (!response.ok) {
-            throw new Error(data.detail || 'Recheck failed');
-        }
-
-        if (data.rechecked === 0) {
-            resultDiv.innerHTML = `
-                <div class="alert alert-info">
-                    <strong>No skipped URLs to recheck</strong><br>
-                    All skipped URLs have already been rechecked.
-                </div>
-            `;
-        } else {
-            resultDiv.innerHTML = `
-                <div class="alert alert-${data.now_eligible > 0 ? 'success' : 'info'}">
-                    <strong>Recheck Complete!</strong><br>
-                    URLs rechecked: ${data.rechecked}<br>
-                    <strong>Now eligible for content creation: ${data.now_eligible}</strong>
-                </div>
-            `;
-        }
-
-        // Refresh status counts
-        refreshStatus();
+                if (data.status === 'running') {
+                    const pct = data.total_to_recheck > 0 ? Math.round((data.rechecked / data.total_to_recheck) * 100) : 0;
+                    resultDiv.innerHTML = `
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Rechecking... ${(data.rechecked || 0).toLocaleString()} / ${(data.total_to_recheck || 0).toLocaleString()} URLs</span>
+                            <span>${pct}%</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="progress flex-grow-1" style="height: 25px;"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${pct}%"></div></div>
+                            <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelRecheck('${taskId}')">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="alert alert-warning mb-0">
+                        <small>Now eligible: ${data.now_eligible || 0}</small>
+                    </div>`;
+                } else if (data.status === 'cancelled') {
+                    clearInterval(poll);
+                    resultDiv.innerHTML = `<div class="alert alert-info"><strong>Recheck cancelled.</strong><br>Rechecked ${(data.rechecked || 0).toLocaleString()} URLs. Now eligible: ${data.now_eligible || 0}</div>`;
+                    refreshStatus();
+                    recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
+                } else if (data.status === 'completed') {
+                    clearInterval(poll);
+                    if (data.rechecked === 0) {
+                        resultDiv.innerHTML = `<div class="alert alert-info"><strong>No skipped URLs to recheck</strong><br>All skipped URLs have already been rechecked.</div>`;
+                    } else {
+                        resultDiv.innerHTML = `<div class="alert alert-${data.now_eligible > 0 ? 'success' : 'info'}"><strong>Recheck Complete!</strong><br>URLs rechecked: ${(data.rechecked || 0).toLocaleString()}<br><strong>Now eligible for content creation: ${data.now_eligible || 0}</strong></div>`;
+                    }
+                    refreshStatus();
+                    recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
+                } else if (data.status === 'error') {
+                    clearInterval(poll);
+                    resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+                    recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
+                }
+            } catch (e) {}
+        }, 3000);
 
     } catch (error) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
-    } finally {
-        recheckBtn.disabled = false;
-        validateBtn.disabled = false;
-        validateAllBtn.disabled = false;
-        resetBtn.disabled = false;
-        recheckBtn.textContent = 'Recheck Skipped';
+        recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
     }
 }
 

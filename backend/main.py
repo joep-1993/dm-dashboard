@@ -33,6 +33,7 @@ from backend.link_validator import validate_content_links, validate_and_fix_cont
 from backend.faq_service import process_single_url_faq
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
 from backend.gsd_campaigns_router import router as gsd_campaigns_router
+from backend.dma_bidding_router import router as dma_bidding_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.content_publisher import (
@@ -52,6 +53,9 @@ app.include_router(thema_ads_router)
 
 # Include gsd_campaigns router
 app.include_router(gsd_campaigns_router)
+
+# Include dma_bidding router
+app.include_router(dma_bidding_router)
 
 @app.on_event("startup")
 async def startup_event():
@@ -1189,32 +1193,63 @@ async def reset_validation_history():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/recheck-skipped-urls/status/{task_id}")
+def get_recheck_status(task_id: str):
+    """Poll progress of a running recheck task."""
+    task = _get_validation_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+@app.post("/api/recheck-skipped-urls/cancel/{task_id}")
+def cancel_recheck(task_id: str):
+    """Cancel a running recheck task."""
+    task = _get_validation_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task["cancel"] = True
+    _set_validation_task(task_id, task)
+    return {"status": "cancelling"}
+
 @app.post("/api/recheck-skipped-urls")
 def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
-    """
-    Re-check all skipped SEO content URLs to see if they're now eligible for content creation.
-
-    URLs get skipped when no products are found during initial processing.
-    This endpoint re-scrapes them to check if products are now available.
-
-    Args:
-        parallel_workers: Number of parallel workers (1-20)
-        batch_size: Number of URLs to process per batch (1-500)
-    """
+    """Start background re-check of skipped URLs. Returns task_id for polling."""
     from concurrent.futures import ThreadPoolExecutor
 
-    try:
-        if parallel_workers < 1 or parallel_workers > 20:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
-        if batch_size < 1 or batch_size > 500:
-            raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
+    if parallel_workers < 1 or parallel_workers > 20:
+        raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+    if batch_size < 1 or batch_size > 500:
+        raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
 
+    task_id = str(uuid.uuid4())[:8]
+
+    # Count total to recheck
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""SELECT COUNT(*) as cnt FROM pa.url_validation_tracking
+            WHERE status = 'skipped' AND (skip_reason IS NULL OR skip_reason NOT LIKE '%%(rechecked)%%')""")
+        total_to_recheck = cur.fetchone()['cnt']
+        cur.close()
+        return_db_connection(conn)
+    except Exception:
+        total_to_recheck = 0
+
+    _set_validation_task(task_id, {"status": "running", "rechecked": 0, "total_to_recheck": total_to_recheck, "now_eligible": 0})
+
+    def run_recheck():
+      try:
         total_rechecked = 0
         total_now_eligible = 0
 
         print(f"[RECHECK-SKIPPED] Starting re-check of skipped URLs...")
 
         while True:
+            task_state = _get_validation_task(task_id)
+            if task_state and task_state.get("cancel"):
+                _set_validation_task(task_id, {"status": "cancelled", "rechecked": total_rechecked, "total_to_recheck": total_to_recheck, "now_eligible": total_now_eligible})
+                print(f"[RECHECK-SKIPPED] Cancelled at {total_rechecked}.")
+                return
             conn = get_db_connection()
             cur = conn.cursor()
 
@@ -1290,20 +1325,15 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
 
             total_rechecked += len(skipped_urls)
             print(f"[RECHECK-SKIPPED] Batch: {len(skipped_urls)} checked, {len(now_eligible)} now eligible. Total: {total_rechecked}")
+            _set_validation_task(task_id, {"status": "running", "rechecked": total_rechecked, "total_to_recheck": total_to_recheck, "now_eligible": total_now_eligible})
 
         print(f"[RECHECK-SKIPPED] Complete. Rechecked: {total_rechecked}, Now eligible: {total_now_eligible}")
+        _set_validation_task(task_id, {"status": "completed", "rechecked": total_rechecked, "total_to_recheck": total_to_recheck, "now_eligible": total_now_eligible})
+      except Exception as e:
+        _set_validation_task(task_id, {"status": "error", "error": str(e)})
 
-        return {
-            "status": "success",
-            "message": f"Rechecked {total_rechecked} skipped URLs, {total_now_eligible} now eligible for content creation",
-            "rechecked": total_rechecked,
-            "now_eligible": total_now_eligible
-        }
-
-    except HTTPException:
-        raise  # Re-raise HTTP exceptions as-is (e.g., 400 validation errors)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    threading.Thread(target=run_recheck, daemon=True).start()
+    return {"task_id": task_id, "status": "started"}
 
 
 @app.delete("/api/recheck-skipped-urls/reset")
