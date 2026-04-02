@@ -937,7 +937,7 @@ async function recheckSkippedUrls() {
                     if (data.rechecked === 0) {
                         resultDiv.innerHTML = `<div class="alert alert-info"><strong>No skipped URLs to recheck</strong><br>All skipped URLs have already been rechecked.</div>`;
                     } else {
-                        resultDiv.innerHTML = `<div class="alert alert-${data.now_eligible > 0 ? 'success' : 'info'}"><strong>Recheck Complete!</strong><br>URLs rechecked: ${(data.rechecked || 0).toLocaleString()}<br><strong>Now eligible for content creation: ${data.now_eligible || 0}</strong></div>`;
+                        resultDiv.innerHTML = `<div class="alert alert-warning"><strong>Recheck Complete!</strong><br>URLs rechecked: ${(data.rechecked || 0).toLocaleString()}<br><strong>Now eligible for content creation: ${data.now_eligible || 0}</strong></div>`;
                     }
                     refreshStatus();
                     recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';

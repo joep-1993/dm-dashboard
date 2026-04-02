@@ -81,7 +81,7 @@ async function refreshFaqStatus() {
                                 ${dateText ? `<small class="text-muted text-nowrap ms-2">${dateText}</small>` : ''}
                             </div>
                             <div class="mt-2">
-                                <span class="badge" style="background-color: #0dcaf0; color: #000;">${faqCount} FAQs</span>
+                                <span class="badge" style="background-color: #CC5500; color: white;">${faqCount} FAQs</span>
                             </div>
                             <div class="content-preview mt-2">
                                 <div class="mb-1" style="font-size: 0.875rem;" id="faq-preview-${index}">${faqPreview}</div>
@@ -624,7 +624,7 @@ async function recheckSkippedFaqUrls() {
                     if (data.rechecked === 0) {
                         resultDiv.innerHTML = `<div class="alert alert-info"><strong>No skipped URLs to recheck</strong><br>All skipped URLs have already been rechecked.</div>`;
                     } else {
-                        resultDiv.innerHTML = `<div class="alert alert-${data.now_eligible > 0 ? 'success' : 'info'}"><strong>Recheck Complete!</strong><br>URLs rechecked: ${(data.rechecked || 0).toLocaleString()}<br><strong>Now eligible for FAQ generation: ${data.now_eligible || 0}</strong></div>`;
+                        resultDiv.innerHTML = `<div class="alert alert-warning"><strong>Recheck Complete!</strong><br>URLs rechecked: ${(data.rechecked || 0).toLocaleString()}<br><strong>Now eligible for FAQ generation: ${data.now_eligible || 0}</strong></div>`;
                     }
                     await refreshFaqStatus();
                     recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
