@@ -35,6 +35,7 @@ from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_j
 from backend.gsd_campaigns_router import router as gsd_campaigns_router
 from backend.dma_bidding_router import router as dma_bidding_router
 from backend.mc_id_finder_router import router as mc_id_finder_router
+from backend.redshift_upload_router import router as redshift_upload_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.content_publisher import (
@@ -60,6 +61,9 @@ app.include_router(dma_bidding_router)
 
 # Include mc_id_finder router
 app.include_router(mc_id_finder_router)
+
+# Include redshift_upload router
+app.include_router(redshift_upload_router)
 
 @app.on_event("startup")
 async def startup_event():

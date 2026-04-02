@@ -28,7 +28,9 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── index_checker_service.py # SEO Index Checker: Google Search Console URL Inspection API
 │   ├── index_checker.py        # Standalone index checker script
 │   ├── mc_id_finder_router.py # MC ID Finder APIRouter
-│   ├── mc_id_finder_service.py # MC ID Finder: Redshift lookup for Merchant Center IDs
+│   ├── mc_id_finder_service.py # MC ID Finder: Redshift lookup for Merchant Center IDs (TLD-based country filtering)
+│   ├── redshift_upload_router.py # Redshift Upload APIRouter
+│   ├── redshift_upload_service.py # Redshift Upload: upload xlsx/pasted data to pa.* tables
 │   ├── category_forms.json     # Pre-computed Dutch singular/plural forms (3,564 entries)
 │   ├── categories.xlsx         # Preloaded category data (3,543 rows: maincat/deepest_cat)
 │   ├── unique_titles.py      # Unique title generation
@@ -54,7 +56,8 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── indexnow.html       # IndexNow (submit URLs for indexing)
 │   ├── index-checker.html  # SEO Index Checker (Google index status)
 │   ├── unique-titles.html # Unique Titles Manager
-│   ├── mc-id-finder.html  # MC ID Finder (Merchant Center IDs by shop name)
+│   ├── mc-id-finder.html  # MC ID Finder (Merchant Center IDs by shop name, always shows NL/BE/DE columns)
+│   ├── redshift-upload.html # Redshift Upload (xlsx upload or paste data to pa.* tables)
 │   ├── url-checker.html   # URL Checker (status, title, description, H1, product count)
 │   ├── css/style.css     # Custom theme (#059CDF blue, #9C3095 purple, #A0D168 green)
 │   └── js/
@@ -393,7 +396,12 @@ python-dotenv==1.0.0      # Environment variable management
 
 ### MC ID Finder
 - `GET /api/mc-id-finder/health` - Health check
-- `GET /api/mc-id-finder/search?shop_names=bol,coolblue&countries=nl,be,de` - Search MC IDs by shop names (comma-separated, partial match) and countries (comma-separated: nl, be, de)
+- `GET /api/mc-id-finder/search?shop_names=bol,coolblue&countries=nl,be,de` - Search MC IDs by shop names (partial match) and countries. Filters by shop TLD to prevent cross-country mismatches (e.g., x2o.be won't appear when only NL is checked). Always returns all 3 MC ID columns (NL/BE/DE).
+
+### Redshift Upload
+- `GET /api/redshift-upload/health` - Health check
+- `POST /api/redshift-upload/xlsx` - Upload .xlsx file to Redshift pa.<table_name> (form: file, table_name, chunk_size)
+- `POST /api/redshift-upload/paste` - Upload pasted data to Redshift pa.<table_name> (form: table_name, chunk_size, headers JSON, rows JSON). All columns created as VARCHAR(1000).
 
 ### Labels Applied by Thema Ads
 **Ad Groups get labeled with:**

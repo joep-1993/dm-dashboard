@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redshift Upload</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .drop-zone {
+            border: 2px dashed #5e4a90;
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: background 0.2s;
+            color: #636e72;
+        }
+        .drop-zone:hover, .drop-zone.drag-over { background: #f0ecf7; }
+        .drop-zone .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+        .paste-grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .paste-grid th, .paste-grid td { border: 1px solid #ddd; padding: 4px 8px; }
+        .paste-grid th input { border: none; background: #5e4a90; color: white; font-weight: 600; width: 100%; padding: 2px 4px; font-size: 0.8rem; }
+        .paste-grid td { font-family: monospace; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .paste-area { max-height: 400px; overflow: auto; }
+        .preview-info { font-size: 0.85rem; color: #636e72; }
+        .tab-content { padding-top: 0; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+        .result-card { border-left: 4px solid #27ae60; }
+        .result-card.error { border-left-color: #e74c3c; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Redshift Upload</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 pb-5">
+        <!-- Settings -->
+        <div class="card mb-4">
+            <div class="card-header" style="background: #5e4a90; color: white;">
+                <h5 class="mb-0">Upload Settings</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-5">
+                        <label for="tableName" class="form-label">Table Name</label>
+                        <div class="input-group">
+                            <span class="input-group-text" style="background:#5e4a90; color:white; font-weight:600;">pa.</span>
+                            <input type="text" class="form-control" id="tableName" placeholder="e.g. joep_test" pattern="[a-zA-Z_][a-zA-Z0-9_]*">
+                        </div>
+                        <small class="text-muted">Letters, numbers, and underscores only.</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="chunkSize" class="form-label">Chunk Size</label>
+                        <input type="number" class="form-control" id="chunkSize" value="5000" min="100" max="10000" step="100">
+                        <small class="text-muted">Max 10,000 rows per chunk.</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Input -->
+        <div class="card mb-4">
+            <div class="card-header" style="background: #5e4a90; color: white;">
+                <h5 class="mb-0">Data Input</h5>
+            </div>
+            <div class="card-body">
+                <ul class="nav nav-tabs" id="inputTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabFile" type="button">Upload .xlsx</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPaste" type="button">Paste Data</button>
+                    </li>
+                </ul>
+                <div class="tab-content" id="inputTabContent">
+                    <!-- File Upload Tab -->
+                    <div class="tab-pane fade show active" id="tabFile" role="tabpanel">
+                        <div class="pt-3">
+                        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                            <div class="icon">&#128196;</div>
+                            <div>Drag & drop an <strong>.xlsx</strong> file here, or click to browse</div>
+                            <div class="mt-2 preview-info" id="fileInfo" style="display:none;"></div>
+                        </div>
+                        <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none" onchange="handleFile(this.files[0])">
+                        <div id="filePreview" class="paste-area mt-3" style="display:none;"></div>
+                        <div class="mt-3 d-flex gap-2">
+                            <button class="btn" style="background:#CC5500;color:white;border:none;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="uploadFile()" id="uploadFileBtn" disabled>Upload to Redshift</button>
+                            <button class="btn btn-outline-secondary" onclick="clearFile()">Clear</button>
+                        </div>
+                        </div>
+                    </div>
+
+                    <!-- Paste Tab -->
+                    <div class="tab-pane fade" id="tabPaste" role="tabpanel">
+                        <div class="pt-3">
+                        <label class="form-label">Paste tab-separated data (including header row)</label>
+                        <textarea class="form-control" id="pasteArea" rows="8" placeholder="Paste data from Excel or Google Sheets here...&#10;&#10;col1&#9;col2&#9;col3&#10;val1&#9;val2&#9;val3"></textarea>
+                        <div class="mt-2 d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="parsePaste()">Parse Data</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="clearPaste()">Clear</button>
+                        </div>
+                        <div id="pastePreview" class="paste-area mt-3" style="display:none;"></div>
+                        <div class="mt-3">
+                            <button class="btn" style="background:#CC5500;color:white;border:none;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="uploadPaste()" id="uploadPasteBtn" disabled>Upload to Redshift</button>
+                        </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading -->
+        <div id="loadingArea" style="display:none;" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status"></div>
+            <div class="mt-2 text-muted">Uploading to Redshift...</div>
+        </div>
+
+        <!-- Result -->
+        <div id="resultArea" style="display:none;"></div>
+
+        <footer class="text-center py-4">
+            <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script>
+        const API = window.location.origin;
+        let selectedFile = null;
+        let fileData = null;   // { headers: [], rows: [] } from xlsx preview
+        let pasteData = null;  // { headers: [], rows: [] } from paste
+
+        // ─── Drag & drop ───
+        const dz = document.getElementById('dropZone');
+        dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+        dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+        dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0]); });
+
+        // ─── File handling ───
+        function handleFile(file) {
+            if (!file) return;
+            selectedFile = file;
+            document.getElementById('fileInfo').textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+            document.getElementById('fileInfo').style.display = 'block';
+            document.getElementById('uploadFileBtn').disabled = false;
+
+            // Parse for preview using SheetJS
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const wb = XLSX.read(e.target.result, { type: 'array' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                const json = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+                if (json.length < 2) { fileData = null; return; }
+                fileData = { headers: json[0].map(String), rows: json.slice(1).slice(0, 50) };
+                renderPreview('filePreview', fileData, false);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function clearFile() {
+            selectedFile = null;
+            fileData = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('fileInfo').style.display = 'none';
+            document.getElementById('filePreview').style.display = 'none';
+            document.getElementById('uploadFileBtn').disabled = true;
+        }
+
+        // ─── Paste handling ───
+        function parsePaste() {
+            const raw = document.getElementById('pasteArea').value.trim();
+            if (!raw) return;
+            const lines = raw.split('\n').map(l => l.split('\t'));
+            if (lines.length < 2) { alert('Need at least a header row and one data row.'); return; }
+            pasteData = { headers: lines[0].map(s => s.trim()), rows: lines.slice(1).map(r => r.map(c => c.trim())) };
+            renderPreview('pastePreview', pasteData, true);
+            document.getElementById('uploadPasteBtn').disabled = false;
+        }
+
+        function clearPaste() {
+            pasteData = null;
+            document.getElementById('pasteArea').value = '';
+            document.getElementById('pastePreview').style.display = 'none';
+            document.getElementById('uploadPasteBtn').disabled = true;
+        }
+
+        // ─── Preview table with editable headers ───
+        function renderPreview(containerId, data, editable) {
+            const container = document.getElementById(containerId);
+            const maxRows = Math.min(data.rows.length, 50);
+            let html = `<p class="preview-info mb-1">Preview: ${data.rows.length} rows, ${data.headers.length} columns${data.rows.length > 50 ? ' (showing first 50)' : ''}</p>`;
+            html += '<table class="paste-grid"><thead><tr>';
+            data.headers.forEach((h, i) => {
+                if (editable) {
+                    html += `<th><input type="text" value="${escAttr(h)}" data-col="${i}" onchange="updateHeader(this, '${containerId}')"></th>`;
+                } else {
+                    html += `<th style="background:#5e4a90;color:white;padding:4px 8px;font-size:0.8rem;">${escHtml(h)}</th>`;
+                }
+            });
+            html += '</tr></thead><tbody>';
+            for (let r = 0; r < maxRows; r++) {
+                html += '<tr>';
+                data.headers.forEach((_, ci) => {
+                    const val = data.rows[r][ci] ?? '';
+                    html += `<td title="${escAttr(String(val))}">${escHtml(String(val))}</td>`;
+                });
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+            container.innerHTML = html;
+            container.style.display = 'block';
+        }
+
+        function updateHeader(input, containerId) {
+            const idx = parseInt(input.dataset.col);
+            if (containerId === 'pastePreview' && pasteData) {
+                pasteData.headers[idx] = input.value.trim();
+            }
+        }
+
+        // ─── Upload file ───
+        async function uploadFile() {
+            if (!selectedFile || !validateSettings()) return;
+            const form = new FormData();
+            form.append('file', selectedFile);
+            form.append('table_name', document.getElementById('tableName').value.trim());
+            form.append('chunk_size', getChunkSize());
+            await doUpload(`${API}/api/redshift-upload/xlsx`, form);
+        }
+
+        // ─── Upload paste ───
+        async function uploadPaste() {
+            if (!pasteData || !validateSettings()) return;
+            const form = new FormData();
+            form.append('table_name', document.getElementById('tableName').value.trim());
+            form.append('chunk_size', getChunkSize());
+            form.append('headers', JSON.stringify(pasteData.headers));
+            form.append('rows', JSON.stringify(pasteData.rows));
+            await doUpload(`${API}/api/redshift-upload/paste`, form);
+        }
+
+        async function doUpload(url, formData) {
+            document.getElementById('loadingArea').style.display = 'block';
+            document.getElementById('resultArea').style.display = 'none';
+            try {
+                const res = await fetch(url, { method: 'POST', body: formData });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+                showResult(data);
+            } catch (err) {
+                showResult({ status: 'error', error: err.message });
+            } finally {
+                document.getElementById('loadingArea').style.display = 'none';
+            }
+        }
+
+        function showResult(data) {
+            const area = document.getElementById('resultArea');
+            if (data.status === 'success') {
+                area.innerHTML = `
+                    <div class="card result-card p-3">
+                        <h5 style="color:#27ae60;">Upload Successful</h5>
+                        <p class="mb-1"><strong>Table:</strong> ${escHtml(data.table)}</p>
+                        <p class="mb-1"><strong>Rows uploaded:</strong> ${data.rows_uploaded.toLocaleString()}</p>
+                        <p class="mb-0"><strong>Columns:</strong> ${data.columns.map(escHtml).join(', ')}</p>
+                    </div>`;
+            } else {
+                area.innerHTML = `
+                    <div class="card result-card error p-3">
+                        <h5 style="color:#e74c3c;">Upload Failed</h5>
+                        <p class="mb-0">${escHtml(data.error)}</p>
+                    </div>`;
+            }
+            area.style.display = 'block';
+        }
+
+        // ─── Helpers ───
+        function validateSettings() {
+            const name = document.getElementById('tableName').value.trim();
+            if (!name) { alert('Please enter a table name.'); return false; }
+            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) { alert('Table name can only contain letters, numbers, and underscores.'); return false; }
+            return true;
+        }
+
+        function getChunkSize() {
+            let v = parseInt(document.getElementById('chunkSize').value) || 5000;
+            return Math.max(100, Math.min(10000, v));
+        }
+
+        function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+        function escAttr(s) { return s.replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+    </script>
+</body>
+</html>
