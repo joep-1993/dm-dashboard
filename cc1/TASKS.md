@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add MC ID Finder tool under Google Ads — Redshift lookup for Merchant Center IDs (NL/BE/DE) by shop name. Multi-shop textarea input, country checkboxes for dynamic columns, CSV export. Backend: mc_id_finder_service.py + mc_id_finder_router.py. Fixed: shop_name on wrong table alias, MC ID fields are strings not ints, many shops lack efficy_k_shop join #claude-session:2026-04-02
 - [x] Add URL Lookup to FAQ tool — lookup endpoint, FAQ preview with Q&A display, delete & reset to pending. Purple hover on all toggle buttons (View All FAQs, View Full Content, Contract) #claude-session:2026-04-01
 - [x] Add DMA Bidding tool — backend service (438 lines), router (5 endpoints), frontend with stats/dry run/include-exclude/results tables/CSV export/history. Ported from standalone DMA_verhogingen_verlagingen.py script #claude-session:2026-04-01
 - [x] Background task pattern for recheck-skipped-urls — progress bar + cancel button, matching validate-all pattern, both Kopteksten and FAQ #claude-session:2026-04-01

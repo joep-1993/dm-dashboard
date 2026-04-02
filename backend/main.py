@@ -34,6 +34,7 @@ from backend.faq_service import process_single_url_faq
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
 from backend.gsd_campaigns_router import router as gsd_campaigns_router
 from backend.dma_bidding_router import router as dma_bidding_router
+from backend.mc_id_finder_router import router as mc_id_finder_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.content_publisher import (
@@ -56,6 +57,9 @@ app.include_router(gsd_campaigns_router)
 
 # Include dma_bidding router
 app.include_router(dma_bidding_router)
+
+# Include mc_id_finder router
+app.include_router(mc_id_finder_router)
 
 @app.on_event("startup")
 async def startup_event():

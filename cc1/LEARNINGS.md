@@ -1,6 +1,15 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## MC ID Finder Tool
+- **Backend**: `backend/mc_id_finder_service.py` + `backend/mc_id_finder_router.py` — 1 endpoint under `/api/mc-id-finder/`
+- **Frontend**: `frontend/mc-id-finder.html` — search by shop names (textarea, one per line) + country checkboxes (NL/BE/DE), dynamic table columns based on checked countries, CSV export
+- **Redshift query**: Joins `beslistbi.hda.efficy_shop_dm` (MC IDs) with `bt.shop_main_attributes_by_day` (shop names) on `k_shop = efficy_k_shop`
+- **Gotcha: `shop_name` is on `shop_main_attributes_by_day` (alias `r`), NOT on `efficy_shop_dm` (alias `m`)**. Initial query used `m.shop_name` which doesn't exist — caused "column does not exist" error
+- **Gotcha: `f_mc_id_nl/be/de` are strings, not integers**. Using `> 1` worked by accident but proper filtering is `NOT IN ('','0','1')`
+- **Gotcha: Many shops have `efficy_k_shop = NULL`** in `shop_main_attributes_by_day`, so the inner JOIN drops them. ~1,888 shops have working joins with MC IDs. Shops like bol.com won't appear because they lack the Efficy link
+- **Date**: 2026-04-02
+
 ## GSD Campaigns Tool
 - **Backend service**: `backend/gsd_campaigns_service.py` (1,247 lines) — ported from `C:\Users\JoepvanSchagen\Downloads\Python\scripts_def\create GSD-campaigns WB.py` (2,757 lines)
 - **Router**: `backend/gsd_campaigns_router.py` — 7 endpoints under `/api/gsd-campaigns/`

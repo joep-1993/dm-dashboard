@@ -27,6 +27,8 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── indexnow_service.py     # IndexNow: submit URLs to IndexNow API with local PostgreSQL dedup + 10K daily limit
 │   ├── index_checker_service.py # SEO Index Checker: Google Search Console URL Inspection API
 │   ├── index_checker.py        # Standalone index checker script
+│   ├── mc_id_finder_router.py # MC ID Finder APIRouter
+│   ├── mc_id_finder_service.py # MC ID Finder: Redshift lookup for Merchant Center IDs
 │   ├── category_forms.json     # Pre-computed Dutch singular/plural forms (3,564 entries)
 │   ├── categories.xlsx         # Preloaded category data (3,543 rows: maincat/deepest_cat)
 │   ├── unique_titles.py      # Unique title generation
@@ -52,6 +54,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── indexnow.html       # IndexNow (submit URLs for indexing)
 │   ├── index-checker.html  # SEO Index Checker (Google index status)
 │   ├── unique-titles.html # Unique Titles Manager
+│   ├── mc-id-finder.html  # MC ID Finder (Merchant Center IDs by shop name)
 │   ├── url-checker.html   # URL Checker (status, title, description, H1, product count)
 │   ├── css/style.css     # Custom theme (#059CDF blue, #9C3095 purple, #A0D168 green)
 │   └── js/
@@ -388,6 +391,10 @@ python-dotenv==1.0.0      # Environment variable management
 - `POST /api/index-checker/upload-excel` - Upload Excel with URLs, check index status
 - `GET /api/index-checker/quota` - Service account quota info
 
+### MC ID Finder
+- `GET /api/mc-id-finder/health` - Health check
+- `GET /api/mc-id-finder/search?shop_names=bol,coolblue&countries=nl,be,de` - Search MC IDs by shop names (comma-separated, partial match) and countries (comma-separated: nl, be, de)
+
 ### Labels Applied by Thema Ads
 **Ad Groups get labeled with:**
 - `BF_2025` - Black Friday 2025 campaign marker
@@ -487,4 +494,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-03-20_
+_Last updated: 2026-04-02_
