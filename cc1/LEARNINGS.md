@@ -1,6 +1,22 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Docker-Free Dashboard (dm-dashboard)
+- **Repo**: `https://github.com/joep-1993/dm-dashboard` — standalone version of dm-tools without Docker
+- **Key changes vs dm-tools**: Added `load_dotenv()` to `main.py`, changed default DB DSN from `db:5432` to `localhost:5432`, moved hardcoded API keys to env vars (`UNIQUE_TITLES_API_KEY`, `CONTENT_API_KEY_*` in `content_publisher.py`)
+- **Password protection**: Cookie-based auth via `DASHBOARD_PASSWORD` env var. HMAC session token, 30-day cookie, middleware blocks all routes except `/login` and `/api/health`. Leave empty to disable
+- **Missing files from original gitignore**: `themes.py` + `thema_ads_optimized/` (was mounted as Docker volume from `/projects/theme_ads/`), `themes/` dir (headline/description templates), `categories.xlsx` (was excluded by `*.xlsx` gitignore rule — added exception)
+- **Credentials file**: `~/dm-dashboard.env` — NOT in repo, copy as `.env` on target machine
+- **Both repos must be kept in sync**: When editing dashboard code, commit to both `dm-tools` and `dm-dashboard`
+- **Date**: 2026-04-03
+
+## n8n IndexNow Submitter — Slack Message Bug
+- **Issue**: Slack message showed "New URLs submitted: 0" and "API response: 0" despite 10K URLs being successfully submitted to IndexNow
+- **Root cause**: `build_summary1` node used `$input.all()` which receives output from `log_to_tracking_table` (Postgres node) — returns query execution results, NOT the `url_count`/`response_code` fields from `build_tracking_insert1`
+- **Fix**: Changed to `$('build_tracking_insert1').all()` for url_count and `$('submit_to_indexnow1').first().json.statusCode` for response code — reference upstream nodes directly instead of relying on passthrough data
+- **File**: `C:\Users\JoepvanSchagen\Downloads\indexnow_submitter (1).json`
+- **Date**: 2026-04-03
+
 ## MC ID Finder Tool
 - **Backend**: `backend/mc_id_finder_service.py` + `backend/mc_id_finder_router.py` — 1 endpoint under `/api/mc-id-finder/`
 - **Frontend**: `frontend/mc-id-finder.html` — search by shop names (textarea, one per line) + country checkboxes (NL/BE/DE), dynamic table columns based on checked countries, CSV export
@@ -3186,3 +3202,31 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 - **Problem**: Output Excel file created by Docker (root) couldn't be overwritten by user process
 - **Workaround**: Save to a different filename (e.g., `_final.xlsx`) owned by the user, then copy
 - **Date**: 2026-02-17
+
+## Syncing dm-dashboard → dm-tools
+- **dm-dashboard repo**: https://github.com/joep-1993/dm-dashboard — Docker-free version of the dashboard
+- **Dual commit policy**: Dashboard changes must be committed to both dm-tools and dm-dashboard repos
+- **Sync process**: `git pull` in dm-dashboard, compare diffs, apply to dm-tools manually
+- **Date**: 2026-04-03
+
+## PostgreSQL Stale Connection Recovery
+- **Problem**: Long-lived PG pool connections go stale, causing queries to fail silently
+- **Fix**: Added TCP keepalives (`keepalives=1, keepalives_idle=30`) to PG pool, plus `SELECT 1` health check in `get_db_connection()` before returning connections — matches the existing Redshift pool pattern
+- **Files**: `backend/database.py`
+- **Date**: 2026-04-03
+
+## Last Push Timestamp Feature
+- **Purpose**: Shows when content was last published to production, next to the Publish button
+- **Components**: `pa.publish_log` table, `GET /api/content-publish/last-push` endpoint, `fetchLastPushTimestamp()` JS function (in both app.js and faq.js)
+- **Format**: DDMMYYYY HH:MM, right-aligned next to Publish button
+- **Auto-refresh**: Fetched on page load and after each successful publish
+- **Date**: 2026-04-03
+
+## Running dm-tools Without Docker
+- **Script**: `./run_local.sh setup` (first time) then `./run_local.sh` to start
+- **Requirements**: `python3.12-venv` apt package, Python venv at `dm-tools/venv/`
+- **Key difference**: `load_dotenv()` added to top of `main.py` — loads `.env` file for env vars (no-ops in Docker since vars already set)
+- **thema_ads_optimized**: Docker mounts from `../theme_ads/thema_ads_optimized`; locally, `run_local.sh` creates a symlink automatically
+- **DATABASE_URL**: `.env` must point to remote DB (`10.1.32.9`) instead of Docker's `db:5432`
+- **Auto-start**: Windows Task Scheduler task "DM Tools Dashboard" runs `wsl.exe -d Ubuntu -e bash -c "cd ... && source venv/bin/activate && uvicorn ..."` at logon
+- **Date**: 2026-04-03

@@ -93,6 +93,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 ├── CLAUDE.md             # Claude Code instructions
 ├── README.md             # Quick start guide
 ├── .env / .env.example   # Environment configuration
+├── run_local.sh          # Run without Docker (setup + start)
 └── .gitignore
 ```
 
@@ -197,6 +198,7 @@ All data lives in the local PostgreSQL container. See LEARNINGS.md for connectio
 - `pa.link_validation_results` - SEO link validation history
 - `pa.faq_validation_results` - FAQ link validation history
 - `pa.content_history` - Content backup before resets
+- `pa.publish_log` - Publish history (environment, content_type, total_urls, timestamps)
 - Thema Ads tables (jobs, job_items, input_data)
 
 **Pending URL calculation**: `WHERE werkvoorraad.url NOT IN tracking_table` (LEFT JOIN, see LEARNINGS.md "Stuck Pending URLs")
@@ -375,6 +377,7 @@ python-dotenv==1.0.0      # Environment variable management
 - `GET /api/content-publish/curl?limit=10&environment=dev` - Generate curl command for testing
 - `POST /api/content-publish?dry_run=true&environment=dev` - Publish content (dry_run=true returns stats, false starts background task)
 - `GET /api/content-publish/status/{task_id}` - Poll background task status (pending/running/completed/failed)
+- `GET /api/content-publish/last-push` - Get last successful production publish timestamp
 
 ### Keyword Planner
 - `POST /api/keyword-planner/search-volumes` - Get search volumes for keyword list (JSON: `{"keywords": [...]}`, max 50,000)
@@ -502,4 +505,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-04-02_
+_Last updated: 2026-04-03_

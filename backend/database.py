@@ -15,7 +15,12 @@ def _get_pg_pool():
             minconn=2,
             maxconn=20,  # Increased from 10 to support more parallel workers
             dsn=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@db:5432/myapp"),
-            cursor_factory=RealDictCursor
+            cursor_factory=RealDictCursor,
+            connect_timeout=10,
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5
         )
     return _pg_pool
 
@@ -41,9 +46,22 @@ def _get_redshift_pool():
     return _redshift_pool
 
 def get_db_connection():
-    """Get PostgreSQL connection from pool"""
+    """Get PostgreSQL connection from pool, with stale connection recovery"""
     p = _get_pg_pool()
-    return p.getconn()
+    conn = p.getconn()
+    # Test if the connection is still alive
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.close()
+    except Exception:
+        # Connection is dead, close it and get a fresh one
+        try:
+            p.putconn(conn, close=True)
+        except Exception:
+            pass
+        conn = p.getconn()
+    return conn
 
 def return_db_connection(conn):
     """Return PostgreSQL connection to pool"""
@@ -166,6 +184,21 @@ def init_db():
             reset_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Publish log table (tracks successful content publishes)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pa.publish_log (
+            id SERIAL PRIMARY KEY,
+            environment VARCHAR(50) NOT NULL,
+            content_type VARCHAR(50) NOT NULL,
+            total_urls INTEGER DEFAULT 0,
+            status VARCHAR(50) NOT NULL,
+            payload_size_mb NUMERIC(10,2),
+            duration_sec NUMERIC(10,1),
+            published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_publish_log_env ON pa.publish_log(environment, published_at DESC)")
 
     # Thema Ads tables
     cur.execute("""

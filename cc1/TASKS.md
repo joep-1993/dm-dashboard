@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Create dm-dashboard repo (Docker-free version) — standalone version at github.com/joep-1993/dm-dashboard with setup.sh, .env.example, password protection, load_dotenv, all API keys moved to env vars. Added missing themes.py, thema_ads_optimized/, themes/, categories.xlsx #claude-session:2026-04-03
+- [x] Fix n8n IndexNow Submitter Slack message — build_summary1 was reading $input (Postgres output) instead of $('build_tracking_insert1') for url_count and response_code #claude-session:2026-04-03
 - [x] Add MC ID Finder tool under Google Ads — Redshift lookup for Merchant Center IDs (NL/BE/DE) by shop name. Multi-shop textarea input, country checkboxes for dynamic columns, CSV export. Backend: mc_id_finder_service.py + mc_id_finder_router.py. Fixed: shop_name on wrong table alias, MC ID fields are strings not ints, many shops lack efficy_k_shop join #claude-session:2026-04-02
 - [x] Add URL Lookup to FAQ tool — lookup endpoint, FAQ preview with Q&A display, delete & reset to pending. Purple hover on all toggle buttons (View All FAQs, View Full Content, Contract) #claude-session:2026-04-01
 - [x] Add DMA Bidding tool — backend service (438 lines), router (5 endpoints), frontend with stats/dry run/include-exclude/results tables/CSV export/history. Ported from standalone DMA_verhogingen_verlagingen.py script #claude-session:2026-04-01
@@ -262,6 +264,11 @@ _Finished tasks (move here when done)_
 - [x] Update docker-compose.yml to remove theme_ads dependencies #claude-session:2025-10-03
 - [x] Update CLAUDE.md to reflect content_top as SEO-only project #claude-session:2025-10-03
 - [x] Initialize project from template #claude-session:2025-09-30
+
+- [x] Sync dm-dashboard stale connection fix to dm-tools #claude-session:2026-04-03
+- [x] Sync last-push timestamp feature to dm-tools (backend + frontend + faq) #claude-session:2026-04-03
+- [x] Add Docker-free local run support (dotenv, run_local.sh, venv, symlink) #claude-session:2026-04-03
+- [x] Create Windows Task Scheduler auto-start for dashboard #claude-session:2026-04-03
 
 ## Blocked
 _Tasks waiting on dependencies_
