@@ -210,16 +210,45 @@ def step_publish_production():
     pub_result = result.get("result", {})
     if pub_result.get("success"):
         log.info(f"  Published {pub_result.get('total_urls', 0)} URLs to production")
+        return pub_result
     else:
         raise RuntimeError(f"Publish did not succeed: {pub_result}")
+
+# ---------------------------------------------------------------------------
+# Slack notification
+# ---------------------------------------------------------------------------
+def send_slack_message(text):
+    """Send a DM to the configured Slack user via Bot Token."""
+    log = logging.getLogger("automation")
+    token = os.getenv("SLACK_BOT_TOKEN", "")
+    user_id = os.getenv("SLACK_USER_ID", "")
+    if not token or not user_id:
+        log.warning("SLACK_BOT_TOKEN or SLACK_USER_ID not set, skipping Slack notification")
+        return
+
+    try:
+        resp = requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"channel": user_id, "text": text},
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("ok"):
+            log.info("Slack notification sent")
+        else:
+            log.warning(f"Slack API error: {data.get('error')}")
+    except Exception as e:
+        log.warning(f"Failed to send Slack notification: {e}")
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
     log = setup_logging()
+    start_time = datetime.now()
     log.info("=" * 60)
-    log.info(f"Daily automation started at {datetime.now():%Y-%m-%d %H:%M:%S}")
+    log.info(f"Daily automation started at {start_time:%Y-%m-%d %H:%M:%S}")
     log.info("=" * 60)
 
     login()
@@ -233,14 +262,38 @@ def main():
         ("Publish to Production",          step_publish_production),
     ]
 
+    completed_steps = []
+    publish_result = None
+
     for step_name, step_func in steps:
         log.info(f"--- Starting: {step_name} ---")
         try:
-            step_func()
+            result = step_func()
+            completed_steps.append(step_name)
+            if step_name == "Publish to Production" and result:
+                publish_result = result
             log.info(f"--- Completed: {step_name} ---")
         except Exception as e:
             log.error(f"--- FAILED: {step_name} --- Error: {e}", exc_info=True)
+            duration = datetime.now() - start_time
+            send_slack_message(
+                f":x: *DM Dashboard - Daily Automation Failed*\n"
+                f"Failed at: *{step_name}*\n"
+                f"Error: {e}\n"
+                f"Duration: {str(duration).split('.')[0]}\n"
+                f"Completed steps: {', '.join(completed_steps) or 'None'}"
+            )
             sys.exit(1)
+
+    duration = datetime.now() - start_time
+    total_urls = publish_result.get("total_urls", 0) if publish_result else "?"
+    payload_mb = publish_result.get("payload_size_mb", "?") if publish_result else "?"
+
+    send_slack_message(
+        f":white_check_mark: *DM Dashboard - Daily Automation Complete*\n"
+        f"Published *{total_urls}* URLs to production ({payload_mb} MB)\n"
+        f"Duration: {str(duration).split('.')[0]}"
+    )
 
     log.info("=" * 60)
     log.info("Daily automation completed successfully")
