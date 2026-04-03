@@ -38,8 +38,25 @@ if [ ! -f ".env" ]; then
     echo ""
 fi
 
+# Set up local PostgreSQL database if psql is available
+if command -v psql &> /dev/null; then
+    echo "PostgreSQL found. Checking if database 'dm_dashboard' exists..."
+    if ! psql -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw dm_dashboard; then
+        echo "Creating database 'dm_dashboard'..."
+        createdb dm_dashboard 2>/dev/null || echo "Could not create database automatically. Create it manually: createdb dm_dashboard"
+    else
+        echo "Database 'dm_dashboard' already exists."
+    fi
+else
+    echo ""
+    echo "WARNING: psql not found. Make sure PostgreSQL is installed and running."
+    echo "  Install: https://www.postgresql.org/download/"
+    echo "  Then create a database: createdb dm_dashboard"
+    echo ""
+fi
+
 # Initialize database tables
-echo "Initializing database..."
+echo "Initializing database tables..."
 python -m backend.database
 
 echo ""
