@@ -26,20 +26,7 @@ Open **http://localhost:8003** in your browser.
 ## Requirements
 
 - Python 3.11+
-- PostgreSQL (local or remote)
-
-### Installing PostgreSQL locally
-
-**macOS:** `brew install postgresql@15 && brew services start postgresql@15`
-**Ubuntu/Debian:** `sudo apt install postgresql && sudo systemctl start postgresql`
-**Windows:** Download from https://www.postgresql.org/download/windows/
-
-After installing, create the database:
-```bash
-createdb dm_dashboard
-```
-
-The `setup.sh` script will try to do this automatically.
+- PostgreSQL database (local or remote)
 
 ## Configuration
 
