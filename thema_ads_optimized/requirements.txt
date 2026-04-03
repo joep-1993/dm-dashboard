@@ -1,0 +1,15 @@
+# Google Ads API
+google-ads>=25.1.0
+
+# Data processing
+pandas==2.2.0
+openpyxl==3.1.2
+
+# Environment management
+python-dotenv==1.0.0
+
+# Optional: For PostgreSQL support
+# psycopg2-binary==2.9.9
+
+# Optional: For Redis caching
+# redis==5.0.1

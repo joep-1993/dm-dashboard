@@ -1,0 +1,4 @@
+        "{KeyWord:Cyber Monday Deals} nu met hoge korting. Alleen échte online deals – geen nepprijzen!",
+        "Scoor {KeyWord:Aanbiedingen} tijdens Cyber Monday. Alleen échte CM deals, op=op!",
+        "{KeyWord:Cyber Monday Deals} nu live. Nog {COUNTDOWN(2025-12-01 00:00:00,5)}! Alleen échte CM deals.",
+        "Scoor {KeyWord:Aanbiedingen} voor Cyber Monday. {COUNTDOWN(2025-12-01 00:00:00,5)} te gaan – geen nepdeals!"

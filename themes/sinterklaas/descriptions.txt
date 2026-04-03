@@ -1,0 +1,6 @@
+        "{KeyWord:Sinterklaas Cadeaus} nu online. Op tijd in huis voor pakjesavond!",
+        "Scoor {KeyWord:Cadeaus} voor Sinterklaas. Nog {COUNTDOWN(2025-12-05 00:00:00,5)} – snel bestellen!",
+        "{KeyWord:Sinterklaas} cadeaus en surprises. Nog {COUNTDOWN(2025-12-05 00:00:00,5)} tot pakjesavond!",
+        "Shop {KeyWord:Cadeaus} voor Sint. {COUNTDOWN(2025-12-05 00:00:00,5)} te gaan – op tijd bezorgd!"
+
+        

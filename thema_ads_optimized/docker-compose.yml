@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  thema-ads-optimizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: thema-ads-optimizer
+    env_file:
+      - .env
+    environment:
+      # Override these in .env file
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DRY_RUN=${DRY_RUN:-false}
+      - INPUT_FILE=/app/data/${INPUT_FILE:-input_data.xlsx}
+    volumes:
+      # Mount data directory for input files
+      - ./data:/app/data
+      # Mount logs directory for output
+      - ./logs:/app/logs
+      # Optional: Mount .env file if not using env_file
+      # - ./.env:/app/.env:ro
+    restart: "no"
+    networks:
+      - thema-ads-network
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 512M
+
+networks:
+  thema-ads-network:
+    driver: bridge

@@ -1,0 +1,106 @@
+2025-10-09 11:59:17,998 - google_ads_client - INFO - Google Ads client initialized successfully
+2025-10-09 11:59:17,998 - __main__ - INFO - 
+============================================================
+2025-10-09 11:59:17,998 - __main__ - INFO - BATCH REMOVAL OF SINGLES_DAY ADS AND SD_DONE LABELS
+2025-10-09 11:59:17,998 - __main__ - INFO - ============================================================
+2025-10-09 11:59:17,998 - __main__ - INFO - Processing 5 customer(s)
+2025-10-09 11:59:17,998 - __main__ - INFO - Customer IDs: 1351439239, 1496704472, 2237802672, 3114657125, 3273661472
+2025-10-09 11:59:17,998 - __main__ - INFO - ============================================================
+
+2025-10-09 11:59:17,998 - __main__ - INFO - 
+============================================================
+2025-10-09 11:59:17,998 - __main__ - INFO - Processing customer: 1351439239
+2025-10-09 11:59:17,998 - __main__ - INFO - ============================================================
+
+2025-10-09 11:59:17,998 - __main__ - INFO - Step 1: Finding ads with SINGLES_DAY label...
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1760011156.407327    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:17,973 - operations.labels - INFO - Found 0 ads with label 'SINGLES_DAY' (excluded removed: True)
+2025-10-09 11:59:17,976 - __main__ - INFO - No ads found with SINGLES_DAY label
+2025-10-09 11:59:17,976 - __main__ - INFO - Step 3: Finding ad groups with SD_DONE label...
+E0000 00:00:1760011157.979669    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:19,485 - operations.labels - INFO - Found 0 ad groups with label 'SD_DONE'
+2025-10-09 11:59:19,486 - __main__ - INFO - No ad groups found with SD_DONE label
+2025-10-09 11:59:19,487 - __main__ - INFO - ✓ Removal process complete for customer 1351439239!
+2025-10-09 11:59:19,487 - __main__ - INFO - 
+============================================================
+2025-10-09 11:59:19,487 - __main__ - INFO - Processing customer: 1496704472
+2025-10-09 11:59:19,487 - __main__ - INFO - ============================================================
+
+2025-10-09 11:59:19,487 - __main__ - INFO - Step 1: Finding ads with SINGLES_DAY label...
+E0000 00:00:1760011159.490309    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:21,030 - operations.labels - INFO - Found 0 ads with label 'SINGLES_DAY' (excluded removed: True)
+2025-10-09 11:59:21,031 - __main__ - INFO - No ads found with SINGLES_DAY label
+2025-10-09 11:59:21,031 - __main__ - INFO - Step 3: Finding ad groups with SD_DONE label...
+E0000 00:00:1760011161.034873    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:22,658 - operations.labels - INFO - Found 0 ad groups with label 'SD_DONE'
+2025-10-09 11:59:22,659 - __main__ - INFO - No ad groups found with SD_DONE label
+2025-10-09 11:59:22,660 - __main__ - INFO - ✓ Removal process complete for customer 1496704472!
+2025-10-09 11:59:22,660 - __main__ - INFO - 
+============================================================
+2025-10-09 11:59:22,660 - __main__ - INFO - Processing customer: 2237802672
+2025-10-09 11:59:22,660 - __main__ - INFO - ============================================================
+
+2025-10-09 11:59:22,661 - __main__ - INFO - Step 1: Finding ads with SINGLES_DAY label...
+E0000 00:00:1760011162.662685    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:24,794 - operations.labels - INFO - Found 0 ads with label 'SINGLES_DAY' (excluded removed: True)
+2025-10-09 11:59:24,795 - __main__ - INFO - No ads found with SINGLES_DAY label
+2025-10-09 11:59:24,796 - __main__ - INFO - Step 3: Finding ad groups with SD_DONE label...
+E0000 00:00:1760011164.798776    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:26,043 - operations.labels - INFO - Found 0 ad groups with label 'SD_DONE'
+2025-10-09 11:59:26,043 - __main__ - INFO - No ad groups found with SD_DONE label
+2025-10-09 11:59:26,044 - __main__ - INFO - ✓ Removal process complete for customer 2237802672!
+2025-10-09 11:59:26,044 - __main__ - INFO - 
+============================================================
+2025-10-09 11:59:26,044 - __main__ - INFO - Processing customer: 3114657125
+2025-10-09 11:59:26,044 - __main__ - INFO - ============================================================
+
+2025-10-09 11:59:26,044 - __main__ - INFO - Step 1: Finding ads with SINGLES_DAY label...
+E0000 00:00:1760011166.046359    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:27,607 - operations.labels - INFO - Found 0 ads with label 'SINGLES_DAY' (excluded removed: True)
+2025-10-09 11:59:27,609 - __main__ - INFO - No ads found with SINGLES_DAY label
+2025-10-09 11:59:27,609 - __main__ - INFO - Step 3: Finding ad groups with SD_DONE label...
+E0000 00:00:1760011167.611222    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:28,581 - operations.labels - INFO - Found 0 ad groups with label 'SD_DONE'
+2025-10-09 11:59:28,582 - __main__ - INFO - No ad groups found with SD_DONE label
+2025-10-09 11:59:28,582 - __main__ - INFO - ✓ Removal process complete for customer 3114657125!
+2025-10-09 11:59:28,582 - __main__ - INFO - 
+============================================================
+2025-10-09 11:59:28,582 - __main__ - INFO - Processing customer: 3273661472
+2025-10-09 11:59:28,582 - __main__ - INFO - ============================================================
+
+2025-10-09 11:59:28,582 - __main__ - INFO - Step 1: Finding ads with SINGLES_DAY label...
+E0000 00:00:1760011168.583706    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:30,010 - operations.labels - INFO - Found 0 ads with label 'SINGLES_DAY' (excluded removed: True)
+2025-10-09 11:59:30,010 - __main__ - INFO - No ads found with SINGLES_DAY label
+2025-10-09 11:59:30,011 - __main__ - INFO - Step 3: Finding ad groups with SD_DONE label...
+E0000 00:00:1760011170.012157    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+2025-10-09 11:59:36,293 - operations.labels - INFO - Found 20312 ad groups with label 'SD_DONE'
+2025-10-09 11:59:36,304 - __main__ - INFO - Step 4: Getting ad_group_label associations for 20312 ad groups...
+E0000 00:00:1760011176.327791    1253 alts_credentials.cc:93] ALTS creds ignored. Not running on GCP and untrusted ALTS is not enabled.
+Request made: ClientCustomerId: 3273661472, Host: googleads.googleapis.com, Method: /google.ads.googleads.v21.services.GoogleAdsService/Search, RequestId: PTKX-wjJTGAS48NwW04lyw, IsFault: True, FaultMessage: The number of values (right-hand-side operands) in a filter exceeds the limit.
+2025-10-09 11:59:37,960 - operations.labels - ERROR - Failed to fetch ad_group_label resources: (<_InactiveRpcError of RPC that terminated with:
+	status = StatusCode.INVALID_ARGUMENT
+	details = "Request contains an invalid argument."
+	debug_error_string = "UNKNOWN:Error received from peer ipv4:216.58.208.106:443 {grpc_message:"Request contains an invalid argument.", grpc_status:3}"
+>, <_InactiveRpcError of RPC that terminated with:
+	status = StatusCode.INVALID_ARGUMENT
+	details = "Request contains an invalid argument."
+	debug_error_string = "UNKNOWN:Error received from peer ipv4:216.58.208.106:443 {grpc_message:"Request contains an invalid argument.", grpc_status:3}"
+>, errors {
+  error_code {
+    query_error: FILTER_HAS_TOO_MANY_VALUES
+  }
+  message: "The number of values (right-hand-side operands) in a filter exceeds the limit."
+}
+request_id: "PTKX-wjJTGAS48NwW04lyw"
+, 'PTKX-wjJTGAS48NwW04lyw')
+2025-10-09 11:59:37,960 - __main__ - INFO - No label associations found to remove
+2025-10-09 11:59:37,960 - __main__ - INFO - ✓ Removal process complete for customer 3273661472!
+2025-10-09 11:59:37,960 - __main__ - INFO - 
+============================================================
+2025-10-09 11:59:37,960 - __main__ - INFO - BATCH PROCESSING COMPLETE
+2025-10-09 11:59:37,960 - __main__ - INFO - ============================================================
+2025-10-09 11:59:37,961 - __main__ - INFO - Successfully processed: 5/5 customers
+2025-10-09 11:59:37,961 - __main__ - INFO - ============================================================
+
