@@ -42,6 +42,7 @@ from backend.gsd_campaigns_router import router as gsd_campaigns_router
 from backend.dma_bidding_router import router as dma_bidding_router
 from backend.mc_id_finder_router import router as mc_id_finder_router
 from backend.redshift_upload_router import router as redshift_upload_router
+from backend.task_scheduler_router import router as task_scheduler_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.content_publisher import (
@@ -138,15 +139,22 @@ app.include_router(mc_id_finder_router)
 # Include redshift_upload router
 app.include_router(redshift_upload_router)
 
+# Include task_scheduler router
+app.include_router(task_scheduler_router)
+
 @app.on_event("startup")
 async def startup_event():
     """Run startup tasks for all services."""
     await cleanup_thema_ads_jobs()
 
-# CORS for frontend
+# CORS for frontend — restricted to this server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict this in production
+    allow_origins=[
+        "http://localhost:3003",
+        "http://win-htz-006.colo.beslist.net:3003",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
