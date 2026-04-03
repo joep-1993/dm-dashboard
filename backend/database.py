@@ -187,6 +187,21 @@ def init_db():
         )
     """)
 
+    # Publish log table (tracks successful content publishes)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pa.publish_log (
+            id SERIAL PRIMARY KEY,
+            environment VARCHAR(50) NOT NULL,
+            content_type VARCHAR(50) NOT NULL,
+            total_urls INTEGER DEFAULT 0,
+            status VARCHAR(50) NOT NULL,
+            payload_size_mb NUMERIC(10,2),
+            duration_sec NUMERIC(10,1),
+            published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_publish_log_env ON pa.publish_log(environment, published_at DESC)")
+
     # Thema Ads tables
     cur.execute("""
         CREATE TABLE IF NOT EXISTS thema_ads_jobs (

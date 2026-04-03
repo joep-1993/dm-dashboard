@@ -2380,6 +2380,37 @@ async def get_publish_status(task_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/content-publish/last-push")
+async def get_last_publish():
+    """Get the timestamp of the last successful publish to production."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT published_at, total_urls, content_type, payload_size_mb, duration_sec
+            FROM pa.publish_log
+            WHERE environment = 'production' AND status = 'success'
+            ORDER BY published_at DESC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        cur.close()
+        return_db_connection(conn)
+
+        if row:
+            return {
+                "last_push": row['published_at'].isoformat(),
+                "total_urls": row['total_urls'],
+                "content_type": row['content_type'],
+                "payload_size_mb": float(row['payload_size_mb']) if row['payload_size_mb'] else None,
+                "duration_sec": float(row['duration_sec']) if row['duration_sec'] else None,
+            }
+        return {"last_push": None}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================================
 # Unique Titles Publishing API
 # ============================================================================

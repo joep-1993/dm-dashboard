@@ -12,6 +12,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // Refresh publish stats if on a page with publishing elements
     if (document.getElementById('publishStats')) {
         refreshPublishStats();
+        fetchLastPushTimestamp();
     }
 
     // FAQ URL Lookup
@@ -694,6 +695,26 @@ async function resetFaqValidationHistory() {
 // Content Publishing Functions
 // ============================================================================
 
+async function fetchLastPushTimestamp() {
+    try {
+        const response = await fetch(`${API_BASE}/api/content-publish/last-push`);
+        const data = await response.json();
+        const el = document.getElementById('lastPushTimestamp');
+        if (el && data.last_push) {
+            const d = new Date(data.last_push);
+            const formatted =
+                String(d.getDate()).padStart(2, '0') +
+                String(d.getMonth() + 1).padStart(2, '0') +
+                d.getFullYear() + ' ' +
+                String(d.getHours()).padStart(2, '0') + ':' +
+                String(d.getMinutes()).padStart(2, '0');
+            el.innerHTML = `Last push: <strong>${formatted}</strong>`;
+        }
+    } catch (error) {
+        console.error('Failed to fetch last push timestamp:', error);
+    }
+}
+
 async function refreshPublishStats() {
     try {
         const response = await fetch(`${API_BASE}/api/content-publish/stats`);
@@ -811,6 +832,7 @@ async function pollPublishStatus(taskId, resultDiv, publishBtn) {
 
             resultDiv.innerHTML = html;
             publishBtn.disabled = false;
+            fetchLastPushTimestamp();
         } else if (data.status === 'failed') {
             // Failed
             resultDiv.innerHTML = `

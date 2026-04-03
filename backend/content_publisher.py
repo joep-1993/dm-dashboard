@@ -599,6 +599,29 @@ def _run_publish_task(task_id: str, environment: str, content_type: str = "all")
             _publish_tasks[task_id]["status"] = "completed"
             _publish_tasks[task_id]["result"] = result
             _publish_tasks[task_id]["completed_at"] = time.time()
+
+        # Record successful publish in log table
+        if result.get("success"):
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO pa.publish_log
+                        (environment, content_type, total_urls, status, payload_size_mb, duration_sec)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    environment,
+                    content_type,
+                    result.get("total_urls", 0),
+                    "success",
+                    result.get("payload_size_mb"),
+                    result.get("timing", {}).get("total_sec"),
+                ))
+                conn.commit()
+                cur.close()
+                return_db_connection(conn)
+            except Exception as log_err:
+                print(f"[Publisher] Warning: Failed to log publish: {log_err}")
     except Exception as e:
         print(f"[Publisher] Error: {str(e)}")
         with _task_lock:
