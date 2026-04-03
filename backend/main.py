@@ -1,17 +1,20 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response as FastAPIResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, RedirectResponse, Response
+from fastapi.responses import StreamingResponse, RedirectResponse, Response, HTMLResponse
 import httpx
 from urllib.parse import urljoin
 from datetime import datetime
 from io import StringIO, BytesIO
 import csv
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import asyncio
 import tempfile
 import time
@@ -52,6 +55,73 @@ from backend.content_publisher import (
 import psycopg2
 
 app = FastAPI(title="SEO Tools - Unified Platform", version="1.0.0")
+
+# --- Authentication ---
+AUTH_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+AUTH_SECRET = os.getenv("DASHBOARD_SECRET", secrets.token_hex(32))
+AUTH_COOKIE = "dm_session"
+PUBLIC_PATHS = {"/login", "/api/health"}
+
+def _make_token(password: str) -> str:
+    return hmac.new(AUTH_SECRET.encode(), password.encode(), hashlib.sha256).hexdigest()
+
+LOGIN_PAGE = """<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DM Dashboard - Login</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>body{background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.login-card{max-width:400px;width:100%}.error{color:#dc3545;font-size:.875rem;margin-top:.5rem}</style>
+</head><body>
+<div class="login-card card shadow-sm"><div class="card-body p-4">
+<h4 class="card-title mb-3">DM Dashboard</h4>
+<form method="POST" action="/login">
+<div class="mb-3"><label class="form-label">Password</label>
+<input type="password" name="password" class="form-control" autofocus required></div>
+<button type="submit" class="btn btn-primary w-100">Log in</button>
+{error}
+</form></div></div></body></html>"""
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    return LOGIN_PAGE.replace("{error}", "")
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_submit(request: Request):
+    form = await request.form()
+    password = form.get("password", "")
+    if hmac.compare_digest(password, AUTH_PASSWORD):
+        response = RedirectResponse(url="/", status_code=303)
+        response.set_cookie(AUTH_COOKIE, _make_token(password), httponly=True, samesite="lax", max_age=86400 * 30)
+        return response
+    return HTMLResponse(
+        LOGIN_PAGE.replace("{error}", '<div class="error">Incorrect password</div>'),
+        status_code=401,
+    )
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/login")
+    response.delete_cookie(AUTH_COOKIE)
+    return response
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if not AUTH_PASSWORD:
+            return await call_next(request)
+        path = request.url.path
+        if path in PUBLIC_PATHS:
+            return await call_next(request)
+        token = request.cookies.get(AUTH_COOKIE, "")
+        if hmac.compare_digest(token, _make_token(AUTH_PASSWORD)):
+            return await call_next(request)
+        if path.startswith("/api/"):
+            return HTMLResponse('{"detail":"Not authenticated"}', status_code=401, media_type="application/json")
+        return RedirectResponse(url="/login")
+
+app.add_middleware(AuthMiddleware)
 
 # Include thema_ads router
 app.include_router(thema_ads_router)
