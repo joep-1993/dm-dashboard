@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>R-Finder</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .results-table { max-height: 600px; overflow-y: auto; }
+        .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
+        .visits-cell { text-align: right; font-weight: bold; }
+        .filter-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
+        .filter-row input { flex: 1; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+        .stats-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">R-Finder</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 pb-5">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+                <!-- Search Filters -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Search Filters</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Find /r/ URLs from Redshift visits data. Filter by category, minimum visits, and date range.</p>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label small">Date Range</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="date" class="form-control" id="startDate">
+                                    <span class="input-group-text">to</span>
+                                    <input type="date" class="form-control" id="endDate">
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">Min Visits</label>
+                                <input type="number" class="form-control form-control-sm" id="minVisits" value="0" min="0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">Limit</label>
+                                <input type="number" class="form-control form-control-sm" id="limit" value="4000" min="1" max="10000">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small">Category / Query Filters (URL must contain ALL of these - AND logic)</label>
+                            <div id="filterContainer">
+                                <div class="row mb-2">
+                                    <div class="col-md-3">
+                                        <input type="text" class="form-control form-control-sm" id="filter1" placeholder="e.g. laptops">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <input type="text" class="form-control form-control-sm" id="filter2" placeholder="e.g. gaming">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <input type="text" class="form-control form-control-sm" id="filter3" placeholder="e.g. 17_inch">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <input type="text" class="form-control form-control-sm" id="filter4" placeholder="e.g. asus">
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="text-muted">Leave empty to get all /r/ URLs. Spaces are converted to underscores.</small>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-primary" onclick="searchUrls()">Search URLs</button>
+                            <button class="btn btn-outline-secondary" onclick="clearFilters()">Clear Filters</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                <div class="card mb-4">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Results</h5>
+                        <div>
+                            <span id="resultCount" class="badge bg-light text-dark me-2">0 URLs</span>
+                            <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyToClipboard()">Copy for Excel</button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="downloadResults()">Download CSV</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="loadingSpinner" class="text-center d-none">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Fetching URLs from Redshift...</p>
+                        </div>
+
+                        <div id="resultsContainer">
+                            <p class="text-muted text-center">Enter filters and click "Search URLs" to find /r/ pages.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Excluded Patterns Info -->
+                <div class="card mt-3">
+                    <div class="card-header bg-secondary text-white">
+                        <h6 class="mb-0">Excluded URL Patterns</h6>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted mb-2">The following patterns are automatically excluded from results:</p>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <ul class="small mb-0">
+                                    <li><code>device=</code> - Device parameters</li>
+                                    <li><code>/sitemap/</code> - Sitemap pages</li>
+                                    <li><code>sortby=</code> - Sort parameters</li>
+                                    <li><code>/filters/</code> - Filter pages</li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <ul class="small mb-0">
+                                    <li><code>/page_</code> - Pagination</li>
+                                    <li><code>shop_id=</code> - Shop filters</li>
+                                    <li><code>+</code> - Combined queries</li>
+                                    <li>Mismatched category combinations</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Store results for download
+        let currentResults = [];
+
+        // Initialize date range (2015-01-01 to today)
+        document.addEventListener('DOMContentLoaded', () => {
+            const today = new Date();
+            document.getElementById('endDate').value = today.toISOString().split('T')[0];
+            document.getElementById('startDate').value = '2015-01-01';
+        });
+
+        function getDateYYYYMMDD(dateStr) {
+            return dateStr.replace(/-/g, '');
+        }
+
+        function collectFilters() {
+            const filters = [];
+            for (let i = 1; i <= 4; i++) {
+                const val = document.getElementById(`filter${i}`).value.trim();
+                if (val) {
+                    filters.push(val);
+                }
+            }
+            return filters;
+        }
+
+        async function searchUrls() {
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const resultCount = document.getElementById('resultCount');
+
+            loadingSpinner.classList.remove('d-none');
+            resultsContainer.innerHTML = '';
+
+            try {
+                const payload = {
+                    filters: collectFilters(),
+                    min_visits: parseInt(document.getElementById('minVisits').value) || 0,
+                    start_date: getDateYYYYMMDD(document.getElementById('startDate').value),
+                    end_date: getDateYYYYMMDD(document.getElementById('endDate').value),
+                    limit: parseInt(document.getElementById('limit').value) || 4000
+                };
+
+                const response = await fetch('/api/rfinder/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to search URLs');
+                }
+
+                currentResults = data.urls || [];
+                resultCount.textContent = `${data.total} URLs`;
+
+                if (currentResults.length === 0) {
+                    resultsContainer.innerHTML = '<p class="text-muted text-center">No URLs found matching the filters.</p>';
+                } else {
+                    renderResults(currentResults);
+                }
+
+            } catch (error) {
+                resultsContainer.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+            } finally {
+                loadingSpinner.classList.add('d-none');
+            }
+        }
+
+        function renderResults(results) {
+            const container = document.getElementById('resultsContainer');
+
+            // Calculate total visits
+            const totalVisits = results.reduce((sum, r) => sum + (r.visits || 0), 0);
+
+            // Create tab-separated text for Excel (tabs = columns) with relative URLs
+            const toRelativeUrl = (url) => url.replace(/^https?:\/\/[^\/]+/, '');
+            const tsvData = 'url\tvisits\n' + results.map(r => `${toRelativeUrl(r.url)}\t${r.visits}`).join('\n');
+
+            container.innerHTML = `
+                <p class="text-muted small mb-2">Total visits: <strong>${totalVisits.toLocaleString()}</strong></p>
+                <textarea id="tsvOutput" class="form-control mb-3" rows="10" readonly style="font-family: monospace; font-size: 0.8rem;">${escapeHtml(tsvData)}</textarea>
+                <div class="results-table">
+                    <table class="table table-sm table-striped table-hover">
+                        <thead class="sticky-top bg-white">
+                            <tr>
+                                <th style="width: 80%">URL</th>
+                                <th style="width: 20%" class="text-end">Visits</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${results.map(r => `
+                                <tr>
+                                    <td class="url-cell">
+                                        <a href="${r.url.startsWith('http') ? r.url : 'https://www.beslist.nl' + r.url}" target="_blank" class="text-decoration-none">${escapeHtml(r.url)}</a>
+                                    </td>
+                                    <td class="visits-cell">${(r.visits || 0).toLocaleString()}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function copyToClipboard() {
+            const textarea = document.getElementById('tsvOutput');
+            textarea.select();
+            document.execCommand('copy');
+            alert('Copied to clipboard! Paste directly into Excel.');
+        }
+
+        function clearFilters() {
+            for (let i = 1; i <= 4; i++) {
+                document.getElementById(`filter${i}`).value = '';
+            }
+            document.getElementById('minVisits').value = '0';
+            document.getElementById('limit').value = '4000';
+
+            // Reset dates (2015-01-01 to today)
+            const today = new Date();
+            document.getElementById('endDate').value = today.toISOString().split('T')[0];
+            document.getElementById('startDate').value = '2015-01-01';
+        }
+
+        function downloadResults() {
+            if (currentResults.length === 0) {
+                alert('No results to download');
+                return;
+            }
+
+            const csv = 'url;visits\n' +
+                currentResults.map(r => `"${r.url}";${r.visits}`).join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `r_urls_${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

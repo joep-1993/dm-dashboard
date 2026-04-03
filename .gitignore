@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+
+# Environment (credentials)
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files
+*.xlsx
+*.xls
+
+# Temporary/output files
+*.csv
+!backend/data/*.csv
+!backend/*.csv
+
+# Credentials
+backend/service_accounts/
+
+# Log files
+logs/
+*.log

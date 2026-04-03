@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kopteksten</title>
+    <!-- Bootstrap 5 from CDN - no build tools needed! -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Kopteksten</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5 pb-5">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+                <!-- Upload URLs -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Upload URLs</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Upload a text file or manually enter URLs (one per line). Duplicates will be automatically skipped.</p>
+
+                        <!-- File Upload -->
+                        <div class="mb-3">
+                            <label for="urlFileInput" class="form-label">Upload File</label>
+                            <input type="file" class="form-control" id="urlFileInput" accept=".txt">
+                        </div>
+                        <button class="btn btn-info mb-3" onclick="uploadUrls()" id="uploadBtn">
+                            Upload File
+                        </button>
+
+                        <hr>
+
+                        <!-- Manual URL Entry -->
+                        <div class="mb-3">
+                            <label for="manualUrlInput" class="form-label">Or Enter URLs Manually</label>
+                            <textarea class="form-control" id="manualUrlInput" rows="5" placeholder="https://example.com/page1&#10;https://example.com/page2&#10;https://example.com/page3"></textarea>
+                            <small class="text-muted">Enter one URL per line</small>
+                        </div>
+                        <button class="btn btn-info" onclick="uploadManualUrls()" id="uploadManualBtn">
+                            Add URLs
+                        </button>
+
+                        <div id="uploadResult" class="mt-3"></div>
+                    </div>
+                </div>
+
+                <!-- SEO Content Generation -->
+                <div class="card mb-4">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0">SEO Content Generation</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Process URLs for AI-generated product recommendations</p>
+                        <div class="row g-2 mb-3">
+                            <div class="col-auto">
+                                <label for="batchSizeInput" class="form-label small mb-1">Batch Size</label>
+                                <input type="number" class="form-control" id="batchSizeInput" value="100" min="1" style="width: 120px;">
+                            </div>
+                            <div class="col-auto">
+                                <label for="parallelWorkersInput" class="form-label small mb-1">Parallel Workers</label>
+                                <input type="number" class="form-control" id="parallelWorkersInput" value="20" min="1" max="20" style="width: 100px;">
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-info" onclick="processUrls()" id="processBtn">
+                                    Process URLs
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-primary" onclick="processAllUrls()" id="processAllBtn">
+                                    Process All URLs
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-danger d-none" onclick="stopProcessing()" id="stopBtn">
+                                    Stop
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Progress Bar -->
+                        <div id="progressContainer" class="d-none mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span id="progressText">Processing...</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar"
+                                     id="progressBar"
+                                     style="width: 0%">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="processResult" class="mt-3"></div>
+                    </div>
+                </div>
+
+                <!-- Link Validation -->
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">Link Validation</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Validate product links via Elasticsearch. Outdated URLs are auto-corrected. Content with gone products is moved back to pending.</p>
+                        <div class="row g-2 mb-3">
+                            <div class="col-auto">
+                                <label for="validationBatchSize" class="form-label small mb-1">Batch Size</label>
+                                <input type="number" class="form-control" id="validationBatchSize" value="500" min="1" style="width: 120px;">
+                            </div>
+                            <div class="col-auto">
+                                <label for="validationParallelWorkers" class="form-label small mb-1">Parallel Workers</label>
+                                <input type="number" class="form-control" id="validationParallelWorkers" value="20" min="1" max="20" style="width: 100px;">
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-secondary" onclick="validateLinks()" id="validateBtn">
+                                    Validate Links
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-primary" onclick="validateAllLinks()" id="validateAllBtn">
+                                    Validate All
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-outline-info" onclick="recheckSkippedUrls()" id="recheckSkippedBtn" title="Re-check skipped URLs to see if products are now available">
+                                    Recheck Skipped
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-outline-danger" onclick="resetValidationHistory()" id="resetValidationBtn" title="Reset validation history to re-check all URLs">
+                                    Reset Validation
+                                </button>
+                            </div>
+                        </div>
+                        <div id="validationResult" class="mt-3"></div>
+                    </div>
+                </div>
+
+                <!-- Content Publishing -->
+                <div class="card mb-4">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="mb-0">Content Publishing</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Publish generated content (content_top + FAQ) to the website-configuration API</p>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <div class="d-flex gap-3 mb-3" id="publishStats">
+                                    <div class="text-center">
+                                        <h5 class="mb-0" id="publishContentCount">-</h5>
+                                        <small class="text-muted">Content Top</small>
+                                    </div>
+                                    <div class="text-center">
+                                        <h5 class="mb-0" id="publishFaqCount">-</h5>
+                                        <small class="text-muted">FAQ</small>
+                                    </div>
+                                    <div class="text-center">
+                                        <h5 class="mb-0" id="publishTotalCount">-</h5>
+                                        <small class="text-muted">Total URLs</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-auto">
+                                <label for="publishEnvironment" class="form-label small mb-1">Environment</label>
+                                <select class="form-select" id="publishEnvironment" style="width: 150px;">
+                                    <option value="staging">Staging</option>
+                                    <option value="production" selected>Production</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <label for="publishContentType" class="form-label small mb-1">Content Type</label>
+                                <select class="form-select" id="publishContentType" style="width: 150px;">
+                                    <option value="all">All</option>
+                                    <option value="seo_only">SEO Only</option>
+                                    <option value="faq_only">FAQ Only</option>
+                                </select>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-outline-warning" onclick="refreshPublishStats()">
+                                    Refresh Stats
+                                </button>
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">
+                                    Publish
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="publishResult" class="mt-3"></div>
+                    </div>
+                </div>
+
+                <!-- Status Overview -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Processing Status</h5>
+                        <button class="btn btn-outline-primary btn-sm" onclick="refreshStatus()">Refresh Status</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="totalUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <p class="text-muted mb-0">Total URLs</p>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="processedUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <p class="text-muted mb-0">Processed</p>
+                            </div>
+                            <div class="col-md-2 col-4 mb-3">
+                                <h3 id="skippedUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <p class="text-muted mb-0">Skipped</p>
+                            </div>
+                            <div class="col-md-2 col-4 mb-3">
+                                <h3 id="failedUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <p class="text-muted mb-0">Failed</p>
+                            </div>
+                            <div class="col-md-2 col-4 mb-3">
+                                <h3 id="pendingUrls" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <p class="text-muted mb-0">Pending</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Results -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Recent Results</h5>
+                        <div>
+                            <button class="btn btn-sm btn-outline-success" onclick="exportXLSX()">
+                                Export Excel
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="exportJSON()">
+                                Export JSON
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="exportCombined()" title="Export FAQ + Content combined">
+                                Export Combined
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="recentResults" class="list-group">
+                            Loading...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- URL Lookup -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">URL Lookup</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="input-group mb-3">
+                            <input type="text" class="form-control" id="lookupUrl" placeholder="Enter URL to lookup...">
+                            <button class="btn btn-outline-secondary" id="lookupBtn">Lookup</button>
+                        </div>
+                        <div id="lookupResult"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
+    <!-- Bootstrap JS from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/app.js?v=2"></script>
+</body>
+</html>

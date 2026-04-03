@@ -1,0 +1,384 @@
+/* Simple custom styles - no preprocessing needed! */
+
+/* Custom Color Scheme */
+:root {
+    --color-navbar: #5e4a90;    /* Purple - for top navbar only */
+    --color-section: #E8E9EB;   /* Light grey - for section headers */
+    --color-button: #CC5500;    /* Burnt orange - for buttons */
+    --color-button-hover: #E97451;  /* Coral orange - for button hover */
+}
+
+/* Match section header size with topbar menu items */
+.card-header h5 {
+    font-size: 1.1rem;
+}
+
+body {
+    background-color: #f8f9fa;
+}
+
+.card {
+    box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+}
+
+/* All card/section headers are light grey */
+.card-header {
+    background-color: var(--color-section) !important;
+    color: #333 !important;
+}
+
+#result {
+    padding: 1rem;
+    background-color: #f1f3f5;
+    border-radius: 0.25rem;
+    white-space: pre-wrap;
+    display: none;
+}
+
+#result.show {
+    display: block;
+}
+
+.status-ok {
+    color: #28a745;
+}
+
+.status-error {
+    color: red;
+}
+
+/* Navbar - taller with centered content, edges aligned with page sections */
+.navbar {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+}
+
+.navbar > .container {
+    flex-wrap: nowrap !important;
+}
+
+.navbar .navbar-brand {
+    font-size: 1.5rem !important;
+    font-weight: 700;
+}
+
+/* Subtle shadow on all buttons throughout the frontend */
+.btn {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Navbar dropdown menu system */
+.nav-dropdown {
+    position: relative;
+}
+
+.nav-dropdown-toggle {
+    background: transparent;
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    padding: 0.4rem 0.85rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 0.3rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.nav-dropdown-toggle:hover,
+.nav-dropdown-active {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.nav-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    padding-top: 0.25rem;
+    background-color: #7b6aa8;
+    border-radius: 0.4rem;
+    padding-bottom: 0.4rem;
+    min-width: 210px;
+    z-index: 1050;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.nav-dropdown:hover .nav-dropdown-menu {
+    display: block;
+}
+
+.nav-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 1rem;
+    color: white;
+    text-decoration: none;
+    font-size: 0.95rem;
+    font-weight: 500;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.nav-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.nav-dropdown-item svg {
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+.nav-dropdown-item:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: white;
+}
+
+.nav-dropdown-item.active {
+    background-color: rgba(255, 255, 255, 0.25);
+    color: white;
+}
+
+/* Dashboard button - match top-level menu style */
+.nav-dashboard-btn {
+    font-size: 1.1rem !important;
+    font-weight: 700 !important;
+    padding: 0.4rem 0.85rem !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    border-radius: 0.3rem !important;
+}
+
+/* Shrink nav text on smaller screens to prevent wrapping */
+@media (max-width: 1600px) {
+    .nav-dropdown-toggle, .nav-dashboard-btn { font-size: 0.9rem !important; padding: 0.35rem 0.6rem !important; }
+    .nav-dropdown-item { font-size: 0.85rem; padding: 0.45rem 0.8rem; }
+}
+@media (max-width: 1200px) {
+    .nav-dropdown-toggle, .nav-dashboard-btn { font-size: 0.8rem !important; padding: 0.3rem 0.5rem !important; }
+    .nav-dropdown-item { font-size: 0.75rem; padding: 0.4rem 0.7rem; }
+}
+@media (max-width: 992px) {
+    .nav-dropdown-toggle, .nav-dashboard-btn { font-size: 0.7rem !important; padding: 0.25rem 0.4rem !important; }
+    .nav-dropdown-item { font-size: 0.65rem; padding: 0.35rem 0.6rem; }
+}
+
+/* Override Bootstrap Colors */
+
+/* Top navbar - Purple */
+.navbar,
+.navbar.bg-primary,
+.navbar.bg-dark {
+    background-color: var(--color-navbar) !important;
+}
+
+/* Other bg-primary elements use section color */
+.bg-primary:not(.navbar) {
+    background-color: var(--color-section) !important;
+}
+
+/* All buttons are orange */
+.btn-primary {
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.btn-outline-primary {
+    color: var(--color-button);
+    border-color: var(--color-button);
+}
+
+.btn-outline-primary:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.text-primary {
+    color: var(--color-navbar) !important;
+}
+
+.badge.bg-primary {
+    background-color: var(--color-navbar) !important;
+}
+
+/* Info Color - Grey for headers, Orange for buttons */
+.bg-info,
+.card-header.bg-info {
+    background-color: var(--color-section) !important;
+}
+
+.btn-info {
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
+}
+
+.btn-info:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.btn-outline-info {
+    color: var(--color-button);
+    border-color: var(--color-button);
+    background-color: transparent;
+}
+
+.btn-outline-info:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.text-info {
+    color: #666 !important;
+}
+
+.badge.bg-info {
+    background-color: var(--color-section) !important;
+}
+
+.alert-info {
+    background-color: rgba(232, 233, 235, 0.5);
+    border-color: var(--color-section);
+    color: #333;
+}
+
+/* Success Color - Grey for headers, Orange for buttons */
+.bg-success,
+.card-header.bg-success {
+    background-color: var(--color-section) !important;
+}
+
+.btn-success {
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
+}
+
+.btn-success:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.btn-outline-success {
+    color: var(--color-button);
+    border-color: var(--color-button);
+}
+
+.btn-outline-success:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.text-success {
+    color: #666 !important;
+}
+
+.badge.bg-success {
+    background-color: var(--color-section) !important;
+}
+
+.alert-success {
+    background-color: rgba(232, 233, 235, 0.5);
+    border-color: var(--color-section);
+    color: #333;
+}
+
+.progress-bar {
+    background-color: var(--color-button);
+}
+
+/* Secondary Color - Grey for headers, Orange for buttons */
+.bg-secondary,
+.card-header.bg-secondary {
+    background-color: var(--color-section) !important;
+}
+
+.btn-secondary {
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.btn-outline-secondary {
+    color: var(--color-button);
+    border-color: var(--color-button);
+}
+
+.btn-outline-secondary:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+/* Warning buttons - also orange */
+.btn-warning {
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: white;
+}
+
+.btn-warning:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+.btn-outline-warning {
+    color: var(--color-button);
+    border-color: var(--color-button);
+    background-color: transparent;
+}
+
+.btn-outline-warning:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}
+
+/* Danger buttons - keep red for destructive actions */
+.btn-danger {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+    color: white;
+}
+
+/* Outline danger buttons - orange like other outline buttons */
+.btn-outline-danger {
+    color: var(--color-button);
+    border-color: var(--color-button);
+    background-color: transparent;
+}
+
+.btn-outline-danger:hover {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: white;
+}

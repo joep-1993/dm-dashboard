@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Keyword Planner</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .results-table { max-height: 600px; overflow-y: auto; }
+        .volume-high { color: #198754; font-weight: bold; }
+        .volume-medium { color: #0d6efd; }
+        .volume-low { color: #636e72; }
+        .volume-zero { color: #dc3545; }
+        .keyword-cell { font-family: monospace; font-size: 0.85rem; }
+        .upload-zone { border: 2px dashed #dee2e6; border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .upload-zone:hover { border-color: #5e4a90; background: #f8f9fc; }
+        .upload-zone.dragover { border-color: #5e4a90; background: #f0eef5; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Keyword Planner</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-11 mx-auto">
+                <!-- Input Section -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Keyword Input</h5>
+                        <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="testConnection()">Test API Connection</button>
+                    </div>
+                    <div class="card-body">
+                        <ul class="nav nav-tabs mb-3" id="inputTabs">
+                            <li class="nav-item">
+                                <a class="nav-link active" data-bs-toggle="tab" href="#textInput">Text Input</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" data-bs-toggle="tab" href="#excelInput">Excel Upload</a>
+                            </li>
+                        </ul>
+                        <div class="tab-content mb-3">
+                            <div class="tab-pane active" id="textInput">
+                                <label for="keywordInput" class="form-label">Enter keywords (one per line)</label>
+                                <textarea class="form-control" id="keywordInput" rows="8" placeholder="e-bike&#10;hardloopschoenen&#10;koffiezetapparaat&#10;wasmachine samsung&#10;stofzuiger"></textarea>
+                            </div>
+                            <div class="tab-pane" id="excelInput">
+                                <div class="upload-zone" id="uploadZone" onclick="document.getElementById('excelFile').click()">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="#5e4a90" viewBox="0 0 16 16" class="mb-2">
+                                        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                                        <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/>
+                                    </svg>
+                                    <p class="mb-1 fw-bold">Drop Excel file here or click to browse</p>
+                                    <p class="text-muted mb-0 small">Keywords will be read from the first column (.xlsx)</p>
+                                </div>
+                                <input type="file" id="excelFile" accept=".xlsx,.xls" class="d-none" onchange="handleFileSelect(event)">
+                                <div id="fileInfo" class="mt-2 d-none">
+                                    <span class="badge bg-success" id="fileName"></span>
+                                    <button class="btn btn-sm btn-outline-danger ms-2" onclick="clearFile()">Remove</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-primary" onclick="getSearchVolumes()">
+                                <span id="searchBtnText">Get Search Volumes</span>
+                                <span id="searchSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="downloadResults()" id="downloadBtn" disabled>Download Excel</button>
+                            <button class="btn btn-outline-danger" onclick="clearAll()">Clear All</button>
+                        </div>
+                        <div id="connectionStatus" class="mt-3"></div>
+                    </div>
+                </div>
+
+                <!-- Category Keyword Volumes Section -->
+                <div class="card mb-4">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background-color: #5e4a90;">
+                        <h5 class="mb-0">Category Keyword Volumes</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">Combine a keyword with all 3,535 category names (singular + plural, both orders). Volumes are aggregated per deepest category and main category.</p>
+                        <div class="row align-items-end">
+                            <div class="col-md-6">
+                                <label for="catKeywordInput" class="form-label">Keyword</label>
+                                <input type="text" class="form-control" id="catKeywordInput" placeholder="e.g. nike">
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn text-white w-100" style="background-color: #5e4a90; transition: background-color 0.2s ease;" onmouseover="this.style.backgroundColor='#7a6aa8'" onmouseout="this.style.backgroundColor='#5e4a90'" onclick="getCategoryVolumes()">
+                                    <span id="catBtnText">Get Category Volumes</span>
+                                    <span id="catSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                </button>
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-outline-secondary w-100" onclick="downloadCategoryResults()" id="catDownloadBtn" disabled>Download Excel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Category Volumes Progress -->
+                <div class="card mb-4 d-none" id="catProgressCard">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="catProgressText">Processing...</span>
+                            <span id="catProgressPercent"></span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" id="catProgressBar" role="progressbar" style="width: 0%; background-color: #5e4a90;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Category Volumes Results -->
+                <div class="card mb-4 d-none" id="catResultsCard">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background-color: #198754;">
+                        <h5 class="mb-0">Category Volume Results</h5>
+                        <span class="badge bg-light text-dark" id="catGrandTotal"></span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="results-table">
+                            <table class="table table-striped table-hover mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Main Category</th>
+                                        <th class="text-end">Search Volume</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="catResultsBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card-body pt-2 pb-2">
+                        <small class="text-muted" id="catStatsText"></small>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div class="card mb-4 d-none" id="progressCard">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="progressText">Processing...</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary Section -->
+                <div class="card mb-4 d-none" id="summaryCard">
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-md-2 col-4">
+                                <h5 id="statTotal" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">Total</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statSuccessful" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">With Volume</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statNoVolume" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">No Volume</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statSkipped" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">Skipped</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statUnique" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">Unique Queried</small>
+                            </div>
+                            <div class="col-md-2 col-4">
+                                <h5 id="statCustomerIds" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
+                                <small class="text-muted">Customer IDs Used</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="card d-none" id="resultsCard">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Results</h5>
+                        <div>
+                            <input type="text" class="form-control form-control-sm d-inline-block" style="width: 200px;" placeholder="Filter results..." id="filterInput" oninput="filterResults()">
+                            <select class="form-select form-select-sm d-inline-block" style="width: 150px;" id="sortSelect" onchange="sortResults()">
+                                <option value="volume_desc">Volume (high-low)</option>
+                                <option value="volume_asc">Volume (low-high)</option>
+                                <option value="keyword_asc">Keyword (A-Z)</option>
+                                <option value="keyword_desc">Keyword (Z-A)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="results-table">
+                            <table class="table table-striped table-hover mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Original Keyword</th>
+                                        <th>Normalized Keyword</th>
+                                        <th class="text-end">Search Volume</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = window.location.origin;
+        let currentResults = [];
+        let selectedFile = null;
+        let catResultsData = null;
+
+        // ====== Category Keyword Volumes ======
+
+        async function getCategoryVolumes() {
+            const keyword = document.getElementById('catKeywordInput').value.trim();
+            if (!keyword) {
+                alert('Please enter a keyword');
+                return;
+            }
+
+            const btnText = document.getElementById('catBtnText');
+            const spinner = document.getElementById('catSpinner');
+            btnText.textContent = 'Processing...';
+            spinner.classList.remove('d-none');
+
+            document.getElementById('catProgressCard').classList.remove('d-none');
+            document.getElementById('catProgressBar').style.width = '50%';
+            document.getElementById('catProgressText').textContent = 'Generating combinations & querying Google Ads API...';
+            document.getElementById('catProgressPercent').textContent = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/category-volumes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keyword })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Request failed');
+                }
+
+                const data = await response.json();
+                catResultsData = data;
+
+                // Update progress
+                document.getElementById('catProgressBar').style.width = '100%';
+                document.getElementById('catProgressText').textContent = 'Complete!';
+                document.getElementById('catProgressPercent').textContent = '100%';
+
+                // Render maincat results
+                const tbody = document.getElementById('catResultsBody');
+                tbody.innerHTML = '';
+
+                const maincatResults = data.maincat_results || [];
+                maincatResults.forEach((r, i) => {
+                    const volumeClass = r.search_volume >= 1000 ? 'volume-high' :
+                                       r.search_volume >= 100 ? 'volume-medium' :
+                                       r.search_volume > 0 ? 'volume-low' : 'volume-zero';
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td>${escapeHtml(r.maincat)}</td>
+                        <td class="text-end ${volumeClass}">${(r.search_volume || 0).toLocaleString()}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                // Grand total row
+                const totalTr = document.createElement('tr');
+                totalTr.classList.add('table-dark');
+                totalTr.innerHTML = `
+                    <td></td>
+                    <td class="fw-bold">Grand Total</td>
+                    <td class="text-end fw-bold">${(data.grand_total || 0).toLocaleString()}</td>
+                `;
+                tbody.appendChild(totalTr);
+
+                document.getElementById('catGrandTotal').textContent = `Grand Total: ${(data.grand_total || 0).toLocaleString()}`;
+
+                const stats = data.stats || {};
+                document.getElementById('catStatsText').textContent =
+                    `${stats.total_categories || 0} categories | ${stats.total_combinations_queried || 0} combinations queried | ${stats.unique_keywords_queried || 0} unique keywords | ${stats.customer_ids_used || 0} customer IDs used`;
+
+                document.getElementById('catResultsCard').classList.remove('d-none');
+                document.getElementById('catDownloadBtn').disabled = false;
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                document.getElementById('catProgressCard').classList.add('d-none');
+            }
+
+            btnText.textContent = 'Get Category Volumes';
+            spinner.classList.add('d-none');
+        }
+
+        async function downloadCategoryResults() {
+            if (!catResultsData || !catResultsData.deepest_cat_results) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/category-volumes/download`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deepest_cat_results: catResultsData.deepest_cat_results })
+                });
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const keyword = document.getElementById('catKeywordInput').value.trim() || 'category';
+                a.download = `category_volumes_${keyword}_${new Date().toISOString().slice(0,10)}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Download failed: ' + error.message);
+            }
+        }
+
+        // ====== Keyword Input (existing) ======
+
+        // Drag and drop
+        const uploadZone = document.getElementById('uploadZone');
+        uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
+                selectedFile = file;
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileInfo').classList.remove('d-none');
+            } else {
+                alert('Please upload an .xlsx or .xls file');
+            }
+        });
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                selectedFile = file;
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileInfo').classList.remove('d-none');
+            }
+        }
+
+        function clearFile() {
+            selectedFile = null;
+            document.getElementById('excelFile').value = '';
+            document.getElementById('fileInfo').classList.add('d-none');
+        }
+
+        async function testConnection() {
+            const statusDiv = document.getElementById('connectionStatus');
+            statusDiv.innerHTML = '<div class="alert alert-info py-1 small">Testing connection...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/test`, { method: 'POST' });
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    statusDiv.innerHTML = `<div class="alert alert-success py-1 small">${data.message}</div>`;
+                } else {
+                    statusDiv.innerHTML = `<div class="alert alert-danger py-1 small">${data.message}</div>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="alert alert-danger py-1 small">Connection failed: ${error.message}</div>`;
+            }
+        }
+
+        async function getSearchVolumes() {
+            const activeTab = document.querySelector('#inputTabs .nav-link.active').getAttribute('href');
+            const isExcel = activeTab === '#excelInput';
+
+            const btnText = document.getElementById('searchBtnText');
+            const spinner = document.getElementById('searchSpinner');
+            btnText.textContent = 'Processing...';
+            spinner.classList.remove('d-none');
+
+            document.getElementById('progressCard').classList.remove('d-none');
+            document.getElementById('progressBar').style.width = '50%';
+            document.getElementById('progressText').textContent = 'Querying Google Ads API...';
+            document.getElementById('progressPercent').textContent = '';
+
+            try {
+                let response;
+
+                if (isExcel && selectedFile) {
+                    const formData = new FormData();
+                    formData.append('file', selectedFile);
+                    response = await fetch(`${API_BASE}/api/keyword-planner/upload-excel`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                } else {
+                    const text = document.getElementById('keywordInput').value.trim();
+                    if (!text) {
+                        alert('Please enter keywords or upload an Excel file');
+                        resetButton();
+                        return;
+                    }
+                    const keywords = text.split('\n').map(k => k.trim()).filter(k => k);
+                    response = await fetch(`${API_BASE}/api/keyword-planner/search-volumes`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ keywords })
+                    });
+                }
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Request failed');
+                }
+
+                const data = await response.json();
+                currentResults = data.results || [];
+
+                // Update progress
+                document.getElementById('progressBar').style.width = '100%';
+                document.getElementById('progressText').textContent = 'Complete!';
+                document.getElementById('progressPercent').textContent = '100%';
+
+                // Update summary
+                document.getElementById('summaryCard').classList.remove('d-none');
+                document.getElementById('statTotal').textContent = (data.total || 0).toLocaleString();
+                document.getElementById('statSuccessful').textContent = (data.successful || 0).toLocaleString();
+                document.getElementById('statNoVolume').textContent = (data.no_volume || 0).toLocaleString();
+                document.getElementById('statSkipped').textContent = (data.skipped || 0).toLocaleString();
+                document.getElementById('statUnique').textContent = (data.unique_keywords_queried || 0).toLocaleString();
+                document.getElementById('statCustomerIds').textContent = data.customer_ids_used || '-';
+
+                // Render results
+                renderResults(currentResults);
+                document.getElementById('resultsCard').classList.remove('d-none');
+                document.getElementById('downloadBtn').disabled = false;
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                document.getElementById('progressCard').classList.add('d-none');
+            }
+
+            resetButton();
+        }
+
+        function resetButton() {
+            document.getElementById('searchBtnText').textContent = 'Get Search Volumes';
+            document.getElementById('searchSpinner').classList.add('d-none');
+        }
+
+        function renderResults(results) {
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = '';
+
+            results.forEach((r, i) => {
+                const volumeClass = r.search_volume >= 1000 ? 'volume-high' :
+                                   r.search_volume >= 100 ? 'volume-medium' :
+                                   r.search_volume > 0 ? 'volume-low' : 'volume-zero';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${i + 1}</td>
+                    <td class="keyword-cell">${escapeHtml(r.original_keyword)}</td>
+                    <td class="keyword-cell text-muted">${escapeHtml(r.normalized_keyword || '')}</td>
+                    <td class="text-end ${volumeClass}">${(r.search_volume || 0).toLocaleString()}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filterResults() {
+            const filter = document.getElementById('filterInput').value.toLowerCase();
+            const filtered = currentResults.filter(r =>
+                r.original_keyword.toLowerCase().includes(filter) ||
+                (r.normalized_keyword || '').toLowerCase().includes(filter)
+            );
+            renderResults(filtered);
+        }
+
+        function sortResults() {
+            const sort = document.getElementById('sortSelect').value;
+            const sorted = [...currentResults];
+
+            switch (sort) {
+                case 'volume_desc': sorted.sort((a, b) => (b.search_volume || 0) - (a.search_volume || 0)); break;
+                case 'volume_asc': sorted.sort((a, b) => (a.search_volume || 0) - (b.search_volume || 0)); break;
+                case 'keyword_asc': sorted.sort((a, b) => a.original_keyword.localeCompare(b.original_keyword)); break;
+                case 'keyword_desc': sorted.sort((a, b) => b.original_keyword.localeCompare(a.original_keyword)); break;
+            }
+
+            renderResults(sorted);
+        }
+
+        async function downloadResults() {
+            if (!currentResults.length) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/download`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ results: currentResults })
+                });
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `keyword_planner_${new Date().toISOString().slice(0,10)}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Download failed: ' + error.message);
+            }
+        }
+
+        function clearAll() {
+            document.getElementById('keywordInput').value = '';
+            clearFile();
+            currentResults = [];
+            document.getElementById('resultsCard').classList.add('d-none');
+            document.getElementById('summaryCard').classList.add('d-none');
+            document.getElementById('progressCard').classList.add('d-none');
+            document.getElementById('downloadBtn').disabled = true;
+            document.getElementById('connectionStatus').innerHTML = '';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+</body>
+</html>

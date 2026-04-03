@@ -1,0 +1,1116 @@
+// Vanilla JavaScript - no build tools, no transpilation!
+
+// Use dynamic API base - works from localhost, WSL IP, or any host
+const API_BASE = window.location.origin;
+
+// Check system status on load
+window.addEventListener('DOMContentLoaded', () => {
+    checkStatus();
+    refreshStatus();
+
+    // Handle conservative mode checkbox for link validation
+    const validationConservativeCheckbox = document.getElementById('validationConservativeModeCheckbox');
+    const validationParallelWorkersInput = document.getElementById('validationParallelWorkers');
+
+    if (validationConservativeCheckbox && validationParallelWorkersInput) {
+        validationConservativeCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                validationParallelWorkersInput.value = 1;
+                validationParallelWorkersInput.disabled = true;
+            } else {
+                validationParallelWorkersInput.disabled = false;
+            }
+        });
+    }
+
+    // URL Lookup functionality
+    const lookupBtn = document.getElementById('lookupBtn');
+    const lookupUrlInput = document.getElementById('lookupUrl');
+
+    if (lookupBtn && lookupUrlInput) {
+        lookupBtn.addEventListener('click', lookupContent);
+        lookupUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') lookupContent();
+        });
+    }
+});
+
+async function checkStatus() {
+    const statusEl = document.getElementById('status');
+    if (!statusEl) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/`);
+        const data = await response.json();
+        statusEl.innerHTML = `
+            <span class="status-ok">✓ Connected</span> |
+            Project: ${data.project} |
+            Server Time: ${new Date(data.timestamp).toLocaleTimeString()}
+        `;
+    } catch (error) {
+        statusEl.innerHTML =
+            '<span class="status-error">✗ Cannot connect to backend</span>';
+    }
+}
+
+async function lookupContent() {
+    const url = document.getElementById('lookupUrl').value.trim();
+    const resultDiv = document.getElementById('lookupResult');
+
+    if (!url) {
+        resultDiv.innerHTML = '<div class="alert alert-warning">Please enter a URL</div>';
+        return;
+    }
+
+    resultDiv.innerHTML = '<p class="text-muted"><span class="spinner-border spinner-border-sm"></span> Looking up...</p>';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/content/lookup?url=${encodeURIComponent(url)}`);
+        const data = await response.json();
+
+        if (!data.found) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-info">
+                    <strong>Not found:</strong> ${data.url}<br>
+                    <small class="text-muted">${data.message}</small>
+                </div>
+            `;
+            return;
+        }
+
+        // Format the content for display
+        const createdAt = data.created_at ? new Date(data.created_at).toLocaleString() : 'Unknown';
+
+        resultDiv.innerHTML = `
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <code style="word-break: break-all;">${data.url}</code>
+                    <div>
+                        <button class="btn btn-outline-danger btn-sm" onclick="deleteAndResetUrl('${data.url}')">
+                            Delete & Reset to Pending
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">Created: ${createdAt}</p>
+                    <div class="border rounded p-2 bg-light" style="max-height: 300px; overflow-y: auto; white-space: pre-wrap; font-size: 0.85rem;">${escapeHtml(data.content || 'No content')}</div>
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    }
+}
+
+async function deleteAndResetUrl(url) {
+    if (!confirm(`Delete content and reset URL to pending?\n\n${url}`)) {
+        return;
+    }
+
+    const resultDiv = document.getElementById('lookupResult');
+
+    try {
+        const response = await fetch(`${API_BASE}/api/result/${encodeURIComponent(url)}`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>Success:</strong> Content deleted and URL reset to pending.<br>
+                    <code>${url}</code>
+                </div>
+            `;
+            // Refresh stats
+            refreshStatus();
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.message || 'Unknown error'}</div>`;
+        }
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+let processingActive = false;
+let shouldStop = false;
+
+async function processUrls() {
+    const btn = document.getElementById('processBtn');
+    const resultDiv = document.getElementById('processResult');
+    const batchSizeInput = document.getElementById('batchSizeInput');
+    const parallelWorkersInput = document.getElementById('parallelWorkersInput');
+    const batchSize = parseInt(batchSizeInput.value) || 10;
+    const parallelWorkers = parseInt(parallelWorkersInput.value) || 1;
+
+    if (batchSize < 1) {
+        alert('Batch size must be at least 1');
+        return;
+    }
+
+    if (parallelWorkers < 1 || parallelWorkers > 20) {
+        alert('Parallel workers must be between 1 and 20');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+    resultDiv.innerHTML = `<div class="alert alert-warning">Processing ${batchSize} URL(s) with ${parallelWorkers} parallel worker(s)...</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/process-urls?batch_size=${batchSize}&parallel_workers=${parallelWorkers}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'complete' && data.processed === 0) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>No URLs to process</strong><br>
+                    ${data.message}
+                </div>
+            `;
+        } else {
+            let resultsHtml = `
+                <div class="alert alert-warning">
+                    <strong>Processed ${data.processed || 0} of ${data.total_attempted || 0} URLs</strong>
+                </div>
+                <ul class="list-group mt-2">
+            `;
+
+            (data.results || []).forEach(r => {
+                let badgeStyle = r.status === 'success' ? 'background-color: #198754; color: #fff;' :
+                               r.status === 'skipped' ? 'background-color: #ffc107; color: #000;' : 'background-color: #dc3545; color: #fff;';
+                resultsHtml += `
+                    <li class="list-group-item">
+                        <span class="badge" style="${badgeStyle}">${r.status}</span>
+                        <small class="text-muted d-block">${r.url}</small>
+                        ${r.content_preview ? `<small>${r.content_preview}</small>` : ''}
+                        ${r.reason ? `<small class="text-danger">${r.reason}</small>` : ''}
+                    </li>
+                `;
+            });
+
+            resultsHtml += '</ul>';
+            resultDiv.innerHTML = resultsHtml;
+        }
+
+        // Refresh status counts
+        refreshStatus();
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Process URLs';
+    }
+}
+
+async function processAllUrls() {
+    const processBtn = document.getElementById('processBtn');
+    const processAllBtn = document.getElementById('processAllBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const progressPercent = document.getElementById('progressPercent');
+    const resultDiv = document.getElementById('processResult');
+    const batchSizeInput = document.getElementById('batchSizeInput');
+    const parallelWorkersInput = document.getElementById('parallelWorkersInput');
+    const batchSize = parseInt(batchSizeInput.value) || 10;
+    const parallelWorkers = parseInt(parallelWorkersInput.value) || 1;
+
+    // Disable buttons and show stop button
+    processBtn.disabled = true;
+    processAllBtn.disabled = true;
+    stopBtn.classList.remove('d-none');
+    progressContainer.classList.remove('d-none');
+
+    processingActive = true;
+    shouldStop = false;
+
+    let totalProcessed = 0;
+    let totalFailed = 0;
+    let batchCount = 0;
+
+    resultDiv.innerHTML = '<div class="alert alert-warning">Starting batch processing...</div>';
+
+    try {
+        // Get initial status
+        const statusResponse = await fetch(`${API_BASE}/api/status`);
+
+        if (!statusResponse.ok) {
+            throw new Error(`Failed to get status: ${statusResponse.statusText}`);
+        }
+
+        const initialStatus = await statusResponse.json();
+        const totalToProcess = initialStatus.pending ?? 0;
+
+        if (totalToProcess === 0) {
+            resultDiv.innerHTML = '<div class="alert alert-warning"><strong>No URLs to process</strong></div>';
+            return;
+        }
+
+        // Process in batches until done or stopped
+        while (processingActive && !shouldStop) {
+            batchCount++;
+
+            // Update progress text
+            progressText.textContent = `Batch ${batchCount} - Processing ${batchSize} URLs with ${parallelWorkers} workers...`;
+
+            const response = await fetch(`${API_BASE}/api/process-urls?batch_size=${batchSize}&parallel_workers=${parallelWorkers}`, {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                // Handle HTTP errors
+                let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.detail || errorMessage;
+                } catch (e) {
+                    // If JSON parsing fails, use the status text
+                }
+                throw new Error(errorMessage);
+            }
+
+            const data = await response.json();
+
+            if (data.status === 'complete' && data.processed === 0) {
+                // No more URLs to process
+                break;
+            }
+
+            totalProcessed += (data.processed || 0);
+            totalFailed += ((data.total_attempted || 0) - (data.processed || 0));
+
+            // Update progress based on initial pending count
+            const currentStatus = await fetch(`${API_BASE}/api/status`);
+
+            if (!currentStatus.ok) {
+                console.error('Failed to get status during batch processing');
+                // Continue with last known status rather than breaking
+                continue;
+            }
+
+            const status = await currentStatus.json();
+            const processedInThisRun = totalToProcess - (status.pending ?? 0);
+            const progress = Math.round((processedInThisRun / totalToProcess) * 100);
+
+            progressBar.style.width = progress + '%';
+            progressPercent.textContent = progress + '%';
+            progressText.textContent = `Processed ${processedInThisRun} of ${totalToProcess} URLs`;
+
+            // Show batch results
+            const batchProcessed = data.processed || 0;
+            const batchTotal = data.total_attempted || 0;
+            const batchFailed = batchTotal - batchProcessed;
+
+            let batchHtml = `<div class="alert alert-warning">`;
+            batchHtml += `<strong>Batch ${batchCount} Complete:</strong> `;
+            batchHtml += `${batchProcessed} successful, ${batchFailed} failed/skipped<br>`;
+            batchHtml += `<strong>Total Progress:</strong> ${processedInThisRun} of ${totalToProcess} URLs (${progress}%)`;
+            batchHtml += `</div>`;
+            resultDiv.innerHTML = batchHtml;
+
+            // Refresh status display
+            await refreshStatus();
+
+            // Check if we're done
+            if (status.pending === 0) {
+                break;
+            }
+
+            // Small delay between batches
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        // Final update
+        const finalStatus = await fetch(`${API_BASE}/api/status`);
+        const final = await finalStatus.json();
+        const finalProcessed = totalToProcess - final.pending;
+
+        progressBar.style.width = '100%';
+        progressPercent.textContent = '100%';
+        progressText.textContent = 'Processing complete!';
+        progressBar.classList.remove('progress-bar-animated');
+
+        resultDiv.innerHTML = `
+            <div class="alert alert-warning">
+                <strong>Processing Complete!</strong><br>
+                Total batches: ${batchCount}<br>
+                Processed in this run: ${finalProcessed} of ${totalToProcess} URLs<br>
+                Remaining pending: ${final.pending} URLs
+            </div>
+        `;
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        processingActive = false;
+        processBtn.disabled = false;
+        processAllBtn.disabled = false;
+        stopBtn.classList.add('d-none');
+    }
+}
+
+function stopProcessing() {
+    shouldStop = true;
+    document.getElementById('progressText').textContent = 'Stopping after current batch...';
+}
+
+async function refreshStatus() {
+    // Only run on pages that have the status elements
+    const totalUrlsEl = document.getElementById('totalUrls');
+    if (!totalUrlsEl) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/status`);
+        const data = await response.json();
+
+        totalUrlsEl.textContent = data.total_urls;
+        document.getElementById('processedUrls').textContent = data.processed;
+        document.getElementById('skippedUrls').textContent = data.skipped || 0;
+        document.getElementById('failedUrls').textContent = data.failed || 0;
+        document.getElementById('pendingUrls').textContent = data.pending;
+
+        // Display recent results
+        const recentDiv = document.getElementById('recentResults');
+        if (data.recent_results && data.recent_results.length > 0) {
+            recentDiv.innerHTML = ''; // Clear existing content
+
+            data.recent_results.forEach((item, index) => {
+                const shortContent = item.content.substring(0, 150);
+                const fullContent = item.content;
+                const needsExpand = fullContent.length > 150;
+
+                // Create item container
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'list-group-item';
+                itemDiv.id = `result-item-${index}`;
+
+                // Format date only if available
+                const dateText = item.created_at ? new Date(item.created_at).toLocaleString() : '';
+
+                // Build the structure
+                itemDiv.innerHTML = `
+                    <div class="d-flex w-100 justify-content-between align-items-start">
+                        <div style="flex: 1;">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <h6 class="mb-1" style="word-break: break-all; ${dateText ? 'max-width: 85%;' : ''}">${item.url}</h6>
+                                ${dateText ? `<small class="text-muted text-nowrap ms-2">${dateText}</small>` : ''}
+                            </div>
+                            <div class="content-preview">
+                                <div class="mb-1" style="font-size: 0.875rem;" id="preview-${index}"></div>
+                                <div class="full-content d-none" id="full-${index}">
+                                    <div class="mb-1" style="font-size: 0.875rem;"></div>
+                                </div>
+                                ${needsExpand ? `
+                                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="toggleContent(${index})">
+                                        <span id="toggle-text-${index}">View Full Content</span>
+                                    </button>
+                                ` : ''}
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-danger ms-2" onclick="deleteResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
+                            ×
+                        </button>
+                    </div>
+                `;
+
+                // Insert HTML content separately to avoid escaping issues
+                itemDiv.querySelector(`#preview-${index}`).innerHTML = shortContent + (needsExpand ? '...' : '');
+                if (needsExpand) {
+                    itemDiv.querySelector(`#full-${index} > div`).innerHTML = fullContent;
+                }
+
+                recentDiv.appendChild(itemDiv);
+            });
+        } else {
+            recentDiv.innerHTML = '<p class="text-muted">No results yet</p>';
+        }
+
+    } catch (error) {
+        console.error('Status refresh error:', error);
+    }
+}
+
+// Auto-refresh status every 30 seconds
+setInterval(checkStatus, 30000);
+
+// Upload URLs function
+async function uploadUrls() {
+    const fileInput = document.getElementById('urlFileInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const resultDiv = document.getElementById('uploadResult');
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+        resultDiv.innerHTML = '<div class="alert alert-warning">Please select a file</div>';
+        return;
+    }
+
+    const file = fileInput.files[0];
+
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = 'Uploading...';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Uploading URLs...</div>';
+
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch(`${API_BASE}/api/upload-urls`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>${data.message}</strong><br>
+                    Total URLs in file: ${data.total_urls}<br>
+                    New URLs added: ${data.added}<br>
+                    Duplicates skipped: ${data.duplicates}
+                </div>
+            `;
+            // Clear file input
+            fileInput.value = '';
+            // Refresh status
+            refreshStatus();
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
+        }
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = 'Upload File';
+    }
+}
+
+// Upload manual URLs function
+async function uploadManualUrls() {
+    const textInput = document.getElementById('manualUrlInput');
+    const uploadBtn = document.getElementById('uploadManualBtn');
+    const resultDiv = document.getElementById('uploadResult');
+
+    const urlsText = textInput.value.trim();
+
+    if (!urlsText) {
+        resultDiv.innerHTML = '<div class="alert alert-warning">Please enter at least one URL</div>';
+        return;
+    }
+
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = 'Adding...';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Adding URLs...</div>';
+
+    try {
+        // Convert text to file-like blob
+        const blob = new Blob([urlsText], { type: 'text/plain' });
+        const formData = new FormData();
+        formData.append('file', blob, 'manual-urls.txt');
+
+        const response = await fetch(`${API_BASE}/api/upload-urls`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>${data.message}</strong><br>
+                    Total URLs entered: ${data.total_urls}<br>
+                    New URLs added: ${data.added}<br>
+                    Duplicates skipped: ${data.duplicates}
+                </div>
+            `;
+            // Clear text input
+            textInput.value = '';
+            // Refresh status
+            refreshStatus();
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
+        }
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = 'Add URLs';
+    }
+}
+
+// Toggle content visibility
+function toggleContent(index) {
+    const preview = document.getElementById(`preview-${index}`);
+    const full = document.getElementById(`full-${index}`);
+    const toggleText = document.getElementById(`toggle-text-${index}`);
+
+    if (full.classList.contains('d-none')) {
+        preview.classList.add('d-none');
+        full.classList.remove('d-none');
+        toggleText.textContent = 'Contract';
+    } else {
+        preview.classList.remove('d-none');
+        full.classList.add('d-none');
+        toggleText.textContent = 'View Full Content';
+    }
+}
+
+// Delete result and reset URL to pending
+async function deleteResult(url, index) {
+    if (!confirm(`Delete this result and reset the URL to pending?\n\n${url}`)) {
+        return;
+    }
+
+    try {
+        const encodedUrl = encodeURIComponent(url);
+        const response = await fetch(`${API_BASE}/api/result/${encodedUrl}`, {
+            method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            // Remove the item from the DOM
+            const item = document.getElementById(`result-item-${index}`);
+            if (item) {
+                item.remove();
+            }
+
+            // Refresh status to update counts
+            await refreshStatus();
+
+            // Show success message briefly
+            const recentDiv = document.getElementById('recentResults');
+            if (recentDiv.children.length === 0) {
+                recentDiv.innerHTML = '<p class="text-muted">No results yet</p>';
+            }
+        } else {
+            alert(`Error: ${data.detail || 'Failed to delete result'}`);
+        }
+
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    }
+}
+
+// Export functions
+async function exportXLSX() {
+    try {
+        window.location.href = `${API_BASE}/api/export/xlsx`;
+    } catch (error) {
+        alert(`Export failed: ${error.message}`);
+    }
+}
+
+async function exportJSON() {
+    try {
+        window.location.href = `${API_BASE}/api/export/json`;
+    } catch (error) {
+        alert(`Export failed: ${error.message}`);
+    }
+}
+
+async function exportCombined() {
+    try {
+        window.location.href = `${API_BASE}/api/export/combined/xlsx`;
+    } catch (error) {
+        alert(`Combined export failed: ${error.message}`);
+    }
+}
+
+// Validate links function
+async function validateLinks() {
+    const validateBtn = document.getElementById('validateBtn');
+    const resultDiv = document.getElementById('validationResult');
+    const batchSizeInput = document.getElementById('validationBatchSize');
+    const parallelWorkersInput = document.getElementById('validationParallelWorkers');
+    const batchSize = parseInt(batchSizeInput.value) || 10;
+    const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
+
+    if (batchSize < 1) {
+        alert('Batch size must be at least 1');
+        return;
+    }
+
+    if (parallelWorkers < 1 || parallelWorkers > 20) {
+        alert('Parallel workers must be between 1 and 20');
+        return;
+    }
+
+    validateBtn.disabled = true;
+    validateBtn.textContent = 'Validating...';
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating links in ${batchSize} content items with ${parallelWorkers} parallel workers...</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/validate-links?batch_size=${batchSize}&parallel_workers=${parallelWorkers}`, {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'complete' && data.validated === 0) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>No content to validate</strong><br>
+                    ${data.message}
+                </div>
+            `;
+        } else {
+            let summaryHtml = `
+                <div class="alert alert-${data.moved_to_pending > 0 ? 'warning' : 'success'}">
+                    <strong>Validation Complete</strong><br>
+                    Validated: ${data.validated} items<br>
+                    URLs corrected: ${data.urls_corrected || 0}<br>
+                    Moved to pending (gone products): ${data.moved_to_pending}
+                </div>
+            `;
+
+            // Show details for items with broken links
+            if (data.results && data.results.length > 0) {
+                summaryHtml += '<div class="mt-3"><strong>Results:</strong></div><ul class="list-group mt-2">';
+
+                data.results.forEach(r => {
+                    let badgeStyle = r.moved_to_pending ? 'background-color: #dc3545; color: #fff;' : 'background-color: #198754; color: #fff;';
+                    let statusText = r.moved_to_pending ? 'Moved to Pending' : 'Valid';
+
+                    summaryHtml += `
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div style="flex: 1;">
+                                    <span class="badge" style="${badgeStyle}">${statusText}</span>
+                                    <small class="text-muted d-block mt-1" style="word-break: break-all;">${r.url}</small>
+                                    <small>Links: ${r.total_links} total</small>
+                                    ${r.broken_links_count > 0 ? `
+                                        <div class="mt-2">
+                                            <strong class="text-danger">Broken Links (${r.broken_links_count}):</strong>
+                                            <ul class="small mt-1">
+                                                ${r.broken_links.map(bl => `
+                                                    <li>
+                                                        <code>${bl.url}</code>
+                                                        <span class="badge bg-danger">${bl.status_code}</span>
+                                                        ${bl.status_text}
+                                                    </li>
+                                                `).join('')}
+                                            </ul>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </li>
+                    `;
+                });
+
+                summaryHtml += '</ul>';
+            }
+
+            resultDiv.innerHTML = summaryHtml;
+        }
+
+        // Refresh status counts
+        refreshStatus();
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        validateBtn.disabled = false;
+        validateBtn.textContent = 'Validate Links';
+    }
+}
+
+// Reset validation history AND skipped URLs recheck status
+async function resetValidationHistory() {
+    if (!confirm('Reset all validation history AND skipped URLs status? This will allow all URLs to be re-validated and rechecked.')) {
+        return;
+    }
+
+    const resetBtn = document.getElementById('resetValidationBtn');
+    const resultDiv = document.getElementById('validationResult');
+
+    resetBtn.disabled = true;
+    resetBtn.textContent = 'Resetting...';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Resetting validation history and skipped URLs...</div>';
+
+    try {
+        // Reset validation history
+        const validationResponse = await fetch(`${API_BASE}/api/validation-history/reset`, {
+            method: 'DELETE'
+        });
+        const validationData = await validationResponse.json();
+
+        // Reset skipped URLs recheck status
+        const skippedResponse = await fetch(`${API_BASE}/api/recheck-skipped-urls/reset`, {
+            method: 'DELETE'
+        });
+        const skippedData = await skippedResponse.json();
+
+        if (validationResponse.ok && skippedResponse.ok) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>Reset complete:</strong><br>
+                    • Validation history: ${validationData.cleared_count || 0} URLs cleared<br>
+                    • Skipped URLs: ${skippedData.reset_count || 0} URLs can be rechecked
+                </div>
+            `;
+        } else {
+            const errors = [];
+            if (!validationResponse.ok) errors.push(`Validation: ${validationData.detail}`);
+            if (!skippedResponse.ok) errors.push(`Skipped: ${skippedData.detail}`);
+            resultDiv.innerHTML = `<div class="alert alert-danger">Errors: ${errors.join(', ')}</div>`;
+        }
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        resetBtn.disabled = false;
+        resetBtn.textContent = 'Reset Validation';
+    }
+}
+
+// Validate ALL links function
+async function cancelRecheck(taskId) {
+    try { await fetch(`${API_BASE}/api/recheck-skipped-urls/cancel/${taskId}`, { method: 'POST' }); } catch (e) {}
+}
+
+async function cancelValidation(taskId) {
+    try { await fetch(`${API_BASE}/api/validate-all-links/cancel/${taskId}`, { method: 'POST' }); } catch (e) {}
+}
+
+async function validateAllLinks() {
+    const validateBtn = document.getElementById('validateBtn');
+    const validateAllBtn = document.getElementById('validateAllBtn');
+    const resetBtn = document.getElementById('resetValidationBtn');
+    const resultDiv = document.getElementById('validationResult');
+    const parallelWorkersInput = document.getElementById('validationParallelWorkers');
+    const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
+    const batchSize = parseInt(document.getElementById('validationBatchSize').value) || 100;
+
+    if (parallelWorkers < 1 || parallelWorkers > 20) {
+        alert('Parallel workers must be between 1 and 20');
+        return;
+    }
+
+    if (!confirm('This will validate all unvalidated content links. Continue?')) {
+        return;
+    }
+
+    // Disable buttons
+    validateBtn.disabled = true;
+    validateAllBtn.disabled = true;
+    resetBtn.disabled = true;
+    validateAllBtn.textContent = 'Validating All...';
+    resultDiv.innerHTML = `<div class="alert alert-warning">Validating ALL content URLs (batch size: ${batchSize}, workers: ${parallelWorkers})... This may take a while.</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/validate-all-links?parallel_workers=${parallelWorkers}&batch_size=${batchSize}`, {
+            method: 'POST'
+        });
+        const startData = await response.json();
+        const taskId = startData.task_id;
+
+        // Poll for progress
+        const poll = setInterval(async () => {
+            try {
+                const statusRes = await fetch(`${API_BASE}/api/validate-all-links/status/${taskId}`);
+                const data = await statusRes.json();
+
+                if (data.status === 'running') {
+                    const pct = data.total_to_validate > 0 ? Math.round((data.validated / data.total_to_validate) * 100) : 0;
+                    resultDiv.innerHTML = `
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Validating... ${(data.validated || 0).toLocaleString()} / ${(data.total_to_validate || 0).toLocaleString()} URLs</span>
+                            <span>${pct}%</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="progress flex-grow-1" style="height: 25px;"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${pct}%"></div></div>
+                            <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelValidation('${taskId}')">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="alert alert-warning mb-0">
+                        <small>Links checked: ${(data.validated || 0).toLocaleString()} | Gone: ${data.moved_to_pending || 0} | Corrected: ${data.urls_corrected || 0}</small>
+                    </div>`;
+                } else if (data.status === 'cancelled') {
+                    clearInterval(poll);
+                    resultDiv.innerHTML = `<div class="alert alert-info"><strong>Validation cancelled.</strong><br>Validated ${(data.validated || 0).toLocaleString()} URLs before stopping.</div>`;
+                    refreshStatus();
+                    validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
+                } else if (data.status === 'completed') {
+                    clearInterval(poll);
+                    if (data.validated === 0) {
+                        resultDiv.innerHTML = `<div class="alert alert-warning"><strong>No content to validate</strong><br>All URLs have already been validated.</div>`;
+                    } else {
+                        resultDiv.innerHTML = `<div class="alert alert-${data.moved_to_pending > 0 ? 'warning' : 'success'}"><strong>Validation Complete!</strong><br>Total validated: ${data.validated} items<br>URLs corrected: ${data.urls_corrected || 0}<br>Moved to pending (gone products): ${data.moved_to_pending}</div>`;
+                    }
+                    refreshStatus();
+                    validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
+                } else if (data.status === 'error') {
+                    clearInterval(poll);
+                    resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+                    validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
+                }
+            } catch (e) { /* polling error, keep trying */ }
+        }, 3000);
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
+    }
+}
+
+async function recheckSkippedUrls() {
+    const recheckBtn = document.getElementById('recheckSkippedBtn');
+    const validateBtn = document.getElementById('validateBtn');
+    const validateAllBtn = document.getElementById('validateAllBtn');
+    const resetBtn = document.getElementById('resetValidationBtn');
+    const resultDiv = document.getElementById('validationResult');
+    const parallelWorkersInput = document.getElementById('validationParallelWorkers');
+    const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
+    const batchSize = parseInt(document.getElementById('validationBatchSize').value) || 50;
+
+    if (parallelWorkers < 1 || parallelWorkers > 20) {
+        alert('Parallel workers must be between 1 and 20');
+        return;
+    }
+
+    if (!confirm('This will re-check all skipped URLs to see if products are now available. Continue?')) {
+        return;
+    }
+
+    recheckBtn.disabled = true;
+    validateBtn.disabled = true;
+    validateAllBtn.disabled = true;
+    resetBtn.disabled = true;
+    recheckBtn.textContent = 'Rechecking...';
+    resultDiv.innerHTML = `<div class="alert alert-warning">Starting recheck of skipped URLs...</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/recheck-skipped-urls?parallel_workers=${parallelWorkers}&batch_size=${batchSize}`, { method: 'POST' });
+        const startData = await response.json();
+        const taskId = startData.task_id;
+
+        const poll = setInterval(async () => {
+            try {
+                const statusRes = await fetch(`${API_BASE}/api/recheck-skipped-urls/status/${taskId}`);
+                const data = await statusRes.json();
+
+                if (data.status === 'running') {
+                    const pct = data.total_to_recheck > 0 ? Math.round((data.rechecked / data.total_to_recheck) * 100) : 0;
+                    resultDiv.innerHTML = `
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Rechecking... ${(data.rechecked || 0).toLocaleString()} / ${(data.total_to_recheck || 0).toLocaleString()} URLs</span>
+                            <span>${pct}%</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="progress flex-grow-1" style="height: 25px;"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${pct}%"></div></div>
+                            <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelRecheck('${taskId}')">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="alert alert-warning mb-0">
+                        <small>Now eligible: ${data.now_eligible || 0}</small>
+                    </div>`;
+                } else if (data.status === 'cancelled') {
+                    clearInterval(poll);
+                    resultDiv.innerHTML = `<div class="alert alert-info"><strong>Recheck cancelled.</strong><br>Rechecked ${(data.rechecked || 0).toLocaleString()} URLs. Now eligible: ${data.now_eligible || 0}</div>`;
+                    refreshStatus();
+                    recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
+                } else if (data.status === 'completed') {
+                    clearInterval(poll);
+                    if (data.rechecked === 0) {
+                        resultDiv.innerHTML = `<div class="alert alert-info"><strong>No skipped URLs to recheck</strong><br>All skipped URLs have already been rechecked.</div>`;
+                    } else {
+                        resultDiv.innerHTML = `<div class="alert alert-warning"><strong>Recheck Complete!</strong><br>URLs rechecked: ${(data.rechecked || 0).toLocaleString()}<br><strong>Now eligible for content creation: ${data.now_eligible || 0}</strong></div>`;
+                    }
+                    refreshStatus();
+                    recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
+                } else if (data.status === 'error') {
+                    clearInterval(poll);
+                    resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+                    recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
+                }
+            } catch (e) {}
+        }, 3000);
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
+    }
+}
+
+// ============================================================================
+// Content Publishing Functions
+// ============================================================================
+
+// Refresh publish stats on page load
+window.addEventListener('DOMContentLoaded', () => {
+    // Only run if on a page with publishing elements
+    if (document.getElementById('publishStats')) {
+        refreshPublishStats();
+    }
+});
+
+async function refreshPublishStats() {
+    try {
+        const response = await fetch(`${API_BASE}/api/content-publish/stats`);
+        const data = await response.json();
+
+        document.getElementById('publishContentCount').textContent = data.content_top_count?.toLocaleString() || '-';
+        document.getElementById('publishFaqCount').textContent = data.faq_count?.toLocaleString() || '-';
+        document.getElementById('publishTotalCount').textContent = data.total_unique_urls?.toLocaleString() || '-';
+
+    } catch (error) {
+        console.error('Failed to refresh publish stats:', error);
+    }
+}
+
+async function publishContent() {
+    const publishBtn = document.getElementById('publishBtn');
+    const resultDiv = document.getElementById('publishResult');
+    const environmentSelect = document.getElementById('publishEnvironment');
+    const contentTypeSelect = document.getElementById('publishContentType');
+
+    const environment = environmentSelect.value;
+    const contentType = contentTypeSelect.value;
+
+    // Confirm for production
+    if (environment === 'production') {
+        if (!confirm('⚠️ WARNING: You are about to publish to PRODUCTION!\n\nAre you sure you want to continue?')) {
+            return;
+        }
+    }
+
+    // Disable button
+    publishBtn.disabled = true;
+
+    const contentTypeLabel = contentType === 'all' ? 'All Content' : (contentType === 'seo_only' ? 'SEO Only' : 'FAQ Only');
+    resultDiv.innerHTML = `<div class="alert alert-warning">Publishing ${contentTypeLabel} to ${environment}...</div>`;
+
+    try {
+        const response = await fetch(
+            `${API_BASE}/api/content-publish?environment=${environment}&content_type=${contentType}`,
+            { method: 'POST' }
+        );
+
+        const data = await response.json();
+
+        if (response.ok) {
+            // Background task started - poll for status
+            const taskId = data.task_id;
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>Publishing started...</strong><br>
+                    Task ID: <code>${taskId}</code><br>
+                    Environment: <code>${data.environment}</code><br>
+                    Content Type: <code>${data.content_type}</code><br>
+                    <div class="mt-2">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span id="publishStatusText">Preparing content...</span>
+                    </div>
+                </div>
+            `;
+
+            // Poll for status
+            pollPublishStatus(taskId, resultDiv, publishBtn);
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail || 'Unknown error'}</div>`;
+            publishBtn.disabled = false;
+        }
+
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        publishBtn.disabled = false;
+    }
+}
+
+async function pollPublishStatus(taskId, resultDiv, publishBtn) {
+    try {
+        const response = await fetch(`${API_BASE}/api/content-publish/status/${taskId}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            // Task not found (e.g. after container restart)
+            resultDiv.innerHTML = `<div class="alert alert-danger"><strong>Task lost</strong> — the server was restarted while publishing. Please try again.</div>`;
+            publishBtn.disabled = false;
+            return;
+        }
+
+        if (data.status === 'running' || data.status === 'pending') {
+            // Still running - update status text and poll again
+            const statusText = document.getElementById('publishStatusText');
+            if (statusText) {
+                const progress = data.progress || {};
+                const phase = progress.phase || data.status;
+                let msg = 'Starting...';
+                if (phase === 'fetching') msg = 'Fetching content from database...';
+                else if (phase === 'building_payload') msg = `Building payload (${(progress.total_items || 0).toLocaleString()} items)...`;
+                else if (phase === 'uploading') msg = `Uploading ${progress.payload_size_mb || '?'} MB to API...`;
+                else if (data.status === 'running') msg = 'Processing...';
+                statusText.textContent = msg;
+            }
+            setTimeout(() => pollPublishStatus(taskId, resultDiv, publishBtn), 2000);
+        } else if (data.status === 'completed') {
+            // Done - show results
+            const result = data.result || {};
+            const alertClass = result.success ? 'success' : 'warning';
+
+            let html = `
+                <div class="alert alert-${alertClass}">
+                    <strong>Publishing Complete!</strong><br>
+                    Environment: <code>${result.environment}</code><br>
+                    API URL: <code>${result.api_url}</code><br>
+                    Total URLs: ${result.total_urls?.toLocaleString() || 0}<br>
+                    Items published: ${result.items_published?.toLocaleString() || 0}<br>
+                    Payload size: ${result.payload_size_mb || 0} MB<br>
+                    Status code: ${result.status_code || 'N/A'}
+                    ${result.timing ? `<br>Time: ${result.timing.total_sec}s (DB: ${result.timing.fetch_db_sec}s, serialize: ${result.timing.serialize_sec}s, upload: ${result.timing.upload_sec}s)` : ''}
+                </div>
+            `;
+
+            if (result.response) {
+                html += `
+                    <div class="alert alert-secondary mt-2">
+                        <strong>API Response:</strong><br>
+                        <small><code>${result.response}</code></small>
+                    </div>
+                `;
+            }
+
+            if (result.error) {
+                html += `<div class="alert alert-danger mt-2"><strong>Error:</strong> ${result.error}</div>`;
+            }
+
+            resultDiv.innerHTML = html;
+            publishBtn.disabled = false;
+        } else if (data.status === 'failed') {
+            // Failed
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <strong>Publishing Failed</strong><br>
+                    Error: ${data.error || 'Unknown error'}
+                </div>
+            `;
+            publishBtn.disabled = false;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error checking status: ${error.message}</div>`;
+        publishBtn.disabled = false;
+    }
+}

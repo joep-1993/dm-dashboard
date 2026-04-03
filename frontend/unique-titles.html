@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unique Titles</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Unique Titles</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+
+        <!-- Stats Row -->
+        <div class="row mb-4">
+            <div class="col-lg-8 mx-auto">
+                <div class="card">
+                    <div class="card-body d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center">
+                            <div class="text-center me-4 pe-4 border-end">
+                                <h3 id="totalTitles" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <small class="text-muted">Titles in Database</small>
+                            </div>
+                            <div>
+                                <h5 class="mb-1">Publish to API</h5>
+                                <p class="text-muted mb-0 small">Upload to website-configuration API</p>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2 flex-nowrap">
+                            <a href="/api/unique-titles/download-csv" class="btn btn-outline-secondary">Download CSV</a>
+                            <button id="publishBtn" class="btn btn-success">
+                                <span id="publishBtnText">Publish All</span>
+                                <span id="publishSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Processing Status -->
+        <div class="row mb-4">
+            <div class="col-lg-8 mx-auto">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">AI Title Generation</h5>
+                        <span id="aiStatusBadge" class="badge bg-secondary d-flex align-items-center">Idle</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-3">
+                            <div class="col-3 text-center">
+                                <h4 id="aiPending" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h4>
+                                <small class="text-muted">Pending</small>
+                            </div>
+                            <div class="col-3 text-center">
+                                <h4 id="aiProcessed" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h4>
+                                <small class="text-muted">AI Processed</small>
+                            </div>
+                            <div class="col-3 text-center">
+                                <h4 id="aiSuccessful" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h4>
+                                <small class="text-muted">Successful</small>
+                            </div>
+                            <div class="col-3 text-center">
+                                <h4 id="aiFailed" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h4>
+                                <small class="text-muted">Failed</small>
+                            </div>
+                        </div>
+
+                        <!-- Progress bar (shown during processing) -->
+                        <div id="aiProgressContainer" class="d-none mb-3">
+                            <div class="progress" style="height: 20px;">
+                                <div id="aiProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%">0%</div>
+                            </div>
+                            <small id="aiCurrentUrl" class="text-muted mt-1 d-block text-truncate"></small>
+                        </div>
+
+                        <!-- Error display -->
+                        <div id="aiErrorContainer" class="d-none mb-3">
+                            <div class="alert alert-danger py-2 mb-0">
+                                <strong>Last Error:</strong> <span id="aiLastError"></span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-center align-items-center gap-2 flex-wrap">
+                            <div class="input-group" style="width: 150px;">
+                                <span class="input-group-text">Batch</span>
+                                <input type="number" class="form-control" id="aiBatchSize" value="100" min="1" max="100000" placeholder="100">
+                            </div>
+                            <div class="input-group" style="width: 150px;">
+                                <span class="input-group-text">Workers</span>
+                                <input type="number" class="form-control" id="aiWorkers" value="15" min="1" max="50" placeholder="15">
+                            </div>
+                            <button id="aiStartBtn" class="btn btn-warning">
+                                <span id="aiStartBtnText">Start Batch</span>
+                                <span id="aiStartSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                            <button id="aiProcessAllBtn" class="btn btn-outline-warning">
+                                <span id="aiProcessAllBtnText">Process All</span>
+                                <span id="aiProcessAllSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                            <button id="aiStopBtn" class="btn btn-outline-danger d-none">Stop</button>
+                        </div>
+
+                        <!-- Recent Results -->
+                        <div class="mt-4">
+                            <h6 class="mb-3">Recent Results</h6>
+                            <div id="recentResults" style="max-height: 400px; overflow-y: auto;">
+                                <p class="text-muted text-center small">No recent results</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <!-- Add/Edit Form -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Add / Edit Title</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="titleForm">
+                            <div class="mb-3">
+                                <label for="titleUrl" class="form-label">URL <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="titleUrl" placeholder="/products/category/..." required>
+                                <div class="form-text">Relative URL (e.g., /products/category/subcategory). Will be stored in lowercase.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="titleTitle" class="form-label">Title <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="titleTitle" placeholder="Page title..." required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="titleDescription" class="form-label">Description <span class="text-danger">*</span></label>
+                                <textarea class="form-control" id="titleDescription" rows="3" placeholder="Meta description..." required>&#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop &#10062; beslist.nl</textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label for="titleH1" class="form-label">H1 Title <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="titleH1" placeholder="H1 heading..." required>
+                            </div>
+                            <button type="submit" class="btn btn-primary" id="saveBtn">
+                                <span id="saveBtnText">Save</span>
+                                <span id="saveSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="clearBtn">Clear</button>
+                        </form>
+                        <div id="saveResult" class="mt-3 d-none">
+                            <div class="alert" id="saveAlert"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Search Titles</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="input-group mb-3">
+                            <input type="text" class="form-control" id="searchInput" placeholder="Search by URL or title...">
+                            <button class="btn btn-outline-secondary" id="searchBtn">Search</button>
+                        </div>
+                        <div id="searchResults" style="max-height: 500px; overflow-y: auto;">
+                            <p class="text-muted text-center">Enter a search term to find titles</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Import CSV -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Import CSV to Database</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="importForm">
+                            <div class="mb-3">
+                                <label for="csvFile" class="form-label">Select CSV File</label>
+                                <input type="file" class="form-control" id="csvFile" accept=".csv" required>
+                                <div class="form-text">
+                                    CSV must have columns: url, title, description, h1_title (semicolon separated)
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-secondary" id="importBtn">
+                                <span id="importBtnText">Import to Database</span>
+                                <span id="importSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
+                        </form>
+                        <div id="importResult" class="mt-3 d-none">
+                            <div class="alert" id="importAlert"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = window.location.origin;
+        let aiStatusInterval = null;
+
+        // Load stats on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            loadAiStatus();
+            // Poll AI status every 2 seconds
+            aiStatusInterval = setInterval(loadAiStatus, 2000);
+        });
+
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/unique-titles/status`);
+                const data = await response.json();
+                document.getElementById('totalTitles').textContent = data.total_titles?.toLocaleString() || '0';
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        async function loadAiStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/ai-titles/status`);
+                const data = await response.json();
+
+                const processing = data.processing;
+                const stats = data.stats;
+
+                // Update stats
+                document.getElementById('aiPending').textContent = stats.pending?.toLocaleString() || '0';
+                document.getElementById('aiProcessed').textContent = stats.ai_processed?.toLocaleString() || '0';
+
+                // Update processing status
+                const statusBadge = document.getElementById('aiStatusBadge');
+                const progressContainer = document.getElementById('aiProgressContainer');
+                const startBtn = document.getElementById('aiStartBtn');
+                const processAllBtn = document.getElementById('aiProcessAllBtn');
+                const stopBtn = document.getElementById('aiStopBtn');
+                const errorContainer = document.getElementById('aiErrorContainer');
+                const batchSizeInput = document.getElementById('aiBatchSize').parentElement;
+                const workersInput = document.getElementById('aiWorkers').parentElement;
+
+                if (processing.is_running) {
+                    statusBadge.className = 'badge bg-primary';
+                    statusBadge.textContent = 'Processing';
+                    progressContainer.classList.remove('d-none');
+                    startBtn.classList.add('d-none');
+                    processAllBtn.classList.add('d-none');
+                    batchSizeInput.classList.add('d-none');
+                    workersInput.classList.add('d-none');
+                    stopBtn.classList.remove('d-none');
+
+                    // Update progress
+                    const progress = processing.total_urls > 0 ? Math.round((processing.processed / processing.total_urls) * 100) : 0;
+                    const progressBar = document.getElementById('aiProgressBar');
+                    progressBar.style.width = progress + '%';
+                    progressBar.textContent = `${processing.processed}/${processing.total_urls} (${progress}%)`;
+
+                    document.getElementById('aiSuccessful').textContent = processing.successful?.toLocaleString() || '0';
+                    document.getElementById('aiFailed').textContent = processing.failed?.toLocaleString() || '0';
+
+                    // Show current URL
+                    if (processing.current_url) {
+                        document.getElementById('aiCurrentUrl').textContent = 'Processing: ' + processing.current_url;
+                    }
+                } else {
+                    statusBadge.className = 'badge bg-secondary';
+                    statusBadge.textContent = 'Idle';
+                    progressContainer.classList.add('d-none');
+                    startBtn.classList.remove('d-none');
+                    processAllBtn.classList.remove('d-none');
+                    batchSizeInput.classList.remove('d-none');
+                    workersInput.classList.remove('d-none');
+                    stopBtn.classList.add('d-none');
+
+                    document.getElementById('aiSuccessful').textContent = '-';
+                    document.getElementById('aiFailed').textContent = '-';
+                }
+
+                // Show error if any
+                if (processing.last_error) {
+                    errorContainer.classList.remove('d-none');
+                    document.getElementById('aiLastError').textContent = processing.last_error;
+                } else {
+                    errorContainer.classList.add('d-none');
+                }
+
+            } catch (error) {
+                console.error('Failed to load AI status:', error);
+            }
+        }
+
+        // AI Processing controls
+        async function startAiProcessing(batchSize, numWorkers) {
+            const startBtn = document.getElementById('aiStartBtn');
+            const startBtnText = document.getElementById('aiStartBtnText');
+            const startSpinner = document.getElementById('aiStartSpinner');
+            const processAllBtn = document.getElementById('aiProcessAllBtn');
+            const processAllBtnText = document.getElementById('aiProcessAllBtnText');
+            const processAllSpinner = document.getElementById('aiProcessAllSpinner');
+
+            // Disable both buttons
+            startBtn.disabled = true;
+            processAllBtn.disabled = true;
+
+            if (batchSize === 0) {
+                processAllBtnText.textContent = 'Starting...';
+                processAllSpinner.classList.remove('d-none');
+            } else {
+                startBtnText.textContent = 'Starting...';
+                startSpinner.classList.remove('d-none');
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/ai-titles/start?batch_size=${batchSize}&num_workers=${numWorkers}`, { method: 'POST' });
+                const result = await response.json();
+
+                if (result.status === 'started') {
+                    loadAiStatus();
+                } else {
+                    alert(result.message || 'Failed to start processing');
+                }
+            } catch (error) {
+                alert('Failed to start: ' + error.message);
+            } finally {
+                startBtn.disabled = false;
+                processAllBtn.disabled = false;
+                startBtnText.textContent = 'Start Batch';
+                startSpinner.classList.add('d-none');
+                processAllBtnText.textContent = 'Process All';
+                processAllSpinner.classList.add('d-none');
+            }
+        }
+
+        document.getElementById('aiStartBtn').addEventListener('click', async () => {
+            const batchSize = parseInt(document.getElementById('aiBatchSize').value) || 100;
+            const numWorkers = parseInt(document.getElementById('aiWorkers').value) || 15;
+            await startAiProcessing(batchSize, numWorkers);
+        });
+
+        document.getElementById('aiProcessAllBtn').addEventListener('click', async () => {
+            const numWorkers = parseInt(document.getElementById('aiWorkers').value) || 15;
+            await startAiProcessing(0, numWorkers);
+        });
+
+        document.getElementById('aiStopBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('aiStopBtn');
+            btn.disabled = true;
+            btn.textContent = 'Stopping...';
+
+            try {
+                await fetch(`${API_BASE}/api/ai-titles/stop`, { method: 'POST' });
+            } catch (error) {
+                console.error('Stop failed:', error);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Stop';
+            }
+        });
+
+        async function loadRecentResults() {
+            try {
+                const response = await fetch(`${API_BASE}/api/ai-titles/recent?limit=20`);
+                const data = await response.json();
+                const container = document.getElementById('recentResults');
+
+                if (!data.results || data.results.length === 0) {
+                    container.innerHTML = '<p class="text-muted text-center small">No recent results</p>';
+                    return;
+                }
+
+                container.innerHTML = data.results.map(item => `
+                    <div class="card mb-2">
+                        <div class="card-body py-2 px-3">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <code class="small" style="word-break: break-all; user-select: all;">${item.url}</code>
+                                ${item.ai_error
+                                    ? '<span class="badge bg-danger ms-2">Error</span>'
+                                    : '<span class="badge bg-success ms-2">OK</span>'}
+                            </div>
+                            ${item.ai_error
+                                ? `<p class="text-danger small mb-0 mt-1">${item.ai_error}</p>`
+                                : `<p class="small mb-1 mt-1"><strong>H1:</strong> ${item.h1_title || '-'}</p>
+                                   <p class="small mb-0 text-muted" style="word-break: break-all;"><strong>Title:</strong> ${item.title || '-'}</p>`
+                            }
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('Failed to load recent results:', error);
+            }
+        }
+
+        // Load recent results on page load and periodically
+        loadRecentResults();
+        setInterval(loadRecentResults, 5000);
+
+        // Add/Edit Form
+        document.getElementById('titleForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const url = document.getElementById('titleUrl').value.trim();
+            const title = document.getElementById('titleTitle').value.trim();
+            const description = document.getElementById('titleDescription').value.trim();
+            const h1_title = document.getElementById('titleH1').value.trim();
+
+            if (!url || !title || !description || !h1_title) {
+                alert('All fields are required');
+                return;
+            }
+
+            const btn = document.getElementById('saveBtn');
+            const btnText = document.getElementById('saveBtnText');
+            const spinner = document.getElementById('saveSpinner');
+
+            btn.disabled = true;
+            btnText.textContent = 'Saving...';
+            spinner.classList.remove('d-none');
+
+            try {
+                // Use import endpoint with single item
+                const csvContent = 'url;title;description;h1_title\n' +
+                    `${url};${title.replace(/;/g, ',')};${description.replace(/;/g, ',')};${h1_title.replace(/;/g, ',')}`;
+
+                const blob = new Blob([csvContent], { type: 'text/csv' });
+                const formData = new FormData();
+                formData.append('file', blob, 'single_title.csv');
+
+                const response = await fetch(`${API_BASE}/api/unique-titles/import`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                const resultDiv = document.getElementById('saveResult');
+                const resultAlert = document.getElementById('saveAlert');
+
+                resultDiv.classList.remove('d-none');
+
+                if (result.status === 'success' && result.imported > 0) {
+                    resultAlert.className = 'alert alert-success';
+                    resultAlert.textContent = `Title saved successfully for: ${url}`;
+                    loadStats();
+                } else {
+                    resultAlert.className = 'alert alert-danger';
+                    resultAlert.textContent = 'Failed to save title: ' + (result.detail || 'Unknown error');
+                }
+
+            } catch (error) {
+                alert('Save failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = 'Save';
+                spinner.classList.add('d-none');
+            }
+        });
+
+        // Clear form
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            document.getElementById('titleForm').reset();
+            document.getElementById('titleDescription').value = '\u2762 Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop \u2762 beslist.nl';
+            document.getElementById('saveResult').classList.add('d-none');
+        });
+
+        // Import CSV
+        document.getElementById('importForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('csvFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+
+            const btn = document.getElementById('importBtn');
+            const btnText = document.getElementById('importBtnText');
+            const spinner = document.getElementById('importSpinner');
+
+            btn.disabled = true;
+            btnText.textContent = 'Importing...';
+            spinner.classList.remove('d-none');
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch(`${API_BASE}/api/unique-titles/import`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                const resultDiv = document.getElementById('importResult');
+                const resultAlert = document.getElementById('importAlert');
+
+                resultDiv.classList.remove('d-none');
+
+                if (result.status === 'success') {
+                    resultAlert.className = 'alert alert-success';
+                    resultAlert.innerHTML = `
+                        <strong>Import Successful!</strong><br>
+                        Rows in file: ${result.rows_in_file?.toLocaleString()}<br>
+                        Imported: ${result.imported?.toLocaleString()}<br>
+                        Errors: ${result.errors || 0}
+                    `;
+                    loadStats();
+                } else {
+                    resultAlert.className = 'alert alert-danger';
+                    resultAlert.textContent = 'Import failed: ' + (result.detail || 'Unknown error');
+                }
+
+            } catch (error) {
+                alert('Import failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = 'Import to Database';
+                spinner.classList.add('d-none');
+            }
+        });
+
+        // Publish
+        document.getElementById('publishBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('publishBtn');
+            const btnText = document.getElementById('publishBtnText');
+            const spinner = document.getElementById('publishSpinner');
+
+            btn.disabled = true;
+            btnText.textContent = 'Publishing...';
+            spinner.classList.remove('d-none');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/unique-titles/publish`, {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const records = result.api_response?.records || result.rows_uploaded;
+                    alert(`Published successfully! ${records?.toLocaleString()} records uploaded.`);
+                } else {
+                    alert('Publish failed: ' + (result.error || JSON.stringify(result.api_response)));
+                }
+
+            } catch (error) {
+                alert('Publish failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = 'Publish All';
+                spinner.classList.add('d-none');
+            }
+        });
+
+        // Search
+        document.getElementById('searchBtn').addEventListener('click', doSearch);
+        document.getElementById('searchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') doSearch();
+        });
+
+        async function doSearch() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) return;
+
+            const resultsDiv = document.getElementById('searchResults');
+            resultsDiv.innerHTML = '<p class="text-center"><span class="spinner-border spinner-border-sm"></span> Searching...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/unique-titles/search?q=${encodeURIComponent(query)}&limit=50`);
+                const data = await response.json();
+
+                if (data.results.length === 0) {
+                    resultsDiv.innerHTML = '<p class="text-muted text-center">No results found</p>';
+                    return;
+                }
+
+                resultsDiv.innerHTML = data.results.map(item => `
+                    <div class="card mb-2">
+                        <div class="card-body py-2">
+                            <p class="mb-1 small"><strong>URL:</strong> <code>${item.url}</code></p>
+                            <p class="mb-1 small"><strong>Title:</strong> ${item.title}</p>
+                            <p class="mb-1 small"><strong>H1:</strong> ${item.h1_title}</p>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editTitle('${encodeURIComponent(JSON.stringify(item))}')">Edit</button>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                resultsDiv.innerHTML = '<p class="text-danger text-center">Search failed</p>';
+            }
+        }
+
+        function editTitle(encodedItem) {
+            const item = JSON.parse(decodeURIComponent(encodedItem));
+            document.getElementById('titleUrl').value = item.url;
+            document.getElementById('titleTitle').value = item.title;
+            document.getElementById('titleDescription').value = item.description;
+            document.getElementById('titleH1').value = item.h1_title;
+            document.getElementById('titleUrl').focus();
+        }
+
+    </script>
+</body>
+</html>

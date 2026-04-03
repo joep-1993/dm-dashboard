@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Index Checker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .result-badge { font-size: 0.85rem; }
+        .badge.bg-success { background-color: #d1e7dd !important; color: #0a3622 !important; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .indexed-yes { color: #198754; font-weight: bold; }
+        .indexed-no { color: #dc3545; font-weight: bold; }
+        .indexed-error { color: #6c757d; font-style: italic; }
+        .quota-bar { height: 8px; border-radius: 4px; }
+        .url-result-row td { vertical-align: middle; font-size: 0.9rem; }
+        .url-result-row td:first-child { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Index Checker</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+
+                <!-- Quota Info -->
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Quota Status</h5>
+                        <button class="btn btn-sm btn-outline-light" onclick="loadQuota()">Refresh</button>
+                    </div>
+                    <div class="card-body" id="quotaContent">
+                        <p class="text-muted">Loading quota info...</p>
+                    </div>
+                </div>
+
+                <!-- Input Section -->
+                <div class="card mb-4">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Check URL Index Status</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Tabs -->
+                        <ul class="nav nav-tabs mb-3" role="tablist">
+                            <li class="nav-item">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#manualTab">Manual Input</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#excelTab">Excel Upload</button>
+                            </li>
+                        </ul>
+
+                        <div class="tab-content">
+                            <!-- Manual Input Tab -->
+                            <div class="tab-pane fade show active" id="manualTab">
+                                <div class="mb-3">
+                                    <label for="urlInput" class="form-label">URLs to check (one per line)</label>
+                                    <textarea class="form-control" id="urlInput" rows="8" placeholder="https://www.beslist.nl/products/...&#10;https://www.beslist.nl/products/..."></textarea>
+                                    <small class="text-muted">Max 8,000 URLs per request. Daily quota: 2,000 per service account.</small>
+                                </div>
+                                <button class="btn btn-primary" onclick="submitManual()" id="submitManualBtn">
+                                    Check Index Status
+                                </button>
+                            </div>
+
+                            <!-- Excel Upload Tab -->
+                            <div class="tab-pane fade" id="excelTab">
+                                <div class="mb-3">
+                                    <label for="excelFile" class="form-label">Upload Excel file with URL column</label>
+                                    <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
+                                    <small class="text-muted">Expects a column named "URL" or uses the first column.</small>
+                                </div>
+                                <button class="btn btn-primary" onclick="submitExcel()" id="submitExcelBtn">
+                                    Upload & Check
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div class="card mb-4 d-none" id="progressCard">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="mb-0">Processing...</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="progress mb-2">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar" style="width: 0%"></div>
+                        </div>
+                        <p class="text-muted mb-0" id="progressText">Checking URLs against Google Search Console...</p>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="card mb-4 d-none" id="resultsCard">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Results</h5>
+                        <button class="btn btn-sm btn-outline-light" onclick="downloadResults()">Download CSV</button>
+                    </div>
+                    <div class="card-body">
+                        <!-- Stats -->
+                        <div class="row mb-3">
+                            <div class="col-md-3 text-center">
+                                <h4 id="statTotal">0</h4>
+                                <small class="text-muted">Total Checked</small>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <h4 id="statIndexed" class="text-success">0</h4>
+                                <small class="text-muted">Indexed</small>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <h4 id="statNotIndexed" class="text-danger">0</h4>
+                                <small class="text-muted">Not Indexed</small>
+                            </div>
+                            <div class="col-md-3 text-center">
+                                <h4 id="statErrors" class="text-warning">0</h4>
+                                <small class="text-muted">Errors</small>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <small class="text-muted" id="accountsUsed"></small>
+                        </div>
+
+                        <!-- Filter buttons -->
+                        <div class="btn-group mb-3" role="group">
+                            <button class="btn btn-outline-secondary btn-sm active" onclick="filterResults('all', this)">All</button>
+                            <button class="btn btn-outline-success btn-sm" onclick="filterResults('indexed', this)">Indexed</button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="filterResults('not_indexed', this)">Not Indexed</button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="filterResults('error', this)">Errors</button>
+                        </div>
+
+                        <!-- Results table -->
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped" id="resultsTable">
+                                <thead>
+                                    <tr>
+                                        <th>URL</th>
+                                        <th>Indexed</th>
+                                        <th>Coverage State</th>
+                                        <th>Verdict</th>
+                                        <th>Robots</th>
+                                        <th>Indexing</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = window.location.origin;
+        let allResults = [];
+
+        window.addEventListener('DOMContentLoaded', loadQuota);
+
+        function setLoading(btnId, loading) {
+            const btn = document.getElementById(btnId);
+            if (loading) {
+                btn.disabled = true;
+                btn.dataset.originalText = btn.textContent;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Checking...';
+                document.getElementById('progressCard').classList.remove('d-none');
+                document.getElementById('progressBar').style.width = '0%';
+                document.getElementById('progressText').textContent = 'Checking URLs against Google Search Console...';
+            } else {
+                btn.disabled = false;
+                btn.textContent = btn.dataset.originalText;
+                document.getElementById('progressCard').classList.add('d-none');
+            }
+        }
+
+        function showResults(data) {
+            const card = document.getElementById('resultsCard');
+            card.classList.remove('d-none');
+
+            document.getElementById('statTotal').textContent = data.total || 0;
+            document.getElementById('statIndexed').textContent = data.indexed || 0;
+            document.getElementById('statNotIndexed').textContent = data.not_indexed || 0;
+            document.getElementById('statErrors').textContent = data.errors || 0;
+
+            const acctInfo = document.getElementById('accountsUsed');
+            acctInfo.textContent = `Service accounts used: ${data.service_accounts_used || '?'} / ${data.service_accounts_available || '?'}`;
+
+            allResults = data.results || [];
+            renderResults(allResults);
+        }
+
+        function renderResults(results) {
+            const tbody = document.getElementById('resultsBody');
+            if (results.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center">No results</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = results.map(r => {
+                let indexedCell;
+                if (r.error) {
+                    indexedCell = `<span class="indexed-error">${r.error}</span>`;
+                } else if (r.indexed) {
+                    indexedCell = '<span class="badge bg-success">Yes</span>';
+                } else {
+                    indexedCell = '<span class="badge bg-danger">No</span>';
+                }
+
+                return `<tr class="url-result-row" data-status="${r.error ? 'error' : (r.indexed ? 'indexed' : 'not_indexed')}">
+                    <td title="${r.url}">${r.url}</td>
+                    <td>${indexedCell}</td>
+                    <td>${r.coverage_state || '-'}</td>
+                    <td>${r.verdict || '-'}</td>
+                    <td>${r.robots || '-'}</td>
+                    <td>${r.indexing_state || '-'}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function filterResults(filter, btn) {
+            // Update active button
+            document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            if (filter === 'all') {
+                renderResults(allResults);
+            } else {
+                const filtered = allResults.filter(r => {
+                    if (filter === 'indexed') return r.indexed === true;
+                    if (filter === 'not_indexed') return r.indexed === false;
+                    if (filter === 'error') return r.error !== null;
+                    return true;
+                });
+                renderResults(filtered);
+            }
+        }
+
+        function downloadResults() {
+            if (allResults.length === 0) return;
+
+            const headers = ['url', 'indexed', 'coverage_state', 'verdict', 'robots', 'indexing_state', 'error'];
+            const csv = [headers.join(',')];
+            allResults.forEach(r => {
+                csv.push(headers.map(h => {
+                    const val = r[h] === null || r[h] === undefined ? '' : String(r[h]);
+                    return val.includes(',') ? `"${val}"` : val;
+                }).join(','));
+            });
+
+            const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `index-check-results-${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        async function submitManual() {
+            const text = document.getElementById('urlInput').value.trim();
+            if (!text) return alert('Please enter at least one URL.');
+
+            const urls = text.split('\n').map(u => u.trim()).filter(u => u && u.startsWith('http'));
+            if (urls.length === 0) return alert('No valid URLs found. URLs must start with http.');
+
+            setLoading('submitManualBtn', true);
+            try {
+                const response = await fetch(`${API_BASE}/api/index-checker/check`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Request failed');
+                }
+
+                const data = await response.json();
+                showResults(data);
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                setLoading('submitManualBtn', false);
+            }
+        }
+
+        async function submitExcel() {
+            const fileInput = document.getElementById('excelFile');
+            if (!fileInput.files.length) return alert('Please select an Excel file.');
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            setLoading('submitExcelBtn', true);
+            try {
+                const response = await fetch(`${API_BASE}/api/index-checker/upload-excel`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Request failed');
+                }
+
+                const data = await response.json();
+                showResults(data);
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                setLoading('submitExcelBtn', false);
+            }
+        }
+
+        async function loadQuota() {
+            const container = document.getElementById('quotaContent');
+            try {
+                const response = await fetch(`${API_BASE}/api/index-checker/quota`);
+                if (!response.ok) throw new Error('Failed to load quota');
+
+                const data = await response.json();
+
+                let html = `<div class="row text-center">
+                    <div class="col-md-4 col-4 mb-3">
+                        <h3 style="color: #5e4a90; font-weight: 700;">${data.valid_accounts}</h3>
+                        <p class="text-muted mb-0">Active Service Accounts</p>
+                    </div>
+                    <div class="col-md-4 col-4 mb-3">
+                        <h3 style="color: #5e4a90; font-weight: 700;">${data.daily_quota_per_account.toLocaleString()}</h3>
+                        <p class="text-muted mb-0">Quota per Account/Day</p>
+                    </div>
+                    <div class="col-md-4 col-4 mb-3">
+                        <h3 style="color: #5e4a90; font-weight: 700;">${data.estimated_daily_quota.toLocaleString()}</h3>
+                        <p class="text-muted mb-0">Total Daily Quota</p>
+                    </div>
+                </div>`;
+
+                container.innerHTML = html;
+            } catch (error) {
+                container.innerHTML = `<p class="text-danger">Error loading quota: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>
