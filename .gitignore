@@ -36,6 +36,9 @@ Thumbs.db
 # Credentials
 backend/service_accounts/
 
+# SSL certificates (private key!)
+certs/
+
 # Log files
 logs/
 *.log

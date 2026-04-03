@@ -12,7 +12,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import requests
+import urllib3
 from dotenv import load_dotenv
+
+# Suppress SSL warnings for self-signed certificate
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Load .env from project root for DASHBOARD_PASSWORD
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
@@ -20,7 +24,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-BASE_URL = "http://localhost:3003"
+BASE_URL = "https://localhost:3003"
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 LOG_FILE = os.path.join(LOG_DIR, "daily_automation.log")
 
@@ -30,7 +34,9 @@ PROCESS_TIMEOUT = 14400       # 4 hours max for processing loops
 PUBLISH_TIMEOUT = 3600        # 1 hour max for publish
 
 # Authenticated session (reused across all requests)
+# verify=False because we use a self-signed certificate
 SESSION = requests.Session()
+SESSION.verify = False
 
 # ---------------------------------------------------------------------------
 # Logging
