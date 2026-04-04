@@ -1,6 +1,7 @@
 """
 Daily automation script for DM Dashboard.
-Runs: reset validations → validate links (parallel) → process URLs → publish to production.
+Runs: cancel stale tasks → reset validations → validate links (parallel)
+      → process URLs → publish to production.
 Designed for Windows Task Scheduler, daily at 07:00.
 """
 import sys
@@ -77,6 +78,38 @@ def login():
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def cancel_running_tasks():
+    """Cancel any stale validation tasks left over from previous runs.
+
+    The server-side validation endpoints run as daemon threads.  If a previous
+    automation run timed out, those threads keep running and will compete with
+    new tasks for ES / DB resources.  We cancel them before starting fresh.
+    """
+    log = logging.getLogger("automation")
+
+    cancel_endpoints = [
+        "/api/faq/validate-all-links/cancel",
+        "/api/validate-all-links/cancel",
+    ]
+
+    for endpoint in cancel_endpoints:
+        try:
+            # The cancel endpoint expects a task_id, but we want to cancel ALL
+            # running tasks.  We use a special "all" sentinel that we'll add to
+            # the server endpoint.  For now, try canceling via a POST to the
+            # base cancel URL — if the server doesn't support it yet we just
+            # skip gracefully.
+            resp = SESSION.post(f"{BASE_URL}{endpoint}/all", timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                cancelled = data.get("cancelled", 0)
+                if cancelled:
+                    log.info(f"  Cancelled {cancelled} stale task(s) via {endpoint}")
+            # 404 = endpoint doesn't exist yet, that's fine
+        except Exception:
+            pass  # best-effort
+
+
 def poll_task(status_url, timeout):
     """Poll a background task until completed/failed."""
     log = logging.getLogger("automation")
@@ -93,10 +126,10 @@ def poll_task(status_url, timeout):
         if status in ("error", "failed"):
             raise RuntimeError(f"Task failed: {data}")
 
-        # Log progress
-        rechecked = data.get("rechecked", data.get("validated", ""))
-        total = data.get("total_to_recheck", data.get("total", ""))
-        log.info(f"  Polling… status={status}  progress={rechecked}/{total}")
+        # Log progress — support both validation response shapes
+        validated = data.get("validated", data.get("rechecked", ""))
+        total = data.get("total_to_validate", data.get("total_to_recheck", data.get("total", "")))
+        log.info(f"  Polling… status={status}  progress={validated}/{total}")
         time.sleep(POLL_INTERVAL)
 
     raise TimeoutError(f"Task timed out after {timeout}s")
@@ -160,14 +193,14 @@ def step_validate_faq_links():
 def step_validate_kopteksten_links():
     log = logging.getLogger("automation")
     resp = SESSION.post(
-        f"{BASE_URL}/api/recheck-skipped-urls",
-        params={"parallel_workers": 20, "batch_size": 50},
+        f"{BASE_URL}/api/validate-all-links",
+        params={"parallel_workers": 20, "batch_size": 500},
         timeout=30,
     )
     resp.raise_for_status()
     task_id = resp.json().get("task_id")
-    log.info(f"  Kopteksten recheck started, task_id={task_id}")
-    poll_task(f"{BASE_URL}/api/recheck-skipped-urls/status/{task_id}", VALIDATION_TIMEOUT)
+    log.info(f"  Kopteksten validate-all started, task_id={task_id}")
+    poll_task(f"{BASE_URL}/api/validate-all-links/status/{task_id}", VALIDATION_TIMEOUT)
 
 
 def step_validate_parallel():
@@ -258,6 +291,10 @@ def main():
     log.info("=" * 60)
 
     login()
+
+    # Cancel any stale validation tasks from previous failed runs
+    log.info("--- Cancelling stale tasks ---")
+    cancel_running_tasks()
 
     steps = [
         ("Reset FAQ validation",          step_reset_faq_validation),
