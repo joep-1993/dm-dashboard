@@ -29,7 +29,7 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 LOG_FILE = os.path.join(LOG_DIR, "daily_automation.log")
 
 POLL_INTERVAL = 15            # seconds between status polls
-VALIDATION_TIMEOUT = 7200     # 2 hours max for a validation step
+VALIDATION_TIMEOUT = 14400    # 4 hours max for a validation step
 PROCESS_TIMEOUT = 14400       # 4 hours max for processing loops
 PUBLISH_TIMEOUT = 3600        # 1 hour max for publish
 
