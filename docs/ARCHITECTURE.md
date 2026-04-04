@@ -56,10 +56,11 @@
 8. **Database Insert Method**: Switched from Redshift `copy_from()` to universal `executemany()` to fix COPY command syntax errors
 
 ### Deployment Model
-- **Everything runs in Docker containers** via `docker-compose`
+- **Two modes**: Docker (`docker-compose up`) or Docker-free (`run_local.sh` / venv + uvicorn)
 - **No build tools** - direct HTML/CSS/JS editing with auto-reload
 - **Single-machine deployment** - designed for 1-10 users
-- **Hybrid database** - local PostgreSQL for speed, Redshift for persistence
+- **Database**: Remote PostgreSQL at 10.1.32.9 (primary for both modes)
+- **Windows auto-start**: Task Scheduler task "DM Tools Dashboard" runs `C:\Users\JoepvanSchagen\scripts\start-dm-dashboard.ps1` at logon — starts uvicorn via WSL, health-checks port 8003, closes window on success, stays open on error
 
 ---
 
@@ -508,8 +509,8 @@ Local PostgreSQL tracking table marked URLs as "success", but Redshift `koptekst
 ## Network Architecture
 
 ### Port Configuration
-- **Frontend/API**: Port 8003 (external) → 8000 (container)
-- **PostgreSQL**: Port 5433 (external) → 5432 (container)
+- **Frontend/API**: Port 8003 (Docker: external → 8000 container; Docker-free: direct on 8003)
+- **PostgreSQL**: Port 5433 (external) → 5432 (container) — local DB still runs but remote 10.1.32.9 is primary
 - **Reason**: Avoid conflicts with existing services on host
 
 ### VPN Bypass for Whitelisted IP
