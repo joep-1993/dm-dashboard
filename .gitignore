@@ -40,6 +40,7 @@ cc1/
 
 # Credentials
 redshift
+scripts/amazon_cred
 backend/service_accounts/
 
 # Google Ads automation (contains sensitive config)
@@ -54,4 +55,10 @@ backend/check_*.py
 
 # Log files
 logs/
-Vector database N8N:
+*.log
+
+# Progress/temp files
+*progress.txt
+
+# JSON data dumps (keep category_forms.json)
+structured_data_*.json

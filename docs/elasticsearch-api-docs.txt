@@ -1,7 +1,7 @@
 # Beslist Elasticsearch API Documentation
 
 ## Cluster Information
-- **Endpoint**: `https://elasticsearch-job-cluster-eck.beslist.nl/`
+- **Endpoint**: `https://elasticsearch-job-cluster-eck-v9.beslist.nl/`
 - **Version**: 8.14.3
 - **Deployment**: ECK (Elastic Cloud on Kubernetes)
 

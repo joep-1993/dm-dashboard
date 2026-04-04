@@ -462,21 +462,25 @@ def _apply_cat_facet_remove(url: str, rules: List[CatFacetRemoveRule]) -> str:
         elif cat:
             url = url.replace(cat, canon_cat)
 
-        # Remove the facet
+        # Remove the full facet (facet_name~numeric_id) using regex
+        # Input facet may be just the name (e.g. "type_spelcomputer")
+        # but in the URL it appears as "type_spelcomputer~480840"
         facet = rule.facet
-        patterns = [
-            f"~~{facet}~~",
-            f"{facet}~~",
-            f"~~{facet}",
-            f"/c/{facet}",
+        # Match facet name + ~numeric_id if present
+        facet_pattern = re.escape(facet) + r'(?:~\d+)?'
+
+        # Try removal patterns in order of specificity
+        regex_patterns = [
+            (rf'~~{facet_pattern}~~', '~~'),    # facet in the middle
+            (rf'{facet_pattern}~~', ''),          # facet at the start
+            (rf'~~{facet_pattern}', ''),           # facet at the end
+            (rf'/c/{facet_pattern}', ''),              # facet is the only one after /c/ — remove /c/ too
         ]
 
-        for pattern in patterns:
-            if pattern in url:
-                replacement = "~~" if pattern.startswith("~~") and pattern.endswith("~~") else ""
-                if pattern == f"/c/{facet}":
-                    replacement = "/"
-                url = url.replace(pattern, replacement)
+        for regex, replacement in regex_patterns:
+            new_url = re.sub(regex, replacement, url)
+            if new_url != url:
+                url = new_url
                 break
 
     # Fix double maincat
@@ -590,6 +594,10 @@ def transform_url(url: str, rules: TransformationRules) -> str:
 
     # Sort facets alphabetically
     url = _sort_facets(url)
+
+    # Ensure trailing slash for URLs without facets (no /c/ and no ~)
+    if '/c/' not in url and '~' not in url and not url.endswith('/'):
+        url = url + '/'
 
     return url
 

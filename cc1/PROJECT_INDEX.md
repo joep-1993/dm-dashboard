@@ -95,6 +95,13 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 ├── .env / .env.example   # Environment configuration
 ├── run_local.sh          # Run without Docker (setup + start)
 └── .gitignore
+
+## Windows Startup
+```
+C:\Users\JoepvanSchagen\scripts\
+└── start-dm-dashboard.ps1  # Auto-start script (Task Scheduler: "DM Tools Dashboard")
+                            # Health-checks port 8003, closes window on success, stays open on error
+```
 ```
 
 ## Network Configuration
@@ -505,4 +512,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-04-03_
+_Last updated: 2026-04-05_

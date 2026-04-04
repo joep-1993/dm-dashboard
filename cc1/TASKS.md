@@ -269,6 +269,7 @@ _Finished tasks (move here when done)_
 - [x] Sync last-push timestamp feature to dm-tools (backend + frontend + faq) #claude-session:2026-04-03
 - [x] Add Docker-free local run support (dotenv, run_local.sh, venv, symlink) #claude-session:2026-04-03
 - [x] Create Windows Task Scheduler auto-start for dashboard #claude-session:2026-04-03
+- [x] Add PowerShell startup script with auto-close — `C:\Users\JoepvanSchagen\scripts\start-dm-dashboard.ps1` wraps the WSL uvicorn command, health-checks port 8003, closes window on success, stays open with error message on failure. Updated scheduled task to use script instead of inline wsl.exe command #claude-session:2026-04-05
 
 ## Blocked
 _Tasks waiting on dependencies_

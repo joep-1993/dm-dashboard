@@ -49,9 +49,11 @@ def create_product_recommendation_prompt(h1_title: str, products: List[Dict]) ->
 
     prompt = f"""Opdracht
 Een prijsbewuste consumenten landt op een pagina na het zoeken in Google. Op de pagina staan veel producten waaruit hij moet kiezen. Zie de lijst met de 30 populairste producten hieronder.
-Schrijf een korte tekst (max. 100 woorden) met als doel om de bezoeker te helpen de juiste keuze te maken.
+Schrijf een tekst (max. 150 woorden) met als doel om de bezoeker te helpen de juiste keuze te maken.
 - Schrijf de tekst als EEN doorlopende alinea, GEEN meerdere paragrafen of witregels.
-- Geef concreet advies: noem bijvoorbeeld verschillen in functies, eigenschappen of gebruiksscenario's
+- Geef concreet advies: noem bijvoorbeeld verschillen in functies, eigenschappen of gebruiksscenario's.
+- Geef minstens één concreet koopcriterium waar de lezer op moet letten (bijv. materiaal, maat, vermogen, compatibiliteit) dat niet al in de productnamen staat.
+- Structureer de tekst niet als een opsomming van producten met bijvoeglijk naamwoord. Weef de links natuurlijk in een verhaal over hoe je kiest.
 - Vermijd het noemen van prijzen.
 - Gebruik waar relevant, klikbare links naar producten en gebruik hierbij HTML-links met de tag <a href="url"> en als linktekst een KORTE, heldere omschrijving (max 3-5 woorden). Maak bijvoorbeeld van "Beeztees kattentuigje Hearts zwart 120 x 1 cm" gewoon "Beeztees kattentuigje Hearts". Gebruik alleen "urls" die hieronder in deze lijst voorkomen en negeer urls met een lege waarde.
 
@@ -71,10 +73,15 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
     user_prompt = create_product_recommendation_prompt(h1_title, products)
 
     system_message = """Je bent een online marketeer voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
-- Spreek de lezer aan met "je," in een toegankelijke, optimistische toon.
+- Spreek de lezer aan met "je," in een toegankelijke, informatieve toon.
 - Noem nooit prijzen.
 - Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
 - Focus op advies dat écht helpt bij het maken van een keuze (bv. voordelen, verschillen, specifieke kenmerken).
+- Varieer sterk in je openingszinnen — begin NOOIT met "Als je op zoek bent naar", "Op zoek naar", "Ben je op zoek naar", "Zoek je" of vergelijkbare zoekformuleringen.
+- Vermijd generieke kwalificaties zoals "ideaal", "perfect", "uitstekend", "een goede keuze", "een heerlijke keuze". Wees specifiek: leg uit WAAROM iets geschikt is.
+- Gebruik geen uitroeptekens.
+- Vermijd overdreven enthousiaste marketing-taal. Schrijf behulpzaam en nuchter, niet als een reclamespot.
+- Gebruik NOOIT "ons", "onze", "wij" of "we" - schrijf vanuit het perspectief van de bezoeker, niet vanuit het bedrijf.
 - BELANGRIJK: Link ALLEEN naar producten die exact overeenkomen met het zoekwoord. Als het zoekwoord "Samsung Galaxy Buds FE" is, link dan NIET naar "Galaxy Buds3" of "Galaxy Buds Pro" - dat zijn andere producten. Link liever naar 1 correct product dan naar meerdere verkeerde producten.
 - Verzin NOOIT producten of URLs die niet in de lijst staan. Als er maar 1 passend product is, gebruik dan alleen die ene link.
 - Als je linkt, gebruik de tag <a href> en kies dan de juiste url uit de lijst van meegeleverde producten. Maak nooit zelf een andere url en negeer urls met een lege waarde.
