@@ -1,7 +1,13 @@
 """
 Daily automation script for DM Dashboard.
-Runs: cancel stale tasks → reset validations → validate links (parallel)
-      → process URLs → publish to production.
+
+Flow:
+  1. Reset FAQ + Kopteksten validation
+  2. Validate FAQ + Kopteksten links (parallel)
+  3. Recheck skipped URLs (makes URLs with new products eligible again)
+  4. Regenerate FAQ + Kopteksten content (parallel)
+  5. Publish all content to production
+
 Designed for Windows Task Scheduler, daily at 07:00.
 """
 import sys
@@ -218,6 +224,26 @@ def step_validate_parallel():
             log.info(f"  ✓ {name} completed")
 
 
+def step_recheck_skipped_urls():
+    """Recheck URLs that were previously skipped (no products).
+
+    URLs that now have products are removed from the skip-list and added
+    back to the werkvoorraad for both FAQ and Kopteksten regeneration.
+    """
+    log = logging.getLogger("automation")
+    # Reset the '(rechecked)' marker so all skipped URLs are rechecked
+    SESSION.delete(f"{BASE_URL}/api/recheck-skipped-urls/reset", timeout=30)
+    resp = SESSION.post(
+        f"{BASE_URL}/api/recheck-skipped-urls",
+        params={"parallel_workers": 20, "batch_size": 50},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    task_id = resp.json().get("task_id")
+    log.info(f"  Recheck skipped URLs started, task_id={task_id}")
+    poll_task(f"{BASE_URL}/api/recheck-skipped-urls/status/{task_id}", VALIDATION_TIMEOUT)
+
+
 def step_process_faq_urls():
     loop_until_done(
         f"{BASE_URL}/api/faq/process-urls",
@@ -232,6 +258,21 @@ def step_process_kopteksten_urls():
         PROCESS_TIMEOUT,
         params={"batch_size": 200, "parallel_workers": 20},
     )
+
+
+def step_process_parallel():
+    """Regenerate FAQ and Kopteksten content in parallel."""
+    log = logging.getLogger("automation")
+    log.info("  Starting FAQ + Kopteksten processing in parallel")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {
+            executor.submit(step_process_faq_urls): "Process FAQ URLs",
+            executor.submit(step_process_kopteksten_urls): "Process Kopteksten URLs",
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            future.result()  # raises if failed
+            log.info(f"  ✓ {name} completed")
 
 
 def step_publish_production():
@@ -297,12 +338,12 @@ def main():
     cancel_running_tasks()
 
     steps = [
-        ("Reset FAQ validation",          step_reset_faq_validation),
-        ("Reset Kopteksten validation",    step_reset_kopteksten_validation),
-        ("Validate links (parallel)",      step_validate_parallel),
-        ("Process FAQ URLs",               step_process_faq_urls),
-        ("Process Kopteksten URLs",        step_process_kopteksten_urls),
-        ("Publish to Production",          step_publish_production),
+        ("Reset FAQ validation",              step_reset_faq_validation),
+        ("Reset Kopteksten validation",       step_reset_kopteksten_validation),
+        ("Validate links (parallel)",         step_validate_parallel),
+        ("Recheck skipped URLs",              step_recheck_skipped_urls),
+        ("Regenerate content (parallel)",      step_process_parallel),
+        ("Publish to Production",             step_publish_production),
     ]
 
     completed_steps = []
