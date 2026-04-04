@@ -197,7 +197,7 @@ def step_process_kopteksten_urls():
     loop_until_done(
         f"{BASE_URL}/api/process-urls",
         PROCESS_TIMEOUT,
-        params={"batch_size": 2, "parallel_workers": 1},
+        params={"batch_size": 200, "parallel_workers": 20},
     )
 
 
