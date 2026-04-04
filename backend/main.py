@@ -1300,7 +1300,15 @@ def get_recheck_status(task_id: str):
 
 @app.post("/api/recheck-skipped-urls/cancel/{task_id}")
 def cancel_recheck(task_id: str):
-    """Cancel a running recheck task."""
+    """Cancel a running recheck task.  Use task_id='all' to cancel every running task."""
+    if task_id == "all":
+        cancelled = 0
+        for tid, task in _validation_tasks.items():
+            if task.get("status") == "running":
+                task["cancel"] = True
+                _validation_tasks[tid] = task
+                cancelled += 1
+        return {"status": "ok", "cancelled": cancelled}
     task = _get_validation_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

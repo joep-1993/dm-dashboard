@@ -96,6 +96,7 @@ def cancel_running_tasks():
     cancel_endpoints = [
         "/api/faq/validate-all-links/cancel",
         "/api/validate-all-links/cancel",
+        "/api/recheck-skipped-urls/cancel",
     ]
 
     for endpoint in cancel_endpoints:
