@@ -148,7 +148,7 @@ def step_validate_faq_links():
     log = logging.getLogger("automation")
     resp = SESSION.post(
         f"{BASE_URL}/api/faq/validate-all-links",
-        params={"parallel_workers": 3, "batch_size": 500},
+        params={"parallel_workers": 20, "batch_size": 500},
         timeout=30,
     )
     resp.raise_for_status()
@@ -161,7 +161,7 @@ def step_validate_kopteksten_links():
     log = logging.getLogger("automation")
     resp = SESSION.post(
         f"{BASE_URL}/api/recheck-skipped-urls",
-        params={"parallel_workers": 3, "batch_size": 50},
+        params={"parallel_workers": 20, "batch_size": 50},
         timeout=30,
     )
     resp.raise_for_status()
