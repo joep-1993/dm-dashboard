@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
@@ -14,7 +16,7 @@ def _get_pg_pool():
         _pg_pool = pool.ThreadedConnectionPool(
             minconn=2,
             maxconn=20,  # Increased from 10 to support more parallel workers
-            dsn=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@db:5432/myapp"),
+            dsn=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/seo_tools"),
             cursor_factory=RealDictCursor,
             connect_timeout=10,
             keepalives=1,

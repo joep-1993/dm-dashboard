@@ -28,6 +28,11 @@ def _get_validation_task(task_id):
     return _validation_tasks.get(task_id)
 
 def _set_validation_task(task_id, data):
+    # Preserve the cancel flag — prevents race condition where a batch
+    # completion overwrites a cancel request that arrived mid-batch.
+    existing = _validation_tasks.get(task_id)
+    if existing and existing.get("cancel") and "cancel" not in data:
+        data["cancel"] = True
     _validation_tasks[task_id] = data
 from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection
 from backend.scraper_service import scrape_product_page, scrape_product_page_api, sanitize_content, is_main_category_url, MAIN_CATEGORY_H1
@@ -1002,7 +1007,15 @@ def get_validate_all_status(task_id: str):
 
 @app.post("/api/validate-all-links/cancel/{task_id}")
 def cancel_validate_all(task_id: str):
-    """Cancel a running validate-all task."""
+    """Cancel a running validate-all task.  Use task_id='all' to cancel every running task."""
+    if task_id == "all":
+        cancelled = 0
+        for tid, task in _validation_tasks.items():
+            if task.get("status") == "running":
+                task["cancel"] = True
+                _validation_tasks[tid] = task
+                cancelled += 1
+        return {"status": "ok", "cancelled": cancelled}
     task = _get_validation_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -1214,7 +1227,15 @@ def get_recheck_status(task_id: str):
 
 @app.post("/api/recheck-skipped-urls/cancel/{task_id}")
 def cancel_recheck(task_id: str):
-    """Cancel a running recheck task."""
+    """Cancel a running recheck task.  Use task_id='all' to cancel every running task."""
+    if task_id == "all":
+        cancelled = 0
+        for tid, task in _validation_tasks.items():
+            if task.get("status") == "running":
+                task["cancel"] = True
+                _validation_tasks[tid] = task
+                cancelled += 1
+        return {"status": "ok", "cancelled": cancelled}
     task = _get_validation_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -1824,7 +1845,15 @@ def get_faq_validate_all_status(task_id: str):
 
 @app.post("/api/faq/validate-all-links/cancel/{task_id}")
 def cancel_faq_validate_all(task_id: str):
-    """Cancel a running FAQ validate-all task."""
+    """Cancel a running FAQ validate-all task.  Use task_id='all' to cancel every running task."""
+    if task_id == "all":
+        cancelled = 0
+        for tid, task in _validation_tasks.items():
+            if task.get("status") == "running":
+                task["cancel"] = True
+                _validation_tasks[tid] = task
+                cancelled += 1
+        return {"status": "ok", "cancelled": cancelled}
     task = _get_validation_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

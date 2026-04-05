@@ -20,9 +20,9 @@ CONTENT_API_URLS = {
 }
 
 CONTENT_API_KEYS = {
-    "dev": "Sectional~Publisher~Dumpling1",
-    "staging": "Crease~Skeptic8~Baguette",
-    "production": "Sectional~Publisher~Dumpling1"
+    "dev": os.getenv("CONTENT_API_KEY_DEV", ""),
+    "staging": os.getenv("CONTENT_API_KEY_STAGING", ""),
+    "production": os.getenv("CONTENT_API_KEY_PROD", "")
 }
 
 # Default environment

@@ -51,6 +51,9 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - GOOGLE_LOGIN_CUSTOMER_ID=${GOOGLE_LOGIN_CUSTOMER_ID}
+      - CONTENT_API_KEY_DEV=${CONTENT_API_KEY_DEV}
+      - CONTENT_API_KEY_STAGING=${CONTENT_API_KEY_STAGING}
+      - CONTENT_API_KEY_PROD=${CONTENT_API_KEY_PROD}
     networks:
       - seo-tools_default
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
