@@ -12,6 +12,11 @@ from backend.database import get_db_connection, return_db_connection
 ES_URL = "https://elasticsearch-job-cluster-eck-v9.beslist.nl"
 INDEX_PREFIX = "product_search_v4_nl-nl_"
 
+# Reuse a single HTTP session for all ES queries.  This keeps the TCP+TLS
+# connection alive between requests, avoiding a ~3.5 s TLS handshake on
+# every query (measured: 3 500 ms -> 27 ms per query).
+_es_session = requests.Session()
+
 # Maincat mapping file path (relative to this file)
 MAINCAT_MAPPING_FILE = Path(__file__).parent / "maincat_mapping.csv"
 
@@ -115,7 +120,7 @@ def query_elasticsearch(index: str, pim_ids: List[str], min_offers: int = 2) -> 
     }
 
     url = f"{ES_URL}/{index}/_search"
-    response = requests.post(url, json=query, timeout=60)
+    response = _es_session.post(url, json=query, timeout=60)
     response.raise_for_status()
 
     data = response.json()
@@ -188,7 +193,7 @@ def query_elasticsearch_by_plpurl(index: str, plp_urls: List[str], min_offers: i
         }
 
         es_url = f"{ES_URL}/{index}/_search"
-        response = requests.post(es_url, json=query, timeout=15)
+        response = _es_session.post(es_url, json=query, timeout=15)
         response.raise_for_status()
         data = response.json()
 

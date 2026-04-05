@@ -31,6 +31,11 @@ def _get_validation_task(task_id):
     return _validation_tasks.get(task_id)
 
 def _set_validation_task(task_id, data):
+    # Preserve the cancel flag — prevents race condition where a batch
+    # completion overwrites a cancel request that arrived mid-batch.
+    existing = _validation_tasks.get(task_id)
+    if existing and existing.get("cancel") and "cancel" not in data:
+        data["cancel"] = True
     _validation_tasks[task_id] = data
 from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection
 from backend.scraper_service import scrape_product_page, scrape_product_page_api, sanitize_content, is_main_category_url, MAIN_CATEGORY_H1
