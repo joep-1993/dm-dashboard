@@ -24,11 +24,13 @@ def health_check():
 
 
 @router.get("/stats")
-async def get_stats():
+async def get_stats(
+    country: str = Query("NL", description="Country code: NL or BE"),
+):
     """Get campaign counts per DMA bid strategy level."""
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(executor, get_level_stats)
+        result = await loop.run_in_executor(executor, lambda: get_level_stats(country=country))
         return result
     except Exception as e:
         logger.error(f"Error fetching DMA bidding stats: {e}")
@@ -42,6 +44,7 @@ async def run_dma_bidding_endpoint(
     end_days_ago: int = Query(3, description="End of date range (days ago)"),
     exclude_campaigns: Optional[str] = Query(None, description="Comma-separated campaign name substrings to exclude"),
     include_campaigns: Optional[str] = Query(None, description="Comma-separated campaign name substrings to include (only these will be processed)"),
+    country: str = Query("NL", description="Country code: NL or BE"),
 ):
     """Run the DMA bidding analysis and (optionally) apply bid strategy changes."""
     try:
@@ -64,6 +67,7 @@ async def run_dma_bidding_endpoint(
                 dry_run=dry_run,
                 exclude_campaigns=exclude_list,
                 include_campaigns=include_list,
+                country=country,
             ),
         )
         return result
@@ -79,7 +83,10 @@ async def get_history():
 
 
 @router.post("/revert")
-async def revert_campaigns(revert_list: List[dict] = Body(...)):
+async def revert_campaigns(
+    revert_list: List[dict] = Body(...),
+    country: str = Query("NL", description="Country code: NL or BE"),
+):
     """Revert campaigns to specified bid strategy levels.
 
     Expects a JSON list of: [{"campaign_name": "...", "target_level": 1}, ...]
@@ -88,8 +95,8 @@ async def revert_campaigns(revert_list: List[dict] = Body(...)):
         loop = asyncio.get_event_loop()
 
         def do_revert():
-            level_to_strategy, _ = get_bid_strategies()
-            campaigns = get_campaigns_with_strategies()
+            level_to_strategy, _ = get_bid_strategies(country=country)
+            campaigns = get_campaigns_with_strategies(country=country)
 
             # Build lookup: campaign_name -> resource_name
             name_to_resource = {c["campaign_name"]: c["resource_name"] for c in campaigns}
@@ -113,7 +120,7 @@ async def revert_campaigns(revert_list: List[dict] = Body(...)):
                     failed += 1
                     continue
 
-                result = change_bid_strategy(resource_name, strategy_resource, dry_run=False)
+                result = change_bid_strategy(resource_name, strategy_resource, dry_run=False, country=country)
                 if result.get("status") == "success":
                     success += 1
                 else:

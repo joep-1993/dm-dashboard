@@ -38,6 +38,7 @@
         .history-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
         .badge.bg-info { background-color: #0d8acc !important; }
         .badge.bg-success { background-color: #1a8a3f !important; }
+        .history-table .badge { display: inline-flex; align-items: center; line-height: 1; }
 
         .dry-run-warning { color: #d63031; font-weight: 600; font-size: 0.85rem; display: none; }
 
@@ -123,13 +124,20 @@
             </div>
             <div class="card-body">
                 <div class="row g-3">
+                    <div class="col-md-1">
+                        <label for="countrySelect" class="form-label">Country</label>
+                        <select class="form-select form-select-sm" id="countrySelect" onchange="onCountryChange()">
+                            <option value="NL" selected>NL</option>
+                            <option value="BE">BE</option>
+                        </select>
+                    </div>
                     <div class="col-md-2">
                         <label class="form-label">Dry Run</label>
                         <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="dryRunToggle" checked onchange="toggleDryRun()">
-                            <label class="form-check-label" for="dryRunToggle" id="dryRunLabel">ON</label>
+                            <input class="form-check-input" type="checkbox" id="dryRunToggle" onchange="toggleDryRun()">
+                            <label class="form-check-label" for="dryRunToggle" id="dryRunLabel">OFF</label>
                         </div>
-                        <div class="dry-run-warning" id="dryRunWarning">LIVE MODE - Changes will be applied!</div>
+                        <div class="dry-run-warning" id="dryRunWarning" style="display: block;">LIVE MODE - Changes will be applied!</div>
                     </div>
                     <div class="col-md-1">
                         <label for="startDaysAgo" class="form-label">Start</label>
@@ -139,7 +147,7 @@
                         <label for="endDaysAgo" class="form-label">End</label>
                         <input type="number" class="form-control form-control-sm" id="endDaysAgo" value="3" min="0">
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <label for="excludeCampaigns" class="form-label">Campaign names (optional, one per line)</label>
                         <textarea class="form-control" id="excludeCampaigns" rows="3" placeholder="campaign substring 1&#10;campaign substring 2"></textarea>
                     </div>
@@ -194,6 +202,7 @@
                         <thead>
                             <tr>
                                 <th>#</th>
+                                <th>Country</th>
                                 <th>Date</th>
                                 <th>Dry Run</th>
                                 <th>Date Range</th>
@@ -220,11 +229,18 @@
     <script>
         const API_BASE = window.location.origin;
         let lastRunResult = null;
+        let selectedCountry = 'NL';
 
         window.addEventListener('DOMContentLoaded', () => {
             loadStats();
             loadHistory();
         });
+
+        // --- Country Selector ---
+        function onCountryChange() {
+            selectedCountry = document.getElementById('countrySelect').value;
+            loadStats();
+        }
 
         // --- Dry Run Toggle ---
         function toggleDryRun() {
@@ -236,7 +252,7 @@
         // --- Stats ---
         async function loadStats() {
             try {
-                const res = await fetch(`${API_BASE}/api/dma-bidding/stats`);
+                const res = await fetch(`${API_BASE}/api/dma-bidding/stats?country=${selectedCountry}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const counts = data.level_counts || {};
@@ -274,6 +290,7 @@
                     dry_run: dryRun,
                     start_days_ago: startDaysAgo,
                     end_days_ago: endDaysAgo,
+                    country: selectedCountry,
                 });
                 if (campaignNames) {
                     if (included) {
@@ -306,7 +323,8 @@
             const meta = document.getElementById('resultMeta');
             meta.innerHTML = `
                 <small class="text-muted">
-                    Run #${data.run_id} | ${data.dry_run ? '<span class="badge bg-info">DRY RUN</span>' : '<span class="badge bg-danger">LIVE</span>'}
+                    Run #${data.run_id} | <strong>${data.country || 'NL'}</strong>
+                    | ${data.dry_run ? '<span class="badge bg-info">DRY RUN</span>' : '<span class="badge bg-danger">LIVE</span>'}
                     | Range: ${data.date_range.start} to ${data.date_range.end}
                     | Duration: ${data.duration_seconds}s
                 </small>
@@ -388,9 +406,10 @@
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'DMA Bidding');
 
+            const country = (runData.country || 'NL').toLowerCase();
             const mode = runData.dry_run ? 'dry' : 'live';
             const date = runData.timestamp.split('T')[0];
-            XLSX.writeFile(wb, `dma-bidding-${mode}-${date}-run${runData.run_id}.xlsx`);
+            XLSX.writeFile(wb, `dma-bidding-${country}-${mode}-${date}-run${runData.run_id}.xlsx`);
         }
 
         async function downloadHistoryRun(event, runId) {
@@ -416,7 +435,7 @@
 
                 const tbody = document.getElementById('historyTableBody');
                 if (runs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No runs yet.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No runs yet.</td></tr>';
                     return;
                 }
 
@@ -427,6 +446,7 @@
                     const changes = r.summary.total_changes || 0;
                     return `<tr style="cursor:pointer" onclick="showHistoryDetail(${r.run_id})">
                         <td>${r.run_id}</td>
+                        <td><strong>${r.country || 'NL'}</strong></td>
                         <td>${ts}</td>
                         <td>${dryBadge}</td>
                         <td>${range}</td>
@@ -438,7 +458,7 @@
             } catch (err) {
                 console.error('Failed to load history:', err);
                 document.getElementById('historyTableBody').innerHTML =
-                    '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load history.</td></tr>';
+                    '<tr><td colspan="8" class="text-center text-danger py-4">Failed to load history.</td></tr>';
             }
         }
 
