@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any, Tuple
 
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from google.protobuf import field_mask_pb2
 
 logger = logging.getLogger(__name__)
 
@@ -213,8 +214,7 @@ def change_bid_strategy(campaign_resource_name: str, new_strategy_resource: str,
     campaign.resource_name = campaign_resource_name
     campaign.bidding_strategy = new_strategy_resource
 
-    field_mask = client.get_type("FieldMask")
-    field_mask.paths.append("bidding_strategy")
+    field_mask = field_mask_pb2.FieldMask(paths=["bidding_strategy"])
     operation.update_mask.CopyFrom(field_mask)
 
     try:
