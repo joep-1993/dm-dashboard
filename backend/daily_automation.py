@@ -150,7 +150,7 @@ def loop_until_done(url, timeout, params=None):
     total_processed = 0
     while time.time() - start < timeout:
         iteration += 1
-        resp = SESSION.post(url, params=params, timeout=300)
+        resp = SESSION.post(url, params=params, timeout=1200)
         resp.raise_for_status()
         data = resp.json()
 
