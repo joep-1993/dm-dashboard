@@ -36,6 +36,8 @@
 
         .history-table { font-size: 0.85rem; }
         .history-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .badge.bg-info { background-color: #0d8acc !important; }
+        .badge.bg-success { background-color: #1a8a3f !important; }
 
         .dry-run-warning { color: #d63031; font-weight: 600; font-size: 0.85rem; display: none; }
 
@@ -170,7 +172,7 @@
                 <div class="card-header" style="background: #5e4a90; color: white;">
                     <h5 class="mb-0 d-flex justify-content-between align-items-center">
                         Results
-                        <button class="btn btn-sm btn-outline-light" onclick="exportCsv()">Export CSV</button>
+                        <button class="btn btn-sm" style="border: 1px solid rgb(94, 74, 144); color: rgb(94, 74, 144); background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="exportCsv()">Export</button>
                     </h5>
                 </div>
                 <div class="card-body">
@@ -197,6 +199,7 @@
                                 <th>Date Range</th>
                                 <th>Changes</th>
                                 <th>Status</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody id="historyTableBody">
@@ -358,21 +361,25 @@
             tables.innerHTML = html;
         }
 
-        // --- Export CSV ---
+        // --- Export Excel ---
+        const labelMap = {
+            '1_to_2': 'L1 naar L2',
+            '2_to_3': 'L2 naar L3',
+            '3_to_2': 'L3 naar L2',
+            '2_to_1': 'L2 naar L1',
+            'stuck_l1': 'L1 Stuck',
+        };
+
         function exportCsv() {
             if (!lastRunResult) return;
+            exportRunToExcel(lastRunResult);
+        }
 
+        function exportRunToExcel(runData) {
             const rows = [['Categorie', 'Campagne', 'Marge', 'OPB', 'Klikken', 'ROAS', 'Kosten', 'DMA/CLA Omzet']];
-            const labelMap = {
-                '1_to_2': 'L1 naar L2',
-                '2_to_3': 'L2 naar L3',
-                '3_to_2': 'L3 naar L2',
-                '2_to_1': 'L2 naar L1',
-                'stuck_l1': 'L1 Stuck',
-            };
 
             for (const [key, label] of Object.entries(labelMap)) {
-                for (const item of (lastRunResult.changes[key] || [])) {
+                for (const item of (runData.changes[key] || [])) {
                     rows.push([label, item.campaign_name, item.marge, item.opb, item.clicks, item.roas, item.cost, item.dma_cla_omzet]);
                 }
             }
@@ -380,7 +387,23 @@
             const ws = XLSX.utils.aoa_to_sheet(rows);
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'DMA Bidding');
-            XLSX.writeFile(wb, `dma-bidding-run-${lastRunResult.run_id}.csv`);
+
+            const mode = runData.dry_run ? 'dry' : 'live';
+            const date = runData.timestamp.split('T')[0];
+            XLSX.writeFile(wb, `dma-bidding-${mode}-${date}-run${runData.run_id}.xlsx`);
+        }
+
+        async function downloadHistoryRun(event, runId) {
+            event.stopPropagation();
+            try {
+                const res = await fetch(`${API_BASE}/api/dma-bidding/history/${runId}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                exportRunToExcel(data);
+            } catch (err) {
+                console.error('Failed to download run:', err);
+                alert('Download mislukt: ' + err.message);
+            }
         }
 
         // --- History ---
@@ -393,7 +416,7 @@
 
                 const tbody = document.getElementById('historyTableBody');
                 if (runs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No runs yet.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No runs yet.</td></tr>';
                     return;
                 }
 
@@ -409,12 +432,13 @@
                         <td>${range}</td>
                         <td>${changes}</td>
                         <td><span class="badge bg-success">${r.status}</span></td>
+                        <td><a href="#" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; line-height: 1.5; text-decoration: none;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="downloadHistoryRun(event, ${r.run_id})">Export</a></td>
                     </tr>`;
                 }).join('');
             } catch (err) {
                 console.error('Failed to load history:', err);
                 document.getElementById('historyTableBody').innerHTML =
-                    '<tr><td colspan="6" class="text-center text-danger py-4">Failed to load history.</td></tr>';
+                    '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load history.</td></tr>';
             }
         }
 
