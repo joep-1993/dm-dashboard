@@ -75,6 +75,14 @@ async def get_history():
     return {"runs": _run_history}
 
 
+@router.delete("/history")
+async def clear_history():
+    """Clear all DMA bidding run history."""
+    count = len(_run_history)
+    _run_history.clear()
+    return {"cleared": count}
+
+
 @router.get("/history/{run_id}")
 async def get_history_detail(run_id: int):
     """Return details for a specific DMA bidding run."""

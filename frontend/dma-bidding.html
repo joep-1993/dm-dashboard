@@ -28,9 +28,11 @@
         .badge-decrease { background-color: #d63031 !important; }
         .badge-stuck { background-color: #e17055 !important; }
 
-        .result-table { font-size: 0.9rem; }
+        .result-table { font-size: 0.9rem; table-layout: fixed; width: 100%; }
         .result-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
-        .result-table td { vertical-align: middle; }
+        .result-table td { vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .result-table .col-campaign { width: 40%; }
+        .result-table .col-metric { width: 15%; }
 
         .history-table { font-size: 0.85rem; }
         .history-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -324,20 +326,20 @@
             let html = '';
 
             const categories = [
-                { key: '1_to_2', label: 'Level 1 &rarr; Level 2 (Verhogingen)', cls: 'text-success' },
-                { key: '2_to_3', label: 'Level 2 &rarr; Level 3 (Verhogingen)', cls: 'text-success' },
-                { key: '3_to_2', label: 'Level 3 &rarr; Level 2 (Verlagingen)', cls: 'text-danger' },
-                { key: '2_to_1', label: 'Level 2 &rarr; Level 1 (Verlagingen)', cls: 'text-danger' },
-                { key: 'stuck_l1', label: 'Level 1 Stuck (niet lager mogelijk)', cls: 'text-warning' },
+                { key: '1_to_2', label: 'Level 1 &rarr; Level 2 (Verhogingen)' },
+                { key: '2_to_3', label: 'Level 2 &rarr; Level 3 (Verhogingen)' },
+                { key: '3_to_2', label: 'Level 3 &rarr; Level 2 (Verlagingen)' },
+                { key: '2_to_1', label: 'Level 2 &rarr; Level 1 (Verlagingen)' },
+                { key: 'stuck_l1', label: 'Level 1 Stuck (niet lager mogelijk)' },
             ];
 
             for (const cat of categories) {
                 const items = (data.changes[cat.key] || []).sort((a, b) => a.campaign_name.localeCompare(b.campaign_name));
                 if (items.length === 0) continue;
 
-                html += `<h6 class="mt-3 ${cat.cls}">${cat.label} (${items.length})</h6>`;
+                html += `<h6 class="mt-3" style="color: #5e4a90;">${cat.label} (${items.length})</h6>`;
                 html += `<div class="table-responsive"><table class="table table-sm result-table"><thead><tr>
-                    <th>Campagne</th><th>Marge</th><th>OPB</th><th>Klikken</th><th>ROAS</th>
+                    <th class="col-campaign">Campagne</th><th class="col-metric">Marge</th><th class="col-metric">OPB</th><th class="col-metric">Klikken</th><th class="col-metric">ROAS</th>
                 </tr></thead><tbody>`;
                 for (const item of items) {
                     const margeClass = item.marge >= 0 ? 'text-success' : 'text-danger';
