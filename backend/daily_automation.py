@@ -339,9 +339,8 @@ def main():
     cancel_running_tasks()
 
     steps = [
-        # TEMPORARILY DISABLED: reset steps skipped so validation resumes where it left off
-        # ("Reset FAQ validation",              step_reset_faq_validation),
-        # ("Reset Kopteksten validation",       step_reset_kopteksten_validation),
+        ("Reset FAQ validation",              step_reset_faq_validation),
+        ("Reset Kopteksten validation",       step_reset_kopteksten_validation),
         ("Validate links (parallel)",         step_validate_parallel),
         ("Recheck skipped URLs",              step_recheck_skipped_urls),
         ("Regenerate content (parallel)",      step_process_parallel),
