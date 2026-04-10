@@ -1,0 +1,661 @@
+"""
+OpenAI Batch API service for bulk FAQ and Kopteksten generation.
+
+Flow:
+1. Fetch all pending URLs from DB
+2. For each URL, call Product Search API to get products/facets
+3. Build prompts, write to JSONL file
+4. Upload JSONL to OpenAI Files API
+5. Create a batch
+6. Poll for completion
+7. Download results, parse, save to DB
+"""
+import os
+import json
+import time
+import tempfile
+import threading
+from typing import Dict, List, Optional
+from dataclasses import asdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from openai import OpenAI
+
+from backend.faq_service import (
+    fetch_products_api, generate_faqs_for_page, FAQPage, FAQItem,
+    get_openai_client, extract_selected_facets
+)
+from backend.scraper_service import scrape_product_page_api
+from backend.gpt_service import create_product_recommendation_prompt, MODEL
+from backend.database import get_db_connection, return_db_connection
+
+AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
+
+# Global batch state (one per type)
+_batch_state = {
+    "faq": {
+        "active": False,
+        "phase": "",  # preparing, uploading, processing, saving, complete, error
+        "total_urls": 0,
+        "prepared": 0,
+        "skipped": 0,
+        "failed_prepare": 0,
+        "processed": 0,
+        "failed": 0,
+        "batch_id": None,
+        "error": None,
+        "started_at": None,
+    },
+    "kopteksten": {
+        "active": False,
+        "phase": "",
+        "total_urls": 0,
+        "prepared": 0,
+        "skipped": 0,
+        "failed_prepare": 0,
+        "processed": 0,
+        "failed": 0,
+        "batch_id": None,
+        "error": None,
+        "started_at": None,
+    }
+}
+_batch_lock = threading.Lock()
+
+
+def get_batch_status(batch_type: str) -> dict:
+    """Get current batch processing status."""
+    with _batch_lock:
+        return dict(_batch_state[batch_type])
+
+
+def _update_state(batch_type: str, **kwargs):
+    """Thread-safe state update."""
+    with _batch_lock:
+        _batch_state[batch_type].update(kwargs)
+
+
+def _reset_state(batch_type: str):
+    """Reset state for a new batch run."""
+    with _batch_lock:
+        _batch_state[batch_type] = {
+            "active": True,
+            "phase": "preparing",
+            "total_urls": 0,
+            "prepared": 0,
+            "skipped": 0,
+            "failed_prepare": 0,
+            "processed": 0,
+            "failed": 0,
+            "batch_id": None,
+            "error": None,
+            "started_at": time.time(),
+        }
+
+
+def _fetch_pending_faq_urls(limit: int = 50000) -> List[str]:
+    """Fetch all pending FAQ URLs."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT w.url
+            FROM pa.jvs_seo_werkvoorraad w
+            WHERE NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
+              AND NOT EXISTS (SELECT 1 FROM pa.faq_tracking t WHERE t.url = w.url AND t.status != 'pending')
+            LIMIT %s
+        """, (limit,))
+        return [row['url'] for row in cur.fetchall()]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def _fetch_pending_kopteksten_urls(limit: int = 50000) -> List[str]:
+    """Fetch all pending kopteksten URLs."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT w.url
+            FROM pa.jvs_seo_werkvoorraad w
+            WHERE NOT EXISTS (SELECT 1 FROM pa.jvs_seo_werkvoorraad_kopteksten_check t WHERE t.url = w.url)
+              AND NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
+            LIMIT %s
+        """, (limit,))
+        return [row['url'] for row in cur.fetchall()]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def _build_faq_prompt(page_data: Dict, num_faqs: int = 6) -> str:
+    """Build the FAQ generation prompt (same as faq_service but returns string only)."""
+    products_context = ""
+    if page_data.get("products"):
+        products_list = "\n".join([
+            f"- {p['title']}: {p['description']}"
+            for p in page_data["products"][:15]
+        ])
+        products_context = f"\n\nBeschikbare producten:\n{products_list}"
+
+    product_urls_context = ""
+    if page_data.get("product_urls"):
+        urls_list = "\n".join([
+            f"- {item['label']}: {item['url']}"
+            for item in page_data["product_urls"][:12]
+        ])
+        product_urls_context = f"\n\nProductpagina's (gebruik deze voor hyperlinks in antwoorden):\n{urls_list}"
+
+    return f"""Je bent een SEO-expert die FAQ's schrijft voor e-commerce pagina's.
+
+Pagina titel: {page_data['h1_title']}
+URL: {page_data['url']}
+{products_context}
+{product_urls_context}
+
+Schrijf {num_faqs} veelgestelde vragen (FAQ's) die relevant zijn voor bezoekers van deze productcategorie pagina.
+
+Vereisten:
+- Vragen moeten natuurlijk klinken, zoals echte klanten ze zouden stellen
+- Antwoorden moeten informatief en behulpzaam zijn (50-100 woorden per antwoord)
+- Focus op koopadvies, productvergelijkingen, en praktische tips
+- Schrijf in het Nederlands
+- Noem geen specifieke prijzen
+- BELANGRIJK: Gebruik een informele, toegankelijke toon. Gebruik "jij" en "je" in plaats van "u" en "uw". Spreek de lezer direct en vriendelijk aan.
+- BELANGRIJK: Gebruik NOOIT "wij", "we", "ons", "onze", "onze producten", "onze website" of vergelijkbare eerste persoon meervoud. Schrijf neutraal en informatief, alsof je een onafhankelijke adviseur bent.
+- BELANGRIJK voor hyperlinks:
+  * Gebruik ALLEEN URLs uit de hierboven gegeven lijst "Productpagina's" (URLs met /p/)
+  * Verzin NOOIT zelf URLs - gebruik alleen de exacte URLs die in de lijst staan
+  * Gebruik GEEN URLs met /c/ (categoriepagina's) - alleen productpagina URLs met /p/
+  * Gebruik GEEN generieke verwijzingen zoals "deze gids", "deze pagina", "hier" of vergelijkbare vage linkteksten
+  * Linktekst moet beschrijvend zijn en verwijzen naar het specifieke product
+  * HOUD DE LINKTEKST KORT (max 3-5 woorden). Vermijd lange productnamen met specificaties.
+  * Als er geen relevante URL in de lijst staat, maak dan GEEN hyperlink
+- Verwerk 1-3 hyperlinks per antwoord waar relevant (naar specifieke producten)
+
+Geef je antwoord als JSON array met objecten die "question" en "answer" bevatten.
+De "answer" mag HTML hyperlinks bevatten.
+Alleen de JSON array, geen andere tekst.
+
+Voorbeeld formaat:
+[
+  {{"question": "Welke merken zijn populair?", "answer": "Populaire merken zijn onder andere <a href=\\"https://www.beslist.nl/p/samsung-galaxy-s24/6/1234567890123/\\">Samsung Galaxy S24</a>. Dit model staat bekend om zijn kwaliteit."}},
+  {{"question": "Andere vraag?", "answer": "Een ander goed product is de <a href=\\"https://www.beslist.nl/p/philips-airfryer/12000/9876543210987/\\">Philips Airfryer</a>."}}
+]"""
+
+
+def _build_kopteksten_messages(page_data: Dict) -> List[Dict]:
+    """Build kopteksten generation messages (system + user)."""
+    h1_title = page_data.get("h1_title", "")
+    products = page_data.get("products", [])
+    user_prompt = create_product_recommendation_prompt(h1_title, products)
+
+    system_message = """Je bent een online marketeer voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
+- Spreek de lezer aan met "je," in een toegankelijke, informatieve toon.
+- Noem nooit prijzen.
+- Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
+- Focus op advies dat écht helpt bij het maken van een keuze (bv. voordelen, verschillen, specifieke kenmerken).
+- Varieer sterk in je openingszinnen — begin NOOIT met "Als je op zoek bent naar", "Op zoek naar", "Ben je op zoek naar", "Zoek je" of vergelijkbare zoekformuleringen.
+- Vermijd generieke kwalificaties zoals "ideaal", "perfect", "uitstekend", "een goede keuze", "een heerlijke keuze". Wees specifiek: leg uit WAAROM iets geschikt is.
+- Gebruik geen uitroeptekens.
+- Vermijd overdreven enthousiaste marketing-taal. Schrijf behulpzaam en nuchter, niet als een reclamespot.
+- Gebruik NOOIT "ons", "onze", "wij" of "we" - schrijf vanuit het perspectief van de bezoeker, niet vanuit het bedrijf.
+- BELANGRIJK: Link ALLEEN naar producten die exact overeenkomen met het zoekwoord.
+- Verzin NOOIT producten of URLs die niet in de lijst staan.
+- Als je linkt, gebruik de tag <a href> en kies dan de juiste url uit de lijst van meegeleverde producten.
+- HOUD DE LINKTEKST KORT (max 3-5 woorden).
+- Gebruik nooit andere URLs dan degene die voorkomen in de lijst van producten."""
+
+    return [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_prompt}
+    ]
+
+
+def _prepare_url_data(url: str, batch_type: str) -> Optional[Dict]:
+    """Fetch product data for a URL. Returns page_data or None."""
+    try:
+        if batch_type == "faq":
+            return fetch_products_api(url)
+        else:
+            return scrape_product_page_api(url)
+    except Exception as e:
+        print(f"[BATCH] Error fetching data for {url}: {e}")
+        return None
+
+
+def _write_jsonl(requests: List[Dict], filepath: str):
+    """Write batch requests to JSONL file."""
+    with open(filepath, 'w', encoding='utf-8') as f:
+        for req in requests:
+            f.write(json.dumps(req, ensure_ascii=False) + '\n')
+
+
+def _run_faq_batch(num_faqs: int = 6):
+    """Background thread: run full FAQ batch pipeline."""
+    batch_type = "faq"
+    try:
+        # Phase 1: Fetch pending URLs
+        _update_state(batch_type, phase="preparing")
+        urls = _fetch_pending_faq_urls()
+        _update_state(batch_type, total_urls=len(urls))
+        print(f"[BATCH-FAQ] Found {len(urls)} pending URLs")
+
+        if not urls:
+            _update_state(batch_type, phase="complete", active=False)
+            return
+
+        # Phase 2: Prepare prompts (fetch product data + build prompts)
+        batch_requests = []
+        skip_data = []  # URLs to mark as skipped (no_products_found)
+        failed_urls = []  # URLs that failed to fetch
+
+        def prepare_one(url):
+            page_data = _prepare_url_data(url, "faq")
+            if not page_data:
+                return url, "failed", None, None
+            if page_data.get("error"):
+                return url, "error", page_data.get("error"), None
+            if not page_data.get("products"):
+                return url, "skipped", "no_products_found", None
+            prompt = _build_faq_prompt(page_data, num_faqs)
+            return url, "ok", prompt, page_data
+
+        # Use 50 threads for Product Search API calls (I/O bound)
+        with ThreadPoolExecutor(max_workers=50) as executor:
+            futures = {executor.submit(prepare_one, url): url for url in urls}
+            for future in as_completed(futures):
+                url, status, data, page_data = future.result()
+                if status == "ok":
+                    custom_id = url  # Use URL as custom_id for matching results later
+                    batch_requests.append({
+                        "custom_id": custom_id,
+                        "method": "POST",
+                        "url": "/v1/chat/completions",
+                        "body": {
+                            "model": AI_MODEL,
+                            "messages": [{"role": "user", "content": data}],
+                            "max_tokens": 2500,
+                            "temperature": 0.7,
+                            "response_format": {"type": "json_object"}
+                        }
+                    })
+                    # Store page_data for URL cleanup later
+                elif status == "skipped":
+                    skip_data.append((url, "skipped", data))
+                else:
+                    failed_urls.append((url, "failed", str(data)[:255] if data else "api_failed"))
+
+                prepared = len(batch_requests) + len(skip_data) + len(failed_urls)
+                _update_state(batch_type,
+                    prepared=len(batch_requests),
+                    skipped=len(skip_data),
+                    failed_prepare=len(failed_urls)
+                )
+
+        # Save skip/failed results to DB immediately
+        if skip_data or failed_urls:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            try:
+                if skip_data:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cur,
+                        "INSERT INTO pa.url_validation_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason, checked_at = CURRENT_TIMESTAMP",
+                        skip_data
+                    )
+                if failed_urls:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cur,
+                        "INSERT INTO pa.faq_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
+                        failed_urls
+                    )
+                conn.commit()
+            finally:
+                cur.close()
+                return_db_connection(conn)
+
+        if not batch_requests:
+            _update_state(batch_type, phase="complete", active=False)
+            return
+
+        print(f"[BATCH-FAQ] Prepared {len(batch_requests)} prompts, {len(skip_data)} skipped, {len(failed_urls)} failed")
+
+        # Phase 3: Upload JSONL and create batch
+        _update_state(batch_type, phase="uploading")
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        jsonl_path = os.path.join(tempfile.gettempdir(), f"batch_faq_{int(time.time())}.jsonl")
+        _write_jsonl(batch_requests, jsonl_path)
+        file_size_mb = os.path.getsize(jsonl_path) / 1024 / 1024
+        print(f"[BATCH-FAQ] JSONL file: {jsonl_path} ({file_size_mb:.1f} MB, {len(batch_requests)} requests)")
+
+        with open(jsonl_path, 'rb') as f:
+            batch_file = client.files.create(file=f, purpose="batch")
+
+        batch = client.batches.create(
+            input_file_id=batch_file.id,
+            endpoint="/v1/chat/completions",
+            completion_window="24h",
+            metadata={"type": "faq", "count": str(len(batch_requests))}
+        )
+        _update_state(batch_type, phase="processing", batch_id=batch.id)
+        print(f"[BATCH-FAQ] Batch created: {batch.id}")
+
+        # Phase 4: Poll for completion
+        while True:
+            time.sleep(15)
+            batch = client.batches.retrieve(batch.id)
+            completed = (batch.request_counts.completed or 0) + (batch.request_counts.failed or 0)
+            _update_state(batch_type, processed=completed)
+
+            if batch.status in ("completed", "failed", "expired", "cancelled"):
+                break
+
+        if batch.status != "completed":
+            _update_state(batch_type, phase="error", active=False,
+                error=f"Batch ended with status: {batch.status}")
+            return
+
+        print(f"[BATCH-FAQ] Batch completed: {batch.request_counts.completed} succeeded, {batch.request_counts.failed} failed")
+
+        # Phase 5: Download and parse results
+        _update_state(batch_type, phase="saving")
+        output_file = client.files.content(batch.output_file_id)
+        results_text = output_file.text
+
+        tracking_data = []
+        content_data = []
+        save_failed = 0
+
+        for line in results_text.strip().split('\n'):
+            try:
+                result = json.loads(line)
+                url = result["custom_id"]
+                response_body = result.get("response", {}).get("body", {})
+
+                if result.get("error") or not response_body.get("choices"):
+                    tracking_data.append((url, "failed", "batch_api_error"))
+                    save_failed += 1
+                    continue
+
+                content = response_body["choices"][0]["message"]["content"].strip()
+                # Parse FAQ JSON
+                if content.startswith("```"):
+                    content = content.split("```")[1]
+                    if content.startswith("json"):
+                        content = content[4:]
+                content = content.strip()
+
+                faqs_data = json.loads(content)
+                # Handle wrapped response
+                if isinstance(faqs_data, dict):
+                    faqs_data = faqs_data.get("faqs") or faqs_data.get("faq") or faqs_data.get("FAQ") or list(faqs_data.values())[0]
+
+                if not faqs_data or not isinstance(faqs_data, list):
+                    tracking_data.append((url, "failed", "faq_generation_failed"))
+                    save_failed += 1
+                    continue
+
+                faq_items = [FAQItem(question=item["question"], answer=item["answer"]) for item in faqs_data]
+                faq_page = FAQPage(url=url, page_title="", faqs=faq_items)
+
+                faq_json = json.dumps([asdict(faq) for faq in faq_items], ensure_ascii=False)
+                schema_org = json.dumps(faq_page.to_schema_org(), ensure_ascii=False)
+
+                tracking_data.append((url, "success", None))
+                content_data.append((url, "", faq_json, schema_org))
+
+            except Exception as e:
+                url = result.get("custom_id", "unknown")
+                tracking_data.append((url, "failed", f"parse_error: {str(e)[:200]}"))
+                save_failed += 1
+
+        # Save all results to DB
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            if tracking_data:
+                from psycopg2.extras import execute_batch
+                execute_batch(cur,
+                    "INSERT INTO pa.faq_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
+                    tracking_data, page_size=1000
+                )
+            if content_data:
+                from psycopg2.extras import execute_batch
+                execute_batch(cur,
+                    "INSERT INTO pa.faq_content (url, page_title, faq_json, schema_org) VALUES (%s, %s, %s, %s) ON CONFLICT (url) DO UPDATE SET page_title = EXCLUDED.page_title, faq_json = EXCLUDED.faq_json, schema_org = EXCLUDED.schema_org",
+                    content_data, page_size=1000
+                )
+            conn.commit()
+        finally:
+            cur.close()
+            return_db_connection(conn)
+
+        succeeded = sum(1 for t in tracking_data if t[1] == "success")
+        _update_state(batch_type, phase="complete", active=False,
+            processed=len(tracking_data), failed=save_failed)
+        print(f"[BATCH-FAQ] Saved {succeeded} FAQs, {save_failed} failed")
+
+        # Cleanup temp file
+        try:
+            os.remove(jsonl_path)
+        except:
+            pass
+
+    except Exception as e:
+        print(f"[BATCH-FAQ] Error: {e}")
+        _update_state(batch_type, phase="error", active=False, error=str(e))
+
+
+def _run_kopteksten_batch():
+    """Background thread: run full kopteksten batch pipeline."""
+    batch_type = "kopteksten"
+    try:
+        # Phase 1: Fetch pending URLs
+        _update_state(batch_type, phase="preparing")
+        urls = _fetch_pending_kopteksten_urls()
+        _update_state(batch_type, total_urls=len(urls))
+        print(f"[BATCH-KOPT] Found {len(urls)} pending URLs")
+
+        if not urls:
+            _update_state(batch_type, phase="complete", active=False)
+            return
+
+        # Phase 2: Prepare prompts
+        batch_requests = []
+        skip_data = []
+        failed_urls = []
+
+        def prepare_one(url):
+            page_data = _prepare_url_data(url, "kopteksten")
+            if not page_data:
+                return url, "failed", None
+            if page_data.get("error"):
+                return url, "error", page_data.get("error")
+            if not page_data.get("products"):
+                return url, "skipped", "no_products_found"
+            messages = _build_kopteksten_messages(page_data)
+            return url, "ok", messages
+
+        with ThreadPoolExecutor(max_workers=50) as executor:
+            futures = {executor.submit(prepare_one, url): url for url in urls}
+            for future in as_completed(futures):
+                url, status, data = future.result()
+                if status == "ok":
+                    batch_requests.append({
+                        "custom_id": url,
+                        "method": "POST",
+                        "url": "/v1/chat/completions",
+                        "body": {
+                            "model": AI_MODEL,
+                            "messages": data,
+                            "max_tokens": 2000,
+                            "temperature": 0.7
+                        }
+                    })
+                elif status == "skipped":
+                    skip_data.append((url, "skipped", data))
+                else:
+                    failed_urls.append((url, "failed", str(data)[:255] if data else "api_failed"))
+
+                _update_state(batch_type,
+                    prepared=len(batch_requests),
+                    skipped=len(skip_data),
+                    failed_prepare=len(failed_urls)
+                )
+
+        # Save skip/failed to DB
+        if skip_data or failed_urls:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            try:
+                if skip_data:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cur,
+                        "INSERT INTO pa.url_validation_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason, checked_at = CURRENT_TIMESTAMP",
+                        skip_data
+                    )
+                if failed_urls:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cur,
+                        "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
+                        failed_urls
+                    )
+                conn.commit()
+            finally:
+                cur.close()
+                return_db_connection(conn)
+
+        if not batch_requests:
+            _update_state(batch_type, phase="complete", active=False)
+            return
+
+        print(f"[BATCH-KOPT] Prepared {len(batch_requests)} prompts, {len(skip_data)} skipped, {len(failed_urls)} failed")
+
+        # Phase 3: Upload and create batch
+        _update_state(batch_type, phase="uploading")
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        jsonl_path = os.path.join(tempfile.gettempdir(), f"batch_kopt_{int(time.time())}.jsonl")
+        _write_jsonl(batch_requests, jsonl_path)
+        file_size_mb = os.path.getsize(jsonl_path) / 1024 / 1024
+        print(f"[BATCH-KOPT] JSONL file: {jsonl_path} ({file_size_mb:.1f} MB, {len(batch_requests)} requests)")
+
+        with open(jsonl_path, 'rb') as f:
+            batch_file = client.files.create(file=f, purpose="batch")
+
+        batch = client.batches.create(
+            input_file_id=batch_file.id,
+            endpoint="/v1/chat/completions",
+            completion_window="24h",
+            metadata={"type": "kopteksten", "count": str(len(batch_requests))}
+        )
+        _update_state(batch_type, phase="processing", batch_id=batch.id)
+        print(f"[BATCH-KOPT] Batch created: {batch.id}")
+
+        # Phase 4: Poll for completion
+        while True:
+            time.sleep(15)
+            batch = client.batches.retrieve(batch.id)
+            completed = (batch.request_counts.completed or 0) + (batch.request_counts.failed or 0)
+            _update_state(batch_type, processed=completed)
+
+            if batch.status in ("completed", "failed", "expired", "cancelled"):
+                break
+
+        if batch.status != "completed":
+            _update_state(batch_type, phase="error", active=False,
+                error=f"Batch ended with status: {batch.status}")
+            return
+
+        print(f"[BATCH-KOPT] Batch completed: {batch.request_counts.completed} succeeded, {batch.request_counts.failed} failed")
+
+        # Phase 5: Download and parse results
+        _update_state(batch_type, phase="saving")
+        output_file = client.files.content(batch.output_file_id)
+        results_text = output_file.text
+
+        tracking_data = []
+        content_data = []
+        save_failed = 0
+
+        for line in results_text.strip().split('\n'):
+            try:
+                result = json.loads(line)
+                url = result["custom_id"]
+                response_body = result.get("response", {}).get("body", {})
+
+                if result.get("error") or not response_body.get("choices"):
+                    tracking_data.append((url, "failed", "batch_api_error"))
+                    save_failed += 1
+                    continue
+
+                content = response_body["choices"][0]["message"]["content"].strip()
+                tracking_data.append((url, "success", None))
+                content_data.append((url, content))
+
+            except Exception as e:
+                url = result.get("custom_id", "unknown")
+                tracking_data.append((url, "failed", f"parse_error: {str(e)[:200]}"))
+                save_failed += 1
+
+        # Save results to DB
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            if tracking_data:
+                from psycopg2.extras import execute_batch
+                execute_batch(cur,
+                    "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
+                    tracking_data, page_size=1000
+                )
+            if content_data:
+                from psycopg2.extras import execute_batch
+                execute_batch(cur,
+                    "INSERT INTO pa.content_urls_joep (url, content) VALUES (%s, %s) ON CONFLICT (url) DO UPDATE SET content = EXCLUDED.content",
+                    content_data, page_size=1000
+                )
+            conn.commit()
+        finally:
+            cur.close()
+            return_db_connection(conn)
+
+        succeeded = sum(1 for t in tracking_data if t[1] == "success")
+        _update_state(batch_type, phase="complete", active=False,
+            processed=len(tracking_data), failed=save_failed)
+        print(f"[BATCH-KOPT] Saved {succeeded} content items, {save_failed} failed")
+
+        try:
+            os.remove(jsonl_path)
+        except:
+            pass
+
+    except Exception as e:
+        print(f"[BATCH-KOPT] Error: {e}")
+        _update_state(batch_type, phase="error", active=False, error=str(e))
+
+
+def start_faq_batch(num_faqs: int = 6) -> dict:
+    """Start FAQ batch processing in background thread."""
+    with _batch_lock:
+        if _batch_state["faq"]["active"]:
+            return {"status": "error", "message": "FAQ batch already running"}
+
+    _reset_state("faq")
+    thread = threading.Thread(target=_run_faq_batch, args=(num_faqs,), daemon=True)
+    thread.start()
+    return {"status": "started", "message": "FAQ batch processing started"}
+
+
+def start_kopteksten_batch() -> dict:
+    """Start kopteksten batch processing in background thread."""
+    with _batch_lock:
+        if _batch_state["kopteksten"]["active"]:
+            return {"status": "error", "message": "Kopteksten batch already running"}
+
+    _reset_state("kopteksten")
+    thread = threading.Thread(target=_run_kopteksten_batch, daemon=True)
+    thread.start()
+    return {"status": "started", "message": "Kopteksten batch processing started"}

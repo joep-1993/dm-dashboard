@@ -39,6 +39,7 @@ from backend.scraper_service import scrape_product_page, scrape_product_page_api
 from backend.gpt_service import generate_product_content, generate_main_category_content, check_content_has_valid_links
 from backend.link_validator import validate_content_links, validate_and_fix_content_links
 from backend.faq_service import process_single_url_faq
+from backend.batch_api_service import start_faq_batch, start_kopteksten_batch, get_batch_status
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
 from backend.gsd_campaigns_router import router as gsd_campaigns_router
 from backend.dma_bidding_router import router as dma_bidding_router
@@ -330,8 +331,8 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
         if batch_size < 1:
             raise HTTPException(status_code=400, detail="Batch size must be at least 1")
 
-        if parallel_workers < 1 or parallel_workers > 20:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+        if parallel_workers < 1 or parallel_workers > 100:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 100")
 
         # Conservative mode always uses 1 worker for maximum safety
         if conservative_mode:
@@ -349,9 +350,8 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
             local_cur.execute("""
                 SELECT w.url
                 FROM pa.jvs_seo_werkvoorraad w
-                LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
-                LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
-                WHERE t.url IS NULL AND v.url IS NULL
+                WHERE NOT EXISTS (SELECT 1 FROM pa.jvs_seo_werkvoorraad_kopteksten_check t WHERE t.url = w.url)
+                  AND NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
                 LIMIT %s
             """, (batch_size,))
 
@@ -424,9 +424,8 @@ def get_status():
                 (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
                 (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'failed') as failed,
                 (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
-                 LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
-                 LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
-                 WHERE t.url IS NULL AND v.url IS NULL) as pending
+                 WHERE NOT EXISTS (SELECT 1 FROM pa.jvs_seo_werkvoorraad_kopteksten_check t WHERE t.url = w.url)
+                   AND NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)) as pending
         """)
         counts = cur.fetchone()
         total = counts['total']
@@ -836,8 +835,8 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
         if batch_size < 1:
             raise HTTPException(status_code=400, detail="Batch size must be at least 1")
 
-        if parallel_workers < 1 or parallel_workers > 20:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+        if parallel_workers < 1 or parallel_workers > 100:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 100")
 
         # Use local PostgreSQL for all operations
         conn = get_db_connection()
@@ -1026,8 +1025,8 @@ def cancel_validate_all(task_id: str):
 @app.post("/api/validate-all-links")
 def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
     """Start background validation of ALL content URLs. Returns task_id for polling."""
-    if parallel_workers < 1 or parallel_workers > 20:
-        raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+    if parallel_workers < 1 or parallel_workers > 100:
+        raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 100")
     if batch_size < 1 or batch_size > 500:
         raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
 
@@ -1248,8 +1247,8 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
     """Start background re-check of skipped URLs. Returns task_id for polling."""
     from concurrent.futures import ThreadPoolExecutor
 
-    if parallel_workers < 1 or parallel_workers > 20:
-        raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+    if parallel_workers < 1 or parallel_workers > 100:
+        raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 100")
     if batch_size < 1 or batch_size > 500:
         raise HTTPException(status_code=400, detail="Batch size must be between 1 and 500")
 
@@ -1423,9 +1422,8 @@ def get_faq_status():
                 (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
                 (SELECT COUNT(*) FROM pa.faq_tracking WHERE status = 'failed') as failed,
                 (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
-                 LEFT JOIN pa.faq_tracking t ON w.url = t.url
-                 LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
-                 WHERE (t.url IS NULL OR t.status = 'pending') AND v.url IS NULL) as pending
+                 WHERE NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
+                   AND NOT EXISTS (SELECT 1 FROM pa.faq_tracking t WHERE t.url = w.url AND t.status != 'pending')) as pending
         """)
         counts = cur.fetchone()
         total = counts['total']
@@ -1470,6 +1468,26 @@ def get_faq_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/faq/batch-start")
+def start_faq_batch_endpoint(num_faqs: int = 6):
+    """Start FAQ batch processing via OpenAI Batch API."""
+    return start_faq_batch(num_faqs)
+
+@app.get("/api/faq/batch-status")
+def get_faq_batch_status():
+    """Get FAQ batch processing status."""
+    return get_batch_status("faq")
+
+@app.post("/api/batch-start")
+def start_kopteksten_batch_endpoint():
+    """Start kopteksten batch processing via OpenAI Batch API."""
+    return start_kopteksten_batch()
+
+@app.get("/api/batch-status")
+def get_kopteksten_batch_status():
+    """Get kopteksten batch processing status."""
+    return get_batch_status("kopteksten")
+
 @app.post("/api/faq/process-urls")
 def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: int = 6):
     """
@@ -1487,8 +1505,8 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
         if batch_size < 1:
             raise HTTPException(status_code=400, detail="Batch size must be at least 1")
 
-        if parallel_workers < 1 or parallel_workers > 20:
-            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+        if parallel_workers < 1 or parallel_workers > 100:
+            raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 100")
 
         if num_faqs < 1 or num_faqs > 10:
             raise HTTPException(status_code=400, detail="Number of FAQs must be between 1 and 10")
@@ -1501,9 +1519,8 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
         cur.execute("""
             SELECT w.url
             FROM pa.jvs_seo_werkvoorraad w
-            LEFT JOIN pa.faq_tracking t ON w.url = t.url
-            LEFT JOIN pa.url_validation_tracking v ON w.url = v.url
-            WHERE (t.url IS NULL OR t.status = 'pending') AND v.url IS NULL
+            WHERE NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
+              AND NOT EXISTS (SELECT 1 FROM pa.faq_tracking t WHERE t.url = w.url AND t.status != 'pending')
             LIMIT %s
         """, (batch_size,))
 
@@ -1867,8 +1884,8 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
     from backend.link_validator import validate_faq_links, reset_faq_to_pending
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    if parallel_workers < 1 or parallel_workers > 20:
-        raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 20")
+    if parallel_workers < 1 or parallel_workers > 100:
+        raise HTTPException(status_code=400, detail="Parallel workers must be between 1 and 100")
     if batch_size < 1 or batch_size > 1000:
         raise HTTPException(status_code=400, detail="Batch size must be between 1 and 1000")
 

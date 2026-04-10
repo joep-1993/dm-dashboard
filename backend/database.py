@@ -14,8 +14,8 @@ def _get_pg_pool():
     global _pg_pool
     if _pg_pool is None:
         _pg_pool = pool.ThreadedConnectionPool(
-            minconn=2,
-            maxconn=20,  # Increased from 10 to support more parallel workers
+            minconn=5,
+            maxconn=60,  # Supports up to 50 parallel workers + headroom for stats queries
             dsn=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/seo_tools"),
             cursor_factory=RealDictCursor,
             connect_timeout=10,

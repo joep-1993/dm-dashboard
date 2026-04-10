@@ -3,6 +3,132 @@
 // Use dynamic API base - works from localhost, WSL IP, or any host
 const API_BASE = window.location.origin;
 
+let batchMode = false;
+let batchPolling = false;
+
+function toggleBatchMode() {
+    batchMode = document.getElementById('batchApiCheckbox').checked;
+    const batchSizeInput = document.getElementById('batchSizeInput');
+    const workersInput = document.getElementById('parallelWorkersInput');
+    const processBtn = document.getElementById('processBtn');
+    const processAllBtn = document.getElementById('processAllBtn');
+
+    if (batchMode) {
+        batchSizeInput.disabled = true;
+        workersInput.disabled = true;
+        processBtn.disabled = true;
+        processBtn.classList.add('btn-secondary');
+        processBtn.classList.remove('btn-info');
+    } else {
+        batchSizeInput.disabled = false;
+        workersInput.disabled = false;
+        processBtn.disabled = false;
+        processBtn.classList.remove('btn-secondary');
+        processBtn.classList.add('btn-info');
+    }
+}
+
+async function startBatchProcessing() {
+    document.getElementById('progressContainer').classList.remove('d-none');
+    document.getElementById('processBtn').disabled = true;
+    document.getElementById('processAllBtn').disabled = true;
+    document.getElementById('stopBtn').classList.remove('d-none');
+    document.getElementById('batchApiCheckbox').disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/batch-start`, { method: 'POST' });
+        const data = await response.json();
+
+        if (data.status === 'error') {
+            document.getElementById('processResult').innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
+            resetBatchUI();
+            return;
+        }
+
+        batchPolling = true;
+        while (batchPolling) {
+            await new Promise(r => setTimeout(r, 3000));
+            try {
+                const statusResp = await fetch(`${API_BASE}/api/batch-status`);
+                const status = await statusResp.json();
+                updateBatchProgress(status);
+
+                if (!status.active) {
+                    batchPolling = false;
+                    if (status.phase === 'complete') {
+                        document.getElementById('processResult').innerHTML = `<div class="alert alert-success">
+                            <strong>Bulk API complete!</strong><br>
+                            Prepared: ${status.prepared} | Skipped: ${status.skipped} | Processed: ${status.processed} | Failed: ${status.failed}
+                        </div>`;
+                    } else if (status.phase === 'error') {
+                        document.getElementById('processResult').innerHTML = `<div class="alert alert-danger">
+                            <strong>Bulk API error:</strong> ${status.error}
+                        </div>`;
+                    }
+                    break;
+                }
+            } catch (e) {
+                console.error('Batch status poll error:', e);
+            }
+        }
+    } catch (e) {
+        document.getElementById('processResult').innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`;
+    }
+
+    resetBatchUI();
+    refreshStatus();
+}
+
+function updateBatchProgress(status) {
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const progressPercent = document.getElementById('progressPercent');
+
+    const phases = {
+        preparing: 'Fetching product data for all URLs...',
+        uploading: 'Uploading batch to OpenAI...',
+        processing: 'OpenAI processing batch...',
+        saving: 'Saving results to database...',
+        complete: 'Complete!',
+        error: 'Error occurred'
+    };
+
+    let pct = 0;
+    let detail = '';
+
+    if (status.phase === 'preparing') {
+        const total = status.prepared + status.skipped + status.failed_prepare;
+        pct = status.total_urls > 0 ? Math.round((total / status.total_urls) * 30) : 0;
+        detail = `${phases[status.phase]} (${status.prepared} prepared, ${status.skipped} skipped, ${status.failed_prepare} failed / ${status.total_urls} total)`;
+    } else if (status.phase === 'uploading') {
+        pct = 35;
+        detail = phases[status.phase];
+    } else if (status.phase === 'processing') {
+        const batchPct = status.prepared > 0 ? (status.processed / status.prepared) * 60 : 0;
+        pct = 35 + Math.round(batchPct);
+        detail = `${phases[status.phase]} (${status.processed} / ${status.prepared})`;
+    } else if (status.phase === 'saving') {
+        pct = 95;
+        detail = phases[status.phase];
+    } else if (status.phase === 'complete') {
+        pct = 100;
+        detail = phases[status.phase];
+    } else {
+        detail = status.phase;
+    }
+
+    progressBar.style.width = pct + '%';
+    progressText.textContent = detail;
+    progressPercent.textContent = pct + '%';
+}
+
+function resetBatchUI() {
+    document.getElementById('processBtn').disabled = batchMode;
+    document.getElementById('processAllBtn').disabled = false;
+    document.getElementById('stopBtn').classList.add('d-none');
+    document.getElementById('batchApiCheckbox').disabled = false;
+}
+
 // Check system status on load
 window.addEventListener('DOMContentLoaded', () => {
     checkStatus();
@@ -157,8 +283,8 @@ async function processUrls() {
         return;
     }
 
-    if (parallelWorkers < 1 || parallelWorkers > 20) {
-        alert('Parallel workers must be between 1 and 20');
+    if (parallelWorkers < 1 || parallelWorkers > 100) {
+        alert('Parallel workers must be between 1 and 100');
         return;
     }
 
@@ -217,6 +343,9 @@ async function processUrls() {
 }
 
 async function processAllUrls() {
+    if (batchMode) {
+        return startBatchProcessing();
+    }
     const processBtn = document.getElementById('processBtn');
     const processAllBtn = document.getElementById('processAllBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -650,8 +779,8 @@ async function validateLinks() {
         return;
     }
 
-    if (parallelWorkers < 1 || parallelWorkers > 20) {
-        alert('Parallel workers must be between 1 and 20');
+    if (parallelWorkers < 1 || parallelWorkers > 100) {
+        alert('Parallel workers must be between 1 and 100');
         return;
     }
 
@@ -802,8 +931,8 @@ async function validateAllLinks() {
     const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
     const batchSize = parseInt(document.getElementById('validationBatchSize').value) || 100;
 
-    if (parallelWorkers < 1 || parallelWorkers > 20) {
-        alert('Parallel workers must be between 1 and 20');
+    if (parallelWorkers < 1 || parallelWorkers > 100) {
+        alert('Parallel workers must be between 1 and 100');
         return;
     }
 
@@ -885,8 +1014,8 @@ async function recheckSkippedUrls() {
     const parallelWorkers = parseInt(parallelWorkersInput.value) || 3;
     const batchSize = parseInt(document.getElementById('validationBatchSize').value) || 50;
 
-    if (parallelWorkers < 1 || parallelWorkers > 20) {
-        alert('Parallel workers must be between 1 and 20');
+    if (parallelWorkers < 1 || parallelWorkers > 100) {
+        alert('Parallel workers must be between 1 and 100');
         return;
     }
 

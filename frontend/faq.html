@@ -71,11 +71,17 @@
                             </div>
                             <div class="col-auto">
                                 <label for="parallelWorkersInput" class="form-label small mb-1">Parallel Workers</label>
-                                <input type="number" class="form-control" id="parallelWorkersInput" value="20" min="1" max="20" style="width: 100px;">
+                                <input type="number" class="form-control" id="parallelWorkersInput" value="50" min="1" max="100" style="width: 100px;">
                             </div>
                             <div class="col-auto">
                                 <label for="numFaqsInput" class="form-label small mb-1">FAQs per Page</label>
                                 <input type="number" class="form-control" id="numFaqsInput" value="6" min="1" max="10" style="width: 100px;">
+                            </div>
+                            <div class="col-auto d-flex align-items-end">
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="batchApiCheckbox" onchange="toggleBatchMode()">
+                                    <label class="form-check-label small" for="batchApiCheckbox">Bulk API</label>
+                                </div>
                             </div>
                             <div class="col-auto d-flex align-items-end">
                                 <button class="btn btn-info" onclick="processFaqUrls()" id="processBtn">
@@ -127,7 +133,7 @@
                             </div>
                             <div class="col-auto">
                                 <label for="validateWorkersInput" class="form-label small mb-1">Workers</label>
-                                <input type="number" class="form-control" id="validateWorkersInput" value="20" min="1" max="20" style="width: 100px;">
+                                <input type="number" class="form-control" id="validateWorkersInput" value="50" min="1" max="100" style="width: 100px;">
                             </div>
                             <div class="col-auto d-flex align-items-end">
                                 <button class="btn btn-secondary" onclick="validateFaqLinks()" id="validateBtn">
