@@ -10,6 +10,10 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Add OpenAI Batch API integration — new `batch_api_service.py` for bulk FAQ and kopteksten generation (50% cheaper). "Bulk API" checkbox in frontend, 4 new endpoints, background thread with phase-based progress. Prepares prompts with 50 concurrent Product Search API threads, uploads JSONL, polls OpenAI, saves results in bulk #claude-session:2026-04-10
+- [x] Optimize FAQ/kopteksten query performance — converted 4 LEFT JOIN queries to NOT EXISTS in main.py (FAQ URL selection 4.2s→190ms = 16.5x faster). Increased DB pool maxconn 20→60, worker limits 20→100, frontend defaults to 50 workers #claude-session:2026-04-10
+- [x] Remove 29,632 winkel facet URLs from all 6 DB tables — Product Search API returns no facet data for winkel-filtered URLs #claude-session:2026-04-10
+- [x] Remove 102 merk~0 URLs from all 6 DB tables #claude-session:2026-04-10
 - [x] Score all 1M+ unique titles — ran `score_titles.py` (GPT-4o-mini, 25/batch, 20 workers) across 684K unscored titles, two parallel processes, 0 errors, ~4.4 hours. Final: 1,023,808 titles scored, avg 8.00, 70% score 8+. Exported to `~/unique_titles_scored.xlsx` (41MB) #claude-session:2026-04-09
 - [x] Reset 125,436 unique titles with score < 7 to pending for regeneration #claude-session:2026-04-09
 - [x] Remove 1,944 bad URLs from unique_titles containing "pricemax" or "+" #claude-session:2026-04-09

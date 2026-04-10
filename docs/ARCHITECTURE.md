@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 **Project:** DM Tools - Digital Marketing Tools Platform
-**Last Updated:** 2026-02-03 CET
+**Last Updated:** 2026-04-10 CET
 **Timezone:** Europe/Amsterdam (CET/CEST)
 
 ## Table of Contents
@@ -200,7 +200,7 @@ const dateText = item.created_at ? new Date(item.created_at).toLocaleString() : 
 - **Framework**: FastAPI 0.104.1
 - **Server**: Uvicorn with auto-reload
 - **Python Version**: 3.11
-- **Parallelization**: ThreadPoolExecutor (1-10 workers)
+- **Parallelization**: ThreadPoolExecutor (1-100 workers, default 50)
 - **Session Management**: Persistent HTTP sessions with connection pooling
 
 ### Service Layer Architecture
@@ -212,7 +212,10 @@ main.py (API Endpoints)
     │       └──▶ requests + BeautifulSoup (lxml parser)
     │
     ├──▶ gpt_service.py (AI Content Generation)
-    │       └──▶ OpenAI API (gpt-4o-mini, 300 max_tokens)
+    │       └──▶ OpenAI API (gpt-4o-mini, 2000 max_tokens)
+    │
+    ├──▶ batch_api_service.py (OpenAI Batch API for bulk processing)
+    │       └──▶ JSONL upload → OpenAI Batch API → result download (50% cheaper)
     │
     ├──▶ link_validator.py (Quality Control)
     │       └──▶ HTTP status checking (301/404 detection)
@@ -243,15 +246,33 @@ main.py (API Endpoints)
 ### Key Design Decisions
 
 #### 1. Parallel Processing with ThreadPoolExecutor
-**Decision**: Use thread-based parallelism (1-10 configurable workers)
+**Decision**: Use thread-based parallelism (1-100 configurable workers, default 50)
 
 **Rationale**:
 - I/O-bound workload (scraping + API calls)
 - Threads work well for I/O (no CPU-bound bottleneck)
-- Each worker gets own database connection
-- Linear speedup up to ~7 workers
+- Each worker gets own database connection (pool maxconn=60)
+- OpenAI rate limits allow 30K RPM / 150M TPM — supports high concurrency
 
-**Performance**: 350-840 URLs/hour with 3 workers
+**Performance**: ~2,500 URLs/hour with 50 workers (real-time API)
+
+#### 1b. OpenAI Batch API (Bulk Processing)
+**Decision**: Added optional Batch API mode for bulk runs (`backend/batch_api_service.py`)
+
+**Rationale**:
+- 50% cheaper than real-time API (batch pricing)
+- No rate limit concerns — OpenAI processes asynchronously within 24h window
+- Better for large bulk runs (10K+ URLs)
+
+**How it works**:
+1. Fetch all pending URLs from DB
+2. Call Product Search API for each (50 concurrent threads) to get product data
+3. Build prompts, write JSONL file
+4. Upload to OpenAI Files API, create batch job
+5. Poll every 15s until complete (~15-60 min for typical batches)
+6. Download results, parse, save to DB in bulk
+
+**Frontend**: "Bulk API" checkbox on FAQ and Kopteksten pages. When checked, greys out batch size/workers/single-batch button. "Process All URLs" triggers batch pipeline with phase-based progress bar.
 
 #### 2. Batch Database Operations
 **Decision**: Batch all Redshift operations after parallel processing
@@ -650,6 +671,8 @@ route add -p 65.9.0.0 mask 255.255.0.0 192.168.1.1 metric 1 if 10
 - No infrastructure for self-hosting
 - Predictable costs (per-token pricing)
 - Fast inference (no GPU required)
+- Batch API available for 50% cost reduction on bulk runs
+- Rate limits (30K RPM, 150M TPM) support high parallelism
 
 #### Docker + Docker Compose
 **Chosen Over**: Bare metal, Kubernetes

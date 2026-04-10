@@ -1,6 +1,33 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## OpenAI Batch API Integration (2026-04-10)
+- **Service**: `backend/batch_api_service.py` — bulk processing for FAQ and kopteksten via OpenAI Batch API
+- **Endpoints**: `POST/GET /api/batch-start`, `POST/GET /api/faq/batch-start`, `/api/batch-status`, `/api/faq/batch-status`
+- **Frontend**: "Bulk API" checkbox on FAQ (`faq.html`) and Kopteksten (`index.html`). When checked, greys out batch size, workers, single-batch button. Process All triggers batch pipeline
+- **Flow**: Fetch pending URLs → Product Search API (50 threads) → build JSONL → upload to OpenAI → poll every 15s → download results → save to DB
+- **Cost**: 50% cheaper than real-time API
+- **Speed**: Prepare phase ~5-15 min (API calls), OpenAI processing ~15-60 min
+- **State tracking**: Global `_batch_state` dict with thread lock, phases: preparing → uploading → processing → saving → complete/error
+
+## Query Performance — LEFT JOIN vs NOT EXISTS (2026-04-10)
+- **Issue**: FAQ URL selection query took 4.2s per batch due to LEFT JOIN across 3 large tables (werkvoorraad 280K, faq_tracking 255K, url_validation_tracking 86K)
+- **Fix**: Converted to NOT EXISTS subqueries — 190ms (16.5x faster). Also fixed kopteksten query (7.7s → 2.9s)
+- **Affected queries**: 4 total in main.py — FAQ URL selection, FAQ pending count, kopteksten URL selection, kopteksten pending count
+- **Pattern**: Always prefer `NOT EXISTS` over `LEFT JOIN ... WHERE x IS NULL` on PostgreSQL for anti-joins
+
+## Worker Limits & Connection Pool (2026-04-10)
+- **OpenAI rate limits**: 30,000 RPM, 150,000,000 TPM for gpt-4o-mini — extremely generous
+- **Bottleneck**: Each OpenAI call takes ~30s. With 20 workers = ~40 URLs/min. With 50 workers = ~100 URLs/min
+- **Changes**: DB pool maxconn 20→60, worker limit 20→100 (backend + frontend), frontend defaults 20→50
+- **Files changed**: `database.py`, `main.py` (6 validation checks), `index.html`, `faq.html`, `app.js` (4 checks), `faq.js` (3 checks)
+
+## Winkel Facet URLs — No API Data (2026-04-10)
+- **Issue**: 29,632 URLs with `winkel~` facet had titles that were just bare category names (e.g., "Zoogcompressen" instead of "Bol.com Zoogcompressen")
+- **Root cause**: Product Search API returns empty facets array for winkel-filtered requests. The shop filter is applied but no facet metadata comes back
+- **Decision**: Removed all winkel URLs from all 6 tables. Shop-specific pages don't need SEO titles
+- **Tables cleaned**: unique_titles, content_urls_joep, kopteksten_check, faq_content, faq_tracking, werkvoorraad
+
 ## Title Scoring — Full Run Completed (2026-04-09)
 - **Script**: `scripts/score_titles.py` — GPT-4o-mini, 25 titles/batch, 20 concurrent workers
 - **Result**: 1,023,808 titles scored, avg 8.00. Distribution: 7.8% score 10, 29% score 9, 33.4% score 8, 17.5% score 7, 12.1% score ≤6
