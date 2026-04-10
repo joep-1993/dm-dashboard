@@ -904,12 +904,12 @@ def _process_url_with_delay(url: str, use_api: bool = True) -> Dict:
     return result
 
 
-def _run_processing(max_urls: int = 100, num_workers: int = 15, use_api: bool = True):
+def _run_processing(max_urls: int = 100, num_workers: int = 50, use_api: bool = True):
     """Background thread for processing URLs with multiple workers.
 
     Args:
         max_urls: Maximum number of URLs to process in this batch. If 0, process all pending.
-        num_workers: Number of parallel workers (default 15).
+        num_workers: Number of parallel workers (default 50).
         use_api: If True, use productsearch API for faceted URLs. If False, use scraping.
     """
     global _processing_state
@@ -1006,12 +1006,12 @@ def _run_processing(max_urls: int = 100, num_workers: int = 15, use_api: bool = 
         print("[AI_TITLES] Processing complete")
 
 
-def start_processing(batch_size: int = 100, num_workers: int = 15, use_api: bool = True) -> Dict:
+def start_processing(batch_size: int = 100, num_workers: int = 50, use_api: bool = True) -> Dict:
     """Start AI title processing in background.
 
     Args:
         batch_size: Number of URLs to process in this batch. If 0, process all pending.
-        num_workers: Number of parallel workers (default 15).
+        num_workers: Number of parallel workers (default 50).
         use_api: If True, use productsearch API for faceted URLs. If False, use scraping.
     """
     with _state_lock:

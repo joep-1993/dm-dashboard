@@ -70,6 +70,7 @@
 - **Framework**: None (Vanilla JavaScript)
 - **UI Library**: Bootstrap 5 (via CDN)
 - **Build Tools**: None
+- **Layout**: All pages use `col-md-10 mx-auto` for consistent width. Input fields use `input-group` with inline label prefix. Buttons right-aligned via `d-flex justify-content-between`
 - **File Structure**:
   ```
   frontend/

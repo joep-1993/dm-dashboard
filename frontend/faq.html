@@ -64,39 +64,29 @@
                     </div>
                     <div class="card-body">
                         <p class="text-muted">Generate FAQ content for product category pages using AI. FAQs are generated in Dutch and include Schema.org structured data.</p>
-                        <div class="row g-2 mb-3">
-                            <div class="col-auto">
-                                <label for="batchSizeInput" class="form-label small mb-1">Batch Size</label>
-                                <input type="number" class="form-control" id="batchSizeInput" value="100" min="1" style="width: 120px;">
-                            </div>
-                            <div class="col-auto">
-                                <label for="parallelWorkersInput" class="form-label small mb-1">Parallel Workers</label>
-                                <input type="number" class="form-control" id="parallelWorkersInput" value="50" min="1" max="100" style="width: 100px;">
-                            </div>
-                            <div class="col-auto">
-                                <label for="numFaqsInput" class="form-label small mb-1">FAQs per Page</label>
-                                <input type="number" class="form-control" id="numFaqsInput" value="6" min="1" max="10" style="width: 100px;">
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <div class="form-check mt-2">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="input-group" style="width: 150px;">
+                                    <span class="input-group-text">Batch</span>
+                                    <input type="number" class="form-control" id="batchSizeInput" value="100" min="1">
+                                </div>
+                                <div class="input-group" style="width: 160px;">
+                                    <span class="input-group-text">Workers</span>
+                                    <input type="number" class="form-control" id="parallelWorkersInput" value="50" min="1" max="100">
+                                </div>
+                                <div class="input-group" style="width: 140px;">
+                                    <span class="input-group-text">FAQs</span>
+                                    <input type="number" class="form-control" id="numFaqsInput" value="6" min="1" max="10">
+                                </div>
+                                <div class="form-check ms-1">
                                     <input class="form-check-input" type="checkbox" id="batchApiCheckbox" onchange="toggleBatchMode()">
                                     <label class="form-check-label small" for="batchApiCheckbox">Bulk API</label>
                                 </div>
                             </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-info" onclick="processFaqUrls()" id="processBtn">
-                                    Process URLs
-                                </button>
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-primary" onclick="processAllFaqUrls()" id="processAllBtn">
-                                    Process All URLs
-                                </button>
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-danger d-none" onclick="stopFaqProcessing()" id="stopBtn">
-                                    Stop
-                                </button>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-info" onclick="processFaqUrls()" id="processBtn">Process URLs</button>
+                                <button class="btn btn-primary" onclick="processAllFaqUrls()" id="processAllBtn">Process All URLs</button>
+                                <button class="btn btn-danger d-none" onclick="stopFaqProcessing()" id="stopBtn">Stop</button>
                             </div>
                         </div>
 
@@ -126,34 +116,22 @@
                     </div>
                     <div class="card-body">
                         <p class="text-muted">Validate product hyperlinks in FAQ answers. FAQs with gone products will be reset to pending for regeneration.</p>
-                        <div class="row g-2 mb-3">
-                            <div class="col-auto">
-                                <label for="validateBatchSizeInput" class="form-label small mb-1">Batch Size</label>
-                                <input type="number" class="form-control" id="validateBatchSizeInput" value="500" min="1" style="width: 120px;">
+                        <div class="d-flex justify-content-between align-items-end mb-3">
+                            <div class="d-flex gap-3 align-items-end">
+                                <div>
+                                    <label for="validateBatchSizeInput" class="form-label small mb-1">Batch Size</label>
+                                    <input type="number" class="form-control" id="validateBatchSizeInput" value="500" min="1" style="width: 120px;">
+                                </div>
+                                <div>
+                                    <label for="validateWorkersInput" class="form-label small mb-1">Workers</label>
+                                    <input type="number" class="form-control" id="validateWorkersInput" value="50" min="1" max="100" style="width: 100px;">
+                                </div>
                             </div>
-                            <div class="col-auto">
-                                <label for="validateWorkersInput" class="form-label small mb-1">Workers</label>
-                                <input type="number" class="form-control" id="validateWorkersInput" value="50" min="1" max="100" style="width: 100px;">
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-secondary" onclick="validateFaqLinks()" id="validateBtn">
-                                    Validate Links
-                                </button>
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-primary" onclick="validateAllFaqLinks()" id="validateAllBtn">
-                                    Validate All
-                                </button>
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-outline-info" onclick="recheckSkippedFaqUrls()" id="recheckSkippedBtn" title="Re-check skipped URLs to see if products are now available">
-                                    Recheck Skipped
-                                </button>
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-outline-danger" onclick="resetFaqValidationHistory()" id="resetValidationBtn">
-                                    Reset Validation
-                                </button>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-secondary" onclick="validateFaqLinks()" id="validateBtn">Validate Links</button>
+                                <button class="btn btn-primary" onclick="validateAllFaqLinks()" id="validateAllBtn">Validate All</button>
+                                <button class="btn btn-outline-info" onclick="recheckSkippedFaqUrls()" id="recheckSkippedBtn" title="Re-check skipped URLs to see if products are now available">Recheck Skipped</button>
+                                <button class="btn btn-outline-danger" onclick="resetFaqValidationHistory()" id="resetValidationBtn">Reset Validation</button>
                             </div>
                         </div>
                         <div id="validateResult" class="mt-3"></div>
@@ -187,36 +165,30 @@
                             </div>
                         </div>
 
-                        <div class="row g-2 mb-3">
-                            <div class="col-auto">
-                                <label for="publishEnvironment" class="form-label small mb-1">Environment</label>
-                                <select class="form-select" id="publishEnvironment" style="width: 150px;">
-                                    <option value="staging">Staging</option>
-                                    <option value="production" selected>Production</option>
-                                </select>
-                            </div>
-                            <div class="col-auto">
-                                <label for="publishContentType" class="form-label small mb-1">Content Type</label>
-                                <select class="form-select" id="publishContentType" style="width: 150px;">
-                                    <option value="all">All</option>
-                                    <option value="seo_only">SEO Only</option>
-                                    <option value="faq_only">FAQ Only</option>
-                                </select>
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-outline-secondary" onclick="refreshPublishStats()">
-                                    Refresh Stats
-                                </button>
-                            </div>
-                            <div class="col-auto d-flex align-items-end">
-                                <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">
-                                    Publish
-                                </button>
-                            </div>
-                            <div class="col d-flex align-items-end justify-content-end">
-                                <span class="text-muted small" id="lastPushTimestamp" style="line-height: 2.4;">
+                        <div class="d-flex justify-content-between align-items-end mb-3">
+                            <div class="d-flex gap-3 align-items-end">
+                                <div>
+                                    <label for="publishEnvironment" class="form-label small mb-1">Environment</label>
+                                    <select class="form-select" id="publishEnvironment" style="width: 150px;">
+                                        <option value="staging">Staging</option>
+                                        <option value="production" selected>Production</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="publishContentType" class="form-label small mb-1">Content Type</label>
+                                    <select class="form-select" id="publishContentType" style="width: 150px;">
+                                        <option value="all">All</option>
+                                        <option value="seo_only">SEO Only</option>
+                                        <option value="faq_only">FAQ Only</option>
+                                    </select>
+                                </div>
+                                <span class="text-muted small mb-2" id="lastPushTimestamp">
                                     Last push: <strong>-</strong>
                                 </span>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-outline-warning" onclick="refreshPublishStats()">Refresh Stats</button>
+                                <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">Publish</button>
                             </div>
                         </div>
 

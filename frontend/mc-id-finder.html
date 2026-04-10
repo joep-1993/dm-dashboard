@@ -82,19 +82,22 @@
     </nav>
 
     <div class="container mt-4 pb-5">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+
         <!-- Search Section -->
         <div class="card mb-4">
-            <div class="card-header" style="background: #5e4a90; color: white;">
+            <div class="card-header">
                 <h5 class="mb-0">Search Merchant Center IDs</h5>
             </div>
             <div class="card-body">
-                <div class="row g-3 align-items-end">
-                    <div class="col-md-5">
-                        <label for="shopNames" class="form-label">Shop Names</label>
-                        <textarea class="form-control" id="shopNames" rows="3" placeholder="one shop name per line&#10;e.g.&#10;bol.com&#10;coolblue"></textarea>
+                <div class="d-flex gap-3 align-items-end mb-3">
+                    <div style="flex: 1;">
+                        <label for="shopNames" class="form-label small">Shop Names</label>
+                        <textarea class="form-control" id="shopNames" rows="3" placeholder="one shop per line"></textarea>
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Countries</label>
+                    <div>
+                        <label class="form-label small">Countries</label>
                         <div class="d-flex gap-3 mt-1">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="chkNl" checked>
@@ -109,12 +112,9 @@
                                 <label class="form-check-label" for="chkDe">DE</label>
                             </div>
                         </div>
-                        <small class="text-muted mt-1 d-block">Only show shops with an MC ID for checked countries.</small>
                     </div>
-                    <div class="col-md-3 d-flex gap-2">
-                        <button class="btn flex-grow-1" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="doSearch()" id="searchBtn">
-                            Search
-                        </button>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" onclick="doSearch()" id="searchBtn">Search</button>
                         <button class="btn btn-outline-secondary" onclick="clearForm()">Clear</button>
                     </div>
                 </div>
@@ -124,9 +124,9 @@
         <!-- Results Section -->
         <div id="resultsSection" style="display: none;">
             <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center" style="background: #5e4a90; color: white;">
-                    <h5 class="mb-0">Results <span class="badge bg-light text-dark ms-2" id="resultCount">0</span></h5>
-                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="exportCsv()">Export CSV</button>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Results <span class="badge bg-secondary ms-2" id="resultCount">0</span></h5>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="exportCsv()">Export CSV</button>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
@@ -165,6 +165,9 @@
         <footer class="text-center py-4">
             <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
         </footer>
+
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

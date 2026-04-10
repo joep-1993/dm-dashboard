@@ -70,7 +70,7 @@
     </nav>
 
     <div class="container mt-4">
-        <div class="col-md-11 mx-auto">
+        <div class="col-md-10 mx-auto">
             <!-- Input Section -->
             <div class="card mb-4">
                 <div class="card-header bg-info text-white">
@@ -78,38 +78,38 @@
                 </div>
                 <div class="card-body">
                     <div class="row">
-                        <div class="col-md-6">
-                            <label for="urlInput" class="form-label">Enter URLs (one per line or comma-separated)</label>
-                            <textarea class="form-control" id="urlInput" rows="8" placeholder="/products/elektronica/
-https://www.beslist.nl/products/mode/
-/products/parfum_aftershave/parfum_aftershave_422757/c/merk~422790"></textarea>
+                        <div class="col-md-7 pe-3">
+                            <label for="urlInput" class="form-label">Enter URLs</label>
+                            <textarea class="form-control" id="urlInput" style="height: calc(100% - 32px);" placeholder="url 1&#10;url 2&#10;url 3"></textarea>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Or upload a file</label>
-                            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                        <div class="col-md-2 px-0">
+                            <label class="form-label">Upload file</label>
+                            <div class="upload-zone" id="uploadZone" style="height: calc(100% - 32px); display: flex; flex-direction: column; justify-content: center;" onclick="document.getElementById('fileInput').click()">
                                 <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.txt" style="display: none;" onchange="handleFileSelect(event)">
                                 <p class="mb-1"><strong>Drop file here</strong></p>
                                 <small class="text-muted">.xlsx, .csv, or .txt</small>
                                 <p class="mb-0 mt-1 text-success small" id="fileStatus" style="display: none;"></p>
                             </div>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Settings</label>
-                            <div class="mb-2">
-                                <label for="workersInput" class="form-label small mb-0">Parallel Workers (max 10)</label>
-                                <input type="number" class="form-control form-control-sm" id="workersInput" value="10" min="1" max="10">
+                        <div class="col-md-3 ps-2">
+                            <label class="form-label d-block" style="margin-left: calc(100% - 220px);">Settings</label>
+                            <div class="d-flex flex-column gap-2 align-items-end">
+                                <div class="input-group input-group-sm" style="width: 220px;">
+                                    <span class="input-group-text" style="flex: 1;">Parallel Workers</span>
+                                    <input type="number" class="form-control text-center" id="workersInput" value="10" min="1" max="10" style="max-width: 60px;">
+                                </div>
+                                <div class="input-group input-group-sm" style="width: 220px;">
+                                    <span class="input-group-text" style="flex: 1;">Requests/sec</span>
+                                    <input type="number" class="form-control text-center" id="rateInput" value="2" min="0.5" max="2" step="0.5" style="max-width: 60px;">
+                                </div>
+                                <div class="input-group input-group-sm" style="width: 220px;">
+                                    <span class="input-group-text" style="flex: 1;">Timeout (sec)</span>
+                                    <input type="number" class="form-control text-center" id="timeoutInput" value="15" min="5" max="60" style="max-width: 60px;">
+                                </div>
+                                <button class="btn btn-primary mt-2" style="width: 220px;" onclick="checkUrls()" id="checkBtn">
+                                    Check URLs
+                                </button>
                             </div>
-                            <div class="mb-2">
-                                <label for="rateInput" class="form-label small mb-0">Requests/sec (max 2)</label>
-                                <input type="number" class="form-control form-control-sm" id="rateInput" value="2" min="0.5" max="2" step="0.5">
-                            </div>
-                            <div class="mb-3">
-                                <label for="timeoutInput" class="form-label small mb-0">Timeout (sec)</label>
-                                <input type="number" class="form-control form-control-sm" id="timeoutInput" value="15" min="5" max="60">
-                            </div>
-                            <button class="btn btn-primary w-100" onclick="checkUrls()" id="checkBtn">
-                                Check URLs
-                            </button>
                         </div>
                     </div>
                 </div>

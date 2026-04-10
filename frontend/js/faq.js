@@ -200,12 +200,12 @@ async function refreshFaqStatus() {
                 window.faqDataMap[index] = item.faq_json || '[]';
 
                 itemDiv.innerHTML = `
-                    <div class="d-flex w-100 justify-content-between align-items-start">
-                        <div style="flex: 1;">
+                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: start;">
+                        <div style="overflow: hidden;">
                             <div class="d-flex justify-content-between align-items-start">
-                                <div>
-                                    <h6 class="mb-1" style="word-break: break-all;">${item.page_title || 'Untitled'}</h6>
-                                    <small class="text-muted d-block">${item.url}</small>
+                                <div style="min-width: 0; flex: 1;">
+                                    <h6 class="mb-1 text-truncate">${item.page_title || 'Untitled'}</h6>
+                                    <small class="text-muted d-block text-truncate">${item.url}</small>
                                 </div>
                                 ${dateText ? `<small class="text-muted text-nowrap ms-2">${dateText}</small>` : ''}
                             </div>
@@ -222,7 +222,7 @@ async function refreshFaqStatus() {
                                 </button>
                             </div>
                         </div>
-                        <button class="btn btn-sm btn-danger ms-2" onclick="deleteFaqResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
+                        <button class="btn btn-sm btn-danger" style="width: 30px; height: 30px; padding: 0; line-height: 30px;" onclick="deleteFaqResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
                             x
                         </button>
                     </div>

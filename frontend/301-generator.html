@@ -15,6 +15,10 @@
         .needs-redirect { background-color: #fff3cd; }
         .rule-row { background-color: #f8f9fa; padding: 8px; margin-bottom: 8px; border-radius: 4px; }
         pre { background: #f8f9fa; padding: 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; margin: 0; }
+        .tab-content { padding-top: 1rem; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -65,19 +69,20 @@
 
     <div class="container mt-4">
         <div class="row">
-            <div class="col-md-11 mx-auto">
+            <div class="col-md-10 mx-auto">
                 <!-- Rules Section -->
                 <div class="card mb-4">
                     <div class="card-header bg-warning text-dark">
-                        <h5 class="mb-0">Transformation Rules (optional)</h5>
+                        <h5 class="mb-0">Transformation Rules</h5>
                     </div>
                     <div class="card-body">
                         <!-- Category Rules -->
                         <h6 class="mt-3">Category rules</h6>
                         <div id="categoryRulesContainer">
-                            <div class="row mb-2">
-                                <div class="col-md-5"><small class="text-muted">Old Category</small></div>
-                                <div class="col-md-5"><small class="text-muted">New Category</small></div>
+                            <div class="d-flex gap-2 mb-2">
+                                <div style="flex: 1;"><small class="text-muted">Old Category</small></div>
+                                <div style="flex: 1;"><small class="text-muted">New Category</small></div>
+                                <div style="width: 31px;"></div>
                             </div>
                         </div>
                         <button class="btn btn-outline-secondary btn-sm mb-2" onclick="addCategoryRule()">+ Add Category Rule</button>
@@ -92,10 +97,11 @@
                         <!-- Facet Rules -->
                         <h6 class="mt-3">Facet rules</h6>
                         <div id="facetRulesContainer">
-                            <div class="row mb-2">
-                                <div class="col-md-4"><small class="text-muted">Old Facet</small></div>
-                                <div class="col-md-4"><small class="text-muted">New Facet</small></div>
-                                <div class="col-md-3"><small class="text-muted">Category filter (optional)</small></div>
+                            <div class="d-flex gap-2 mb-2">
+                                <div style="flex: 1;"><small class="text-muted">Old Facet</small></div>
+                                <div style="flex: 1;"><small class="text-muted">New Facet</small></div>
+                                <div style="flex: 0.75;"><small class="text-muted">Category filter</small></div>
+                                <div style="width: 31px;"></div>
                             </div>
                         </div>
                         <button class="btn btn-outline-secondary btn-sm" onclick="addFacetRule()">+ Add Facet Rule</button>
@@ -115,9 +121,7 @@
                         <h5 class="mb-0">URL Source</h5>
                     </div>
                     <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-8">
-                                <ul class="nav nav-tabs mb-3" id="inputTabs">
+                                <ul class="nav nav-tabs" id="inputTabs">
                                     <li class="nav-item">
                                         <a class="nav-link active" data-bs-toggle="tab" href="#redshiftTab">Fetch from Redshift</a>
                                     </li>
@@ -127,23 +131,23 @@
                                 </ul>
                                 <div class="tab-content">
                                     <div class="tab-pane fade show active" id="redshiftTab">
-                                        <div class="row">
-                                            <div class="col-md-4">
+                                        <div class="d-flex align-items-end gap-3">
+                                            <div style="width: 140px;">
                                                 <label for="startDate" class="form-label small">Start Date</label>
                                                 <input type="text" class="form-control form-control-sm" id="startDate" value="20240101">
                                             </div>
-                                            <div class="col-md-4">
+                                            <div style="width: 140px;">
                                                 <label for="endDate" class="form-label small">End Date</label>
                                                 <input type="text" class="form-control form-control-sm" id="endDate" value="20261231">
                                             </div>
-                                            <div class="col-md-4">
+                                            <div style="width: 120px;">
                                                 <label for="limitInput" class="form-label small">Limit</label>
                                                 <input type="number" class="form-control form-control-sm" id="limitInput" value="10000">
                                             </div>
+                                            <button class="btn btn-primary btn-sm" onclick="generate()" id="generateBtn">
+                                                Generate 301 Redirects
+                                            </button>
                                         </div>
-                                        <button class="btn btn-primary mt-3" onclick="generate()" id="generateBtn">
-                                            Generate 301 Redirects
-                                        </button>
                                     </div>
                                     <div class="tab-pane fade" id="manualTab">
                                         <label for="urlInput" class="form-label">Enter URLs (one per line or comma-separated)</label>
@@ -154,8 +158,6 @@
                                         </button>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
 
@@ -223,16 +225,10 @@
             const container = document.getElementById('categoryRulesContainer');
             const ruleHtml = `
                 <div class="rule-row category-rule" id="cat-rule-${categoryRuleCount}">
-                    <div class="row">
-                        <div class="col-md-5">
-                            <input type="text" class="form-control form-control-sm" placeholder="e.g., fietsen_484521_484542" data-field="old_cat">
-                        </div>
-                        <div class="col-md-5">
-                            <input type="text" class="form-control form-control-sm" placeholder="e.g., fietsen_484521" data-field="new_cat">
-                        </div>
-                        <div class="col-md-2">
-                            <button class="btn btn-sm btn-outline-danger btn-remove" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
-                        </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., fietsen_484521_484542" data-field="old_cat">
+                        <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., fietsen_484521" data-field="new_cat">
+                        <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
                     </div>
                 </div>
             `;
@@ -248,19 +244,11 @@
             const container = document.getElementById('facetRulesContainer');
             const ruleHtml = `
                 <div class="rule-row facet-rule" id="facet-rule-${facetRuleCount}">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <input type="text" class="form-control form-control-sm" placeholder="e.g., merk~123 or merk" data-field="old_facet">
-                        </div>
-                        <div class="col-md-4">
-                            <input type="text" class="form-control form-control-sm" placeholder="e.g., materiaal~456 or materiaal" data-field="new_facet">
-                        </div>
-                        <div class="col-md-3">
-                            <input type="text" class="form-control form-control-sm" placeholder="e.g., /fietsen/" data-field="category">
-                        </div>
-                        <div class="col-md-1">
-                            <button class="btn btn-sm btn-outline-danger btn-remove" onclick="removeFacetRule(${facetRuleCount})">×</button>
-                        </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., merk~123 or merk" data-field="old_facet">
+                        <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., materiaal~456 or materiaal" data-field="new_facet">
+                        <input type="text" class="form-control form-control-sm" style="flex: 0.75;" placeholder="e.g., /fietsen/" data-field="category">
+                        <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeFacetRule(${facetRuleCount})">×</button>
                     </div>
                 </div>
             `;
@@ -353,16 +341,10 @@
             const container = document.getElementById('categoryRulesContainer');
             const ruleHtml = `
                 <div class="rule-row category-rule" id="cat-rule-${categoryRuleCount}">
-                    <div class="row">
-                        <div class="col-md-5">
-                            <input type="text" class="form-control form-control-sm" value="${oldCat}" data-field="old_cat">
-                        </div>
-                        <div class="col-md-5">
-                            <input type="text" class="form-control form-control-sm" value="${newCat}" data-field="new_cat">
-                        </div>
-                        <div class="col-md-2">
-                            <button class="btn btn-sm btn-outline-danger btn-remove" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
-                        </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${oldCat}" data-field="old_cat">
+                        <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${newCat}" data-field="new_cat">
+                        <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
                     </div>
                 </div>
             `;
@@ -374,19 +356,11 @@
             const container = document.getElementById('facetRulesContainer');
             const ruleHtml = `
                 <div class="rule-row facet-rule" id="facet-rule-${facetRuleCount}">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <input type="text" class="form-control form-control-sm" value="${oldFacet}" data-field="old_facet">
-                        </div>
-                        <div class="col-md-4">
-                            <input type="text" class="form-control form-control-sm" value="${newFacet}" data-field="new_facet">
-                        </div>
-                        <div class="col-md-3">
-                            <input type="text" class="form-control form-control-sm" value="${category}" data-field="category">
-                        </div>
-                        <div class="col-md-1">
-                            <button class="btn btn-sm btn-outline-danger btn-remove" onclick="removeFacetRule(${facetRuleCount})">×</button>
-                        </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${oldFacet}" data-field="old_facet">
+                        <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${newFacet}" data-field="new_facet">
+                        <input type="text" class="form-control form-control-sm" style="flex: 0.75;" value="${category}" data-field="category">
+                        <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeFacetRule(${facetRuleCount})">×</button>
                     </div>
                 </div>
             `;

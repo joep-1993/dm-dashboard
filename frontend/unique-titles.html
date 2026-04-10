@@ -57,7 +57,7 @@
 
         <!-- Stats Row -->
         <div class="row mb-4">
-            <div class="col-lg-8 mx-auto">
+            <div class="col-md-10 mx-auto">
                 <div class="card">
                     <div class="card-body d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center">
@@ -82,16 +82,15 @@
             </div>
         </div>
 
-        <!-- AI Processing Status -->
+        <!-- Processing Stats -->
         <div class="row mb-4">
-            <div class="col-lg-8 mx-auto">
+            <div class="col-md-10 mx-auto">
                 <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">AI Title Generation</h5>
-                        <span id="aiStatusBadge" class="badge bg-secondary d-flex align-items-center">Idle</span>
+                    <div class="card-header">
+                        <h5 class="mb-0">Processing Status</h5>
                     </div>
                     <div class="card-body">
-                        <div class="row mb-3">
+                        <div class="row">
                             <div class="col-3 text-center">
                                 <h4 id="aiPending" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h4>
                                 <small class="text-muted">Pending</small>
@@ -109,7 +108,20 @@
                                 <small class="text-muted">Failed</small>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
+        <!-- AI Processing -->
+        <div class="row mb-4">
+            <div class="col-md-10 mx-auto">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">AI Title Generation</h5>
+                        <span id="aiStatusBadge" class="d-none"></span>
+                    </div>
+                    <div class="card-body">
                         <!-- Progress bar (shown during processing) -->
                         <div id="aiProgressContainer" class="d-none mb-3">
                             <div class="progress" style="height: 20px;">
@@ -125,32 +137,49 @@
                             </div>
                         </div>
 
-                        <div class="d-flex justify-content-center align-items-center gap-2 flex-wrap">
-                            <div class="input-group" style="width: 150px;">
-                                <span class="input-group-text">Batch</span>
-                                <input type="number" class="form-control" id="aiBatchSize" value="100" min="1" max="100000" placeholder="100">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="input-group" style="width: 150px;">
+                                    <span class="input-group-text">Batch</span>
+                                    <input type="number" class="form-control" id="aiBatchSize" value="100" min="1" max="100000" placeholder="100">
+                                </div>
+                                <div class="input-group" style="width: 150px;">
+                                    <span class="input-group-text">Workers</span>
+                                    <input type="number" class="form-control" id="aiWorkers" value="50" min="1" max="100" placeholder="50">
+                                </div>
+                                <div class="form-check ms-1">
+                                    <input class="form-check-input" type="checkbox" id="aiBatchApiCheckbox" onchange="toggleAiBatchMode()">
+                                    <label class="form-check-label small" for="aiBatchApiCheckbox">Bulk API</label>
+                                </div>
                             </div>
-                            <div class="input-group" style="width: 150px;">
-                                <span class="input-group-text">Workers</span>
-                                <input type="number" class="form-control" id="aiWorkers" value="15" min="1" max="50" placeholder="15">
+                            <div class="d-flex gap-2">
+                                <button id="aiStartBtn" class="btn btn-warning">
+                                    <span id="aiStartBtnText">Start Batch</span>
+                                    <span id="aiStartSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                </button>
+                                <button id="aiProcessAllBtn" class="btn btn-outline-warning">
+                                    <span id="aiProcessAllBtnText">Process All</span>
+                                    <span id="aiProcessAllSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                </button>
+                                <button id="aiStopBtn" class="btn btn-outline-danger d-none">Stop</button>
                             </div>
-                            <button id="aiStartBtn" class="btn btn-warning">
-                                <span id="aiStartBtnText">Start Batch</span>
-                                <span id="aiStartSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
-                            </button>
-                            <button id="aiProcessAllBtn" class="btn btn-outline-warning">
-                                <span id="aiProcessAllBtnText">Process All</span>
-                                <span id="aiProcessAllSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
-                            </button>
-                            <button id="aiStopBtn" class="btn btn-outline-danger d-none">Stop</button>
                         </div>
 
-                        <!-- Recent Results -->
-                        <div class="mt-4">
-                            <h6 class="mb-3">Recent Results</h6>
-                            <div id="recentResults" style="max-height: 400px; overflow-y: auto;">
-                                <p class="text-muted text-center small">No recent results</p>
-                            </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Results -->
+        <div class="row mb-4">
+            <div class="col-md-10 mx-auto">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Recent Results</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="recentResults" style="max-height: 400px; overflow-y: auto;">
+                            <p class="text-muted text-center small">No recent results</p>
                         </div>
                     </div>
                 </div>
@@ -158,7 +187,7 @@
         </div>
 
         <div class="row">
-            <div class="col-lg-8 mx-auto">
+            <div class="col-md-10 mx-auto">
                 <!-- Add/Edit Form -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -173,7 +202,7 @@
                             </div>
                             <div class="mb-3">
                                 <label for="titleTitle" class="form-label">Title <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="titleTitle" placeholder="Page title..." required>
+                                <input type="text" class="form-control" id="titleTitle" value="✔️ Tot !!DISCOUNT!! korting! | beslist.nl" required>
                             </div>
                             <div class="mb-3">
                                 <label for="titleDescription" class="form-label">Description <span class="text-danger">*</span></label>
@@ -256,6 +285,96 @@
             aiStatusInterval = setInterval(loadAiStatus, 2000);
         });
 
+        let aiBatchMode = false;
+        let aiBatchPolling = false;
+
+        function toggleAiBatchMode() {
+            aiBatchMode = document.getElementById('aiBatchApiCheckbox').checked;
+            const batchInput = document.getElementById('aiBatchSize');
+            const workersInput = document.getElementById('aiWorkers');
+            const startBtn = document.getElementById('aiStartBtn');
+
+            if (aiBatchMode) {
+                batchInput.disabled = true;
+                workersInput.disabled = true;
+                startBtn.disabled = true;
+                startBtn.classList.add('btn-secondary');
+                startBtn.classList.remove('btn-warning');
+            } else {
+                batchInput.disabled = false;
+                workersInput.disabled = false;
+                startBtn.disabled = false;
+                startBtn.classList.remove('btn-secondary');
+                startBtn.classList.add('btn-warning');
+            }
+        }
+
+        async function startAiBatchProcessing() {
+            const processAllBtn = document.getElementById('aiProcessAllBtn');
+            const startBtn = document.getElementById('aiStartBtn');
+            const stopBtn = document.getElementById('aiStopBtn');
+            const processAllBtnText = document.getElementById('aiProcessAllBtnText');
+            const processAllSpinner = document.getElementById('aiProcessAllSpinner');
+
+            processAllBtn.disabled = true;
+            startBtn.disabled = true;
+            stopBtn.classList.remove('d-none');
+            document.getElementById('aiBatchApiCheckbox').disabled = true;
+            processAllBtnText.textContent = 'Starting...';
+            processAllSpinner.classList.remove('d-none');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/ai-titles/batch-start`, { method: 'POST' });
+                const data = await response.json();
+
+                if (data.status === 'error') {
+                    alert(data.message);
+                    resetAiBatchUI();
+                    return;
+                }
+
+                processAllBtnText.textContent = 'Processing...';
+
+                aiBatchPolling = true;
+                while (aiBatchPolling) {
+                    await new Promise(r => setTimeout(r, 3000));
+                    try {
+                        const statusResp = await fetch(`${API_BASE}/api/ai-titles/batch-status`);
+                        const status = await statusResp.json();
+
+                        // Update progress display
+                        const pct = status.total_urls > 0 ? Math.round((status.processed / status.total_urls) * 100) : 0;
+                        processAllBtnText.textContent = `${status.phase}: ${status.processed}/${status.total_urls} (${pct}%)`;
+
+                        if (!status.active) {
+                            aiBatchPolling = false;
+                            if (status.phase === 'complete') {
+                                processAllBtnText.textContent = `Done: ${status.processed} processed, ${status.failed} failed`;
+                            } else if (status.phase === 'error') {
+                                processAllBtnText.textContent = `Error: ${status.error}`;
+                            }
+                            break;
+                        }
+                    } catch (e) {
+                        console.error('Batch status poll error:', e);
+                    }
+                }
+            } catch (e) {
+                alert('Failed to start batch: ' + e.message);
+            }
+
+            resetAiBatchUI();
+            loadAiStatus();
+        }
+
+        function resetAiBatchUI() {
+            document.getElementById('aiProcessAllBtn').disabled = false;
+            document.getElementById('aiStartBtn').disabled = aiBatchMode;
+            document.getElementById('aiStopBtn').classList.add('d-none');
+            document.getElementById('aiBatchApiCheckbox').disabled = false;
+            document.getElementById('aiProcessAllSpinner').classList.add('d-none');
+        }
+
         async function loadStats() {
             try {
                 const response = await fetch(`${API_BASE}/api/unique-titles/status`);
@@ -289,8 +408,8 @@
                 const workersInput = document.getElementById('aiWorkers').parentElement;
 
                 if (processing.is_running) {
-                    statusBadge.className = 'badge bg-primary';
-                    statusBadge.textContent = 'Processing';
+                    statusBadge.className = 'd-none';
+                    statusBadge.textContent = '';
                     progressContainer.classList.remove('d-none');
                     startBtn.classList.add('d-none');
                     processAllBtn.classList.add('d-none');
@@ -312,8 +431,8 @@
                         document.getElementById('aiCurrentUrl').textContent = 'Processing: ' + processing.current_url;
                     }
                 } else {
-                    statusBadge.className = 'badge bg-secondary';
-                    statusBadge.textContent = 'Idle';
+                    statusBadge.className = 'd-none';
+                    statusBadge.textContent = '';
                     progressContainer.classList.add('d-none');
                     startBtn.classList.remove('d-none');
                     processAllBtn.classList.remove('d-none');
@@ -382,12 +501,15 @@
 
         document.getElementById('aiStartBtn').addEventListener('click', async () => {
             const batchSize = parseInt(document.getElementById('aiBatchSize').value) || 100;
-            const numWorkers = parseInt(document.getElementById('aiWorkers').value) || 15;
+            const numWorkers = parseInt(document.getElementById('aiWorkers').value) || 50;
             await startAiProcessing(batchSize, numWorkers);
         });
 
         document.getElementById('aiProcessAllBtn').addEventListener('click', async () => {
-            const numWorkers = parseInt(document.getElementById('aiWorkers').value) || 15;
+            if (aiBatchMode) {
+                return startAiBatchProcessing();
+            }
+            const numWorkers = parseInt(document.getElementById('aiWorkers').value) || 50;
             await startAiProcessing(0, numWorkers);
         });
 

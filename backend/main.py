@@ -39,7 +39,7 @@ from backend.scraper_service import scrape_product_page, scrape_product_page_api
 from backend.gpt_service import generate_product_content, generate_main_category_content, check_content_has_valid_links
 from backend.link_validator import validate_content_links, validate_and_fix_content_links
 from backend.faq_service import process_single_url_faq
-from backend.batch_api_service import start_faq_batch, start_kopteksten_batch, get_batch_status
+from backend.batch_api_service import start_faq_batch, start_kopteksten_batch, start_titles_batch, get_batch_status
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
 from backend.gsd_campaigns_router import router as gsd_campaigns_router
 from backend.dma_bidding_router import router as dma_bidding_router
@@ -2619,8 +2619,18 @@ async def get_ai_titles_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/ai-titles/batch-start")
+def start_ai_titles_batch_endpoint():
+    """Start AI titles batch processing via concurrent workers."""
+    return start_titles_batch()
+
+@app.get("/api/ai-titles/batch-status")
+def get_ai_titles_batch_status():
+    """Get AI titles batch processing status."""
+    return get_batch_status("titles")
+
 @app.post("/api/ai-titles/start")
-async def start_ai_titles_processing(batch_size: int = 100, num_workers: int = 15, use_api: bool = True):
+async def start_ai_titles_processing(batch_size: int = 100, num_workers: int = 50, use_api: bool = True):
     """Start AI title generation processing.
 
     Args:

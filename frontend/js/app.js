@@ -685,6 +685,64 @@ async function uploadManualUrls() {
     }
 }
 
+// Combined upload: processes file if selected, otherwise manual URLs
+async function processUploadUrls() {
+    const fileInput = document.getElementById('urlFileInput');
+    const textInput = document.getElementById('manualUrlInput');
+    const hasFile = fileInput.files && fileInput.files.length > 0;
+    const hasText = textInput.value.trim().length > 0;
+
+    if (!hasFile && !hasText) {
+        document.getElementById('uploadResult').innerHTML = '<div class="alert alert-warning">Please select a file or enter URLs manually</div>';
+        return;
+    }
+
+    const btn = document.getElementById('uploadBtn');
+    const resultDiv = document.getElementById('uploadResult');
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+    resultDiv.innerHTML = '<div class="alert alert-warning">Processing URLs...</div>';
+
+    try {
+        const results = [];
+
+        if (hasFile) {
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            const response = await fetch(`${API_BASE}/api/upload-urls`, { method: 'POST', body: formData });
+            const data = await response.json();
+            if (response.ok) {
+                results.push(`<strong>File:</strong> ${data.added} new, ${data.duplicates} duplicates (${data.total_urls} total)`);
+                fileInput.value = '';
+            } else {
+                results.push(`<strong>File error:</strong> ${data.detail}`);
+            }
+        }
+
+        if (hasText) {
+            const blob = new Blob([textInput.value.trim()], { type: 'text/plain' });
+            const formData = new FormData();
+            formData.append('file', blob, 'manual-urls.txt');
+            const response = await fetch(`${API_BASE}/api/upload-urls`, { method: 'POST', body: formData });
+            const data = await response.json();
+            if (response.ok) {
+                results.push(`<strong>Manual:</strong> ${data.added} new, ${data.duplicates} duplicates (${data.total_urls} total)`);
+                textInput.value = '';
+            } else {
+                results.push(`<strong>Manual error:</strong> ${data.detail}`);
+            }
+        }
+
+        resultDiv.innerHTML = `<div class="alert alert-warning">${results.join('<br>')}</div>`;
+        refreshStatus();
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Process';
+    }
+}
+
 // Toggle content visibility
 function toggleContent(index) {
     const preview = document.getElementById(`preview-${index}`);

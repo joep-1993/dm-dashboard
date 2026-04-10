@@ -1,6 +1,14 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Frontend Consistency Standards (2026-04-10)
+- **Page widths**: All tools use `col-md-10 mx-auto`. Was inconsistent: unique-titles had `col-lg-8`, redirects/keyword-planner/url-checker/redirect-checker had `col-md-11`
+- **Input fields**: Use `input-group` with inline label prefix (e.g., `<span class="input-group-text">Batch</span>`) — consistent across Kopteksten, FAQ, Unique Titles
+- **Button alignment**: Inputs left, buttons right via `d-flex justify-content-between align-items-center`
+- **Publishing section**: Dropdowns + last push timestamp left, Refresh Stats + Publish buttons right
+- **Badge color**: `.badge.bg-success` was overridden to grey in `css/style.css` via `--color-section`. Fixed to `#198754` (Bootstrap green)
+- **FAQ recent results X-button overflow**: Fixed with CSS grid (`grid-template-columns: 1fr auto`) + `overflow: hidden` on content div. Flexbox approach failed because long URLs could push the button out
+
 ## OpenAI Batch API Integration (2026-04-10)
 - **Service**: `backend/batch_api_service.py` — bulk processing for FAQ and kopteksten via OpenAI Batch API
 - **Endpoints**: `POST/GET /api/batch-start`, `POST/GET /api/faq/batch-start`, `/api/batch-status`, `/api/faq/batch-status`

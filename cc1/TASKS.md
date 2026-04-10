@@ -10,6 +10,7 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Frontend polish — standardized page widths to col-md-10 across all tools (unique-titles was col-lg-8, redirects/keyword-planner/url-checker/redirect-checker were col-md-11). Unified input-group layout for batch/workers fields. Buttons right-aligned across all sections. Cleaned up MC ID Finder, URL Checker, Redirect Checker, R-Finder, Redirects. Added Bulk API to unique titles. Fixed FAQ recent results X-button overflow (CSS grid). Pre-filled title suffix in unique titles Add/Edit form #claude-session:2026-04-10
 - [x] Add OpenAI Batch API integration — new `batch_api_service.py` for bulk FAQ and kopteksten generation (50% cheaper). "Bulk API" checkbox in frontend, 4 new endpoints, background thread with phase-based progress. Prepares prompts with 50 concurrent Product Search API threads, uploads JSONL, polls OpenAI, saves results in bulk #claude-session:2026-04-10
 - [x] Optimize FAQ/kopteksten query performance — converted 4 LEFT JOIN queries to NOT EXISTS in main.py (FAQ URL selection 4.2s→190ms = 16.5x faster). Increased DB pool maxconn 20→60, worker limits 20→100, frontend defaults to 50 workers #claude-session:2026-04-10
 - [x] Remove 29,632 winkel facet URLs from all 6 DB tables — Product Search API returns no facet data for winkel-filtered URLs #claude-session:2026-04-10

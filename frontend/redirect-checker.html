@@ -70,40 +70,37 @@
 
     <div class="container mt-4">
         <div class="row">
-            <div class="col-md-11 mx-auto">
+            <div class="col-md-10 mx-auto">
                 <!-- Input Section -->
                 <div class="card mb-4">
                     <div class="card-header bg-info text-white">
                         <h5 class="mb-0">Input URLs</h5>
                     </div>
                     <div class="card-body">
-                        <div class="row">
+                        <div class="row align-items-end">
                             <div class="col-md-8">
                                 <label for="urlInput" class="form-label">Enter URLs (one per line or comma-separated)</label>
-                                <textarea class="form-control" id="urlInput" rows="8" placeholder="/products/elektronica/
-/products/kleding/jassen/
-https://www.beslist.nl/products/tuin/
-
-Or comma-separated:
-/products/a/, /products/b/, /products/c/"></textarea>
+                                <textarea class="form-control" id="urlInput" style="height: calc(100% - 32px);" placeholder="url 1&#10;url 2&#10;url 3"></textarea>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Settings</label>
-                                <div class="mb-2">
-                                    <label for="workersInput" class="form-label small mb-0">Parallel Workers</label>
-                                    <input type="number" class="form-control form-control-sm" id="workersInput" value="20" min="1" max="50">
+                                <div class="d-flex flex-column gap-2">
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text" style="width: 120px;">Parallel Workers</span>
+                                        <input type="number" class="form-control text-center" id="workersInput" value="20" min="1" max="50">
+                                    </div>
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text" style="width: 120px;">Requests/sec</span>
+                                        <input type="number" class="form-control text-center" id="rateInput" value="2" min="1" max="20" step="0.5">
+                                    </div>
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text" style="width: 120px;">Timeout (sec)</span>
+                                        <input type="number" class="form-control text-center" id="timeoutInput" value="15" min="5" max="60">
+                                    </div>
+                                    <button class="btn btn-primary mt-1" onclick="checkUrls()" id="checkBtn">
+                                        Check URLs
+                                    </button>
                                 </div>
-                                <div class="mb-2">
-                                    <label for="rateInput" class="form-label small mb-0">Requests/sec</label>
-                                    <input type="number" class="form-control form-control-sm" id="rateInput" value="2" min="1" max="20" step="0.5">
-                                </div>
-                                <div class="mb-3">
-                                    <label for="timeoutInput" class="form-label small mb-0">Timeout (sec)</label>
-                                    <input type="number" class="form-control form-control-sm" id="timeoutInput" value="15" min="5" max="60">
-                                </div>
-                                <button class="btn btn-primary w-100" onclick="checkUrls()" id="checkBtn">
-                                    Check URLs
-                                </button>
                             </div>
                         </div>
                     </div>
