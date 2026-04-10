@@ -339,121 +339,137 @@ def _run_faq_batch(num_faqs: int = 6):
 
         print(f"[BATCH-FAQ] Prepared {len(batch_requests)} prompts, {len(skip_data)} skipped, {len(failed_urls)} failed")
 
-        # Phase 3: Upload JSONL and create batch
-        _update_state(batch_type, phase="uploading")
+        # Phase 3-5: Upload, process, and save in chunks (OpenAI 200MB limit per batch)
+        CHUNK_SIZE = 5000  # requests per chunk — keeps well under 200MB
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        chunks = [batch_requests[i:i + CHUNK_SIZE] for i in range(0, len(batch_requests), CHUNK_SIZE)]
+        total_succeeded = 0
+        total_save_failed = 0
+        total_processed = 0
 
-        jsonl_path = os.path.join(tempfile.gettempdir(), f"batch_faq_{int(time.time())}.jsonl")
-        _write_jsonl(batch_requests, jsonl_path)
-        file_size_mb = os.path.getsize(jsonl_path) / 1024 / 1024
-        print(f"[BATCH-FAQ] JSONL file: {jsonl_path} ({file_size_mb:.1f} MB, {len(batch_requests)} requests)")
+        for chunk_idx, chunk in enumerate(chunks):
+            _update_state(batch_type, phase=f"uploading chunk {chunk_idx + 1}/{len(chunks)}")
+            print(f"[BATCH-FAQ] Uploading chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} requests)")
 
-        with open(jsonl_path, 'rb') as f:
-            batch_file = client.files.create(file=f, purpose="batch")
+            jsonl_path = os.path.join(tempfile.gettempdir(), f"batch_faq_{int(time.time())}_{chunk_idx}.jsonl")
+            _write_jsonl(chunk, jsonl_path)
+            file_size_mb = os.path.getsize(jsonl_path) / 1024 / 1024
+            print(f"[BATCH-FAQ] JSONL: {jsonl_path} ({file_size_mb:.1f} MB)")
 
-        batch = client.batches.create(
-            input_file_id=batch_file.id,
-            endpoint="/v1/chat/completions",
-            completion_window="24h",
-            metadata={"type": "faq", "count": str(len(batch_requests))}
-        )
-        _update_state(batch_type, phase="processing", batch_id=batch.id)
-        print(f"[BATCH-FAQ] Batch created: {batch.id}")
+            with open(jsonl_path, 'rb') as f:
+                batch_file = client.files.create(file=f, purpose="batch")
 
-        # Phase 4: Poll for completion
-        while True:
-            time.sleep(15)
-            batch = client.batches.retrieve(batch.id)
-            completed = (batch.request_counts.completed or 0) + (batch.request_counts.failed or 0)
-            _update_state(batch_type, processed=completed)
+            batch = client.batches.create(
+                input_file_id=batch_file.id,
+                endpoint="/v1/chat/completions",
+                completion_window="24h",
+                metadata={"type": "faq", "chunk": f"{chunk_idx + 1}/{len(chunks)}", "count": str(len(chunk))}
+            )
+            _update_state(batch_type, phase=f"processing chunk {chunk_idx + 1}/{len(chunks)}", batch_id=batch.id)
+            print(f"[BATCH-FAQ] Batch created: {batch.id}")
 
-            if batch.status in ("completed", "failed", "expired", "cancelled"):
-                break
+            # Poll for completion
+            while True:
+                time.sleep(15)
+                batch = client.batches.retrieve(batch.id)
+                chunk_completed = (batch.request_counts.completed or 0) + (batch.request_counts.failed or 0)
+                _update_state(batch_type, processed=total_processed + chunk_completed)
 
-        if batch.status != "completed":
-            _update_state(batch_type, phase="error", active=False,
-                error=f"Batch ended with status: {batch.status}")
-            return
+                if batch.status in ("completed", "failed", "expired", "cancelled"):
+                    break
 
-        print(f"[BATCH-FAQ] Batch completed: {batch.request_counts.completed} succeeded, {batch.request_counts.failed} failed")
+            if batch.status != "completed":
+                _update_state(batch_type, phase="error", active=False,
+                    error=f"Chunk {chunk_idx + 1} batch ended with status: {batch.status}")
+                return
 
-        # Phase 5: Download and parse results
-        _update_state(batch_type, phase="saving")
-        output_file = client.files.content(batch.output_file_id)
-        results_text = output_file.text
+            print(f"[BATCH-FAQ] Chunk {chunk_idx + 1} completed: {batch.request_counts.completed} succeeded, {batch.request_counts.failed} failed")
 
-        tracking_data = []
-        content_data = []
-        save_failed = 0
+            # Download and parse results for this chunk
+            _update_state(batch_type, phase=f"saving chunk {chunk_idx + 1}/{len(chunks)}")
+            output_file = client.files.content(batch.output_file_id)
+            results_text = output_file.text
 
-        for line in results_text.strip().split('\n'):
+            tracking_data = []
+            content_data = []
+            save_failed = 0
+
+            for line in results_text.strip().split('\n'):
+                try:
+                    result = json.loads(line)
+                    url = result["custom_id"]
+                    response_body = result.get("response", {}).get("body", {})
+
+                    if result.get("error") or not response_body.get("choices"):
+                        tracking_data.append((url, "failed", "batch_api_error"))
+                        save_failed += 1
+                        continue
+
+                    content = response_body["choices"][0]["message"]["content"].strip()
+                    if content.startswith("```"):
+                        content = content.split("```")[1]
+                        if content.startswith("json"):
+                            content = content[4:]
+                    content = content.strip()
+
+                    faqs_data = json.loads(content)
+                    if isinstance(faqs_data, dict):
+                        faqs_data = faqs_data.get("faqs") or faqs_data.get("faq") or faqs_data.get("FAQ") or list(faqs_data.values())[0]
+
+                    if not faqs_data or not isinstance(faqs_data, list):
+                        tracking_data.append((url, "failed", "faq_generation_failed"))
+                        save_failed += 1
+                        continue
+
+                    faq_items = [FAQItem(question=item["question"], answer=item["answer"]) for item in faqs_data]
+                    faq_page = FAQPage(url=url, page_title="", faqs=faq_items)
+
+                    faq_json = json.dumps([asdict(faq) for faq in faq_items], ensure_ascii=False)
+                    schema_org = json.dumps(faq_page.to_schema_org(), ensure_ascii=False)
+
+                    tracking_data.append((url, "success", None))
+                    content_data.append((url, "", faq_json, schema_org))
+
+                except Exception as e:
+                    url = result.get("custom_id", "unknown")
+                    tracking_data.append((url, "failed", f"parse_error: {str(e)[:200]}"))
+                    save_failed += 1
+
+            # Save chunk results to DB
+            conn = get_db_connection()
+            cur = conn.cursor()
             try:
-                result = json.loads(line)
-                url = result["custom_id"]
-                response_body = result.get("response", {}).get("body", {})
+                if tracking_data:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cur,
+                        "INSERT INTO pa.faq_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
+                        tracking_data, page_size=1000
+                    )
+                if content_data:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cur,
+                        "INSERT INTO pa.faq_content (url, page_title, faq_json, schema_org) VALUES (%s, %s, %s, %s) ON CONFLICT (url) DO UPDATE SET page_title = EXCLUDED.page_title, faq_json = EXCLUDED.faq_json, schema_org = EXCLUDED.schema_org",
+                        content_data, page_size=1000
+                    )
+                conn.commit()
+            finally:
+                cur.close()
+                return_db_connection(conn)
 
-                if result.get("error") or not response_body.get("choices"):
-                    tracking_data.append((url, "failed", "batch_api_error"))
-                    save_failed += 1
-                    continue
+            chunk_succeeded = sum(1 for t in tracking_data if t[1] == "success")
+            total_succeeded += chunk_succeeded
+            total_save_failed += save_failed
+            total_processed += len(tracking_data)
+            print(f"[BATCH-FAQ] Chunk {chunk_idx + 1} saved: {chunk_succeeded} FAQs, {save_failed} failed")
 
-                content = response_body["choices"][0]["message"]["content"].strip()
-                # Parse FAQ JSON
-                if content.startswith("```"):
-                    content = content.split("```")[1]
-                    if content.startswith("json"):
-                        content = content[4:]
-                content = content.strip()
+            try:
+                os.remove(jsonl_path)
+            except:
+                pass
 
-                faqs_data = json.loads(content)
-                # Handle wrapped response
-                if isinstance(faqs_data, dict):
-                    faqs_data = faqs_data.get("faqs") or faqs_data.get("faq") or faqs_data.get("FAQ") or list(faqs_data.values())[0]
-
-                if not faqs_data or not isinstance(faqs_data, list):
-                    tracking_data.append((url, "failed", "faq_generation_failed"))
-                    save_failed += 1
-                    continue
-
-                faq_items = [FAQItem(question=item["question"], answer=item["answer"]) for item in faqs_data]
-                faq_page = FAQPage(url=url, page_title="", faqs=faq_items)
-
-                faq_json = json.dumps([asdict(faq) for faq in faq_items], ensure_ascii=False)
-                schema_org = json.dumps(faq_page.to_schema_org(), ensure_ascii=False)
-
-                tracking_data.append((url, "success", None))
-                content_data.append((url, "", faq_json, schema_org))
-
-            except Exception as e:
-                url = result.get("custom_id", "unknown")
-                tracking_data.append((url, "failed", f"parse_error: {str(e)[:200]}"))
-                save_failed += 1
-
-        # Save all results to DB
-        conn = get_db_connection()
-        cur = conn.cursor()
-        try:
-            if tracking_data:
-                from psycopg2.extras import execute_batch
-                execute_batch(cur,
-                    "INSERT INTO pa.faq_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
-                    tracking_data, page_size=1000
-                )
-            if content_data:
-                from psycopg2.extras import execute_batch
-                execute_batch(cur,
-                    "INSERT INTO pa.faq_content (url, page_title, faq_json, schema_org) VALUES (%s, %s, %s, %s) ON CONFLICT (url) DO UPDATE SET page_title = EXCLUDED.page_title, faq_json = EXCLUDED.faq_json, schema_org = EXCLUDED.schema_org",
-                    content_data, page_size=1000
-                )
-            conn.commit()
-        finally:
-            cur.close()
-            return_db_connection(conn)
-
-        succeeded = sum(1 for t in tracking_data if t[1] == "success")
         _update_state(batch_type, phase="complete", active=False,
-            processed=len(tracking_data), failed=save_failed)
-        print(f"[BATCH-FAQ] Saved {succeeded} FAQs, {save_failed} failed")
+            processed=total_processed, failed=total_save_failed)
+        print(f"[BATCH-FAQ] All {len(chunks)} chunks complete: {total_succeeded} FAQs, {total_save_failed} failed")
 
         # Cleanup temp file
         try:
@@ -551,103 +567,113 @@ def _run_kopteksten_batch():
 
         print(f"[BATCH-KOPT] Prepared {len(batch_requests)} prompts, {len(skip_data)} skipped, {len(failed_urls)} failed")
 
-        # Phase 3: Upload and create batch
-        _update_state(batch_type, phase="uploading")
+        # Phase 3-5: Upload, process, and save in chunks (OpenAI 200MB limit per batch)
+        CHUNK_SIZE = 5000
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        chunks = [batch_requests[i:i + CHUNK_SIZE] for i in range(0, len(batch_requests), CHUNK_SIZE)]
+        total_succeeded = 0
+        total_save_failed = 0
+        total_processed = 0
 
-        jsonl_path = os.path.join(tempfile.gettempdir(), f"batch_kopt_{int(time.time())}.jsonl")
-        _write_jsonl(batch_requests, jsonl_path)
-        file_size_mb = os.path.getsize(jsonl_path) / 1024 / 1024
-        print(f"[BATCH-KOPT] JSONL file: {jsonl_path} ({file_size_mb:.1f} MB, {len(batch_requests)} requests)")
+        for chunk_idx, chunk in enumerate(chunks):
+            _update_state(batch_type, phase=f"uploading chunk {chunk_idx + 1}/{len(chunks)}")
+            print(f"[BATCH-KOPT] Uploading chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} requests)")
 
-        with open(jsonl_path, 'rb') as f:
-            batch_file = client.files.create(file=f, purpose="batch")
+            jsonl_path = os.path.join(tempfile.gettempdir(), f"batch_kopt_{int(time.time())}_{chunk_idx}.jsonl")
+            _write_jsonl(chunk, jsonl_path)
+            file_size_mb = os.path.getsize(jsonl_path) / 1024 / 1024
+            print(f"[BATCH-KOPT] JSONL: {jsonl_path} ({file_size_mb:.1f} MB)")
 
-        batch = client.batches.create(
-            input_file_id=batch_file.id,
-            endpoint="/v1/chat/completions",
-            completion_window="24h",
-            metadata={"type": "kopteksten", "count": str(len(batch_requests))}
-        )
-        _update_state(batch_type, phase="processing", batch_id=batch.id)
-        print(f"[BATCH-KOPT] Batch created: {batch.id}")
+            with open(jsonl_path, 'rb') as f:
+                batch_file = client.files.create(file=f, purpose="batch")
 
-        # Phase 4: Poll for completion
-        while True:
-            time.sleep(15)
-            batch = client.batches.retrieve(batch.id)
-            completed = (batch.request_counts.completed or 0) + (batch.request_counts.failed or 0)
-            _update_state(batch_type, processed=completed)
+            batch = client.batches.create(
+                input_file_id=batch_file.id,
+                endpoint="/v1/chat/completions",
+                completion_window="24h",
+                metadata={"type": "kopteksten", "chunk": f"{chunk_idx + 1}/{len(chunks)}", "count": str(len(chunk))}
+            )
+            _update_state(batch_type, phase=f"processing chunk {chunk_idx + 1}/{len(chunks)}", batch_id=batch.id)
+            print(f"[BATCH-KOPT] Batch created: {batch.id}")
 
-            if batch.status in ("completed", "failed", "expired", "cancelled"):
-                break
+            while True:
+                time.sleep(15)
+                batch = client.batches.retrieve(batch.id)
+                chunk_completed = (batch.request_counts.completed or 0) + (batch.request_counts.failed or 0)
+                _update_state(batch_type, processed=total_processed + chunk_completed)
 
-        if batch.status != "completed":
-            _update_state(batch_type, phase="error", active=False,
-                error=f"Batch ended with status: {batch.status}")
-            return
+                if batch.status in ("completed", "failed", "expired", "cancelled"):
+                    break
 
-        print(f"[BATCH-KOPT] Batch completed: {batch.request_counts.completed} succeeded, {batch.request_counts.failed} failed")
+            if batch.status != "completed":
+                _update_state(batch_type, phase="error", active=False,
+                    error=f"Chunk {chunk_idx + 1} batch ended with status: {batch.status}")
+                return
 
-        # Phase 5: Download and parse results
-        _update_state(batch_type, phase="saving")
-        output_file = client.files.content(batch.output_file_id)
-        results_text = output_file.text
+            print(f"[BATCH-KOPT] Chunk {chunk_idx + 1} completed: {batch.request_counts.completed} succeeded, {batch.request_counts.failed} failed")
 
-        tracking_data = []
-        content_data = []
-        save_failed = 0
+            _update_state(batch_type, phase=f"saving chunk {chunk_idx + 1}/{len(chunks)}")
+            output_file = client.files.content(batch.output_file_id)
+            results_text = output_file.text
 
-        for line in results_text.strip().split('\n'):
-            try:
-                result = json.loads(line)
-                url = result["custom_id"]
-                response_body = result.get("response", {}).get("body", {})
+            tracking_data = []
+            content_data = []
+            save_failed = 0
 
-                if result.get("error") or not response_body.get("choices"):
-                    tracking_data.append((url, "failed", "batch_api_error"))
+            for line in results_text.strip().split('\n'):
+                try:
+                    result = json.loads(line)
+                    url = result["custom_id"]
+                    response_body = result.get("response", {}).get("body", {})
+
+                    if result.get("error") or not response_body.get("choices"):
+                        tracking_data.append((url, "failed", "batch_api_error"))
+                        save_failed += 1
+                        continue
+
+                    content = response_body["choices"][0]["message"]["content"].strip()
+                    tracking_data.append((url, "success", None))
+                    content_data.append((url, content))
+
+                except Exception as e:
+                    url = result.get("custom_id", "unknown")
+                    tracking_data.append((url, "failed", f"parse_error: {str(e)[:200]}"))
                     save_failed += 1
-                    continue
 
-                content = response_body["choices"][0]["message"]["content"].strip()
-                tracking_data.append((url, "success", None))
-                content_data.append((url, content))
+            conn = get_db_connection()
+            cur = conn.cursor()
+            try:
+                if tracking_data:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cur,
+                        "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
+                        tracking_data, page_size=1000
+                    )
+                if content_data:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cur,
+                        "INSERT INTO pa.content_urls_joep (url, content) VALUES (%s, %s) ON CONFLICT (url) DO UPDATE SET content = EXCLUDED.content",
+                        content_data, page_size=1000
+                    )
+                conn.commit()
+            finally:
+                cur.close()
+                return_db_connection(conn)
 
-            except Exception as e:
-                url = result.get("custom_id", "unknown")
-                tracking_data.append((url, "failed", f"parse_error: {str(e)[:200]}"))
-                save_failed += 1
+            chunk_succeeded = sum(1 for t in tracking_data if t[1] == "success")
+            total_succeeded += chunk_succeeded
+            total_save_failed += save_failed
+            total_processed += len(tracking_data)
+            print(f"[BATCH-KOPT] Chunk {chunk_idx + 1} saved: {chunk_succeeded} content items, {save_failed} failed")
 
-        # Save results to DB
-        conn = get_db_connection()
-        cur = conn.cursor()
-        try:
-            if tracking_data:
-                from psycopg2.extras import execute_batch
-                execute_batch(cur,
-                    "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
-                    tracking_data, page_size=1000
-                )
-            if content_data:
-                from psycopg2.extras import execute_batch
-                execute_batch(cur,
-                    "INSERT INTO pa.content_urls_joep (url, content) VALUES (%s, %s) ON CONFLICT (url) DO UPDATE SET content = EXCLUDED.content",
-                    content_data, page_size=1000
-                )
-            conn.commit()
-        finally:
-            cur.close()
-            return_db_connection(conn)
+            try:
+                os.remove(jsonl_path)
+            except:
+                pass
 
-        succeeded = sum(1 for t in tracking_data if t[1] == "success")
         _update_state(batch_type, phase="complete", active=False,
-            processed=len(tracking_data), failed=save_failed)
-        print(f"[BATCH-KOPT] Saved {succeeded} content items, {save_failed} failed")
-
-        try:
-            os.remove(jsonl_path)
-        except:
-            pass
+            processed=total_processed, failed=total_save_failed)
+        print(f"[BATCH-KOPT] All {len(chunks)} chunks complete: {total_succeeded} content items, {total_save_failed} failed")
 
     except Exception as e:
         print(f"[BATCH-KOPT] Error: {e}")
