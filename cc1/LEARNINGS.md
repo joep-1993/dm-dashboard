@@ -1,6 +1,34 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Title Scoring — Full Run Completed (2026-04-09)
+- **Script**: `scripts/score_titles.py` — GPT-4o-mini, 25 titles/batch, 20 concurrent workers
+- **Result**: 1,023,808 titles scored, avg 8.00. Distribution: 7.8% score 10, 29% score 9, 33.4% score 8, 17.5% score 7, 12.1% score ≤6
+- **Runtime**: ~4.4 hours for 684K titles (two parallel processes), ~40-43 titles/sec, 0 errors
+- **Export**: `scripts/export_scored_titles.py` → `~/unique_titles_scored.xlsx` (41MB, color-coded scores, distribution sheet)
+- **Decision**: All titles scoring <7 (125,436) were reset to pending for regeneration
+- **Pool exhaustion**: `maxconn=20` in `database.py` matches worker count — under peak load the pool can exhaust. Not currently blocking but could be bumped to 25
+
+## FAQ/Kopteksten Tracking Ghost Records
+- **Issue**: 45,004 URLs in `pa.faq_tracking` had status='success' but no content in `pa.faq_content`. Also 373 ghost success records in kopteksten tracking
+- **Impact**: Ghost records prevented URLs from being picked up for generation (pipeline thinks they're done)
+- **Fix**: Reset ghost success records to 'pending'. This explains why FAQ content count (200K) was lower than kopteksten (218K) despite same URL pool
+- **Check query**: `SELECT count(*) FROM pa.faq_tracking t WHERE t.status = 'success' AND NOT EXISTS (SELECT 1 FROM pa.faq_content c WHERE c.url = t.url AND c.faq_json IS NOT NULL AND c.faq_json != '')`
+
+## AI Title Kinder+Meisjes/Jongens Dedup Fix
+- **Issue**: Titles like "Kinder Meisjes Panty's" — "Kinder" not stripped when "Meisjes" present
+- **Root cause**: Dedup logic at `ai_titles_service.py:509` was facet-name-based (only matched `doelgroep`, `doelgroep mode`, `doelgroep schoenen`) but actual facets use names like `doelgroep_feestkleding`, `doelgroep_fietsen`, `doelgroep_horloge`, `dg_kind_horloge`, etc.
+- **Fix**: Changed to value-based approach — any facet with value "Kinder"/"Kinderen"/"Baby" is dropped when any facet has value "Meisjes"/"Jongens". Also strips "Kinder" prefix from category names in H1 (e.g., "Kinderfietsen" → "fietsen")
+- **Affected**: 403 URLs reset
+
+## AI Title English Hallucination — "vases"
+- **Issue**: GPT translated Dutch "vazen" to English "vases" in 9 titles
+- **Pattern**: Original H1 had "vazen", AI output had "vases". Only found for this one word so far but worth watching
+- **Fix**: Reset 9 URLs to pending. Consider a post-processing check for common Dutch→English mistranslations if pattern recurs
+
+## Bad URL Patterns in unique_titles
+- **Removed**: 1,944 URLs containing "pricemax" (2) or "+" (1,943) — these are invalid/malformed facet URLs
+
 ## Docker-Free Dashboard (dm-dashboard)
 - **Repo**: `https://github.com/joep-1993/dm-dashboard` — standalone version of dm-tools without Docker
 - **Key changes vs dm-tools**: Added `load_dotenv()` to `main.py`, changed default DB DSN from `db:5432` to `localhost:5432`, moved hardcoded API keys to env vars (`UNIQUE_TITLES_API_KEY`, `CONTENT_API_KEY_*` in `content_publisher.py`)

@@ -10,6 +10,13 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] Score all 1M+ unique titles — ran `score_titles.py` (GPT-4o-mini, 25/batch, 20 workers) across 684K unscored titles, two parallel processes, 0 errors, ~4.4 hours. Final: 1,023,808 titles scored, avg 8.00, 70% score 8+. Exported to `~/unique_titles_scored.xlsx` (41MB) #claude-session:2026-04-09
+- [x] Reset 125,436 unique titles with score < 7 to pending for regeneration #claude-session:2026-04-09
+- [x] Remove 1,944 bad URLs from unique_titles containing "pricemax" or "+" #claude-session:2026-04-09
+- [x] Fix "vases" hallucination — AI translated Dutch "vazen" to English "vases" in 9 titles, reset to pending #claude-session:2026-04-09
+- [x] Fix FAQ tracking ghost success records — 45,004 URLs marked 'success' in faq_tracking but no content in faq_content, reset to pending. Also fixed 9 failed→success (had content), inserted 7 missing tracking records #claude-session:2026-04-09
+- [x] Fix kopteksten tracking ghost success records — 373 URLs marked 'success' in kopteksten_check but no content, reset to pending #claude-session:2026-04-09
+- [x] Fix Kinder+Meisjes/Jongens redundancy in AI title generation — replaced narrow facet-name-based dedup with value-based approach in `ai_titles_service.py:509-523`. Any facet with "Kinder"/"Kinderen"/"Baby" value dropped when "Meisjes"/"Jongens" present. Also strips "Kinder" prefix from category names in H1. Reset 403 affected URLs #claude-session:2026-04-09
 - [x] Create dm-dashboard repo (Docker-free version) — standalone version at github.com/joep-1993/dm-dashboard with setup.sh, .env.example, password protection, load_dotenv, all API keys moved to env vars. Added missing themes.py, thema_ads_optimized/, themes/, categories.xlsx #claude-session:2026-04-03
 - [x] Fix n8n IndexNow Submitter Slack message — build_summary1 was reading $input (Postgres output) instead of $('build_tracking_insert1') for url_count and response_code #claude-session:2026-04-03
 - [x] Add MC ID Finder tool under Google Ads — Redshift lookup for Merchant Center IDs (NL/BE/DE) by shop name. Multi-shop textarea input, country checkboxes for dynamic columns, CSV export. Backend: mc_id_finder_service.py + mc_id_finder_router.py. Fixed: shop_name on wrong table alias, MC ID fields are strings not ints, many shops lack efficy_k_shop join #claude-session:2026-04-02

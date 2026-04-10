@@ -319,18 +319,27 @@ def generate_ai_title(h1_title: str, url: str) -> Optional[Dict]:
         print("[AI_TITLES] No OpenAI API key configured")
         return None
 
-    prompt = f"""Je bent een SEO-expert. Maak van '{h1_title}' een goedlopende en grammaticaal correcte titel zonder "-". Gebruik UITSLUITEND de woorden die je krijgt - verzin ABSOLUUT GEEN nieuwe woorden, maten, kleuren of andere informatie. Je mag WEL "met" of "zonder" toevoegen waar grammaticaal nodig (zie regel 8). Voeg NOOIT zelf "voor", "van" of "in" toe, maar als deze woorden al in een facetwaarde staan, behoud ze dan. Overbodige woorden mag je weglaten. Je mag de volgorde aanpassen om een beter lopende zin te maken.
+    prompt = f"""Je bent een SEO-expert. Maak van '{h1_title}' een goedlopende en grammaticaal correcte titel zonder "-". Gebruik UITSLUITEND de woorden die je krijgt - verzin ABSOLUUT GEEN nieuwe woorden, maten, kleuren of andere informatie. Je mag WEL "met", "zonder", "van" en "voor aan" toevoegen waar grammaticaal nodig (zie regels 2 en 8). Overbodige woorden mag je weglaten. Je mag de volgorde aanpassen om een beter lopende zin te maken.
 
 Regels:
 1. Zorg dat het merk ALTIJD vooraan in de titel staat, dus "Apple iPhones" in plaats van "iPhones van Apple".
-2. Gebruik ALTIJD bijvoeglijke naamwoorden voor materialen en kleuren. NOOIT "in" of "van" gebruiken.
-   - FOUT: "fonteinkranen in zilver en messing" of "fonteinkranen van messing"
-   - GOED: "Zilveren messing fonteinkranen"
-   - FOUT: "bank in hout" of "bank van hout"
-   - GOED: "Houten bank"
-   - FOUT: "schoenen in rood"
-   - GOED: "Rode schoenen"
-3. Zet kleuren en materialen als bijvoeglijk naamwoord VOOR het zelfstandig naamwoord.
+2. Kleuren en materialen als bijvoeglijk naamwoord VOOR het zelfstandig naamwoord, MAAR: maximaal 3 bijvoeglijke naamwoorden VOOR het product. Als er meer dan 3 eigenschappen zijn, verplaats dan materiaal en bevestiging/plaatsing NA het product met "van" (materiaal) of "voor aan" (bevestiging/plaatsing).
+   - Bij weinig facetten (1-3 bijvoeglijke naamwoorden):
+     - GOED: "Rode schoenen"
+     - GOED: "Houten bank"
+     - GOED: "Zilveren messing fonteinkranen"
+   - Bij veel facetten (4+ bijvoeglijke naamwoorden), verplaats materiaal/bevestiging NA het product:
+     - FOUT: "Witte Metalen Klassieke Rechthoekige Muur wijnrekken" (te veel gestapeld!)
+     - GOED: "Klassieke witte rechthoekige wijnrekken van metaal voor aan de muur"
+     - FOUT: "Zwarte Katoenen Kleine Reistassen met organizer Vakantie"
+     - GOED: "Kleine zwarte reistassen van katoen met organizer"
+   - NOOIT "in" gebruiken voor materiaal of kleur.
+     - FOUT: "fonteinkranen in zilver" of "schoenen in rood"
+3. Volgorde van bijvoeglijke naamwoorden VOOR het product: stijl (Klassieke, Moderne) → kleur (witte, rode) → vorm/formaat (rechthoekige, kleine, grote) → [product]. Na het eerste woord altijd kleine letters.
+   - FOUT: "Witte Metalen Klassieke wijnrekken"
+   - GOED: "Klassieke witte wijnrekken"
+   - FOUT: "Fleece Moderne Ronde hondenmanden"
+   - GOED: "Moderne ronde hondenmanden van fleece"
 4. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan ALTIJD direct VOOR de productnaam, NOOIT met "voor" ervoor.
    - FOUT: "vesten voor heren"
    - GOED: "Heren vesten"
@@ -355,6 +364,8 @@ Regels:
    - GOED: "Nieuwe kleine Low Frost tafelmodel Energieklasse D"
    - FOUT: "Inductie kookplaat Nieuwe"
    - GOED: "Nieuwe inductie kookplaat"
+   - FOUT: "Rubberen Butterfly Kiss vibrators Kleine"
+   - GOED: "Kleine rubberen Butterfly Kiss vibrators"
 8. BELANGRIJK: Producteigenschappen zoals "Korte mouwen", "Lange mouwen", "Capuchon", "Ronde hals", "V-hals" mogen NOOIT los voor de productnaam staan. Voeg ALTIJD "met" toe en zet ze NA de productnaam. Dit geldt ook voor facetwaarden die beginnen met "Met" of "Zonder".
    Bundel alles in ÉÉN "met X, Y en Z" clause. Gebruik "met" maar één keer, daarna komma's en "en".
    LET OP: Maten (Maat S/M/L/XL/38/42 etc.) zijn GEEN producteigenschappen! Zet NOOIT "met" voor maten. Maten staan los achteraan.
@@ -366,6 +377,11 @@ Regels:
    - GOED: "Puma Heren blauwe joggingbroeken Maat L"
    - FOUT: "Capuchon Heren jassen met rits"
    - GOED: "Heren jassen met capuchon en rits"
+9. Hoofdlettergebruik: alleen het eerste woord met een hoofdletter, daarna kleine letters (behalve merknamen en eigennamen).
+   - FOUT: "Klassieke Witte Rechthoekige wijnrekken"
+   - GOED: "Klassieke witte rechthoekige wijnrekken"
+   - FOUT: "Rode Melamine Mokken"
+   - GOED: "Rode melamine mokken"
 
 Voorbeeld:
 "Schoenen - Nike - Rode - Met veters" wordt "Rode Nike schoenen met veters".
@@ -373,8 +389,10 @@ Voorbeeld:
 "Nike - Heren - Maat L - Tanktops" wordt "Nike Heren tanktops Maat L".
 "Adidas - Groen - Kinderen - Adidas Originals Trainingspakken" wordt "Groene Adidas Originals Kinderen trainingspakken".
 "Tafelmodel Low frost D Nieuw Kleine" wordt "Nieuwe kleine Low Frost tafelmodel Energieklasse D".
-"Stretch - Heren - Korte mouwen - Met borstzak - Met print - Poloshirts" wordt "Stretch Heren Poloshirts met korte mouwen, borstzak en print".
+"Stretch - Heren - Korte mouwen - Met borstzak - Met print - Poloshirts" wordt "Stretch Heren poloshirts met korte mouwen, borstzak en print".
 "Dutch Dandies - Heren - Slim fit - Lange mouwen - Poloshirts" wordt "Dutch Dandies Heren Slim fit poloshirts met lange mouwen".
+"Witte - Metalen - Klassieke - Rechthoekige - Muur - Wijnrekken" wordt "Klassieke witte rechthoekige wijnrekken van metaal voor aan de muur".
+"Fleece - Moderne - Ronde - Hondenmanden" wordt "Moderne ronde hondenmanden van fleece".
 
 Ik wil het antwoord graag in dit json formaat terug:
 {{"oude_titel": "{h1_title}", "h1_title": "nieuwe_titel_hier", "url": "{url}"}}
@@ -489,17 +507,20 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             api_h1 = api_h1.replace(kleur_val + ' ', '', 1).strip()
 
     # Drop general audience (Kinder/Baby) when a more specific one (Meisjes/Jongens) is present
-    # Works across categories: Doelgroep + Kinderafdeling, Doelgroep + Doelgroep kind, etc.
+    # Value-based: any facet with a general value is dropped when any facet has a specific child value
     general_audiences = {'kinder', 'kinderen', 'baby'}
-    doelgroep_facets = [f for f in selected_facets if f['facet_name'].lower() in ('doelgroep', 'doelgroep mode', 'doelgroep schoenen')]
-    specific_facets = [f for f in selected_facets if f['facet_name'].lower() in ('kinderafdeling', 'afdeling baby/kind', 'doelgroep kind') or f['facet_name'].lower().startswith('doelgroep_kind')]
-    if doelgroep_facets and specific_facets:
-        for df in doelgroep_facets:
-            if df['detail_value'].lower() in general_audiences:
-                selected_facets = [f for f in selected_facets if f is not df]
-                doelgroep_val = df['detail_value']
-                if doelgroep_val in api_h1:
-                    api_h1 = api_h1.replace(doelgroep_val + ' ', '', 1).strip()
+    specific_child_values = {'meisjes', 'jongens'}
+    has_specific_child = any(f['detail_value'].lower() in specific_child_values for f in selected_facets)
+    if has_specific_child:
+        general_facets = [f for f in selected_facets if f['detail_value'].lower() in general_audiences]
+        for gf in general_facets:
+            selected_facets = [f for f in selected_facets if f is not gf]
+            gf_val = gf['detail_value']
+            if gf_val in api_h1:
+                api_h1 = api_h1.replace(gf_val + ' ', '', 1).strip()
+        # Also strip "Kinder"/"Kinderen" from H1 when embedded in category name (e.g., "Kinderfietsen")
+        if api_h1.lower().startswith('kinder') and not any(f['detail_value'].lower().startswith('kinder') for f in selected_facets):
+            api_h1 = api_h1[6:]  # Strip "Kinder" prefix
 
     # Strip redundant category name when a "Soort" facet already contains the product type
     # e.g., Soort="Parka jassen" + category_name="Jacks" → H1 "Parka jassen jacks" → strip "jacks"
