@@ -313,15 +313,21 @@
             const processAllBtn = document.getElementById('aiProcessAllBtn');
             const startBtn = document.getElementById('aiStartBtn');
             const stopBtn = document.getElementById('aiStopBtn');
-            const processAllBtnText = document.getElementById('aiProcessAllBtnText');
-            const processAllSpinner = document.getElementById('aiProcessAllSpinner');
+            const progressContainer = document.getElementById('aiProgressContainer');
+            const progressBar = document.getElementById('aiProgressBar');
+
+            // Set flag immediately to prevent loadAiStatus from resetting UI
+            aiBatchPolling = true;
 
             processAllBtn.disabled = true;
             startBtn.disabled = true;
             stopBtn.classList.remove('d-none');
             document.getElementById('aiBatchApiCheckbox').disabled = true;
-            processAllBtnText.textContent = 'Starting...';
-            processAllSpinner.classList.remove('d-none');
+            document.getElementById('aiBatchSize').parentElement.classList.add('d-none');
+            document.getElementById('aiWorkers').parentElement.classList.add('d-none');
+            progressContainer.classList.remove('d-none');
+            progressBar.style.width = '0%';
+            progressBar.textContent = 'Starting...';
 
             try {
                 const response = await fetch(`${API_BASE}/api/ai-titles/batch-start`, { method: 'POST' });
@@ -329,32 +335,35 @@
 
                 if (data.status === 'error') {
                     alert(data.message);
+                    aiBatchPolling = false;
                     resetAiBatchUI();
                     return;
                 }
-
-                processAllBtnText.textContent = 'Processing...';
-
-                aiBatchPolling = true;
                 while (aiBatchPolling) {
                     await new Promise(r => setTimeout(r, 3000));
                     try {
                         const statusResp = await fetch(`${API_BASE}/api/ai-titles/batch-status`);
                         const status = await statusResp.json();
 
-                        // Update progress display
-                        const pct = status.total_urls > 0 ? Math.round((status.processed / status.total_urls) * 100) : 0;
-                        processAllBtnText.textContent = `${status.phase}: ${status.processed}/${status.total_urls} (${pct}%)`;
-
                         if (!status.active) {
                             aiBatchPolling = false;
                             if (status.phase === 'complete') {
-                                processAllBtnText.textContent = `Done: ${status.processed} processed, ${status.failed} failed`;
+                                progressBar.style.width = '100%';
+                                progressBar.classList.remove('progress-bar-animated');
+                                progressBar.textContent = `Done: ${status.processed} processed, ${status.failed} failed`;
                             } else if (status.phase === 'error') {
-                                processAllBtnText.textContent = `Error: ${status.error}`;
+                                progressBar.style.width = '100%';
+                                progressBar.classList.remove('progress-bar-animated');
+                                progressBar.classList.add('bg-danger');
+                                progressBar.textContent = `Error: ${status.error}`;
                             }
                             break;
                         }
+
+                        // Update progress bar
+                        const pct = status.total_urls > 0 ? Math.round((status.processed / status.total_urls) * 100) : 0;
+                        progressBar.style.width = pct + '%';
+                        progressBar.textContent = `${status.processed || 0}/${status.total_urls || 0} (${pct}%)`;
                     } catch (e) {
                         console.error('Batch status poll error:', e);
                     }
@@ -373,6 +382,10 @@
             document.getElementById('aiStopBtn').classList.add('d-none');
             document.getElementById('aiBatchApiCheckbox').disabled = false;
             document.getElementById('aiProcessAllSpinner').classList.add('d-none');
+            document.getElementById('aiBatchSize').parentElement.classList.remove('d-none');
+            document.getElementById('aiWorkers').parentElement.classList.remove('d-none');
+            document.getElementById('aiProcessAllBtnText').textContent = 'Process All';
+            aiBatchPolling = false;
         }
 
         async function loadStats() {
@@ -406,6 +419,9 @@
                 const errorContainer = document.getElementById('aiErrorContainer');
                 const batchSizeInput = document.getElementById('aiBatchSize').parentElement;
                 const workersInput = document.getElementById('aiWorkers').parentElement;
+
+                // Skip UI updates when batch mode is running (uses separate status)
+                if (aiBatchPolling) return;
 
                 if (processing.is_running) {
                     statusBadge.className = 'd-none';

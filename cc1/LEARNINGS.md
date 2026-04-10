@@ -1,6 +1,19 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Faulty URLs in unique_titles (2026-04-10)
+- **158,742 URLs removed** from all 6 DB tables, exported to `~/faulty_unique_title_urls.xlsx`
+- `/r/` URLs (143,626): product redirect URLs like `/products/fietsen/r/accu-slot/` — Product Search API can't parse these (no `/c/` facet path)
+- `populaire_themas_accessoires` (8,134): invalid facet — API returns 400 "facet is not valid"
+- `type_parfum` (6,901): invalid facet — same 400 error
+- `pl_pennen` (90): invalid facet — same 400 error
+- **Pattern**: When batch processing shows many `api_failed` or `facet_not_available` errors, check for systematic bad URL patterns to clean from DB
+
+## Unique Titles Batch UI Race Condition (2026-04-10)
+- **Problem**: Process All button turned yellow briefly, progress bar didn't show, `undefined` text appeared
+- **Root cause**: `loadAiStatus()` polls `/api/ai-titles/status` every 2 seconds and resets the UI when `is_running: false`. The batch uses a separate state (`/api/ai-titles/batch-status`), so the normal status always shows idle → UI gets reset
+- **Fix**: Set `aiBatchPolling = true` immediately on click (before fetch), then `loadAiStatus` returns early when flag is set. Also hide batch/workers inputs during batch run and restore in `resetAiBatchUI`
+
 ## Frontend Consistency Standards (2026-04-10)
 - **Page widths**: All tools use `col-md-10 mx-auto`. Was inconsistent: unique-titles had `col-lg-8`, redirects/keyword-planner/url-checker/redirect-checker had `col-md-11`
 - **Input fields**: Use `input-group` with inline label prefix (e.g., `<span class="input-group-text">Batch</span>`) — consistent across Kopteksten, FAQ, Unique Titles
