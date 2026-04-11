@@ -1,6 +1,12 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## OpenAI Batch API — File Size Limit & Chunking (2026-04-10)
+- **200MB limit** per batch file for gpt-4o-mini. 29K FAQ prompts with product data exceeded this
+- **Fix**: Split into chunks of 5,000 requests each. For 29K URLs = 6 chunks, processed sequentially
+- **Queue time**: OpenAI batch queue can be very slow — first run took ~8 hours (mostly queue waiting, not processing)
+- **Chunk size**: 5,000 is conservative. Could potentially go higher but 200MB is hard limit
+
 ## Faulty URLs in unique_titles (2026-04-10)
 - **158,742 URLs removed** from all 6 DB tables, exported to `~/faulty_unique_title_urls.xlsx`
 - `/r/` URLs (143,626): product redirect URLs like `/products/fietsen/r/accu-slot/` — Product Search API can't parse these (no `/c/` facet path)

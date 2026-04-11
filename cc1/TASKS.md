@@ -10,6 +10,8 @@ _Tasks currently being worked on_
 ## Completed
 _Finished tasks (move here when done)_
 
+- [x] First FAQ Bulk API run completed — 29,076 FAQs generated via OpenAI Batch API (6 chunks of 5K). FAQ content now at 230,241 total. 4 failures, 0 errors. Took ~8 hours (mostly OpenAI queue time) #claude-session:2026-04-11
+- [x] Fix batch API 200MB limit — split into 5K-request chunks. OpenAI has 200MB file size limit for gpt-4o-mini batches, 29K prompts exceeded this. Both FAQ and kopteksten batch pipelines updated #claude-session:2026-04-10
 - [x] Fix unique titles batch UI — progress bar instead of button text, aiBatchPolling flag set immediately to prevent loadAiStatus from resetting UI. Removed 158,742 faulty URLs (/r/ URLs, populaire_themas_accessoires, type_parfum, pl_pennen) from all 6 DB tables, exported to ~/faulty_unique_title_urls.xlsx #claude-session:2026-04-10
 - [x] Frontend polish — standardized page widths to col-md-10 across all tools (unique-titles was col-lg-8, redirects/keyword-planner/url-checker/redirect-checker were col-md-11). Unified input-group layout for batch/workers fields. Buttons right-aligned across all sections. Cleaned up MC ID Finder, URL Checker, Redirect Checker, R-Finder, Redirects. Added Bulk API to unique titles. Fixed FAQ recent results X-button overflow (CSS grid). Pre-filled title suffix in unique titles Add/Edit form #claude-session:2026-04-10
 - [x] Add OpenAI Batch API integration — new `batch_api_service.py` for bulk FAQ and kopteksten generation (50% cheaper). "Bulk API" checkbox in frontend, 4 new endpoints, background thread with phase-based progress. Prepares prompts with 50 concurrent Product Search API threads, uploads JSONL, polls OpenAI, saves results in bulk #claude-session:2026-04-10

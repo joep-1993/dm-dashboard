@@ -142,11 +142,29 @@
     - type_parfum (6,901): invalid facet, API returns 400
     - pl_pennen (90): invalid facet, API returns 400
 
+  ---
+  14. Batch API 200MB Fix — Chunked Uploads
+
+  - OpenAI Batch API has a 200MB file size limit per batch for gpt-4o-mini
+  - 29K FAQ prompts with product data exceeded this limit, causing batch failure
+  - Fix: split into chunks of 5,000 requests each, process sequentially, save results per chunk
+  - Applied to both FAQ and kopteksten batch pipelines in batch_api_service.py
+
+  ---
+  15. First FAQ Bulk API Run (2026-04-11)
+
+  - 29,076 FAQs generated via OpenAI Batch API (6 chunks of 5K requests each)
+  - FAQ content total now 230,241 (up from ~200K)
+  - 4 failures, 0 errors from this batch run
+  - Processing took ~8 hours total (mostly OpenAI queue waiting time, not actual processing)
+  - 13,584 URLs still pending (skipped during prepare phase — no products found)
+
 You can find the changes in the commit history:
 
   1. 33c5d57 — Title scoring, Kinder dedup fix, tracking ghost records, prompt improvements
   2. 332f98a — Batch API, query optimization, worker limits
   3. b03f1c3 — Update cc1 docs and ARCHITECTURE.md
   4. d7f7c6d — Frontend polish, Bulk API for unique titles, standardize layouts
-  5. (next) — Batch UI fix, faulty URL cleanup
+  5. 56632c7 — Batch UI fix, faulty URL cleanup
+  6. 452d41f — Fix batch API 200MB limit, split into 5K-request chunks
 
