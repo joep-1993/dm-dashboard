@@ -102,11 +102,12 @@
   - Pre-filled title suffix "✔️ Tot !!DISCOUNT!! korting! | beslist.nl" in Unique Titles Add/Edit form
 
   Tool-specific cleanups:
-  - MC ID Finder: wrapped in col-md-10, standard card headers, cleaned up inline styles, simplified search layout
-  - URL Checker: input-group settings (Workers/Req-sec/Timeout) with aligned labels, textarea + file picker + settings in 3 columns
-  - Redirect Checker: input-group settings, textarea aligned with Check URLs button
-  - Redirects (301-generator): compact date/limit inputs inline with Generate button, transformation rules X-buttons right-aligned via flexbox, tab styling matched to Canonicals
+  - MC ID Finder: wrapped in col-md-10, standard card headers, cleaned up inline styles, simplified search layout, placeholder "one shop per line"
+  - URL Checker: 3-column layout (textarea col-md-7, file picker col-md-2, settings col-md-3). Settings inputs stacked with fixed-width labels (Parallel Workers, Requests/sec, Timeout), right-aligned. Check URLs button same width as settings. File picker height matches textarea. Placeholder changed to "url 1/url 2/url 3"
+  - Redirect Checker: input-group settings with fixed-width labels, textarea height aligned with Check URLs button, placeholder changed to "url 1/url 2/url 3"
+  - Redirects (301-generator): compact date/limit inputs inline with Generate button, transformation rules X-buttons right-aligned via flexbox, tab styling matched to Canonicals (bold text, full width), removed "(optional)" from section title
   - R-Finder: renamed "Category / Query Filters (AND logic)" to "URL-filters", placeholder text simplified to "Filter 1/2/3/4", removed helper text
+  - FAQ Content Publishing: matched Kopteksten layout (dropdowns + last push left, buttons right)
 
   ---
   10. Bulk API for Unique Titles
