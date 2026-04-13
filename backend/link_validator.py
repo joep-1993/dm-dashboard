@@ -179,15 +179,20 @@ def query_elasticsearch_by_plpurl(index: str, plp_urls: List[str], min_offers: i
     result = {}
     found_v4_parts = set()
 
-    # Phase 1: Fast pimId-based lookup with V4 UUIDs
+    # Phase 1: Fast id-based lookup with V4 UUIDs.
+    # V4 UUIDs are stored in the `id` / `groupId` fields of the index — NOT in
+    # `pimId` (which uses values like `nl-nl-gold-...`). Matching on pimId used
+    # to always miss, causing every V4 link to be silently skipped by the
+    # validator (neither replaced when slugs change, nor flagged gone when the
+    # product disappears from ES). Querying on `id` fixes both behaviors.
     try:
         v4_uuids = list(v4_to_original.keys())
         query = {
-            "_source": ["plpUrl", "pimId", "shopCount"],
+            "_source": ["plpUrl", "id", "shopCount"],
             "size": len(v4_uuids),
             "query": {
                 "terms": {
-                    "pimId": v4_uuids
+                    "id": v4_uuids
                 }
             }
         }
@@ -199,29 +204,32 @@ def query_elasticsearch_by_plpurl(index: str, plp_urls: List[str], min_offers: i
 
         for hit in data.get('hits', {}).get('hits', []):
             source = hit.get('_source', {})
-            pim_id = source.get('pimId', '')
+            v4_id = source.get('id', '')
             es_plp_url = source.get('plpUrl', '')
             shop_count = source.get('shopCount', 0) or 0
 
-            if pim_id in v4_to_original:
-                original_url = v4_to_original[pim_id]
-                found_v4_parts.add(pim_id)
+            if v4_id in v4_to_original:
+                original_url = v4_to_original[v4_id]
+                found_v4_parts.add(v4_id)
                 if shop_count >= min_offers and es_plp_url:
                     result[original_url] = es_plp_url
                 else:
                     result[original_url] = None
 
-        if found_v4_parts:
-            print(f"[LINK_VALIDATOR] Fast pimId lookup found {len(found_v4_parts)}/{len(v4_uuids)} V4 URLs in {index}")
-    except Exception as e:
-        print(f"[LINK_VALIDATOR] Fast pimId lookup failed for {index}: {e}, falling back to wildcard")
+        # V4 UUIDs not in the phase-1 response are treated as GONE (product no
+        # longer exists in ES). We query on the authoritative `id` field, so a
+        # miss is reliable — no need for a wildcard fallback.
+        for v4_uuid, original_url in v4_to_original.items():
+            if v4_uuid not in found_v4_parts:
+                result[original_url] = None
 
-    # V4 URLs not found via pimId are skipped (not marked as gone).
-    # Wildcard queries on plpUrl are disabled because they always timeout on ES
-    # and never return results - they just slow down the entire validation process.
-    remaining = len(v4_to_original) - len(found_v4_parts)
-    if remaining > 0:
-        print(f"[LINK_VALIDATOR] Skipping {remaining} V4 URLs in {index} not found via pimId (wildcard disabled)")
+        if found_v4_parts:
+            print(f"[LINK_VALIDATOR] V4 id lookup found {len(found_v4_parts)}/{len(v4_uuids)} products in {index}")
+        missing = len(v4_to_original) - len(found_v4_parts)
+        if missing > 0:
+            print(f"[LINK_VALIDATOR] Marked {missing} V4 URLs as GONE in {index} (not found in ES)")
+    except Exception as e:
+        print(f"[LINK_VALIDATOR] V4 id lookup failed for {index}: {e} - skipping batch (not marking as gone)")
 
     return result
 

@@ -574,16 +574,27 @@ class ThemaAdsService:
         cur = conn.cursor()
 
         try:
+            # Pre-aggregate item counts per job_id so the outer query doesn't
+            # need a GROUP BY (thema_ads_jobs.id has no PRIMARY KEY, so Postgres
+            # can't infer functional dependency of j.* on j.id).
             cur.execute("""
                 SELECT
                     j.*,
-                    COALESCE(SUM(CASE WHEN i.status = 'successful' THEN 1 ELSE 0 END), 0) as successful_count,
-                    COALESCE(SUM(CASE WHEN i.status = 'failed' THEN 1 ELSE 0 END), 0) as failed_count,
-                    COALESCE(SUM(CASE WHEN i.status = 'skipped' THEN 1 ELSE 0 END), 0) as skipped_count,
-                    COALESCE(SUM(CASE WHEN i.status = 'pending' THEN 1 ELSE 0 END), 0) as pending_count
+                    COALESCE(c.successful_count, 0) AS successful_count,
+                    COALESCE(c.failed_count,     0) AS failed_count,
+                    COALESCE(c.skipped_count,    0) AS skipped_count,
+                    COALESCE(c.pending_count,    0) AS pending_count
                 FROM thema_ads_jobs j
-                LEFT JOIN thema_ads_job_items i ON j.id = i.job_id
-                GROUP BY j.id
+                LEFT JOIN (
+                    SELECT
+                        job_id,
+                        SUM(CASE WHEN status = 'successful' THEN 1 ELSE 0 END) AS successful_count,
+                        SUM(CASE WHEN status = 'failed'     THEN 1 ELSE 0 END) AS failed_count,
+                        SUM(CASE WHEN status = 'skipped'    THEN 1 ELSE 0 END) AS skipped_count,
+                        SUM(CASE WHEN status = 'pending'    THEN 1 ELSE 0 END) AS pending_count
+                    FROM thema_ads_job_items
+                    GROUP BY job_id
+                ) c ON c.job_id = j.id
                 ORDER BY j.created_at DESC
                 LIMIT %s
             """, (limit,))
