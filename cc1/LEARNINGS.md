@@ -1,6 +1,42 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Link validator — V4 UUID lookup used the wrong ES field (2026-04-13)
+- **Bug**: `backend/link_validator.py:query_elasticsearch_by_plpurl` phase-1 lookup queried ES on `pimId`, but V4 UUIDs live in the `id`/`groupId` fields. `pimId` stores `nl-nl-gold-...` values, never `V4_...`. So the terms query *always* returned 0 hits
+- **Impact**: *Every* V4 product link on content and FAQ pages was silently skipped by the validator — never replaced when slugs changed, never flagged `gone`, never triggering regeneration. This has been true for as long as the V4 branch existed in this file. Phase-2 wildcard fallback was disabled (it timed out), so the bug had no safety net
+- **Fix**: Changed `"pimId"` → `"id"` in the terms query and source list. Also repurposed the phase-1 miss path: V4 UUIDs not returned by the `id` lookup are now marked gone (previously left out of the result dict entirely). ES request failures still skip the batch in the `except` branch, so transient errors can't cause spurious regeneration
+- **Verification**: tested on `/products/mode/mode_432356/` (4 V4 links) — before: 0/0/0, after: 2 slug replacements + 2 gone URLs matching ground truth
+- **Files**: `backend/link_validator.py` (one function, ~50 line diff). Same fix benefits `validate_faq_links` because it delegates to the same helper
+- **Pattern**: when a schema sample disagrees with query assumptions, always verify field names against a live document before debugging around the symptoms
+
+## thema_ads_* tables missing PKs → GROUP BY errors + broken inserts (2026-04-13)
+- **Symptom**: startup log showed `Error cleaning up stale jobs: column "j.status" must appear in the GROUP BY clause`. `cleanup_stale_jobs` in `thema_ads_router.py` calls `thema_ads_service.list_jobs` which did `SELECT j.*, SUM(...) ... GROUP BY j.id`
+- **Root cause**: `thema_ads_jobs` in the live DB had zero constraints — no PK, no unique, nothing. Postgres functional-dependency detection only accepts `SELECT j.*` with `GROUP BY j.id` when `id` is declared PK. The schema files (`thema_ads_schema.sql`, `thema_ads_db.py`, `database.py`) all declare `id SERIAL PRIMARY KEY`, but the live table was created without those constraints
+- **Fix 1 — query**: rewrote `list_jobs` to pre-aggregate counts in a subquery on `thema_ads_job_items` and LEFT JOIN, eliminating GROUP BY on the outer query. Semantically identical
+- **Fix 2 — schema**: added sequences, `SET DEFAULT nextval(...)`, PRIMARY KEYs on all three `thema_ads_*` tables (`thema_ads_jobs`, `thema_ads_job_items`, `thema_ads_input_data`), and FKs from the two child tables to `thema_ads_jobs(id)` with ON DELETE CASCADE. All three were empty so zero risk
+- **Side effect fixed**: inserts without explicit id would have failed (column NOT NULL, no default). Now they auto-increment as intended
+- **Pattern**: periodically verify that `CREATE TABLE IF NOT EXISTS` declarations in the code match actual live schema — the "IF NOT EXISTS" silently skips structural mismatches
+
+## AI Titles — facets that should act as the category name (2026-04-13)
+- **Context**: for some URLs the facet value is already the product noun (e.g. `t_wanddeco` → "wandplaten"), so appending the generic `category_name` ("Wanddecoratie") produces redundant titles like *"Acryl Metalen wandplaten Wanddecoratie kopen?..."*
+- **Implementation**: added `CATEGORY_OVERRIDE_FACETS` set (currently `{'t_wanddeco'}`) in `improve_h1_title`. When any such facet is in `selected_facets`, the code strips `category_name` from the H1 (both prefix and suffix, case-insensitive) and clears the local `category_name` variable so downstream logic can't re-append it
+- **Why a set, not a generic `t_*` rule**: some `t_*` facets are genuinely descriptors, not category-equivalents. Explicit opt-in keeps behavior predictable
+- **Reset**: 61 URLs containing `t_wanddeco` reset to pending
+- **Related pattern**: similar to the existing "Soort facet with product-type suffix" logic at lines 535-544, but generalized and explicit
+
+## AI Titles — stijl adjectives must precede the noun (2026-04-13)
+- **Issue**: with `stijl_test~8064049` (value "Industriële"), the AI placed the style adjective correctly ~97% of the time but sometimes at the end: *"Gouden Stoffen Verstelbare Barkrukken Industriële"*, *"Zwarte Grote Hoekbureaus 4 laden Industriële"*
+- **Root cause**: prompt rule 4 only explicitly covered colors and materials. Style facets (`stijl_test`, `stijl_woonaccessoires`, `stijl`, `stijl_schoenen`, `stijl_tas`, `stijl_tegels`, `stijl_tuinart` — ~44k URLs across 7 families) had no explicit rule, so the model's placement was inconsistent
+- **Fix**: extended rule 4 to name stijl adjectives with examples ("Industriële", "Moderne", "Scandinavische") and an explicit "NOOIT aan het einde van de titel" clause
+- **Reset**: 1,994 URLs containing `stijl_test~8064049` (572 processed + 1,422 unprocessed) reset to pending
+- **Pattern**: the AI follows explicit, example-backed rules far more reliably than implicit category-like behavior. When one facet family has a recurring placement issue, check whether the prompt names that family
+
+## Uvicorn was running without --reload (2026-04-13)
+- **Symptom**: code edits to `backend/*.py` didn't take effect until process restart
+- **Cause**: scheduled-task startup script `C:\Users\JoepvanSchagen\scripts\start-dm-dashboard.ps1` ran `uvicorn backend.main:app --host 0.0.0.0 --port 8003` with no `--reload`
+- **Fix**: added `--reload` to the ps1 script and restarted the process. Future edits hot-swap via WatchFiles
+- **Also**: scheduled task `DM Tools Dashboard` logon trigger got a 10-minute delay (`<Delay>PT10M</Delay>`) so WSL/Ubuntu has time to be ready before uvicorn tries to bind :8003
+
 ## OpenAI Batch API — File Size Limit & Chunking (2026-04-10)
 - **200MB limit** per batch file for gpt-4o-mini. 29K FAQ prompts with product data exceeded this
 - **Fix**: Split into chunks of 5,000 requests each. For 29K URLs = 6 chunks, processed sequentially

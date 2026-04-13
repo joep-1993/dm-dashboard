@@ -454,6 +454,23 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         print(f"[AI_TITLES] No H1 from API for {url}")
         return None
 
+    # Facets that should be treated as the category name themselves. When any of
+    # these is present on the URL, the actual category_name is suppressed so the
+    # facet value (e.g. "wandplaten") carries the product noun instead of the
+    # generic category (e.g. "Wanddecoratie").
+    CATEGORY_OVERRIDE_FACETS = {'t_wanddeco'}
+    has_category_override = any(
+        f['facet_name'].lower() in CATEGORY_OVERRIDE_FACETS for f in selected_facets
+    )
+    if has_category_override and category_name:
+        # Strip category_name from end or start of the API H1 if it's already there
+        cat_suffix = re.compile(r'\s+' + re.escape(category_name) + r'\s*$', re.IGNORECASE)
+        api_h1 = cat_suffix.sub('', api_h1).strip()
+        cat_prefix = re.compile(r'^' + re.escape(category_name) + r'\s+', re.IGNORECASE)
+        api_h1 = cat_prefix.sub('', api_h1).strip()
+        # Prevent downstream logic from re-appending it
+        category_name = ''
+
     # Append category name if missing from H1 (e.g., "Vrijstaande 23 liter" → "Vrijstaande 23 liter magnetrons")
     if category_name and category_name.lower() not in api_h1.lower():
         api_h1 = api_h1.rstrip() + " " + category_name.lower()
@@ -715,7 +732,7 @@ Regels:
 1. ALLERBELANGRIJKSTE REGEL: Gebruik UITSLUITEND woorden die voorkomen in de titel OF in de facetten hierboven. Voeg ABSOLUUT GEEN nieuwe woorden toe. Geen "Nieuwe", geen extra bijvoeglijke naamwoorden, geen woorden die niet letterlijk in de input staan.
 2. Facetwaarden zijn vaste combinaties en mogen NIET opgesplitst worden.
 3. Merk ALTIJD vooraan (bijv. "Apple iPhones" niet "iPhones van Apple").
-4. Kleuren en materialen als bijvoeglijk naamwoord VOOR de doelgroep en VOOR het zelfstandig naamwoord (bijv. "blauwe Heren hoodies", NIET "Heren blauwe hoodies").
+4. Kleuren, materialen en stijlen (bv. "Industriële", "Moderne", "Scandinavische") als bijvoeglijk naamwoord VOOR de doelgroep en VOOR de productnaam, NOOIT aan het einde van de titel (bijv. "blauwe Heren hoodies", "Industriële Zwarte tafels", NIET "Heren blauwe hoodies" of "tafels Industriële").
 5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan direct VOOR de productnaam maar NA kleuren/materialen, NOOIT met "voor" ervoor.
 6. NOOIT "in", "van" of "voor" toevoegen (doelgroep-achtervoegsel wordt automatisch toegevoegd).
 {met_rule}8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
