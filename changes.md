@@ -1,6 +1,14 @@
 Session Summary — 2026-04-14
 
-1. Kopteksten Prompt — Vary Opening Phrases (backend/gpt_service.py:80,159)
+1. FAQ Prompt — Add Facet Context for Filtered Pages (backend/faq_service.py, backend/batch_api_service.py)
+
+- Problem: FAQs on faceted URLs (e.g. merk~819441) had generic category questions — no mention of the specific brand/color/material filter
+- Root cause: `selected_facets` data was available in page_data but never passed to the FAQ prompt
+- Fix: Added facet context block ("Actieve filters op deze pagina: Merk: You2Toys") and a conditional instruction telling the AI to write facet-specific questions. Only injected on faceted pages — non-faceted pages unaffected
+- Analysis: ~18,047 of 221,955 faceted FAQs (8%) had clearly generic questions. 100,142 brand-filtered URLs, 8,016 (8%) generic
+- Reset: Deleted 18,047 generic FAQ entries from pa.faq_content, reset 18,046 to pending in pa.faq_tracking
+
+2. Kopteksten Prompt — Vary Opening Phrases (backend/gpt_service.py:80,159)
 
 - Problem: Nearly all generated kopteksten opened with "Bij het kiezen van een..." — repetitive across content
 - Fix: Added soft variation rule to both subcategory and main category system prompts. Not a hard ban — the phrase can still appear occasionally, just not as the default opener

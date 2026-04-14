@@ -164,10 +164,20 @@ def _build_faq_prompt(page_data: Dict, num_faqs: int = 6) -> str:
         ])
         product_urls_context = f"\n\nProductpagina's (gebruik deze voor hyperlinks in antwoorden):\n{urls_list}"
 
+    # Build context from selected facets so the AI writes facet-specific FAQs
+    facet_context = ""
+    facet_instruction = ""
+    if page_data.get("selected_facets"):
+        facets = page_data["selected_facets"]
+        facet_descriptions = [f"{f['facet_name']}: {f['facet_value']}" for f in facets]
+        facet_context = f"\n\nActieve filters op deze pagina:\n" + "\n".join(f"- {d}" for d in facet_descriptions)
+        facet_instruction = "\n- BELANGRIJK: Deze pagina is gefilterd op specifieke kenmerken (zie \"Actieve filters\" hierboven). Maak de vragen en antwoorden specifiek over die filters. Als er gefilterd is op een merk, stel dan vragen over dat merk en hun producten. Als er gefilterd is op een kleur, materiaal of type, stel dan vragen die specifiek over die eigenschap gaan. Schrijf GEEN generieke vragen die net zo goed op de ongefilterde categoriepagina zouden passen."
+
     return f"""Je bent een SEO-expert die FAQ's schrijft voor e-commerce pagina's.
 
 Pagina titel: {page_data['h1_title']}
 URL: {page_data['url']}
+{facet_context}
 {products_context}
 {product_urls_context}
 
@@ -176,7 +186,7 @@ Schrijf {num_faqs} veelgestelde vragen (FAQ's) die relevant zijn voor bezoekers 
 Vereisten:
 - Vragen moeten natuurlijk klinken, zoals echte klanten ze zouden stellen
 - Antwoorden moeten informatief en behulpzaam zijn (50-100 woorden per antwoord)
-- Focus op koopadvies, productvergelijkingen, en praktische tips
+- Focus op koopadvies, productvergelijkingen, en praktische tips{facet_instruction}
 - Schrijf in het Nederlands
 - Noem geen specifieke prijzen
 - BELANGRIJK: Gebruik een informele, toegankelijke toon. Gebruik "jij" en "je" in plaats van "u" en "uw". Spreek de lezer direct en vriendelijk aan.
