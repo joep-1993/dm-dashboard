@@ -1,6 +1,12 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Kopteksten prompt — repetitive opening phrases (2026-04-14)
+- **Issue**: Nearly all generated kopteksten started with "Bij het kiezen van een..." — monotonous output
+- **Root cause**: The system prompt already banned "Als je op zoek bent naar" etc. but the model defaulted to another formulaic opener
+- **Fix**: Added a soft discouragement (not a hard ban) to both subcategory and main category system prompts: "Vermijd ook om te vaak te openen met 'Bij het kiezen van' — gebruik dit hooguit af en toe, niet standaard"
+- **Pattern**: When banning specific openings, the model often shifts to a new default. Soft variation rules ("use sparingly") work better than hard bans for preventing monotony without over-constraining
+
 ## Link validator — V4 UUID lookup used the wrong ES field (2026-04-13)
 - **Bug**: `backend/link_validator.py:query_elasticsearch_by_plpurl` phase-1 lookup queried ES on `pimId`, but V4 UUIDs live in the `id`/`groupId` fields. `pimId` stores `nl-nl-gold-...` values, never `V4_...`. So the terms query *always* returned 0 hits
 - **Impact**: *Every* V4 product link on content and FAQ pages was silently skipped by the validator — never replaced when slugs changed, never flagged `gone`, never triggering regeneration. This has been true for as long as the V4 branch existed in this file. Phase-2 wildcard fallback was disabled (it timed out), so the bug had no safety net

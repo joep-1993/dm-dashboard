@@ -77,7 +77,7 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
 - Noem nooit prijzen.
 - Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
 - Focus op advies dat écht helpt bij het maken van een keuze (bv. voordelen, verschillen, specifieke kenmerken).
-- Varieer sterk in je openingszinnen — begin NOOIT met "Als je op zoek bent naar", "Op zoek naar", "Ben je op zoek naar", "Zoek je" of vergelijkbare zoekformuleringen.
+- Varieer sterk in je openingszinnen — begin NOOIT met "Als je op zoek bent naar", "Op zoek naar", "Ben je op zoek naar", "Zoek je" of vergelijkbare zoekformuleringen. Vermijd ook om te vaak te openen met "Bij het kiezen van" — gebruik dit hooguit af en toe, niet standaard.
 - Vermijd generieke kwalificaties zoals "ideaal", "perfect", "uitstekend", "een goede keuze", "een heerlijke keuze". Wees specifiek: leg uit WAAROM iets geschikt is.
 - Gebruik geen uitroeptekens.
 - Vermijd overdreven enthousiaste marketing-taal. Schrijf behulpzaam en nuchter, niet als een reclamespot.
@@ -156,7 +156,7 @@ def generate_main_category_content(h1_title: str, products: List[Dict]) -> str:
 - Noem nooit prijzen.
 - Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
 - Dit is een hoofdcategoriepagina, dus schrijf een breed, uitnodigend overzicht - niet te specifiek op één producttype.
-- Begin NOOIT met "Welkom op de ... pagina" of vergelijkbare welkomstformuleringen.
+- Begin NOOIT met "Welkom op de ... pagina" of vergelijkbare welkomstformuleringen. Vermijd ook om te vaak te openen met "Bij het kiezen van" — gebruik dit hooguit af en toe.
 - Gebruik NOOIT "ons", "onze", "wij" of "we" - schrijf vanuit het perspectief van de bezoeker, niet vanuit het bedrijf.
 - BELANGRIJK: Link ALLEEN naar producten die in de meegeleverde lijst staan. Verzin NOOIT producten of URLs.
 - Als je linkt, gebruik de tag <a href> en kies de juiste url uit de lijst. Maak nooit zelf een andere url.

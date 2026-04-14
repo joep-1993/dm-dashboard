@@ -1,4 +1,14 @@
-  
+Session Summary — 2026-04-14
+
+1. Kopteksten Prompt — Vary Opening Phrases (backend/gpt_service.py:80,159)
+
+- Problem: Nearly all generated kopteksten opened with "Bij het kiezen van een..." — repetitive across content
+- Fix: Added soft variation rule to both subcategory and main category system prompts. Not a hard ban — the phrase can still appear occasionally, just not as the default opener
+- Subcategory prompt (line 80): "Vermijd ook om te vaak te openen met 'Bij het kiezen van' — gebruik dit hooguit af en toe, niet standaard"
+- Main category prompt (line 159): same rule added alongside existing "Welkom op de..." ban
+
+---
+
   Session Summary — 2026-04-09 / 2026-04-10                                                                                                                                     
                                                                                                                                                                                                                                                                      
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
