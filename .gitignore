@@ -44,6 +44,7 @@ scripts/amazon_cred
 backend/service_accounts/
 
 # Google Ads automation (contains sensitive config)
+thema_ads_optimized
 thema_ads_optimized/
 themes/
 
@@ -62,3 +63,20 @@ logs/
 
 # JSON data dumps (keep category_forms.json)
 structured_data_*.json
+
+# Local scratch / one-off notes not meant for the shared repo
+/nova
+/examp
+/query_example
+/query_visits_revenue.py
+/compare_prompts.py
+backend/brand_volumes.py
+backend/compare_prompts.py
+backend/fix_faq_*.py
+scripts/fix_faq_item_names.py
+scripts/script info.txt
+scripts/script.js
+scripts/search_volumes.py
+scripts/swagger_taxv2.json
+scripts/wishlist
+docs/indexnow_n8n.json
