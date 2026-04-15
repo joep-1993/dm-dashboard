@@ -1,5 +1,5 @@
 """
-Daily automation script for DM Tools (Docker version).
+Daily automation script for DM Tools / DM Dashboard.
 
 Flow:
   1. Cancel stale tasks from previous runs
@@ -9,7 +9,13 @@ Flow:
   5. Regenerate FAQ + Kopteksten content (parallel)
   6. Publish all content to production
 
-Can be triggered manually or via cron.
+Can be triggered manually, via cron (Linux), or Windows Task Scheduler.
+
+Environment:
+  BASE_URL                 — dashboard URL (default http://localhost:8003)
+  DASHBOARD_PASSWORD       — if set, logs in before running automation
+  DISABLE_SSL_VERIFY=true  — skip cert verification (for self-signed HTTPS)
+  SLACK_BOT_TOKEN / SLACK_USER_ID — for completion/failure notifications
 """
 import sys
 import os
@@ -20,6 +26,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import requests
+
+# Load .env from project root so this script can be run standalone (e.g. Task Scheduler)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+except ImportError:
+    pass  # dotenv is optional; running inside the app already has env loaded
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -33,8 +46,25 @@ VALIDATION_TIMEOUT = 14400    # 4 hours max for a validation step
 PROCESS_TIMEOUT = 14400       # 4 hours max for processing loops
 PUBLISH_TIMEOUT = 3600        # 1 hour max for publish
 
-# Reusable session
+# Reusable session — SSL verify can be disabled for self-signed certs
 SESSION = requests.Session()
+if os.getenv("DISABLE_SSL_VERIFY", "").lower() == "true":
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    SESSION.verify = False
+
+
+def login_if_configured():
+    """Authenticate with the dashboard using DASHBOARD_PASSWORD if set."""
+    log = logging.getLogger("automation")
+    password = os.getenv("DASHBOARD_PASSWORD", "")
+    if not password:
+        return  # no auth configured — local/dev mode
+    resp = SESSION.post(f"{BASE_URL}/login", data={"password": password}, allow_redirects=False)
+    if resp.status_code in (200, 302, 303, 307):
+        log.info("Authenticated with dashboard")
+    else:
+        raise RuntimeError(f"Login failed with status {resp.status_code}")
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -298,7 +328,11 @@ def main():
     start_time = datetime.now()
     log.info("=" * 60)
     log.info(f"Daily automation started at {start_time:%Y-%m-%d %H:%M:%S}")
+    log.info(f"Target: {BASE_URL}")
     log.info("=" * 60)
+
+    # Authenticate if the dashboard is password-protected
+    login_if_configured()
 
     # Cancel any stale validation tasks from previous failed runs
     log.info("--- Cancelling stale tasks ---")
