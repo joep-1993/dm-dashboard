@@ -6,6 +6,7 @@ Stores data in local PostgreSQL and generates CSV for API upload.
 """
 import csv
 import io
+import os
 import requests
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -13,7 +14,7 @@ from backend.database import get_db_connection, return_db_connection
 
 # API Configuration
 UNIQUE_TITLES_API_URL = "https://website-configuration.api.beslist.nl/custom-title-description/import-per-url"
-UNIQUE_TITLES_API_KEY = "Sectional~Publisher~Dumpling1"
+UNIQUE_TITLES_API_KEY = os.getenv("UNIQUE_TITLES_API_KEY", "")
 
 
 def init_unique_titles_table():
