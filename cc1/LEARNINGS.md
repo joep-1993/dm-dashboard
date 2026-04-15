@@ -1,6 +1,36 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## One repo serving two environments — env-gated features beat two forks (2026-04-15)
+- **Context**: `dm-tools` (localhost, 8003, no auth) and `dm-dashboard` (networked, 3003, password-protected, Windows Task Scheduler UI) had drifted into two parallel repos with ~11 differing files. Same project, different deployment constraints. The old workflow was "commit to both repos after every change" which is error-prone and was already producing divergent features
+- **Consolidation approach**: dm-tools absorbed every dashboard feature, but behind env vars:
+  - `DASHBOARD_PASSWORD` empty → middleware is a pass-through; set → login required
+  - `ENABLE_TASK_SCHEDULER=false` (default) → router not mounted, `/api/config` returns `task_scheduler_enabled:false`, and a small frontend script hides the Automation card in `dashboard.html`
+  - `CORS_ORIGINS` unset or `*` → permissive; comma-separated hosts → restricted
+  - `BASE_URL` and `DISABLE_SSL_VERIFY` in `daily_automation.py` → same script works for http://localhost:8003 and https://win-htz-006.colo.beslist.net:3003
+- **Why this is better than two forks**: one code path to test, one set of commits, no "which repo has the latest fix" ambiguity. Every new feature only has to be written once
+- **Gotcha**: creating tables (e.g. `scheduled_tasks`) unconditionally is fine — they're dormant when the feature is off. Mounting routers conditionally is cleaner than nesting `if env_var:` inside every handler
+- **Frontend feature flags via `/api/config`**: any new env-gated UI now just `fetch('/api/config').then(cfg => { if (cfg.feature) show(el) })`. No build step needed for a vanilla-JS frontend
+- **Pattern**: when two deploys of the same app diverge, unify via env flags before the drift becomes unmanageable. Each additional month of "two forks" makes the merge harder
+
+## Git remote swap for a canonical-repo switch (2026-04-15)
+- **Goal**: make `joep-1993/dm-dashboard` the canonical push target without moving files or re-cloning
+- **Steps used**:
+  1. Force-pushed consolidated history to dm-dashboard with `--force-with-lease=main:<old-hash>` (safety catch — fails if the remote moved since last fetch)
+  2. `git remote rename origin dm-tools-old`
+  3. `git remote rename dm-dashboard origin`
+  4. `git branch --set-upstream-to=origin/main main`
+- **Now plain `git push` / `git pull` target dm-dashboard**. The old remote is kept under a new name for reference (will be removed when dm-tools GitHub repo is archived)
+- **Pitfall hit**: `--force-with-lease=main:21eb8dc` (short hash) failed with "stale info". Had to use the full 40-char hash from `git rev-parse dm-dashboard/main`. `--force-with-lease` needs the exact SHA string
+- **Pattern**: use `--force-with-lease` (never plain `--force`) when rewriting shared remote history — it refuses to overwrite if someone else pushed in between
+
+## FAQ prompt — missing facet context for filtered pages (2026-04-14)
+- **Issue**: FAQs on faceted URLs (e.g. `/c/merk~819441`) had generic category questions instead of brand/facet-specific ones. Example: "AEG boormachines" page got "Wat is het voordeel van een accuboormachine?" with no mention of AEG
+- **Root cause**: `selected_facets` was returned by `fetch_products_api` but never included in the FAQ prompt. The AI only saw the h1_title (which often contained the brand) but had no explicit instruction to write facet-specific questions
+- **Fix**: Added `facet_context` (list of active filters) and a conditional instruction to both `faq_service.py` and `batch_api_service.py` — only injected when `selected_facets` is non-empty, so non-faceted pages are unaffected
+- **Scale**: ~18K of 222K faceted FAQs (8%) had clearly generic questions (title words absent from all questions). True number likely higher since heuristic is conservative
+- **Pattern**: When data is available in page_data but unused in the prompt, the AI can't be expected to know the page's filtering context. Always pass relevant metadata explicitly
+
 ## Kopteksten prompt — repetitive opening phrases (2026-04-14)
 - **Issue**: Nearly all generated kopteksten started with "Bij het kiezen van een..." — monotonous output
 - **Root cause**: The system prompt already banned "Als je op zoek bent naar" etc. but the model defaulted to another formulaic opener

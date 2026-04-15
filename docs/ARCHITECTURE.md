@@ -56,11 +56,29 @@
 8. **Database Insert Method**: Switched from Redshift `copy_from()` to universal `executemany()` to fix COPY command syntax errors
 
 ### Deployment Model
-- **Two modes**: Docker (`docker-compose up`) or Docker-free (`run_local.sh` / venv + uvicorn)
+- **Single codebase, two deploys**: one FastAPI app runs both on the developer laptop (localhost:8003) and on the networked box (`win-htz-006.colo.beslist.net:3003`). Behavioral differences are env-driven — see "Environment-Gated Features" below
+- **Two modes**: Docker (`docker-compose up`) or Docker-free (`run_local.sh` / venv + uvicorn). Docker-free is the standard path now
 - **No build tools** - direct HTML/CSS/JS editing with auto-reload
 - **Single-machine deployment** - designed for 1-10 users
 - **Database**: Remote PostgreSQL at 10.1.32.9 (primary for both modes)
 - **Windows auto-start**: Task Scheduler task "DM Tools Dashboard" runs `C:\Users\JoepvanSchagen\scripts\start-dm-dashboard.ps1` at logon — starts uvicorn via WSL, health-checks port 8003, closes window on success, stays open on error
+
+### Repository Management (as of 2026-04-15)
+- **Canonical repo**: `github.com/joep-1993/dm-dashboard` (git remote alias: `origin`)
+- **Legacy repo**: `github.com/joep-1993/dm-tools` (alias `dm-tools-old`) — kept for reference until archived. Do NOT push to it
+- **Working copy**: `/home/joepvanschagen/projects/dm-tools` (directory name unchanged, despite remote swap — historical)
+- **History of the consolidation**: dm-tools and dm-dashboard were two parallel repos with drifting copies. On 2026-04-15 they were unified: dm-tools absorbed all dashboard features behind env flags, then its history was force-pushed to dm-dashboard. Both remotes now hold identical history at commit `2414674`
+- **Workflow**: always `git pull --rebase` before pushing; a second Claude instance on the networked box also has repo access
+
+### Environment-Gated Features
+Features that should only run in specific deploys are toggled via `.env`. All default to "off" so the local dev experience is minimal:
+- `DASHBOARD_PASSWORD` — set to enable login middleware; unset disables auth entirely. Session cookie signed with `DASHBOARD_SECRET` (any stable random hex)
+- `CORS_ORIGINS` — comma-separated allow-list; unset or `*` for permissive local dev
+- `ENABLE_TASK_SCHEDULER=true` — mounts `task_scheduler_router` (Windows `schtasks`-based) and reveals the "Automation → Taakplanner" card on the dashboard frontpage via a `/api/config` feature-flag fetch
+- `UNIQUE_TITLES_API_KEY` — was hardcoded, now env-driven (key still the same value)
+- `BASE_URL`, `DISABLE_SSL_VERIFY`, `DASHBOARD_PASSWORD` are also read by `backend/daily_automation.py` so the same script can target localhost HTTP and networked self-signed HTTPS
+
+Frontend reads `/api/config` on page load to decide which feature-flagged UI to reveal — no rebuild required since the frontend is vanilla JS + CDN Bootstrap
 
 ---
 
