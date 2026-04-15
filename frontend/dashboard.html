@@ -450,6 +450,27 @@
             </div>
         </div>
 
+        <!-- Automation (only rendered when ENABLE_TASK_SCHEDULER=true on the server) -->
+        <section id="automation-section" style="display: none;">
+            <h4 class="category-heading">Automation</h4>
+            <div class="row g-4 mb-5">
+                <div class="col-lg-4 col-md-6">
+                    <div class="card tool-card">
+                        <div class="card-body">
+                            <div class="tool-icon" style="background: #6c5ce7; --icon-color: #6c5ce7;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                                </svg>
+                            </div>
+                            <h5 class="card-title">Taakplanner</h5>
+                            <p class="card-text">Beheer geplande taken die draaien via Windows Task Scheduler.</p>
+                            <a href="/static/task-scheduler.html" class="btn btn-tool" style="width: 50%;">Open Tool</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Footer -->
         <footer class="text-center py-4">
             <small>Digital Marketing tools by Joep van Schagen - 2026</small>
@@ -457,5 +478,14 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      // Reveal feature-gated sections based on server config
+      fetch('/api/config').then(r => r.ok ? r.json() : {}).then(cfg => {
+          if (cfg && cfg.task_scheduler_enabled) {
+              const s = document.getElementById('automation-section');
+              if (s) s.style.display = '';
+          }
+      }).catch(() => {});
+    </script>
 </body>
 </html>

@@ -277,6 +277,44 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_content_history_reset_at ON pa.content_history(reset_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_url_validation_status ON pa.url_validation_tracking(status)")
 
+    # Scheduled tasks configuration (used only when ENABLE_TASK_SCHEDULER=true)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pa.scheduled_tasks (
+            id SERIAL PRIMARY KEY,
+            task_name VARCHAR(100) NOT NULL UNIQUE,
+            display_name VARCHAR(200) NOT NULL,
+            description TEXT,
+            command TEXT NOT NULL,
+            working_directory TEXT DEFAULT 'C:\\Users\\l.davidowski\\dm-dashboard',
+            schedule_type VARCHAR(20) NOT NULL DEFAULT 'DAILY',
+            schedule_time TIME NOT NULL DEFAULT '07:00',
+            schedule_days VARCHAR(100),
+            is_enabled BOOLEAN NOT NULL DEFAULT true,
+            win_task_name VARCHAR(200) NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Scheduled task execution history
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pa.scheduled_task_runs (
+            id SERIAL PRIMARY KEY,
+            task_id INTEGER REFERENCES pa.scheduled_tasks(id) ON DELETE CASCADE,
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            exit_code INTEGER,
+            status VARCHAR(20) DEFAULT 'running',
+            output_log TEXT,
+            trigger_type VARCHAR(20) DEFAULT 'scheduled',
+            error_message TEXT
+        )
+    """)
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_enabled ON pa.scheduled_tasks(is_enabled)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_task_runs_task_id ON pa.scheduled_task_runs(task_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_task_runs_started ON pa.scheduled_task_runs(started_at DESC)")
+
     conn.commit()
     cur.close()
     conn.close()
