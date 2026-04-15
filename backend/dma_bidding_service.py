@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any, Tuple
 
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from google.protobuf import field_mask_pb2
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,11 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-CUSTOMER_ID = "3800751597"
+COUNTRY_CUSTOMER_IDS = {
+    "NL": "3800751597",
+    "BE": "9920951707",
+}
+DEFAULT_COUNTRY = "NL"
 MCC_CUSTOMER_ID = "3011145605"
 
 BID_STRATEGIES = {
@@ -41,6 +46,14 @@ _run_history: List[Dict[str, Any]] = []
 # ---------------------------------------------------------------------------
 
 
+def _resolve_customer_id(country: str = DEFAULT_COUNTRY) -> str:
+    """Return the Google Ads CUSTOMER_ID for the given country code."""
+    cid = COUNTRY_CUSTOMER_IDS.get(country.upper())
+    if not cid:
+        raise ValueError(f"Unknown country '{country}'. Expected one of: {list(COUNTRY_CUSTOMER_IDS.keys())}")
+    return cid
+
+
 def _get_client() -> GoogleAdsClient:
     """Initialize Google Ads client from environment variables."""
     config = {
@@ -59,74 +72,81 @@ def _get_client() -> GoogleAdsClient:
 # ---------------------------------------------------------------------------
 
 
-def get_bid_strategies() -> Tuple[Dict[int, str], Dict[str, int]]:
+def get_bid_strategies(country: str = DEFAULT_COUNTRY) -> Tuple[Dict[int, str], Dict[str, int]]:
     """
-    Query MCC for DMA Level 1/2/3 bid strategy resource names.
+    Query DMA Level 1/2/3 bid strategies via accessible_bidding_strategy.
+    This finds both account-owned and MCC-owned (cross-account) strategies.
     Returns:
-        (level_to_strategy_id, strategy_id_to_level) dicts.
+        (level_to_strategy_resource, strategy_id_to_level) dicts.
+        level_to_strategy_resource maps level -> full bidding_strategy resource name for mutations.
     """
+    customer_id = _resolve_customer_id(country)
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
     query = """
-        SELECT bidding_strategy.name, bidding_strategy.resource_name
-        FROM bidding_strategy
+        SELECT accessible_bidding_strategy.name,
+               accessible_bidding_strategy.id,
+               accessible_bidding_strategy.owner_customer_id
+        FROM accessible_bidding_strategy
     """
 
-    response = ga_service.search(customer_id=CUSTOMER_ID, query=query)
+    response = ga_service.search(customer_id=customer_id, query=query)
 
-    level_to_strategy_id: Dict[int, str] = {}
+    level_to_strategy_resource: Dict[int, str] = {}
     strategy_id_to_level: Dict[str, int] = {}
 
     for row in response:
-        name = row.bidding_strategy.name
-        resource_name = row.bidding_strategy.resource_name
-        # Extract strategy ID from resource_name: customers/{cid}/biddingStrategies/{sid}
-        strategy_id = resource_name.split("/")[-1]
+        name = row.accessible_bidding_strategy.name
+        strategy_id = str(row.accessible_bidding_strategy.id)
+        owner_id = str(row.accessible_bidding_strategy.owner_customer_id)
 
         for level, level_name in BID_STRATEGIES.items():
             if name == level_name:
-                level_to_strategy_id[level] = strategy_id
+                # Build resource name using the owner's customer ID for mutations
+                level_to_strategy_resource[level] = f"customers/{owner_id}/biddingStrategies/{strategy_id}"
                 strategy_id_to_level[strategy_id] = level
                 break
 
-    logger.info(f"Found bid strategies: {level_to_strategy_id}")
-    return level_to_strategy_id, strategy_id_to_level
+    logger.info(f"Found bid strategies: {level_to_strategy_resource}")
+    return level_to_strategy_resource, strategy_id_to_level
 
 
-def get_campaigns_with_strategies() -> List[Dict[str, Any]]:
+def get_campaigns_with_strategies(country: str = DEFAULT_COUNTRY) -> List[Dict[str, Any]]:
     """
-    Get all ENABLED campaigns with their bid strategy.
-    Returns list of dicts with campaign_name, resource_name, bidding_strategy.
+    Get all ENABLED campaigns with their accessible bid strategy.
+    Returns list of dicts with campaign_name, resource_name, accessible_bidding_strategy.
     """
+    customer_id = _resolve_customer_id(country)
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
     query = """
-        SELECT campaign.name, campaign.resource_name, campaign.bidding_strategy
+        SELECT campaign.name, campaign.resource_name, campaign.accessible_bidding_strategy
         FROM campaign
         WHERE campaign.status = 'ENABLED'
     """
 
-    response = ga_service.search(customer_id=CUSTOMER_ID, query=query)
+    response = ga_service.search(customer_id=customer_id, query=query)
 
     campaigns = []
     for row in response:
         campaigns.append({
             "campaign_name": row.campaign.name,
             "resource_name": row.campaign.resource_name,
-            "bidding_strategy": row.campaign.bidding_strategy,
+            "accessible_bidding_strategy": str(row.campaign.accessible_bidding_strategy),
         })
 
     logger.info(f"Found {len(campaigns)} enabled campaigns")
     return campaigns
 
 
-def get_campaign_metrics(start_days_ago: int = 9, end_days_ago: int = 3) -> Dict[str, Dict[str, Any]]:
+def get_campaign_metrics(start_days_ago: int = 9, end_days_ago: int = 3, country: str = DEFAULT_COUNTRY) -> Dict[str, Dict[str, Any]]:
     """
     Get per-campaign metrics: clicks, conversions_value, cost_micros.
     Also calculates OPB (conversions_value / clicks) and cost in EUR.
     """
+    customer_id = _resolve_customer_id(country)
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
@@ -140,7 +160,7 @@ def get_campaign_metrics(start_days_ago: int = 9, end_days_ago: int = 3) -> Dict
             AND segments.date BETWEEN '{start_date}' AND '{end_date}'
     """
 
-    response = ga_service.search(customer_id=CUSTOMER_ID, query=query)
+    response = ga_service.search(customer_id=customer_id, query=query)
 
     metrics: Dict[str, Dict[str, Any]] = {}
     for row in response:
@@ -161,11 +181,12 @@ def get_campaign_metrics(start_days_ago: int = 9, end_days_ago: int = 3) -> Dict
     return metrics
 
 
-def get_dma_cla_omzet(start_days_ago: int = 9, end_days_ago: int = 3) -> Dict[str, float]:
+def get_dma_cla_omzet(start_days_ago: int = 9, end_days_ago: int = 3, country: str = DEFAULT_COUNTRY) -> Dict[str, float]:
     """
     Get DMA/CLA conversion value per campaign.
     Returns dict mapping campaign_name -> all_conversions_value.
     """
+    customer_id = _resolve_customer_id(country)
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
@@ -180,7 +201,7 @@ def get_dma_cla_omzet(start_days_ago: int = 9, end_days_ago: int = 3) -> Dict[st
             AND segments.conversion_action_name = '{DMA_CLA_CONVERSION_ACTION}'
     """
 
-    response = ga_service.search(customer_id=CUSTOMER_ID, query=query)
+    response = ga_service.search(customer_id=customer_id, query=query)
 
     omzet: Dict[str, float] = {}
     for row in response:
@@ -191,36 +212,37 @@ def get_dma_cla_omzet(start_days_ago: int = 9, end_days_ago: int = 3) -> Dict[st
     return omzet
 
 
-def change_bid_strategy(campaign_resource_name: str, new_strategy_id: str, dry_run: bool = True) -> Dict[str, Any]:
+def change_bid_strategy(campaign_resource_name: str, new_strategy_resource: str, dry_run: bool = True, country: str = DEFAULT_COUNTRY) -> Dict[str, Any]:
     """
     Mutate a campaign's bidding_strategy to a new strategy.
+    new_strategy_resource is the full resource name (e.g. customers/{owner_id}/biddingStrategies/{id}).
     Skips mutation if dry_run is True.
     """
     if dry_run:
-        logger.info(f"[DRY RUN] Would change {campaign_resource_name} to strategy {new_strategy_id}")
-        return {"status": "dry_run", "campaign": campaign_resource_name, "new_strategy_id": new_strategy_id}
+        logger.info(f"[DRY RUN] Would change {campaign_resource_name} to strategy {new_strategy_resource}")
+        return {"status": "dry_run", "campaign": campaign_resource_name, "new_strategy": new_strategy_resource}
 
+    customer_id = _resolve_customer_id(country)
     client = _get_client()
     campaign_service = client.get_service("CampaignService")
 
     operation = client.get_type("CampaignOperation")
     campaign = operation.update
     campaign.resource_name = campaign_resource_name
-    campaign.bidding_strategy = f"customers/{CUSTOMER_ID}/biddingStrategies/{new_strategy_id}"
+    campaign.bidding_strategy = new_strategy_resource
 
-    field_mask = client.get_type("FieldMask")
-    field_mask.paths.append("bidding_strategy")
+    field_mask = field_mask_pb2.FieldMask(paths=["bidding_strategy"])
     operation.update_mask.CopyFrom(field_mask)
 
     try:
         response = campaign_service.mutate_campaigns(
-            customer_id=CUSTOMER_ID, operations=[operation]
+            customer_id=customer_id, operations=[operation]
         )
-        logger.info(f"Changed bid strategy for {campaign_resource_name} to {new_strategy_id}")
+        logger.info(f"Changed bid strategy for {campaign_resource_name} to {new_strategy_resource}")
         return {
             "status": "success",
             "campaign": campaign_resource_name,
-            "new_strategy_id": new_strategy_id,
+            "new_strategy": new_strategy_resource,
             "result": response.results[0].resource_name,
         }
     except GoogleAdsException as ex:
@@ -233,18 +255,18 @@ def change_bid_strategy(campaign_resource_name: str, new_strategy_id: str, dry_r
 # ---------------------------------------------------------------------------
 
 
-def get_level_stats() -> Dict[str, Any]:
+def get_level_stats(country: str = DEFAULT_COUNTRY) -> Dict[str, Any]:
     """
     Get campaign counts per DMA bid strategy level + full campaign list.
     """
-    level_to_strategy_id, strategy_id_to_level = get_bid_strategies()
-    campaigns = get_campaigns_with_strategies()
+    level_to_strategy_id, strategy_id_to_level = get_bid_strategies(country=country)
+    campaigns = get_campaigns_with_strategies(country=country)
 
     level_counts = {1: 0, 2: 0, 3: 0}
     campaign_list = []
 
     for c in campaigns:
-        strategy_resource = c.get("bidding_strategy", "")
+        strategy_resource = c.get("accessible_bidding_strategy", "")
         if strategy_resource:
             strategy_id = strategy_resource.split("/")[-1]
             level = strategy_id_to_level.get(strategy_id)
@@ -272,6 +294,7 @@ def run_dma_bidding(
     dry_run: bool = True,
     exclude_campaigns: Optional[List[str]] = None,
     include_campaigns: Optional[List[str]] = None,
+    country: str = DEFAULT_COUNTRY,
 ) -> Dict[str, Any]:
     """
     Main DMA bidding flow:
@@ -282,13 +305,13 @@ def run_dma_bidding(
     run_id = len(_run_history) + 1
     start_time = datetime.now()
 
-    logger.info(f"Starting DMA bidding run #{run_id} (dry_run={dry_run}, range={start_days_ago}-{end_days_ago})")
+    logger.info(f"Starting DMA bidding run #{run_id} (country={country}, dry_run={dry_run}, range={start_days_ago}-{end_days_ago})")
 
     # Step 1: Gather data
-    level_to_strategy_id, strategy_id_to_level = get_bid_strategies()
-    campaigns = get_campaigns_with_strategies()
-    metrics = get_campaign_metrics(start_days_ago, end_days_ago)
-    dma_cla_omzet = get_dma_cla_omzet(start_days_ago, end_days_ago)
+    level_to_strategy_id, strategy_id_to_level = get_bid_strategies(country=country)
+    campaigns = get_campaigns_with_strategies(country=country)
+    metrics = get_campaign_metrics(start_days_ago, end_days_ago, country=country)
+    dma_cla_omzet = get_dma_cla_omzet(start_days_ago, end_days_ago, country=country)
 
     # Step 2: Process campaigns
     changes = {
@@ -308,7 +331,7 @@ def run_dma_bidding(
     for c in campaigns:
         campaign_name = c["campaign_name"]
         resource_name = c["resource_name"]
-        strategy_resource = c.get("bidding_strategy", "")
+        strategy_resource = c.get("accessible_bidding_strategy", "")
 
         if not strategy_resource:
             continue
@@ -392,9 +415,9 @@ def run_dma_bidding(
 
         # Apply bid strategy change
         if new_level != current_level:
-            new_strategy_id = level_to_strategy_id.get(new_level)
-            if new_strategy_id:
-                result = change_bid_strategy(resource_name, new_strategy_id, dry_run=dry_run)
+            new_strategy_resource = level_to_strategy_id.get(new_level)
+            if new_strategy_resource:
+                result = change_bid_strategy(resource_name, new_strategy_resource, dry_run=dry_run, country=country)
                 campaign_info["mutation_result"] = result
 
     # Step 3: Build summary
@@ -419,6 +442,7 @@ def run_dma_bidding(
 
     run_result = {
         "run_id": run_id,
+        "country": country,
         "dry_run": dry_run,
         "start_days_ago": start_days_ago,
         "end_days_ago": end_days_ago,
