@@ -20,7 +20,8 @@ import threading
 import traceback
 from collections import deque
 from datetime import datetime
-from typing import Optional
+from pathlib import Path
+from typing import Dict, Optional
 
 import openpyxl
 from google.ads.googleads.client import GoogleAdsClient
@@ -87,6 +88,46 @@ def _patch_campaign_processor(country: str):
     cp.CUSTOMER_ID = cfg["customer_id"]
     cp.MERCHANT_CENTER_ID = cfg["merchant_center_id"]
     cp.EXCLUDE_DATAEDIS = cfg["exclude_dataedis"]
+
+
+# ---------------------------------------------------------------------------
+# Maincat cross-matching (name ↔ id)
+# ---------------------------------------------------------------------------
+_maincat_name_to_id: Dict[str, str] = {}
+_maincat_id_to_name: Dict[str, str] = {}
+
+
+def _ensure_maincat_mapping():
+    """Load maincat_mapping.csv once for name↔id resolution."""
+    if _maincat_name_to_id:
+        return
+    csv_path = Path(__file__).parent / "maincat_mapping.csv"
+    if not csv_path.exists():
+        return
+    import csv
+    with open(csv_path, encoding="utf-8") as f:
+        for row in csv.DictReader(f, delimiter=";"):
+            name = row["maincat"].strip()
+            mid = str(row["maincat_id"]).strip()
+            _maincat_name_to_id[name.lower()] = mid
+            _maincat_id_to_name[mid] = name
+
+
+def resolve_maincat(maincat: str, maincat_id: str) -> tuple:
+    """
+    Cross-match maincat name and id. Returns (name, id).
+    If only one is provided, resolves the other from maincat_mapping.csv.
+    """
+    _ensure_maincat_mapping()
+    maincat = (maincat or "").strip()
+    maincat_id = (maincat_id or "").strip()
+
+    if maincat and not maincat_id:
+        maincat_id = _maincat_name_to_id.get(maincat.lower(), "")
+    elif maincat_id and not maincat:
+        maincat = _maincat_id_to_name.get(maincat_id, "")
+
+    return maincat, maincat_id
 
 
 # ---------------------------------------------------------------------------
@@ -380,16 +421,19 @@ def start_operation(operation: str, country: str = "NL",
     """
     task_id = str(uuid.uuid4())[:8]
 
+    # Cross-match maincat name ↔ id if only one is provided
+    maincat, maincat_id = resolve_maincat(maincat, maincat_id)
+
     wb = None
     # If shop_name provided (quick input), build a workbook
     if shop_name and operation == "inclusion":
         wb = _build_inclusion_workbook(
-            shop_name, maincat or "", maincat_id or "", cl1 or "a", budget or 10.0
+            shop_name, maincat, maincat_id, cl1 or "a", budget or 50.0
         )
         wb_bytes = None  # use the wb object directly
     elif shop_name and operation == "exclusion":
         wb = _build_exclusion_workbook(
-            shop_name, maincat or "", maincat_id or "", cl1 or "a"
+            shop_name, maincat, maincat_id, cl1 or "a"
         )
         wb_bytes = None
 
