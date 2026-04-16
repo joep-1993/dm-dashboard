@@ -8,8 +8,10 @@
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
         .result-badge { font-size: 0.85rem; }
+        .tab-content { padding-top: 1rem; }
         .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
         .status-valid { color: #198754; font-weight: bold; }
         .status-warning { color: #ffc107; font-weight: bold; }
         .status-error { color: #dc3545; font-weight: bold; }
@@ -82,9 +84,9 @@
 
                 <!-- Cache Status -->
                 <div class="card mb-4">
-                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background: #5e4a90;">
                         <h5 class="mb-0">Taxonomy Cache</h5>
-                        <button class="btn btn-sm btn-outline-light" onclick="refreshCache()">Refresh Cache</button>
+                        <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="refreshCache()">Refresh</button>
                     </div>
                     <div class="card-body" id="cacheContent">
                         <p class="text-muted">Loading cache info...</p>
@@ -93,19 +95,25 @@
 
                 <!-- Input -->
                 <div class="card mb-4">
-                    <div class="card-header">
-                        <ul class="nav nav-tabs card-header-tabs" role="tablist">
-                            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#manualTab">Paste URLs</a></li>
-                            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#excelTab">Upload Excel/CSV</a></li>
-                        </ul>
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">URL Input</h5>
                     </div>
                     <div class="card-body">
+                        <ul class="nav nav-tabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#manualTab" type="button">Paste URLs</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#excelTab" type="button">Upload Excel/CSV</button>
+                            </li>
+                        </ul>
+
                         <div class="tab-content">
-                            <div class="tab-pane fade show active" id="manualTab">
+                            <div class="tab-pane fade show active" id="manualTab" role="tabpanel">
                                 <textarea id="urlInput" class="form-control" rows="8" placeholder="Paste URLs here, one per line...&#10;&#10;https://www.beslist.nl/products/schoenen/schoenen_32100/c/merk~123&#10;/products/elektronica/elektronica_655123/c/merk~456~~kleur~789"></textarea>
                                 <small class="text-muted">One URL per line. Accepts full URLs or paths starting with /products/</small>
                             </div>
-                            <div class="tab-pane fade" id="excelTab">
+                            <div class="tab-pane fade" id="excelTab" role="tabpanel">
                                 <div class="mb-3">
                                     <input type="file" class="form-control" id="fileInput" accept=".xlsx,.xls,.csv,.txt">
                                     <small class="text-muted">Upload .xlsx, .csv, or .txt file. Looks for a column named "URL" or uses the first column.</small>
@@ -191,16 +199,20 @@
         try {
             const r = await fetch(`${API}/api/url-validator/cache-status`);
             const d = await r.json();
+            if (d.detail || !d.maincats_loaded && d.maincats_loaded !== 0) {
+                document.getElementById('cacheContent').innerHTML = `<p class="text-muted">Cache not loaded yet. Click Refresh to initialize.</p>`;
+                return;
+            }
             document.getElementById('cacheContent').innerHTML = `
                 <div class="row text-center">
-                    <div class="col"><strong>${d.maincats_loaded}</strong><br><small>Maincats</small></div>
-                    <div class="col"><strong>${d.categories_loaded}</strong><br><small>Categories</small></div>
-                    <div class="col"><strong>${d.category_details_cached}</strong><br><small>Details cached</small></div>
-                    <div class="col"><strong>${d.category_facets_cached}</strong><br><small>Facets cached</small></div>
-                    <div class="col"><strong>${d.facet_values_cached}</strong><br><small>Value sets cached</small></div>
+                    <div class="col"><strong>${d.maincats_loaded || 0}</strong><br><small>Maincats</small></div>
+                    <div class="col"><strong>${d.categories_loaded || 0}</strong><br><small>Categories</small></div>
+                    <div class="col"><strong>${d.category_details_cached || 0}</strong><br><small>Details cached</small></div>
+                    <div class="col"><strong>${d.category_facets_cached || 0}</strong><br><small>Facets cached</small></div>
+                    <div class="col"><strong>${d.facet_values_cached || 0}</strong><br><small>Value sets cached</small></div>
                 </div>`;
         } catch (e) {
-            document.getElementById('cacheContent').innerHTML = `<p class="text-danger">Failed to load cache: ${e.message}</p>`;
+            document.getElementById('cacheContent').innerHTML = `<p class="text-muted">Cache not loaded yet. Click Refresh to initialize.</p>`;
         }
     }
 
