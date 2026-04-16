@@ -17,7 +17,10 @@
         .stat-box .label { font-size: 0.75rem; text-transform: uppercase; }
         .history-row { font-size: 0.85rem; }
         .log-output { max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; }
-        .country-toggle .btn { min-width: 50px; }
+        .tab-content { padding-top: 1rem; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -76,10 +79,10 @@
                 <div class="card mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Operation</h5>
-                        <div class="btn-group country-toggle" role="group">
-                            <button class="btn btn-sm btn-primary active" onclick="setCountry('NL', this)">NL</button>
-                            <button class="btn btn-sm btn-outline-primary" onclick="setCountry('BE', this)">BE</button>
-                        </div>
+                        <select class="form-select form-select-sm" style="width: auto;" id="countrySelect" onchange="selectedCountry = this.value">
+                            <option value="NL" selected>NL</option>
+                            <option value="BE">BE</option>
+                        </select>
                     </div>
                     <div class="card-body">
                         <div class="row g-2 mb-3">
@@ -119,45 +122,40 @@
 
                 <!-- Input Section -->
                 <div class="card mb-4">
-                    <div class="card-header">
-                        <ul class="nav nav-tabs card-header-tabs" role="tablist">
-                            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#excelTab">Excel Upload</a></li>
-                            <li class="nav-item" id="shopTabLi"><a class="nav-link" data-bs-toggle="tab" href="#shopTab">Quick Shop Input</a></li>
-                        </ul>
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Input</h5>
                     </div>
                     <div class="card-body">
+                        <ul class="nav nav-tabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#excelTab" type="button">Excel Upload</button>
+                            </li>
+                            <li class="nav-item" role="presentation" id="shopTabLi">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#shopTab" type="button">Quick Shop Input</button>
+                            </li>
+                        </ul>
+
                         <div class="tab-content">
                             <!-- Excel Upload -->
-                            <div class="tab-pane fade show active" id="excelTab">
+                            <div class="tab-pane fade show active" id="excelTab" role="tabpanel">
                                 <input type="file" class="form-control mb-2" id="fileInput" accept=".xlsx,.xls">
                                 <small class="text-muted">Upload the DMA Excel file (sheets: toevoegen, uitsluiten, cat_ids)</small>
                             </div>
                             <!-- Quick Shop Input -->
-                            <div class="tab-pane fade" id="shopTab">
+                            <div class="tab-pane fade" id="shopTab" role="tabpanel">
+                                <p class="small text-muted">Enter a shop name — will automatically process for CL1 a, b and c with budget &euro;50.</p>
                                 <div class="row g-2">
-                                    <div class="col-md-4">
+                                    <div class="col-md-5">
                                         <label class="form-label">Shop Name</label>
                                         <input type="text" class="form-control" id="shopName" placeholder="e.g. amazon.nl">
                                     </div>
-                                    <div class="col-md-3">
+                                    <div class="col-md-4">
                                         <label class="form-label">Maincat</label>
                                         <input type="text" class="form-control" id="shopMaincat" placeholder="e.g. Elektronica">
                                     </div>
-                                    <div class="col-md-2">
+                                    <div class="col-md-3">
                                         <label class="form-label">Maincat ID</label>
                                         <input type="text" class="form-control" id="shopMaincatId" placeholder="e.g. 655">
-                                    </div>
-                                    <div class="col-md-1">
-                                        <label class="form-label">CL1</label>
-                                        <select class="form-select" id="shopCl1">
-                                            <option value="a">a</option>
-                                            <option value="b">b</option>
-                                            <option value="c">c</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-2" id="budgetCol">
-                                        <label class="form-label">Budget</label>
-                                        <input type="number" class="form-control" id="shopBudget" value="10" step="0.5">
                                     </div>
                                 </div>
                             </div>
@@ -221,9 +219,8 @@
 
                 <!-- History -->
                 <div class="card mb-4">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="card-header">
                         <h5 class="mb-0">Change History</h5>
-                        <button class="btn btn-sm btn-outline-danger" onclick="clearHistory()">Clear</button>
                     </div>
                     <div class="card-body p-0">
                         <table class="table table-sm table-bordered mb-0" id="historyTable">
@@ -263,16 +260,6 @@
         validate_trees: 'Validate Trees',
     };
 
-    function setCountry(c, btn) {
-        selectedCountry = c;
-        document.querySelectorAll('.country-toggle .btn').forEach(b => {
-            b.classList.remove('active', 'btn-primary');
-            b.classList.add('btn-outline-primary');
-        });
-        btn.classList.add('active', 'btn-primary');
-        btn.classList.remove('btn-outline-primary');
-    }
-
     function selectOp(el) {
         document.querySelectorAll('.op-card').forEach(c => c.classList.remove('selected'));
         el.classList.add('selected');
@@ -282,13 +269,12 @@
         const isIncExc = ['inclusion', 'exclusion'].includes(selectedOp);
         document.getElementById('shopTabLi').style.display = isIncExc ? '' : 'none';
         document.getElementById('optionsRow').style.display = isIncExc ? 'none' : '';
-        document.getElementById('budgetCol').style.display = selectedOp === 'inclusion' ? '' : 'none';
         document.getElementById('fixCheck').style.display = selectedOp === 'validate_ads' ? '' : 'none';
 
         // If switching to validate ops, switch to Excel tab
         if (!isIncExc) {
-            const excelTab = document.querySelector('[href="#excelTab"]');
-            if (excelTab) bootstrap.Tab.getOrCreateInstance(excelTab).show();
+            const excelTabBtn = document.querySelector('[data-bs-target="#excelTab"]');
+            if (excelTabBtn) bootstrap.Tab.getOrCreateInstance(excelTabBtn).show();
         }
     }
 
@@ -310,10 +296,8 @@
             form.append('shop_name', shopName);
             form.append('maincat', document.getElementById('shopMaincat').value.trim());
             form.append('maincat_id', document.getElementById('shopMaincatId').value.trim());
-            form.append('cl1', document.getElementById('shopCl1').value);
-            if (selectedOp === 'inclusion') {
-                form.append('budget', document.getElementById('shopBudget').value);
-            }
+            form.append('cl1', 'a,b,c');
+            form.append('budget', '50');
         } else if (fileInput.files.length > 0) {
             form.append('file', fileInput.files[0]);
         } else if (['inclusion', 'exclusion'].includes(selectedOp)) {

@@ -94,27 +94,31 @@ def _patch_campaign_processor(country: str):
 # ---------------------------------------------------------------------------
 def _build_inclusion_workbook(shop_name: str, maincat: str, maincat_id: str,
                               cl1: str, budget: float) -> openpyxl.Workbook:
-    """Create a minimal workbook matching the inclusion sheet layout."""
+    """Create a minimal workbook matching the inclusion sheet layout.
+    cl1 can be comma-separated (e.g. 'a,b,c') to create one row per level."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "toevoegen"
-    # Header: campaign_name, ad_group_name, Shop ID, maincat, maincat_id, cl1, budget, result, error
     ws.append(["campaign_name", "ad_group_name", "Shop ID", "maincat", "maincat_id",
                "custom label 1", "budget", "result", "error message"])
-    # Build campaign name: PLA/{maincat}_{cl1}
-    campaign_name = f"PLA/{maincat}_{cl1}"
-    ws.append([campaign_name, shop_name, "", maincat, maincat_id, cl1, budget, None, None])
+    cl1_values = [v.strip() for v in cl1.split(",") if v.strip()]
+    for cl in cl1_values:
+        campaign_name = f"PLA/{maincat}_{cl}"
+        ws.append([campaign_name, shop_name, "", maincat, maincat_id, cl, budget, None, None])
     return wb
 
 
 def _build_exclusion_workbook(shop_name: str, maincat: str, maincat_id: str,
                               cl1: str) -> openpyxl.Workbook:
-    """Create a minimal workbook matching the exclusion sheet layout."""
+    """Create a minimal workbook matching the exclusion sheet layout.
+    cl1 can be comma-separated (e.g. 'a,b,c') to create one row per level."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "uitsluiten"
     ws.append(["shop_name", "Shop ID", "maincat", "maincat_id", "custom label 1", "result", "error message"])
-    ws.append([shop_name, "", maincat, maincat_id, cl1, None, None])
+    cl1_values = [v.strip() for v in cl1.split(",") if v.strip()]
+    for cl in cl1_values:
+        ws.append([shop_name, "", maincat, maincat_id, cl, None, None])
     # Add cat_ids sheet (needed by exclusion processor)
     ws_cat = wb.create_sheet("cat_ids")
     ws_cat.append(["maincat", "maincat_id", "deepest_cat", "cat_id"])
