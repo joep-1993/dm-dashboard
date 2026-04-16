@@ -223,17 +223,21 @@
                 <div class="card mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Change History</h5>
-                        <div>
-                            <button class="btn btn-sm btn-outline-primary" onclick="exportHistory()">Export CSV</button>
-                            <button class="btn btn-sm btn-outline-danger ms-1" onclick="clearHistory()">Clear</button>
-                        </div>
+                        <button class="btn btn-sm btn-outline-danger" onclick="clearHistory()">Clear</button>
                     </div>
                     <div class="card-body p-0">
-                        <table class="table table-sm mb-0" id="historyTable">
-                            <thead class="table-light">
-                                <tr><th>Time</th><th>Operation</th><th>Country</th><th>Status</th><th>Summary</th></tr>
+                        <table class="table table-sm table-bordered mb-0" id="historyTable">
+                            <thead>
+                                <tr style="background:#f0f0f0; border-bottom: 2px solid #dee2e6;">
+                                    <th style="padding: 8px 12px;">Time</th>
+                                    <th style="padding: 8px 12px;">Operation</th>
+                                    <th style="padding: 8px 12px;">Country</th>
+                                    <th style="padding: 8px 12px;">Status</th>
+                                    <th style="padding: 8px 12px;">Summary</th>
+                                    <th style="padding: 8px 12px; width: 70px;">Export</th>
+                                </tr>
                             </thead>
-                            <tbody id="historyBody"><tr><td colspan="5" class="text-muted text-center">No history yet</td></tr></tbody>
+                            <tbody id="historyBody"><tr><td colspan="6" class="text-muted text-center">No history yet</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -466,24 +470,27 @@
     }
 
     // --- History ---
+    let historyData = [];
+
     async function loadHistory() {
         try {
             const r = await fetch(`${API}/api/dma-plus/history`);
-            const data = await r.json();
+            historyData = await r.json();
             const tbody = document.getElementById('historyBody');
-            if (!data.length) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">No history yet</td></tr>';
+            if (!historyData.length) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center">No history yet</td></tr>';
                 return;
             }
-            tbody.innerHTML = data.map(h => {
+            tbody.innerHTML = historyData.map((h, idx) => {
                 const time = h.completed_at ? new Date(h.completed_at).toLocaleString('nl-NL') : '-';
                 const statusCls = h.status === 'completed' ? 'text-success' : 'text-danger';
                 return `<tr class="history-row">
-                    <td>${time}</td>
-                    <td>${OP_LABELS[h.operation] || h.operation}</td>
-                    <td>${h.country}</td>
-                    <td class="${statusCls}">${h.status}</td>
-                    <td>${h.summary || ''}</td>
+                    <td style="padding: 6px 12px;">${time}</td>
+                    <td style="padding: 6px 12px;">${OP_LABELS[h.operation] || h.operation}</td>
+                    <td style="padding: 6px 12px;">${h.country}</td>
+                    <td style="padding: 6px 12px;" class="${statusCls}">${h.status}</td>
+                    <td style="padding: 6px 12px;">${h.summary || ''}</td>
+                    <td style="padding: 6px 12px; text-align: center;"><button class="btn btn-sm btn-outline-secondary" onclick="exportRow(${idx})" title="Export this row as CSV">CSV</button></td>
                 </tr>`;
             }).join('');
         } catch (e) { console.error('History error:', e); }
@@ -495,18 +502,16 @@
         loadHistory();
     }
 
-    function exportHistory() {
-        fetch(`${API}/api/dma-plus/history`).then(r => r.json()).then(data => {
-            let csv = 'Time,Operation,Country,Status,Summary\n';
-            data.forEach(h => {
-                csv += `"${h.completed_at || ''}","${h.operation}","${h.country}","${h.status}","${(h.summary||'').replace(/"/g, '""')}"\n`;
-            });
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `dma_plus_history_${new Date().toISOString().slice(0,10)}.csv`;
-            a.click();
-        });
+    function exportRow(idx) {
+        const h = historyData[idx];
+        if (!h) return;
+        const csv = 'Time,Operation,Country,Status,Summary\n'
+            + `"${h.completed_at || ''}","${h.operation}","${h.country}","${h.status}","${(h.summary||'').replace(/"/g, '""')}"`;
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `dma_plus_${h.operation}_${(h.completed_at || '').slice(0,10)}.csv`;
+        a.click();
     }
 
     // Init
