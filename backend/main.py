@@ -50,6 +50,7 @@ from backend.mc_id_finder_router import router as mc_id_finder_router
 from backend.redshift_upload_router import router as redshift_upload_router
 from backend.task_scheduler_router import router as task_scheduler_router
 from backend.url_validator_router import router as url_validator_router
+from backend.dma_plus_router import router as dma_plus_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.content_publisher import (
@@ -148,6 +149,9 @@ app.include_router(redshift_upload_router)
 
 # Include url_validator router
 app.include_router(url_validator_router)
+
+# Include dma_plus router
+app.include_router(dma_plus_router)
 
 # Include task_scheduler router (env-gated — Windows-only, depends on schtasks)
 TASK_SCHEDULER_ENABLED = os.getenv("ENABLE_TASK_SCHEDULER", "false").lower() == "true"
