@@ -32,6 +32,7 @@ cc1/
 
 # Large data files
 *.xlsx
+!backend/categories.xlsx
 *.xls
 
 # Temporary/output files
