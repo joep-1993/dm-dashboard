@@ -494,8 +494,20 @@
     function exportRow(idx) {
         const h = historyData[idx];
         if (!h) return;
-        const csv = 'Time,Operation,Country,Status,Summary\n'
-            + `"${h.completed_at || ''}","${h.operation}","${h.country}","${h.status}","${(h.summary||'').replace(/"/g, '""')}"`;
+        const aff = h.affected || {};
+        const campaigns = (aff.campaigns || []).join('\n');
+        const adGroups = (aff.ad_groups || []).join('\n');
+        const trees = (aff.trees || []).join('\n');
+
+        let csv = 'Time,Operation,Country,Status,Summary\n';
+        csv += `"${h.completed_at || ''}","${h.operation}","${h.country}","${h.status}","${(h.summary||'').replace(/"/g, '""')}"\n`;
+        csv += '\nAffected Campaigns\n';
+        if (campaigns) csv += campaigns + '\n'; else csv += '(none)\n';
+        csv += '\nAffected Ad Groups\n';
+        if (adGroups) csv += adGroups + '\n'; else csv += '(none)\n';
+        csv += '\nAffected Product Trees\n';
+        if (trees) csv += trees + '\n'; else csv += '(none)\n';
+
         const blob = new Blob([csv], { type: 'text/csv' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);

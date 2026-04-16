@@ -462,6 +462,14 @@ def _run_operation(task_id: str, operation: str, country: str,
             "result": result_data,
         })
 
+        # Parse affected entities from log
+        log_text = result_data.get("log", "") if result_data else ""
+        affected = _parse_affected_entities(log_text)
+
+        # Also store affected in result for the status endpoint
+        if result_data:
+            result_data["affected"] = affected
+
         # Add to history
         _history.appendleft({
             "task_id": task_id,
@@ -471,6 +479,7 @@ def _run_operation(task_id: str, operation: str, country: str,
             "completed_at": datetime.now().isoformat(),
             "status": "completed",
             "summary": _summarize_result(operation, result_data),
+            "affected": affected,
         })
 
     except Exception as e:
@@ -494,6 +503,51 @@ def _run_operation(task_id: str, operation: str, country: str,
             "status": "failed",
             "summary": f"Error: {str(e)[:200]}",
         })
+
+
+def _parse_affected_entities(log: str) -> dict:
+    """Parse the captured log output to extract affected campaigns, ad groups, and trees."""
+    import re
+    campaigns = set()
+    ad_groups = set()
+    trees = set()
+
+    for line in log.splitlines():
+        # Campaigns: "Creating campaign: PLA/..." or "Campaign: PLA/..."
+        m = re.search(r'(?:Creating|Created|Found|Processing) campaign[:\s]+([^\n(]+)', line, re.IGNORECASE)
+        if m:
+            campaigns.add(m.group(1).strip().rstrip('.'))
+
+        # Campaign names from "PLA/..." pattern in context
+        m = re.search(r'campaign.*?(PLA/[^\s,()]+)', line, re.IGNORECASE)
+        if m:
+            campaigns.add(m.group(1).strip())
+
+        # Ad groups: "Creating ad group: ..." or "Ad group: ..."
+        m = re.search(r'(?:Creating|Created|Processing|Found) ad group[:\s]+([^\n(]+)', line, re.IGNORECASE)
+        if m:
+            ad_groups.add(m.group(1).strip().rstrip('.'))
+
+        # Ad group names from "PLA/" pattern (ad groups also named PLA/...)
+        m = re.search(r'ad.group.*?(PLA/[^\s,()]+)', line, re.IGNORECASE)
+        if m:
+            ad_groups.add(m.group(1).strip())
+
+        # Trees: "Tree created: ..." or "Tree rebuilt: ..."
+        m = re.search(r'Tree (?:created|rebuilt)[:\s]+(.+)', line)
+        if m:
+            trees.add(m.group(1).strip())
+
+        # Exclusions added
+        m = re.search(r'Adding \d+ new shop exclusion.*?ad group.*?(PLA/[^\s,()]+)', line, re.IGNORECASE)
+        if m:
+            ad_groups.add(m.group(1).strip())
+
+    return {
+        "campaigns": sorted(campaigns),
+        "ad_groups": sorted(ad_groups),
+        "trees": sorted(trees),
+    }
 
 
 def _summarize_result(operation: str, result: dict) -> str:
