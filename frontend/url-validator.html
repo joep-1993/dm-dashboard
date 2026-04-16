@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL Validator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .result-badge { font-size: 0.85rem; }
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .status-valid { color: #198754; font-weight: bold; }
+        .status-warning { color: #ffc107; font-weight: bold; }
+        .status-error { color: #dc3545; font-weight: bold; }
+        .url-result-row td { vertical-align: middle; font-size: 0.9rem; }
+        .url-cell { max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 0.82rem; }
+        .issue-list { font-size: 0.82rem; margin: 0; padding: 0; list-style: none; }
+        .issue-list li { margin-bottom: 2px; }
+        .issue-error { color: #dc3545; }
+        .issue-warning { color: #b45309; }
+        .issue-info { color: #6c757d; }
+        .stat-box { text-align: center; padding: 10px; border-radius: 8px; }
+        .stat-box .num { font-size: 1.8rem; font-weight: bold; }
+        .stat-box .label { font-size: 0.8rem; text-transform: uppercase; }
+        .expand-btn { cursor: pointer; user-select: none; }
+        .detail-row { display: none; }
+        .detail-row.show { display: table-row; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">URL Validator</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+
+                <!-- Cache Status -->
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Taxonomy Cache</h5>
+                        <button class="btn btn-sm btn-outline-light" onclick="refreshCache()">Refresh Cache</button>
+                    </div>
+                    <div class="card-body" id="cacheContent">
+                        <p class="text-muted">Loading cache info...</p>
+                    </div>
+                </div>
+
+                <!-- Input -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#manualTab">Paste URLs</a></li>
+                            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#excelTab">Upload Excel/CSV</a></li>
+                        </ul>
+                    </div>
+                    <div class="card-body">
+                        <div class="tab-content">
+                            <div class="tab-pane fade show active" id="manualTab">
+                                <textarea id="urlInput" class="form-control" rows="8" placeholder="Paste URLs here, one per line...&#10;&#10;https://www.beslist.nl/products/schoenen/schoenen_32100/c/merk~123&#10;/products/elektronica/elektronica_655123/c/merk~456~~kleur~789"></textarea>
+                                <small class="text-muted">One URL per line. Accepts full URLs or paths starting with /products/</small>
+                            </div>
+                            <div class="tab-pane fade" id="excelTab">
+                                <div class="mb-3">
+                                    <input type="file" class="form-control" id="fileInput" accept=".xlsx,.xls,.csv,.txt">
+                                    <small class="text-muted">Upload .xlsx, .csv, or .txt file. Looks for a column named "URL" or uses the first column.</small>
+                                </div>
+                                <div id="filePreview" class="text-muted" style="display:none;"></div>
+                            </div>
+                        </div>
+                        <div class="mt-3 d-flex gap-2">
+                            <button class="btn btn-primary" onclick="startValidation()" id="validateBtn">Validate URLs</button>
+                            <span id="urlCount" class="text-muted align-self-center"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress -->
+                <div class="card mb-4" id="progressCard" style="display:none;">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="progressLabel">Validating...</span>
+                            <span id="progressPct"></span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                <div id="resultsSection" style="display:none;">
+                    <!-- Stats -->
+                    <div class="row mb-3 g-2">
+                        <div class="col-3"><div class="stat-box bg-light"><div class="num" id="statTotal">0</div><div class="label">Total</div></div></div>
+                        <div class="col-3"><div class="stat-box" style="background:#d1e7dd;"><div class="num status-valid" id="statValid">0</div><div class="label">Valid</div></div></div>
+                        <div class="col-3"><div class="stat-box" style="background:#fff3cd;"><div class="num status-warning" id="statWarnings">0</div><div class="label">Warnings</div></div></div>
+                        <div class="col-3"><div class="stat-box" style="background:#f8d7da;"><div class="num status-error" id="statErrors">0</div><div class="label">Errors</div></div></div>
+                    </div>
+
+                    <!-- Filter + Download -->
+                    <div class="d-flex justify-content-between mb-2">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button class="btn btn-outline-secondary active" onclick="filterResults('all', this)">All</button>
+                            <button class="btn btn-outline-success" onclick="filterResults('valid', this)">Valid</button>
+                            <button class="btn btn-outline-warning" onclick="filterResults('warning', this)">Warnings</button>
+                            <button class="btn btn-outline-danger" onclick="filterResults('error', this)">Errors</button>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="downloadResults()">Download Excel</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="copyForExcel()">Copy for Excel</button>
+                        </div>
+                    </div>
+
+                    <!-- Results table -->
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover" id="resultsTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:30px;">#</th>
+                                    <th>URL</th>
+                                    <th style="width:70px;">Status</th>
+                                    <th style="width:120px;">Maincat</th>
+                                    <th style="width:140px;">Category</th>
+                                    <th style="width:60px;">Facets</th>
+                                    <th>Issues</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    const API = window.location.origin;
+    let allResults = [];
+    let uploadedUrls = null;
+
+    // --- Cache ---
+    async function loadCache() {
+        try {
+            const r = await fetch(`${API}/api/url-validator/cache-status`);
+            const d = await r.json();
+            document.getElementById('cacheContent').innerHTML = `
+                <div class="row text-center">
+                    <div class="col"><strong>${d.maincats_loaded}</strong><br><small>Maincats</small></div>
+                    <div class="col"><strong>${d.categories_loaded}</strong><br><small>Categories</small></div>
+                    <div class="col"><strong>${d.category_details_cached}</strong><br><small>Details cached</small></div>
+                    <div class="col"><strong>${d.category_facets_cached}</strong><br><small>Facets cached</small></div>
+                    <div class="col"><strong>${d.facet_values_cached}</strong><br><small>Value sets cached</small></div>
+                </div>`;
+        } catch (e) {
+            document.getElementById('cacheContent').innerHTML = `<p class="text-danger">Failed to load cache: ${e.message}</p>`;
+        }
+    }
+
+    async function refreshCache() {
+        await fetch(`${API}/api/url-validator/cache-refresh`, { method: 'POST' });
+        loadCache();
+    }
+
+    // --- File upload ---
+    document.getElementById('fileInput').addEventListener('change', async function() {
+        const file = this.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        try {
+            const r = await fetch(`${API}/api/url-validator/upload`, { method: 'POST', body: form });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.detail || 'Upload failed');
+            uploadedUrls = d.urls;
+            document.getElementById('filePreview').style.display = 'block';
+            document.getElementById('filePreview').textContent = `Loaded ${d.count} URLs from ${file.name}`;
+            document.getElementById('urlCount').textContent = `${d.count} URLs ready`;
+        } catch (e) {
+            alert('Upload error: ' + e.message);
+        }
+    });
+
+    // --- Validation ---
+    async function startValidation() {
+        let urls;
+        // Check which tab is active
+        const manualActive = document.querySelector('#manualTab.active, #manualTab.show');
+        if (manualActive || !uploadedUrls) {
+            const text = document.getElementById('urlInput').value.trim();
+            if (!text && !uploadedUrls) { alert('No URLs provided'); return; }
+            urls = text ? text.split('\n').map(u => u.trim()).filter(u => u) : uploadedUrls;
+        } else {
+            urls = uploadedUrls;
+        }
+
+        // If manual tab has content, prefer it; otherwise use uploaded
+        const manualText = document.getElementById('urlInput').value.trim();
+        if (manualText) {
+            urls = manualText.split('\n').map(u => u.trim()).filter(u => u);
+        } else if (uploadedUrls) {
+            urls = uploadedUrls;
+        }
+
+        if (!urls || !urls.length) { alert('No URLs to validate'); return; }
+
+        const btn = document.getElementById('validateBtn');
+        btn.disabled = true;
+        btn.textContent = 'Validating...';
+
+        document.getElementById('progressCard').style.display = 'block';
+        document.getElementById('progressBar').style.width = '30%';
+        document.getElementById('progressLabel').textContent = `Validating ${urls.length} URLs...`;
+        document.getElementById('resultsSection').style.display = 'none';
+
+        try {
+            const r = await fetch(`${API}/api/url-validator/validate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ urls })
+            });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.detail || 'Validation failed');
+
+            document.getElementById('progressBar').style.width = '100%';
+            document.getElementById('progressLabel').textContent = 'Done';
+
+            allResults = d.results || [];
+            showResults(d);
+        } catch (e) {
+            alert('Validation error: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Validate URLs';
+            setTimeout(() => { document.getElementById('progressCard').style.display = 'none'; }, 1000);
+        }
+    }
+
+    function showResults(data) {
+        document.getElementById('resultsSection').style.display = 'block';
+        document.getElementById('statTotal').textContent = data.total;
+        document.getElementById('statValid').textContent = data.valid;
+        document.getElementById('statWarnings').textContent = data.warnings;
+        document.getElementById('statErrors').textContent = data.errors;
+        renderResults(allResults);
+    }
+
+    function renderResults(results) {
+        const tbody = document.getElementById('resultsBody');
+        tbody.innerHTML = '';
+        results.forEach((r, i) => {
+            const statusBadge = r.status === 'valid'
+                ? '<span class="badge bg-success">Valid</span>'
+                : r.status === 'warning'
+                    ? '<span class="badge bg-warning text-dark">Warning</span>'
+                    : '<span class="badge bg-danger">Error</span>';
+
+            const facetStr = r.facets_total > 0 ? `${r.facets_valid}/${r.facets_total}` : '-';
+
+            // Top issues (first 2)
+            const topIssues = (r.issues || []).slice(0, 2).map(iss => {
+                const cls = iss.severity === 'error' ? 'issue-error' : iss.severity === 'warning' ? 'issue-warning' : 'issue-info';
+                return `<span class="${cls}">${iss.message}</span>`;
+            }).join('<br>');
+            const moreCount = (r.issues || []).length > 2 ? ` <small class="text-muted">+${r.issues.length - 2} more</small>` : '';
+
+            const tr = document.createElement('tr');
+            tr.className = 'url-result-row';
+            tr.dataset.status = r.status;
+            tr.style.cursor = r.issues.length > 2 ? 'pointer' : 'default';
+            tr.innerHTML = `
+                <td>${i + 1}</td>
+                <td class="url-cell" title="${r.url}">${r.url}</td>
+                <td>${statusBadge}</td>
+                <td>${r.maincat_name || '-'}</td>
+                <td>${r.category_name || '-'}</td>
+                <td>${facetStr}</td>
+                <td>${topIssues}${moreCount}</td>`;
+
+            if (r.issues.length > 2) {
+                tr.addEventListener('click', () => {
+                    const detail = tr.nextElementSibling;
+                    if (detail && detail.classList.contains('detail-row')) {
+                        detail.classList.toggle('show');
+                    }
+                });
+            }
+            tbody.appendChild(tr);
+
+            // Detail row (all issues)
+            if (r.issues.length > 2) {
+                const detailTr = document.createElement('tr');
+                detailTr.className = 'detail-row';
+                const allIssueHtml = r.issues.map(iss => {
+                    const cls = iss.severity === 'error' ? 'issue-error' : iss.severity === 'warning' ? 'issue-warning' : 'issue-info';
+                    return `<li class="${cls}">[${iss.severity.toUpperCase()}] ${iss.message}</li>`;
+                }).join('');
+                detailTr.innerHTML = `<td colspan="7"><ul class="issue-list">${allIssueHtml}</ul></td>`;
+                tbody.appendChild(detailTr);
+            }
+        });
+    }
+
+    function filterResults(filter, btn) {
+        // Update active button
+        document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+
+        const filtered = filter === 'all' ? allResults : allResults.filter(r => r.status === filter);
+        renderResults(filtered);
+    }
+
+    // --- Download ---
+    async function downloadResults() {
+        if (!allResults.length) return;
+        try {
+            const r = await fetch(`${API}/api/url-validator/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ results: allResults })
+            });
+            const blob = await r.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'url_validation_results.xlsx';
+            a.click();
+        } catch (e) {
+            alert('Download error: ' + e.message);
+        }
+    }
+
+    function copyForExcel() {
+        if (!allResults.length) return;
+        const header = 'URL\tStatus\tMaincat\tCategory\tFacets Valid\tFacets Total\tIssues';
+        const rows = allResults.map(r => {
+            const issues = (r.issues || []).map(i => `[${i.severity}] ${i.message}`).join('; ');
+            return `${r.url}\t${r.status}\t${r.maincat_name}\t${r.category_name}\t${r.facets_valid}\t${r.facets_total}\t${issues}`;
+        });
+        navigator.clipboard.writeText(header + '\n' + rows.join('\n'));
+        alert('Copied to clipboard');
+    }
+
+    // Init
+    loadCache();
+    </script>
+</body>
+</html>
