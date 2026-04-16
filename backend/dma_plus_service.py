@@ -160,10 +160,34 @@ def _build_exclusion_workbook(shop_name: str, maincat: str, maincat_id: str,
     cl1_values = [v.strip() for v in cl1.split(",") if v.strip()]
     for cl in cl1_values:
         ws.append([shop_name, "", maincat, maincat_id, cl, None, None])
-    # Add cat_ids sheet (needed by exclusion processor)
+    # Populate cat_ids sheet from cat_urls.csv + maincat_mapping.csv
+    _populate_cat_ids_sheet(wb)
+    return wb
+
+
+def _populate_cat_ids_sheet(wb: openpyxl.Workbook):
+    """Add a cat_ids sheet with full maincat_id → deepest_cat mapping from CSVs."""
     ws_cat = wb.create_sheet("cat_ids")
     ws_cat.append(["maincat", "maincat_id", "deepest_cat", "cat_id"])
-    return wb
+
+    _ensure_maincat_mapping()
+
+    cat_urls_csv = Path(__file__).parent / "data" / "cat_urls.csv"
+    if not cat_urls_csv.exists():
+        return
+
+    import csv
+    with open(cat_urls_csv, encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f, delimiter=";"):
+            mc_name = row.get("maincat", "").strip()
+            deepest_cat = row.get("deepest_cat", "").strip()
+            cat_id = row.get("cat_id", "").strip()
+            if not mc_name or not deepest_cat:
+                continue
+            # Resolve maincat name → id
+            mc_id = _maincat_name_to_id.get(mc_name.lower(), "")
+            if mc_id:
+                ws_cat.append([mc_name, mc_id, deepest_cat, cat_id])
 
 
 # ---------------------------------------------------------------------------
