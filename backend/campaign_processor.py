@@ -84,9 +84,9 @@ NEGATIVE_LIST_NAME = "DMA negatives"
 
 # Bid strategy mapping based on custom label 1
 BID_STRATEGY_MAPPING = {
-    'a': 'DMA: Elektronica shops A - 0,25',
-    'b': 'DMA: Elektronica shops B - 0,21',
-    'c': 'DMA: Elektronica shops C - 0,17'
+    'a': 'DMA: DMA+ shops A - 0,25',
+    'b': 'DMA: DMA+ shops B - 0,21',
+    'c': 'DMA: DMA+ shops C - 0,17'
 }
 
 # Auto-detect Excel file path based on operating system
