@@ -412,7 +412,7 @@
                 detailHtml += '<th>#</th><th>Status</th><th>Data</th><th>Error</th></tr></thead><tbody>';
                 details.forEach(d => {
                     const cls = d.success ? 'text-success' : 'text-danger';
-                    detailHtml += `<tr><td>${d.row}</td><td class="${cls}">${d.success ? 'OK' : 'FAIL'}</td><td style="font-size:0.8rem;">${(d.data||[]).slice(0,5).join(' | ')}</td><td style="font-size:0.8rem;">${d.error || ''}</td></tr>`;
+                    detailHtml += `<tr><td>${d.row}</td><td class="${cls}">${d.success ? 'OK' : 'FAIL'}</td><td style="font-size:0.8rem;">${(d.data||[]).filter(v => v !== null && v !== '').slice(0,5).join(' | ')}</td><td style="font-size:0.8rem;">${d.error || ''}</td></tr>`;
                 });
             } else {
                 const keys = Object.keys(details[0]).filter(k => k !== 'message');
