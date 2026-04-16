@@ -7,7 +7,10 @@ from concurrent.futures import ThreadPoolExecutor
 from backend.dma_plus_service import (
     start_operation, get_task_status, cancel_task,
     get_history, clear_history, COUNTRY_CONFIG,
+    _cat_ids_cache, _cat_ids_cache_time, _CAT_IDS_TTL,
+    _ensure_maincat_mapping, _fetch_all_cat_ids_from_taxonomy_api,
 )
+import time as _time
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,42 @@ def cancel(task_id: str):
     if cancel_task(task_id):
         return {"status": "cancelling"}
     raise HTTPException(400, "Task not running or not found")
+
+
+# --- Category cache ---
+
+@router.get("/cat-cache-status")
+def cat_cache_status():
+    """Check if the category index is cached."""
+    import backend.dma_plus_service as svc
+    age = _time.time() - svc._cat_ids_cache_time if svc._cat_ids_cache_time else None
+    return {
+        "cached": len(svc._cat_ids_cache) > 0,
+        "rows": len(svc._cat_ids_cache),
+        "age_seconds": round(age) if age else None,
+        "ttl_seconds": _CAT_IDS_TTL,
+    }
+
+
+@router.post("/warm-cat-cache")
+async def warm_cat_cache():
+    """Pre-load the category index from Taxonomy API (takes ~5 min first time)."""
+    import backend.dma_plus_service as svc
+    if svc._cat_ids_cache and (_time.time() - svc._cat_ids_cache_time) < _CAT_IDS_TTL:
+        return {"status": "already_cached", "rows": len(svc._cat_ids_cache)}
+
+    loop = asyncio.get_event_loop()
+
+    def _warm():
+        svc._ensure_maincat_mapping()
+        rows = svc._fetch_all_cat_ids_from_taxonomy_api()
+        if rows:
+            svc._cat_ids_cache = rows
+            svc._cat_ids_cache_time = _time.time()
+        return len(rows)
+
+    count = await loop.run_in_executor(executor, _warm)
+    return {"status": "loaded", "rows": count}
 
 
 # --- History ---

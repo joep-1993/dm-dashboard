@@ -165,13 +165,98 @@ def _build_exclusion_workbook(shop_name: str, maincat: str, maincat_id: str,
     return wb
 
 
+_cat_ids_cache: list = []       # [(mc_name, mc_id, deepest_cat, cat_id), ...]
+_cat_ids_cache_time: float = 0
+_CAT_IDS_TTL = 3600             # 1 hour
+
+
 def _populate_cat_ids_sheet(wb: openpyxl.Workbook):
-    """Add a cat_ids sheet with full maincat_id → deepest_cat mapping from CSVs."""
+    """Add a cat_ids sheet with full maincat_id → deepest_cat mapping.
+    Uses cached Taxonomy API v2 data (1h TTL), falls back to cat_urls.csv."""
+    global _cat_ids_cache, _cat_ids_cache_time
+
     ws_cat = wb.create_sheet("cat_ids")
     ws_cat.append(["maincat", "maincat_id", "deepest_cat", "cat_id"])
 
     _ensure_maincat_mapping()
 
+    # Use cache if fresh
+    if _cat_ids_cache and (time.time() - _cat_ids_cache_time) < _CAT_IDS_TTL:
+        for row in _cat_ids_cache:
+            ws_cat.append(list(row))
+        logger.info(f"cat_ids sheet: {len(_cat_ids_cache)} rows from cache")
+        return
+
+    # Try live Taxonomy API
+    api_rows = _fetch_all_cat_ids_from_taxonomy_api()
+    if api_rows:
+        _cat_ids_cache = api_rows
+        _cat_ids_cache_time = time.time()
+        for row in api_rows:
+            ws_cat.append(list(row))
+        logger.info(f"cat_ids sheet: {len(api_rows)} rows from Taxonomy API v2")
+        return
+
+    # Fallback to CSV
+    logger.info("Taxonomy API unavailable, falling back to cat_urls.csv")
+    _populate_cat_ids_from_csv(ws_cat)
+
+
+def _fetch_all_cat_ids_from_taxonomy_api() -> list:
+    """Fetch all categories from Taxonomy API v2. Returns [(mc_name, mc_id, cat_name, cat_id), ...]."""
+    import requests
+
+    TAX_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
+    TAX_HEADERS = {"X-User-Name": "SEO_JOEP", "Accept": "application/json"}
+    result = []
+
+    try:
+        for mc_name_lower, mc_id in _maincat_name_to_id.items():
+            mc_name = _maincat_id_to_name.get(mc_id, mc_name_lower)
+            subcats = _fetch_subcategories_recursive(TAX_BASE, TAX_HEADERS, int(mc_id))
+            for cat_name, cat_id in subcats:
+                result.append((mc_name, mc_id, cat_name, str(cat_id)))
+    except Exception as e:
+        logger.warning(f"Taxonomy API fetch failed: {e}")
+        return []
+
+    return result
+
+
+def _fetch_subcategories_recursive(base_url: str, headers: dict, parent_id: int) -> list:
+    """Recursively fetch all subcategories under a parent. Returns [(name, id), ...]."""
+    import requests
+
+    result = []
+    try:
+        r = requests.get(
+            f"{base_url}/api/Categories/{parent_id}",
+            headers=headers, params={"locale": "nl-NL"}, timeout=30,
+        )
+        if r.status_code != 200:
+            return result
+
+        data = r.json()
+        for sub in data.get("subCategories", []):
+            if not sub.get("isEnabled", True):
+                continue
+            nl = next((l for l in sub.get("labels", []) if l.get("locale") == "nl-NL"), {})
+            name = nl.get("name", "")
+            cat_id = sub.get("id")
+            if name and cat_id:
+                result.append((name, cat_id))
+                # Recurse into this subcategory
+                result.extend(
+                    _fetch_subcategories_recursive(base_url, headers, cat_id)
+                )
+    except Exception as e:
+        logger.warning(f"Failed to fetch subcategories for {parent_id}: {e}")
+
+    return result
+
+
+def _populate_cat_ids_from_csv(ws_cat):
+    """Fallback: populate cat_ids from static cat_urls.csv."""
     cat_urls_csv = Path(__file__).parent / "data" / "cat_urls.csv"
     if not cat_urls_csv.exists():
         return
@@ -184,7 +269,6 @@ def _populate_cat_ids_sheet(wb: openpyxl.Workbook):
             cat_id = row.get("cat_id", "").strip()
             if not mc_name or not deepest_cat:
                 continue
-            # Resolve maincat name → id
             mc_id = _maincat_name_to_id.get(mc_name.lower(), "")
             if mc_id:
                 ws_cat.append([mc_name, mc_id, deepest_cat, cat_id])
