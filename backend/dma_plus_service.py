@@ -135,17 +135,17 @@ def resolve_maincat(maincat: str, maincat_id: str) -> tuple:
 # ---------------------------------------------------------------------------
 def _build_inclusion_workbook(shop_name: str, maincat: str, maincat_id: str,
                               cl1: str, budget: float) -> openpyxl.Workbook:
-    """Create a minimal workbook matching the inclusion sheet layout.
+    """Create a minimal workbook matching the inclusion sheet v2 layout.
+    Columns: A=shop_name, B=Shop ID, C=maincat, D=maincat_id, E=cl1, F=budget, G=result, H=error
     cl1 can be comma-separated (e.g. 'a,b,c') to create one row per level."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "toevoegen"
-    ws.append(["campaign_name", "ad_group_name", "Shop ID", "maincat", "maincat_id",
+    ws.append(["shop_name", "Shop ID", "maincat", "maincat_id",
                "custom label 1", "budget", "result", "error message"])
     cl1_values = [v.strip() for v in cl1.split(",") if v.strip()]
     for cl in cl1_values:
-        campaign_name = f"PLA/{maincat}_{cl}"
-        ws.append([campaign_name, shop_name, "", maincat, maincat_id, cl, budget, None, None])
+        ws.append([shop_name, "", maincat, maincat_id, cl, budget, None, None])
     return wb
 
 
@@ -355,7 +355,7 @@ def _run_operation(task_id: str, operation: str, country: str,
                 sys.stdout = old_stdout
 
             log_output = captured.getvalue()
-            results = _extract_results(wb, "toevoegen", 7, 8)  # col H=result, I=error
+            results = _extract_results(wb, "toevoegen", 6, 7)  # col G=result, H=error
             result_data = {
                 "rows_processed": len(results),
                 "successes": sum(1 for r in results if r["success"]),
