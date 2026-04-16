@@ -254,6 +254,11 @@ def parse_beslist_url(url: str) -> ParsedUrl:
     if "#" in path:
         path, result.fragment = path.split("#", 1)
 
+    # Strip /r/{bucket}/ segments (e.g. /r/2_delige/) — these are query/bucket
+    # parts that should be ignored for validation
+    path = re.sub(r'/r/[^/]+/', '/', path)
+    path = path.replace('//', '/')
+
     result.path = path
 
     # Split on /c/ to separate category from facets
