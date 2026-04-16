@@ -43,7 +43,8 @@ LOG_FILE = os.path.join(LOG_DIR, "daily_automation.log")
 
 POLL_INTERVAL = 15            # seconds between status polls
 VALIDATION_TIMEOUT = 14400    # 4 hours max for a validation step
-PROCESS_TIMEOUT = 14400       # 4 hours max for processing loops
+PROCESS_TIMEOUT = 28800       # 8 hours max for processing loops
+PROCESS_MAX_RETRIES = 3       # retry timed-out processing steps up to N times
 PUBLISH_TIMEOUT = 3600        # 1 hour max for publish
 
 # Reusable session — SSL verify can be disabled for self-signed certs
@@ -142,7 +143,11 @@ def poll_task(status_url, timeout):
 
 
 def loop_until_done(url, timeout, params=None):
-    """Call an endpoint repeatedly until no URLs left to process."""
+    """Call an endpoint repeatedly until no URLs left to process.
+
+    Returns a dict with 'total_processed' and 'timed_out' flag.
+    Does NOT raise on timeout — partial progress is still useful.
+    """
     log = logging.getLogger("automation")
     start = time.time()
     iteration = 0
@@ -155,14 +160,15 @@ def loop_until_done(url, timeout, params=None):
 
         if data.get("status") == "complete" or data.get("message") == "No URLs to process":
             log.info(f"  Done after {iteration} iterations, total processed: {total_processed}")
-            return data
+            return {"total_processed": total_processed, "timed_out": False}
 
         processed = data.get("processed", 0)
         total_processed += processed
         log.info(f"  Iteration {iteration}: processed={processed} (total so far: {total_processed})")
         time.sleep(2)
 
-    raise TimeoutError(f"Processing loop timed out after {timeout}s")
+    log.warning(f"  Timeout after {timeout}s — processed {total_processed} URLs before timeout")
+    return {"total_processed": total_processed, "timed_out": True}
 
 # ---------------------------------------------------------------------------
 # Steps
@@ -243,35 +249,72 @@ def step_recheck_skipped_urls():
     poll_task(f"{BASE_URL}/api/recheck-skipped-urls/status/{task_id}", VALIDATION_TIMEOUT)
 
 
+PROCESS_WORKERS = 20          # parallel workers for content generation
+
+
 def step_process_faq_urls():
-    loop_until_done(
+    return loop_until_done(
         f"{BASE_URL}/api/faq/process-urls",
         PROCESS_TIMEOUT,
-        params={"batch_size": 200, "parallel_workers": 20, "num_faqs": 6},
+        params={"batch_size": 200, "parallel_workers": PROCESS_WORKERS, "num_faqs": 6},
     )
 
 
 def step_process_kopteksten_urls():
-    loop_until_done(
+    return loop_until_done(
         f"{BASE_URL}/api/process-urls",
         PROCESS_TIMEOUT,
-        params={"batch_size": 200, "parallel_workers": 20},
+        params={"batch_size": 200, "parallel_workers": PROCESS_WORKERS},
     )
 
 
 def step_process_parallel():
-    """Regenerate FAQ and Kopteksten content in parallel."""
+    """Regenerate FAQ and Kopteksten content in parallel.
+
+    Returns a summary dict. Does NOT raise on timeout — partial progress
+    is preserved in the DB and will be published in the next step.
+    """
     log = logging.getLogger("automation")
     log.info("  Starting FAQ + Kopteksten processing in parallel")
+
+    results = {}
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {
-            executor.submit(step_process_faq_urls): "Process FAQ URLs",
-            executor.submit(step_process_kopteksten_urls): "Process Kopteksten URLs",
+            executor.submit(step_process_faq_urls): "FAQ",
+            executor.submit(step_process_kopteksten_urls): "Kopteksten",
         }
         for future in as_completed(futures):
             name = futures[future]
-            future.result()  # raises if failed
-            log.info(f"  {name} completed")
+            result = future.result()  # raises on network/server errors (not timeout)
+            results[name] = result
+            if result["timed_out"]:
+                log.warning(f"  ⚠ {name} timed out after processing {result['total_processed']} URLs")
+            else:
+                log.info(f"  ✓ {name} completed — {result['total_processed']} URLs processed")
+
+    for attempt in range(1, PROCESS_MAX_RETRIES + 1):
+        timed_out_names = [n for n, r in results.items() if r["timed_out"]]
+        if not timed_out_names:
+            break
+        log.info(f"  Retry {attempt}/{PROCESS_MAX_RETRIES} for: {', '.join(timed_out_names)}")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            retry_futures = {}
+            if results.get("FAQ", {}).get("timed_out"):
+                retry_futures[executor.submit(step_process_faq_urls)] = "FAQ"
+            if results.get("Kopteksten", {}).get("timed_out"):
+                retry_futures[executor.submit(step_process_kopteksten_urls)] = "Kopteksten"
+            for future in as_completed(retry_futures):
+                name = retry_futures[future]
+                result = future.result()
+                extra = result["total_processed"]
+                results[name]["total_processed"] += extra
+                results[name]["timed_out"] = result["timed_out"]
+                if result["timed_out"]:
+                    log.warning(f"  ⚠ {name} retry {attempt} timed out (+{extra} URLs)")
+                else:
+                    log.info(f"  ✓ {name} retry {attempt} completed (+{extra} URLs)")
+
+    return results
 
 
 def step_publish_production():
@@ -338,25 +381,24 @@ def main():
     log.info("--- Cancelling stale tasks ---")
     cancel_running_tasks()
 
-    steps = [
+    # Steps before content generation — these are critical (abort on failure)
+    prep_steps = [
         ("Reset FAQ validation",              step_reset_faq_validation),
         ("Reset Kopteksten validation",       step_reset_kopteksten_validation),
         ("Validate links (parallel)",         step_validate_parallel),
         ("Recheck skipped URLs",              step_recheck_skipped_urls),
-        ("Regenerate content (parallel)",      step_process_parallel),
-        ("Publish to Production",             step_publish_production),
     ]
 
     completed_steps = []
+    process_results = None
     publish_result = None
 
-    for step_name, step_func in steps:
+    # --- Preparation steps (critical) ---
+    for step_name, step_func in prep_steps:
         log.info(f"--- Starting: {step_name} ---")
         try:
-            result = step_func()
+            step_func()
             completed_steps.append(step_name)
-            if step_name == "Publish to Production" and result:
-                publish_result = result
             log.info(f"--- Completed: {step_name} ---")
         except Exception as e:
             log.error(f"--- FAILED: {step_name} --- Error: {e}", exc_info=True)
@@ -370,13 +412,62 @@ def main():
             )
             sys.exit(1)
 
+    # --- Content generation (non-fatal on timeout — always continue to publish) ---
+    log.info("--- Starting: Regenerate content (parallel) ---")
+    try:
+        process_results = step_process_parallel()
+        completed_steps.append("Regenerate content (parallel)")
+
+        any_timed_out = any(r["timed_out"] for r in process_results.values())
+        if any_timed_out:
+            timed_out_names = [n for n, r in process_results.items() if r["timed_out"]]
+            log.warning(f"--- Partial: Regenerate content --- {', '.join(timed_out_names)} timed out after retry, continuing to publish")
+        else:
+            log.info("--- Completed: Regenerate content (parallel) ---")
+    except Exception as e:
+        log.error(f"--- FAILED: Regenerate content --- Error: {e}", exc_info=True)
+        log.info("Continuing to publish — already-generated content is still in the DB")
+
+    # --- Publish (always runs) ---
+    log.info("--- Starting: Publish to Production ---")
+    try:
+        publish_result = step_publish_production()
+        completed_steps.append("Publish to Production")
+        log.info("--- Completed: Publish to Production ---")
+    except Exception as e:
+        log.error(f"--- FAILED: Publish to Production --- Error: {e}", exc_info=True)
+        duration = datetime.now() - start_time
+        send_slack_message(
+            f":x: *DM Dashboard - Daily Automation Failed*\n"
+            f"Failed at: *Publish to Production*\n"
+            f"Error: {e}\n"
+            f"Duration: {str(duration).split('.')[0]}\n"
+            f"Completed steps: {', '.join(completed_steps) or 'None'}"
+        )
+        sys.exit(1)
+
+    # --- Final Slack notification ---
     duration = datetime.now() - start_time
     total_urls = publish_result.get("total_urls", 0) if publish_result else "?"
     payload_mb = publish_result.get("payload_size_mb", "?") if publish_result else "?"
 
+    # Build process summary
+    process_summary = ""
+    if process_results:
+        parts = []
+        for name, r in process_results.items():
+            status = "timed out" if r["timed_out"] else "done"
+            parts.append(f"{name}: {r['total_processed']} URLs ({status})")
+        process_summary = f"\nGeneration: {', '.join(parts)}"
+
+    any_timed_out = process_results and any(r["timed_out"] for r in process_results.values())
+    icon = ":warning:" if any_timed_out else ":white_check_mark:"
+    label = "Partial" if any_timed_out else "Complete"
+
     send_slack_message(
-        f":white_check_mark: *DM Tools - Daily Automation Complete*\n"
-        f"Published *{total_urls}* URLs to production ({payload_mb} MB)\n"
+        f"{icon} *DM Tools - Daily Automation {label}*\n"
+        f"Published *{total_urls}* URLs to production ({payload_mb} MB)"
+        f"{process_summary}\n"
         f"Duration: {str(duration).split('.')[0]}"
     )
 
