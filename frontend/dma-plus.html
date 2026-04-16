@@ -167,11 +167,7 @@
                                 <label class="form-label">Campaign Pattern</label>
                                 <input type="text" class="form-control" id="campaignPattern" placeholder="PLA/%" value="PLA/%">
                             </div>
-                            <div class="col-md-3 d-flex align-items-end gap-2">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="dryRun" checked>
-                                    <label class="form-check-label" for="dryRun">Dry run</label>
-                                </div>
+                            <div class="col-md-3 d-flex align-items-end">
                                 <div class="form-check" id="fixCheck" style="display:none;">
                                     <input class="form-check-input" type="checkbox" id="fixMode">
                                     <label class="form-check-label" for="fixMode">Fix issues</label>
@@ -179,9 +175,13 @@
                             </div>
                         </div>
 
-                        <div class="mt-3">
+                        <div class="mt-3 d-flex align-items-center gap-3">
                             <button class="btn btn-primary" id="startBtn" onclick="startOperation()">Start</button>
-                            <button class="btn btn-outline-danger ms-2" id="cancelBtn" style="display:none;" onclick="cancelOperation()">Cancel</button>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="dryRun" checked>
+                                <label class="form-check-label" for="dryRun">Dry run</label>
+                            </div>
+                            <button class="btn btn-outline-danger" id="cancelBtn" style="display:none;" onclick="cancelOperation()">Cancel</button>
                         </div>
                     </div>
                 </div>
@@ -307,9 +307,11 @@
         }
 
         // Validate options
+        // Always send dry_run flag
+        form.append('dry_run', document.getElementById('dryRun').checked);
+
         if (!['inclusion', 'exclusion'].includes(selectedOp)) {
             form.append('campaign_pattern', document.getElementById('campaignPattern').value);
-            form.append('dry_run', document.getElementById('dryRun').checked);
             if (selectedOp === 'validate_ads') {
                 form.append('fix', document.getElementById('fixMode').checked);
             }
