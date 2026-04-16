@@ -31,6 +31,12 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── mc_id_finder_service.py # MC ID Finder: Redshift lookup for Merchant Center IDs (TLD-based country filtering)
 │   ├── redshift_upload_router.py # Redshift Upload APIRouter
 │   ├── redshift_upload_service.py # Redshift Upload: upload xlsx/pasted data to pa.* tables
+│   ├── url_validator_router.py  # URL Validator APIRouter
+│   ├── url_validator_service.py # URL Validator: validates category/facet URLs against Taxonomy API v2
+│   ├── dma_plus_router.py       # DMA+ APIRouter
+│   ├── dma_plus_service.py      # DMA+ service: wrapper for campaign_processor with progress + history
+│   ├── campaign_processor.py    # DMA campaign processor (8.5K lines, copied from dma_script)
+│   ├── google_ads_helpers.py    # Google Ads helper functions (listing trees, campaigns, ad groups)
 │   ├── category_forms.json     # Pre-computed Dutch singular/plural forms (3,564 entries)
 │   ├── categories.xlsx         # Preloaded category data (3,543 rows: maincat/deepest_cat)
 │   ├── unique_titles.py      # Unique title generation
@@ -59,6 +65,8 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── mc-id-finder.html  # MC ID Finder (Merchant Center IDs by shop name, always shows NL/BE/DE columns)
 │   ├── redshift-upload.html # Redshift Upload (xlsx upload or paste data to pa.* tables)
 │   ├── url-checker.html   # URL Checker (status, title, description, H1, product count)
+│   ├── url-validator.html # URL Validator (validate URLs against Taxonomy API v2)
+│   ├── dma-plus.html      # DMA+ (include/exclude shops, validate CL1/ads/trees)
 │   ├── css/style.css     # Custom theme (#059CDF blue, #9C3095 purple, #A0D168 green)
 │   └── js/
 │       ├── app.js        # SEO content frontend logic
@@ -413,6 +421,22 @@ python-dotenv==1.0.0      # Environment variable management
 - `POST /api/redshift-upload/xlsx` - Upload .xlsx file to Redshift pa.<table_name> (form: file, table_name, chunk_size)
 - `POST /api/redshift-upload/paste` - Upload pasted data to Redshift pa.<table_name> (form: table_name, chunk_size, headers JSON, rows JSON). All columns created as VARCHAR(1000).
 
+### URL Validator
+- `POST /api/url-validator/validate` - Validate URLs against Taxonomy API v2 (JSON: `{"urls": [...]}`, max 50,000)
+- `POST /api/url-validator/upload` - Upload Excel/CSV/TXT, extract URLs
+- `POST /api/url-validator/download` - Download validation results as Excel
+- `GET /api/url-validator/cache-status` - Taxonomy cache stats
+- `POST /api/url-validator/cache-refresh` - Force cache reload
+
+### DMA+
+- `POST /api/dma-plus/start` - Start DMA+ operation (form: operation, country, file/shop_name, dry_run)
+- `GET /api/dma-plus/status/{task_id}` - Poll task progress
+- `POST /api/dma-plus/cancel/{task_id}` - Cancel running task
+- `GET /api/dma-plus/history` - Change history (with affected campaigns/ad_groups/trees)
+- `GET /api/dma-plus/countries` - Available countries (NL/BE)
+- `GET /api/dma-plus/cat-cache-status` - Category index cache status
+- `POST /api/dma-plus/warm-cat-cache` - Pre-load category index from Taxonomy API v2 (~5 min)
+
 ### Labels Applied by Thema Ads
 **Ad Groups get labeled with:**
 - `BF_2025` - Black Friday 2025 campaign marker
@@ -512,4 +536,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-04-05_
+_Last updated: 2026-04-16_
