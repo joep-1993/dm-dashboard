@@ -287,7 +287,8 @@
         form.append('country', selectedCountry);
 
         // Check which input tab is active
-        const shopTabActive = document.querySelector('#shopTab.active, #shopTab.show');
+        const shopTabBtn = document.querySelector('[data-bs-target="#shopTab"]');
+        const shopTabActive = shopTabBtn && shopTabBtn.classList.contains('active');
         const fileInput = document.getElementById('fileInput');
 
         if (shopTabActive && ['inclusion', 'exclusion'].includes(selectedOp)) {
