@@ -477,7 +477,7 @@
                     <td style="padding: 6px 12px;">${h.country}</td>
                     <td style="padding: 6px 12px;" class="${statusCls}">${h.status}</td>
                     <td style="padding: 6px 12px;">${h.summary || ''}</td>
-                    <td style="padding: 6px 12px; text-align: center;"><button class="btn btn-sm btn-outline-secondary" onclick="exportRow(${idx})" title="Export this row as CSV">CSV</button></td>
+                    <td style="padding: 6px 12px; text-align: center;"><button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportRow(${idx})">Export</button></td>
                 </tr>`;
             }).join('');
         } catch (e) { console.error('History error:', e); }
