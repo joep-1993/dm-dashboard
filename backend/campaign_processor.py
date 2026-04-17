@@ -5247,6 +5247,7 @@ def process_exclusion_sheet_v2(
     # Structure: {(maincat_id, cl1): [(row_idx, shop_name), ...]}
     groups = defaultdict(list)
     rows_with_missing_fields = []
+    maincat_name_by_id: dict = {}  # maincat_id -> human-readable maincat name (col C)
 
     for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=False), start=2):
         # Check if already processed
@@ -5255,6 +5256,7 @@ def process_exclusion_sheet_v2(
             continue
 
         shop_name = row[COL_EX_SHOP_NAME].value
+        maincat_name = row[COL_EX_MAINCAT].value if len(row) > COL_EX_MAINCAT else None
         maincat_id = row[COL_EX_MAINCAT_ID].value
         custom_label_1 = row[COL_EX_CUSTOM_LABEL_1].value
 
@@ -5262,20 +5264,38 @@ def process_exclusion_sheet_v2(
         if not shop_name:
             continue
 
-        # Track rows with missing required fields
-        if not maincat_id or not custom_label_1:
-            rows_with_missing_fields.append(idx)
+        # Track rows with missing required fields (maincat_id and cl1 are both required)
+        missing = []
+        if not maincat_id:
+            missing.append("maincat_id")
+        if not custom_label_1:
+            missing.append("custom_label_1")
+        if missing:
+            rows_with_missing_fields.append((idx, missing))
             continue
 
         maincat_id_str = str(maincat_id)
         cl1_str = str(custom_label_1)
+        if maincat_name and maincat_id_str not in maincat_name_by_id:
+            maincat_name_by_id[maincat_id_str] = str(maincat_name)
         groups[(maincat_id_str, cl1_str)].append((idx, shop_name))
 
+    # Per-maincat counters for the summary:
+    #   categories_by_maincat  = distinct deepest_cats under the maincat
+    #   slots_by_maincat       = categories × number of cl1 groups (= total campaign
+    #                            names that could exist in Google Ads)
+    #   campaigns_found_by_maincat = how many of those slots were actually found
+    #                                in the pre-fetched campaign cache
+    campaigns_found_by_maincat: dict = defaultdict(int)
+    categories_by_maincat: dict = {}
+    slots_by_maincat: dict = defaultdict(int)
+
     # Mark rows with missing fields as errors
-    for idx in rows_with_missing_fields:
-        print(f"[Row {idx}] ⚠️  Missing required fields, skipping")
+    for idx, missing in rows_with_missing_fields:
+        missing_str = ", ".join(missing)
+        print(f"[Row {idx}] ⚠️  Missing required fields: {missing_str}, skipping")
         sheet.cell(row=idx, column=COL_EX_STATUS + 1).value = False
-        sheet.cell(row=idx, column=COL_EX_ERROR + 1).value = "Missing required fields"
+        sheet.cell(row=idx, column=COL_EX_ERROR + 1).value = f"Missing required fields: {missing_str}"
 
     total_groups = len(groups)
     total_rows = sum(len(rows) for rows in groups.values())
@@ -5329,6 +5349,10 @@ def process_exclusion_sheet_v2(
             continue
 
         print(f"  Found {len(deepest_cats)} deepest_cat(s)")
+
+        # Record category / slot counts for the maincat-level summary at the end
+        categories_by_maincat[maincat_id_str] = len(deepest_cats)
+        slots_by_maincat[maincat_id_str] += len(deepest_cats)
 
         # Track results per shop
         shop_results = {shop: {'success': 0, 'already_excluded': 0, 'errors': []} for shop in shop_names}
@@ -5416,6 +5440,7 @@ def process_exclusion_sheet_v2(
                     time.sleep(0.3)
 
         print(f"  Summary: {campaigns_found} campaign(s), {total_exclusions_added} exclusion(s) added")
+        campaigns_found_by_maincat[maincat_id_str] += campaigns_found
 
         # =========================================================================
         # STEP 3: Update row statuses based on results
@@ -5470,6 +5495,13 @@ def process_exclusion_sheet_v2(
     print(f"Rows with missing fields: {len(rows_with_missing_fields)}")
     print(f"✅ Successful: {success_count}")
     print(f"❌ Failed: {error_count + len(rows_with_missing_fields)}")
+    for mc_id, count in campaigns_found_by_maincat.items():
+        mc_name = maincat_name_by_id.get(mc_id, f"maincat_id={mc_id}")
+        cats = categories_by_maincat.get(mc_id, 0)
+        slots = slots_by_maincat.get(mc_id, 0)
+        pct = (count / slots * 100) if slots else 0
+        print(f"Categories in {mc_name}: {cats}")
+        print(f"Campaigns found in {mc_name}: {count}/{slots} ({pct:.0f}%)")
     print(f"{'='*70}\n")
 
 

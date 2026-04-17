@@ -1,6 +1,37 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Log truncation for display ≠ log truncation for parsing (2026-04-17)
+- **Bug**: DMA+ exclusion export showed only ~22 campaigns when the run processed hundreds. Affected-entity regex was being applied to `result_data["log"]` which had already been sliced to the last 5000 chars for UI display
+- **Fix**: Keep a separate `full_log = captured.getvalue()` local variable per branch; let the display `"log"` field stay truncated, but parse downstream artifacts (affected campaigns, counts, anything for export) from `full_log`
+- **Pattern**: whenever you truncate stdout capture for a UI field, the parser must run on the pre-truncation value. Name the two explicitly (`full_log` vs `display_log`) so it's obvious which is which and future branches can't accidentally reuse the truncated one
+- **File**: `backend/dma_plus_service.py:380-523`
+
+## FastAPI async handlers block the event loop when they call sync I/O (2026-04-17)
+- **Symptom**: DMA+ Start button felt dead — POST `/api/dma-plus/start` took minutes to return because `start_operation` synchronously called `_build_exclusion_workbook → _populate_cat_ids_sheet → _fetch_all_cat_ids_from_taxonomy_api` (a recursive Taxonomy API walk). Worse: while the event loop was blocked the Cancel button was also useless — frontend only sets `currentTaskId` *after* the start response, so cancel had nothing to target
+- **Fix**: `start_operation` now only seeds the task record (`status:"queued"`) and spawns the background thread. ALL heavy work (maincat resolve, workbook build, Google Ads client init) moved into `_run_operation`. POST returns in <10ms with a task_id that Cancel can immediately target
+- **Pattern**: `async def` handlers that do blocking I/O are worse than sync handlers — sync handlers get a threadpool slot, async handlers hog the loop. If a handler must do slow work, it should hand it off to a thread/task and return an ID. "The response doesn't need the result" is the tell that background execution is right
+- **Cancel plumbing**: flip a flag on the task record and have the worker `_check_cancelled(task_id)` at every phase boundary. Raising a custom `TaskCancelled` exception keeps the control flow clean. Widen the allowed-to-cancel statuses to include `queued`/`initializing`, not just `running`, or users can't cancel during the slow init phase
+- **Still missing**: once control is inside a monolithic sync function (e.g. `cp.process_exclusion_sheet_v2`), you can't cancel without a callback threaded through that function. Flagging this as a known limitation is better than pretending cancel works everywhere
+- **File**: `backend/dma_plus_service.py:570-616, 307-395`
+
+## xlsx over CSV kills Excel's Windows-1252 mojibake (2026-04-17)
+- **Symptom**: DMA+ CSV export displayed `→` as `â†’`, `✅` as `âœ…`, etc. Backend data was correct UTF-8; Excel was opening the CSV as Windows-1252 and mis-decoding every multi-byte character
+- **Fix**: Switch output to `.xlsx` via SheetJS (`XLSX.utils.aoa_to_sheet → book_append_sheet → writeFile`). Xlsx stores strings as UTF-8 inside XML parts of the zip; Excel always decodes them correctly. No BOM needed, no locale-dependence
+- **Bonus**: multi-sheet support came for free — split the one noisy CSV into `Status` + `Campaigns` tabs
+- **Alt fix** (kept in back pocket): prepend `\ufeff` BOM to the CSV Blob. Works but fragile — some tools strip BOMs, and it doesn't fix column-formatting issues
+- **Pattern**: for any user-facing tabular export containing non-ASCII characters (arrows, emoji, accented names), default to xlsx. CSV is fine for ASCII or data pipelines that explicitly declare encoding
+
+## Blocking `<script src>` stalls the whole page when the CDN is unreachable (2026-04-17)
+- **Symptom**: Adding `<script src="https://cdn.sheetjs.com/...">` before the inline `<script>` made the Start button do nothing after page load. The inline script couldn't parse until SheetJS finished downloading, so `startOperation` was undefined when the onclick fired — silently no-op, no console error
+- **Fix**: add `async` to the CDN script. It loads in parallel and doesn't hold up the inline script. Protect any callsite that needs the library with a guard: `if (typeof XLSX === 'undefined') { alert('Excel library still loading — try again in a second.'); return; }`
+- **Pattern**: third-party CDN scripts should always be `async` or `defer` unless the inline script directly needs a symbol from them. The worst-case failure mode (corp network blocks the CDN) is "nothing on the page works, no error" which is painful to debug
+
+## Two-stage cap: validate before you truncate (2026-04-17)
+- **Bug**: n8n IndexNow submitter fetched top-10K URLs from Redshift, then validated supplier count. If N of those 10K failed validation, the run submitted only `10K − N` URLs — URLs 10001+ that might have passed were never considered
+- **Fix**: fetch 15K (headroom), run validation on ALL of them, THEN cap to 10K. Report `rejected (<3 suppliers)` and `truncated (daily cap, post-validation)` as separate numbers in the Slack summary
+- **Pattern**: when a pipeline has (1) a natural input limit and (2) a filter that discards some inputs, always filter-then-truncate, not truncate-then-filter. The other ordering silently wastes quota and is invisible unless you instrument both counts
+
 ## One repo serving two environments — env-gated features beat two forks (2026-04-15)
 - **Context**: `dm-tools` (localhost, 8003, no auth) and `dm-dashboard` (networked, 3003, password-protected, Windows Task Scheduler UI) had drifted into two parallel repos with ~11 differing files. Same project, different deployment constraints. The old workflow was "commit to both repos after every change" which is error-prone and was already producing divergent features
 - **Consolidation approach**: dm-tools absorbed every dashboard feature, but behind env vars:

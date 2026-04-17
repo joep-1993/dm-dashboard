@@ -73,6 +73,16 @@ def _set_task(task_id: str, data: dict):
     _tasks[task_id] = data
 
 
+class TaskCancelled(Exception):
+    """Raised inside a background task when the user hit Cancel."""
+
+
+def _check_cancelled(task_id: str):
+    task = _tasks.get(task_id)
+    if task and task.get("cancel"):
+        raise TaskCancelled()
+
+
 # ---------------------------------------------------------------------------
 # Patch campaign_processor globals for web use
 # ---------------------------------------------------------------------------
@@ -305,29 +315,60 @@ def _extract_results(wb: openpyxl.Workbook, sheet_name: str, result_col: int, er
 # Core operation runners (run in background thread)
 # ---------------------------------------------------------------------------
 def _run_operation(task_id: str, operation: str, country: str,
-                   wb: Optional[openpyxl.Workbook] = None,
                    wb_bytes: Optional[bytes] = None,
+                   shop_name: Optional[str] = None,
+                   maincat: Optional[str] = None,
+                   maincat_id: Optional[str] = None,
+                   cl1: Optional[str] = None,
+                   budget: Optional[float] = None,
                    campaign_pattern: str = None,
                    dry_run: bool = False,
                    fix: bool = False):
-    """Background thread target for all 5 operations."""
+    """Background thread target for all 5 operations. Does ALL heavy init
+    (maincat resolve, workbook build, Taxonomy API fetch, Google Ads client)
+    inside this thread so the /start HTTP handler returns instantly."""
     try:
+        existing_started = _get_task(task_id).get("started_at") if _get_task(task_id) else datetime.now().isoformat()
         _set_task(task_id, {
             "status": "initializing",
             "operation": operation,
             "country": country,
-            "progress": 0,
-            "message": "Initializing Google Ads client...",
-            "started_at": datetime.now().isoformat(),
+            "progress": 2,
+            "message": "Resolving category...",
+            "started_at": existing_started,
         })
+        _check_cancelled(task_id)
+
+        # Resolve maincat name ↔ id (cheap, reads CSV)
+        maincat, maincat_id = resolve_maincat(maincat, maincat_id)
+
+        # Build workbook if shop_name provided. _build_exclusion_workbook can
+        # fetch the Taxonomy API (slow on cold cache), which is why this is
+        # in the background thread.
+        wb: Optional[openpyxl.Workbook] = None
+        if shop_name and operation == "inclusion":
+            _set_task(task_id, {**_get_task(task_id), "progress": 5, "message": "Building workbook..."})
+            _check_cancelled(task_id)
+            wb = _build_inclusion_workbook(shop_name, maincat, maincat_id, cl1 or "a", budget or 50.0)
+        elif shop_name and operation == "exclusion":
+            _set_task(task_id, {**_get_task(task_id), "progress": 5, "message": "Loading categories (Taxonomy API)..."})
+            _check_cancelled(task_id)
+            wb = _build_exclusion_workbook(shop_name, maincat, maincat_id, cl1 or "a")
+            # Once the workbook is built the shop_name path no longer needs wb_bytes
+            wb_bytes = None
+
+        _check_cancelled(task_id)
 
         # Patch campaign_processor for country
+        _set_task(task_id, {**_get_task(task_id), "progress": 8, "message": "Initializing Google Ads client..."})
         _patch_campaign_processor(country)
         from backend import campaign_processor as cp
 
         # Initialize client
         client = _get_client()
         customer_id = COUNTRY_CONFIG[country]["customer_id"]
+
+        _check_cancelled(task_id)
 
         _set_task(task_id, {
             **_get_task(task_id),
@@ -337,6 +378,7 @@ def _run_operation(task_id: str, operation: str, country: str,
         })
 
         result_data = None
+        full_log = ""  # complete captured stdout — used for affected-entity parsing
 
         # ---- INCLUSION ----
         if operation == "inclusion":
@@ -354,14 +396,14 @@ def _run_operation(task_id: str, operation: str, country: str,
             finally:
                 sys.stdout = old_stdout
 
-            log_output = captured.getvalue()
+            full_log = captured.getvalue()
             results = _extract_results(wb, "toevoegen", 6, 7)  # col G=result, H=error
             result_data = {
                 "rows_processed": len(results),
                 "successes": sum(1 for r in results if r["success"]),
                 "failures": sum(1 for r in results if not r["success"] and r["error"]),
                 "details": results,
-                "log": log_output[-5000:],  # last 5k chars
+                "log": full_log[-5000:],  # last 5k chars for display
             }
 
         # ---- EXCLUSION ----
@@ -379,14 +421,14 @@ def _run_operation(task_id: str, operation: str, country: str,
             finally:
                 sys.stdout = old_stdout
 
-            log_output = captured.getvalue()
+            full_log = captured.getvalue()
             results = _extract_results(wb, "uitsluiten", 5, 6)  # col F=result, G=error
             result_data = {
                 "rows_processed": len(results),
                 "successes": sum(1 for r in results if r["success"]),
                 "failures": sum(1 for r in results if not r["success"] and r["error"]),
                 "details": results,
-                "log": log_output[-5000:],
+                "log": full_log[-5000:],
             }
 
         # ---- VALIDATE CL1 ----
@@ -402,8 +444,9 @@ def _run_operation(task_id: str, operation: str, country: str,
                 )
             finally:
                 sys.stdout = old_stdout
+            full_log = captured.getvalue()
             if result_data:
-                result_data["log"] = captured.getvalue()[-5000:]
+                result_data["log"] = full_log[-5000:]
 
         # ---- VALIDATE ADS ----
         elif operation == "validate_ads":
@@ -418,8 +461,9 @@ def _run_operation(task_id: str, operation: str, country: str,
                 )
             finally:
                 sys.stdout = old_stdout
+            full_log = captured.getvalue()
             if result_data:
-                result_data["log"] = captured.getvalue()[-5000:]
+                result_data["log"] = full_log[-5000:]
 
         # ---- VALIDATE LISTING TREES ----
         elif operation == "validate_trees":
@@ -444,8 +488,9 @@ def _run_operation(task_id: str, operation: str, country: str,
                 )
             finally:
                 sys.stdout = old_stdout
+            full_log = captured.getvalue()
             if result_data:
-                result_data["log"] = captured.getvalue()[-5000:]
+                result_data["log"] = full_log[-5000:]
 
         else:
             raise ValueError(f"Unknown operation: {operation}")
@@ -462,9 +507,10 @@ def _run_operation(task_id: str, operation: str, country: str,
             "result": result_data,
         })
 
-        # Parse affected entities from log
-        log_text = result_data.get("log", "") if result_data else ""
-        affected = _parse_affected_entities(log_text)
+        # Parse affected entities from the FULL log, not the display-truncated
+        # copy — otherwise campaigns mentioned before the last 5k chars get
+        # dropped from the export when a run has many groups.
+        affected = _parse_affected_entities(full_log)
 
         # Also store affected in result for the status endpoint
         if result_data:
@@ -482,6 +528,27 @@ def _run_operation(task_id: str, operation: str, country: str,
             "affected": affected,
         })
 
+    except TaskCancelled:
+        logger.info(f"DMA+ task {task_id} cancelled by user")
+        prev = _get_task(task_id) or {}
+        _set_task(task_id, {
+            "status": "failed",
+            "operation": operation,
+            "country": country,
+            "progress": prev.get("progress", 0),
+            "message": "Cancelled by user",
+            "started_at": prev.get("started_at", ""),
+            "completed_at": datetime.now().isoformat(),
+        })
+        _history.appendleft({
+            "task_id": task_id,
+            "operation": operation,
+            "country": country,
+            "started_at": prev.get("started_at", ""),
+            "completed_at": datetime.now().isoformat(),
+            "status": "failed",
+            "summary": "Cancelled by user",
+        })
     except Exception as e:
         logger.error(f"DMA+ task {task_id} failed: {e}", exc_info=True)
         _set_task(task_id, {
@@ -578,33 +645,32 @@ def start_operation(operation: str, country: str = "NL",
                     dry_run: bool = False,
                     fix: bool = False) -> str:
     """
-    Start a DMA+ operation in the background.
-    Returns task_id for progress polling.
+    Seed a task record and kick off the background thread. Returns task_id
+    instantly — all heavy work (maincat resolve, workbook build, Taxonomy API
+    fetch, Google Ads client init) happens inside _run_operation so the HTTP
+    handler is not blocked and the Cancel button can flip the flag early.
     """
     task_id = str(uuid.uuid4())[:8]
 
-    # Cross-match maincat name ↔ id if only one is provided
-    maincat, maincat_id = resolve_maincat(maincat, maincat_id)
-
-    wb = None
-    # If shop_name provided (quick input), build a workbook
-    if shop_name and operation == "inclusion":
-        wb = _build_inclusion_workbook(
-            shop_name, maincat, maincat_id, cl1 or "a", budget or 50.0
-        )
-        wb_bytes = None  # use the wb object directly
-    elif shop_name and operation == "exclusion":
-        wb = _build_exclusion_workbook(
-            shop_name, maincat, maincat_id, cl1 or "a"
-        )
-        wb_bytes = None
+    _set_task(task_id, {
+        "status": "queued",
+        "operation": operation,
+        "country": country,
+        "progress": 0,
+        "message": "Queued...",
+        "started_at": datetime.now().isoformat(),
+    })
 
     thread = threading.Thread(
         target=_run_operation,
         args=(task_id, operation, country),
         kwargs={
-            "wb": wb,
             "wb_bytes": wb_bytes,
+            "shop_name": shop_name,
+            "maincat": maincat,
+            "maincat_id": maincat_id,
+            "cl1": cl1,
+            "budget": budget,
             "campaign_pattern": campaign_pattern,
             "dry_run": dry_run,
             "fix": fix,
@@ -622,7 +688,7 @@ def get_task_status(task_id: str) -> Optional[dict]:
 
 def cancel_task(task_id: str) -> bool:
     task = _get_task(task_id)
-    if task and task.get("status") == "running":
+    if task and task.get("status") in ("queued", "initializing", "running"):
         task["cancel"] = True
         _set_task(task_id, task)
         return True

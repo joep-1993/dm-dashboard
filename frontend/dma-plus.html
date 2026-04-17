@@ -245,6 +245,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js" async></script>
     <script>
     const API = window.location.origin;
     let selectedOp = 'inclusion';
@@ -493,27 +494,38 @@
     }
 
     function exportRow(idx) {
+        if (typeof XLSX === 'undefined') {
+            alert('Excel library still loading — try again in a second. If this persists, the SheetJS CDN may be blocked on your network.');
+            return;
+        }
         const h = historyData[idx];
         if (!h) return;
         const aff = h.affected || {};
-        const campaigns = (aff.campaigns || []).join('\n');
-        const adGroups = (aff.ad_groups || []).join('\n');
-        const trees = (aff.trees || []).join('\n');
+        const campaigns = aff.campaigns || [];
+        const adGroups = aff.ad_groups || [];
+        const trees = aff.trees || [];
 
-        let csv = 'Time,Operation,Country,Status,Summary\n';
-        csv += `"${h.completed_at || ''}","${h.operation}","${h.country}","${h.status}","${(h.summary||'').replace(/"/g, '""')}"\n`;
-        csv += '\nAffected Campaigns\n';
-        if (campaigns) csv += campaigns + '\n'; else csv += '(none)\n';
-        csv += '\nAffected Ad Groups\n';
-        if (adGroups) csv += adGroups + '\n'; else csv += '(none)\n';
-        csv += '\nAffected Product Trees\n';
-        if (trees) csv += trees + '\n'; else csv += '(none)\n';
+        const statusRows = [
+            ['Time', 'Operation', 'Country', 'Status', 'Summary'],
+            [h.completed_at || '', h.operation || '', h.country || '', h.status || '', h.summary || '']
+        ];
 
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `dma_plus_${h.operation}_${(h.completed_at || '').slice(0,10)}.csv`;
-        a.click();
+        const campaignRows = [['Affected Campaigns', 'Affected Ad Groups', 'Affected Product Trees']];
+        const rowCount = Math.max(campaigns.length, adGroups.length, trees.length);
+        for (let i = 0; i < rowCount; i++) {
+            campaignRows.push([campaigns[i] || '', adGroups[i] || '', trees[i] || '']);
+        }
+        if (rowCount === 0) campaignRows.push(['(none)', '(none)', '(none)']);
+
+        const wb = XLSX.utils.book_new();
+        const statusWs = XLSX.utils.aoa_to_sheet(statusRows);
+        const campaignWs = XLSX.utils.aoa_to_sheet(campaignRows);
+        statusWs['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 40 }];
+        campaignWs['!cols'] = [{ wch: 32 }, { wch: 28 }, { wch: 70 }];
+        XLSX.utils.book_append_sheet(wb, statusWs, 'Status');
+        XLSX.utils.book_append_sheet(wb, campaignWs, 'Campaigns');
+
+        XLSX.writeFile(wb, `dma_plus_${h.operation}_${(h.completed_at || '').slice(0,10)}.xlsx`);
     }
 
     // Init
