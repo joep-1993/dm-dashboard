@@ -1,6 +1,13 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Taxonomy API: `isBiddingCategory` only lives on the detail response (2026-04-17)
+- **Discovery**: DMA campaigns in Google Ads are named `PLA/{bidcat}_{cl1}` where a bidcat is any category with `isBiddingCategory=true`. The dm-tools processor was walking to the deepest leaves instead and looking up campaigns on those names, producing a high false-miss rate (849 lookup slots, ~100% hit only because bidcats happened to overlap the leaf set)
+- **API quirk**: `GET /api/Categories/{id}` returns a CategoryDto with `isBiddingCategory` populated on the TOP-LEVEL object. The embedded `subCategories` array entries carry only `id, parentId, isEnabled, labels` — **no `isBiddingCategory`**. The flat `/api/Categories?rootCategoriesOnly=false` endpoint ignores the param and returns only root cats (tried three boolean encodings, all returned 32). So there is no cheap way to get all bidcats in one call — you must walk the tree and fetch each category's own detail
+- **Cost**: Klussen subtree = 284 categories = 284 GETs. With `requests.Session()` reuse (keeps TCP/TLS alive), it runs in ~19s. Without session reuse the TLS handshake alone dominates. Full taxonomy (~31 maincats) ≈ 10 min on cold cache; fine for a 1h TTL cache
+- **Pattern**: when a schema lists a field at every level, always verify it's actually *populated* in every response context. The swagger promised `isBiddingCategory` on every CategoryDto; reality had it in detail responses only. Schema completeness ≠ response completeness
+- **File**: `backend/dma_plus_service.py:236-291` (`_fetch_bidcats_recursive`)
+
 ## Log truncation for display ≠ log truncation for parsing (2026-04-17)
 - **Bug**: DMA+ exclusion export showed only ~22 campaigns when the run processed hundreds. Affected-entity regex was being applied to `result_data["log"]` which had already been sliced to the last 5000 chars for UI display
 - **Fix**: Keep a separate `full_log = captured.getvalue()` local variable per branch; let the display `"log"` field stay truncated, but parse downstream artifacts (affected campaigns, counts, anything for export) from `full_log`

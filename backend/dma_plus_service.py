@@ -213,19 +213,31 @@ def _populate_cat_ids_sheet(wb: openpyxl.Workbook):
 
 
 def _fetch_all_cat_ids_from_taxonomy_api() -> list:
-    """Fetch all categories from Taxonomy API v2. Returns [(mc_name, mc_id, cat_name, cat_id), ...]."""
+    """Fetch all BIDCATS from Taxonomy API v2.
+
+    DMA campaigns are named `PLA/{bidcat_name}_{cl1}` — the bidcat, not the
+    deepest leaf category. A bidcat is any category whose detail response
+    has `isBiddingCategory: true`. Subcategory summaries embedded in a
+    parent's response do NOT include that flag, so we must walk the tree
+    and fetch each category's own detail to read it.
+
+    Returns [(mc_name, mc_id, bidcat_name, bidcat_id), ...] — one row per
+    (maincat, bidcat) pair. The tuple field names are kept generic for
+    backwards compat with the cat_ids sheet column 'deepest_cat'.
+    """
     import requests
 
     TAX_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
     TAX_HEADERS = {"X-User-Name": "SEO_JOEP", "Accept": "application/json"}
     result = []
+    session = requests.Session()  # reuse TCP/TLS across ~thousands of category GETs
 
     try:
         for mc_name_lower, mc_id in _maincat_name_to_id.items():
             mc_name = _maincat_id_to_name.get(mc_id, mc_name_lower)
-            subcats = _fetch_subcategories_recursive(TAX_BASE, TAX_HEADERS, int(mc_id))
-            for cat_name, cat_id in subcats:
-                result.append((mc_name, mc_id, cat_name, str(cat_id)))
+            bidcats = _fetch_bidcats_recursive(TAX_BASE, TAX_HEADERS, int(mc_id), session=session)
+            for bc_name, bc_id in bidcats:
+                result.append((mc_name, mc_id, bc_name, str(bc_id)))
     except Exception as e:
         logger.warning(f"Taxonomy API fetch failed: {e}")
         return []
@@ -233,34 +245,53 @@ def _fetch_all_cat_ids_from_taxonomy_api() -> list:
     return result
 
 
-def _fetch_subcategories_recursive(base_url: str, headers: dict, parent_id: int) -> list:
-    """Recursively fetch all subcategories under a parent. Returns [(name, id), ...]."""
+def _fetch_bidcats_recursive(base_url: str, headers: dict, cat_id: int,
+                              session=None) -> list:
+    """Recursively walk the taxonomy starting at `cat_id` and collect every
+    enabled descendant (and `cat_id` itself) whose `isBiddingCategory` flag
+    is true. Returns [(name, id), ...].
+
+    The parent's subCategories summary only carries id/parentId/isEnabled/
+    labels — not isBiddingCategory — so each category needs its own detail
+    call. Using a persistent requests.Session gives ~100× speedup on the
+    TLS handshake overhead vs. creating a fresh connection per call.
+    """
     import requests
+
+    if session is None:
+        session = requests.Session()
 
     result = []
     try:
-        r = requests.get(
-            f"{base_url}/api/Categories/{parent_id}",
+        r = session.get(
+            f"{base_url}/api/Categories/{cat_id}",
             headers=headers, params={"locale": "nl-NL"}, timeout=30,
         )
         if r.status_code != 200:
             return result
-
         data = r.json()
-        for sub in data.get("subCategories", []):
-            if not sub.get("isEnabled", True):
-                continue
-            nl = next((l for l in sub.get("labels", []) if l.get("locale") == "nl-NL"), {})
-            name = nl.get("name", "")
-            cat_id = sub.get("id")
-            if name and cat_id:
-                result.append((name, cat_id))
-                # Recurse into this subcategory
-                result.extend(
-                    _fetch_subcategories_recursive(base_url, headers, cat_id)
-                )
     except Exception as e:
-        logger.warning(f"Failed to fetch subcategories for {parent_id}: {e}")
+        logger.warning(f"Failed to fetch category {cat_id}: {e}")
+        return result
+
+    if not data.get("isEnabled", True):
+        return result
+
+    # Include this node if it is itself a bidcat
+    if data.get("isBiddingCategory"):
+        nl = next((l for l in data.get("labels", []) if l.get("locale") == "nl-NL"), {})
+        name = nl.get("name", "")
+        if name:
+            result.append((name, cat_id))
+
+    # Recurse into enabled children. Their isBiddingCategory comes from their
+    # own detail response, which this recursive call fetches.
+    for sub in data.get("subCategories", []):
+        if not sub.get("isEnabled", True):
+            continue
+        sub_id = sub.get("id")
+        if sub_id:
+            result.extend(_fetch_bidcats_recursive(base_url, headers, sub_id, session=session))
 
     return result
 

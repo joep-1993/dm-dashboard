@@ -5357,12 +5357,17 @@ def process_exclusion_sheet_v2(
         # Track results per shop
         shop_results = {shop: {'success': 0, 'already_excluded': 0, 'errors': []} for shop in shop_names}
         campaigns_found = 0
+        missing_campaigns: list = []  # PLA/{deepest_cat}_{cl1} names not present in the Google Ads cache
         total_exclusions_added = 0
 
         # Process each deepest_cat ONCE for all shops in this group
         for deepest_cat in deepest_cats:
             campaign_name = f"PLA/{deepest_cat}_{cl1_str}"
             campaign_data = campaign_cache.get(campaign_name)
+
+            if not campaign_data:
+                missing_campaigns.append(campaign_name)
+                print(f"    ⚠️  Campaign not found in Google Ads cache: {campaign_name}")
 
             if campaign_data:
                 campaigns_found += 1
@@ -5440,6 +5445,10 @@ def process_exclusion_sheet_v2(
                     time.sleep(0.3)
 
         print(f"  Summary: {campaigns_found} campaign(s), {total_exclusions_added} exclusion(s) added")
+        if missing_campaigns:
+            preview = ", ".join(missing_campaigns[:10])
+            more = f" (+{len(missing_campaigns) - 10} more)" if len(missing_campaigns) > 10 else ""
+            print(f"  ⚠️  {len(missing_campaigns)} campaign name(s) missing from Google Ads cache: {preview}{more}")
         campaigns_found_by_maincat[maincat_id_str] += campaigns_found
 
         # =========================================================================
