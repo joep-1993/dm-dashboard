@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from backend.dma_plus_service import (
     start_operation, get_task_status, cancel_task,
-    get_history, clear_history, COUNTRY_CONFIG,
+    get_history, clear_history, remove_history_entry, COUNTRY_CONFIG,
     _cat_ids_cache, _cat_ids_cache_time, _CAT_IDS_TTL,
     _ensure_maincat_mapping, _fetch_all_cat_ids_from_taxonomy_api,
 )
@@ -45,7 +45,7 @@ async def start(
     file: Optional[UploadFile] = File(None),
 ):
     """Start a DMA+ operation. Accepts Excel upload or shop name input."""
-    valid_ops = ["inclusion", "exclusion", "validate_cl1", "validate_ads", "validate_trees"]
+    valid_ops = ["inclusion", "exclusion", "reverse_inclusion", "reverse_exclusion", "validate_cl1", "validate_ads", "validate_trees"]
     if operation not in valid_ops:
         raise HTTPException(400, f"Invalid operation. Expected one of: {valid_ops}")
 
@@ -57,7 +57,7 @@ async def start(
         wb_bytes = await file.read()
 
     # Validate input
-    if operation in ("inclusion", "exclusion") and not wb_bytes and not shop_name:
+    if operation in ("inclusion", "exclusion", "reverse_inclusion", "reverse_exclusion") and not wb_bytes and not shop_name:
         raise HTTPException(400, "Provide either an Excel file or a shop name")
 
     task_id = start_operation(
@@ -140,3 +140,10 @@ def history():
 def delete_history():
     clear_history()
     return {"status": "cleared"}
+
+
+@router.delete("/history/{task_id}")
+def delete_history_entry(task_id: str):
+    if remove_history_entry(task_id):
+        return {"status": "removed", "task_id": task_id}
+    raise HTTPException(404, f"History entry {task_id} not found")

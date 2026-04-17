@@ -30,6 +30,9 @@ postgres_data/
 # CC1 context files (Claude Code)
 cc1/
 
+# Runtime history / state produced by DMA+ at runtime
+backend/data/dma_plus_history.json
+
 # Large data files
 *.xlsx
 !backend/categories.xlsx

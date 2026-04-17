@@ -59,7 +59,45 @@ def _get_client() -> GoogleAdsClient:
 # Task store (in-memory, background tasks)
 # ---------------------------------------------------------------------------
 _tasks: dict = {}
-_history: deque = deque(maxlen=200)  # change history, capped
+
+# Change history is persisted to disk so server restarts (frequent during
+# dev) don't wipe it. JSON is fine here: entries are small and capped at 200.
+_HISTORY_FILE: Path = Path(__file__).parent / "data" / "dma_plus_history.json"
+_history_lock = threading.Lock()
+
+
+def _load_history_from_disk() -> deque:
+    if _HISTORY_FILE.exists():
+        try:
+            import json as _json
+            data = _json.loads(_HISTORY_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return deque(data, maxlen=200)
+        except Exception as e:
+            logger.warning(f"Failed to load DMA+ history from {_HISTORY_FILE}: {e}")
+    return deque(maxlen=200)
+
+
+def _save_history_to_disk():
+    try:
+        import json as _json
+        _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _HISTORY_FILE.write_text(
+            _json.dumps(list(_history), default=str, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.warning(f"Failed to save DMA+ history to {_HISTORY_FILE}: {e}")
+
+
+_history: deque = _load_history_from_disk()
+
+
+def _history_append(entry: dict):
+    """Add an entry to the head of the history and persist to disk."""
+    with _history_lock:
+        _history.appendleft(entry)
+        _save_history_to_disk()
 
 
 def _get_task(task_id: str) -> Optional[dict]:
@@ -171,6 +209,22 @@ def _build_exclusion_workbook(shop_name: str, maincat: str, maincat_id: str,
     for cl in cl1_values:
         ws.append([shop_name, "", maincat, maincat_id, cl, None, None])
     # Populate cat_ids sheet from cat_urls.csv + maincat_mapping.csv
+    _populate_cat_ids_sheet(wb)
+    return wb
+
+
+def _build_reverse_exclusion_workbook(shop_name: str, maincat: str, maincat_id: str,
+                                      cl1: str) -> openpyxl.Workbook:
+    """Create a workbook matching process_reverse_exclusion_sheet's 'verwijderen'
+    layout — same columns as 'uitsluiten' but a different sheet name."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "verwijderen"
+    ws.append(["shop_name", "Shop ID", "maincat", "maincat_id", "custom label 1", "result", "error message"])
+    cl1_values = [v.strip() for v in cl1.split(",") if v.strip()]
+    for cl in cl1_values:
+        ws.append([shop_name, "", maincat, maincat_id, cl, None, None])
+    # cat_ids sheet is required (processor calls load_cat_ids_mapping)
     _populate_cat_ids_sheet(wb)
     return wb
 
@@ -346,15 +400,23 @@ def _run_operation(task_id: str, operation: str, country: str,
         # fetch the Taxonomy API (slow on cold cache), which is why this is
         # in the background thread.
         wb: Optional[openpyxl.Workbook] = None
-        if shop_name and operation == "inclusion":
+        if shop_name and operation in ("inclusion", "reverse_inclusion"):
+            # reverse_inclusion reads the same 'toevoegen' sheet as inclusion
             _set_task(task_id, {**_get_task(task_id), "progress": 5, "message": "Building workbook..."})
             _check_cancelled(task_id)
             wb = _build_inclusion_workbook(shop_name, maincat, maincat_id, cl1 or "a", budget or 50.0)
+            wb_bytes = None
         elif shop_name and operation == "exclusion":
             _set_task(task_id, {**_get_task(task_id), "progress": 5, "message": "Loading categories (Taxonomy API)..."})
             _check_cancelled(task_id)
             wb = _build_exclusion_workbook(shop_name, maincat, maincat_id, cl1 or "a")
             # Once the workbook is built the shop_name path no longer needs wb_bytes
+            wb_bytes = None
+        elif shop_name and operation == "reverse_exclusion":
+            # reverse_exclusion needs the 'verwijderen' sheet + cat_ids
+            _set_task(task_id, {**_get_task(task_id), "progress": 5, "message": "Loading categories (Taxonomy API)..."})
+            _check_cancelled(task_id)
+            wb = _build_reverse_exclusion_workbook(shop_name, maincat, maincat_id, cl1 or "a")
             wb_bytes = None
 
         _check_cancelled(task_id)
@@ -392,7 +454,7 @@ def _run_operation(task_id: str, operation: str, country: str,
             captured = io.StringIO()
             sys.stdout = captured
             try:
-                cp.process_inclusion_sheet_v2(client, wb, customer_id)
+                cp.process_inclusion_sheet_v2(client, wb, customer_id, dry_run=dry_run)
             finally:
                 sys.stdout = old_stdout
 
@@ -417,12 +479,64 @@ def _run_operation(task_id: str, operation: str, country: str,
             captured = io.StringIO()
             sys.stdout = captured
             try:
-                cp.process_exclusion_sheet_v2(client, wb, customer_id)
+                cp.process_exclusion_sheet_v2(client, wb, customer_id, dry_run=dry_run)
             finally:
                 sys.stdout = old_stdout
 
             full_log = captured.getvalue()
             results = _extract_results(wb, "uitsluiten", 5, 6)  # col F=result, G=error
+            result_data = {
+                "rows_processed": len(results),
+                "successes": sum(1 for r in results if r["success"]),
+                "failures": sum(1 for r in results if not r["success"] and r["error"]),
+                "details": results,
+                "log": full_log[-5000:],
+            }
+
+        # ---- REVERSE INCLUSION ----
+        elif operation == "reverse_inclusion":
+            # Same sheet layout as inclusion ('toevoegen'), removes ad groups
+            if wb_bytes:
+                wb = openpyxl.load_workbook(io.BytesIO(wb_bytes), data_only=True)
+            if not wb:
+                raise ValueError("No workbook provided for reverse_inclusion")
+
+            old_stdout = sys.stdout
+            captured = io.StringIO()
+            sys.stdout = captured
+            try:
+                cp.process_reverse_inclusion_sheet_v2(client, wb, customer_id, dry_run=dry_run)
+            finally:
+                sys.stdout = old_stdout
+
+            full_log = captured.getvalue()
+            results = _extract_results(wb, "toevoegen", 6, 7)  # col G=result, H=error
+            result_data = {
+                "rows_processed": len(results),
+                "successes": sum(1 for r in results if r["success"]),
+                "failures": sum(1 for r in results if not r["success"] and r["error"]),
+                "details": results,
+                "log": full_log[-5000:],
+            }
+
+        # ---- REVERSE EXCLUSION ----
+        elif operation == "reverse_exclusion":
+            # 'verwijderen' sheet layout matches 'uitsluiten'; removes shop exclusions
+            if wb_bytes:
+                wb = openpyxl.load_workbook(io.BytesIO(wb_bytes), data_only=True)
+            if not wb:
+                raise ValueError("No workbook provided for reverse_exclusion")
+
+            old_stdout = sys.stdout
+            captured = io.StringIO()
+            sys.stdout = captured
+            try:
+                cp.process_reverse_exclusion_sheet(client, wb, customer_id, dry_run=dry_run)
+            finally:
+                sys.stdout = old_stdout
+
+            full_log = captured.getvalue()
+            results = _extract_results(wb, "verwijderen", 5, 6)  # col F=result, G=error
             result_data = {
                 "rows_processed": len(results),
                 "successes": sum(1 for r in results if r["success"]),
@@ -517,7 +631,7 @@ def _run_operation(task_id: str, operation: str, country: str,
             result_data["affected"] = affected
 
         # Add to history
-        _history.appendleft({
+        _history_append({
             "task_id": task_id,
             "operation": operation,
             "country": country,
@@ -540,7 +654,7 @@ def _run_operation(task_id: str, operation: str, country: str,
             "started_at": prev.get("started_at", ""),
             "completed_at": datetime.now().isoformat(),
         })
-        _history.appendleft({
+        _history_append({
             "task_id": task_id,
             "operation": operation,
             "country": country,
@@ -561,7 +675,7 @@ def _run_operation(task_id: str, operation: str, country: str,
             "started_at": _get_task(task_id).get("started_at", ""),
             "completed_at": datetime.now().isoformat(),
         })
-        _history.appendleft({
+        _history_append({
             "task_id": task_id,
             "operation": operation,
             "country": country,
@@ -573,11 +687,26 @@ def _run_operation(task_id: str, operation: str, country: str,
 
 
 def _parse_affected_entities(log: str) -> dict:
-    """Parse the captured log output to extract affected campaigns, ad groups, and trees."""
+    """Parse the captured log output to extract affected campaigns, ad groups,
+    trees, and missing campaigns (names the processor looked up that weren't
+    in the Google Ads cache).
+
+    Also produces `campaign_ad_group_pairs`: a list of (campaign, ad_group)
+    tuples preserving the log's campaign→ad-groups structure so the export
+    can show each ad group on the same row as its campaign. For exclusion
+    the log is:
+        📁 Campaign: PLA/X (N ad group(s))
+          ⏭️  PLA/X: all 1 already excluded
+    — the leading-whitespace ad-group line immediately follows its campaign.
+    """
     import re
     campaigns = set()
     ad_groups = set()
     trees = set()
+    missing_campaigns = set()
+    campaign_ad_group_pairs: list = []  # [(campaign, ad_group_or_empty), ...]
+    current_campaign = None
+    current_campaign_had_ag = False
 
     for line in log.splitlines():
         # Campaigns: "Creating campaign: PLA/..." or "Campaign: PLA/..."
@@ -585,10 +714,15 @@ def _parse_affected_entities(log: str) -> dict:
         if m:
             campaigns.add(m.group(1).strip().rstrip('.'))
 
-        # Campaign names from "PLA/..." pattern in context
-        m = re.search(r'campaign.*?(PLA/[^\s,()]+)', line, re.IGNORECASE)
-        if m:
-            campaigns.add(m.group(1).strip())
+        # Campaign names from "PLA/..." pattern in context. Note: the original
+        # regex stopped at whitespace, which truncated names with a space in
+        # them (e.g. "PLA/Klussen store_a" → "PLA/Klussen"). We now only
+        # apply this broad fallback when the specific parsers above haven't
+        # already claimed the line.
+        if not m:
+            m = re.search(r'campaign.*?(PLA/[^\s,()]+)', line, re.IGNORECASE)
+            if m:
+                campaigns.add(m.group(1).strip())
 
         # Ad groups: "Creating ad group: ..." or "Ad group: ..."
         m = re.search(r'(?:Creating|Created|Processing|Found) ad group[:\s]+([^\n(]+)', line, re.IGNORECASE)
@@ -600,8 +734,51 @@ def _parse_affected_entities(log: str) -> dict:
         if m:
             ad_groups.add(m.group(1).strip())
 
-        # Trees: "Tree created: ..." or "Tree rebuilt: ..."
-        m = re.search(r'Tree (?:created|rebuilt)[:\s]+(.+)', line)
+        # Campaign header line — two formats:
+        #   exclusion:          "    📁 Campaign: PLA/X (N ad group(s))"
+        #   reverse_inclusion:  "CAMPAIGN 1/3: PLA/Klussen store_a"
+        # Both set the current campaign so subsequent ad-group lines pair with it.
+        # Reverse-inclusion names contain a space ("PLA/Klussen store_a") which
+        # is why we allow ".+?" up to end-of-line or a parenthesis rather than
+        # a simple \S+ match.
+        m = re.search(r'Campaign:\s+(PLA/.+?)\s+\(\d+\s+ad\s+group', line)
+        if not m:
+            m = re.search(r'^\s*CAMPAIGN\s+\d+/\d+:\s+(PLA/.+?)\s*$', line)
+        if m:
+            # Flush previous campaign if it had no ad-group line (shouldn't happen
+            # in exclusion but handles degraded logs gracefully).
+            if current_campaign is not None and not current_campaign_had_ag:
+                campaign_ad_group_pairs.append((current_campaign, ""))
+            current_campaign = m.group(1).strip()
+            current_campaign_had_ag = False
+            campaigns.add(current_campaign)
+
+        # Reverse-inclusion ad-group header: "   ──── Ad Group: PLA/wibra.nl_a ────"
+        m_rev_ag = re.search(r'Ad Group:\s*(PLA/\S+)', line)
+        if m_rev_ag:
+            ag_name = m_rev_ag.group(1).strip()
+            ad_groups.add(ag_name)
+            if current_campaign is not None:
+                campaign_ad_group_pairs.append((current_campaign, ag_name))
+                current_campaign_had_ag = True
+
+        # Exclusion per-ad-group status lines like:
+        #   "      ⏭️  PLA/Aggregaten_a: all 1 already excluded"
+        #   "      ✅ PLA/wibra.nl_a: 3 added, 0 already excluded"
+        #   "      ❌ PLA/wibra.nl_a: 2 error(s)"
+        # These don't contain the words "ad group" but the leading-whitespace
+        # + symbol + "PLA/xxx:" pattern uniquely identifies ad-group rows.
+        m = re.search(r'^\s{4,}\S+\s+(PLA/[^:\s()]+):\s', line)
+        if m:
+            ag_name = m.group(1).strip()
+            ad_groups.add(ag_name)
+            if current_campaign is not None:
+                campaign_ad_group_pairs.append((current_campaign, ag_name))
+                current_campaign_had_ag = True
+
+        # Trees: "Tree created: ..." / "Tree rebuilt: ..." (inclusion)
+        #        "Tree to modify: ..." / "Tree modified: ..." (exclusion)
+        m = re.search(r'Tree (?:created|rebuilt|to modify|modified)[:\s]+(.+)', line)
         if m:
             trees.add(m.group(1).strip())
 
@@ -610,17 +787,37 @@ def _parse_affected_entities(log: str) -> dict:
         if m:
             ad_groups.add(m.group(1).strip())
 
+        # Missing campaigns emitted by process_exclusion_sheet_v2:
+        #   "    ⚠️  Campaign not found in Google Ads cache: PLA/Aggregaten_b"
+        # and by the final summary block:
+        #   "Missing campaigns in Klussen (3): PLA/Aggregaten_a, PLA/Aggregaten_b, ..."
+        m = re.search(r'Campaign not found in Google Ads cache:\s+(PLA/\S+)', line)
+        if m:
+            missing_campaigns.add(m.group(1).strip())
+        m = re.search(r'Missing campaigns in [^:]+\(\d+\):\s+(.+)$', line)
+        if m:
+            for name in m.group(1).split(","):
+                name = name.strip()
+                if name.startswith("PLA/"):
+                    missing_campaigns.add(name)
+
+    # Flush trailing campaign with no ad-group line
+    if current_campaign is not None and not current_campaign_had_ag:
+        campaign_ad_group_pairs.append((current_campaign, ""))
+
     return {
         "campaigns": sorted(campaigns),
         "ad_groups": sorted(ad_groups),
         "trees": sorted(trees),
+        "missing_campaigns": sorted(missing_campaigns),
+        "campaign_ad_group_pairs": campaign_ad_group_pairs,
     }
 
 
 def _summarize_result(operation: str, result: dict) -> str:
     if not result:
         return "No results"
-    if operation in ("inclusion", "exclusion"):
+    if operation in ("inclusion", "exclusion", "reverse_inclusion", "reverse_exclusion"):
         return f"{result.get('successes', 0)} ok, {result.get('failures', 0)} failed of {result.get('rows_processed', 0)} rows"
     elif operation == "validate_cl1":
         return f"{result.get('ok', 0)} ok, {result.get('fixed', 0)} fixed, {result.get('error', 0)} errors of {result.get('total', 0)}"
@@ -700,4 +897,21 @@ def get_history() -> list:
 
 
 def clear_history():
-    _history.clear()
+    with _history_lock:
+        _history.clear()
+        _save_history_to_disk()
+
+
+def remove_history_entry(task_id: str) -> bool:
+    """Remove a single history entry by task_id. Returns True if found."""
+    with _history_lock:
+        original_len = len(_history)
+        # Rebuild the deque without the matching entry (deque doesn't support
+        # del-by-predicate but the history is tiny so a list comprehension is fine).
+        remaining = [e for e in _history if e.get("task_id") != task_id]
+        if len(remaining) == original_len:
+            return False
+        _history.clear()
+        _history.extend(remaining)
+        _save_history_to_disk()
+        return True

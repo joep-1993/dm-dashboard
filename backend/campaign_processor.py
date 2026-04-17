@@ -16,6 +16,7 @@ Configuration:
 import sys
 import os
 import time
+import uuid
 import platform
 import threading
 from collections import defaultdict
@@ -81,6 +82,90 @@ DEFAULT_BID_MICROS = 200_000  # €0.20
 
 # Negative keyword list to add to all created campaigns
 NEGATIVE_LIST_NAME = "DMA negatives"
+
+# Label applied to every campaign + ad group created by the DMA+ dashboard,
+# so operators can later see at a glance which entities were generated here.
+DM_DASHBOARD_LABEL_NAME = "DM_DASHBOARD"
+
+# Cache the label resource_name per customer_id so we hit LabelService once
+# per run rather than once per campaign.
+_dm_dashboard_label_cache: Dict[str, str] = {}
+
+
+def ensure_dm_dashboard_label(client: "GoogleAdsClient", customer_id: str) -> Optional[str]:
+    """Look up DM_DASHBOARD; create it if missing. Returns label.resource_name, or None on failure."""
+    if customer_id in _dm_dashboard_label_cache:
+        return _dm_dashboard_label_cache[customer_id]
+
+    try:
+        ga_service = client.get_service("GoogleAdsService")
+        query = (
+            f"SELECT label.resource_name FROM label "
+            f"WHERE label.name = '{DM_DASHBOARD_LABEL_NAME}' LIMIT 1"
+        )
+        for row in ga_service.search(customer_id=customer_id, query=query):
+            rn = row.label.resource_name
+            _dm_dashboard_label_cache[customer_id] = rn
+            return rn
+    except Exception as e:
+        print(f"   ⚠️  Failed to look up '{DM_DASHBOARD_LABEL_NAME}' label: {str(e)[:200]}")
+
+    # Not found → create it
+    try:
+        label_service = client.get_service("LabelService")
+        op = client.get_type("LabelOperation")
+        op.create.name = DM_DASHBOARD_LABEL_NAME
+        op.create.description = "Created automatically by the DMA+ dashboard (dm-tools)."
+        resp = label_service.mutate_labels(customer_id=customer_id, operations=[op])
+        rn = resp.results[0].resource_name
+        _dm_dashboard_label_cache[customer_id] = rn
+        print(f"   🏷️  Created label '{DM_DASHBOARD_LABEL_NAME}': {rn}")
+        return rn
+    except Exception as e:
+        print(f"   ⚠️  Failed to create '{DM_DASHBOARD_LABEL_NAME}' label: {str(e)[:200]}")
+        return None
+
+
+def apply_dm_dashboard_label_to_campaign(
+    client: "GoogleAdsClient", customer_id: str,
+    campaign_resource_name: str, label_resource_name: str,
+) -> bool:
+    """Attach the DM_DASHBOARD label to a campaign. Returns True on success or if already attached."""
+    try:
+        svc = client.get_service("CampaignLabelService")
+        op = client.get_type("CampaignLabelOperation")
+        op.create.campaign = campaign_resource_name
+        op.create.label = label_resource_name
+        svc.mutate_campaign_labels(customer_id=customer_id, operations=[op])
+        return True
+    except Exception as e:
+        msg = str(e)
+        # Google Ads returns an error if the label is already on the campaign;
+        # treat that as success so re-runs don't spam failures.
+        if "already" in msg.lower() or "duplicate" in msg.lower():
+            return True
+        print(f"   ⚠️  Failed to label campaign with DM_DASHBOARD: {msg[:200]}")
+        return False
+
+
+def apply_dm_dashboard_label_to_ad_group(
+    client: "GoogleAdsClient", customer_id: str,
+    ad_group_resource_name: str, label_resource_name: str,
+) -> bool:
+    """Attach the DM_DASHBOARD label to an ad group. Returns True on success or if already attached."""
+    try:
+        svc = client.get_service("AdGroupLabelService")
+        op = client.get_type("AdGroupLabelOperation")
+        op.create.ad_group = ad_group_resource_name
+        op.create.label = label_resource_name
+        svc.mutate_ad_group_labels(customer_id=customer_id, operations=[op])
+        return True
+    except Exception as e:
+        msg = str(e)
+        if "already" in msg.lower() or "duplicate" in msg.lower():
+            return True
+        print(f"   ⚠️  Failed to label ad group with DM_DASHBOARD: {msg[:200]}")
+        return False
 
 # Bid strategy mapping based on custom label 1
 BID_STRATEGY_MAPPING = {
@@ -2181,7 +2266,8 @@ def process_inclusion_sheet_v2(
     client: GoogleAdsClient,
     workbook: openpyxl.Workbook,
     customer_id: str,
-    file_path: str = None
+    file_path: str = None,
+    dry_run: bool = False,
 ):
     """
     Process the 'toevoegen' (inclusion) sheet - V2 (NEW STRUCTURE).
@@ -2220,7 +2306,20 @@ def process_inclusion_sheet_v2(
     """
     print(f"\n{'='*70}")
     print(f"PROCESSING INCLUSION SHEET (V2): '{SHEET_INCLUSION}'")
+    if dry_run:
+        print("(DRY RUN: no campaigns, ad groups, listing trees or ads will actually be written to Google Ads)")
     print(f"{'='*70}\n")
+
+    # Resolve (or create) the DM_DASHBOARD label once up-front. Live runs only —
+    # in dry_run mode we'd be labeling against fake resource names, so we skip
+    # the API call entirely and just note the intent.
+    dm_label_resource = None
+    if dry_run:
+        print(f"   [DRY RUN] Would ensure label '{DM_DASHBOARD_LABEL_NAME}' exists and apply it to each new campaign + ad group")
+    else:
+        dm_label_resource = ensure_dm_dashboard_label(client, customer_id)
+        if dm_label_resource:
+            print(f"   🏷️  Using label '{DM_DASHBOARD_LABEL_NAME}': {dm_label_resource}")
 
     try:
         sheet = workbook[SHEET_INCLUSION]
@@ -2361,34 +2460,48 @@ def process_inclusion_sheet_v2(
 
             # Create campaign (status: PAUSED - set in add_standard_shopping_campaign)
             print(f"\n   Creating campaign: {campaign_name}")
-            campaign_resource_name = add_standard_shopping_campaign(
-                client=client,
-                customer_id=customer_id,
-                merchant_center_account_id=merchant_center_account_id,
-                campaign_name=campaign_name,
-                budget_name=budget_name,
-                tracking_template=tracking_template,
-                country=country,
-                shopid=first_ag_data['shop_id'],
-                shopname=first_ag_name,
-                label=custom_label_1,
-                budget=budget_micros,
-                bidding_strategy_resource_name=bid_strategy_resource_name
-            )
+            if dry_run:
+                # Fake resource name keeps the downstream .split('/')[-1] logic happy
+                campaign_resource_name = f"customers/{customer_id}/campaigns/DRY_RUN_{uuid.uuid4().hex[:10]}"
+                print(f"   [DRY RUN] Would create campaign → {campaign_resource_name}")
+            else:
+                campaign_resource_name = add_standard_shopping_campaign(
+                    client=client,
+                    customer_id=customer_id,
+                    merchant_center_account_id=merchant_center_account_id,
+                    campaign_name=campaign_name,
+                    budget_name=budget_name,
+                    tracking_template=tracking_template,
+                    country=country,
+                    shopid=first_ag_data['shop_id'],
+                    shopname=first_ag_name,
+                    label=custom_label_1,
+                    budget=budget_micros,
+                    bidding_strategy_resource_name=bid_strategy_resource_name
+                )
 
             if not campaign_resource_name:
                 raise Exception("Failed to create/find campaign")
 
             print(f"   ✅ Campaign ready: {campaign_resource_name}")
 
+            # Tag with DM_DASHBOARD label so operators can identify entities
+            # created via the dashboard. Skipped in dry_run (fake resource name).
+            if not dry_run and dm_label_resource:
+                if apply_dm_dashboard_label_to_campaign(client, customer_id, campaign_resource_name, dm_label_resource):
+                    print(f"   🏷️  Labeled campaign with '{DM_DASHBOARD_LABEL_NAME}'")
+
             # Add negative keyword list to campaign
             if NEGATIVE_LIST_NAME:
-                enable_negative_list_for_campaign(
-                    client=client,
-                    customer_id=customer_id,
-                    campaign_resource_name=campaign_resource_name,
-                    negative_list_name=NEGATIVE_LIST_NAME
-                )
+                if dry_run:
+                    print(f"   [DRY RUN] Would attach negative keyword list '{NEGATIVE_LIST_NAME}'")
+                else:
+                    enable_negative_list_for_campaign(
+                        client=client,
+                        customer_id=customer_id,
+                        campaign_resource_name=campaign_resource_name,
+                        negative_list_name=NEGATIVE_LIST_NAME
+                    )
 
             # Wait after campaign setup before processing ad groups
             time.sleep(1.0)
@@ -2409,21 +2522,31 @@ def process_inclusion_sheet_v2(
                     print(f"      Maincat IDs (CL4): {maincat_ids}")
 
                     # Create ad group (status: ENABLED - set in add_shopping_ad_group)
-                    ad_group_resource_name, _ = add_shopping_ad_group(
-                        client=client,
-                        customer_id=customer_id,
-                        campaign_resource_name=campaign_resource_name,
-                        ad_group_name=ad_group_name,
-                        campaign_name=campaign_name
-                    )
+                    if dry_run:
+                        ad_group_resource_name = f"customers/{customer_id}/adGroups/DRY_RUN_{uuid.uuid4().hex[:10]}"
+                        print(f"      [DRY RUN] Would create ad group → {ad_group_resource_name}")
+                    else:
+                        ad_group_resource_name, _ = add_shopping_ad_group(
+                            client=client,
+                            customer_id=customer_id,
+                            campaign_resource_name=campaign_resource_name,
+                            ad_group_name=ad_group_name,
+                            campaign_name=campaign_name
+                        )
 
                     if not ad_group_resource_name:
                         raise Exception(f"Failed to create/find ad group")
 
                     print(f"      ✅ Ad group ready: {ad_group_resource_name}")
 
-                    # Wait after ad group creation before building tree
-                    time.sleep(1.0)
+                    # Tag ad group with DM_DASHBOARD label (live runs only)
+                    if not dry_run and dm_label_resource:
+                        if apply_dm_dashboard_label_to_ad_group(client, customer_id, ad_group_resource_name, dm_label_resource):
+                            print(f"      🏷️  Labeled ad group with '{DM_DASHBOARD_LABEL_NAME}'")
+
+                    # Wait after ad group creation before building tree (skip delay in dry_run)
+                    if not dry_run:
+                        time.sleep(1.0)
 
                     # Extract ad group ID
                     ad_group_id = ad_group_resource_name.split('/')[-1]
@@ -2435,25 +2558,33 @@ def process_inclusion_sheet_v2(
                         print(f"      CL3 targeting: '{shop_name_for_targeting}' (split from '{shop_name}')")
 
                     # Build listing tree with V2 function (CL1 targeting + dataedis exclusion)
-                    build_listing_tree_for_inclusion_v2(
-                        client=client,
-                        customer_id=customer_id,
-                        ad_group_id=ad_group_id,
-                        shop_name=shop_name_for_targeting,  # Use split shop_name for CL3
-                        maincat_ids=maincat_ids,
-                        custom_label_1=custom_label_1
-                    )
+                    if dry_run:
+                        dataedis_msg = " → dataedis excluded" if EXCLUDE_DATAEDIS else ""
+                        print(f"      [DRY RUN] Would build tree: Shop '{shop_name_for_targeting}' → {len(maincat_ids)} maincat(s) → CL1 '{custom_label_1}'{dataedis_msg}")
+                    else:
+                        build_listing_tree_for_inclusion_v2(
+                            client=client,
+                            customer_id=customer_id,
+                            ad_group_id=ad_group_id,
+                            shop_name=shop_name_for_targeting,  # Use split shop_name for CL3
+                            maincat_ids=maincat_ids,
+                            custom_label_1=custom_label_1
+                        )
 
-                    # Wait after tree creation before creating ad
-                    time.sleep(2.0)
+                    # Wait after tree creation before creating ad (skip delay in dry_run)
+                    if not dry_run:
+                        time.sleep(2.0)
 
                     # Create shopping product ad
                     print(f"      Creating shopping product ad...")
-                    add_shopping_product_ad(
-                        client=client,
-                        customer_id=customer_id,
-                        ad_group_resource_name=ad_group_resource_name
-                    )
+                    if dry_run:
+                        print(f"      [DRY RUN] Would create shopping product ad")
+                    else:
+                        add_shopping_product_ad(
+                            client=client,
+                            customer_id=customer_id,
+                            ad_group_resource_name=ad_group_resource_name
+                        )
 
                     ad_groups_processed.append(shop_name)
                     print(f"      ✅ Ad group completed: {ad_group_name}")
@@ -2724,7 +2855,8 @@ def process_reverse_inclusion_sheet_v2(
     client: GoogleAdsClient,
     workbook: openpyxl.Workbook,
     customer_id: str,
-    file_path: str = None
+    file_path: str = None,
+    dry_run: bool = False,
 ):
     """
     Process the 'toevoegen' sheet - removes (deletes) ad groups.
@@ -2758,6 +2890,8 @@ def process_reverse_inclusion_sheet_v2(
     print(f"\n{'='*70}")
     print(f"PROCESSING REVERSE INCLUSION SHEET (V2): '{SHEET_REVERSE_INCLUSION}'")
     print(f"(REMOVING AD GROUPS)")
+    if dry_run:
+        print("(DRY RUN: no ad groups will actually be removed from Google Ads)")
     print(f"{'='*70}\n")
 
     try:
@@ -2865,13 +2999,17 @@ def process_reverse_inclusion_sheet_v2(
                     successful_removals += 1
                     continue
 
-                # Remove the ad group
-                print(f"      Removing ad group...")
-                success = remove_ad_group(
-                    client=client,
-                    customer_id=customer_id,
-                    ad_group_resource_name=ad_group_info['ad_group_resource_name']
-                )
+                # Remove the ad group (skipped under dry_run)
+                if dry_run:
+                    print(f"      [DRY RUN] Would remove ad group")
+                    success = True
+                else:
+                    print(f"      Removing ad group...")
+                    success = remove_ad_group(
+                        client=client,
+                        customer_id=customer_id,
+                        ad_group_resource_name=ad_group_info['ad_group_resource_name']
+                    )
 
                 if success:
                     print(f"      ✅ Ad group removed successfully")
@@ -5184,7 +5322,8 @@ def process_exclusion_sheet_v2(
     workbook: openpyxl.Workbook,
     customer_id: str,
     file_path: str = None,
-    save_interval: int = 10
+    save_interval: int = 10,
+    dry_run: bool = False,
 ):
     """
     Process the 'uitsluiten' (exclusion) sheet - V2 with cat_ids mapping.
@@ -5220,6 +5359,8 @@ def process_exclusion_sheet_v2(
     print(f"\n{'='*70}")
     print(f"PROCESSING EXCLUSION SHEET V2: '{SHEET_EXCLUSION}'")
     print(f"(OPTIMIZED: Grouping shops by maincat_id + cl1)")
+    if dry_run:
+        print("(DRY RUN: no shop exclusions will actually be added to Google Ads)")
     print(f"{'='*70}")
 
     # Load cat_ids mapping
@@ -5281,14 +5422,15 @@ def process_exclusion_sheet_v2(
         groups[(maincat_id_str, cl1_str)].append((idx, shop_name))
 
     # Per-maincat counters for the summary:
-    #   categories_by_maincat  = distinct deepest_cats under the maincat
-    #   slots_by_maincat       = categories × number of cl1 groups (= total campaign
-    #                            names that could exist in Google Ads)
-    #   campaigns_found_by_maincat = how many of those slots were actually found
-    #                                in the pre-fetched campaign cache
+    #   categories_by_maincat       = distinct deepest_cats under the maincat
+    #   slots_by_maincat            = categories × number of cl1 groups
+    #   campaigns_found_by_maincat  = how many slots were in the prefetch cache
+    #   missing_campaigns_by_maincat = list of PLA/{cat}_{cl1} names NOT in cache
+    #                                  (aggregated across all cl1 groups)
     campaigns_found_by_maincat: dict = defaultdict(int)
     categories_by_maincat: dict = {}
     slots_by_maincat: dict = defaultdict(int)
+    missing_campaigns_by_maincat: dict = defaultdict(list)
 
     # Mark rows with missing fields as errors
     for idx, missing in rows_with_missing_fields:
@@ -5373,6 +5515,13 @@ def process_exclusion_sheet_v2(
                 campaigns_found += 1
                 ad_groups = campaign_data['ad_groups']
                 print(f"    📁 Campaign: {campaign_name} ({len(ad_groups)} ad group(s))")
+                # Emit a tree line per campaign so the Affected Product Trees
+                # column in the export has something to show. Format is
+                # intentionally parseable by _parse_affected_entities' tree regex.
+                mc_name_disp = maincat_name_by_id.get(maincat_id_str, f"maincat_id={maincat_id_str}")
+                shops_disp = ", ".join(sorted(set(shop_names))[:5]) + ("..." if len(set(shop_names)) > 5 else "")
+                tree_verb = "Tree to modify" if dry_run else "Tree modified"
+                print(f"      🌳 {tree_verb}: Campaign '{campaign_name}' → Maincat '{mc_name_disp}' → CL1 '{cl1_str}' → Shops: {shops_disp}")
 
                 for ag in ad_groups:
                     ag_id = str(ag['id'])
@@ -5387,13 +5536,22 @@ def process_exclusion_sheet_v2(
                             # Call batch function with targeting names (split at |)
                             # Use unique targeting names to avoid duplicates
                             unique_targeting_names = list(set(shop_names_for_targeting))
-                            result = add_shop_exclusions_batch(
-                                client=client,
-                                customer_id=customer_id,
-                                ad_group_id=ag_id,
-                                ad_group_name=ag_name,
-                                shop_names=unique_targeting_names
-                            )
+                            if dry_run:
+                                # DRY RUN: simulate — pretend every shop would be added
+                                # successfully without actually calling Google Ads.
+                                result = {
+                                    'success': list(unique_targeting_names),
+                                    'already_excluded': [],
+                                    'errors': [],
+                                }
+                            else:
+                                result = add_shop_exclusions_batch(
+                                    client=client,
+                                    customer_id=customer_id,
+                                    ad_group_id=ag_id,
+                                    ad_group_name=ag_name,
+                                    shop_names=unique_targeting_names
+                                )
 
                             # Log results per ad group
                             success_count = len(result['success'])
@@ -5450,6 +5608,7 @@ def process_exclusion_sheet_v2(
             more = f" (+{len(missing_campaigns) - 10} more)" if len(missing_campaigns) > 10 else ""
             print(f"  ⚠️  {len(missing_campaigns)} campaign name(s) missing from Google Ads cache: {preview}{more}")
         campaigns_found_by_maincat[maincat_id_str] += campaigns_found
+        missing_campaigns_by_maincat[maincat_id_str].extend(missing_campaigns)
 
         # =========================================================================
         # STEP 3: Update row statuses based on results
@@ -5509,8 +5668,13 @@ def process_exclusion_sheet_v2(
         cats = categories_by_maincat.get(mc_id, 0)
         slots = slots_by_maincat.get(mc_id, 0)
         pct = (count / slots * 100) if slots else 0
+        missing = missing_campaigns_by_maincat.get(mc_id, [])
         print(f"Categories in {mc_name}: {cats}")
         print(f"Campaigns found in {mc_name}: {count}/{slots} ({pct:.0f}%)")
+        if missing:
+            # Stays in the log tail because it's part of the final summary block
+            # (important: the /api/dma-plus/status "log" field is truncated to the last 5000 chars).
+            print(f"Missing campaigns in {mc_name} ({len(missing)}): {', '.join(missing)}")
     print(f"{'='*70}\n")
 
 
@@ -7825,7 +7989,8 @@ def process_reverse_exclusion_sheet(
     customer_id: str,
     file_path: str = None,
     save_interval: int = 10,
-    sheet_name: str = "verwijderen"
+    sheet_name: str = "verwijderen",
+    dry_run: bool = False,
 ):
     """
     Process a sheet to REMOVE shop exclusions (reverse of exclusion).
@@ -7862,6 +8027,8 @@ def process_reverse_exclusion_sheet(
     print(f"\n{'='*70}")
     print(f"PROCESSING REVERSE EXCLUSION SHEET: '{sheet_name}'")
     print(f"(OPTIMIZED: Grouping shops by maincat_id + cl1)")
+    if dry_run:
+        print("(DRY RUN: no shop exclusions will actually be removed from Google Ads)")
     print(f"{'='*70}")
 
     # Load cat_ids mapping (same as process_exclusion_sheet_v2)
@@ -8009,13 +8176,22 @@ def process_reverse_exclusion_sheet(
                             # Call batch function with targeting names (split at |)
                             # Use unique targeting names to avoid duplicates
                             unique_targeting_names = list(set(shop_names_for_targeting))
-                            result = reverse_exclusion_batch(
-                                client=client,
-                                customer_id=customer_id,
-                                ad_group_id=ag_id,
-                                ad_group_name=ag_name,
-                                shop_names=unique_targeting_names
-                            )
+                            if dry_run:
+                                # DRY RUN: simulate — pretend every shop's exclusion
+                                # would be removed successfully.
+                                result = {
+                                    'success': list(unique_targeting_names),
+                                    'not_found': [],
+                                    'errors': [],
+                                }
+                            else:
+                                result = reverse_exclusion_batch(
+                                    client=client,
+                                    customer_id=customer_id,
+                                    ad_group_id=ag_id,
+                                    ad_group_name=ag_name,
+                                    shop_names=unique_targeting_names
+                                )
 
                             # Aggregate results - map targeting names back to original names
                             for targeting_name in result['success']:

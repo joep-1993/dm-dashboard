@@ -100,6 +100,18 @@
                                 </div>
                             </div>
                             <div class="col">
+                                <div class="card op-card p-2" data-op="reverse_inclusion" onclick="selectOp(this)">
+                                    <div class="op-title">Reverse Include</div>
+                                    <div class="op-desc">Remove ad groups created by Include</div>
+                                </div>
+                            </div>
+                            <div class="col">
+                                <div class="card op-card p-2" data-op="reverse_exclusion" onclick="selectOp(this)">
+                                    <div class="op-title">Reverse Exclude</div>
+                                    <div class="op-desc">Remove shop exclusions from ad groups</div>
+                                </div>
+                            </div>
+                            <div class="col">
                                 <div class="card op-card p-2" data-op="validate_cl1" onclick="selectOp(this)">
                                     <div class="op-title">Validate CL1</div>
                                     <div class="op-desc">Check CL1 targeting on campaigns</div>
@@ -257,10 +269,16 @@
     const OP_LABELS = {
         inclusion: 'Include Shops',
         exclusion: 'Exclude Shops',
+        reverse_inclusion: 'Reverse Include',
+        reverse_exclusion: 'Reverse Exclude',
         validate_cl1: 'Validate CL1',
         validate_ads: 'Validate Ads',
         validate_trees: 'Validate Trees',
     };
+
+    // Operations that accept a shop-name "quick input" or an Excel upload.
+    // Keeping it as a single source of truth for the UI gating below.
+    const SHOP_INPUT_OPS = ['inclusion', 'exclusion', 'reverse_inclusion', 'reverse_exclusion'];
 
     function selectOp(el) {
         document.querySelectorAll('.op-card').forEach(c => c.classList.remove('selected'));
@@ -268,13 +286,13 @@
         selectedOp = el.dataset.op;
 
         // Show/hide input sections
-        const isIncExc = ['inclusion', 'exclusion'].includes(selectedOp);
-        document.getElementById('shopTabLi').style.display = isIncExc ? '' : 'none';
-        document.getElementById('optionsRow').style.display = isIncExc ? 'none' : '';
+        const isShopInputOp = SHOP_INPUT_OPS.includes(selectedOp);
+        document.getElementById('shopTabLi').style.display = isShopInputOp ? '' : 'none';
+        document.getElementById('optionsRow').style.display = isShopInputOp ? 'none' : '';
         document.getElementById('fixCheck').style.display = selectedOp === 'validate_ads' ? '' : 'none';
 
         // If switching to validate ops, switch to Excel tab
-        if (!isIncExc) {
+        if (!isShopInputOp) {
             const excelTabBtn = document.querySelector('[data-bs-target="#excelTab"]');
             if (excelTabBtn) bootstrap.Tab.getOrCreateInstance(excelTabBtn).show();
         }
@@ -293,7 +311,7 @@
         const shopTabActive = shopTabBtn && shopTabBtn.classList.contains('active');
         const fileInput = document.getElementById('fileInput');
 
-        if (shopTabActive && ['inclusion', 'exclusion'].includes(selectedOp)) {
+        if (shopTabActive && SHOP_INPUT_OPS.includes(selectedOp)) {
             const shopName = document.getElementById('shopName').value.trim();
             if (!shopName) { alert('Enter a shop name'); btn.disabled = false; return; }
             form.append('shop_name', shopName);
@@ -303,7 +321,7 @@
             form.append('budget', '50');
         } else if (fileInput.files.length > 0) {
             form.append('file', fileInput.files[0]);
-        } else if (['inclusion', 'exclusion'].includes(selectedOp)) {
+        } else if (SHOP_INPUT_OPS.includes(selectedOp)) {
             alert('Upload an Excel file or enter a shop name');
             btn.disabled = false;
             return;
@@ -313,7 +331,7 @@
         // Always send dry_run flag
         form.append('dry_run', document.getElementById('dryRun').checked);
 
-        if (!['inclusion', 'exclusion'].includes(selectedOp)) {
+        if (!SHOP_INPUT_OPS.includes(selectedOp)) {
             form.append('campaign_pattern', document.getElementById('campaignPattern').value);
             if (selectedOp === 'validate_ads') {
                 form.append('fix', document.getElementById('fixMode').checked);
@@ -386,7 +404,7 @@
 
         // Stats
         const statsRow = document.getElementById('statsRow');
-        if (op === 'inclusion' || op === 'exclusion') {
+        if (op === 'inclusion' || op === 'exclusion' || op === 'reverse_inclusion' || op === 'reverse_exclusion') {
             statsRow.innerHTML = `
                 <div class="col-4"><div class="stat-box bg-light"><div class="num">${result.rows_processed || 0}</div><div class="label">Processed</div></div></div>
                 <div class="col-4"><div class="stat-box" style="background:#d1e7dd;"><div class="num" style="color:#198754;">${result.successes || 0}</div><div class="label">Success</div></div></div>
@@ -481,7 +499,10 @@
                     <td style="padding: 6px 12px;">${h.country}</td>
                     <td style="padding: 6px 12px;">${statusBadge}</td>
                     <td style="padding: 6px 12px;">${h.summary || ''}</td>
-                    <td style="padding: 6px 12px; text-align: center;"><button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportRow(${idx})">Export</button></td>
+                    <td style="padding: 6px 12px; text-align: center; white-space: nowrap;">
+                        <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportRow(${idx})">Export</button>
+                        <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; margin-left: 4px;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="removeRow(${idx})">Remove</button>
+                    </td>
                 </tr>`;
             }).join('');
         } catch (e) { console.error('History error:', e); }
@@ -493,6 +514,18 @@
         loadHistory();
     }
 
+    async function removeRow(idx) {
+        const h = historyData[idx];
+        if (!h || !h.task_id) return;
+        if (!confirm(`Remove this ${h.operation} run from history?`)) return;
+        const r = await fetch(`${API}/api/dma-plus/history/${encodeURIComponent(h.task_id)}`, { method: 'DELETE' });
+        if (!r.ok) {
+            alert('Failed to remove — check server log.');
+            return;
+        }
+        loadHistory();
+    }
+
     function exportRow(idx) {
         if (typeof XLSX === 'undefined') {
             alert('Excel library still loading — try again in a second. If this persists, the SheetJS CDN may be blocked on your network.');
@@ -501,9 +534,21 @@
         const h = historyData[idx];
         if (!h) return;
         const aff = h.affected || {};
-        const campaigns = aff.campaigns || [];
-        const adGroups = aff.ad_groups || [];
         const trees = aff.trees || [];
+        const missing = aff.missing_campaigns || [];
+
+        // Prefer campaign_ad_group_pairs (emitted by the log parser) so each
+        // campaign and its ad group(s) appear on the same row. Fall back to
+        // independent zip of flat lists for older history rows that predate
+        // the pairing field.
+        let pairRows = aff.campaign_ad_group_pairs;
+        if (!Array.isArray(pairRows) || pairRows.length === 0) {
+            const campaigns = aff.campaigns || [];
+            const adGroups = aff.ad_groups || [];
+            const maxLen = Math.max(campaigns.length, adGroups.length);
+            pairRows = [];
+            for (let i = 0; i < maxLen; i++) pairRows.push([campaigns[i] || '', adGroups[i] || '']);
+        }
 
         const statusRows = [
             ['Time', 'Operation', 'Country', 'Status', 'Summary'],
@@ -511,19 +556,27 @@
         ];
 
         const campaignRows = [['Affected Campaigns', 'Affected Ad Groups', 'Affected Product Trees']];
-        const rowCount = Math.max(campaigns.length, adGroups.length, trees.length);
+        const rowCount = Math.max(pairRows.length, trees.length);
         for (let i = 0; i < rowCount; i++) {
-            campaignRows.push([campaigns[i] || '', adGroups[i] || '', trees[i] || '']);
+            const pair = pairRows[i] || ['', ''];
+            campaignRows.push([pair[0] || '', pair[1] || '', trees[i] || '']);
         }
         if (rowCount === 0) campaignRows.push(['(none)', '(none)', '(none)']);
+
+        const missingRows = [['Missing Campaigns']];
+        for (const m of missing) missingRows.push([m]);
+        if (missing.length === 0) missingRows.push(['(none)']);
 
         const wb = XLSX.utils.book_new();
         const statusWs = XLSX.utils.aoa_to_sheet(statusRows);
         const campaignWs = XLSX.utils.aoa_to_sheet(campaignRows);
+        const missingWs = XLSX.utils.aoa_to_sheet(missingRows);
         statusWs['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 40 }];
         campaignWs['!cols'] = [{ wch: 32 }, { wch: 28 }, { wch: 70 }];
+        missingWs['!cols'] = [{ wch: 40 }];
         XLSX.utils.book_append_sheet(wb, statusWs, 'Status');
         XLSX.utils.book_append_sheet(wb, campaignWs, 'Campaigns');
+        XLSX.utils.book_append_sheet(wb, missingWs, 'Missing campaigns');
 
         XLSX.writeFile(wb, `dma_plus_${h.operation}_${(h.completed_at || '').slice(0,10)}.xlsx`);
     }
