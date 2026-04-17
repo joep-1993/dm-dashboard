@@ -734,27 +734,32 @@ def _parse_affected_entities(log: str) -> dict:
         if m:
             ad_groups.add(m.group(1).strip())
 
-        # Campaign header line — two formats:
+        # Campaign header line — three formats, all set the current campaign
+        # so subsequent ad-group lines pair with it:
         #   exclusion:          "    📁 Campaign: PLA/X (N ad group(s))"
         #   reverse_inclusion:  "CAMPAIGN 1/3: PLA/Klussen store_a"
-        # Both set the current campaign so subsequent ad-group lines pair with it.
-        # Reverse-inclusion names contain a space ("PLA/Klussen store_a") which
-        # is why we allow ".+?" up to end-of-line or a parenthesis rather than
-        # a simple \S+ match.
+        #   inclusion:          "   Creating campaign: PLA/Klussen store_a"
+        # Names may contain spaces ("PLA/Klussen store_a"), which is why we
+        # use ".+?" up to a distinctive terminator rather than "\S+".
         m = re.search(r'Campaign:\s+(PLA/.+?)\s+\(\d+\s+ad\s+group', line)
         if not m:
             m = re.search(r'^\s*CAMPAIGN\s+\d+/\d+:\s+(PLA/.+?)\s*$', line)
+        if not m:
+            m = re.search(r'Creating\s+campaign:\s+(PLA/.+?)\s*$', line, re.IGNORECASE)
         if m:
-            # Flush previous campaign if it had no ad-group line (shouldn't happen
-            # in exclusion but handles degraded logs gracefully).
+            # Flush previous campaign if it had no ad-group line (handles
+            # degraded logs and campaigns that errored before any AG loop).
             if current_campaign is not None and not current_campaign_had_ag:
                 campaign_ad_group_pairs.append((current_campaign, ""))
             current_campaign = m.group(1).strip()
             current_campaign_had_ag = False
             campaigns.add(current_campaign)
 
-        # Reverse-inclusion ad-group header: "   ──── Ad Group: PLA/wibra.nl_a ────"
-        m_rev_ag = re.search(r'Ad Group:\s*(PLA/\S+)', line)
+        # Ad-group header — two formats:
+        #   reverse_inclusion: "   ──── Ad Group: PLA/wibra.nl_a ────"
+        #   inclusion:         "   ──── Ad Group 1/3: PLA/wibra.nl_a ────"
+        # The optional "N/M" must sit between "Ad Group" and the colon.
+        m_rev_ag = re.search(r'Ad Group(?:\s+\d+/\d+)?:\s*(PLA/\S+)', line)
         if m_rev_ag:
             ag_name = m_rev_ag.group(1).strip()
             ad_groups.add(ag_name)

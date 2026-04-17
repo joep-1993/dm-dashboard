@@ -8,6 +8,18 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Pattern**: when retrofitting dry-run onto code that wasn't designed for it, wrap the call sites in the caller, not the helpers. Helpers stay pure and reusable; all the dry-run conditionals live in one place. Only push `dry_run` into a helper when the helper has side-effects that need different code paths (e.g. a batch mutator that needs to construct a plausible success response)
 - **File**: `backend/campaign_processor.py:process_inclusion_sheet_v2` (~40 lines of wrapping), same pattern in exclusion / reverse_inclusion / reverse_exclusion
 
+## A shared log parser needs coverage for every processor's log format (2026-04-17)
+- **Pattern observed three times this session**: new mutating operation added → export rows look empty for that op → root cause is the processor prints its own flavor of `📁 Campaign: …` / `Creating campaign: …` / `CAMPAIGN N/M: …` / `📁 Campaign: PLA/X (N ad group(s))` and my parser only knows a subset. Each one cost a round-trip with the user before I checked the log format
+- **Fix cadence that works**: before adding a processor to DMA+, grep its `print(f"...")` statements for campaign-name and ad-group-name lines and cross-check the patterns in `_parse_affected_entities`. Header variants I've now catalogued:
+  - `    📁 Campaign: PLA/X (N ad group(s))` — exclusion / reverse_exclusion
+  - `CAMPAIGN 1/3: PLA/Klussen store_a` — reverse_inclusion
+  - `   Creating campaign: PLA/Klussen store_a` — inclusion
+  - `   ──── Ad Group: PLA/wibra.nl_a ────` — reverse_inclusion
+  - `   ──── Ad Group 1/3: PLA/wibra.nl_a ────` — inclusion
+  - `      ⏭️/✅/❌ PLA/X: ...` — exclusion / reverse_exclusion status lines
+- **Pattern**: when a shared downstream consumer (parser, exporter, summarizer) touches output from multiple producers, changes to any producer's output format are a silent regression risk. Worth a single "log-format contract" comment block above `_parse_affected_entities` listing every expected format, so whoever adds the next processor has a checklist
+- **File**: `backend/dma_plus_service.py:_parse_affected_entities`
+
 ## Log-parsing regexes trip on entity names with spaces (2026-04-17)
 - **Bug**: exported DMA+ Affected Campaigns only showed `PLA/Klussen` when the run had processed `PLA/Klussen store_a`, `PLA/Klussen store_b`, `PLA/Klussen store_c`. Three distinct campaigns collapsed to one export row. Parser regex was `r'campaign.*?(PLA/[^\s,()]+)'` — the `[^\s]` stops at the first space, truncating `"PLA/Klussen store_a"` → `"PLA/Klussen"`, and the `campaigns = set()` dedupes to one
 - **Fix**: two specific patterns per log format, broad fallback only if they miss. For reverse-inclusion's `CAMPAIGN N/M: PLA/X store_a` header: `r'^\s*CAMPAIGN\s+\d+/\d+:\s+(PLA/.+?)\s*$'` (greedy to EOL). For exclusion's `📁 Campaign: PLA/X (N ad group(s))`: `r'Campaign:\s+(PLA/.+?)\s+\(\d+\s+ad\s+group'`. Both tolerate spaces inside the name because they anchor on a distinctive terminator (end-of-line, or `" ("`)

@@ -8066,6 +8066,7 @@ def process_reverse_exclusion_sheet(
     # Structure: {(maincat_id, cl1): [(row_idx, shop_name), ...]}
     groups = defaultdict(list)
     rows_with_missing_fields = []  # Track rows with missing required fields
+    maincat_name_by_id: dict = {}  # for tree log description
 
     for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=False), start=2):
         # Check if already processed
@@ -8074,6 +8075,7 @@ def process_reverse_exclusion_sheet(
             continue
 
         shop_name = row[COL_SHOP_NAME].value
+        maincat_name = row[COL_MAINCAT].value if len(row) > COL_MAINCAT else None
         maincat_id = row[COL_MAINCAT_ID].value
         custom_label_1 = row[COL_CL1].value
 
@@ -8088,6 +8090,8 @@ def process_reverse_exclusion_sheet(
 
         maincat_id_str = str(maincat_id)
         cl1_str = str(custom_label_1)
+        if maincat_name and maincat_id_str not in maincat_name_by_id:
+            maincat_name_by_id[maincat_id_str] = str(maincat_name)
         groups[(maincat_id_str, cl1_str)].append((idx, shop_name))
 
     # Mark rows with missing fields as errors
@@ -8155,13 +8159,24 @@ def process_reverse_exclusion_sheet(
         total_exclusions_removed = 0
 
         # Process each deepest_cat ONCE for all shops in this group
+        missing_campaigns: list = []
         for deepest_cat in deepest_cats:
             campaign_name = f"PLA/{deepest_cat}_{cl1_str}"
             campaign_data = campaign_cache.get(campaign_name)
 
+            if not campaign_data:
+                missing_campaigns.append(campaign_name)
+                print(f"    ⚠️  Campaign not found in Google Ads cache: {campaign_name}")
+
             if campaign_data:
                 campaigns_found += 1
                 ad_groups = campaign_data['ad_groups']
+                print(f"    📁 Campaign: {campaign_name} ({len(ad_groups)} ad group(s))")
+                # Tree line per campaign — parseable by _parse_affected_entities
+                mc_name_disp = maincat_name_by_id.get(maincat_id_str, f"maincat_id={maincat_id_str}")
+                shops_disp = ", ".join(sorted(set(shop_names))[:5]) + ("..." if len(set(shop_names)) > 5 else "")
+                tree_verb = "Tree to modify" if dry_run else "Tree modified"
+                print(f"      🌳 {tree_verb}: Campaign '{campaign_name}' → Maincat '{mc_name_disp}' → CL1 '{cl1_str}' → Shops: {shops_disp}")
 
                 for ag in ad_groups:
                     ag_id = str(ag['id'])
@@ -8207,6 +8222,17 @@ def process_reverse_exclusion_sheet(
                                 for orig_name in targeting_to_original.get(targeting_name, [targeting_name]):
                                     if orig_name in shop_results:
                                         shop_results[orig_name]['errors'].append(f"{ag_name}: {error}")
+
+                            # Per-ad-group status line (parser keys on "<indent> <icon> PLA/...:")
+                            s_count = len(result['success'])
+                            nf_count = len(result['not_found'])
+                            err_count = len(result['errors'])
+                            if err_count > 0:
+                                print(f"      ❌ {ag_name}: {err_count} error(s), {s_count} removed, {nf_count} not found")
+                            elif s_count > 0:
+                                print(f"      ✅ {ag_name}: {s_count} removed, {nf_count} not found")
+                            else:
+                                print(f"      ⏭️  {ag_name}: all {nf_count} not found (nothing to remove)")
 
                             break  # Success, exit retry loop
 
