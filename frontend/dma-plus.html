@@ -405,10 +405,13 @@
         // Stats
         const statsRow = document.getElementById('statsRow');
         if (op === 'inclusion' || op === 'exclusion' || op === 'reverse_inclusion' || op === 'reverse_exclusion') {
+            // Reflect what the run actually touched in Google Ads rather than
+            // workbook-row pass/fail. The precise "actually mutated vs no-op"
+            // breakdown still lives in the Log Output for exclusion-style ops.
             statsRow.innerHTML = `
-                <div class="col-4"><div class="stat-box bg-light"><div class="num">${result.rows_processed || 0}</div><div class="label">Processed</div></div></div>
-                <div class="col-4"><div class="stat-box" style="background:#d1e7dd;"><div class="num" style="color:#198754;">${result.successes || 0}</div><div class="label">Success</div></div></div>
-                <div class="col-4"><div class="stat-box" style="background:#f8d7da;"><div class="num" style="color:#dc3545;">${result.failures || 0}</div><div class="label">Failed</div></div></div>`;
+                <div class="col-4"><div class="stat-box bg-light"><div class="num">${result.edited_campaigns || 0}</div><div class="label">Campaigns</div></div></div>
+                <div class="col-4"><div class="stat-box bg-light"><div class="num">${result.edited_ad_groups || 0}</div><div class="label">Ad Groups</div></div></div>
+                <div class="col-4"><div class="stat-box bg-light"><div class="num">${result.edited_trees || 0}</div><div class="label">Trees</div></div></div>`;
         } else if (op === 'validate_cl1' || op === 'validate_trees') {
             statsRow.innerHTML = `
                 <div class="col-3"><div class="stat-box bg-light"><div class="num">${result.total || 0}</div><div class="label">Total</div></div></div>
@@ -493,9 +496,12 @@
                 const statusBadge = h.status === 'completed'
                     ? '<span class="badge" style="border: 1px solid #00b894; color: #00b894; background: transparent;">completed</span>'
                     : '<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">failed</span>';
+                const dryRunBadge = h.dry_run
+                    ? ' <span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent; margin-left: 4px;">DRY RUN</span>'
+                    : '';
                 return `<tr class="history-row">
                     <td style="padding: 6px 12px;">${time}</td>
-                    <td style="padding: 6px 12px;">${OP_LABELS[h.operation] || h.operation}</td>
+                    <td style="padding: 6px 12px;">${OP_LABELS[h.operation] || h.operation}${dryRunBadge}</td>
                     <td style="padding: 6px 12px;">${h.country}</td>
                     <td style="padding: 6px 12px;">${statusBadge}</td>
                     <td style="padding: 6px 12px;">${h.summary || ''}</td>

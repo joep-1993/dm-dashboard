@@ -626,9 +626,23 @@ def _run_operation(task_id: str, operation: str, country: str,
         # dropped from the export when a run has many groups.
         affected = _parse_affected_entities(full_log)
 
-        # Also store affected in result for the status endpoint
+        # Also store affected in result for the status endpoint, plus
+        # action-oriented counts that the stats row renders (campaigns /
+        # ad groups / trees touched by the run). For exclusion-style ops
+        # these reflect entities *processed* in the log — the per-op log
+        # summary still breaks out actual vs no-op for precise action count.
         if result_data:
             result_data["affected"] = affected
+            result_data["edited_campaigns"] = len(affected.get("campaigns", []))
+            result_data["edited_ad_groups"] = len(affected.get("ad_groups", []))
+            # For ops that don't emit tree lines (reverse_inclusion removes
+            # the tree implicitly with the ad group), fall back to ad-group
+            # count so the column isn't always zero.
+            tree_count = len(affected.get("trees", []))
+            if tree_count == 0 and operation == "reverse_inclusion":
+                tree_count = result_data["edited_ad_groups"]
+            result_data["edited_trees"] = tree_count
+            result_data["dry_run"] = bool(dry_run)
 
         # Add to history
         _history_append({
@@ -640,6 +654,10 @@ def _run_operation(task_id: str, operation: str, country: str,
             "status": "completed",
             "summary": _summarize_result(operation, result_data),
             "affected": affected,
+            "dry_run": bool(dry_run),
+            "edited_campaigns": result_data.get("edited_campaigns", 0) if result_data else 0,
+            "edited_ad_groups": result_data.get("edited_ad_groups", 0) if result_data else 0,
+            "edited_trees": result_data.get("edited_trees", 0) if result_data else 0,
         })
 
     except TaskCancelled:
@@ -662,6 +680,7 @@ def _run_operation(task_id: str, operation: str, country: str,
             "completed_at": datetime.now().isoformat(),
             "status": "failed",
             "summary": "Cancelled by user",
+            "dry_run": bool(dry_run),
         })
     except Exception as e:
         logger.error(f"DMA+ task {task_id} failed: {e}", exc_info=True)
@@ -683,6 +702,7 @@ def _run_operation(task_id: str, operation: str, country: str,
             "completed_at": datetime.now().isoformat(),
             "status": "failed",
             "summary": f"Error: {str(e)[:200]}",
+            "dry_run": bool(dry_run),
         })
 
 
