@@ -141,9 +141,11 @@ def get_all_titles(limit: int = 0) -> List[Dict]:
             WHERE h1_title IS NOT NULL OR title IS NOT NULL
             ORDER BY url
         """
-        if limit > 0:
-            query += f" LIMIT {limit}"
-        cur.execute(query)
+        params = ()
+        if isinstance(limit, int) and limit > 0:
+            query += " LIMIT %s"
+            params = (limit,)
+        cur.execute(query, params)
         rows = cur.fetchall()
         return [dict(row) for row in rows]
     finally:

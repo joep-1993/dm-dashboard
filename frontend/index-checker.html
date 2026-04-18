@@ -210,6 +210,11 @@
         const API_BASE = window.location.origin;
         let allResults = [];
 
+        function escapeHtml(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+
         window.addEventListener('DOMContentLoaded', loadQuota);
 
         function setLoading(btnId, loading) {
@@ -393,7 +398,7 @@
 
                 container.innerHTML = html;
             } catch (error) {
-                container.innerHTML = `<p class="text-danger">Error loading quota: ${error.message}</p>`;
+                container.innerHTML = `<p class="text-danger">Error loading quota: ${escapeHtml(error.message)}</p>`;
             }
         }
     </script>

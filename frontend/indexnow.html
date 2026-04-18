@@ -190,6 +190,11 @@
     <script>
         const API_BASE = window.location.origin;
 
+        function escapeHtml(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+
         function updateCounter(todayCount, dailyLimit) {
             const pct = Math.min(100, Math.round((todayCount / dailyLimit) * 100));
             const remaining = Math.max(0, dailyLimit - todayCount);
@@ -368,7 +373,7 @@
                 html += '</div>';
                 container.innerHTML = html;
             } catch (error) {
-                container.innerHTML = `<p class="text-danger">Error: ${error.message}</p>`;
+                container.innerHTML = `<p class="text-danger">Error: ${escapeHtml(error.message)}</p>`;
             }
         }
     </script>

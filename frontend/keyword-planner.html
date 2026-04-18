@@ -429,7 +429,7 @@
                     statusDiv.innerHTML = `<div class="alert alert-danger py-1 small">${data.message}</div>`;
                 }
             } catch (error) {
-                statusDiv.innerHTML = `<div class="alert alert-danger py-1 small">Connection failed: ${error.message}</div>`;
+                statusDiv.innerHTML = `<div class="alert alert-danger py-1 small">Connection failed: ${escapeHtml(error.message)}</div>`;
             }
         }
 

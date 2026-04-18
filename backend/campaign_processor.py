@@ -183,8 +183,15 @@ def get_excel_path():
 
     Returns:
         str: Path to Excel file (WSL format for Linux, Windows format for Windows)
+
+    Override with env var DMA_EXCEL_PATH. Dashboard callers always pass
+    `excel_path=` explicitly, so these defaults only matter for standalone
+    CLI runs from this module's __main__.
     """
-    # Base Windows path
+    env_override = os.getenv("DMA_EXCEL_PATH")
+    if env_override:
+        return env_override
+    # Legacy defaults (kept for CLI-run backwards compat on the original author's box).
     windows_path = "c:/Users/JoepvanSchagen/Downloads/claude/dma_script_uitbreiding.xlsx"
     wsl_path = "/mnt/c/Users/JoepvanSchagen/Downloads/claude/dma_script_uitbreiding.xlsx"
 
@@ -212,9 +219,12 @@ def get_reverse_exclusion_path():
     """
     Get the path to the reverse exclusion Excel file.
 
-    Returns:
-        str: Path to reverse exclusion Excel file (WSL format for Linux, Windows format for Windows)
+    Override with env var DMA_REVERSE_EXCEL_PATH. Dashboard callers always
+    pass the path explicitly; defaults only matter for standalone CLI runs.
     """
+    env_override = os.getenv("DMA_REVERSE_EXCEL_PATH")
+    if env_override:
+        return env_override
     windows_path = "C:/Users/JoepvanSchagen/Downloads/claude/dma_script_uitbreiding_reverse.xlsx"
     wsl_path = "/mnt/c/Users/JoepvanSchagen/Downloads/claude/dma_script_uitbreiding_reverse.xlsx"
 
@@ -4971,8 +4981,9 @@ def add_shop_exclusions_batch(
                 print(f"         {error.error_code}: {error.message}")
                 if error.location:
                     print(f"         Location: {error.location}")
+            first_err = gae.failure.errors[0].message[:80] if gae.failure.errors else "unknown error"
             for shop_name in shop_names:
-                result['errors'].append((shop_name, f"Rebuild failed: {gae.failure.errors[0].message[:80]}"))
+                result['errors'].append((shop_name, f"Rebuild failed: {first_err}"))
             return result
         except Exception as e:
             print(f"      ❌ Error rebuilding tree: {str(e)[:150]}")
@@ -5039,7 +5050,7 @@ def add_shop_exclusions_batch(
                     else:
                         result['errors'].append((shop_name, ind_error[:50]))
     except Exception as e:
-        error_msg = str(e)[:100]
+        error_msg = str(e)[:300]
         for _, shop_name in operations:
             result['errors'].append((shop_name, error_msg))
 
@@ -5219,13 +5230,13 @@ def replace_shop_exclusions_batch(
 
         except GoogleAdsException as gae:
             # Batch failed - try per-replacement (REMOVE+CREATE pair)
-            error_str = str(gae)[:100]
+            error_str = str(gae)[:300]
             print(f"      Batch failed ({error_str}), falling back to individual replacements...")
             _replace_individual_fallback(
                 client, customer_id, agc_service, operations, replacements, marker_names, result
             )
         except Exception as e:
-            error_msg = str(e)[:100]
+            error_msg = str(e)[:300]
             for old_name in replacements:
                 if old_name not in [n for n in result['not_found']]:
                     result['errors'].append((old_name, error_msg))
@@ -7211,7 +7222,7 @@ def validate_cl1_targeting_for_ad_group(
         rows = list(ga_service.search(customer_id=customer_id, query=query))
     except Exception as e:
         result['status'] = 'error'
-        result['message'] = f"Error querying listing tree: {str(e)[:100]}"
+        result['message'] = f"Error querying listing tree: {str(e)[:300]}"
         return result
 
     if not rows:
@@ -7819,14 +7830,14 @@ def validate_listing_trees_for_campaigns(
             stats['error'] += 1
             stats['details'].append({
                 'campaign': campaign_name, 'ad_group': ag_name,
-                'status': 'error', 'message': f"GoogleAdsException: {error_msgs[0][:100]}"
+                'status': 'error', 'message': f"GoogleAdsException: {error_msgs[0][:300]}"
             })
         except Exception as e:
-            print(f"   ❌ {ag_name}: {str(e)[:100]}")
+            print(f"   ❌ {ag_name}: {str(e)[:300]}")
             stats['error'] += 1
             stats['details'].append({
                 'campaign': campaign_name, 'ad_group': ag_name,
-                'status': 'error', 'message': str(e)[:100]
+                'status': 'error', 'message': str(e)[:300]
             })
 
     # Print summary

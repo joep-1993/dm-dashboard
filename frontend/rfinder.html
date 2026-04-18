@@ -247,7 +247,7 @@
                 }
 
             } catch (error) {
-                resultsContainer.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+                resultsContainer.innerHTML = `<div class="alert alert-danger">${escapeHtml(error.message)}</div>`;
             } finally {
                 loadingSpinner.classList.add('d-none');
             }

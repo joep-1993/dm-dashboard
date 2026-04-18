@@ -59,6 +59,11 @@ def _get_client() -> GoogleAdsClient:
 # Task store (in-memory, background tasks)
 # ---------------------------------------------------------------------------
 _tasks: dict = {}
+# `_tasks` is mutated from the FastAPI handler thread (start/cancel) and from
+# the background worker thread (progress/completion). Wrap reads/writes in a
+# lock so the cancel bit isn't lost when the worker's `_set_task` races a
+# caller's cancel flip.
+_tasks_lock = threading.Lock()
 
 # Change history is persisted to disk so server restarts (frequent during
 # dev) don't wipe it. JSON is fine here: entries are small and capped at 200.
@@ -101,14 +106,16 @@ def _history_append(entry: dict):
 
 
 def _get_task(task_id: str) -> Optional[dict]:
-    return _tasks.get(task_id)
+    with _tasks_lock:
+        return _tasks.get(task_id)
 
 
 def _set_task(task_id: str, data: dict):
-    existing = _tasks.get(task_id)
-    if existing and existing.get("cancel") and "cancel" not in data:
-        data["cancel"] = True
-    _tasks[task_id] = data
+    with _tasks_lock:
+        existing = _tasks.get(task_id)
+        if existing and existing.get("cancel") and "cancel" not in data:
+            data["cancel"] = True
+        _tasks[task_id] = data
 
 
 class TaskCancelled(Exception):
@@ -116,8 +123,10 @@ class TaskCancelled(Exception):
 
 
 def _check_cancelled(task_id: str):
-    task = _tasks.get(task_id)
-    if task and task.get("cancel"):
+    with _tasks_lock:
+        task = _tasks.get(task_id)
+        cancelled = bool(task and task.get("cancel"))
+    if cancelled:
         raise TaskCancelled()
 
 

@@ -1,6 +1,38 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Swapped executemany tuple order silently breaks UPDATE (2026-04-18)
+- **The bug**: `cur.executemany("UPDATE ... SET content = %s WHERE url = %s", [(url, content), ...])` — the tuple was `(url, content)` but the positional SQL expected `(content, url)`. psycopg2 binds positionally, so the UPDATE ran as `SET content=<url-string> WHERE url=<html-string>` every time — zero row matches, zero rows updated, conn.commit() succeeds with `rowcount=0`, no exception, no log. Every link-correction run since the code was written was a no-op. Two sites in `main.py` (`/api/validate-links` and `/api/validate-all-links`) had the same swap because the second endpoint was copy-pasted from the first
+- **Why it hid**: `executemany` doesn't raise on 0-row updates. The surrounding code counted "URLs corrected" from the in-memory `urls_corrected` counter, which was incremented *regardless of DB outcome*. So the status dashboard reported "corrected 47 URLs" while the DB had 0 updates. Only a content audit would catch it
+- **Pattern for any `executemany` UPDATE/DELETE**:
+  1. The positional order of the SQL (`SET a=%s, b=%s WHERE c=%s`) must match the tuple order pushed into the list. Write one before the other and match them deliberately
+  2. Prefer named parameters (`SET content = %(content)s WHERE url = %(url)s` with list-of-dicts) — psycopg2 supports them and they survive reordering
+  3. If you *must* use positional binding in executemany, put a `# tuple order: (content, url)` comment on the list-append line and never edit one without the other
+- **Generalisation**: whenever a symptom is "the UI says it worked but the data didn't change," suspect silently-zero-row mutations. Log `cur.rowcount` after every `executemany` that's supposed to mutate, or assert it matches `len(updates)` when you know no concurrent deletes happened
+- **File**: `backend/main.py:/api/validate-links`, `backend/main.py:/api/validate-all-links`
+
+## CREATE TABLE IF NOT EXISTS never adds columns to an existing table (2026-04-18)
+- **The bug**: Thema Ads service `INSERT INTO thema_ads_jobs (..., batch_size, is_repair_job, theme_name)` against a schema whose `CREATE TABLE IF NOT EXISTS` block never listed those columns. On any fresh DB, job creation fails with `column "batch_size" does not exist`. Live DBs had the columns because someone added them by hand during the original rollout — that manual ALTER never made it into the init script, so the codebase's source-of-truth schema drifted from reality
+- **Fix shape**: every column added after initial rollout needs an explicit `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` beside the `CREATE TABLE IF NOT EXISTS`. Columns in the CREATE block are only applied on first creation; they're skipped forever after. Postgres 9.6+ supports `ALTER TABLE ... ADD COLUMN IF NOT EXISTS col TYPE [DEFAULT ...]` in a single statement with multiple columns, so you can stack them
+- **Project caveat**: there are *two* db-init paths in this repo — `backend/thema_ads_db.py:init_db` and `backend/database.py:init_db` — and they both define the same tables. Any schema migration has to land in both or the one that runs first "wins" and the other silently diverges. Long term this should be consolidated to one; for now, keep the ADD COLUMN IF NOT EXISTS blocks aligned in both files
+- **Pattern**: when you add a column to an already-shipped table, grep the whole repo for `CREATE TABLE IF NOT EXISTS <tablename>` and add the `ALTER ... ADD COLUMN IF NOT EXISTS` next to *each* one. A single source-of-truth schema file would be cleaner, but that's a bigger refactor — until then, discipline
+- **Files**: `backend/thema_ads_db.py`, `backend/database.py`
+
+## Pool-returning connection vs raw connection: know which you have (2026-04-18)
+- **The bug**: `backend/database.py:init_db` did `conn = get_db_connection()` (pool) then `conn.close()` at the end (close raw). `conn.close()` on a pooled connection destroys it — the pool's `putconn` is what returns the slot. Under frequent dev restarts this slowly drained the 2–20 connection pool until startup-time init couldn't get a connection
+- **How to tell them apart in this repo**:
+  - `backend/database.py:get_db_connection` → pool-backed, must `return_db_connection(conn)`
+  - `backend/thema_ads_db.py:get_db_connection` → direct `psycopg2.connect`, `conn.close()` is correct (pooling was disabled there with a comment explaining why)
+- **Pattern**: when a module exports `get_X_connection` and `return_X_connection`, the pair signals pooling. Call `return_X_connection`. If a module exports only `get_X_connection`, read the body — pooling may or may not be in play
+- **Bigger lesson**: having two `get_db_connection` functions in sibling modules *with different semantics* is the real trap. Agents/humans pick the wrong one by importing the closest. Consolidating is on the backlog
+- **Files**: `backend/database.py:init_db`, `backend/thema_ads_db.py`
+
+## Frontend XSS via `innerHTML = "...${error.message}..."` (2026-04-18)
+- **The pattern**: `resultDiv.innerHTML = \`<div class="alert alert-danger">Error: ${error.message}</div>\`` is ~40 copies across app.js / faq.js / thema-ads.js and several HTML files. `error.message` can be anything the backend puts into an HTTPException `detail` — and FastAPI echoes user input into errors (e.g. "Invalid URL: <script>…"). Click-through of a malformed URL + rendered error = stored-XSS-adjacent risk
+- **Fix shape**: a shared `escapeHtml` helper at the top of each JS/HTML script tag (no build step in this project, so no single import point), then `${escapeHtml(error.message)}` everywhere the error lands in innerHTML. `data.error`, `data.detail`, `errors.join(', ')` — same treatment because they're all server-echoed strings. The grep query `innerHTML\s*=.*\$\{[^}]*error` surfaces every instance
+- **Longer-term**: a real fix is to swap the `<div><alert>` error pattern to `textContent` assignment on a pre-built alert element. But that's a bigger UI refactor; inline `escapeHtml` is good enough until there's a reason to
+- **Pattern beyond errors**: any `${foo}` interpolated into `innerHTML` where `foo` comes from the server (filenames, URLs, shop names, custom_id) is a risk. The innocuous-looking `${row.url}` in a results table can be the same bug if the backend echoed a user-uploaded URL
+
 ## Prefer structured results over log-parsing when the processor already has them (2026-04-18)
 - **Symptom**: `validate_trees` dry-run export only contained campaign names — ad group and tree columns were empty. Root cause was the usual shared-parser mismatch: `validate_trees` logs `📁 Campaign: PLA/X` (no `(N ad group(s))` suffix) and 3-space-indented `   🔧 PLA/ag_a: …` status lines, but `_parse_affected_entities` requires the exclusion-style `(N ad group(s))` header and `\s{4,}` ad-group indentation. Campaigns limped through via the broad `r'campaign.*?(PLA/[^\s,()]+)'` fallback; ad groups and tree descriptions didn't
 - **Anti-fix**: changing the log format to appease the parser (add more spaces, add the `(N ad group(s))` suffix) would've worked but is the wrong direction — it bakes parser assumptions into every processor's `print()` statements. Each new processor has to remember the format or regress the export

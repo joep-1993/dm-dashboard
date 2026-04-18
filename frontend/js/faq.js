@@ -3,6 +3,17 @@
 // Use dynamic API base - works from localhost, WSL IP, or any host
 const API_BASE = window.location.origin;
 
+// Escape server-provided strings before interpolating into innerHTML.
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 let faqProcessingActive = false;
 let faqShouldStop = false;
 let faqBatchMode = false;
@@ -309,7 +320,7 @@ async function processFaqUrls() {
         refreshFaqStatus();
 
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
         btn.textContent = 'Process URLs';
@@ -449,7 +460,7 @@ async function processAllFaqUrls() {
         `;
 
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         faqProcessingActive = false;
         processBtn.disabled = false;
@@ -537,7 +548,7 @@ async function deleteFaqResult(url, index) {
         }
 
     } catch (error) {
-        alert(`Error: ${error.message}`);
+        alert(`Error: ${escapeHtml(error.message)}`);
     }
 }
 
@@ -546,7 +557,7 @@ function exportFaqXLSX() {
     try {
         window.location.href = `${API_BASE}/api/faq/export/xlsx`;
     } catch (error) {
-        alert(`Export failed: ${error.message}`);
+        alert(`Export failed: ${escapeHtml(error.message)}`);
     }
 }
 
@@ -554,7 +565,7 @@ function exportFaqJSON() {
     try {
         window.location.href = `${API_BASE}/api/faq/export/json`;
     } catch (error) {
-        alert(`Export failed: ${error.message}`);
+        alert(`Export failed: ${escapeHtml(error.message)}`);
     }
 }
 
@@ -562,7 +573,7 @@ function exportCombined() {
     try {
         window.location.href = `${API_BASE}/api/export/combined/xlsx`;
     } catch (error) {
-        alert(`Combined export failed: ${error.message}`);
+        alert(`Combined export failed: ${escapeHtml(error.message)}`);
     }
 }
 
@@ -605,7 +616,7 @@ async function validateFaqLinks() {
         }
 
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
         btn.textContent = 'Validate Links';
@@ -683,14 +694,14 @@ async function validateAllFaqLinks() {
                     validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
                 } else if (data.status === 'error') {
                     clearInterval(poll);
-                    resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+                    resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(data.error)}</div>`;
                     validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
                 }
             } catch (e) { /* polling error, keep trying */ }
         }, 3000);
 
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
         validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; validateAllBtn.textContent = 'Validate All';
     }
 }
@@ -762,14 +773,14 @@ async function recheckSkippedFaqUrls() {
                     recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
                 } else if (data.status === 'error') {
                     clearInterval(poll);
-                    resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.error}</div>`;
+                    resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(data.error)}</div>`;
                     recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
                 }
             } catch (e) {}
         }, 3000);
 
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
         recheckBtn.disabled = false; validateBtn.disabled = false; validateAllBtn.disabled = false; resetBtn.disabled = false; recheckBtn.textContent = 'Recheck Skipped';
     }
 }
@@ -811,11 +822,11 @@ async function resetFaqValidationHistory() {
             const errors = [];
             if (!validationResponse.ok) errors.push(`Validation: ${validationData.detail}`);
             if (!skippedResponse.ok) errors.push(`Skipped: ${skippedData.detail}`);
-            resultDiv.innerHTML = `<div class="alert alert-danger">Errors: ${errors.join(', ')}</div>`;
+            resultDiv.innerHTML = `<div class="alert alert-danger">Errors: ${escapeHtml(errors.join(', '))}</div>`;
         }
 
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         resetBtn.disabled = false;
         resetBtn.textContent = 'Reset Validation';
@@ -909,12 +920,12 @@ async function publishContent() {
             // Poll for status
             pollPublishStatus(taskId, resultDiv, publishBtn);
         } else {
-            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail || 'Unknown error'}</div>`;
+            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(data.detail || 'Unknown error')}</div>`;
             publishBtn.disabled = false;
         }
 
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
         publishBtn.disabled = false;
     }
 }
@@ -975,7 +986,7 @@ async function pollPublishStatus(taskId, resultDiv, publishBtn) {
             publishBtn.disabled = false;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error checking status: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error checking status: ${escapeHtml(error.message)}</div>`;
         publishBtn.disabled = false;
     }
 }
@@ -1041,7 +1052,7 @@ async function lookupFaqContent() {
         `;
 
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -1056,7 +1067,7 @@ async function deleteFaqAndReset(encodedUrl) {
         resultDiv.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
         refreshFaqStatus();
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     }
 }
 

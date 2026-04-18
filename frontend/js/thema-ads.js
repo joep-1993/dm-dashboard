@@ -3,6 +3,17 @@ let currentJobId = null;
 let pollInterval = null;
 let themes = [];
 
+// Escape server-provided strings before interpolating into innerHTML.
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // Format date to local timezone
 function formatDateTime(isoString) {
     if (!isoString) return 'Not started';
@@ -132,7 +143,7 @@ async function uploadExcel() {
             resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -181,7 +192,7 @@ async function uploadCSV() {
             resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -240,7 +251,7 @@ async function discoverAdGroups() {
             resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
     }
@@ -581,7 +592,7 @@ async function runCheckup() {
             resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
     }
@@ -669,7 +680,7 @@ async function runCleanup() {
     } catch (error) {
         resultDiv.innerHTML = `
             <div class="alert alert-danger">
-                <strong>Error:</strong> ${error.message}
+                <strong>Error:</strong> ${escapeHtml(error.message)}
             </div>
         `;
     } finally {
@@ -724,7 +735,7 @@ async function removeCheckupLabels() {
             resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
     }
@@ -792,7 +803,7 @@ async function toggleAutoQueue() {
     } catch (error) {
         // Revert toggle on error
         toggle.checked = !enabled;
-        alert(`Error: ${error.message}`);
+        alert(`Error: ${escapeHtml(error.message)}`);
     }
 }
 
@@ -839,7 +850,7 @@ async function uploadActivationPlan() {
             resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
     }
@@ -995,10 +1006,10 @@ async function activateAds() {
         } else if (data.status === 'error') {
             resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.message}</div>`;
         } else {
-            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail || 'Unknown error'}</div>`;
+            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(data.detail || 'Unknown error')}</div>`;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         // Stop polling
         if (pollInterval) {
@@ -1134,7 +1145,7 @@ async function runAllThemes() {
             resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail}</div>`;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
     }
@@ -1232,10 +1243,10 @@ async function removeDuplicates() {
             resultHTML += '</div>';
             resultDiv.innerHTML = resultHTML;
         } else {
-            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.detail || 'Unknown error'}</div>`;
+            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(data.detail || 'Unknown error')}</div>`;
         }
     } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
     }

@@ -405,6 +405,8 @@ def _run_faq_batch(num_faqs: int = 6):
             save_failed = 0
 
             for line in results_text.strip().split('\n'):
+                if not line.strip():
+                    continue  # OpenAI batch output sometimes has trailing blank lines
                 try:
                     result = json.loads(line)
                     url = result["custom_id"]
@@ -417,14 +419,23 @@ def _run_faq_batch(num_faqs: int = 6):
 
                     content = response_body["choices"][0]["message"]["content"].strip()
                     if content.startswith("```"):
-                        content = content.split("```")[1]
+                        # Robust fence extraction: everything between the first
+                        # and second ``` fence, else the content as-is.
+                        parts = content.split("```")
+                        content = parts[1] if len(parts) >= 3 else content
                         if content.startswith("json"):
                             content = content[4:]
                     content = content.strip()
 
                     faqs_data = json.loads(content)
                     if isinstance(faqs_data, dict):
-                        faqs_data = faqs_data.get("faqs") or faqs_data.get("faq") or faqs_data.get("FAQ") or list(faqs_data.values())[0]
+                        fallback_values = list(faqs_data.values())
+                        faqs_data = (
+                            faqs_data.get("faqs")
+                            or faqs_data.get("faq")
+                            or faqs_data.get("FAQ")
+                            or (fallback_values[0] if fallback_values else None)
+                        )
 
                     if not faqs_data or not isinstance(faqs_data, list):
                         tracking_data.append((url, "failed", "faq_generation_failed"))
@@ -480,12 +491,9 @@ def _run_faq_batch(num_faqs: int = 6):
         _update_state(batch_type, phase="complete", active=False,
             processed=total_processed, failed=total_save_failed)
         print(f"[BATCH-FAQ] All {len(chunks)} chunks complete: {total_succeeded} FAQs, {total_save_failed} failed")
-
-        # Cleanup temp file
-        try:
-            os.remove(jsonl_path)
-        except:
-            pass
+        # Per-chunk cleanup already happened inside the loop; no trailing
+        # os.remove here (would NameError on empty chunks, or double-delete
+        # the last file otherwise).
 
     except Exception as e:
         print(f"[BATCH-FAQ] Error: {e}")

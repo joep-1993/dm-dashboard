@@ -419,7 +419,7 @@
                 }
 
             } catch (error) {
-                resultsContainer.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+                resultsContainer.innerHTML = `<div class="alert alert-danger">${escapeHtml(error.message)}</div>`;
             } finally {
                 loadingSpinner.classList.add('d-none');
             }
@@ -467,7 +467,7 @@
                 }
 
             } catch (error) {
-                resultsContainer.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+                resultsContainer.innerHTML = `<div class="alert alert-danger">${escapeHtml(error.message)}</div>`;
             } finally {
                 loadingSpinner.classList.add('d-none');
             }
@@ -513,7 +513,7 @@
                 }
 
             } catch (error) {
-                testResult.innerHTML = `<div class="alert alert-danger py-2">${error.message}</div>`;
+                testResult.innerHTML = `<div class="alert alert-danger py-2">${escapeHtml(error.message)}</div>`;
             }
         }
 

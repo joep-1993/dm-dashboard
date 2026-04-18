@@ -218,11 +218,12 @@ def fix_truncated_urls(content: str, products: List[Dict]) -> str:
                 slug = match.group(1)
                 slug_to_url[slug] = url
 
-    # Find all href URLs in content
+    # Find all href URLs in content. GPT emits both absolute and relative hrefs
+    # (check_content_has_valid_links above treats both as valid), so the truncation
+    # detection must accept either shape.
     def replace_truncated(match):
         href = match.group(1)
-        # Check if this is a truncated URL (only has /p/product-name/ pattern)
-        truncated_match = re.match(r'https://www\.beslist\.nl/p/([^/]+)/?$', href)
+        truncated_match = re.match(r'(?:https://www\.beslist\.nl)?/p/([^/]+)/?$', href)
         if truncated_match:
             slug = truncated_match.group(1)
             if slug in slug_to_url:
@@ -230,12 +231,13 @@ def fix_truncated_urls(content: str, products: List[Dict]) -> str:
         return match.group(0)
 
     # Replace truncated URLs
-    fixed_content = re.sub(r'href="(https://www\.beslist\.nl/p/[^"]+)"', replace_truncated, content)
+    fixed_content = re.sub(r'href="((?:https://www\.beslist\.nl)?/p/[^"]+)"', replace_truncated, content)
 
     # Count fixes
     if fixed_content != content:
-        original_truncated = len(re.findall(r'href="https://www\.beslist\.nl/p/[^/]+/?"', content))
-        remaining_truncated = len(re.findall(r'href="https://www\.beslist\.nl/p/[^/]+/?"', fixed_content))
+        count_pattern = r'href="(?:https://www\.beslist\.nl)?/p/[^/]+/?"'
+        original_truncated = len(re.findall(count_pattern, content))
+        remaining_truncated = len(re.findall(count_pattern, fixed_content))
         fixes = original_truncated - remaining_truncated
         if fixes > 0:
             print(f"[GPT] Fixed {fixes} truncated URL(s) in content")

@@ -396,8 +396,8 @@ def process_single_url(url: str, conservative_mode: bool = False):
                 ON CONFLICT (url) DO UPDATE SET status = 'failed', skip_reason = EXCLUDED.skip_reason
             """, (url, error_msg))
             conn.commit()
-        except:
-            pass  # If DB fails, just return the result
+        except (psycopg2.DatabaseError, psycopg2.Error) as db_err:
+            print(f"[process_single_url] Failed to persist error status for {url}: {db_err}")
         return result
     finally:
         if conn:
@@ -637,9 +637,9 @@ async def export_xlsx():
 
 @app.get("/api/export/json")
 async def export_json():
-    """Export all generated content as JSON"""
+    """Export all generated content as JSON (from local PostgreSQL)"""
     try:
-        conn = get_output_connection()
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -649,7 +649,7 @@ async def export_json():
         rows = cur.fetchall()
 
         cur.close()
-        return_output_connection(conn)
+        return_db_connection(conn)
 
         # Convert to JSON-serializable format
         data = []
@@ -999,7 +999,8 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
             # Handle URL replacements - update content in local database
             if has_replaced and not has_gone:
                 # Only replaced URLs, no gone URLs - update content, keep kopteksten=1
-                urls_to_update_content.append((content_url, validation_result['corrected_content']))
+                # Order matches `UPDATE ... SET content = %s WHERE url = %s` below.
+                urls_to_update_content.append((validation_result['corrected_content'], content_url))
                 urls_corrected += 1
 
             # Handle gone products - need to regenerate content
@@ -1200,7 +1201,8 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                     ))
 
                     if has_replaced and not has_gone:
-                        urls_to_update_content.append((content_url, validation_result['corrected_content']))
+                        # Order matches `UPDATE ... SET content = %s WHERE url = %s` below.
+                        urls_to_update_content.append((validation_result['corrected_content'], content_url))
                         urls_corrected += 1
 
                     if has_gone:

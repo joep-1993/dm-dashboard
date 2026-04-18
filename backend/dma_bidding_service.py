@@ -419,6 +419,14 @@ def run_dma_bidding(
             if new_strategy_resource:
                 result = change_bid_strategy(resource_name, new_strategy_resource, dry_run=dry_run, country=country)
                 campaign_info["mutation_result"] = result
+            else:
+                # Strategy for target level not configured — record as not-applied
+                # so the campaign row isn't silently claimed as moved.
+                campaign_info["mutation_result"] = {
+                    "success": False,
+                    "skipped": True,
+                    "reason": f"No bid strategy configured for level {new_level}",
+                }
 
     # Step 3: Build summary
     end_time = datetime.now()

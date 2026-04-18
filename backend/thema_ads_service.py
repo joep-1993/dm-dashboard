@@ -459,7 +459,11 @@ class ThemaAdsService:
             if job_status['failed_items'] == 0:
                 self.update_job_status(job_id, 'completed')
             else:
-                self.update_job_status(job_id, 'completed')
+                self.update_job_status(
+                    job_id,
+                    'completed_with_errors',
+                    error_message=f"{job_status['failed_items']} item(s) failed"
+                )
 
             self.is_running = False
             self.current_job_id = None
@@ -492,6 +496,12 @@ class ThemaAdsService:
 
         async def process_with_tracking(customer_id, customer_inputs):
             async with semaphore:
+                # Honor pause: `pause_job()` sets is_running=False. Without this
+                # gate, paused jobs keep chewing through the remaining queued
+                # customers until the whole batch finishes.
+                if not self.is_running:
+                    logger.info(f"⏸️  Skipping customer {customer_id} — job paused")
+                    return []
                 try:
                     logger.info(f"🔵 START processing customer {customer_id} with {len(customer_inputs)} inputs")
                     results = await processor.process_customer(customer_id, customer_inputs)
@@ -564,7 +574,15 @@ class ThemaAdsService:
         logger.info(f"Job {job_id} paused")
 
     def resume_job(self, job_id: int):
-        """Resume a paused job."""
+        """Resume a paused job. Guarded so double-clicks can't spawn two
+        concurrent process_job tasks racing on the same job."""
+        if self.is_running and self.current_job_id == job_id:
+            logger.warning(f"Job {job_id} is already running — ignoring resume")
+            return
+        status = self.get_job_status(job_id).get('status')
+        if status not in ('paused', 'failed'):
+            raise ValueError(f"Cannot resume job {job_id} from status '{status}'")
+        self.update_job_status(job_id, 'running')
         asyncio.create_task(self.process_job(job_id))
         logger.info(f"Job {job_id} resumed")
 

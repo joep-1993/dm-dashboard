@@ -285,7 +285,7 @@ def _extract_maincat(url: str) -> str:
 def _extract_cat(url: str, maincat: str) -> str:
     """Extract category slug after maincat"""
     if maincat and maincat in url:
-        after_maincat = url.split(maincat)[1] if maincat in url else url
+        after_maincat = url.split(maincat)[1]
         parts = after_maincat.split("/")
         if parts and parts[0] and parts[0] != "c":
             return f"/{parts[0]}/"
@@ -471,14 +471,17 @@ def _apply_cat_facet_remove(url: str, rules: List[CatFacetRemoveRule]) -> str:
 
         # Try removal patterns in order of specificity
         regex_patterns = [
-            (rf'~~{facet_pattern}~~', '~~'),    # facet in the middle
-            (rf'{facet_pattern}~~', ''),          # facet at the start
-            (rf'~~{facet_pattern}', ''),           # facet at the end
-            (rf'/c/{facet_pattern}', ''),              # facet is the only one after /c/ — remove /c/ too
+            (rf'~~{facet_pattern}~~', '~~'),             # facet in the middle
+            (rf'{facet_pattern}~~', ''),                 # facet at the start
+            (rf'~~{facet_pattern}', ''),                 # facet at the end
+            (rf'/c/{facet_pattern}(?:/|$)', ''),         # single facet after /c/ (with or without trailing slash)
         ]
 
         for regex, replacement in regex_patterns:
-            new_url = re.sub(regex, replacement, url)
+            # IGNORECASE because facet keys/values in the URL may carry mixed
+            # casing from the source system; the canonicalized output is
+            # lowercased later.
+            new_url = re.sub(regex, replacement, url, flags=re.IGNORECASE)
             if new_url != url:
                 url = new_url
                 break

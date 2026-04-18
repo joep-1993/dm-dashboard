@@ -8,7 +8,6 @@ Adapted from seo_faq/faq_generator_api.py for integration with content_top.
 import os
 import json
 import time
-import random
 import re
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, asdict
@@ -627,9 +626,12 @@ Voorbeeld formaat (let op: URLs moeten EXACT uit de lijst komen, formaat /p/prod
         content = response.choices[0].message.content.strip()
 
         # Parse JSON response
-        # Handle potential markdown code blocks
+        # Handle potential markdown code blocks. Split defensively: if the
+        # model emits malformed fences (no closing ```), fall back to the
+        # content as-is rather than indexing into a 1-element split.
         if content.startswith("```"):
-            content = content.split("```")[1]
+            parts = content.split("```")
+            content = parts[1] if len(parts) >= 3 else content
             if content.startswith("json"):
                 content = content[4:]
         content = content.strip()
@@ -638,7 +640,6 @@ Voorbeeld formaat (let op: URLs moeten EXACT uit de lijst komen, formaat /p/prod
 
         # Validate and clean URLs in answers - remove any fabricated URLs
         def clean_urls_in_answer(answer: str, valid_urls: list) -> str:
-            import re
 
             # Extract all href URLs from the answer
             href_pattern = r'<a\s+href="([^"]+)"[^>]*>([^<]+)</a>'

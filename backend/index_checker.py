@@ -24,7 +24,7 @@ SERVICE_ACCOUNT_FILES = [
 
 SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
 SITE_URL = "sc-domain:beslist.nl"
-MAX_URLS_PER_ACCOUNT = 1000
+MAX_URLS_PER_ACCOUNT = 2000  # Matches Google Search Console API daily quota per service account
 
 # Default Excel path (can be overridden via command line argument)
 DEFAULT_EXCEL_PATH = "/app/backend/index_checker.xlsx"

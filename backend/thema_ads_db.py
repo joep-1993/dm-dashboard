@@ -121,17 +121,17 @@ def init_db():
         )
     """)
 
-    # Add skipped_ad_groups column if it doesn't exist (migration)
+    # Column migrations — CREATE TABLE IF NOT EXISTS doesn't add missing columns
+    # to existing tables, so every column added after initial rollout needs an
+    # explicit ADD COLUMN IF NOT EXISTS statement. The thema_ads service inserts
+    # into batch_size / is_repair_job / theme_name / ad_group_name; without these,
+    # job creation fails on fresh DBs.
     cur.execute("""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name='thema_ads_jobs' AND column_name='skipped_ad_groups'
-            ) THEN
-                ALTER TABLE thema_ads_jobs ADD COLUMN skipped_ad_groups INTEGER DEFAULT 0;
-            END IF;
-        END $$;
+        ALTER TABLE thema_ads_jobs
+            ADD COLUMN IF NOT EXISTS skipped_ad_groups INTEGER DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS batch_size INTEGER DEFAULT 7500,
+            ADD COLUMN IF NOT EXISTS is_repair_job BOOLEAN DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS theme_name VARCHAR(50)
     """)
 
     cur.execute("""
@@ -142,12 +142,20 @@ def init_db():
             campaign_id VARCHAR(50),
             campaign_name TEXT,
             ad_group_id VARCHAR(50) NOT NULL,
+            ad_group_name TEXT,
+            theme_name VARCHAR(50),
             status VARCHAR(20) NOT NULL DEFAULT 'pending',
             new_ad_resource VARCHAR(500),
             error_message TEXT,
             processed_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+    """)
+
+    cur.execute("""
+        ALTER TABLE thema_ads_job_items
+            ADD COLUMN IF NOT EXISTS ad_group_name TEXT,
+            ADD COLUMN IF NOT EXISTS theme_name VARCHAR(50)
     """)
 
     cur.execute("""
@@ -158,8 +166,16 @@ def init_db():
             campaign_id VARCHAR(50),
             campaign_name TEXT,
             ad_group_id VARCHAR(50) NOT NULL,
+            ad_group_name TEXT,
+            theme_name VARCHAR(50),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+    """)
+
+    cur.execute("""
+        ALTER TABLE thema_ads_input_data
+            ADD COLUMN IF NOT EXISTS ad_group_name TEXT,
+            ADD COLUMN IF NOT EXISTS theme_name VARCHAR(50)
     """)
 
     # Create indexes

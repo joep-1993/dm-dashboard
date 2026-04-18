@@ -76,23 +76,26 @@ class TaxonomyCache:
         self._category_detail: Dict[int, dict] = {}    # cat_id -> API detail
         self._category_facets: Dict[int, list] = {}    # cat_id -> [facet dicts]
         self._facet_values: Dict[int, Dict[int, dict]] = {}  # facet_id -> {value_id -> value dict}
-        self._facet_by_slug: Dict[str, dict] = {}      # facet urlSlug -> facet dict (global)
         self._last_csv_load: float = 0
         self._session = requests.Session()
 
     # --- CSV loading ---
     def _ensure_csv_loaded(self):
-        if time.time() - self._last_csv_load < self.TTL and self._maincat_by_slug:
+        # Rely on TTL only; after a clear() we want the next call to reload
+        # even if the map happens to look populated from a stale load.
+        if self._last_csv_load and time.time() - self._last_csv_load < self.TTL:
             return
         self._load_csvs()
 
     def _load_csvs(self):
-        # maincat_mapping.csv  (maincat;maincat_url;maincat_id)
+        # Slugs are stored lowercase so URL lookups work regardless of the
+        # casing used in the URL (browsers preserve URL case, CSV exports
+        # sometimes don't). Every `.get(slug)` lookup lowercases in parallel.
         self._maincat_by_slug.clear()
         if MAINCAT_CSV.exists():
             with open(MAINCAT_CSV, encoding="utf-8") as f:
                 for row in csv.DictReader(f, delimiter=";"):
-                    slug = row["maincat_url"].strip("/")
+                    slug = row["maincat_url"].strip("/").lower()
                     self._maincat_by_slug[slug] = {
                         "id": int(row["maincat_id"]),
                         "name": row["maincat"],
@@ -105,7 +108,7 @@ class TaxonomyCache:
             with open(CAT_URLS_CSV, encoding="utf-8-sig") as f:
                 reader = csv.DictReader(f, delimiter=";")
                 for row in reader:
-                    slug = row.get("url_name", "").strip("/")
+                    slug = row.get("url_name", "").strip("/").lower()
                     if not slug:
                         continue
                     self._cat_by_slug[slug] = {
@@ -134,11 +137,11 @@ class TaxonomyCache:
     # --- Public lookups ---
     def get_maincat(self, slug: str) -> Optional[dict]:
         self._ensure_csv_loaded()
-        return self._maincat_by_slug.get(slug)
+        return self._maincat_by_slug.get((slug or "").lower())
 
     def get_category(self, slug: str) -> Optional[dict]:
         self._ensure_csv_loaded()
-        return self._cat_by_slug.get(slug)
+        return self._cat_by_slug.get((slug or "").lower())
 
     def get_category_detail(self, cat_id: int) -> Optional[dict]:
         if cat_id in self._category_detail:
@@ -165,13 +168,11 @@ class TaxonomyCache:
             facet_info = {
                 "facet_id": facet.get("id"),
                 "name": nl.get("name", ""),
-                "slug": nl.get("urlSlug", ""),
+                "slug": (nl.get("urlSlug") or "").lower(),
                 "enabled": facet.get("isEnabled", True),
                 "noindex": facet.get("noIndexNoFollow", False),
             }
             result.append(facet_info)
-            if facet_info["slug"]:
-                self._facet_by_slug[facet_info["slug"]] = facet_info
         self._category_facets[cat_id] = result
         return result
 
@@ -214,7 +215,6 @@ class TaxonomyCache:
         self._category_detail.clear()
         self._category_facets.clear()
         self._facet_values.clear()
-        self._facet_by_slug.clear()
         self._last_csv_load = 0
 
     def stats(self) -> dict:
@@ -460,14 +460,14 @@ def validate_against_taxonomy(parsed: ParsedUrl) -> Tuple[List[ValidationIssue],
         return issues, maincat_name, category_name, facets_valid, facets_total
 
     category_facets = _cache.get_category_facets(cat_id)
-    facet_slug_map = {f["slug"]: f for f in category_facets if f.get("slug")}
+    facet_slug_map = {f["slug"].lower(): f for f in category_facets if f.get("slug")}
 
     for facet_slug, value_str in parsed.facets:
         if not facet_slug or not value_str:
             continue
 
-        # Look up facet by slug
-        facet_info = facet_slug_map.get(facet_slug)
+        # Look up facet by slug (case-insensitive; facets preserve URL casing)
+        facet_info = facet_slug_map.get(facet_slug.lower())
         if not facet_info:
             issues.append(ValidationIssue("error", "FACET_NOT_LINKED",
                                           f"Facet '{facet_slug}' is not linked to category '{category_name}'",
