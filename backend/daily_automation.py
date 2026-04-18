@@ -477,4 +477,21 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException as e:
+        # Catch-all so unexpected failures (e.g. login ConnectionError before the
+        # per-step try/except blocks) still produce a Slack notification instead
+        # of a silent exit(1) that only shows up as Task Scheduler "Last Result: 1".
+        logging.getLogger("automation").error(f"Unhandled exception: {e}", exc_info=True)
+        try:
+            send_slack_message(
+                f":x: *DM Dashboard - Daily Automation Crashed*\n"
+                f"Unhandled error: {type(e).__name__}: {e}\n"
+                f"Check logs/daily_automation.log for traceback."
+            )
+        except Exception:
+            pass
+        sys.exit(1)
