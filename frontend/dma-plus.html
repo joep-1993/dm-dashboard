@@ -574,16 +574,26 @@
         for (const m of missing) missingRows.push([m]);
         if (missing.length === 0) missingRows.push(['(none)']);
 
+        // validate_trees: rows that were skipped (suffix not a/b/c, no PLA/, etc.)
+        // get their own sheet so the main Campaigns sheet only lists faulty trees.
+        const skippedPairs = aff.skipped_pairs || [];
+        const skippedRows = [['Campaign', 'Ad Group', 'Reason']];
+        for (const p of skippedPairs) skippedRows.push([p[0] || '', p[1] || '', p[2] || '']);
+        if (skippedPairs.length === 0) skippedRows.push(['(none)', '', '']);
+
         const wb = XLSX.utils.book_new();
         const statusWs = XLSX.utils.aoa_to_sheet(statusRows);
         const campaignWs = XLSX.utils.aoa_to_sheet(campaignRows);
         const missingWs = XLSX.utils.aoa_to_sheet(missingRows);
+        const skippedWs = XLSX.utils.aoa_to_sheet(skippedRows);
         statusWs['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 40 }];
         campaignWs['!cols'] = [{ wch: 32 }, { wch: 28 }, { wch: 70 }];
         missingWs['!cols'] = [{ wch: 40 }];
+        skippedWs['!cols'] = [{ wch: 32 }, { wch: 28 }, { wch: 60 }];
         XLSX.utils.book_append_sheet(wb, statusWs, 'Status');
         XLSX.utils.book_append_sheet(wb, campaignWs, 'Campaigns');
         XLSX.utils.book_append_sheet(wb, missingWs, 'Missing campaigns');
+        XLSX.utils.book_append_sheet(wb, skippedWs, 'Skipped');
 
         XLSX.writeFile(wb, `dma_plus_${h.operation}_${(h.completed_at || '').slice(0,10)}.xlsx`);
     }

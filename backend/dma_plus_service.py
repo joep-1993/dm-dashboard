@@ -634,6 +634,43 @@ def _run_operation(task_id: str, operation: str, country: str,
         # dropped from the export when a run has many groups.
         affected = _parse_affected_entities(full_log)
 
+        # validate_trees emits "📁 Campaign: PLA/X" without the "(N ad group(s))"
+        # suffix and 3-space-indented ad-group lines, neither of which the log
+        # parser recognises — so only campaign names survive into the export.
+        # Rebuild `affected` from the structured `details` rows instead, which
+        # already carry campaign / ad_group / status / message per entry.
+        if operation == "validate_trees" and result_data and result_data.get("details"):
+            vt_campaigns = set()
+            vt_ad_groups = set()
+            vt_trees = set()
+            vt_pairs = []        # created/error rows → main "Campaigns" sheet
+            vt_skipped = []      # skipped rows → separate "Skipped" sheet
+            for d in result_data["details"]:
+                status = d.get("status", "")
+                if status == "ok":
+                    continue  # only faulty/actioned rows belong in the export
+                camp = d.get("campaign", "") or ""
+                ag = d.get("ad_group", "") or ""
+                tree_desc = d.get("message", "") or ""
+                if camp:
+                    vt_campaigns.add(camp)
+                if ag:
+                    vt_ad_groups.add(ag)
+                if tree_desc:
+                    vt_trees.add(tree_desc)
+                if status == "skipped":
+                    vt_skipped.append((camp, ag, tree_desc))
+                else:
+                    vt_pairs.append((camp, ag, tree_desc))
+            affected = {
+                "campaigns": sorted(vt_campaigns),
+                "ad_groups": sorted(vt_ad_groups),
+                "trees": sorted(vt_trees),
+                "missing_campaigns": affected.get("missing_campaigns", []),
+                "campaign_ad_group_pairs": vt_pairs,
+                "skipped_pairs": vt_skipped,
+            }
+
         # Also store affected in result for the status endpoint, plus
         # action-oriented counts that the stats row renders (campaigns /
         # ad groups / trees touched by the run). For exclusion-style ops
