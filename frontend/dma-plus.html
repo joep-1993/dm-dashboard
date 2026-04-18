@@ -408,10 +408,12 @@
             // Reflect what the run actually touched in Google Ads rather than
             // workbook-row pass/fail. The precise "actually mutated vs no-op"
             // breakdown still lives in the Log Output for exclusion-style ops.
+            const errors = result.failures || 0;
             statsRow.innerHTML = `
-                <div class="col-4"><div class="stat-box bg-light"><div class="num">${result.edited_campaigns || 0}</div><div class="label">Campaigns</div></div></div>
-                <div class="col-4"><div class="stat-box bg-light"><div class="num">${result.edited_ad_groups || 0}</div><div class="label">Ad Groups</div></div></div>
-                <div class="col-4"><div class="stat-box bg-light"><div class="num">${result.edited_trees || 0}</div><div class="label">Trees</div></div></div>`;
+                <div class="col-3"><div class="stat-box bg-light"><div class="num">${result.edited_campaigns || 0}</div><div class="label">Campaigns</div></div></div>
+                <div class="col-3"><div class="stat-box bg-light"><div class="num">${result.edited_ad_groups || 0}</div><div class="label">Ad Groups</div></div></div>
+                <div class="col-3"><div class="stat-box bg-light"><div class="num">${result.edited_trees || 0}</div><div class="label">Trees</div></div></div>
+                <div class="col-3"><div class="stat-box" style="background:${errors > 0 ? '#f8d7da' : '#f8f9fa'};"><div class="num" style="color:${errors > 0 ? '#dc3545' : 'inherit'};">${errors}</div><div class="label">Errors</div></div></div>`;
         } else if (op === 'validate_cl1' || op === 'validate_trees') {
             statsRow.innerHTML = `
                 <div class="col-3"><div class="stat-box bg-light"><div class="num">${result.total || 0}</div><div class="label">Total</div></div></div>
@@ -426,26 +428,22 @@
                 <div class="col-3"><div class="stat-box" style="background:#d1e7dd;"><div class="num" style="color:#198754;">${result.fixed || 0}</div><div class="label">Fixed</div></div></div>`;
         }
 
-        // Details
+        // Details — only render the per-row table for validate ops (where
+        // each row is one finding the operator needs to see). For the four
+        // mutating ops the counters + Log Output already tell the story,
+        // and the "#/Status/Data/Error" row dump was noise.
         const details = result.details || [];
         let detailHtml = '';
-        if (details.length > 0 && details.length <= 500) {
+        const isMutatingOp = ['inclusion', 'exclusion', 'reverse_inclusion', 'reverse_exclusion'].includes(op);
+        if (!isMutatingOp && details.length > 0 && details.length <= 500 && !details[0].data) {
             detailHtml = '<table class="table table-sm mt-2"><thead><tr>';
-            if (details[0].data) {
-                detailHtml += '<th>#</th><th>Status</th><th>Data</th><th>Error</th></tr></thead><tbody>';
-                details.forEach(d => {
-                    const cls = d.success ? 'text-success' : 'text-danger';
-                    detailHtml += `<tr><td>${d.row}</td><td class="${cls}">${d.success ? 'OK' : 'FAIL'}</td><td style="font-size:0.8rem;">${(d.data||[]).filter(v => v !== null && v !== '').slice(0,5).join(' | ')}</td><td style="font-size:0.8rem;">${d.error || ''}</td></tr>`;
-                });
-            } else {
-                const keys = Object.keys(details[0]).filter(k => k !== 'message');
-                detailHtml += keys.map(k => `<th>${k}</th>`).join('') + '</tr></thead><tbody>';
-                details.forEach(d => {
-                    detailHtml += '<tr>' + keys.map(k => `<td style="font-size:0.8rem;">${d[k] || ''}</td>`).join('') + '</tr>';
-                });
-            }
+            const keys = Object.keys(details[0]).filter(k => k !== 'message');
+            detailHtml += keys.map(k => `<th>${k}</th>`).join('') + '</tr></thead><tbody>';
+            details.forEach(d => {
+                detailHtml += '<tr>' + keys.map(k => `<td style="font-size:0.8rem;">${d[k] || ''}</td>`).join('') + '</tr>';
+            });
             detailHtml += '</tbody></table>';
-        } else if (details.length > 500) {
+        } else if (!isMutatingOp && details.length > 500) {
             detailHtml = `<p class="text-muted">${details.length} results — use Copy Results to export.</p>`;
         }
         document.getElementById('resultDetails').innerHTML = detailHtml;

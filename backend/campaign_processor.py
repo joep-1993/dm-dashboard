@@ -110,12 +110,14 @@ def ensure_dm_dashboard_label(client: "GoogleAdsClient", customer_id: str) -> Op
     except Exception as e:
         print(f"   ⚠️  Failed to look up '{DM_DASHBOARD_LABEL_NAME}' label: {str(e)[:200]}")
 
-    # Not found → create it
+    # Not found → create it. The description (and background color) live on
+    # the label's text_label sub-message, not directly on Label — setting
+    # `op.create.description` raises "Unknown field for Label: description".
     try:
         label_service = client.get_service("LabelService")
         op = client.get_type("LabelOperation")
         op.create.name = DM_DASHBOARD_LABEL_NAME
-        op.create.description = "Created automatically by the DMA+ dashboard (dm-tools)."
+        op.create.text_label.description = "Created automatically by the DMA+ dashboard (dm-tools)."
         resp = label_service.mutate_labels(customer_id=customer_id, operations=[op])
         rn = resp.results[0].resource_name
         _dm_dashboard_label_cache[customer_id] = rn
@@ -5468,6 +5470,14 @@ def process_exclusion_sheet_v2(
     success_count = 0
     error_count = 0
     groups_processed = 0
+    # Run-wide action counters — distinct from per-row "successful". A row
+    # is TRUE if the shop ends up excluded for any reason (newly added OR
+    # already excluded), so "Rows OK" can be 3 while "Exclusions actually
+    # added" is 0.
+    run_total_added = 0
+    run_total_already_excluded = 0
+    run_total_mutate_errors = 0
+    run_total_batch_calls = 0
 
     for (maincat_id_str, cl1_str), rows in groups.items():
         groups_processed += 1
@@ -5567,10 +5577,18 @@ def process_exclusion_sheet_v2(
                                     shop_names=unique_targeting_names
                                 )
 
-                            # Log results per ad group
+                            # Log results per ad group. NOTE: these locals
+                            # (success_count, error_count) SHADOW the outer
+                            # row-level counters with the same name. The
+                            # run-wide action totals below are the precise
+                            # "what Google Ads actually did" numbers.
                             success_count = len(result['success'])
                             already_count = len(result['already_excluded'])
                             error_count = len(result['errors'])
+                            run_total_batch_calls += 1
+                            run_total_added += success_count
+                            run_total_already_excluded += already_count
+                            run_total_mutate_errors += error_count
                             if error_count > 0:
                                 print(f"      ❌ {ag_name}: {error_count} error(s), {success_count} added, {already_count} already excluded")
                                 for shop, err in result['errors'][:3]:  # Show first 3 errors
@@ -5675,8 +5693,19 @@ def process_exclusion_sheet_v2(
     print(f"Total groups processed: {groups_processed}")
     print(f"Total rows processed: {success_count + error_count}")
     print(f"Rows with missing fields: {len(rows_with_missing_fields)}")
-    print(f"✅ Successful: {success_count}")
-    print(f"❌ Failed: {error_count + len(rows_with_missing_fields)}")
+    print(f"✅ Rows OK: {success_count}  (row didn't error — shop is excluded for any reason)")
+    print(f"❌ Rows failed: {error_count + len(rows_with_missing_fields)}")
+    print()
+    print(f"Batch calls made (1 per ad group): {run_total_batch_calls}")
+    print(f"  → Exclusions actually added: {run_total_added}")
+    print(f"  → Already excluded (no-op): {run_total_already_excluded}")
+    print(f"  → Mutate errors: {run_total_mutate_errors}")
+    if run_total_batch_calls > 0 and run_total_added == 0:
+        print()
+        print("⚠️  No exclusions were actually added. Either every shop was")
+        print("    already excluded in every ad group, or every mutate was")
+        print("    classified as a no-op (check the per-ad-group log lines).")
+    print()
     for mc_id, count in campaigns_found_by_maincat.items():
         mc_name = maincat_name_by_id.get(mc_id, f"maincat_id={mc_id}")
         cats = categories_by_maincat.get(mc_id, 0)
@@ -7469,19 +7498,9 @@ def validate_cl1_targeting_for_campaigns(
     print(f"❌ Errors: {stats['error']}")
     print(f"{'='*70}\n")
 
-    # Write ad groups that need fixing to xlsx file
-    to_fix = [d for d in stats['details'] if d['status'] == 'fixed']
-    if to_fix:
-        from openpyxl import Workbook
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Ad Groups to Fix"
-        ws.append(["Campaign Name", "Ad Group Name"])
-        for item in to_fix:
-            ws.append([item['campaign'], item['ad_group']])
-        output_file = r"C:\Users\JoepvanSchagen\Downloads\Python\scripts_def\DMA+\cl1_validation_to_fix.xlsx"
-        wb.save(output_file)
-        print(f"📄 Wrote {len(to_fix)} ad group(s) to {output_file}")
+    # (Previously wrote an xlsx to a hardcoded Windows path here — removed:
+    # the same details are already present in stats['details'] and are
+    # exported via the dashboard's Export button.)
 
     return stats
 
@@ -7828,7 +7847,8 @@ def validate_ads_for_campaigns(
     client: GoogleAdsClient,
     customer_id: str,
     campaign_name_pattern: str = None,
-    fix: bool = False
+    fix: bool = False,
+    dry_run: bool = False,
 ) -> dict:
     """
     Validate that all ad groups in matching campaigns have at least one ad.
@@ -7849,6 +7869,8 @@ def validate_ads_for_campaigns(
     """
     print(f"\n{'='*70}")
     print("AD PRESENCE VALIDATION")
+    if fix and dry_run:
+        print("(DRY RUN: missing ads will be reported but no ads will be created)")
     print(f"{'='*70}")
     print(f"Customer ID: {customer_id}")
     print(f"Campaign filter: {campaign_name_pattern or '(all campaigns)'}")
@@ -7953,14 +7975,18 @@ def validate_ads_for_campaigns(
             })
 
             if fix:
-                try:
-                    add_shopping_product_ad(client, customer_id, ag_resource)
-                    print(f"      🔧 Created shopping ad")
+                if dry_run:
+                    print(f"      [DRY RUN] Would create shopping ad")
                     stats['fixed'] += 1
-                    time.sleep(0.3)
-                except Exception as e:
-                    print(f"      ❌ Error creating ad: {e}")
-                    stats['errors'] += 1
+                else:
+                    try:
+                        add_shopping_product_ad(client, customer_id, ag_resource)
+                        print(f"      🔧 Created shopping ad")
+                        stats['fixed'] += 1
+                        time.sleep(0.3)
+                    except Exception as e:
+                        print(f"      ❌ Error creating ad: {e}")
+                        stats['errors'] += 1
 
     # Print last campaign's missing count
     if current_campaign and missing_count_in_campaign > 0:
@@ -7978,21 +8004,9 @@ def validate_ads_for_campaigns(
         print(f"❌ Fix errors: {stats['errors']}")
     print(f"{'='*70}\n")
 
-    # Write missing ads to xlsx
-    if stats['details']:
-        from openpyxl import Workbook
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Ad Groups Missing Ads"
-        ws.append(["Campaign Name", "Ad Group Name", "Ad Group ID"])
-        for item in stats['details']:
-            ws.append([item['campaign'], item['ad_group'], item['ad_group_id']])
-        output_file = r"C:\Users\JoepvanSchagen\Downloads\Python\scripts_def\DMA+\missing_ads_validation.xlsx"
-        try:
-            wb.save(output_file)
-            print(f"📄 Wrote {len(stats['details'])} ad group(s) to {output_file}")
-        except Exception as e:
-            print(f"⚠️  Could not save xlsx: {e}")
+    # (Previously wrote an xlsx to a hardcoded Windows path here — removed:
+    # the same details are already present in stats['details'] and are
+    # exported via the dashboard's Export button.)
 
     return stats
 

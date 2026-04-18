@@ -572,6 +572,7 @@ def _run_operation(task_id: str, operation: str, country: str,
                     client, customer_id,
                     campaign_name_pattern=campaign_pattern,
                     fix=fix,
+                    dry_run=dry_run,
                 )
             finally:
                 sys.stdout = old_stdout
@@ -584,10 +585,12 @@ def _run_operation(task_id: str, operation: str, country: str,
             old_stdout = sys.stdout
             captured = io.StringIO()
             sys.stdout = captured
+            excel_path = None
             try:
-                excel_path = None
                 if wb_bytes:
-                    # Save to temp file for cat_ids reading
+                    # Save to temp file for cat_ids reading. delete=False so
+                    # the child process can open it by path; we clean up in
+                    # the outer finally.
                     import tempfile
                     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
                     tmp.write(wb_bytes)
@@ -602,6 +605,11 @@ def _run_operation(task_id: str, operation: str, country: str,
                 )
             finally:
                 sys.stdout = old_stdout
+                if excel_path:
+                    try:
+                        os.unlink(excel_path)
+                    except OSError:
+                        pass  # already gone, or never materialised
             full_log = captured.getvalue()
             if result_data:
                 result_data["log"] = full_log[-5000:]
