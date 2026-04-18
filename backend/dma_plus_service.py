@@ -771,9 +771,11 @@ def _parse_affected_entities(log: str) -> dict:
         #   "      ⏭️  PLA/Aggregaten_a: all 1 already excluded"
         #   "      ✅ PLA/wibra.nl_a: 3 added, 0 already excluded"
         #   "      ❌ PLA/wibra.nl_a: 2 error(s)"
-        # These don't contain the words "ad group" but the leading-whitespace
-        # + symbol + "PLA/xxx:" pattern uniquely identifies ad-group rows.
-        m = re.search(r'^\s{4,}\S+\s+(PLA/[^:\s()]+):\s', line)
+        #   "      ⏭️  PLA/Accessoires elektrisch gereedschap_a: all 1 already excluded"
+        # The capture group terminates on ':' rather than whitespace so names
+        # with spaces (deepest_cats like "Accessoires elektrisch gereedschap",
+        # "CO2 Meters", "Afvoerbuizen & hulpstukken") are captured whole.
+        m = re.search(r'^\s{4,}\S+\s+(PLA/[^:]+):\s', line)
         if m:
             ag_name = m.group(1).strip()
             ad_groups.add(ag_name)
