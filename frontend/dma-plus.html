@@ -538,10 +538,12 @@
         const missing = aff.missing_campaigns || [];
 
         // Prefer campaign_ad_group_pairs (emitted by the log parser) so each
-        // campaign and its ad group(s) appear on the same row. Fall back to
-        // independent zip of flat lists for older history rows that predate
-        // the pairing field.
+        // campaign and its ad group(s) appear on the same row. New tuples are
+        // (campaign, ad_group, tree) — older history rows are 2-tuples without
+        // the tree, in which case we fall back to the independently-sorted
+        // trees array for column 3.
         let pairRows = aff.campaign_ad_group_pairs;
+        let usePerPairTree = Array.isArray(pairRows) && pairRows.length > 0 && Array.isArray(pairRows[0]) && pairRows[0].length >= 3;
         if (!Array.isArray(pairRows) || pairRows.length === 0) {
             const campaigns = aff.campaigns || [];
             const adGroups = aff.ad_groups || [];
@@ -556,10 +558,11 @@
         ];
 
         const campaignRows = [['Affected Campaigns', 'Affected Ad Groups', 'Affected Product Trees']];
-        const rowCount = Math.max(pairRows.length, trees.length);
+        const rowCount = usePerPairTree ? pairRows.length : Math.max(pairRows.length, trees.length);
         for (let i = 0; i < rowCount; i++) {
-            const pair = pairRows[i] || ['', ''];
-            campaignRows.push([pair[0] || '', pair[1] || '', trees[i] || '']);
+            const pair = pairRows[i] || ['', '', ''];
+            const tree = usePerPairTree ? (pair[2] || '') : (trees[i] || '');
+            campaignRows.push([pair[0] || '', pair[1] || '', tree]);
         }
         if (rowCount === 0) campaignRows.push(['(none)', '(none)', '(none)']);
 

@@ -704,9 +704,14 @@ def _parse_affected_entities(log: str) -> dict:
     ad_groups = set()
     trees = set()
     missing_campaigns = set()
-    campaign_ad_group_pairs: list = []  # [(campaign, ad_group_or_empty), ...]
+    # Each row: (campaign, ad_group_or_empty, tree_or_empty). Tree is the most
+    # recent "🌳 Tree..." line for the current campaign — repeated across all
+    # ad-group rows belonging to that campaign so the export columns stay in
+    # sync (sorting independently caused misalignment).
+    campaign_ad_group_pairs: list = []
     current_campaign = None
     current_campaign_had_ag = False
+    current_tree = ""
 
     for line in log.splitlines():
         # Campaigns: "Creating campaign: PLA/..." or "Campaign: PLA/..."
@@ -750,9 +755,10 @@ def _parse_affected_entities(log: str) -> dict:
             # Flush previous campaign if it had no ad-group line (handles
             # degraded logs and campaigns that errored before any AG loop).
             if current_campaign is not None and not current_campaign_had_ag:
-                campaign_ad_group_pairs.append((current_campaign, ""))
+                campaign_ad_group_pairs.append((current_campaign, "", current_tree))
             current_campaign = m.group(1).strip()
             current_campaign_had_ag = False
+            current_tree = ""  # reset; new campaign expects its own tree line
             campaigns.add(current_campaign)
 
         # Ad-group header — two formats:
@@ -764,7 +770,7 @@ def _parse_affected_entities(log: str) -> dict:
             ag_name = m_rev_ag.group(1).strip()
             ad_groups.add(ag_name)
             if current_campaign is not None:
-                campaign_ad_group_pairs.append((current_campaign, ag_name))
+                campaign_ad_group_pairs.append((current_campaign, ag_name, current_tree))
                 current_campaign_had_ag = True
 
         # Exclusion per-ad-group status lines like:
@@ -780,14 +786,17 @@ def _parse_affected_entities(log: str) -> dict:
             ag_name = m.group(1).strip()
             ad_groups.add(ag_name)
             if current_campaign is not None:
-                campaign_ad_group_pairs.append((current_campaign, ag_name))
+                campaign_ad_group_pairs.append((current_campaign, ag_name, current_tree))
                 current_campaign_had_ag = True
 
         # Trees: "Tree created: ..." / "Tree rebuilt: ..." (inclusion)
         #        "Tree to modify: ..." / "Tree modified: ..." (exclusion)
         m = re.search(r'Tree (?:created|rebuilt|to modify|modified)[:\s]+(.+)', line)
         if m:
-            trees.add(m.group(1).strip())
+            tree_text = m.group(1).strip()
+            trees.add(tree_text)
+            # Track for the current campaign so subsequent ad-group rows pick it up.
+            current_tree = tree_text
 
         # Exclusions added
         m = re.search(r'Adding \d+ new shop exclusion.*?ad group.*?(PLA/[^\s,()]+)', line, re.IGNORECASE)
@@ -810,7 +819,7 @@ def _parse_affected_entities(log: str) -> dict:
 
     # Flush trailing campaign with no ad-group line
     if current_campaign is not None and not current_campaign_had_ag:
-        campaign_ad_group_pairs.append((current_campaign, ""))
+        campaign_ad_group_pairs.append((current_campaign, "", current_tree))
 
     return {
         "campaigns": sorted(campaigns),

@@ -4572,22 +4572,36 @@ def reverse_exclusion_batch(
 
     try:
         # Execute batch removal
-        agc_service.mutate_ad_group_criteria(
+        response = agc_service.mutate_ad_group_criteria(
             customer_id=customer_id,
             operations=[op for op, _ in operations]
         )
-        # All successful
+        # If the API returned fewer results than ops (shouldn't happen with the
+        # default partial_failure=False, but defensive), surface that.
+        if len(response.results) != len(operations):
+            print(f"      ⚠️  reverse_exclusion_batch: ad_group {ad_group_name} — "
+                  f"API returned {len(response.results)} results for {len(operations)} ops!")
         for _, shop_name in operations:
             result['success'].append(shop_name)
     except GoogleAdsException as gae:
-        # Try to identify which operations failed
-        error_msg = str(gae)[:100]
+        # Walk failure.errors so each individual error is surfaced — the previous
+        # str(gae)[:100] truncated the most useful diagnostic part.
+        details = []
+        try:
+            for err in gae.failure.errors:
+                code = err.error_code.WhichOneof("error_code") if err.error_code else "?"
+                details.append(f"[{code}] {err.message}")
+        except Exception:
+            details.append(str(gae)[:300])
+        full_msg = " | ".join(details) if details else str(gae)[:300]
+        print(f"      ❌ reverse_exclusion_batch GoogleAdsException for ad_group {ad_group_name}: {full_msg}")
         for _, shop_name in operations:
-            result['errors'].append((shop_name, error_msg))
+            result['errors'].append((shop_name, full_msg[:200]))
     except Exception as e:
-        error_msg = str(e)[:100]
+        msg = f"{type(e).__name__}: {str(e)[:300]}"
+        print(f"      ❌ reverse_exclusion_batch unexpected exception for ad_group {ad_group_name}: {msg}")
         for _, shop_name in operations:
-            result['errors'].append((shop_name, error_msg))
+            result['errors'].append((shop_name, msg[:200]))
 
     return result
 
@@ -8115,6 +8129,15 @@ def process_reverse_exclusion_sheet(
     success_count = 0
     error_count = 0
     groups_processed = 0
+    # Run-wide counters distinct from per-row "successful" — these tell the
+    # operator what the API actually did, not just whether the workbook row
+    # ended up flagged TRUE. A row is TRUE if the shop is no longer excluded
+    # for ANY reason (removed OR was never excluded), so "Rows OK" can be 3
+    # while "Exclusions actually removed" is 0.
+    run_total_removed = 0
+    run_total_already_not_excluded = 0
+    run_total_mutate_errors = 0
+    run_total_batch_calls = 0
 
     for (maincat_id_str, cl1_str), rows in groups.items():
         groups_processed += 1
@@ -8227,8 +8250,15 @@ def process_reverse_exclusion_sheet(
                             s_count = len(result['success'])
                             nf_count = len(result['not_found'])
                             err_count = len(result['errors'])
+                            run_total_batch_calls += 1
+                            run_total_removed += s_count
+                            run_total_already_not_excluded += nf_count
+                            run_total_mutate_errors += err_count
                             if err_count > 0:
                                 print(f"      ❌ {ag_name}: {err_count} error(s), {s_count} removed, {nf_count} not found")
+                                # Print each error in full so transient API problems are visible
+                                for shop_e, msg_e in result['errors'][:5]:
+                                    print(f"         · {shop_e}: {msg_e}")
                             elif s_count > 0:
                                 print(f"      ✅ {ag_name}: {s_count} removed, {nf_count} not found")
                             else:
@@ -8307,8 +8337,18 @@ def process_reverse_exclusion_sheet(
     print(f"Total groups processed: {groups_processed}")
     print(f"Total rows processed: {success_count + error_count}")
     print(f"Rows with missing fields: {len(rows_with_missing_fields)}")
-    print(f"✅ Successful: {success_count}")
-    print(f"❌ Failed: {error_count + len(rows_with_missing_fields)}")
+    print(f"✅ Rows OK: {success_count}  (row didn't error — shop is no longer excluded for any reason)")
+    print(f"❌ Rows failed: {error_count + len(rows_with_missing_fields)}")
+    print()
+    print(f"Batch calls made (1 per ad group): {run_total_batch_calls}")
+    print(f"  → Exclusions actually removed: {run_total_removed}")
+    print(f"  → Already not excluded (no-op): {run_total_already_not_excluded}")
+    print(f"  → Mutate errors: {run_total_mutate_errors}")
+    if run_total_batch_calls > 0 and run_total_removed == 0:
+        print()
+        print("⚠️  No exclusions were actually removed. Either the shops were already")
+        print("    not excluded in any of these ad groups, or every match attempt")
+        print("    fell through (check INDEX/value casing in the listing tree).")
     print(f"{'='*70}\n")
 
 # ============================================================================
