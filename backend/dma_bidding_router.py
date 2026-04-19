@@ -139,8 +139,8 @@ async def revert_campaigns(
 @router.delete("/history")
 async def clear_history():
     """Clear all DMA bidding run history."""
-    count = len(_run_history)
-    _run_history.clear()
+    from backend.dma_bidding_service import _history_clear
+    count = _history_clear()
     return {"cleared": count}
 
 

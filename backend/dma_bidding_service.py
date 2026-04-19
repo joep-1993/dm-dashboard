@@ -5,9 +5,12 @@ Manages DMA (Direct Marketing Advertising) bid strategy level changes for campai
 Analyzes campaign performance metrics (marge, OPB, ROAS) and moves campaigns between
 bid strategy levels (L1/L2/L3) based on configurable thresholds.
 """
+import json as _json
 import os
 import logging
+import threading
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
 from google.ads.googleads.client import GoogleAdsClient
@@ -36,10 +39,63 @@ BID_STRATEGIES = {
 DMA_CLA_CONVERSION_ACTION = "Omzet DMA en CLA"
 
 # ---------------------------------------------------------------------------
-# In-memory run history (capped at 50)
+# Run history — persisted to disk so uvicorn restarts (including the Windows
+# Task Scheduler job that runs without --reload) don't wipe past runs.
+# Same pattern DMA+ uses at backend/dma_plus_service.py:_load_history_from_disk.
 # ---------------------------------------------------------------------------
 
-_run_history: List[Dict[str, Any]] = []
+_HISTORY_FILE: Path = Path(__file__).parent / "data" / "dma_bidding_history.json"
+_HISTORY_MAX = 50
+_history_lock = threading.Lock()
+
+
+def _load_run_history_from_disk() -> List[Dict[str, Any]]:
+    if _HISTORY_FILE.exists():
+        try:
+            data = _json.loads(_HISTORY_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return data[:_HISTORY_MAX]
+        except Exception as e:
+            logger.warning(f"Failed to load DMA bidding history from {_HISTORY_FILE}: {e}")
+    return []
+
+
+def _save_run_history_to_disk():
+    try:
+        _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _HISTORY_FILE.write_text(
+            _json.dumps(_run_history, default=str, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.warning(f"Failed to save DMA bidding history to {_HISTORY_FILE}: {e}")
+
+
+_run_history: List[Dict[str, Any]] = _load_run_history_from_disk()
+
+
+def _history_prepend(entry: Dict[str, Any]):
+    """Insert a new run at the head, trim past the cap, and persist."""
+    with _history_lock:
+        _run_history.insert(0, entry)
+        while len(_run_history) > _HISTORY_MAX:
+            _run_history.pop()
+        _save_run_history_to_disk()
+
+
+def _history_clear():
+    """Wipe all runs and persist the empty state."""
+    with _history_lock:
+        n = len(_run_history)
+        _run_history.clear()
+        _save_run_history_to_disk()
+        return n
+
+
+def _history_persist():
+    """Persist the current list (call after in-place mutation of an entry)."""
+    with _history_lock:
+        _save_run_history_to_disk()
 
 # ---------------------------------------------------------------------------
 # Client helper
@@ -468,10 +524,8 @@ def run_dma_bidding(
         "status": "completed",
     }
 
-    # Store in history (capped at 50)
-    _run_history.insert(0, run_result)
-    if len(_run_history) > 50:
-        _run_history.pop()
+    # Store in history (capped, persisted to disk)
+    _history_prepend(run_result)
 
     logger.info(f"DMA bidding run #{run_id} completed in {duration_s:.1f}s - {summary}")
     return run_result
