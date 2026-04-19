@@ -129,25 +129,25 @@
                     <div class="card-body">
                         <!-- Row 1: Country + date range (Filter mode moved under the textarea below) -->
                         <div class="row g-3 align-items-end mb-3">
-                            <div class="col-md-2">
+                            <div class="col-auto" style="min-width: 90px;">
                                 <label for="countrySelect" class="form-label">Country</label>
                                 <select class="form-select form-select-sm" id="countrySelect" onchange="onCountryChange()">
                                     <option value="NL" selected>NL</option>
                                     <option value="BE">BE</option>
                                 </select>
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-auto" style="min-width: 120px;">
                                 <label for="startDaysAgo" class="form-label">Start (days ago)</label>
                                 <input type="number" class="form-control form-control-sm" id="startDaysAgo" value="9" min="1">
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-auto" style="min-width: 120px;">
                                 <label for="endDaysAgo" class="form-label">End (days ago)</label>
                                 <input type="number" class="form-control form-control-sm" id="endDaysAgo" value="3" min="0">
                             </div>
                         </div>
 
                         <!-- Row 2: campaign names — doesn't need to span the full width -->
-                        <div class="row g-3 mb-2">
+                        <div class="row g-3 mb-3">
                             <div class="col-md-7">
                                 <label for="excludeCampaigns" class="form-label">Campaign names <span class="text-muted">(optional, one per line)</span></label>
                                 <textarea class="form-control form-control-sm" id="excludeCampaigns" rows="3" placeholder="campaign substring 1&#10;campaign substring 2" oninput="updateFilterModeState()"></textarea>
@@ -155,7 +155,7 @@
                         </div>
 
                         <!-- Row 2b: filter mode — only meaningful once names exist, so disabled until the textarea has content -->
-                        <div class="mb-3" id="filterModeGroup" style="opacity: 0.5;">
+                        <div class="mb-3 mt-1" id="filterModeGroup" style="opacity: 0.5;">
                             <div class="form-check">
                                 <input class="form-check-input" type="radio" name="campaignMode" id="modeExclude" value="exclude" checked disabled>
                                 <label class="form-check-label" for="modeExclude">Exclude these campaigns</label>
