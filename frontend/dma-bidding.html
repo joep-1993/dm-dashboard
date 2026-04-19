@@ -41,8 +41,6 @@
         .badge.bg-success { background-color: #1a8a3f !important; }
         .history-table .badge { display: inline-flex; align-items: center; line-height: 1; }
 
-        .dry-run-warning { color: #d63031; font-weight: 600; font-size: 0.85rem; display: none; }
-
         .summary-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
         .summary-badges .badge { font-size: 0.85rem; padding: 0.5rem 0.75rem; }
     </style>
@@ -129,7 +127,7 @@
                         <h5 class="mb-0">Run DMA Bidding</h5>
                     </div>
                     <div class="card-body">
-                        <!-- Row 1: compact top-of-form controls -->
+                        <!-- Row 1: Country / date range on the left, Filter mode on the right -->
                         <div class="row g-3 align-items-end mb-3">
                             <div class="col-md-2">
                                 <label for="countrySelect" class="form-label">Country</label>
@@ -139,13 +137,6 @@
                                 </select>
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label">Dry Run</label>
-                                <div class="form-check form-switch mb-0">
-                                    <input class="form-check-input" type="checkbox" id="dryRunToggle" onchange="toggleDryRun()">
-                                    <label class="form-check-label" for="dryRunToggle" id="dryRunLabel">OFF</label>
-                                </div>
-                            </div>
-                            <div class="col-md-2">
                                 <label for="startDaysAgo" class="form-label">Start (days ago)</label>
                                 <input type="number" class="form-control form-control-sm" id="startDaysAgo" value="9" min="1">
                             </div>
@@ -153,18 +144,7 @@
                                 <label for="endDaysAgo" class="form-label">End (days ago)</label>
                                 <input type="number" class="form-control form-control-sm" id="endDaysAgo" value="3" min="0">
                             </div>
-                            <div class="col-md-4 text-md-end">
-                                <div class="dry-run-warning" id="dryRunWarning" style="display: block;">LIVE MODE — changes will be applied!</div>
-                            </div>
-                        </div>
-
-                        <!-- Row 2: campaign filter -->
-                        <div class="row g-3 mb-3">
-                            <div class="col-md-7">
-                                <label for="excludeCampaigns" class="form-label">Campaign names <span class="text-muted">(optional, one per line)</span></label>
-                                <textarea class="form-control form-control-sm" id="excludeCampaigns" rows="3" placeholder="campaign substring 1&#10;campaign substring 2"></textarea>
-                            </div>
-                            <div class="col-md-5">
+                            <div class="col-md-6">
                                 <label class="form-label">Filter mode</label>
                                 <div class="form-check">
                                     <input class="form-check-input" type="radio" name="campaignMode" id="modeExclude" value="exclude" checked>
@@ -177,8 +157,18 @@
                             </div>
                         </div>
 
-                        <!-- Row 3: Run button standalone -->
-                        <div class="d-flex justify-content-end">
+                        <!-- Row 2: campaign names textarea (full-width) -->
+                        <div class="mb-3">
+                            <label for="excludeCampaigns" class="form-label">Campaign names <span class="text-muted">(optional, one per line)</span></label>
+                            <textarea class="form-control form-control-sm" id="excludeCampaigns" rows="3" placeholder="campaign substring 1&#10;campaign substring 2"></textarea>
+                        </div>
+
+                        <!-- Row 3: Dry run checkbox next to Run button (matches DMA+ pattern) -->
+                        <div class="d-flex justify-content-end align-items-center gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="dryRunToggle" checked>
+                                <label class="form-check-label" for="dryRunToggle">Dry run</label>
+                            </div>
                             <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2.5rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runBidding()" id="runBtn">
                                 Run
                             </button>
@@ -259,13 +249,6 @@
         function onCountryChange() {
             selectedCountry = document.getElementById('countrySelect').value;
             loadStats();
-        }
-
-        // --- Dry Run Toggle ---
-        function toggleDryRun() {
-            const checked = document.getElementById('dryRunToggle').checked;
-            document.getElementById('dryRunLabel').textContent = checked ? 'ON' : 'OFF';
-            document.getElementById('dryRunWarning').style.display = checked ? 'none' : 'block';
         }
 
         // --- Stats ---
