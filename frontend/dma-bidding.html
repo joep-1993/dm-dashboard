@@ -127,7 +127,7 @@
                         <h5 class="mb-0">Run DMA Bidding</h5>
                     </div>
                     <div class="card-body">
-                        <!-- Row 1: Country / date range on the left, Filter mode on the right -->
+                        <!-- Row 1: Country + date range (Filter mode moved under the textarea below) -->
                         <div class="row g-3 align-items-end mb-3">
                             <div class="col-md-2">
                                 <label for="countrySelect" class="form-label">Country</label>
@@ -144,23 +144,26 @@
                                 <label for="endDaysAgo" class="form-label">End (days ago)</label>
                                 <input type="number" class="form-control form-control-sm" id="endDaysAgo" value="3" min="0">
                             </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Filter mode</label>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="campaignMode" id="modeExclude" value="exclude" checked>
-                                    <label class="form-check-label" for="modeExclude">Exclude these campaigns</label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="campaignMode" id="modeInclude" value="include">
-                                    <label class="form-check-label" for="modeInclude">Include only these campaigns</label>
-                                </div>
+                        </div>
+
+                        <!-- Row 2: campaign names — doesn't need to span the full width -->
+                        <div class="row g-3 mb-2">
+                            <div class="col-md-7">
+                                <label for="excludeCampaigns" class="form-label">Campaign names <span class="text-muted">(optional, one per line)</span></label>
+                                <textarea class="form-control form-control-sm" id="excludeCampaigns" rows="3" placeholder="campaign substring 1&#10;campaign substring 2" oninput="updateFilterModeState()"></textarea>
                             </div>
                         </div>
 
-                        <!-- Row 2: campaign names textarea (full-width) -->
-                        <div class="mb-3">
-                            <label for="excludeCampaigns" class="form-label">Campaign names <span class="text-muted">(optional, one per line)</span></label>
-                            <textarea class="form-control form-control-sm" id="excludeCampaigns" rows="3" placeholder="campaign substring 1&#10;campaign substring 2"></textarea>
+                        <!-- Row 2b: filter mode — only meaningful once names exist, so disabled until the textarea has content -->
+                        <div class="mb-3" id="filterModeGroup" style="opacity: 0.5;">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="campaignMode" id="modeExclude" value="exclude" checked disabled>
+                                <label class="form-check-label" for="modeExclude">Exclude these campaigns</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="campaignMode" id="modeInclude" value="include" disabled>
+                                <label class="form-check-label" for="modeInclude">Include only these campaigns</label>
+                            </div>
                         </div>
 
                         <!-- Row 3: Dry run checkbox next to Run button (matches DMA+ pattern) -->
@@ -249,6 +252,16 @@
         function onCountryChange() {
             selectedCountry = document.getElementById('countrySelect').value;
             loadStats();
+        }
+
+        // --- Filter mode gating: only meaningful when the textarea has substrings ---
+        function updateFilterModeState() {
+            const hasInput = document.getElementById('excludeCampaigns').value.trim().length > 0;
+            const group = document.getElementById('filterModeGroup');
+            group.style.opacity = hasInput ? '1' : '0.5';
+            for (const el of group.querySelectorAll('input[type="radio"]')) {
+                el.disabled = !hasInput;
+            }
         }
 
         // --- Stats ---
