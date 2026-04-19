@@ -127,22 +127,22 @@
                         <h5 class="mb-0">Run DMA Bidding</h5>
                     </div>
                     <div class="card-body">
-                        <!-- Row 1: Country + date range (Filter mode moved under the textarea below) -->
-                        <div class="row g-3 align-items-end mb-3">
-                            <div class="col-auto" style="min-width: 90px;">
-                                <label for="countrySelect" class="form-label">Country</label>
-                                <select class="form-select form-select-sm" id="countrySelect" onchange="onCountryChange()">
+                        <!-- Row 1: compact flex bar (Country / Start date / End date) — matches FAQ layout style -->
+                        <div class="d-flex gap-3 align-items-end mb-3 flex-wrap">
+                            <div>
+                                <label for="countrySelect" class="form-label small mb-1">Country</label>
+                                <select class="form-select form-select-sm" id="countrySelect" onchange="onCountryChange()" style="width: 90px;">
                                     <option value="NL" selected>NL</option>
                                     <option value="BE">BE</option>
                                 </select>
                             </div>
-                            <div class="col-auto" style="min-width: 120px;">
-                                <label for="startDaysAgo" class="form-label">Start (days ago)</label>
-                                <input type="number" class="form-control form-control-sm" id="startDaysAgo" value="9" min="1">
+                            <div>
+                                <label for="startDate" class="form-label small mb-1">Start date</label>
+                                <input type="date" class="form-control form-control-sm" id="startDate" style="width: 160px;">
                             </div>
-                            <div class="col-auto" style="min-width: 120px;">
-                                <label for="endDaysAgo" class="form-label">End (days ago)</label>
-                                <input type="number" class="form-control form-control-sm" id="endDaysAgo" value="3" min="0">
+                            <div>
+                                <label for="endDate" class="form-label small mb-1">End date</label>
+                                <input type="date" class="form-control form-control-sm" id="endDate" style="width: 160px;">
                             </div>
                         </div>
 
@@ -244,9 +244,43 @@
         let selectedCountry = 'NL';
 
         window.addEventListener('DOMContentLoaded', () => {
+            initDateDefaults();
             loadStats();
             loadHistory();
         });
+
+        // Seed Start/End date pickers with the previous "9 days ago" / "3 days ago"
+        // defaults so existing workflows keep working without manual entry.
+        function initDateDefaults() {
+            const today = new Date();
+            const yyyymmdd = (d) => {
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${day}`;
+            };
+            const addDays = (d, n) => {
+                const c = new Date(d);
+                c.setDate(c.getDate() + n);
+                return c;
+            };
+            document.getElementById('startDate').value = yyyymmdd(addDays(today, -9));
+            document.getElementById('endDate').value = yyyymmdd(addDays(today, -3));
+            document.getElementById('startDate').max = yyyymmdd(today);
+            document.getElementById('endDate').max = yyyymmdd(today);
+        }
+
+        // Backend still expects days-ago integers; convert here so the API doesn't
+        // need to change. Midnight-local diff rounded to whole days.
+        function daysAgoFromInput(id) {
+            const v = document.getElementById(id).value;
+            if (!v) return null;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const chosen = new Date(v + 'T00:00:00');
+            const diffMs = today - chosen;
+            return Math.max(0, Math.round(diffMs / 86400000));
+        }
 
         // --- Country Selector ---
         function onCountryChange() {
@@ -288,8 +322,18 @@
             const progressContent = document.getElementById('progressContent');
 
             const dryRun = document.getElementById('dryRunToggle').checked;
-            const startDaysAgo = document.getElementById('startDaysAgo').value;
-            const endDaysAgo = document.getElementById('endDaysAgo').value;
+            const startDaysAgo = daysAgoFromInput('startDate');
+            const endDaysAgo = daysAgoFromInput('endDate');
+            if (startDaysAgo === null || endDaysAgo === null) {
+                progressArea.style.display = 'block';
+                progressContent.innerHTML = `<span class="text-danger">Please pick both a start and end date.</span>`;
+                return;
+            }
+            if (startDaysAgo < endDaysAgo) {
+                progressArea.style.display = 'block';
+                progressContent.innerHTML = `<span class="text-danger">Start date must be on or before End date.</span>`;
+                return;
+            }
             const campaignText = document.getElementById('excludeCampaigns').value.trim();
             const campaignNames = campaignText ? campaignText.split('\n').map(s => s.trim()).filter(Boolean).join(',') : '';
             const included = document.getElementById('modeInclude').checked;
