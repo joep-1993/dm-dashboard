@@ -1176,8 +1176,8 @@ async function fetchLastPushTimestamp() {
         if (el && data.last_push) {
             const d = new Date(data.last_push);
             const formatted =
-                String(d.getDate()).padStart(2, '0') +
-                String(d.getMonth() + 1).padStart(2, '0') +
+                String(d.getDate()).padStart(2, '0') + '-' +
+                String(d.getMonth() + 1).padStart(2, '0') + '-' +
                 d.getFullYear() + ' ' +
                 String(d.getHours()).padStart(2, '0') + ':' +
                 String(d.getMinutes()).padStart(2, '0');
