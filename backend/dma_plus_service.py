@@ -596,15 +596,22 @@ def _run_operation(task_id: str, operation: str, country: str,
             sys.stdout = captured
             excel_path = None
             try:
-                if wb_bytes:
-                    # Save to temp file for cat_ids reading. delete=False so
-                    # the child process can open it by path; we clean up in
-                    # the outer finally.
-                    import tempfile
-                    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
-                    tmp.write(wb_bytes)
-                    tmp.close()
-                    excel_path = tmp.name
+                # validate_trees needs a cat_ids sheet to map deepest_cat → cat_id.
+                # If no upload was provided, build it server-side from the
+                # Taxonomy API (same source reverse_exclusion uses).
+                if not wb_bytes:
+                    wb = openpyxl.Workbook()
+                    wb.remove(wb.active)
+                    _populate_cat_ids_sheet(wb)
+                    buf = io.BytesIO()
+                    wb.save(buf)
+                    wb_bytes = buf.getvalue()
+
+                import tempfile
+                tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+                tmp.write(wb_bytes)
+                tmp.close()
+                excel_path = tmp.name
 
                 result_data = cp.validate_listing_trees_for_campaigns(
                     client, customer_id,
