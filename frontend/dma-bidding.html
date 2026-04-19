@@ -34,12 +34,8 @@
         .result-table .col-campaign { width: 40%; }
         .result-table .col-metric { width: 15%; }
 
-        .history-table { font-size: 0.85rem; }
-        .history-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
-        .history-table td { text-align: center; vertical-align: middle; }
-        .badge.bg-info { background-color: #0d8acc !important; }
-        .badge.bg-success { background-color: #1a8a3f !important; }
-        .history-table .badge { display: inline-flex; align-items: center; line-height: 1; }
+        .history-row { font-size: 0.85rem; }
+        .history-row td, #historyTable th { vertical-align: middle; }
 
         .summary-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
         .summary-badges .badge { font-size: 0.85rem; padding: 0.5rem 0.75rem; }
@@ -200,28 +196,26 @@
                     </div>
                 </div>
 
-                <!-- Run History -->
+                <!-- Run History — same visual treatment as DMA+'s history table -->
                 <div class="card mb-4">
-                    <div class="card-header" style="background: #5e4a90; color: white;">
+                    <div class="card-header">
                         <h5 class="mb-0">Run History</h5>
                     </div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-hover history-table mb-0" style="min-width: 720px;">
+                            <table class="table table-sm table-bordered mb-0" id="historyTable" style="min-width: 720px;">
                                 <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Country</th>
-                                        <th>Date</th>
-                                        <th>Dry Run</th>
-                                        <th>Date Range</th>
-                                        <th>Changes</th>
-                                        <th>Status</th>
-                                        <th></th>
+                                    <tr style="background:#f0f0f0; border-bottom: 2px solid #dee2e6;">
+                                        <th style="padding: 8px 12px;">Time</th>
+                                        <th style="padding: 8px 12px;">Country</th>
+                                        <th style="padding: 8px 12px;">Date Range</th>
+                                        <th style="padding: 8px 12px;">Changes</th>
+                                        <th style="padding: 8px 12px;">Status</th>
+                                        <th style="padding: 8px 12px; width: 70px;">Export</th>
                                     </tr>
                                 </thead>
                                 <tbody id="historyTableBody">
-                                    <tr><td colspan="8" class="text-center text-muted py-4">Loading history...</td></tr>
+                                    <tr><td colspan="6" class="text-muted text-center">Loading history...</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -494,30 +488,35 @@
 
                 const tbody = document.getElementById('historyTableBody');
                 if (runs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No runs yet.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center">No runs yet</td></tr>';
                     return;
                 }
 
                 tbody.innerHTML = runs.map(r => {
                     const ts = new Date(r.timestamp).toLocaleString('nl-NL');
-                    const dryBadge = r.dry_run ? '<span class="badge bg-info">Dry Run</span>' : '<span class="badge bg-danger">Live</span>';
-                    const range = `${r.date_range.start} - ${r.date_range.end}`;
+                    const range = `${r.date_range.start} → ${r.date_range.end}`;
                     const changes = r.summary.total_changes || 0;
-                    return `<tr style="cursor:pointer" onclick="showHistoryDetail(${r.run_id})">
-                        <td>${r.run_id}</td>
-                        <td><strong>${r.country || 'NL'}</strong></td>
-                        <td>${ts}</td>
-                        <td>${dryBadge}</td>
-                        <td>${range}</td>
-                        <td>${changes}</td>
-                        <td><span class="badge bg-success">${r.status}</span></td>
-                        <td><a href="#" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; line-height: 1.5; text-decoration: none;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="downloadHistoryRun(event, ${r.run_id})">Export</a></td>
+                    const statusBadge = r.status === 'completed' || r.status === 'success'
+                        ? '<span class="badge" style="border: 1px solid #00b894; color: #00b894; background: transparent;">completed</span>'
+                        : `<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">${escHtml(r.status || 'failed')}</span>`;
+                    const dryRunBadge = r.dry_run
+                        ? ' <span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent; margin-left: 4px;">DRY RUN</span>'
+                        : '';
+                    return `<tr class="history-row" style="cursor:pointer" onclick="showHistoryDetail(${r.run_id})">
+                        <td style="padding: 6px 12px;">${ts}</td>
+                        <td style="padding: 6px 12px;">${escHtml(r.country || 'NL')}</td>
+                        <td style="padding: 6px 12px;">${range}</td>
+                        <td style="padding: 6px 12px;">${changes}</td>
+                        <td style="padding: 6px 12px;">${statusBadge}${dryRunBadge}</td>
+                        <td style="padding: 6px 12px; text-align: center; white-space: nowrap;">
+                            <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="downloadHistoryRun(event, ${r.run_id})">Export</button>
+                        </td>
                     </tr>`;
                 }).join('');
             } catch (err) {
                 console.error('Failed to load history:', err);
                 document.getElementById('historyTableBody').innerHTML =
-                    '<tr><td colspan="8" class="text-center text-danger py-4">Failed to load history.</td></tr>';
+                    '<tr><td colspan="6" class="text-center text-danger py-4">Failed to load history.</td></tr>';
             }
         }
 
