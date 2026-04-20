@@ -164,27 +164,29 @@ class TaxonomyCache:
         return detail
 
     def get_category_facets(self, cat_id: int) -> List[dict]:
-        """Return facets linked to a category (with urlSlugs from labels)."""
+        """Return facets linked to a category (with urlSlugs from labels).
+
+        Reads from /api/Categories/{id}.facets rather than /api/CategoryFacets
+        because the latter silently omits facets with inheritanceStatus=Dependent
+        (e.g. the pl_* product-line facets on overview categories).
+        """
         if cat_id in self._category_facets:
             return self._category_facets[cat_id]
-        data = self._api_get("/api/CategoryFacets", {"categoryId": cat_id, "locale": "nl-NL"})
-        if data is None:
+        detail = self.get_category_detail(cat_id)
+        if not detail:
             return []
-        facets = data if isinstance(data, list) else data.get("items", [])
-        # Enrich with slug from labels
+        facets_raw = detail.get("facets") or []
         result = []
-        for link in facets:
-            facet = link.get("facet", {})
-            labels = facet.get("labels", [])
+        for f in facets_raw:
+            labels = f.get("labels", [])
             nl = next((l for l in labels if l.get("locale") == "nl-NL"), {})
-            facet_info = {
-                "facet_id": facet.get("id"),
+            result.append({
+                "facet_id": f.get("facetId"),
                 "name": nl.get("name", ""),
                 "slug": (nl.get("urlSlug") or "").lower(),
-                "enabled": facet.get("isEnabled", True),
-                "noindex": facet.get("noIndexNoFollow", False),
-            }
-            result.append(facet_info)
+                "enabled": f.get("isEnabled", True),
+                "noindex": f.get("noIndexNoFollow", False),
+            })
         self._category_facets[cat_id] = result
         return result
 
