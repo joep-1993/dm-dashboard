@@ -273,26 +273,22 @@
 
     // --- Validation ---
     async function startValidation() {
+        // Strictly use the source matching the active tab — no cross-source fallback,
+        // so stale text in the hidden tab doesn't override the active one.
+        const manualPane = document.getElementById('manualTab');
+        const manualActive = manualPane && manualPane.classList.contains('active');
+
         let urls;
-        // Check which tab is active
-        const manualActive = document.querySelector('#manualTab.active, #manualTab.show');
-        if (manualActive || !uploadedUrls) {
+        if (manualActive) {
             const text = document.getElementById('urlInput').value.trim();
-            if (!text && !uploadedUrls) { alert('No URLs provided'); return; }
-            urls = text ? text.split('\n').map(u => u.trim()).filter(u => u) : uploadedUrls;
+            if (!text) { alert('No URLs provided — paste URLs or switch to the Upload tab'); return; }
+            urls = text.split('\n').map(u => u.trim()).filter(u => u);
         } else {
+            if (!uploadedUrls || !uploadedUrls.length) { alert('No file uploaded — upload a file or switch to the Paste tab'); return; }
             urls = uploadedUrls;
         }
 
-        // If manual tab has content, prefer it; otherwise use uploaded
-        const manualText = document.getElementById('urlInput').value.trim();
-        if (manualText) {
-            urls = manualText.split('\n').map(u => u.trim()).filter(u => u);
-        } else if (uploadedUrls) {
-            urls = uploadedUrls;
-        }
-
-        if (!urls || !urls.length) { alert('No URLs to validate'); return; }
+        if (!urls.length) { alert('No URLs to validate'); return; }
 
         const btn = document.getElementById('validateBtn');
         btn.disabled = true;
