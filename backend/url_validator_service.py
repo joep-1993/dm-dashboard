@@ -610,9 +610,14 @@ def build_suggested_url(parsed: ParsedUrl, issues: List[ValidationIssue]) -> str
         # Category-only URLs (incl. /r/-only, no facets) keep a trailing slash
         path = f"{path}/"
 
+    # Suggested URLs must always be all lowercase (beslist convention). Covers
+    # the /r/{query} segment and facet values, which aren't individually
+    # lowercased above.
+    path = path.lower()
+
     # Preserve protocol + domain if the input had them
     if parsed.scheme and parsed.netloc:
-        suggested = f"{parsed.scheme}://{parsed.netloc}{path}"
+        suggested = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}"
     else:
         suggested = path
 
