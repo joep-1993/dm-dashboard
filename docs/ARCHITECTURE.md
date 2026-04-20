@@ -329,6 +329,32 @@ main.py (API Endpoints)
 
 **Diagnostic pattern**: when interpreting "validator flagged N URLs as gone," always decompose N by classification rather than treating the total as monolithic. Sample the gone URLs back through ES (size=1 terms query on pimId/id, read `shopCount` + `plpUrl`) and bucket: `TRULY_GONE_not_in_ES`, `LOW_OFFERS_sc=X`, `UNRECOGNIZED_FORMAT`, `NO_PLPURL`. A 200-row sample on current production found 13/13 gone verdicts dominated by buckets 2+3, not 1 — useful context for "is the validator behaving" conversations.
 
+#### 1e. URL Validator — Suggested URL Rebuild Rules
+
+`backend/url_validator_service.py` validates beslist.nl category/facet URLs and, when it finds fixable issues, returns a `suggested_url` rebuilt from parsed components.
+
+**URL blueprint** (order matters):
+```
+/products/{maincat}/{subcat}/r/{query}/c/{facet1_slug}~{value_id}~~{facet2_slug}~{value_id}
+                              ^^^^^^^^^ ^^^^^^^^^^^^^^
+                              optional  optional
+```
+
+**What `parse_beslist_url` captures into `ParsedUrl`**:
+- `maincat_slug`, `subcat_slug` — the `/products/{maincat}/{subcat}/` segments.
+- `r_query` — the `/r/{query}` bucket/search-term segment if present. **Preserved, not dropped** (earlier versions stripped this destructively, which broke suggestion rebuilding for any URL that had a `/r/` segment).
+- `facets` — list of `(slug, value_id)` tuples from the `/c/` portion.
+- `scheme`, `netloc`, `query_params`, `fragment` — preserved for the output.
+
+**What `build_suggested_url` emits**:
+1. Rebuilds path in blueprint order: `/products/` → maincat → subcat → `/r/{r_query}` (if present) → `/c/{facet1}~{v1}~~{facet2}~{v2}` (if facets).
+2. Trailing slash: yes when `/c/` is absent (category-only or `/r/`-only URL), no when `/c/` is present (URL ends at the last facet value).
+3. Deduplicates facets — keeps first occurrence of each slug (fixes `DUPLICATE_FACET`).
+4. **Forces the whole output to lowercase** — scheme, netloc, path. Not per-segment: a single `path.lower()` + `scheme.lower() / netloc.lower()` pass after assembly. Per-segment lowercasing is a magnet for "forgot this field" bugs every time you add a component.
+5. Returns `""` when the rebuilt URL exactly equals the input (no suggestion needed) or when any `_BLOCKER_CODE` issue fires (e.g. `CATEGORY_NOT_FOUND`, `FACET_NOT_LINKED` — the URL can't be safely fixed).
+
+**Design rule for the parser**: when a parser serves both validation (wants normalised/simplified structure) and reconstruction (wants lossless input), capture every stripped segment into a named field rather than discarding it. Destructive normalisation is a one-way trip that breaks rebuilders downstream.
+
 #### 2. Batch Database Operations
 **Decision**: Batch all Redshift operations after parallel processing
 
