@@ -56,6 +56,7 @@ Schrijf een tekst (max. 150 woorden) met als doel om de bezoeker te helpen de ju
 - Structureer de tekst niet als een opsomming van producten met bijvoeglijk naamwoord. Weef de links natuurlijk in een verhaal over hoe je kiest.
 - Vermijd het noemen van prijzen.
 - Gebruik waar relevant, klikbare links naar producten en gebruik hierbij HTML-links met de tag <a href="url"> en als linktekst een KORTE, heldere omschrijving (max 3-5 woorden). Maak bijvoorbeeld van "Beeztees kattentuigje Hearts zwart 120 x 1 cm" gewoon "Beeztees kattentuigje Hearts". Gebruik alleen "urls" die hieronder in deze lijst voorkomen en negeer urls met een lege waarde.
+- VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text): "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link". Linktekst MOET de productnaam zijn of een logische, beschrijvende zoekterm. Als je de productnaam niet natuurlijk in de zin kunt verwerken als anchor text, maak dan GEEN hyperlink - herschrijf liever de zin zonder link.
 
 Hieronder de context:
 Zoekwoord in Google: {h1_title}
@@ -86,6 +87,8 @@ def generate_product_content(h1_title: str, products: List[Dict]) -> str:
 - Verzin NOOIT producten of URLs die niet in de lijst staan. Als er maar 1 passend product is, gebruik dan alleen die ene link.
 - Als je linkt, gebruik de tag <a href> en kies dan de juiste url uit de lijst van meegeleverde producten. Maak nooit zelf een andere url en negeer urls met een lege waarde.
 - Als je een link maakt: HOUD DE LINKTEKST KORT (max 3-5 woorden). Zorg dat de linktekst verwijst naar het correcte product, maar vermijd lange productnamen met specificaties. Bijvoorbeeld: "Beeztees kattentuigje Hearts" in plaats van "Beeztees kattentuigje Hearts zwart 120 x 1 cm".
+- VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text, ook niet als onderdeel van een langere linktekst): "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link". FOUT: "voor de Dark Grey variant kun je <a href=\"...\">hier klikken</a>". GOED: "bekijk de <a href=\"...\">Philips Airfryer XXL</a>".
+- Linktekst MOET de productnaam zijn of een logische, beschrijvende zoekterm. Als je de productnaam niet natuurlijk in de zin kunt verwerken als anchor text, maak dan GEEN hyperlink - herschrijf liever de zin zonder link dan met een vage linktekst.
 - We moeten voorkomen dat de link tekst niet overeenkomt met de url.
 - Gebruik nooit andere URLs dan degene die voorkomen in de lijst van producten."""
 
@@ -134,6 +137,7 @@ Schrijf een korte, uitnodigende introductietekst (max. 100 woorden) die:
 - Schrijf als EEN doorlopende alinea, GEEN meerdere paragrafen of witregels
 - Vermijd het noemen van prijzen
 - Gebruik HTML-links met <a href="url"> en als linktekst een KORTE omschrijving (max 3-5 woorden). Gebruik alleen URLs die hieronder voorkomen.
+- VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text): "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link". Linktekst MOET de productnaam of een beschrijvende zoekterm zijn. Als dat niet natuurlijk past, maak dan GEEN hyperlink.
 
 Hieronder de context:
 Categorie: {h1_title}
@@ -161,6 +165,7 @@ def generate_main_category_content(h1_title: str, products: List[Dict]) -> str:
 - BELANGRIJK: Link ALLEEN naar producten die in de meegeleverde lijst staan. Verzin NOOIT producten of URLs.
 - Als je linkt, gebruik de tag <a href> en kies de juiste url uit de lijst. Maak nooit zelf een andere url.
 - HOUD DE LINKTEKST KORT (max 3-5 woorden).
+- VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text): "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link". Linktekst MOET de productnaam of een logische zoekterm zijn. Als dat niet natuurlijk past, maak dan GEEN hyperlink - herschrijf liever de zin zonder link.
 - Gebruik nooit andere URLs dan degene die voorkomen in de lijst van producten."""
 
     messages = [

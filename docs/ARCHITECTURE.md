@@ -237,7 +237,9 @@ main.py (API Endpoints)
     │       └──▶ JSONL upload → OpenAI Batch API → result download (50% cheaper)
     │
     ├──▶ link_validator.py (Quality Control)
-    │       └──▶ HTTP status checking (301/404 detection)
+    │       └──▶ Elasticsearch lookup on pimId / V4 id; "gone" verdict covers
+    │           (1) not-in-ES, (2) shopCount < min_offers (default 2),
+    │           (3) unparseable URL format, (4) V4 id miss
     │
     ├──▶ ai_titles_service.py (Unique Title Generation)
     │       └──▶ Product Search API + OpenAI (facet classification, met-features, spec values)
@@ -292,6 +294,40 @@ main.py (API Endpoints)
 6. Download results, parse, save to DB in bulk
 
 **Frontend**: "Bulk API" checkbox on FAQ and Kopteksten pages. When checked, greys out batch size/workers/single-batch button. "Process All URLs" triggers batch pipeline with phase-based progress bar.
+
+#### 1c. Hyperlink Rules in FAQ + Kopteksten Prompts
+
+**Decision**: Anchor text in generated content MUST be a product name or logical search term — never a vague demonstrative phrase.
+
+**Why**: vague anchors ("klik hier", "deze link", "hier", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link", "deze pagina", "deze gids", "ga naar") are bad for SEO (search engines weight anchor text as a relevance signal) and bad for UX (no preview of destination). Real example the user flagged: *"Dark Grey variant kun je hier klikken, en voor de 360 ml Dark Grey variant is er deze link."*
+
+**Enforcement layers** (needed all three — plain prompt instructions alone don't hold):
+
+1. **Explicit VERBODEN LINKTEKSTEN block-list** in every prompt — spells out each forbidden phrase so the model can pattern-match against the ban rather than interpret a vague rule.
+2. **FOUT/GOED example pair** in each prompt — shows a literal wrong version and its rewrite. Anchors the model on what "good" looks like.
+3. **Positive rule with escape hatch**: "linktekst MOET de productnaam of een logische zoekterm zijn — als dat niet natuurlijk past, maak dan GEEN hyperlink, herschrijf liever de zin zonder link." Without the escape hatch, the model forces a link and falls back to "hier" as the least-bad option.
+
+**Prompt sites** (all 4 updated 2026-04-20):
+- `backend/faq_service.py` — single-URL FAQ prompt.
+- `backend/batch_api_service.py` — FAQ batch prompt + Kopteksten batch system message.
+- `backend/gpt_service.py` — Kopteksten subcategory prompt + system message, main-category prompt + system message.
+
+**Post-processing guard** (`backend/faq_service.py:clean_urls_in_answer`): after the model returns, every `<a>` tag's anchor text is normalised (lowercased, punctuation stripped) and matched against the `VAGUE_ANCHOR_TEXTS` set. Matches are unwrapped in place — tag removed, text kept. Belt-and-suspenders for the model's off-days. Currently only on the FAQ single-URL path; worth adding to batch FAQ + kopteksten paths if the problem recurs.
+
+**Pending regeneration snapshot (2026-04-20)**: a DB scan turned up 1,280 FAQ rows + 274 kopteksten rows with vague anchors. All reset to pending so the next batch (post-prompt-fix) regenerates them with compliant anchors.
+
+#### 1d. link_validator.py "gone" Classification
+
+**What triggers a `gone` verdict on a product URL inside generated content**:
+
+1. URL's `pimId` (or V4 `id`) is not found in Elasticsearch — the true "product was removed" case.
+2. URL is found but `shopCount < min_offers` (default 2) — product exists with too few offers to be commercially useful.
+3. URL's path can't be parsed into `(maincat_id, pimId)` via `extract_from_url` — e.g. truncated `/p/slug/` without maincat/pimId segments. Intentional: reprocessing will emit a fresh valid link.
+4. V4 UUID URL where phase-1 `id`-based lookup misses.
+
+**What does NOT trigger gone**: ES query exceptions (timeout, 500). The code explicitly drops the link from the result dict and logs `- skipping batch (not marking as gone)` so ES blips can't mass-false-positive-trigger reprocessing.
+
+**Diagnostic pattern**: when interpreting "validator flagged N URLs as gone," always decompose N by classification rather than treating the total as monolithic. Sample the gone URLs back through ES (size=1 terms query on pimId/id, read `shopCount` + `plpUrl`) and bucket: `TRULY_GONE_not_in_ES`, `LOW_OFFERS_sc=X`, `UNRECOGNIZED_FORMAT`, `NO_PLPURL`. A 200-row sample on current production found 13/13 gone verdicts dominated by buckets 2+3, not 1 — useful context for "is the validator behaving" conversations.
 
 #### 2. Batch Database Operations
 **Decision**: Batch all Redshift operations after parallel processing

@@ -195,9 +195,17 @@ Vereisten:
   * Gebruik ALLEEN URLs uit de hierboven gegeven lijst "Productpagina's" (URLs met /p/)
   * Verzin NOOIT zelf URLs - gebruik alleen de exacte URLs die in de lijst staan
   * Gebruik GEEN URLs met /c/ (categoriepagina's) - alleen productpagina URLs met /p/
-  * Gebruik GEEN generieke verwijzingen zoals "deze gids", "deze pagina", "hier" of vergelijkbare vage linkteksten
-  * Linktekst moet beschrijvend zijn en verwijzen naar het specifieke product
+  * VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text):
+    - "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link"
+    - Elke andere vage of demonstratieve verwijzing zonder productnaam of zoekterm
+  * Voorbeelden van FOUT (NIET doen):
+    - "... voor de Dark Grey variant kun je <a href=\\"...\\">hier klikken</a>"
+    - "... is er <a href=\\"...\\">deze link</a>"
+  * Voorbeelden van GOED (wel doen):
+    - "... bekijk de <a href=\\"...\\">Philips Airfryer XXL</a> voor grotere porties"
+  * Linktekst MOET de productnaam zijn of een logische, beschrijvende zoekterm
   * HOUD DE LINKTEKST KORT (max 3-5 woorden). Vermijd lange productnamen met specificaties.
+  * Als je de productnaam niet logisch in de zin kunt verwerken als anchor text, maak dan GEEN hyperlink - herschrijf liever de zin zonder link
   * Als er geen relevante URL in de lijst staat, maak dan GEEN hyperlink
 - Verwerk 1-3 hyperlinks per antwoord waar relevant (naar specifieke producten)
 
@@ -232,6 +240,7 @@ def _build_kopteksten_messages(page_data: Dict) -> List[Dict]:
 - Verzin NOOIT producten of URLs die niet in de lijst staan.
 - Als je linkt, gebruik de tag <a href> en kies dan de juiste url uit de lijst van meegeleverde producten.
 - HOUD DE LINKTEKST KORT (max 3-5 woorden).
+- VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text): "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link". FOUT: "voor de Dark Grey variant kun je <a href=\"...\">hier klikken</a>". GOED: "bekijk de <a href=\"...\">Philips Airfryer XXL</a>". Linktekst MOET de productnaam of een logische zoekterm zijn. Als dat niet natuurlijk past, maak dan GEEN hyperlink.
 - Gebruik nooit andere URLs dan degene die voorkomen in de lijst van producten."""
 
     return [

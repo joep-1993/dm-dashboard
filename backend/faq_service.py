@@ -599,9 +599,19 @@ Vereisten:
   * Gebruik ALLEEN URLs uit de hierboven gegeven lijst "Productpagina's" (URLs met /p/)
   * Verzin NOOIT zelf URLs - gebruik alleen de exacte URLs die in de lijst staan
   * Gebruik GEEN URLs met /c/ (categoriepagina's) - alleen productpagina URLs met /p/
-  * Gebruik GEEN generieke verwijzingen zoals "deze gids", "deze pagina", "hier" of vergelijkbare vage linkteksten
-  * Linktekst moet beschrijvend zijn en verwijzen naar het specifieke product
+  * VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text, ook niet als onderdeel van een langere linktekst):
+    - "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link"
+    - Elke andere vage of demonstratieve verwijzing zonder productnaam of zoekterm
+  * Voorbeelden van FOUT (NIET doen):
+    - "... voor de Dark Grey variant kun je <a href=\"...\">hier klikken</a>"
+    - "... is er <a href=\"...\">deze link</a>"
+    - "Meer info vind je <a href=\"...\">hier</a>"
+  * Voorbeelden van GOED (wel doen):
+    - "... bekijk de <a href=\"...\">Philips Airfryer XXL</a> voor grotere porties"
+    - "De <a href=\"...\">Beeztees kattentuigje Hearts</a> is een populaire keuze"
+  * Linktekst MOET de productnaam zijn of een logische, beschrijvende zoekterm die inhoudelijk naar het product verwijst
   * HOUD DE LINKTEKST KORT (max 3-5 woorden). Vermijd lange productnamen met specificaties. Bijvoorbeeld: "Beeztees kattentuigje Hearts" in plaats van "Beeztees kattentuigje Hearts zwart 120 x 1 cm"
+  * Als je de productnaam niet logisch in de zin kunt verwerken als anchor text, maak dan GEEN hyperlink - herschrijf liever de zin zonder link dan met een vage linktekst
   * Als er geen relevante URL in de lijst staat, maak dan GEEN hyperlink
 - Verwerk 1-3 hyperlinks per antwoord waar relevant (naar specifieke producten)
 
@@ -638,6 +648,13 @@ Voorbeeld formaat (let op: URLs moeten EXACT uit de lijst komen, formaat /p/prod
 
         faqs_data = json.loads(content)
 
+        # Anchor texts that are too vague to be useful SEO links — unwrap them
+        VAGUE_ANCHOR_TEXTS = {
+            "hier", "klik hier", "hier klikken", "kijk hier", "bekijk hier",
+            "deze", "deze link", "deze pagina", "deze gids", "via deze link",
+            "lees meer", "meer info", "meer informatie", "link", "ga naar",
+        }
+
         # Validate and clean URLs in answers - remove any fabricated URLs
         def clean_urls_in_answer(answer: str, valid_urls: list) -> str:
 
@@ -647,6 +664,11 @@ Voorbeeld formaat (let op: URLs moeten EXACT uit de lijst komen, formaat /p/prod
             def replace_invalid_link(match):
                 url = match.group(1)
                 link_text = match.group(2)
+
+                # Unwrap vague/generic anchor texts regardless of URL validity
+                normalized_text = re.sub(r"[^\w\s]", "", link_text).strip().lower()
+                if normalized_text in VAGUE_ANCHOR_TEXTS:
+                    return link_text
 
                 # Check if URL is valid (must be /p/ format and in our list)
                 is_valid = False
