@@ -256,6 +256,16 @@
     document.getElementById('fileInput').addEventListener('change', async function() {
         const file = this.files[0];
         if (!file) return;
+
+        const btn = document.getElementById('validateBtn');
+        const preview = document.getElementById('filePreview');
+        uploadedUrls = null;
+        btn.disabled = true;
+        btn.textContent = 'Loading file...';
+        preview.style.display = 'block';
+        preview.textContent = `Reading ${file.name}...`;
+        document.getElementById('urlCount').textContent = '';
+
         const form = new FormData();
         form.append('file', file);
         try {
@@ -263,10 +273,14 @@
             const d = await r.json();
             if (!r.ok) throw new Error(d.detail || 'Upload failed');
             uploadedUrls = d.urls;
-            document.getElementById('filePreview').style.display = 'block';
-            document.getElementById('filePreview').textContent = `Loaded ${d.count} URLs from ${file.name}`;
+            preview.textContent = `Loaded ${d.count} URLs from ${file.name}`;
             document.getElementById('urlCount').textContent = `${d.count} URLs ready`;
+            btn.disabled = false;
+            btn.textContent = 'Validate URLs';
         } catch (e) {
+            preview.textContent = `Upload failed: ${e.message}`;
+            btn.textContent = 'Validate URLs';
+            btn.disabled = false;
             alert('Upload error: ' + e.message);
         }
     });
