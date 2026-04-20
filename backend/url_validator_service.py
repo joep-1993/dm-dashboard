@@ -47,6 +47,7 @@ class ParsedUrl:
     netloc: str = ""
     maincat_slug: str = ""
     subcat_slug: str = ""
+    r_query: str = ""  # /r/{query}/ segment (bucket/search-query), preserved for reconstruction
     facets: List[Tuple[str, str]] = field(default_factory=list)  # (facet_slug, value_id)
     query_params: Dict = field(default_factory=dict)
     fragment: str = ""
@@ -270,9 +271,13 @@ def parse_beslist_url(url: str) -> ParsedUrl:
     if "#" in path:
         path, result.fragment = path.split("#", 1)
 
-    # Strip /r/{bucket}/ segments (e.g. /r/2_delige/) — these are query/bucket
-    # parts that should be ignored for validation
-    path = re.sub(r'/r/[^/]+/', '/', path)
+    # Capture and strip /r/{query}/ segment (e.g. /r/2_delige/). Ignored for
+    # category/facet validation but preserved on ParsedUrl so build_suggested_url
+    # can reinsert it when reconstructing the URL.
+    r_match = re.search(r'/r/([^/]+)(?:/|$)', path)
+    if r_match:
+        result.r_query = r_match.group(1)
+        path = re.sub(r'/r/[^/]+(?:/|$)', '/', path, count=1)
     path = path.replace('//', '/')
 
     result.path = path
@@ -581,6 +586,11 @@ def build_suggested_url(parsed: ParsedUrl, issues: List[ValidationIssue]) -> str
         segments.append(subcat_slug)
     path = "/" + "/".join(segments)
 
+    # Preserve /r/{query}/ segment when the original URL had one. Blueprint:
+    # /products/{maincat}/{subcat}/r/{query}/c/{facets}
+    if parsed.r_query:
+        path = f"{path}/r/{parsed.r_query}"
+
     # Facets: keep the first occurrence of each slug (drops DUPLICATE_FACET dupes),
     # lowercase slugs (URLs should be lowercase).
     seen: set = set()
@@ -597,7 +607,7 @@ def build_suggested_url(parsed: ParsedUrl, issues: List[ValidationIssue]) -> str
         # URLs with /c/ end with a facet value — no trailing slash
         path = f"{path}/c/" + "~~".join(f"{s}~{v}" for s, v in unique_facets)
     else:
-        # Category-only URLs (including ones where /r/ was stripped) keep a trailing slash
+        # Category-only URLs (incl. /r/-only, no facets) keep a trailing slash
         path = f"{path}/"
 
     # Preserve protocol + domain if the input had them
