@@ -592,7 +592,11 @@ def build_suggested_url(parsed: ParsedUrl, issues: List[ValidationIssue]) -> str
         seen.add(key)
         unique_facets.append((key, val))
     if unique_facets:
+        # URLs with /c/ end with a facet value — no trailing slash
         path = f"{path}/c/" + "~~".join(f"{s}~{v}" for s, v in unique_facets)
+    else:
+        # Category-only URLs (including ones where /r/ was stripped) keep a trailing slash
+        path = f"{path}/"
 
     # Preserve protocol + domain if the input had them
     if parsed.scheme and parsed.netloc:
