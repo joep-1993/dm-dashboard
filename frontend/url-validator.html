@@ -184,6 +184,7 @@
                                     <th style="width:30px;">#</th>
                                     <th>URL</th>
                                     <th style="width:70px;">Status</th>
+                                    <th>Suggested URL</th>
                                     <th>Issues</th>
                                 </tr>
                             </thead>
@@ -413,10 +414,16 @@
                     return `<span class="${cls}">${iss.message}</span>`;
                 }).join('<span class="issue-sep">|</span>');
 
+            const suggested = r.suggested_url || '';
+            const suggestedCell = suggested
+                ? `<span class="url-cell" title="${suggested}" style="color:#198754;">${suggested}</span>`
+                : '<span class="text-muted">-</span>';
+
             parts.push(`<tr class="url-result-row" data-status="${r.status}">
                 <td>${startIndex + i + 1}</td>
                 <td class="url-cell" title="${r.url}">${r.url}</td>
                 <td>${statusBadge}</td>
+                <td>${suggestedCell}</td>
                 <td class="issues-cell">${issuesHtml}</td>
             </tr>`);
         });
@@ -455,10 +462,10 @@
 
     function copyForExcel() {
         if (!allResults.length) return;
-        const header = 'URL\tStatus\tMaincat\tCategory\tIssues';
+        const header = 'URL\tStatus\tMaincat\tCategory\tSuggested URL\tIssues';
         const rows = allResults.map(r => {
             const issues = (r.issues || []).map(i => `[${i.severity}] ${i.message}`).join('; ');
-            return `${r.url}\t${r.status}\t${r.maincat_name}\t${r.category_name}\t${issues}`;
+            return `${r.url}\t${r.status}\t${r.maincat_name}\t${r.category_name}\t${r.suggested_url || ''}\t${issues}`;
         });
         navigator.clipboard.writeText(header + '\n' + rows.join('\n'));
         alert('Copied to clipboard');

@@ -43,6 +43,8 @@ class ValidationIssue:
 class ParsedUrl:
     raw: str
     path: str = ""
+    scheme: str = ""
+    netloc: str = ""
     maincat_slug: str = ""
     subcat_slug: str = ""
     facets: List[Tuple[str, str]] = field(default_factory=list)  # (facet_slug, value_id)
@@ -60,6 +62,7 @@ class ValidationResult:
     facets_valid: int = 0
     facets_total: int = 0
     issues: List[dict] = field(default_factory=list)
+    suggested_url: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +141,15 @@ class TaxonomyCache:
     def get_maincat(self, slug: str) -> Optional[dict]:
         self._ensure_csv_loaded()
         return self._maincat_by_slug.get((slug or "").lower())
+
+    def get_maincat_slug_by_name(self, name: str) -> Optional[str]:
+        self._ensure_csv_loaded()
+        if not name:
+            return None
+        for slug, info in self._maincat_by_slug.items():
+            if info["name"] == name:
+                return slug
+        return None
 
     def get_category(self, slug: str) -> Optional[dict]:
         self._ensure_csv_loaded()
@@ -244,6 +256,8 @@ def parse_beslist_url(url: str) -> ParsedUrl:
     path = raw
     if "://" in path:
         parsed = urlparse(path)
+        result.scheme = parsed.scheme
+        result.netloc = parsed.netloc
         path = parsed.path
         result.query_params = parse_qs(parsed.query)
         result.fragment = parsed.fragment
@@ -515,6 +529,84 @@ def validate_against_taxonomy(parsed: ParsedUrl) -> Tuple[List[ValidationIssue],
 
 
 # ---------------------------------------------------------------------------
+# Suggested-URL reconstruction
+# ---------------------------------------------------------------------------
+# Issue codes we can safely fix by rebuilding the URL from parsed components.
+_FIXABLE_CODES = {
+    "HIERARCHY_MISMATCH", "DOUBLE_PRODUCTS", "UPPERCASE_IN_PATH",
+    "FRAGMENT_PRESENT", "TRACKING_PARAMS", "UNWANTED_PARAM",
+    "QUERY_PARAMS", "DUPLICATE_FACET", "HAS_BUCKET",
+}
+
+# Issue codes that mean we don't have enough data to reconstruct a valid URL.
+_BLOCKER_CODES = {
+    "MAINCAT_NOT_FOUND", "NO_MAINCAT", "CATEGORY_NOT_FOUND", "CATEGORY_DISABLED",
+    "FACET_NOT_LINKED", "INVALID_VALUE_ID", "VALUE_NOT_FOUND",
+    "INVALID_CHARS", "EMPTY_FACET_SLUG", "EMPTY_FACET_VALUE",
+    "MISSING_PRODUCTS_PREFIX", "DOUBLE_MAINCAT",
+}
+
+
+def build_suggested_url(parsed: ParsedUrl, issues: List[ValidationIssue]) -> str:
+    """Rebuild a corrected URL from the parsed components.
+
+    Returns '' when no fixable issues exist or when a blocker prevents
+    safe reconstruction.
+    """
+    codes = {i.code for i in issues}
+    if codes & _BLOCKER_CODES:
+        return ""
+    if not (codes & _FIXABLE_CODES):
+        return ""
+
+    maincat_slug = (parsed.maincat_slug or "").lower()
+    subcat_slug = (parsed.subcat_slug or "").lower()
+
+    # HIERARCHY_MISMATCH: the category belongs under a different maincat — swap
+    # the maincat slug to the correct one so the (maincat, category) pair is valid.
+    if "HIERARCHY_MISMATCH" in codes and subcat_slug:
+        cat = _cache.get_category(subcat_slug)
+        if cat:
+            correct_slug = _cache.get_maincat_slug_by_name(cat["maincat"])
+            if correct_slug:
+                maincat_slug = correct_slug
+
+    # Rebuild the path
+    segments = ["products"]
+    if maincat_slug:
+        segments.append(maincat_slug)
+    if subcat_slug:
+        segments.append(subcat_slug)
+    path = "/" + "/".join(segments)
+
+    # Facets: keep the first occurrence of each slug (drops DUPLICATE_FACET dupes),
+    # lowercase slugs (URLs should be lowercase).
+    seen: set = set()
+    unique_facets: List[Tuple[str, str]] = []
+    for slug, val in parsed.facets:
+        if not slug or not val:
+            continue
+        key = slug.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_facets.append((key, val))
+    if unique_facets:
+        path = f"{path}/c/" + "~~".join(f"{s}~{v}" for s, v in unique_facets)
+
+    # Preserve protocol + domain if the input had them
+    if parsed.scheme and parsed.netloc:
+        suggested = f"{parsed.scheme}://{parsed.netloc}{path}"
+    else:
+        suggested = path
+
+    # Only return a suggestion if it actually differs from the input
+    if suggested == parsed.raw.strip():
+        return ""
+    return suggested
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 def validate_urls(urls: List[str]) -> dict:
@@ -565,6 +657,7 @@ def validate_urls(urls: List[str]) -> dict:
             issues=[{"severity": i.severity, "code": i.code,
                      "message": i.message, "component": i.component}
                     for i in all_issues],
+            suggested_url=build_suggested_url(parsed, all_issues),
         ))
 
     return {
