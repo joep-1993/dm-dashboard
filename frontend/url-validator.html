@@ -184,9 +184,6 @@
                                     <th style="width:30px;">#</th>
                                     <th>URL</th>
                                     <th style="width:70px;">Status</th>
-                                    <th style="width:120px;">Maincat</th>
-                                    <th style="width:140px;">Category</th>
-                                    <th style="width:60px;">Facets</th>
                                     <th>Issues</th>
                                 </tr>
                             </thead>
@@ -407,7 +404,6 @@
                     ? '<span class="badge bg-warning text-dark">Warning</span>'
                     : '<span class="badge bg-danger">Error</span>';
 
-            const facetStr = r.facets_total > 0 ? `${r.facets_valid}/${r.facets_total}` : '-';
             const issues = r.issues || [];
 
             const issuesHtml = issues.length === 0
@@ -421,9 +417,6 @@
                 <td>${startIndex + i + 1}</td>
                 <td class="url-cell" title="${r.url}">${r.url}</td>
                 <td>${statusBadge}</td>
-                <td>${r.maincat_name || '-'}</td>
-                <td>${r.category_name || '-'}</td>
-                <td>${facetStr}</td>
                 <td class="issues-cell">${issuesHtml}</td>
             </tr>`);
         });
@@ -462,10 +455,10 @@
 
     function copyForExcel() {
         if (!allResults.length) return;
-        const header = 'URL\tStatus\tMaincat\tCategory\tFacets Valid\tFacets Total\tIssues';
+        const header = 'URL\tStatus\tMaincat\tCategory\tIssues';
         const rows = allResults.map(r => {
             const issues = (r.issues || []).map(i => `[${i.severity}] ${i.message}`).join('; ');
-            return `${r.url}\t${r.status}\t${r.maincat_name}\t${r.category_name}\t${r.facets_valid}\t${r.facets_total}\t${issues}`;
+            return `${r.url}\t${r.status}\t${r.maincat_name}\t${r.category_name}\t${issues}`;
         });
         navigator.clipboard.writeText(header + '\n' + rows.join('\n'));
         alert('Copied to clipboard');

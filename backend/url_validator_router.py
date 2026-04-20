@@ -107,8 +107,6 @@ async def download_results(req: dict):
             "Status": r.get("status", ""),
             "Maincat": r.get("maincat_name", ""),
             "Category": r.get("category_name", ""),
-            "Facets Valid": r.get("facets_valid", 0),
-            "Facets Total": r.get("facets_total", 0),
             "Issues": issue_msgs,
         })
 
