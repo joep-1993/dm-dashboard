@@ -1,6 +1,31 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Rendering 40k+ table rows freezes the browser — cap + batch the DOM writes (2026-04-20)
+- **The symptom**: URL Validator with 44k results popped a "page unresponsive" dialog and stayed laggy even after recovery. Root cause is the same one that bites every "just loop through results" renderer: per-row `document.createElement` + `appendChild` in a `forEach`, each row also getting an `addEventListener`, repeated 44k times. Browser commits a layout/style recalc after each append; memory for 44k listeners alone is non-trivial
+- **Three-part fix, in order of impact**:
+  1. **Cap rendered rows** — slice to `MAX_RENDERED_ROWS = 1000` with a "showing X of Y" notice. The full data stays in `allResults` for filtering/export; the DOM only ever sees 1000
+  2. **One `innerHTML` assignment** instead of N appendChilds. Build a `parts = []` array of template strings, `tbody.innerHTML = parts.join('')` at the end. Orders of magnitude faster because the browser does one parse+commit instead of 44k
+  3. **Event delegation** on `<tbody>` — one `click` listener that walks up to the nearest `tr.url-result-row` via `closest()`. Zero per-row listeners. Gate with `tbody.dataset.delegated = '1'` so re-renders don't stack listeners
+- **Pagination is the natural second step**: once you've proven the page freezes at N rows, adding pagination (25/50/100 per page) makes the cap unnecessary — each page is at most 100 rows and feels instant. The mc-id-finder pattern (`frontend/mc-id-finder.html:142-153`) is the reference: `<select id="perPage">` + SVG prev/next `.btn-page` buttons + `<span class="page-info" id="pageInfo">` showing "X-Y of Total". Ported verbatim to url-validator
+- **Watch for**: `filterResults` that re-runs `renderResults(subset)` on every filter click also triggers the freeze if you haven't capped/paginated. Reset `currentPage = 1` on filter change so users don't land on an out-of-bounds page
+- **Files**: `frontend/url-validator.html:renderPage/renderRows/filterResults`
+
+## The dm-tools orange is #CC5500, not Bootstrap's #fd7e14 (2026-04-20)
+- **Where it lives**: `frontend/css/style.css:7` — `--color-button: #CC5500` (burnt orange), `--color-button-hover: #E97451` (coral). Every "primary" button across the dashboard uses these; Bootstrap's default orange (`#fd7e14`) is noticeably brighter and looks off next to the nav/body chrome
+- **Pattern**: before hardcoding any brand color, `grep -n "color-button\|--color-" frontend/css/style.css`. The CSS vars are the source of truth; hand-picked hex values drift
+- **Applied**: active-state filter buttons (All/Valid/Warnings/Errors) in url-validator — used `#fd7e14` first pass, user flagged the mismatch, swapped to `#CC5500`
+
+## One horizontal scrollbar at the table level, not per-cell (2026-04-20)
+- **The trap**: giving a single cell (e.g. the Issues column with long wrapped text) its own `overflow-x: auto` wrapper creates a tiny per-row scrollbar. Visually noisy (one per row) and awkward UX
+- **The right layer**: Bootstrap's `.table-responsive` parent already provides ONE horizontal scrollbar at the bottom of the whole table when content overflows. So the fix for "long content in one column" is: set `white-space: nowrap` on the cell (or all cells) and let the whole table get wider; the single bottom scrollbar handles it
+- **Applied**: url-validator Issues cell — removed the `.issues-scroll` wrapper div entirely, kept `white-space: nowrap` on `.url-result-row td`
+
+## Uniform table row heights require nowrap on EVERY cell (2026-04-20)
+- **Why rows came out unequal**: `height: 38px` on `.url-result-row` sets a *minimum* — any cell that wraps its text (long maincat name, two issues stacked, etc.) blows the row taller. One tall cell breaks the row; rows with short cells stay at 38px; result = visibly uneven table
+- **Fix**: `white-space: nowrap` on `.url-result-row td` AND on `thead th`. Now nothing in any row can wrap; the row is always exactly the height of a single line of its tallest-font-sized cell. Combined with the fixed `height: 38px`, every row is identical
+- **Pattern**: any "fixed row height" requirement on an HTML table needs nowrap on every cell to work. `height` alone is necessary-but-not-sufficient
+
 ## Dashboard layout consistency: narrow centered column + DMA+-style action bar (2026-04-19)
 - **Pattern**: every tool page in this dashboard should open with `<div class="container mt-4"><div class="row"><div class="col-md-10 mx-auto">…</div></div></div>`. Pages that skip the inner `row/col-md-10` (full `container` width) stick out visually even when nothing else is wrong — the user noticed dma-bidding was wider than dma-plus, faq, canonical, 301-generator, rfinder, etc. Grep `col-md-10 mx-auto` to enumerate; anything without it in the content area needs wrapping
 - **Action bar convention**: primary CTA + dry-run / options live in a single right-aligned flex row: `<div class="d-flex justify-content-end align-items-center gap-3"><form-check…><button…>`. DMA+ (`dma-plus.html:191-198`) is the reference. Dry-run-by-default (`checked`) is the safer default for anything with Google Ads blast radius — the native `confirm()` in the submit handler is the live-mode guardrail

@@ -15,19 +15,43 @@
         .status-valid { color: #198754; font-weight: bold; }
         .status-warning { color: #ffc107; font-weight: bold; }
         .status-error { color: #dc3545; font-weight: bold; }
-        .url-result-row td { vertical-align: middle; font-size: 0.9rem; }
-        .url-cell { max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 0.82rem; }
-        .issue-list { font-size: 0.82rem; margin: 0; padding: 0; list-style: none; }
-        .issue-list li { margin-bottom: 2px; }
+
+        /* DMA+-style results table — uniform row heights, single line, single bottom scrollbar via .table-responsive */
+        #resultsTable thead tr { background: #f0f0f0; border-bottom: 2px solid #dee2e6; }
+        #resultsTable thead th { padding: 8px 12px; vertical-align: middle; white-space: nowrap; }
+        .url-result-row { font-size: 0.85rem; height: 38px; }
+        .url-result-row td { vertical-align: middle; padding: 6px 12px; white-space: nowrap; }
+
+        .url-cell { max-width: 350px; overflow: hidden; text-overflow: ellipsis; font-family: monospace; font-size: 0.82rem; }
+
+        /* Issues on one line — no per-cell scrollbar; .table-responsive gives one scrollbar at the bottom of the table */
+        .issues-cell { font-size: 0.82rem; }
+        .issues-cell .issue-sep { color: #adb5bd; margin: 0 6px; }
         .issue-error { color: #dc3545; }
         .issue-warning { color: #b45309; }
         .issue-info { color: #6c757d; }
+
         .stat-box { text-align: center; padding: 10px; border-radius: 8px; }
         .stat-box .num { font-size: 1.8rem; font-weight: bold; }
         .stat-box .label { font-size: 0.8rem; text-transform: uppercase; }
-        .expand-btn { cursor: pointer; user-select: none; }
-        .detail-row { display: none; }
-        .detail-row.show { display: table-row; }
+
+        /* Filter buttons: use the same burnt orange as other dm-tools buttons when active */
+        .filter-btn-group .btn.active,
+        .filter-btn-group .btn.active:hover,
+        .filter-btn-group .btn.active:focus {
+            background-color: #CC5500 !important;
+            border-color: #CC5500 !important;
+            color: #fff !important;
+            box-shadow: none !important;
+        }
+
+        /* Pagination + result-count notice */
+        .results-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; flex-wrap: wrap; }
+        .results-footer .notice { color: #636e72; }
+        .pagination-controls { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
+        .pagination-controls select { font-size: 0.85rem; width: auto; }
+        .pagination-controls .page-info { color: #636e72; }
+        .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
     </style>
 </head>
 <body>
@@ -104,7 +128,6 @@
                             <div class="tab-pane fade" id="excelTab" role="tabpanel">
                                 <div class="mb-3">
                                     <input type="file" class="form-control" id="fileInput" accept=".xlsx,.xls,.csv,.txt">
-                                    <small class="text-muted">Upload .xlsx, .csv, or .txt file. Looks for a column named "URL" or uses the first column.</small>
                                 </div>
                                 <div id="filePreview" class="text-muted" style="display:none;"></div>
                             </div>
@@ -141,11 +164,11 @@
 
                     <!-- Filter + Download -->
                     <div class="d-flex justify-content-between mb-2">
-                        <div class="btn-group btn-group-sm" role="group">
+                        <div class="btn-group btn-group-sm filter-btn-group" role="group">
                             <button class="btn btn-outline-secondary active" onclick="filterResults('all', this)">All</button>
-                            <button class="btn btn-outline-success" onclick="filterResults('valid', this)">Valid</button>
-                            <button class="btn btn-outline-warning" onclick="filterResults('warning', this)">Warnings</button>
-                            <button class="btn btn-outline-danger" onclick="filterResults('error', this)">Errors</button>
+                            <button class="btn btn-outline-secondary" onclick="filterResults('valid', this)">Valid</button>
+                            <button class="btn btn-outline-secondary" onclick="filterResults('warning', this)">Warnings</button>
+                            <button class="btn btn-outline-secondary" onclick="filterResults('error', this)">Errors</button>
                         </div>
                         <div class="d-flex gap-2">
                             <button class="btn btn-sm btn-outline-primary" onclick="downloadResults()">Download Excel</button>
@@ -155,8 +178,8 @@
 
                     <!-- Results table -->
                     <div class="table-responsive">
-                        <table class="table table-sm table-hover" id="resultsTable">
-                            <thead class="table-light">
+                        <table class="table table-sm table-bordered mb-0" id="resultsTable">
+                            <thead>
                                 <tr>
                                     <th style="width:30px;">#</th>
                                     <th>URL</th>
@@ -170,16 +193,38 @@
                             <tbody id="resultsBody"></tbody>
                         </table>
                     </div>
+
+                    <!-- Notice + Pagination -->
+                    <div class="results-footer" id="resultsFooter">
+                        <div class="notice" id="resultsNotice"></div>
+                        <div class="pagination-controls">
+                            <span>Per page:</span>
+                            <select class="form-select form-select-sm" id="perPage" onchange="currentPage=1; renderPage();">
+                                <option value="25">25</option>
+                                <option value="50" selected>50</option>
+                                <option value="100">100</option>
+                            </select>
+                            <button class="btn btn-outline-secondary btn-page" onclick="changePage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                            <span class="page-info" id="pageInfo">-</span>
+                            <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                        </div>
+                    </div>
                 </div>
 
             </div>
         </div>
     </div>
 
+    <footer class="text-center py-4">
+        <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     const API = window.location.origin;
     let allResults = [];
+    let filteredResults = [];
+    let currentPage = 1;
     let uploadedUrls = null;
 
     // --- Cache ---
@@ -256,24 +301,48 @@
         btn.textContent = 'Validating...';
 
         document.getElementById('progressCard').style.display = 'block';
-        document.getElementById('progressBar').style.width = '30%';
+        document.getElementById('progressBar').style.width = '0%';
         document.getElementById('progressLabel').textContent = `Validating ${urls.length} URLs...`;
         document.getElementById('resultsSection').style.display = 'none';
 
         try {
-            const r = await fetch(`${API}/api/url-validator/validate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ urls })
-            });
-            const d = await r.json();
-            if (!r.ok) throw new Error(d.detail || 'Validation failed');
+            const BATCH_SIZE = 50000;
+            const batches = [];
+            for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+                batches.push(urls.slice(i, i + BATCH_SIZE));
+            }
+
+            const merged = [];
+            const totals = { total: 0, valid: 0, warnings: 0, errors: 0 };
+
+            for (let bi = 0; bi < batches.length; bi++) {
+                const batch = batches[bi];
+                const label = batches.length > 1
+                    ? `Validating batch ${bi + 1}/${batches.length} (${batch.length} URLs)...`
+                    : `Validating ${batch.length} URLs...`;
+                document.getElementById('progressLabel').textContent = label;
+                document.getElementById('progressBar').style.width = `${Math.round((bi / batches.length) * 100)}%`;
+
+                const r = await fetch(`${API}/api/url-validator/validate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls: batch })
+                });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || 'Validation failed');
+
+                merged.push(...(d.results || []));
+                totals.total += d.total || 0;
+                totals.valid += d.valid || 0;
+                totals.warnings += d.warnings || 0;
+                totals.errors += d.errors || 0;
+            }
 
             document.getElementById('progressBar').style.width = '100%';
             document.getElementById('progressLabel').textContent = 'Done';
 
-            allResults = d.results || [];
-            showResults(d);
+            allResults = merged;
+            showResults(totals);
         } catch (e) {
             alert('Validation error: ' + e.message);
         } finally {
@@ -289,12 +358,48 @@
         document.getElementById('statValid').textContent = data.valid;
         document.getElementById('statWarnings').textContent = data.warnings;
         document.getElementById('statErrors').textContent = data.errors;
-        renderResults(allResults);
+        filteredResults = allResults;
+        currentPage = 1;
+        renderPage();
     }
 
-    function renderResults(results) {
+    function getPerPage() {
+        return parseInt(document.getElementById('perPage').value, 10) || 50;
+    }
+
+    function renderPage() {
+        const perPage = getPerPage();
+        const total = filteredResults.length;
+        const totalPages = Math.max(1, Math.ceil(total / perPage));
+        if (currentPage > totalPages) currentPage = totalPages;
+        if (currentPage < 1) currentPage = 1;
+
+        const start = (currentPage - 1) * perPage;
+        const end = Math.min(start + perPage, total);
+        const pageItems = filteredResults.slice(start, end);
+
+        renderRows(pageItems, start);
+
+        document.getElementById('prevBtn').disabled = currentPage <= 1;
+        document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+        const showing = total === 0 ? '0' : `${(start + 1).toLocaleString()}-${end.toLocaleString()}`;
+        document.getElementById('pageInfo').textContent = `${showing} of ${total.toLocaleString()}`;
+
+        const notice = document.getElementById('resultsNotice');
+        notice.textContent = total === 0
+            ? 'No results match the current filter.'
+            : `Showing ${showing} of ${total.toLocaleString()} results. Click "Download Excel" for the full list.`;
+    }
+
+    function changePage(delta) {
+        currentPage += delta;
+        renderPage();
+    }
+
+    function renderRows(results, startIndex) {
         const tbody = document.getElementById('resultsBody');
-        tbody.innerHTML = '';
+        const parts = [];
+
         results.forEach((r, i) => {
             const statusBadge = r.status === 'valid'
                 ? '<span class="badge bg-success">Valid</span>'
@@ -303,58 +408,37 @@
                     : '<span class="badge bg-danger">Error</span>';
 
             const facetStr = r.facets_total > 0 ? `${r.facets_valid}/${r.facets_total}` : '-';
+            const issues = r.issues || [];
 
-            // Top issues (first 2)
-            const topIssues = (r.issues || []).slice(0, 2).map(iss => {
-                const cls = iss.severity === 'error' ? 'issue-error' : iss.severity === 'warning' ? 'issue-warning' : 'issue-info';
-                return `<span class="${cls}">${iss.message}</span>`;
-            }).join('<br>');
-            const moreCount = (r.issues || []).length > 2 ? ` <small class="text-muted">+${r.issues.length - 2} more</small>` : '';
+            const issuesHtml = issues.length === 0
+                ? '<span class="text-muted">-</span>'
+                : issues.map(iss => {
+                    const cls = iss.severity === 'error' ? 'issue-error' : iss.severity === 'warning' ? 'issue-warning' : 'issue-info';
+                    return `<span class="${cls}">${iss.message}</span>`;
+                }).join('<span class="issue-sep">|</span>');
 
-            const tr = document.createElement('tr');
-            tr.className = 'url-result-row';
-            tr.dataset.status = r.status;
-            tr.style.cursor = r.issues.length > 2 ? 'pointer' : 'default';
-            tr.innerHTML = `
-                <td>${i + 1}</td>
+            parts.push(`<tr class="url-result-row" data-status="${r.status}">
+                <td>${startIndex + i + 1}</td>
                 <td class="url-cell" title="${r.url}">${r.url}</td>
                 <td>${statusBadge}</td>
                 <td>${r.maincat_name || '-'}</td>
                 <td>${r.category_name || '-'}</td>
                 <td>${facetStr}</td>
-                <td>${topIssues}${moreCount}</td>`;
-
-            if (r.issues.length > 2) {
-                tr.addEventListener('click', () => {
-                    const detail = tr.nextElementSibling;
-                    if (detail && detail.classList.contains('detail-row')) {
-                        detail.classList.toggle('show');
-                    }
-                });
-            }
-            tbody.appendChild(tr);
-
-            // Detail row (all issues)
-            if (r.issues.length > 2) {
-                const detailTr = document.createElement('tr');
-                detailTr.className = 'detail-row';
-                const allIssueHtml = r.issues.map(iss => {
-                    const cls = iss.severity === 'error' ? 'issue-error' : iss.severity === 'warning' ? 'issue-warning' : 'issue-info';
-                    return `<li class="${cls}">[${iss.severity.toUpperCase()}] ${iss.message}</li>`;
-                }).join('');
-                detailTr.innerHTML = `<td colspan="7"><ul class="issue-list">${allIssueHtml}</ul></td>`;
-                tbody.appendChild(detailTr);
-            }
+                <td class="issues-cell">${issuesHtml}</td>
+            </tr>`);
         });
+
+        tbody.innerHTML = parts.join('');
     }
 
     function filterResults(filter, btn) {
         // Update active button
-        document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.filter-btn-group .btn').forEach(b => b.classList.remove('active'));
         if (btn) btn.classList.add('active');
 
-        const filtered = filter === 'all' ? allResults : allResults.filter(r => r.status === filter);
-        renderResults(filtered);
+        filteredResults = filter === 'all' ? allResults : allResults.filter(r => r.status === filter);
+        currentPage = 1;
+        renderPage();
     }
 
     // --- Download ---
