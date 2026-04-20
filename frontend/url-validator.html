@@ -140,15 +140,13 @@
                 </div>
 
                 <!-- Progress -->
-                <div class="card mb-4" id="progressCard" style="display:none;">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between mb-1">
-                            <span id="progressLabel">Validating...</span>
-                            <span id="progressPct"></span>
-                        </div>
-                        <div class="progress" style="height: 8px;">
-                            <div class="progress-bar" id="progressBar" style="width: 0%"></div>
-                        </div>
+                <div id="progressCard" class="mb-4" style="display:none;">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span id="progressLabel">Validating...</span>
+                        <span id="progressPct">0%</span>
+                    </div>
+                    <div class="progress" style="height: 25px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" id="progressBar" style="width: 0%"></div>
                     </div>
                 </div>
 
@@ -310,6 +308,7 @@
 
         document.getElementById('progressCard').style.display = 'block';
         document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressPct').textContent = '0%';
         document.getElementById('progressLabel').textContent = `Validating ${urls.length} URLs...`;
         document.getElementById('resultsSection').style.display = 'none';
 
@@ -329,7 +328,9 @@
                     ? `Validating batch ${bi + 1}/${batches.length} (${batch.length} URLs)...`
                     : `Validating ${batch.length} URLs...`;
                 document.getElementById('progressLabel').textContent = label;
-                document.getElementById('progressBar').style.width = `${Math.round((bi / batches.length) * 100)}%`;
+                const pct = Math.round((bi / batches.length) * 100);
+                document.getElementById('progressBar').style.width = `${pct}%`;
+                document.getElementById('progressPct').textContent = `${pct}%`;
 
                 const r = await fetch(`${API}/api/url-validator/validate`, {
                     method: 'POST',
@@ -347,6 +348,7 @@
             }
 
             document.getElementById('progressBar').style.width = '100%';
+            document.getElementById('progressPct').textContent = '100%';
             document.getElementById('progressLabel').textContent = 'Done';
 
             allResults = merged;
