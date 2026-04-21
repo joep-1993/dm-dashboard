@@ -33,6 +33,13 @@ cc1/
 # Runtime history / state produced by DMA+ at runtime
 backend/data/dma_plus_history.json
 
+# Runtime history produced by GSD Budgets
+backend/data/gsd_budgets_history.json
+# GSD Budgets runtime search-ads-360.yaml (derived from env vars)
+backend/data/search-ads-360.yaml
+# Service-account JSON for Google Sheets (copied locally, not tracked)
+backend/data/gsd-campaign-creation.json
+
 # Large data files
 *.xlsx
 !backend/categories.xlsx

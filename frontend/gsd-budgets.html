@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DMA Bidding</title>
+    <title>GSD Budgets</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
@@ -31,8 +31,9 @@
         .result-table { font-size: 0.9rem; table-layout: fixed; width: 100%; }
         .result-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
         .result-table td { vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .result-table .col-campaign { width: 40%; }
-        .result-table .col-metric { width: 15%; }
+        .result-table .col-shop { width: 22%; }
+        .result-table .col-campaign { width: 30%; }
+        .result-table .col-metric { width: 10%; }
 
         .history-row { font-size: 0.85rem; }
         .history-row td, #historyTable th { vertical-align: middle; }
@@ -44,7 +45,7 @@
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
         <div class="container d-flex flex-nowrap align-items-center gap-2">
-            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">DMA Bidding</span>
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">GSD Budgets</span>
             <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
                 <div class="nav-dropdown">
                     <button class="nav-dropdown-toggle">Generators</button>
@@ -68,8 +69,8 @@
                     <div class="nav-dropdown-menu">
                         <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
                         <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
-                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C9.5 4 6 7.5 6 12s3.5 8 7.8 8c2 0 3.8-.8 5.2-2"/></svg> GSD Budgets</a>
-                        <a href="/static/dma-bidding.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C9.5 4 6 7.5 6 12s3.5 8 7.8 8c2 0 3.8-.8 5.2-2"/></svg> GSD Budgets</a>
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
                         <a href="/static/dma-plus.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="10"/></svg> DMA+</a>
                         <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
                     </div>
@@ -97,34 +98,38 @@
                 <!-- Stats Cards -->
                 <div class="d-flex flex-wrap gap-3 mb-4 justify-content-center" id="statsRow">
                     <div class="stat-card">
-                        <h3 id="statL1">-</h3>
-                        <div class="label">Level 1</div>
-                        <div class="detail">0,07 CPC</div>
+                        <h3 id="statShops">-</h3>
+                        <div class="label">Shops in range</div>
+                        <div class="detail">Last 7 days</div>
                     </div>
                     <div class="stat-card">
-                        <h3 id="statL2">-</h3>
-                        <div class="label">Level 2</div>
-                        <div class="detail">0,11 CPC</div>
+                        <h3 id="statCampaigns">-</h3>
+                        <div class="label">Enabled campaigns</div>
+                        <div class="detail" id="statCustomer"></div>
                     </div>
                     <div class="stat-card">
-                        <h3 id="statL3">-</h3>
-                        <div class="label">Level 3</div>
-                        <div class="detail">0,15 CPC</div>
-                    </div>
-                    <div class="stat-card">
-                        <h3 id="statTotal">-</h3>
-                        <div class="label">Total</div>
-                        <div class="detail" id="statTotalDetail"></div>
+                        <h3 id="statLastRun">-</h3>
+                        <div class="label">Last run</div>
+                        <div class="detail" id="statLastRunDetail"></div>
                     </div>
                 </div>
 
                 <!-- Run Section -->
                 <div class="card run-card mb-4">
                     <div class="card-header" style="background: #5e4a90; color: white;">
-                        <h5 class="mb-0">Run DMA Bidding</h5>
+                        <h5 class="mb-0 d-flex justify-content-between align-items-center">
+                            Run GSD Budgets
+                            <a href="https://docs.google.com/spreadsheets/d/1y7kZmo9O7KO4uaG9wwq_wOtovsDMas07TAFDb0cyGAE/edit"
+                               target="_blank" rel="noopener"
+                               class="btn btn-sm"
+                               style="border: 1px solid rgb(94, 74, 144); color: rgb(94, 74, 144); background: white; font-size: 0.8rem;"
+                               onmouseover="this.style.background='#5e4a90';this.style.color='white'"
+                               onmouseout="this.style.background='white';this.style.color='#5e4a90'">
+                                Add shop exclusions
+                            </a>
+                        </h5>
                     </div>
                     <div class="card-body">
-                        <!-- Row 1: compact flex bar (Country / Start date / End date) — matches FAQ layout style -->
                         <div class="d-flex gap-3 align-items-end mb-3 flex-wrap">
                             <div>
                                 <label for="countrySelect" class="form-label small mb-1">Country</label>
@@ -141,35 +146,40 @@
                                 <label for="endDate" class="form-label small mb-1">End date</label>
                                 <input type="date" class="form-control form-control-sm" id="endDate" style="width: 160px;">
                             </div>
+                            <div>
+                                <label for="limitShops" class="form-label small mb-1">Limit shops <span class="text-muted">(optional)</span></label>
+                                <input type="number" min="1" class="form-control form-control-sm" id="limitShops" style="width: 140px;" placeholder="e.g. 5">
+                            </div>
                         </div>
 
-                        <!-- Row 2: campaign names — doesn't need to span the full width -->
                         <div class="row g-3 mb-3">
                             <div class="col-md-7">
-                                <label for="excludeCampaigns" class="form-label">Campaign names <span class="text-muted">(optional, one per line)</span></label>
-                                <textarea class="form-control form-control-sm" id="excludeCampaigns" rows="3" placeholder="campaign substring 1&#10;campaign substring 2" oninput="updateFilterModeState()"></textarea>
+                                <label for="shopNames" class="form-label">Shop names <span class="text-muted">(optional, one per line)</span></label>
+                                <textarea class="form-control form-control-sm" id="shopNames" rows="3" placeholder="Shop name 1&#10;Shop name 2" oninput="updateFilterModeState()"></textarea>
                             </div>
                         </div>
 
-                        <!-- Row 2b: filter mode — only meaningful once names exist, so disabled until the textarea has content -->
                         <div class="mb-3 mt-1" id="filterModeGroup" style="opacity: 0.5;">
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="campaignMode" id="modeExclude" value="exclude" checked disabled>
-                                <label class="form-check-label" for="modeExclude">Exclude these campaigns</label>
+                                <input class="form-check-input" type="radio" name="shopMode" id="modeInclude" value="include" checked disabled>
+                                <label class="form-check-label" for="modeInclude">Include only these shops</label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="campaignMode" id="modeInclude" value="include" disabled>
-                                <label class="form-check-label" for="modeInclude">Include only these campaigns</label>
+                                <input class="form-check-input" type="radio" name="shopMode" id="modeExclude" value="exclude" disabled>
+                                <label class="form-check-label" for="modeExclude">Exclude these shops</label>
                             </div>
                         </div>
 
-                        <!-- Row 3: Dry run checkbox next to Run button (matches DMA+ pattern) -->
-                        <div class="d-flex justify-content-end align-items-center gap-3">
+                        <div class="d-flex justify-content-end align-items-center gap-3 flex-wrap">
+                            <div class="form-check" title="When on, a LIVE run writes missed shops to pa.jvs_gsd_missed_shops. Always skipped in dry-run.">
+                                <input class="form-check-input" type="checkbox" id="uploadMissedToggle" checked>
+                                <label class="form-check-label" for="uploadMissedToggle">Upload missed-shops</label>
+                            </div>
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="dryRunToggle" checked>
                                 <label class="form-check-label" for="dryRunToggle">Dry run</label>
                             </div>
-                            <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2.5rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runBidding()" id="runBtn">
+                            <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2.5rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runBudgets()" id="runBtn">
                                 Run
                             </button>
                         </div>
@@ -193,11 +203,24 @@
                             <div class="mb-2" id="resultMeta"></div>
                             <div class="summary-badges" id="summaryBadges"></div>
                             <div id="resultTables"></div>
+                            <div id="overLoss25Section" class="mt-4" style="display: none;">
+                                <h6 style="color: #d63031;">Shops met meer dan €25 verlies</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm result-table">
+                                        <thead><tr>
+                                            <th class="col-shop">Shopnaam</th>
+                                            <th class="col-metric">Shop ID</th>
+                                            <th class="col-metric">Marge</th>
+                                        </tr></thead>
+                                        <tbody id="overLoss25Body"></tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Run History — same visual treatment as DMA+'s history table -->
+                <!-- Run History -->
                 <div class="card mb-4">
                     <div class="card-header">
                         <h5 class="mb-0">Run History</h5>
@@ -238,14 +261,25 @@
         let lastRunResult = null;
         let selectedCountry = 'NL';
 
+        const ACTION_LABELS = {
+            'verhogen-20': 'Verhogen +20%',
+            'verlagen-20': 'Verlagen -20%',
+            'verlagen-25': 'Verlagen -25%',
+            'c-verlagen-20': 'C-campagne verlagen -20%',
+        };
+        const ACTION_BADGE_CLASS = {
+            'verhogen-20': 'badge-increase',
+            'verlagen-20': 'badge-decrease',
+            'verlagen-25': 'badge-decrease',
+            'c-verlagen-20': 'badge-stuck',
+        };
+
         window.addEventListener('DOMContentLoaded', () => {
             initDateDefaults();
             loadStats();
             loadHistory();
         });
 
-        // Seed Start/End date pickers with the previous "9 days ago" / "3 days ago"
-        // defaults so existing workflows keep working without manual entry.
         function initDateDefaults() {
             const today = new Date();
             const yyyymmdd = (d) => {
@@ -265,8 +299,6 @@
             document.getElementById('endDate').max = yyyymmdd(today);
         }
 
-        // Backend still expects days-ago integers; convert here so the API doesn't
-        // need to change. Midnight-local diff rounded to whole days.
         function daysAgoFromInput(id) {
             const v = document.getElementById(id).value;
             if (!v) return null;
@@ -277,15 +309,13 @@
             return Math.max(0, Math.round(diffMs / 86400000));
         }
 
-        // --- Country Selector ---
         function onCountryChange() {
             selectedCountry = document.getElementById('countrySelect').value;
             loadStats();
         }
 
-        // --- Filter mode gating: only meaningful when the textarea has substrings ---
         function updateFilterModeState() {
-            const hasInput = document.getElementById('excludeCampaigns').value.trim().length > 0;
+            const hasInput = document.getElementById('shopNames').value.trim().length > 0;
             const group = document.getElementById('filterModeGroup');
             group.style.opacity = hasInput ? '1' : '0.5';
             for (const el of group.querySelectorAll('input[type="radio"]')) {
@@ -293,30 +323,44 @@
             }
         }
 
-        // --- Stats ---
         async function loadStats() {
             try {
-                const res = await fetch(`${API_BASE}/api/dma-bidding/stats?country=${selectedCountry}`);
+                const res = await fetch(`${API_BASE}/api/gsd-budgets/stats?country=${selectedCountry}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                const counts = data.level_counts || {};
-                document.getElementById('statL1').textContent = counts[1] || 0;
-                document.getElementById('statL2').textContent = counts[2] || 0;
-                document.getElementById('statL3').textContent = counts[3] || 0;
-                document.getElementById('statTotal').textContent = data.total || 0;
-                document.getElementById('statTotalDetail').textContent = `${counts[1] || 0} + ${counts[2] || 0} + ${counts[3] || 0}`;
+                document.getElementById('statShops').textContent = data.shop_count ?? '-';
+                document.getElementById('statCampaigns').textContent = data.campaign_count ?? '-';
+                document.getElementById('statCustomer').textContent = `Customer ${data.customer_id}`;
             } catch (err) {
                 console.error('Failed to load stats:', err);
             }
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-budgets/history`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const latest = (data.runs || []).find(r => (r.country || 'NL') === selectedCountry);
+                    if (latest) {
+                        const ts = new Date(latest.timestamp);
+                        document.getElementById('statLastRun').textContent = ts.toLocaleDateString('nl-NL');
+                        document.getElementById('statLastRunDetail').textContent = latest.dry_run ? 'dry run' : 'live';
+                    } else {
+                        document.getElementById('statLastRun').textContent = '–';
+                        document.getElementById('statLastRunDetail').textContent = '';
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to load last run:', err);
+            }
         }
 
-        // --- Run ---
-        async function runBidding() {
+        async function runBudgets() {
             const btn = document.getElementById('runBtn');
             const progressArea = document.getElementById('progressArea');
             const progressContent = document.getElementById('progressContent');
 
             const dryRun = document.getElementById('dryRunToggle').checked;
+            const skipMissed = !document.getElementById('uploadMissedToggle').checked;
             const startDaysAgo = daysAgoFromInput('startDate');
             const endDaysAgo = daysAgoFromInput('endDate');
             if (startDaysAgo === null || endDaysAgo === null) {
@@ -329,48 +373,53 @@
                 progressContent.innerHTML = `<span class="text-danger">Start date must be on or before End date.</span>`;
                 return;
             }
-            const campaignText = document.getElementById('excludeCampaigns').value.trim();
-            const campaignNames = campaignText ? campaignText.split('\n').map(s => s.trim()).filter(Boolean).join(',') : '';
-            const included = document.getElementById('modeInclude').checked;
+            const limitShopsRaw = document.getElementById('limitShops').value.trim();
+            const limitShops = limitShopsRaw ? parseInt(limitShopsRaw, 10) : null;
+            const shopText = document.getElementById('shopNames').value.trim();
+            const shopNames = shopText
+                ? shopText.split('\n').map(s => s.trim()).filter(Boolean).join(',')
+                : '';
+            const excluded = document.getElementById('modeExclude').checked;
 
-            if (!dryRun && !confirm('LIVE MODE: This will actually change bid strategies. Continue?')) return;
+            if (!dryRun && !confirm('LIVE MODE: this will mutate Google Ads campaign budgets and (unless skipped) write to pa.jvs_gsd_missed_shops. Continue?')) return;
 
             btn.disabled = true;
             progressArea.style.display = 'block';
-            progressContent.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Running DMA bidding analysis...</div>';
+            progressContent.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Running GSD Budgets analysis... this can take several minutes for a full country.</div>';
 
             try {
                 const params = new URLSearchParams({
+                    country: selectedCountry,
                     dry_run: dryRun,
                     start_days_ago: startDaysAgo,
                     end_days_ago: endDaysAgo,
-                    country: selectedCountry,
+                    skip_missed_upload: skipMissed,
                 });
-                if (campaignNames) {
-                    if (included) {
-                        params.append('include_campaigns', campaignNames);
-                    } else {
-                        params.append('exclude_campaigns', campaignNames);
-                    }
+                if (limitShops) params.append('limit_shops', limitShops);
+                if (shopNames) {
+                    params.append('shop_names', shopNames);
+                    params.append('shop_names_excluded', excluded);
                 }
 
-                const res = await fetch(`${API_BASE}/api/dma-bidding/run?${params}`, { method: 'POST' });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const res = await fetch(`${API_BASE}/api/gsd-budgets/run?${params}`, { method: 'POST' });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(`HTTP ${res.status}: ${text}`);
+                }
                 const data = await res.json();
                 lastRunResult = data;
 
-                progressContent.innerHTML = `<span class="text-success">Completed in ${data.duration_seconds}s</span>`;
+                progressContent.innerHTML = `<span class="text-success">Completed in ${data.duration_seconds}s — evaluated ${data.shops_evaluated} shops.</span>`;
                 renderResults(data);
                 loadHistory();
                 loadStats();
             } catch (err) {
-                progressContent.innerHTML = `<span class="text-danger">Error: ${err.message}</span>`;
+                progressContent.innerHTML = `<span class="text-danger">Error: ${escHtml(err.message)}</span>`;
             } finally {
                 btn.disabled = false;
             }
         }
 
-        // --- Results ---
         function renderResults(data) {
             document.getElementById('resultsSection').style.display = 'block';
 
@@ -379,68 +428,96 @@
                 <small class="text-muted">
                     Run #${data.run_id} | <strong>${data.country || 'NL'}</strong>
                     | ${data.dry_run ? '<span class="badge bg-info">DRY RUN</span>' : '<span class="badge bg-danger">LIVE</span>'}
-                    | Range: ${data.date_range.start} to ${data.date_range.end}
+                    | Shops: ${data.shops_evaluated}
+                    | SA360 window: ${data.date_range.start} → ${data.date_range.end}
                     | Duration: ${data.duration_seconds}s
+                    | Missed upload: ${escHtml(data.missed_upload_status || 'n/a')}
                 </small>
             `;
 
-            const s = data.summary;
+            const s = data.summary || {};
             const badges = document.getElementById('summaryBadges');
             badges.innerHTML = `
-                <span class="badge badge-increase">L1 &rarr; L2: ${s['1_to_2']}</span>
-                <span class="badge badge-increase">L2 &rarr; L3: ${s['2_to_3']}</span>
-                <span class="badge badge-decrease">L3 &rarr; L2: ${s['3_to_2']}</span>
-                <span class="badge badge-decrease">L2 &rarr; L1: ${s['2_to_1']}</span>
-                <span class="badge badge-stuck">L1 Stuck: ${s.stuck_l1}</span>
-                <span class="badge bg-secondary">No Data: ${s.no_data}</span>
-                <span class="badge bg-secondary">Skipped: ${s.skipped}</span>
-                <span class="badge bg-secondary">Unchanged: ${s.unchanged}</span>
+                <span class="badge badge-increase">verhogen-20: ${s['verhogen-20'] || 0}</span>
+                <span class="badge badge-decrease">verlagen-20: ${s['verlagen-20'] || 0}</span>
+                <span class="badge badge-decrease">verlagen-25: ${s['verlagen-25'] || 0}</span>
+                <span class="badge badge-stuck">c-verlagen-20: ${s['c-verlagen-20'] || 0}</span>
+                <span class="badge bg-secondary">missed: ${s.missed || 0}</span>
+                <span class="badge bg-secondary">no action: ${s.no_action || 0}</span>
+                <span class="badge bg-secondary">budget mutations: ${s.budget_changed || 0}</span>
             `;
 
             const tables = document.getElementById('resultTables');
             let html = '';
 
-            const categories = [
-                { key: '1_to_2', label: 'Level 1 &rarr; Level 2 (Verhogingen)' },
-                { key: '2_to_3', label: 'Level 2 &rarr; Level 3 (Verhogingen)' },
-                { key: '3_to_2', label: 'Level 3 &rarr; Level 2 (Verlagingen)' },
-                { key: '2_to_1', label: 'Level 2 &rarr; Level 1 (Verlagingen)' },
-                { key: 'stuck_l1', label: 'Level 1 Stuck (niet lager mogelijk)' },
-            ];
+            // Group applied campaign rows by shop-level action. One row per campaign
+            // that actually got a mutation (or dry-run preview).
+            const byAction = {
+                'verhogen-20': [],
+                'verlagen-20': [],
+                'verlagen-25': [],
+                'c-verlagen-20': [],
+            };
+            for (const shop of (data.results || [])) {
+                if (!shop.action || !(shop.action in byAction)) continue;
+                for (const c of (shop.campaigns || [])) {
+                    if (!c.applied) continue;
+                    byAction[shop.action].push({ shop, campaign: c });
+                }
+            }
 
-            for (const cat of categories) {
-                const items = (data.changes[cat.key] || []).sort((a, b) => a.campaign_name.localeCompare(b.campaign_name));
+            for (const action of Object.keys(byAction)) {
+                const items = byAction[action];
                 if (items.length === 0) continue;
-
-                html += `<h6 class="mt-3" style="color: #5e4a90;">${cat.label} (${items.length})</h6>`;
+                const cls = ACTION_BADGE_CLASS[action];
+                html += `<h6 class="mt-3" style="color: #5e4a90;"><span class="badge ${cls}">${ACTION_LABELS[action]}</span> <span class="text-muted">(${items.length})</span></h6>`;
                 html += `<div class="table-responsive"><table class="table table-sm result-table"><thead><tr>
-                    <th class="col-campaign">Campagne</th><th class="col-metric">Marge</th><th class="col-metric">OPB</th><th class="col-metric">Klikken</th><th class="col-metric">ROAS</th>
+                    <th class="col-shop">Shopnaam</th>
+                    <th class="col-metric">Shop ID</th>
+                    <th class="col-metric">Marge</th>
+                    <th class="col-metric">Rev/Click</th>
+                    <th class="col-metric">4wkn</th>
+                    <th class="col-metric">Δ %</th>
+                    <th class="col-campaign">Campagne</th>
+                    <th class="col-metric">Oud €</th>
+                    <th class="col-metric">Nieuw €</th>
                 </tr></thead><tbody>`;
-                for (const item of items) {
-                    const margeClass = item.marge >= 0 ? 'text-success' : 'text-danger';
+                for (const it of items) {
+                    const s = it.shop;
+                    const c = it.campaign;
+                    const mClass = (s.marge ?? 0) >= 0 ? 'text-success' : 'text-danger';
                     html += `<tr>
-                        <td>${escHtml(item.campaign_name)}</td>
-                        <td class="${margeClass}">&euro;${item.marge.toFixed(2)}</td>
-                        <td>&euro;${item.opb.toFixed(4)}</td>
-                        <td>${item.clicks}</td>
-                        <td>${item.roas.toFixed(2)}</td>
+                        <td>${escHtml(s.shop_name)}</td>
+                        <td>${escHtml(s.shop_id)}</td>
+                        <td class="${mClass}">€${fmt(s.marge)}</td>
+                        <td>€${fmt(s.rev_click)}</td>
+                        <td>${s.rev_click_old != null ? '€' + fmt(s.rev_click_old) : '-'}</td>
+                        <td>${s.rev_click_delta != null ? s.rev_click_delta.toFixed(1) + '%' : '-'}</td>
+                        <td title="${escHtml(c.campaign_name)}">${escHtml(c.campaign_name)}</td>
+                        <td>${c.budget_old != null ? fmt(c.budget_old) : '-'}</td>
+                        <td>${c.budget_new != null ? fmt(c.budget_new) : '-'}</td>
                     </tr>`;
                 }
                 html += '</tbody></table></div>';
             }
 
-            if (!html) html = '<p class="text-muted mt-3">No changes to display.</p>';
+            if (!html) html = '<p class="text-muted mt-3">No budget changes to display.</p>';
             tables.innerHTML = html;
-        }
 
-        // --- Export Excel ---
-        const labelMap = {
-            '1_to_2': 'L1 naar L2',
-            '2_to_3': 'L2 naar L3',
-            '3_to_2': 'L3 naar L2',
-            '2_to_1': 'L2 naar L1',
-            'stuck_l1': 'L1 Stuck',
-        };
+            const ol = data.over_loss_25 || [];
+            const olSection = document.getElementById('overLoss25Section');
+            const olBody = document.getElementById('overLoss25Body');
+            if (ol.length > 0) {
+                olBody.innerHTML = ol.map(r => `<tr>
+                    <td>${escHtml(r.shop_name)}</td>
+                    <td>${escHtml(r.shop_id)}</td>
+                    <td class="text-danger">€${fmt(r.marge)}</td>
+                </tr>`).join('');
+                olSection.style.display = 'block';
+            } else {
+                olSection.style.display = 'none';
+            }
+        }
 
         function exportCsv() {
             if (!lastRunResult) return;
@@ -448,28 +525,46 @@
         }
 
         function exportRunToExcel(runData) {
-            const rows = [['Categorie', 'Campagne', 'Marge', 'OPB', 'Klikken', 'ROAS', 'Kosten', 'DMA/CLA Omzet']];
-
-            for (const [key, label] of Object.entries(labelMap)) {
-                for (const item of (runData.changes[key] || [])) {
-                    rows.push([label, item.campaign_name, item.marge, item.opb, item.clicks, item.roas, item.cost, item.dma_cla_omzet]);
+            const header = ['Actie', 'Shopnaam', 'Shop ID', 'Marge', 'Rev/Click', 'Rev/Click-4wkn', 'Δ %',
+                            'Transacties', 'Linkage', 'Campagne', 'Oud Budget (€)', 'Nieuw Budget (€)',
+                            'Mutation Status'];
+            const rows = [header];
+            for (const shop of (runData.results || [])) {
+                if (!shop.action) continue;
+                if ((shop.campaigns || []).length === 0) {
+                    rows.push([shop.action, shop.shop_name, shop.shop_id, shop.marge, shop.rev_click,
+                               shop.rev_click_old, shop.rev_click_delta, shop.transactions, shop.linkage,
+                               '', '', '', '(no matching campaigns)']);
+                    continue;
+                }
+                for (const c of shop.campaigns) {
+                    rows.push([shop.action, shop.shop_name, shop.shop_id, shop.marge, shop.rev_click,
+                               shop.rev_click_old, shop.rev_click_delta, shop.transactions, shop.linkage,
+                               c.campaign_name, c.budget_old, c.budget_new,
+                               c.mutation_status || (c.skip_reason || '')]);
                 }
             }
-
             const ws = XLSX.utils.aoa_to_sheet(rows);
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'DMA Bidding');
+            XLSX.utils.book_append_sheet(wb, ws, 'GSD Budgets');
+
+            if ((runData.over_loss_25 || []).length > 0) {
+                const ol = [['Shopnaam', 'Shop ID', 'Marge']].concat(
+                    runData.over_loss_25.map(r => [r.shop_name, r.shop_id, r.marge])
+                );
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ol), '> €25 verlies');
+            }
 
             const country = (runData.country || 'NL').toLowerCase();
             const mode = runData.dry_run ? 'dry' : 'live';
-            const date = runData.timestamp.split('T')[0];
-            XLSX.writeFile(wb, `dma-bidding-${country}-${mode}-${date}-run${runData.run_id}.xlsx`);
+            const date = (runData.timestamp || '').split('T')[0];
+            XLSX.writeFile(wb, `gsd-budgets-${country}-${mode}-${date}-run${runData.run_id}.xlsx`);
         }
 
         async function downloadHistoryRun(event, runId) {
             event.stopPropagation();
             try {
-                const res = await fetch(`${API_BASE}/api/dma-bidding/history/${runId}`);
+                const res = await fetch(`${API_BASE}/api/gsd-budgets/history/${runId}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 exportRunToExcel(data);
@@ -479,10 +574,9 @@
             }
         }
 
-        // --- History ---
         async function loadHistory() {
             try {
-                const res = await fetch(`${API_BASE}/api/dma-bidding/history`);
+                const res = await fetch(`${API_BASE}/api/gsd-budgets/history`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const runs = data.runs || [];
@@ -496,7 +590,7 @@
                 tbody.innerHTML = runs.map(r => {
                     const ts = new Date(r.timestamp).toLocaleString('nl-NL');
                     const range = `${r.date_range.start} → ${r.date_range.end}`;
-                    const changes = r.summary.total_changes || 0;
+                    const changes = (r.summary && r.summary.budget_changed) || 0;
                     const statusBadge = r.status === 'completed' || r.status === 'success'
                         ? '<span class="badge" style="border: 1px solid #00b894; color: #00b894; background: transparent;">completed</span>'
                         : `<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">${escHtml(r.status || 'failed')}</span>`;
@@ -523,7 +617,7 @@
 
         async function showHistoryDetail(runId) {
             try {
-                const res = await fetch(`${API_BASE}/api/dma-bidding/history/${runId}`);
+                const res = await fetch(`${API_BASE}/api/gsd-budgets/history/${runId}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 lastRunResult = data;
@@ -534,10 +628,16 @@
             }
         }
 
-        // --- Helpers ---
+        function fmt(v) {
+            if (v === null || v === undefined || Number.isNaN(v)) return '-';
+            const n = Number(v);
+            if (!Number.isFinite(n)) return '-';
+            return n.toFixed(2);
+        }
+
         function escHtml(str) {
             const div = document.createElement('div');
-            div.textContent = str;
+            div.textContent = str === null || str === undefined ? '' : String(str);
             return div.innerHTML;
         }
     </script>

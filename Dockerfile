@@ -3,7 +3,10 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install Python dependencies
+# backend/vendor/ is copied first so local tarballs referenced from requirements.txt
+# (e.g. the Google Search Ads 360 SDK) resolve during pip install.
 COPY requirements.txt .
+COPY backend/vendor/ /app/backend/vendor/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application

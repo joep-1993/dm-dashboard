@@ -46,6 +46,7 @@ from backend.batch_api_service import start_faq_batch, start_kopteksten_batch, s
 from backend.thema_ads_router import router as thema_ads_router, cleanup_stale_jobs as cleanup_thema_ads_jobs
 from backend.gsd_campaigns_router import router as gsd_campaigns_router
 from backend.dma_bidding_router import router as dma_bidding_router
+from backend.gsd_budgets_router import router as gsd_budgets_router
 from backend.mc_id_finder_router import router as mc_id_finder_router
 from backend.redshift_upload_router import router as redshift_upload_router
 from backend.task_scheduler_router import router as task_scheduler_router
@@ -140,6 +141,9 @@ app.include_router(gsd_campaigns_router)
 
 # Include dma_bidding router
 app.include_router(dma_bidding_router)
+
+# Include gsd_budgets router
+app.include_router(gsd_budgets_router)
 
 # Include mc_id_finder router
 app.include_router(mc_id_finder_router)
