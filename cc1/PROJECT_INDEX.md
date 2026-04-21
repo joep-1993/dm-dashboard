@@ -428,6 +428,14 @@ python-dotenv==1.0.0      # Environment variable management
 - `GET /api/url-validator/cache-status` - Taxonomy cache stats
 - `POST /api/url-validator/cache-refresh` - Force cache reload
 
+### GSD Budgets (dm-dashboard)
+- `GET /api/gsd-budgets/health` - Health check
+- `GET /api/gsd-budgets/stats?country=NL|BE` - Cheap shop + campaign counts for UI stat cards
+- `POST /api/gsd-budgets/run?country=NL|BE&dry_run=true&start_days_ago=9&end_days_ago=3&limit_shops=&shop_names=&shop_names_excluded=false&skip_missed_upload=false` - Run the full flow (sync exclusions sheet → Redshift shop query → per-shop decision tree → Google Ads campaign discovery → SA360 per-campaign marge → budget mutation → optional upload to `pa.jvs_gsd_missed_shops`). ThreadPool-serialised via `_run_lock` to prevent concurrent budget mutations.
+- `GET /api/gsd-budgets/history` - Recent runs (cap 50, persisted to `backend/data/gsd_budgets_history.json`)
+- `GET /api/gsd-budgets/history/{run_id}` - Full detail for a specific run (used for history row re-render + XLSX export)
+- `DELETE /api/gsd-budgets/history` - Clear history
+
 ### DMA+
 - `POST /api/dma-plus/start` - Start DMA+ operation (form: operation, country, file/shop_name, dry_run)
 - `GET /api/dma-plus/status/{task_id}` - Poll task progress
