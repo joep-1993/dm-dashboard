@@ -890,10 +890,16 @@ def run_gsd_budgets(
         )
 
         exclusions_synced = 0
-        try:
-            exclusions_synced = sync_shop_exclusions()
-        except Exception as e:
-            logger.warning(f"sync_shop_exclusions failed: {e}")
+        exclusions_sync_status = "synced"
+        if dry_run:
+            exclusions_sync_status = "skipped_dry_run"
+            logger.info("Dry-run: skipping pa.gsd_shop_exclusions_joep sync; using whatever is currently in the table")
+        else:
+            try:
+                exclusions_synced = sync_shop_exclusions()
+            except Exception as e:
+                logger.warning(f"sync_shop_exclusions failed: {e}")
+                exclusions_sync_status = f"failed: {e}"
 
         try:
             limited_cache = preload_budget_constrained_cache()
@@ -1094,6 +1100,7 @@ def run_gsd_budgets(
             "timestamp": start_time.isoformat(),
             "duration_seconds": round(duration, 1),
             "exclusions_synced": exclusions_synced,
+            "exclusions_sync_status": exclusions_sync_status,
             "summary": summary_counts,
             "shops_evaluated": len(shop_rows),
             "results": results,
