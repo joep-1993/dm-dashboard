@@ -20,12 +20,20 @@ Environment:
 import sys
 import os
 import time
+import socket
 import logging
 from logging.handlers import RotatingFileHandler
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Safety net: no socket operation should ever block longer than 2 minutes.
+# This catches edge cases where the requests timeout parameter doesn't fire
+# (e.g. SSL handshake hang on Windows).
+socket.setdefaulttimeout(120)
 
 # Load .env from project root so this script can be run standalone (e.g. Task Scheduler)
 try:
@@ -46,6 +54,10 @@ VALIDATION_TIMEOUT = 14400    # 4 hours max for a validation step
 PROCESS_TIMEOUT = 28800       # 8 hours max for processing loops
 PROCESS_MAX_RETRIES = 3       # retry timed-out processing steps up to N times
 PUBLISH_TIMEOUT = 3600        # 1 hour max for publish
+POLL_MAX_ERRORS = 10          # consecutive poll failures before aborting a task
+CONNECT_TIMEOUT = 10          # seconds to wait for TCP connect
+READ_TIMEOUT = 60             # seconds to wait for HTTP response body
+LONG_READ_TIMEOUT = 300       # seconds for slow endpoints (process-urls)
 
 # Reusable session — SSL verify can be disabled for self-signed certs
 SESSION = requests.Session()
@@ -53,6 +65,11 @@ if os.getenv("DISABLE_SSL_VERIFY", "").lower() == "true":
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     SESSION.verify = False
+
+# Retry adapter: automatically retry on connection errors and 502/503/504
+_retry = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
+SESSION.mount("http://", HTTPAdapter(max_retries=_retry))
+SESSION.mount("https://", HTTPAdapter(max_retries=_retry))
 
 
 def login_if_configured():
@@ -107,7 +124,7 @@ def cancel_running_tasks():
 
     for endpoint in cancel_endpoints:
         try:
-            resp = SESSION.post(f"{BASE_URL}{endpoint}/all", timeout=10)
+            resp = SESSION.post(f"{BASE_URL}{endpoint}/all", timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
             if resp.status_code == 200:
                 data = resp.json()
                 cancelled = data.get("cancelled", 0)
@@ -118,13 +135,30 @@ def cancel_running_tasks():
 
 
 def poll_task(status_url, timeout):
-    """Poll a background task until completed/failed."""
+    """Poll a background task until completed/failed.
+
+    Tolerates up to POLL_MAX_ERRORS consecutive connection/timeout failures
+    before aborting — a single flaky request no longer kills the whole run.
+    """
     log = logging.getLogger("automation")
     start = time.time()
+    consecutive_errors = 0
     while time.time() - start < timeout:
-        resp = SESSION.get(status_url, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            resp = SESSION.get(status_url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+            resp.raise_for_status()
+            data = resp.json()
+            consecutive_errors = 0  # reset on success
+        except Exception as e:
+            consecutive_errors += 1
+            log.warning(f"  Poll error ({consecutive_errors}/{POLL_MAX_ERRORS}): {e}")
+            if consecutive_errors >= POLL_MAX_ERRORS:
+                raise RuntimeError(
+                    f"Task polling failed after {POLL_MAX_ERRORS} consecutive errors, last: {e}"
+                )
+            time.sleep(POLL_INTERVAL)
+            continue
+
         status = data.get("status", "")
 
         if status == "completed":
@@ -147,16 +181,29 @@ def loop_until_done(url, timeout, params=None):
 
     Returns a dict with 'total_processed' and 'timed_out' flag.
     Does NOT raise on timeout — partial progress is still useful.
+    Tolerates up to POLL_MAX_ERRORS consecutive connection failures.
     """
     log = logging.getLogger("automation")
     start = time.time()
     iteration = 0
     total_processed = 0
+    consecutive_errors = 0
     while time.time() - start < timeout:
         iteration += 1
-        resp = SESSION.post(url, params=params, timeout=300)
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            resp = SESSION.post(url, params=params, timeout=(CONNECT_TIMEOUT, LONG_READ_TIMEOUT))
+            resp.raise_for_status()
+            data = resp.json()
+            consecutive_errors = 0
+        except Exception as e:
+            consecutive_errors += 1
+            log.warning(f"  Loop error ({consecutive_errors}/{POLL_MAX_ERRORS}): {e}")
+            if consecutive_errors >= POLL_MAX_ERRORS:
+                raise RuntimeError(
+                    f"Processing loop failed after {POLL_MAX_ERRORS} consecutive errors, last: {e}"
+                )
+            time.sleep(POLL_INTERVAL)
+            continue
 
         if data.get("status") == "complete" or data.get("message") == "No URLs to process":
             log.info(f"  Done after {iteration} iterations, total processed: {total_processed}")
@@ -175,7 +222,7 @@ def loop_until_done(url, timeout, params=None):
 # ---------------------------------------------------------------------------
 def step_reset_faq_validation():
     log = logging.getLogger("automation")
-    resp = SESSION.delete(f"{BASE_URL}/api/faq/validation-history/reset", timeout=30)
+    resp = SESSION.delete(f"{BASE_URL}/api/faq/validation-history/reset", timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
     resp.raise_for_status()
     data = resp.json()
     log.info(f"  FAQ validation reset — cleared: {data.get('cleared_count', data.get('deleted', 0))}")
@@ -183,7 +230,7 @@ def step_reset_faq_validation():
 
 def step_reset_kopteksten_validation():
     log = logging.getLogger("automation")
-    resp = SESSION.delete(f"{BASE_URL}/api/validation-history/reset", timeout=30)
+    resp = SESSION.delete(f"{BASE_URL}/api/validation-history/reset", timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
     resp.raise_for_status()
     data = resp.json()
     log.info(f"  Kopteksten validation reset — cleared: {data.get('cleared_count', 0)}")
@@ -194,7 +241,7 @@ def step_validate_faq_links():
     resp = SESSION.post(
         f"{BASE_URL}/api/faq/validate-all-links",
         params={"parallel_workers": 20, "batch_size": 500},
-        timeout=30,
+        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
     )
     resp.raise_for_status()
     task_id = resp.json().get("task_id")
@@ -207,7 +254,7 @@ def step_validate_kopteksten_links():
     resp = SESSION.post(
         f"{BASE_URL}/api/validate-all-links",
         params={"parallel_workers": 20, "batch_size": 500},
-        timeout=30,
+        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
     )
     resp.raise_for_status()
     task_id = resp.json().get("task_id")
@@ -237,11 +284,11 @@ def step_recheck_skipped_urls():
     back to the werkvoorraad for both FAQ and Kopteksten regeneration.
     """
     log = logging.getLogger("automation")
-    SESSION.delete(f"{BASE_URL}/api/recheck-skipped-urls/reset", timeout=30)
+    SESSION.delete(f"{BASE_URL}/api/recheck-skipped-urls/reset", timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
     resp = SESSION.post(
         f"{BASE_URL}/api/recheck-skipped-urls",
         params={"parallel_workers": 20, "batch_size": 50},
-        timeout=30,
+        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
     )
     resp.raise_for_status()
     task_id = resp.json().get("task_id")
@@ -322,7 +369,7 @@ def step_publish_production():
     resp = SESSION.post(
         f"{BASE_URL}/api/content-publish",
         params={"environment": "production", "content_type": "all"},
-        timeout=30,
+        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
     )
     resp.raise_for_status()
     task_id = resp.json().get("task_id")
