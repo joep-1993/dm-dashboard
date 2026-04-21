@@ -7,13 +7,19 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        .results-table { max-height: 600px; overflow-y: auto; }
-        .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
+        /* Fixed layout + min-width forces the columns to honour their th widths instead
+           of reflowing around content; overflow-x adds the horizontal scrollbar. */
+        .results-table { max-height: 600px; overflow: auto; }
+        .results-table table { table-layout: fixed; min-width: 1900px; }
+        .results-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .url-cell { font-family: monospace; font-size: 0.85rem; }
         .url-cell.copyable { cursor: pointer; }
         .url-cell.copyable:hover { background-color: #e9ecef; }
         .url-cell.copied { background-color: #d4edda !important; transition: background-color 0.3s; }
-        .meta-cell { font-size: 0.8rem; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .meta-cell:hover { white-space: normal; overflow: visible; }
+        .meta-cell { font-size: 0.8rem; }
+        /* Hover-expand wraps text inside the fixed column width — row grows
+           vertically, but nothing spills sideways, so no horizontal layout shift. */
+        .meta-cell:hover, .url-cell:hover { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
         .status-200 { color: #198754; font-weight: bold; }
         .status-301, .status-302, .status-307, .status-308 { color: #0d6efd; font-weight: bold; }
         .status-404 { color: #dc3545; font-weight: bold; }
@@ -137,8 +143,7 @@
                     <h5 class="mb-0">Results</h5>
                     <div>
                         <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyAllToClipboard()">Copy for Excel</button>
-                        <button class="btn btn-light btn-sm" onclick="downloadResults('csv')">Download CSV</button>
-                        <button class="btn btn-light btn-sm" onclick="downloadResults('excel')">Download Excel</button>
+                        <button class="btn btn-sm" style="border-color: #CC5500; color: #CC5500;" onmouseover="this.style.backgroundColor='#CC5500';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#CC5500'" onclick="downloadExcel()">Download Excel</button>
                     </div>
                 </div>
                 <div class="card-body">
@@ -154,14 +159,16 @@
                         <table class="table table-sm table-bordered table-hover">
                             <thead class="table-light sticky-top">
                                 <tr>
-                                    <th style="width: 3%">#</th>
-                                    <th style="width: 20%">URL</th>
-                                    <th style="width: 5%">Status</th>
-                                    <th style="width: 15%">Redirect URL</th>
-                                    <th style="width: 18%">Title</th>
-                                    <th style="width: 18%">Description</th>
-                                    <th style="width: 12%">H1</th>
-                                    <th style="width: 5%">Results</th>
+                                    <th style="width: 40px">#</th>
+                                    <th style="width: 280px">URL</th>
+                                    <th style="width: 70px" class="text-center">Status</th>
+                                    <th style="width: 240px">Redirect URL</th>
+                                    <th style="width: 280px">Canonical</th>
+                                    <th style="width: 100px" class="text-center">Verdict</th>
+                                    <th style="width: 260px">Title</th>
+                                    <th style="width: 300px">Description</th>
+                                    <th style="width: 250px">H1</th>
+                                    <th style="width: 80px">Results</th>
                                 </tr>
                             </thead>
                             <tbody id="resultsBody"></tbody>
@@ -309,21 +316,18 @@
 
             // Summary stats
             const statusCounts = {};
-            let redirectCount = 0;
             results.forEach(r => {
                 const status = String(r.status_code);
                 statusCounts[status] = (statusCounts[status] || 0) + 1;
-                if (r.redirect_url) redirectCount++;
             });
 
-            let summaryHtml = `<span class="badge bg-secondary">Total: ${results.length}</span>`;
+            let summaryHtml = `<span class="badge" style="background-color: #CC5500;">Total: ${results.length}</span>`;
             Object.keys(statusCounts).sort().forEach(status => {
                 const badgeClass = status === '200' ? 'bg-success' :
-                                   status.startsWith('3') ? 'bg-primary' :
-                                   status.startsWith('4') ? 'bg-danger' : 'bg-secondary';
+                                   status.startsWith('3') ? 'bg-warning text-dark' :
+                                   (status.startsWith('4') || status.startsWith('5')) ? 'bg-danger' : 'bg-secondary';
                 summaryHtml += `<span class="badge ${badgeClass}">${status}: ${statusCounts[status]}</span>`;
             });
-            if (redirectCount > 0) summaryHtml += `<span class="badge bg-info">Redirects: ${redirectCount}</span>`;
             document.getElementById('summaryStats').innerHTML = summaryHtml;
 
             // Results table
@@ -331,19 +335,34 @@
             tbody.innerHTML = '';
 
             results.forEach((r, i) => {
-                const statusClass = r.status_code === 200 ? 'status-200' :
-                                   String(r.status_code).startsWith('3') ? 'status-301' :
-                                   r.status_code === 404 ? 'status-404' : 'status-error';
+                // Badge colors mirror url-validator.html: green=ok, yellow=redirect, red=error
+                const sc = r.status_code;
+                const scStr = String(sc);
+                const statusBadgeClass = sc === 200 ? 'bg-success'
+                    : scStr.startsWith('3') ? 'bg-warning text-dark'
+                    : scStr.startsWith('4') || scStr.startsWith('5') ? 'bg-danger'
+                    : 'bg-secondary';
+                const statusBadge = `<span class="badge ${statusBadgeClass}">${escapeHtml(scStr)}</span>`;
 
                 const tr = document.createElement('tr');
+                const inputUrlDisp = stripBeslist(r.input_url);
+                const redirectUrlDisp = stripBeslist(r.redirect_url);
+                const canonicalUrlDisp = stripBeslist(r.canonical_url);
+                const metaTitle = decodeEntities(r.meta_title);
+                const metaDescription = decodeEntities(r.meta_description);
+                const h1 = decodeEntities(r.h1);
+                const selfCanonical = computeSelfCanonical(r);
+
                 tr.innerHTML = `
                     <td>${i + 1}</td>
-                    <td class="url-cell copyable" title="${escapeAttr(r.input_url)}" onclick="copyToClipboard('${escapeJs(r.input_url)}', this)">${truncate(r.input_url, 50)}</td>
-                    <td class="${statusClass}">${r.status_code}</td>
-                    <td class="url-cell ${r.redirect_url ? 'copyable' : ''}" title="${escapeAttr(r.redirect_url || '')}" ${r.redirect_url ? `onclick="copyToClipboard('${escapeJs(r.redirect_url)}', this)"` : ''}>${r.redirect_url ? truncate(r.redirect_url, 40) : '-'}</td>
-                    <td class="meta-cell" title="${escapeAttr(r.meta_title || '')}">${escapeHtml(r.meta_title || '-')}</td>
-                    <td class="meta-cell" title="${escapeAttr(r.meta_description || '')}">${escapeHtml(r.meta_description || '-')}</td>
-                    <td class="meta-cell" title="${escapeAttr(r.h1 || '')}">${escapeHtml(r.h1 || '-')}</td>
+                    <td class="url-cell copyable" title="${escapeAttr(inputUrlDisp)}" onclick="copyToClipboard('${escapeJs(inputUrlDisp)}', this)">${escapeHtml(inputUrlDisp)}</td>
+                    <td class="text-center">${statusBadge}</td>
+                    <td class="url-cell ${redirectUrlDisp ? 'copyable' : ''}" title="${escapeAttr(redirectUrlDisp || '')}" ${redirectUrlDisp ? `onclick="copyToClipboard('${escapeJs(redirectUrlDisp)}', this)"` : ''}>${redirectUrlDisp ? escapeHtml(redirectUrlDisp) : '-'}</td>
+                    <td class="url-cell ${canonicalUrlDisp ? 'copyable' : ''}" title="${escapeAttr(canonicalUrlDisp || '')}" ${canonicalUrlDisp ? `onclick="copyToClipboard('${escapeJs(canonicalUrlDisp)}', this)"` : ''}>${canonicalUrlDisp ? escapeHtml(canonicalUrlDisp) : '-'}</td>
+                    <td class="text-center">${selfCanonical === null ? '<span class="text-muted">-</span>' : selfCanonical ? '<span class="badge bg-success">true</span>' : '<span class="badge bg-danger">false</span>'}</td>
+                    <td class="meta-cell" title="${escapeAttr(metaTitle || '')}">${escapeHtml(metaTitle || '-')}</td>
+                    <td class="meta-cell" title="${escapeAttr(metaDescription || '')}">${escapeHtml(metaDescription || '-')}</td>
+                    <td class="meta-cell" title="${escapeAttr(h1 || '')}">${escapeHtml(h1 || '-')}</td>
                     <td>${r.product_count !== null && r.product_count !== undefined ? r.product_count : '-'}</td>
                 `;
                 tbody.appendChild(tr);
@@ -353,6 +372,72 @@
         function truncate(str, maxLen) {
             if (!str) return '';
             return str.length <= maxLen ? str : str.substring(0, maxLen) + '...';
+        }
+
+        // Strip the beslist host so exports + table cells show only the path —
+        // keeps shop URLs aligned with how users paste them into spreadsheets.
+        function stripBeslist(url) {
+            if (!url) return url;
+            return String(url).replace(/^https?:\/\/(www\.)?beslist\.(nl|be)/i, '');
+        }
+
+        // Normalize a URL for equality comparison: lowercase host+scheme, strip
+        // trailing slash on the path, keep query + hash. URL() throws on relative
+        // strings so fall back to a best-effort trim+lowercase for those.
+        function normalizeUrlForCompare(u) {
+            if (!u) return '';
+            try {
+                const p = new URL(u);
+                const path = p.pathname.replace(/\/+$/, '') || '/';
+                return (p.protocol + '//' + p.host.toLowerCase() + path + p.search + p.hash);
+            } catch (_) {
+                return String(u).trim().replace(/\/+$/, '').toLowerCase();
+            }
+        }
+
+        // True if the page's canonical URL points at the page itself (after
+        // following any redirect). Returns null when there is no canonical to
+        // compare — surfaces as "-" instead of a misleading "false".
+        function computeSelfCanonical(r) {
+            if (!r || !r.canonical_url) return null;
+            const effective = r.redirect_url || r.input_url;
+            if (!effective) return null;
+            return normalizeUrlForCompare(effective) === normalizeUrlForCompare(r.canonical_url);
+        }
+
+        // Decode HTML entities (e.g. &#x27; → ', &amp; → &) that the backend
+        // passes through from scraped markup. Uses a textarea roundtrip so every
+        // named + numeric entity is handled by the browser, no hand-rolled table.
+        // Loops up to 3 times because source pages are sometimes double-encoded
+        // (e.g. `&amp;#10062;` needs one pass to become `&#10062;` and a second
+        // to become ❎) — stops as soon as a pass changes nothing.
+        const _decodeHelper = document.createElement('textarea');
+        function decodeEntities(str) {
+            if (str == null) return str;
+            let current = String(str);
+            for (let i = 0; i < 3; i++) {
+                _decodeHelper.innerHTML = current;
+                const next = _decodeHelper.value;
+                if (next === current) break;
+                current = next;
+            }
+            return current;
+        }
+
+        // Build an export-ready copy of a result: URL fields stripped of the
+        // beslist host, meta fields decoded from HTML entities, self_canonical
+        // flag populated so exports carry the same value the table shows.
+        function stripResult(r) {
+            return {
+                ...r,
+                input_url: stripBeslist(r.input_url),
+                redirect_url: stripBeslist(r.redirect_url),
+                canonical_url: stripBeslist(r.canonical_url),
+                meta_title: decodeEntities(r.meta_title),
+                meta_description: decodeEntities(r.meta_description),
+                h1: decodeEntities(r.h1),
+                self_canonical: computeSelfCanonical(r),
+            };
         }
 
         function escapeHtml(text) {
@@ -381,9 +466,9 @@
 
         function copyAllToClipboard() {
             if (results.length === 0) return;
-            const headers = ['input_url', 'status_code', 'redirect_url', 'meta_title', 'meta_description', 'h1', 'product_count'];
+            const headers = ['input_url', 'status_code', 'redirect_url', 'canonical_url', 'self_canonical', 'meta_title', 'meta_description', 'h1', 'product_count'];
             const tsv = [headers.join('\t')];
-            results.forEach(r => {
+            results.map(stripResult).forEach(r => {
                 tsv.push(headers.map(h => r[h] != null ? String(r[h]) : '').join('\t'));
             });
             navigator.clipboard.writeText(tsv.join('\n')).then(() => {
@@ -391,36 +476,22 @@
             });
         }
 
-        function downloadResults(format) {
+        function downloadExcel() {
             if (results.length === 0) return;
-
-            if (format === 'csv') {
-                const headers = ['input_url', 'status_code', 'redirect_url', 'meta_title', 'meta_description', 'h1', 'product_count', 'canonical_url', 'error'];
-                const csv = [headers.join(',')];
-                results.forEach(r => {
-                    csv.push(headers.map(h => `"${(r[h] != null ? String(r[h]) : '').replace(/"/g, '""')}"`).join(','));
-                });
-                const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
+            const exportResults = results.map(stripResult);
+            fetch(`${API_BASE}/api/url-checker/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ results: exportResults })
+            })
+            .then(r => r.blob())
+            .then(blob => {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'url_checker_results.csv';
+                a.download = 'url_checker_results.xlsx';
                 a.click();
-            } else {
-                fetch(`${API_BASE}/api/url-checker/download`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ results })
-                })
-                .then(r => r.blob())
-                .then(blob => {
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'url_checker_results.xlsx';
-                    a.click();
-                });
-            }
+            });
         }
     </script>
 </body>

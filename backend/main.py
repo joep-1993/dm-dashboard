@@ -3515,7 +3515,7 @@ async def url_checker_download(request: dict):
     try:
         import pandas as pd
         df = pd.DataFrame(results)
-        cols = ['input_url', 'status_code', 'redirect_url', 'meta_title', 'meta_description', 'h1', 'product_count', 'canonical_url', 'error']
+        cols = ['input_url', 'status_code', 'redirect_url', 'canonical_url', 'self_canonical', 'meta_title', 'meta_description', 'h1', 'product_count', 'error']
         df = df[[c for c in cols if c in df.columns]]
 
         output = BytesIO()
