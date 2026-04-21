@@ -220,6 +220,13 @@
                                 <span id="saveSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                             </button>
                             <button type="button" class="btn btn-outline-secondary" id="clearBtn">Clear</button>
+                            <button type="button" class="btn d-none" id="removeBtn"
+                                    style="border: 1px solid #d63031; color: #d63031; background: white;"
+                                    onmouseover="this.style.background='#d63031';this.style.color='white'"
+                                    onmouseout="this.style.background='white';this.style.color='#d63031'">
+                                <span id="removeBtnText">Remove</span>
+                                <span id="removeSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                            </button>
                         </form>
                         <div id="saveResult" class="mt-3 d-none">
                             <div class="alert" id="saveAlert"></div>
@@ -651,6 +658,53 @@
             document.getElementById('titleForm').reset();
             document.getElementById('titleDescription').value = '\u2762 Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop \u2762 beslist.nl';
             document.getElementById('saveResult').classList.add('d-none');
+            document.getElementById('removeBtn').classList.add('d-none');
+        });
+
+        // Remove title — only visible after editTitle() populates the form
+        document.getElementById('removeBtn').addEventListener('click', async () => {
+            const url = document.getElementById('titleUrl').value.trim();
+            if (!url) return;
+            if (!confirm(`Remove the title for:\n\n${url}\n\nThis cannot be undone.`)) return;
+
+            const btn = document.getElementById('removeBtn');
+            const btnText = document.getElementById('removeBtnText');
+            const spinner = document.getElementById('removeSpinner');
+            btn.disabled = true;
+            btnText.textContent = 'Removing...';
+            spinner.classList.remove('d-none');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/unique-titles/${encodeURIComponent(url)}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+
+                const resultDiv = document.getElementById('saveResult');
+                const resultAlert = document.getElementById('saveAlert');
+                resultDiv.classList.remove('d-none');
+
+                if (response.ok && result.status === 'success') {
+                    resultAlert.className = 'alert alert-success';
+                    resultAlert.textContent = `Title removed for: ${url}`;
+                    document.getElementById('titleForm').reset();
+                    document.getElementById('titleDescription').value = '\u2762 Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop \u2762 beslist.nl';
+                    btn.classList.add('d-none');
+                    loadStats();
+                    // Refresh the search panel if a query is still active so the removed row disappears
+                    const q = document.getElementById('searchInput').value.trim();
+                    if (q && typeof doSearch === 'function') doSearch();
+                } else {
+                    resultAlert.className = 'alert alert-danger';
+                    resultAlert.textContent = 'Failed to remove title: ' + (result.detail || `HTTP ${response.status}`);
+                }
+            } catch (error) {
+                alert('Remove failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = 'Remove';
+                spinner.classList.add('d-none');
+            }
         });
 
         // Import CSV
@@ -790,6 +844,8 @@
             document.getElementById('titleDescription').value = item.description;
             document.getElementById('titleH1').value = item.h1_title;
             document.getElementById('titleUrl').focus();
+            // Remove button is meaningful only when editing an existing title.
+            document.getElementById('removeBtn').classList.remove('d-none');
         }
 
     </script>
