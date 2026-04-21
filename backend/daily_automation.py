@@ -134,6 +134,20 @@ def cancel_running_tasks():
             pass  # best-effort
 
 
+def _reauth_on_401(resp):
+    """Re-authenticate when the server returns 401 (e.g. after a restart)."""
+    if resp.status_code != 401:
+        return False
+    log = logging.getLogger("automation")
+    log.info("  Got 401 — re-authenticating…")
+    try:
+        login_if_configured()
+        return True
+    except Exception as e:
+        log.warning(f"  Re-authentication failed: {e}")
+        return False
+
+
 def poll_task(status_url, timeout):
     """Poll a background task until completed/failed.
 
@@ -146,6 +160,8 @@ def poll_task(status_url, timeout):
     while time.time() - start < timeout:
         try:
             resp = SESSION.get(status_url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+            if resp.status_code == 401 and _reauth_on_401(resp):
+                resp = SESSION.get(status_url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
             resp.raise_for_status()
             data = resp.json()
             consecutive_errors = 0  # reset on success
@@ -192,6 +208,8 @@ def loop_until_done(url, timeout, params=None):
         iteration += 1
         try:
             resp = SESSION.post(url, params=params, timeout=(CONNECT_TIMEOUT, LONG_READ_TIMEOUT))
+            if resp.status_code == 401 and _reauth_on_401(resp):
+                resp = SESSION.post(url, params=params, timeout=(CONNECT_TIMEOUT, LONG_READ_TIMEOUT))
             resp.raise_for_status()
             data = resp.json()
             consecutive_errors = 0
