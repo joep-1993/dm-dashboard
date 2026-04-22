@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from typing import Optional
 import asyncio
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 from backend.dma_plus_service import (
@@ -9,6 +11,9 @@ from backend.dma_plus_service import (
     get_history, clear_history, remove_history_entry, COUNTRY_CONFIG,
     _cat_ids_cache, _cat_ids_cache_time, _CAT_IDS_TTL,
     _ensure_maincat_mapping, _fetch_all_cat_ids_from_taxonomy_api,
+)
+from backend.dma_plus_monthly import (
+    start_monthly, start_coverage, get_output_path,
 )
 import time as _time
 
@@ -147,3 +152,40 @@ def delete_history_entry(task_id: str):
     if remove_history_entry(task_id):
         return {"status": "removed", "task_id": task_id}
     raise HTTPException(404, f"History entry {task_id} not found")
+
+
+# --- Expanded (ported from dma_script) ------------------------------------
+# Monthly delta: upload a multi-sheet xlsx with per-country Nieuw/Afvallers
+# sheets; we fan each row out to cl1 ∈ {a,b,c} and run all four operations
+# per country. Reuses the same task-polling endpoints (/status, /cancel).
+
+@router.post("/monthly")
+async def monthly(file: UploadFile = File(...)):
+    wb_bytes = await file.read()
+    if not wb_bytes:
+        raise HTTPException(400, "Empty file")
+    task_id = start_monthly(wb_bytes)
+    return {"task_id": task_id, "status": "started"}
+
+
+@router.post("/coverage")
+def coverage(country: str = "NL"):
+    country = (country or "NL").upper()
+    if country not in COUNTRY_CONFIG:
+        raise HTTPException(400, "country must be NL or BE")
+    task_id = start_coverage(country)
+    return {"task_id": task_id, "status": "started", "country": country}
+
+
+@router.get("/download/{task_id}")
+def download(task_id: str):
+    path = get_output_path(task_id)
+    if not path:
+        raise HTTPException(404, "No output yet for this task")
+    if not os.path.exists(path):
+        raise HTTPException(410, "Output missing on disk")
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=os.path.basename(path),
+    )

@@ -200,6 +200,76 @@
                     </div>
                 </div>
 
+                <!-- Monthly Delta + Category Coverage -->
+                <div class="card mb-4" id="monthlyCard">
+                    <div class="card-header bg-dark text-white">
+                        <h5 class="mb-0">Monthly Delta &amp; Category Coverage</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <h6>Monthly Delta</h6>
+                                <p class="small text-muted mb-2">
+                                    Upload a <code>dma_plus_delta_*.xlsx</code> with the 4 country sheets
+                                    (<em>NL/BE - Nieuw (aanmaken)</em> and <em>NL/BE - Afvallers</em>, 3 columns each:
+                                    shop / maincat / maincat_id). Each row fans out to cl1 a/b/c at &euro;50.
+                                    Runs Include → Exclude on Nieuw, then Reverse-exclude → Reverse-include on Afvallers, for both countries.
+                                </p>
+                                <input type="file" class="form-control mb-2" id="monthlyFile" accept=".xlsx,.xls">
+                                <button class="btn btn-primary" id="monthlyRunBtn" onclick="runMonthly()">Run Monthly Delta</button>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>Category Coverage</h6>
+                                <p class="small text-muted mb-2">
+                                    Writes TRUE/FALSE per taxv2 category for whether
+                                    <code>PLA/{name}_{cl1}</code> exists in Google Ads (columns A/B/C).
+                                    Lists mismatches between campaign names and taxonomy labels.
+                                </p>
+                                <select class="form-select mb-2" id="coverageCountry" style="max-width:120px;">
+                                    <option value="NL" selected>NL</option>
+                                    <option value="BE">BE</option>
+                                </select>
+                                <button class="btn btn-primary" id="coverageRunBtn" onclick="runCoverage()">Run Coverage</button>
+                            </div>
+                        </div>
+
+                        <div id="mcProgress" class="mt-3" style="display:none;">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span id="mcProgressLabel">Starting...</span>
+                                <span id="mcProgressPct"></span>
+                            </div>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" id="mcProgressBar" style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <div id="mcLogWrap" class="mt-3" style="display:none;">
+                            <label class="form-label fw-semibold mb-1">Live log</label>
+                            <div class="log-output" id="mcLog"></div>
+                        </div>
+
+                        <div id="mcDone" class="mt-3" style="display:none;">
+                            <span id="mcSummary" class="me-3"></span>
+                            <a class="btn btn-outline-secondary btn-sm" id="mcDownloadBtn" href="#" target="_blank">Download xlsx</a>
+                        </div>
+
+                        <div id="mcErrors" class="mt-3" style="display:none;">
+                            <h6>Errors <span class="badge bg-danger" id="mcErrorCount"></span></h6>
+                            <div class="table-responsive" style="max-height: 260px;">
+                                <table class="table table-sm table-striped">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Country</th><th>Op</th><th>Sheet</th><th>Row</th>
+                                            <th>Shop</th><th>Maincat</th><th>cl1</th><th>Error</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="mcErrorsBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Progress -->
                 <div class="card mb-4" id="progressCard" style="display:none;">
                     <div class="card-body">
@@ -395,6 +465,132 @@
     async function cancelOperation() {
         if (!currentTaskId) return;
         await fetch(`${API}/api/dma-plus/cancel/${currentTaskId}`, { method: 'POST' });
+    }
+
+    // -----------------------------------------------------------------
+    // Monthly Delta + Coverage (separate flow; uses its own progress/log
+    // UI so it doesn't collide with the per-shop Start flow above).
+    // -----------------------------------------------------------------
+    let mcTaskId = null;
+    let mcPoll = null;
+
+    function mcSetRunning(busy) {
+        document.getElementById('monthlyRunBtn').disabled = busy;
+        document.getElementById('coverageRunBtn').disabled = busy;
+    }
+
+    function mcReset() {
+        document.getElementById('mcLog').textContent = '';
+        document.getElementById('mcLogWrap').style.display = 'none';
+        document.getElementById('mcProgress').style.display = '';
+        document.getElementById('mcProgressBar').style.width = '0%';
+        document.getElementById('mcProgressBar').classList.remove('bg-danger');
+        document.getElementById('mcProgressBar').classList.add('progress-bar-animated');
+        document.getElementById('mcProgressLabel').textContent = 'Starting...';
+        document.getElementById('mcProgressPct').textContent = '';
+        document.getElementById('mcDone').style.display = 'none';
+        document.getElementById('mcErrors').style.display = 'none';
+        document.getElementById('mcErrorsBody').innerHTML = '';
+    }
+
+    async function runMonthly() {
+        const input = document.getElementById('monthlyFile');
+        if (input.files.length === 0) { alert('Pick a monthly delta xlsx first'); return; }
+        mcReset();
+        mcSetRunning(true);
+        const fd = new FormData();
+        fd.append('file', input.files[0]);
+        try {
+            const r = await fetch(`${API}/api/dma-plus/monthly`, { method: 'POST', body: fd });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.detail || 'Start failed');
+            mcTaskId = d.task_id;
+            mcPoll = setInterval(mcPollStatus, 1500);
+        } catch (e) {
+            alert('Error: ' + e.message);
+            mcSetRunning(false);
+        }
+    }
+
+    async function runCoverage() {
+        const country = document.getElementById('coverageCountry').value;
+        mcReset();
+        mcSetRunning(true);
+        try {
+            const r = await fetch(`${API}/api/dma-plus/coverage?country=${country}`, { method: 'POST' });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.detail || 'Start failed');
+            mcTaskId = d.task_id;
+            mcPoll = setInterval(mcPollStatus, 1500);
+        } catch (e) {
+            alert('Error: ' + e.message);
+            mcSetRunning(false);
+        }
+    }
+
+    async function mcPollStatus() {
+        if (!mcTaskId) return;
+        try {
+            const r = await fetch(`${API}/api/dma-plus/status/${mcTaskId}`);
+            const d = await r.json();
+            const p = d.progress || 0;
+            document.getElementById('mcProgressBar').style.width = p + '%';
+            document.getElementById('mcProgressPct').textContent = p + '%';
+            document.getElementById('mcProgressLabel').textContent = d.message || d.status;
+
+            if (Array.isArray(d.log) && d.log.length) {
+                const logEl = document.getElementById('mcLog');
+                logEl.textContent = d.log.join('\n');
+                logEl.scrollTop = logEl.scrollHeight;
+                document.getElementById('mcLogWrap').style.display = '';
+            }
+
+            if (d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled') {
+                clearInterval(mcPoll); mcPoll = null; mcSetRunning(false);
+                const bar = document.getElementById('mcProgressBar');
+                bar.classList.remove('progress-bar-animated');
+                if (d.status !== 'completed') bar.classList.add('bg-danger');
+
+                document.getElementById('mcDone').style.display = '';
+                let summaryText = '';
+                if (d.summary) {
+                    summaryText = Object.entries(d.summary).map(([cc, v]) => {
+                        if (v && typeof v === 'object' && ('a' in v || 'b' in v || 'c' in v)) {
+                            return `${cc}: a=${v.a||0} b=${v.b||0} c=${v.c||0} (${v.total||0} rows)`;
+                        }
+                        const ops = Object.entries(v).map(([op, x]) => `${op} ${x.rows||0}r/${x.errors||0}e`).join(', ');
+                        return `${cc}: ${ops}`;
+                    }).join(' | ');
+                }
+                document.getElementById('mcSummary').textContent = summaryText;
+
+                const dl = document.getElementById('mcDownloadBtn');
+                if (d.output_path) {
+                    dl.href = `${API}/api/dma-plus/download/${mcTaskId}`;
+                    dl.classList.remove('disabled');
+                } else {
+                    dl.classList.add('disabled');
+                    dl.removeAttribute('href');
+                }
+
+                const errs = d.errors || [];
+                if (errs.length > 0) {
+                    document.getElementById('mcErrorCount').textContent = errs.length;
+                    const tbody = document.getElementById('mcErrorsBody');
+                    for (const e of errs.slice(0, 500)) {
+                        const tr = document.createElement('tr');
+                        const esc = v => (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                        tr.innerHTML = `<td>${esc(e.country)}</td><td>${esc(e.operation)}</td><td>${esc(e.source_sheet)}</td><td>${esc(e.source_row)}</td><td>${esc(e.shop)}</td><td>${esc(e.maincat)}</td><td>${esc(e.cl1)}</td><td>${esc(e.error)}</td>`;
+                        tbody.appendChild(tr);
+                    }
+                    document.getElementById('mcErrors').style.display = '';
+                }
+
+                loadHistory && loadHistory();
+            }
+        } catch (e) {
+            console.error('mcPoll error:', e);
+        }
     }
 
     function showResults(task) {

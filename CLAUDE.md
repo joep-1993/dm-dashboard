@@ -10,13 +10,12 @@ This project is **Content Top** - an SEO content generation system.
 - **Timezone**: Europe/Amsterdam (CET/CEST)
 
 ## Development Workflow
-1. Run `docker-compose up` to start everything
+1. Start the backend: `uvicorn backend.main:app --reload --port 8003`
 2. Edit files directly - they auto-reload
 3. Access frontend at http://localhost:8003/static/index.html (port 8003, not 8001)
 
 ## Important Notes
 - **No Build Tools**: Edit HTML/CSS/JS directly
-- **Docker First**: Everything runs in containers
 - **Simple Scale**: Designed for small teams (1-10 users)
 - **Hybrid Database**: Local PostgreSQL for tracking, Redshift for content storage
 
@@ -46,7 +45,7 @@ This project is **Content Top** - an SEO content generation system.
   - `GOOGLE_CLIENT_SECRET` - OAuth2 client secret
   - `GOOGLE_LOGIN_CUSTOMER_ID` - Customer ID for account access
 - **Documentation**: https://developers.google.com/google-ads/api/docs/oauth/cloud-project
-- **Access**: Environment variables automatically loaded in Docker container
+- **Access**: Environment variables loaded from `.env` via `python-dotenv`
 
 ## What It Does
 Processes URLs from database, scrapes product information, generates AI-powered SEO content, and saves results.
