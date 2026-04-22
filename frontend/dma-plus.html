@@ -299,9 +299,10 @@
         document.getElementById('shopTabLi').style.display = isShopInputOp ? '' : 'none';
         document.getElementById('optionsRow').style.display = (isShopInputOp || isMonthly) ? 'none' : '';
         document.getElementById('fixCheck').style.display = selectedOp === 'validate_ads' ? '' : 'none';
-        // Dry-run toggle doesn't apply to Monthly (always real).
+        // Dry-run toggle applies to every op (Monthly runs all four v2
+        // processors which all support dry_run).
         const dryRunWrap = document.getElementById('dryRun').parentElement;
-        dryRunWrap.style.display = isMonthly ? 'none' : '';
+        dryRunWrap.style.display = '';
 
         // Country selector doesn't apply to Monthly (both NL + BE run from the file).
         document.getElementById('countrySelect').disabled = isMonthly;
@@ -325,7 +326,7 @@
         const btn = document.getElementById('startBtn');
         btn.disabled = true;
 
-        // Monthly delta is its own endpoint — just a file upload, no shop/country form.
+        // Monthly delta is its own endpoint — just a file upload + dry_run flag.
         if (selectedOp === 'monthly') {
             const fileInput = document.getElementById('fileInput');
             if (fileInput.files.length === 0) {
@@ -335,6 +336,7 @@
             }
             const fd = new FormData();
             fd.append('file', fileInput.files[0]);
+            fd.append('dry_run', document.getElementById('dryRun').checked);
             try {
                 const r = await fetch(`${API}/api/dma-plus/monthly`, { method: 'POST', body: fd });
                 const d = await r.json();

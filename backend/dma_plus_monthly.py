@@ -365,20 +365,23 @@ def _run_one_operation(task_id, op_label, wb, src_rows, country, source_sheet,
     return len(results), len(errors)
 
 
-def run_monthly_delta(task_id: str, wb_bytes: bytes):
+def run_monthly_delta(task_id: str, wb_bytes: bytes, dry_run: bool = False):
     """Background-thread target for the monthly delta flow."""
     try:
         _set_task(task_id, {
             **(_get_task(task_id) or {}),
             "status": "running",
             "progress": 2,
-            "message": "Loading workbook...",
+            "message": "Loading workbook..." + (" [DRY RUN]" if dry_run else ""),
             "log": [],
             "errors": [],
+            "dry_run": dry_run,
         })
 
         src_wb = openpyxl.load_workbook(io.BytesIO(wb_bytes), data_only=True)
         _append_log(task_id, f"Source sheets: {src_wb.sheetnames}")
+        if dry_run:
+            _append_log(task_id, "DRY RUN: no mutations will be sent to Google Ads")
 
         from backend import campaign_processor as cp
 
@@ -388,7 +391,7 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes):
         for country in ("NL", "BE"):
             _check_cancelled(task_id)
             _append_log(task_id, f"==== Country: {country} ====", progress=overall_progress,
-                        message=f"Processing {country}...")
+                        message=f"Processing {country}..." + (" [DRY RUN]" if dry_run else ""))
             summary[country] = {}
             sheets = DMA_PLUS_SHEETS[country]
 
@@ -406,7 +409,7 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes):
                 if len(src_inc) > 0:
                     n_rows, n_err = _run_one_operation(
                         task_id, "include", wb_inc, src_inc, country, nieuw_name,
-                        lambda c, w, cid: cp.process_inclusion_sheet_v2(c, w, cid),
+                        lambda c, w, cid: cp.process_inclusion_sheet_v2(c, w, cid, dry_run=dry_run),
                         ("toevoegen", 6, 7),
                     )
                     summary[country]["include"] = {"rows": n_rows, "errors": n_err}
@@ -422,7 +425,7 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes):
                 if len(src_exc) > 0:
                     n_rows, n_err = _run_one_operation(
                         task_id, "exclude", wb_exc, src_exc, country, nieuw_name,
-                        lambda c, w, cid: cp.process_exclusion_sheet_v2(c, w, cid),
+                        lambda c, w, cid: cp.process_exclusion_sheet_v2(c, w, cid, dry_run=dry_run),
                         ("uitsluiten", 5, 6),
                     )
                     summary[country]["exclude"] = {"rows": n_rows, "errors": n_err}
@@ -442,7 +445,7 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes):
                 if len(src_rex) > 0:
                     n_rows, n_err = _run_one_operation(
                         task_id, "reverse_exclude", wb_rex, src_rex, country, afvallers_name,
-                        lambda c, w, cid: cp.process_reverse_exclusion_sheet(c, w, cid),
+                        lambda c, w, cid: cp.process_reverse_exclusion_sheet(c, w, cid, dry_run=dry_run),
                         ("verwijderen", 5, 6),
                     )
                     summary[country]["reverse_exclude"] = {"rows": n_rows, "errors": n_err}
@@ -457,7 +460,7 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes):
                 if len(src_rin) > 0:
                     n_rows, n_err = _run_one_operation(
                         task_id, "reverse_include", wb_rin, src_rin, country, afvallers_name,
-                        lambda c, w, cid: cp.process_reverse_inclusion_sheet_v2(c, w, cid),
+                        lambda c, w, cid: cp.process_reverse_inclusion_sheet_v2(c, w, cid, dry_run=dry_run),
                         ("toevoegen", 6, 7),
                     )
                     summary[country]["reverse_include"] = {"rows": n_rows, "errors": n_err}
@@ -606,17 +609,19 @@ def run_category_coverage(task_id: str, country: str):
 # ---------------------------------------------------------------------------
 # Public entry points (called from router)
 # ---------------------------------------------------------------------------
-def start_monthly(wb_bytes: bytes) -> str:
+def start_monthly(wb_bytes: bytes, dry_run: bool = False) -> str:
     task_id = uuid.uuid4().hex[:8]
     _set_task(task_id, {
         "status": "queued",
         "operation": "monthly_delta",
         "country": "NL+BE",
         "progress": 0,
-        "message": "Queued...",
+        "message": "Queued..." + (" [DRY RUN]" if dry_run else ""),
         "started_at": datetime.now().isoformat(),
+        "dry_run": dry_run,
     })
-    threading.Thread(target=run_monthly_delta, args=(task_id, wb_bytes), daemon=True).start()
+    threading.Thread(target=run_monthly_delta, args=(task_id, wb_bytes),
+                     kwargs={"dry_run": dry_run}, daemon=True).start()
     return task_id
 
 
