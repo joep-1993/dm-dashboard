@@ -24,6 +24,19 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import openpyxl
+
+# On Windows, Python's stdio defaults to cp1252 which blows up on non-ASCII
+# output from the Google Ads library / campaign_processor. Force UTF-8 with
+# errors='replace' as a belt-and-suspenders guard (stderr + stdout are also
+# redirected per-call during processor runs, but logging can fire earlier).
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 from google.ads.googleads.client import GoogleAdsClient
 
 logger = logging.getLogger(__name__)
@@ -520,13 +533,15 @@ def _run_operation(task_id: str, operation: str, country: str,
                 raise ValueError("No workbook provided for inclusion")
 
             # Redirect stdout to capture progress
-            old_stdout = sys.stdout
+            old_stdout, old_stderr = sys.stdout, sys.stderr
             captured = io.StringIO()
             sys.stdout = captured
+            sys.stderr = captured
             try:
                 cp.process_inclusion_sheet_v2(client, wb, customer_id, dry_run=dry_run)
             finally:
                 sys.stdout = old_stdout
+                sys.stderr = old_stderr
 
             full_log = captured.getvalue()
             results = _extract_results(wb, "toevoegen", 6, 7)  # col G=result, H=error
@@ -545,13 +560,15 @@ def _run_operation(task_id: str, operation: str, country: str,
             if not wb:
                 raise ValueError("No workbook provided for exclusion")
 
-            old_stdout = sys.stdout
+            old_stdout, old_stderr = sys.stdout, sys.stderr
             captured = io.StringIO()
             sys.stdout = captured
+            sys.stderr = captured
             try:
                 cp.process_exclusion_sheet_v2(client, wb, customer_id, dry_run=dry_run)
             finally:
                 sys.stdout = old_stdout
+                sys.stderr = old_stderr
 
             full_log = captured.getvalue()
             results = _extract_results(wb, "uitsluiten", 5, 6)  # col F=result, G=error
@@ -571,13 +588,15 @@ def _run_operation(task_id: str, operation: str, country: str,
             if not wb:
                 raise ValueError("No workbook provided for reverse_inclusion")
 
-            old_stdout = sys.stdout
+            old_stdout, old_stderr = sys.stdout, sys.stderr
             captured = io.StringIO()
             sys.stdout = captured
+            sys.stderr = captured
             try:
                 cp.process_reverse_inclusion_sheet_v2(client, wb, customer_id, dry_run=dry_run)
             finally:
                 sys.stdout = old_stdout
+                sys.stderr = old_stderr
 
             full_log = captured.getvalue()
             results = _extract_results(wb, "toevoegen", 6, 7)  # col G=result, H=error
@@ -597,13 +616,15 @@ def _run_operation(task_id: str, operation: str, country: str,
             if not wb:
                 raise ValueError("No workbook provided for reverse_exclusion")
 
-            old_stdout = sys.stdout
+            old_stdout, old_stderr = sys.stdout, sys.stderr
             captured = io.StringIO()
             sys.stdout = captured
+            sys.stderr = captured
             try:
                 cp.process_reverse_exclusion_sheet(client, wb, customer_id, dry_run=dry_run)
             finally:
                 sys.stdout = old_stdout
+                sys.stderr = old_stderr
 
             full_log = captured.getvalue()
             results = _extract_results(wb, "verwijderen", 5, 6)  # col F=result, G=error
@@ -617,9 +638,10 @@ def _run_operation(task_id: str, operation: str, country: str,
 
         # ---- VALIDATE CL1 ----
         elif operation == "validate_cl1":
-            old_stdout = sys.stdout
+            old_stdout, old_stderr = sys.stdout, sys.stderr
             captured = io.StringIO()
             sys.stdout = captured
+            sys.stderr = captured
             try:
                 result_data = cp.validate_cl1_targeting_for_campaigns(
                     client, customer_id,
@@ -628,15 +650,17 @@ def _run_operation(task_id: str, operation: str, country: str,
                 )
             finally:
                 sys.stdout = old_stdout
+                sys.stderr = old_stderr
             full_log = captured.getvalue()
             if result_data:
                 result_data["log"] = full_log[-5000:]
 
         # ---- VALIDATE ADS ----
         elif operation == "validate_ads":
-            old_stdout = sys.stdout
+            old_stdout, old_stderr = sys.stdout, sys.stderr
             captured = io.StringIO()
             sys.stdout = captured
+            sys.stderr = captured
             try:
                 result_data = cp.validate_ads_for_campaigns(
                     client, customer_id,
@@ -646,15 +670,17 @@ def _run_operation(task_id: str, operation: str, country: str,
                 )
             finally:
                 sys.stdout = old_stdout
+                sys.stderr = old_stderr
             full_log = captured.getvalue()
             if result_data:
                 result_data["log"] = full_log[-5000:]
 
         # ---- VALIDATE LISTING TREES ----
         elif operation == "validate_trees":
-            old_stdout = sys.stdout
+            old_stdout, old_stderr = sys.stdout, sys.stderr
             captured = io.StringIO()
             sys.stdout = captured
+            sys.stderr = captured
             excel_path = None
             try:
                 # validate_trees needs a cat_ids sheet to map deepest_cat → cat_id.
@@ -682,6 +708,7 @@ def _run_operation(task_id: str, operation: str, country: str,
                 )
             finally:
                 sys.stdout = old_stdout
+                sys.stderr = old_stderr
                 if excel_path:
                     try:
                         os.unlink(excel_path)

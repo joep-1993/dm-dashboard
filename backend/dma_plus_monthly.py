@@ -51,6 +51,19 @@ from backend.dma_plus_service import (
 
 logger = logging.getLogger(__name__)
 
+# On Windows, Python's sys.stdout/stderr default to the console's cp1252
+# codec. Any print or logging.warning with non-ASCII (Dutch campaign names,
+# emoji used throughout campaign_processor.py) blows up with
+# "'charmap' codec can't encode …". Force UTF-8 with errors='replace' so a
+# bad character can never kill the worker thread.
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 # ---------------------------------------------------------------------------
 # Constants — matches the DMA+ delta file layout
 # ---------------------------------------------------------------------------
@@ -328,13 +341,19 @@ def _run_one_operation(task_id, op_label, wb, src_rows, country, source_sheet,
 
     sheet_name, result_col, error_col = extract_cols
 
-    old_stdout = sys.stdout
+    # Redirect BOTH stdout and stderr to an in-memory buffer. stderr matters
+    # because the Google Ads library + logging module often write there, and
+    # on Windows that stream has a cp1252 codec that chokes on Dutch category
+    # names / emoji.
+    old_stdout, old_stderr = sys.stdout, sys.stderr
     captured = io.StringIO()
     sys.stdout = captured
+    sys.stderr = captured
     try:
         processor_call(client, wb, customer_id)
     finally:
         sys.stdout = old_stdout
+        sys.stderr = old_stderr
 
     full_log = captured.getvalue()
     for line in full_log.splitlines():
