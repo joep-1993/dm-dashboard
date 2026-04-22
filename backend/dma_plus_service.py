@@ -428,6 +428,67 @@ def _run_operation(task_id: str, operation: str, country: str,
             wb = _build_reverse_exclusion_workbook(shop_name, maincat, maincat_id, cl1 or "a")
             wb_bytes = None
 
+        # If the uploaded workbook is in the new DMA+ delta layout (per-country
+        # sheets "NL/BE - Nieuw (aanmaken)" and "NL/BE - Afvallers"), transform
+        # it into the conventional per-op layout that the processors expect.
+        # This lets the user upload a single delta file and pick any of
+        # inclusion / exclusion / reverse_inclusion / reverse_exclusion.
+        if wb_bytes and operation in (
+            "inclusion", "exclusion", "reverse_inclusion", "reverse_exclusion"
+        ):
+            _check_cancelled(task_id)
+            from backend.dma_plus_monthly import (
+                DMA_PLUS_SHEETS,
+                DMA_PLUS_DEFAULT_BUDGET,
+                _build_inclusion_workbook_from_source,
+                _build_exclusion_workbook_from_source,
+                _build_reverse_exclusion_workbook_from_source,
+                _build_reverse_inclusion_workbook_from_source,
+            )
+            probe_wb = openpyxl.load_workbook(io.BytesIO(wb_bytes), data_only=True, read_only=True)
+            probe_sheets = set(probe_wb.sheetnames)
+            delta_sheetnames = {
+                name
+                for cc in DMA_PLUS_SHEETS.values()
+                for name in cc.values()
+            }
+            if probe_sheets & delta_sheetnames:
+                # Which source sheet to read depends on op + country.
+                src_sheet_name = (
+                    DMA_PLUS_SHEETS[country]["nieuw"]
+                    if operation in ("inclusion", "exclusion")
+                    else DMA_PLUS_SHEETS[country]["afvallers"]
+                )
+                if src_sheet_name not in probe_sheets:
+                    raise ValueError(
+                        f"Uploaded file looks like a DMA+ delta workbook but is missing "
+                        f"sheet '{src_sheet_name}' (needed for operation={operation}, country={country}). "
+                        f"Sheets present: {sorted(probe_sheets)}"
+                    )
+
+                src_wb_full = openpyxl.load_workbook(io.BytesIO(wb_bytes), data_only=True)
+                src_ws = src_wb_full[src_sheet_name]
+                _set_task(task_id, {**_get_task(task_id), "progress": 6,
+                                    "message": f"Expanding '{src_sheet_name}' for {operation}..."})
+
+                if operation == "inclusion":
+                    new_wb, _src_rows = _build_inclusion_workbook_from_source(src_ws, DMA_PLUS_DEFAULT_BUDGET)
+                elif operation == "exclusion":
+                    new_wb, _src_rows = _build_exclusion_workbook_from_source(src_ws)
+                elif operation == "reverse_exclusion":
+                    new_wb, _src_rows = _build_reverse_exclusion_workbook_from_source(src_ws)
+                else:  # reverse_inclusion
+                    new_wb, _src_rows = _build_reverse_inclusion_workbook_from_source(src_ws)
+
+                buf = io.BytesIO()
+                new_wb.save(buf)
+                wb_bytes = buf.getvalue()
+                logger.info(
+                    f"Transformed DMA+ delta workbook: read '{src_sheet_name}' "
+                    f"({_src_rows[-1] - 1 if _src_rows else 0} source rows), "
+                    f"produced {operation} layout with {len(_src_rows)} fanned rows (cl1 a/b/c)"
+                )
+
         _check_cancelled(task_id)
 
         # Patch campaign_processor for country
