@@ -224,7 +224,10 @@
                     <div class="card mb-4">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <h5 class="mb-0">Results</h5>
-                            <button class="btn btn-sm btn-outline-primary" onclick="copyResults()">Copy Results</button>
+                            <div>
+                                <a id="downloadXlsxBtn" class="btn btn-sm btn-primary me-2 d-none" href="#" target="_blank">Download xlsx</a>
+                                <button class="btn btn-sm btn-outline-primary" onclick="copyResults()">Copy Results</button>
+                            </div>
                         </div>
                         <div class="card-body">
                             <div class="row mb-3 g-2" id="statsRow"></div>
@@ -454,6 +457,10 @@
         const result = task.result || {};
         const op = task.operation;
 
+        // Reset the Download xlsx header button — only Monthly Delta re-shows it.
+        const dlReset = document.getElementById('downloadXlsxBtn');
+        if (dlReset) { dlReset.classList.add('d-none'); dlReset.removeAttribute('href'); }
+
         // Stats
         const statsRow = document.getElementById('statsRow');
         if (op === 'inclusion' || op === 'exclusion' || op === 'reverse_inclusion' || op === 'reverse_exclusion') {
@@ -487,10 +494,14 @@
                 for (const v of Object.values(summary[cc])) totalRows += (v.rows || 0);
             }
             statsRow.innerHTML = `
-                <div class="col-3"><div class="stat-box bg-light"><div class="num">${Object.keys(summary).length}</div><div class="label">Countries</div></div></div>
-                <div class="col-3"><div class="stat-box bg-light"><div class="num">${totalRows}</div><div class="label">Rows processed</div></div></div>
-                <div class="col-3"><div class="stat-box" style="background:${errs > 0 ? '#f8d7da' : '#d1e7dd'};"><div class="num" style="color:${errs > 0 ? '#dc3545' : '#198754'};">${errs}</div><div class="label">Errors</div></div></div>
-                <div class="col-3"><div class="stat-box bg-light"><a href="${API}/api/dma-plus/download/${task.task_id || currentTaskId}" class="btn btn-sm btn-primary" style="margin-top:8px;" target="_blank">Download xlsx</a></div></div>`;
+                <div class="col-4"><div class="stat-box bg-light"><div class="num">${Object.keys(summary).length}</div><div class="label">Countries</div></div></div>
+                <div class="col-4"><div class="stat-box bg-light"><div class="num">${totalRows}</div><div class="label">Rows processed</div></div></div>
+                <div class="col-4"><div class="stat-box" style="background:${errs > 0 ? '#f8d7da' : '#d1e7dd'};"><div class="num" style="color:${errs > 0 ? '#dc3545' : '#198754'};">${errs}</div><div class="label">Errors</div></div></div>`;
+
+            // Show Download xlsx in the Results card header, next to Copy Results.
+            const dl = document.getElementById('downloadXlsxBtn');
+            dl.href = `${API}/api/dma-plus/download/${task.task_id || currentTaskId}`;
+            dl.classList.remove('d-none');
 
             // Per-op breakdown + errors table
             const escHtml = v => (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
