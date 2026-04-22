@@ -2,6 +2,11 @@
 
 This project is **Content Top** - an SEO content generation system.
 
+> **Edit here, push to `dm-dashboard`.** This directory is the working copy.
+> Don't mirror features into `~/projects/dma_script` or other projects —
+> dma_script is a separate standalone tool. The local `origin` remote already
+> points to the `dm-dashboard` GitHub repo; pull --rebase before each push.
+
 ## Tech Stack
 - **Backend**: FastAPI with auto-reload
 - **Frontend**: Static files with Bootstrap CDN (no build tools)
