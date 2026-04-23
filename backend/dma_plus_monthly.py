@@ -137,6 +137,7 @@ def _fetch_taxv2_tree(locale: str = "nl-NL", force_refresh: bool = False) -> dic
 
     id_to_parent: dict = {}
     id_to_name: dict = {}
+    id_to_isbidding: dict = {}
     children_of = defaultdict(list)
     id_order: list = []
 
@@ -146,6 +147,7 @@ def _fetch_taxv2_tree(locale: str = "nl-NL", force_refresh: bool = False) -> dic
             continue
         id_to_parent[cid] = cat.get("parentId")
         id_to_name[cid] = pick_name(cat.get("labels")) or str(cid)
+        id_to_isbidding[cid] = bool(cat.get("isBiddingCategory"))
         id_order.append(cid)
 
     frontier = list(id_to_parent.keys())
@@ -165,6 +167,7 @@ def _fetch_taxv2_tree(locale: str = "nl-NL", force_refresh: bool = False) -> dic
                         continue
                     id_to_parent[sid] = sub.get("parentId", cid)
                     id_to_name[sid] = pick_name(sub.get("labels")) or str(sid)
+                    id_to_isbidding[sid] = bool(sub.get("isBiddingCategory"))
                     children_of[cid].append(sid)
                     id_order.append(sid)
                     next_frontier.append(sid)
@@ -191,6 +194,7 @@ def _fetch_taxv2_tree(locale: str = "nl-NL", force_refresh: bool = False) -> dic
     tree = {
         "id_to_parent": id_to_parent,
         "id_to_name": id_to_name,
+        "id_to_isbidding": id_to_isbidding,
         "children_of": dict(children_of),
         "leaves_of": leaves_of,
         "id_order": id_order,
@@ -572,10 +576,12 @@ def run_category_coverage(task_id: str, country: str):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = f"coverage_{country}"
-        ws.append(["a", "b", "c", "category_id", "category_name", "parent_id", "is_leaf"])
+        ws.append(["a", "b", "c", "category_id", "category_name", "parent_id",
+                   "is_leaf", "is_bidding_category", "all_cl1_present"])
 
         id_to_parent = tree["id_to_parent"]
         id_to_name = tree["id_to_name"]
+        id_to_isbidding = tree.get("id_to_isbidding", {})
         children_of = tree["children_of"]
         counts = {"a": 0, "b": 0, "c": 0}
 
@@ -590,7 +596,10 @@ def run_category_coverage(task_id: str, country: str):
                 flags.append(bool(exists))
                 if exists:
                     counts[cl1] += 1
-            ws.append([flags[0], flags[1], flags[2], cid, name, parent_id, is_leaf])
+            all_present = all(flags)
+            is_bidding = bool(id_to_isbidding.get(cid, False))
+            ws.append([flags[0], flags[1], flags[2], cid, name, parent_id,
+                       is_leaf, is_bidding, all_present])
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_path = OUTPUT_DIR / f"category_coverage_{country}_{ts}.xlsx"
