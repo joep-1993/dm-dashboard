@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Redirects</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .log-output { max-height: 320px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; }
+        .stat-box { text-align: center; padding: 10px; border-radius: 8px; }
+        .stat-box .num { font-size: 1.4rem; font-weight: bold; }
+        .stat-box .label { font-size: 0.72rem; text-transform: uppercase; color: #6c757d; }
+        .history-row { font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Auto-Redirects</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/faq.html" class="nav-dropdown-item">FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item">Kopteksten</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item">Redirects</a>
+                        <a href="/static/canonical.html" class="nav-dropdown-item">Canonicals</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item">Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/indexnow.html" class="nav-dropdown-item">IndexNow</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item">Index Checker</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item">Thema Ads</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item">GSD Campaigns</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item">GSD Budgets</a>
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item">DMA Bidding</a>
+                        <a href="/static/dma-plus.html" class="nav-dropdown-item">DMA+</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item">MC ID Finder</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rfinder.html" class="nav-dropdown-item">R-Finder</a>
+                        <a href="/static/rurl-optimizer.html" class="nav-dropdown-item active">Auto-Redirects</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item">URL Checker</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item">URL Validator</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item">Keyword Planner</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item">Redirect Checker</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item">Redshift Upload</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 pb-5">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Upload & run</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">
+                            Converts generic R-URLs (<code>/products/&lt;cat&gt;/&lt;cat_id&gt;/r/&lt;keyword&gt;/</code>) into
+                            filtered category pages with facets. Upload a CSV with an <code>r_url</code> column;
+                            the tool pulls taxonomy+facet data from Redshift and matches each URL to its best redirect.
+                        </p>
+
+                        <form id="runForm" class="row g-3">
+                            <div class="col-md-6">
+                                <label for="csvFile" class="form-label">Input CSV</label>
+                                <input type="file" class="form-control" id="csvFile" accept=".csv" required>
+                            </div>
+                            <div class="col-md-2">
+                                <label for="urlColumn" class="form-label">URL column</label>
+                                <input type="text" class="form-control" id="urlColumn" value="r_url">
+                            </div>
+                            <div class="col-md-2">
+                                <label for="workers" class="form-label">Workers</label>
+                                <input type="number" class="form-control" id="workers" min="1" max="32" placeholder="auto">
+                            </div>
+                            <div class="col-md-2">
+                                <label for="threshold" class="form-label">Fuzzy threshold</label>
+                                <input type="number" class="form-control" id="threshold" value="80" min="50" max="100">
+                            </div>
+
+                            <div class="col-12">
+                                <div class="form-check form-check-inline">
+                                    <input type="checkbox" class="form-check-input" id="multiFacet" checked>
+                                    <label for="multiFacet" class="form-check-label">Multi-facet matching</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input type="checkbox" class="form-check-input" id="alsoGlobal">
+                                    <label for="alsoGlobal" class="form-check-label">Also process mainpage R-urls</label>
+                                </div>
+                            </div>
+
+                            <div class="col-12 d-flex justify-content-end gap-2">
+                                <button type="button" class="btn btn-outline-danger d-none" id="cancelBtn">Cancel</button>
+                                <button type="submit" class="btn btn-primary" id="runBtn">Run</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card mb-4 d-none" id="statusCard">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Progress</h5>
+                        <span id="statusBadge" class="badge bg-secondary">idle</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-2 small text-muted" id="statusMsg">—</div>
+                        <div class="progress mb-3" style="height: 18px;">
+                            <div class="progress-bar progress-bar-striped" role="progressbar"
+                                 id="progressBar" style="width: 0%">0%</div>
+                        </div>
+
+                        <div class="row g-2 mb-3" id="statsRow" style="display:none;">
+                            <div class="col"><div class="stat-box bg-light"><div class="num" id="statTotal">0</div><div class="label">Total</div></div></div>
+                            <div class="col"><div class="stat-box bg-light"><div class="num" id="statSuccess">0</div><div class="label">Success</div></div></div>
+                            <div class="col"><div class="stat-box bg-light"><div class="num" id="statProdReady">0</div><div class="label">Prod ready (A+B)</div></div></div>
+                        </div>
+
+                        <div class="log-output" id="logOutput"></div>
+
+                        <div class="mt-3 d-none" id="downloadWrap">
+                            <a href="#" class="btn btn-success" id="downloadBtn">Download results CSV</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Recent runs</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <table class="table mb-0" id="historyTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="padding: 8px 12px;">Started</th>
+                                    <th style="padding: 8px 12px;">Script</th>
+                                    <th style="padding: 8px 12px;">Status</th>
+                                    <th style="padding: 8px 12px;">Input</th>
+                                    <th style="padding: 8px 12px;">Message</th>
+                                    <th style="padding: 8px 12px;">Output</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyBody">
+                                <tr><td colspan="6" class="text-muted text-center p-3">No runs yet</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTaskId = null;
+        let pollTimer = null;
+
+        document.getElementById('runForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const file = document.getElementById('csvFile').files[0];
+            if (!file) { alert('Please choose a CSV file.'); return; }
+
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('url_column', document.getElementById('urlColumn').value || 'r_url');
+            const w = document.getElementById('workers').value;
+            if (w) fd.append('workers', w);
+            fd.append('threshold', document.getElementById('threshold').value || '80');
+            fd.append('multi_facet', document.getElementById('multiFacet').checked);
+            fd.append('also_global', document.getElementById('alsoGlobal').checked);
+
+            document.getElementById('runBtn').disabled = true;
+            try {
+                const resp = await fetch('/api/rurl/optimize', { method: 'POST', body: fd });
+                if (!resp.ok) throw new Error(await resp.text());
+                const data = await resp.json();
+                currentTaskId = data.task_id;
+                document.getElementById('statusCard').classList.remove('d-none');
+                document.getElementById('cancelBtn').classList.remove('d-none');
+                document.getElementById('downloadWrap').classList.add('d-none');
+                startPolling();
+            } catch (err) {
+                alert('Failed to start: ' + err.message);
+                document.getElementById('runBtn').disabled = false;
+            }
+        });
+
+        document.getElementById('cancelBtn').addEventListener('click', async () => {
+            if (!currentTaskId) return;
+            await fetch('/api/rurl/cancel/' + currentTaskId, { method: 'POST' });
+        });
+
+        function startPolling() {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = setInterval(pollStatus, 1500);
+            pollStatus();
+        }
+
+        async function pollStatus() {
+            if (!currentTaskId) return;
+            try {
+                const r = await fetch('/api/rurl/status/' + currentTaskId);
+                if (!r.ok) return;
+                const t = await r.json();
+                renderStatus(t);
+                if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                    document.getElementById('runBtn').disabled = false;
+                    document.getElementById('cancelBtn').classList.add('d-none');
+                    if (t.status === 'completed') {
+                        document.getElementById('downloadWrap').classList.remove('d-none');
+                        document.getElementById('downloadBtn').href = '/api/rurl/download/' + currentTaskId;
+                    }
+                    loadHistory();
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function renderStatus(t) {
+            const badge = document.getElementById('statusBadge');
+            const color = {
+                queued: 'secondary', running: 'primary',
+                completed: 'success', failed: 'danger', cancelled: 'warning'
+            }[t.status] || 'secondary';
+            badge.className = 'badge bg-' + color;
+            badge.textContent = t.status || 'unknown';
+
+            document.getElementById('statusMsg').textContent = t.message || '';
+            const pct = Math.max(0, Math.min(100, t.progress || 0));
+            const bar = document.getElementById('progressBar');
+            bar.style.width = pct + '%';
+            bar.textContent = pct + '%';
+
+            const logEl = document.getElementById('logOutput');
+            const wasAtBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 20;
+            logEl.textContent = (t.log || []).join('\n');
+            if (wasAtBottom) logEl.scrollTop = logEl.scrollHeight;
+
+            // Parse summary stats out of the tail of the log, if present.
+            const log = (t.log || []).join('\n');
+            const totalMatch = log.match(/Total URLs processed:\s+([\d,]+)/);
+            const successMatch = log.match(/Successful redirects:\s+([\d,]+)/);
+            const prodMatch = log.match(/Production ready \(A\+B\):\s+([\d,]+)/);
+            if (totalMatch || successMatch || prodMatch) {
+                document.getElementById('statsRow').style.display = '';
+                if (totalMatch) document.getElementById('statTotal').textContent = totalMatch[1];
+                if (successMatch) document.getElementById('statSuccess').textContent = successMatch[1];
+                if (prodMatch) document.getElementById('statProdReady').textContent = prodMatch[1];
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const r = await fetch('/api/rurl/history');
+                if (!r.ok) return;
+                const rows = await r.json();
+                const tbody = document.getElementById('historyBody');
+                if (!rows.length) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">No runs yet</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = rows.map(h => {
+                    const started = h.started_at ? new Date(h.started_at).toLocaleString() : '—';
+                    const color = {
+                        completed: 'success', failed: 'danger', cancelled: 'warning', running: 'primary'
+                    }[h.status] || 'secondary';
+                    const filename = (h.params && h.params.filename) || '';
+                    const msg = h.error || h.message || '';
+                    const outName = h.output_path ? h.output_path.split('/').pop() : '';
+                    const dl = h.status === 'completed' && h.task_id
+                        ? `<a href="/api/rurl/download/${h.task_id}">${outName}</a>`
+                        : (outName || '—');
+                    return `<tr class="history-row">
+                        <td style="padding: 6px 12px;">${started}</td>
+                        <td style="padding: 6px 12px;">${h.script || ''}</td>
+                        <td style="padding: 6px 12px;"><span class="badge bg-${color}">${h.status || ''}</span></td>
+                        <td style="padding: 6px 12px;">${filename}</td>
+                        <td style="padding: 6px 12px;">${msg}</td>
+                        <td style="padding: 6px 12px;">${dl}</td>
+                    </tr>`;
+                }).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        loadHistory();
+    </script>
+</body>
+</html>

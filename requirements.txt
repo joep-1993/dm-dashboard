@@ -15,6 +15,10 @@ pandas==2.2.0
 openpyxl==3.1.2
 gspread>=6.0.0
 pytz>=2024.1
+# R-URL Optimizer
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.21.0
+tqdm>=4.65.0
 # The vendored SA360 SDK imports pkg_resources, which setuptools 81+ no longer
 # ships by default. Pin to an older setuptools until Google ships an SDK build
 # that drops the pkg_resources dependency.
