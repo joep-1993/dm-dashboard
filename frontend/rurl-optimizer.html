@@ -112,10 +112,6 @@
 
                             <div class="col-12">
                                 <div class="form-check form-check-inline">
-                                    <input type="checkbox" class="form-check-input" id="multiFacet" checked>
-                                    <label for="multiFacet" class="form-check-label">Multi-facet matching</label>
-                                </div>
-                                <div class="form-check form-check-inline">
                                     <input type="checkbox" class="form-check-input" id="alsoGlobal">
                                     <label for="alsoGlobal" class="form-check-label">Mainpage R-urls</label>
                                 </div>
@@ -220,7 +216,6 @@
             const w = document.getElementById('workers').value;
             if (w && Number(w) > 0) fd.append('workers', w);
             fd.append('threshold', document.getElementById('threshold').value || '80');
-            fd.append('multi_facet', document.getElementById('multiFacet').checked);
             fd.append('also_global', document.getElementById('alsoGlobal').checked);
             fd.append('force_reprocess', document.getElementById('forceReprocess').checked);
 
