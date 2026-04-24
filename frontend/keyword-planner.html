@@ -14,8 +14,8 @@
         .volume-zero { color: #dc3545; }
         .keyword-cell { font-family: monospace; font-size: 0.85rem; }
         .upload-zone { border: 2px dashed #dee2e6; border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.2s; }
-        .upload-zone:hover { border-color: #90B664; background: #f8f9fc; }
-        .upload-zone.dragover { border-color: #90B664; background: #f0eef5; }
+        .upload-zone:hover { border-color: #5e4a90; background: #f8f9fc; }
+        .upload-zone.dragover { border-color: #5e4a90; background: #f0eef5; }
         .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
         .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
@@ -83,7 +83,7 @@
                 <div class="card mb-4">
                     <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Keyword Input</h5>
-                        <button class="btn btn-sm" style="border: 1px solid #90B664; color: #90B664; background: white;" onmouseover="this.style.background='#90B664';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#90B664'" onclick="testConnection()">Test API Connection</button>
+                        <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="testConnection()">Test API Connection</button>
                     </div>
                     <div class="card-body">
                         <ul class="nav nav-tabs mb-3" id="inputTabs">
@@ -101,7 +101,7 @@
                             </div>
                             <div class="tab-pane" id="excelInput">
                                 <div class="upload-zone" id="uploadZone" onclick="document.getElementById('excelFile').click()">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="#90B664" viewBox="0 0 16 16" class="mb-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="#5e4a90" viewBox="0 0 16 16" class="mb-2">
                                         <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
                                         <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/>
                                     </svg>
@@ -129,7 +129,7 @@
 
                 <!-- Category Keyword Volumes Section -->
                 <div class="card mb-4">
-                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background-color: #90B664;">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background-color: #5e4a90;">
                         <h5 class="mb-0">Category Keyword Volumes</h5>
                     </div>
                     <div class="card-body">
@@ -140,7 +140,7 @@
                                 <input type="text" class="form-control" id="catKeywordInput" placeholder="e.g. nike">
                             </div>
                             <div class="col-md-3">
-                                <button class="btn text-white w-100" style="background-color: #90B664; transition: background-color 0.2s ease;" onmouseover="this.style.backgroundColor='#AAC787'" onmouseout="this.style.backgroundColor='#90B664'" onclick="getCategoryVolumes()">
+                                <button class="btn text-white w-100" style="background-color: #5e4a90; transition: background-color 0.2s ease;" onmouseover="this.style.backgroundColor='#7a6aa8'" onmouseout="this.style.backgroundColor='#5e4a90'" onclick="getCategoryVolumes()">
                                     <span id="catBtnText">Get Category Volumes</span>
                                     <span id="catSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                                 </button>
@@ -160,7 +160,7 @@
                             <span id="catProgressPercent"></span>
                         </div>
                         <div class="progress">
-                            <div class="progress-bar" id="catProgressBar" role="progressbar" style="width: 0%; background-color: #90B664;"></div>
+                            <div class="progress-bar" id="catProgressBar" role="progressbar" style="width: 0%; background-color: #5e4a90;"></div>
                         </div>
                     </div>
                 </div>
@@ -209,27 +209,27 @@
                     <div class="card-body">
                         <div class="row text-center">
                             <div class="col-md-2 col-4">
-                                <h5 id="statTotal" class="mb-0" style="color: #90B664; font-weight: 700;">-</h5>
+                                <h5 id="statTotal" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
                                 <small class="text-muted">Total</small>
                             </div>
                             <div class="col-md-2 col-4">
-                                <h5 id="statSuccessful" class="mb-0" style="color: #90B664; font-weight: 700;">-</h5>
+                                <h5 id="statSuccessful" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
                                 <small class="text-muted">With Volume</small>
                             </div>
                             <div class="col-md-2 col-4">
-                                <h5 id="statNoVolume" class="mb-0" style="color: #90B664; font-weight: 700;">-</h5>
+                                <h5 id="statNoVolume" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
                                 <small class="text-muted">No Volume</small>
                             </div>
                             <div class="col-md-2 col-4">
-                                <h5 id="statSkipped" class="mb-0" style="color: #90B664; font-weight: 700;">-</h5>
+                                <h5 id="statSkipped" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
                                 <small class="text-muted">Skipped</small>
                             </div>
                             <div class="col-md-2 col-4">
-                                <h5 id="statUnique" class="mb-0" style="color: #90B664; font-weight: 700;">-</h5>
+                                <h5 id="statUnique" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
                                 <small class="text-muted">Unique Queried</small>
                             </div>
                             <div class="col-md-2 col-4">
-                                <h5 id="statCustomerIds" class="mb-0" style="color: #90B664; font-weight: 700;">-</h5>
+                                <h5 id="statCustomerIds" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h5>
                                 <small class="text-muted">Customer IDs Used</small>
                             </div>
                         </div>

@@ -16,11 +16,11 @@
             min-width: 140px;
             box-shadow: 0 4px 16px rgba(94, 74, 144, 0.14);
         }
-        .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #90B664; }
+        .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; }
         .stat-card .label { font-size: 0.85rem; color: #636e72; }
         .stat-card .detail { font-size: 0.75rem; color: #999; margin-top: 0.25rem; }
 
-        .run-card { border-left: 4px solid #90B664; }
+        .run-card { border-left: 4px solid #5e4a90; }
         .progress-area { background: #f8f9fc; border-radius: 8px; padding: 1rem; min-height: 60px; }
         .spinner-border-sm { width: 1rem; height: 1rem; }
 
@@ -29,7 +29,7 @@
         .badge-stuck { background-color: #e17055 !important; }
 
         .result-table { font-size: 0.9rem; table-layout: fixed; width: 100%; }
-        .result-table th { background: #90B664; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .result-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
         .result-table td { vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .result-table .col-campaign { width: 40%; }
         .result-table .col-metric { width: 15%; }
@@ -126,7 +126,7 @@
 
                 <!-- Run Section -->
                 <div class="card run-card mb-4">
-                    <div class="card-header" style="background: #90B664; color: white;">
+                    <div class="card-header" style="background: #5e4a90; color: white;">
                         <h5 class="mb-0">Run DMA Bidding</h5>
                     </div>
                     <div class="card-body">
@@ -175,7 +175,7 @@
                                 <input class="form-check-input" type="checkbox" id="dryRunToggle" checked>
                                 <label class="form-check-label" for="dryRunToggle">Dry run</label>
                             </div>
-                            <button class="btn" style="background: #AA3A95; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2.5rem;" onmouseover="this.style.backgroundColor='#C24EA9'" onmouseout="this.style.backgroundColor='#AA3A95'" onclick="runBidding()" id="runBtn">
+                            <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2.5rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runBidding()" id="runBtn">
                                 Run
                             </button>
                         </div>
@@ -189,10 +189,10 @@
                 <!-- Results Section (hidden initially) -->
                 <div id="resultsSection" style="display: none;">
                     <div class="card mb-4">
-                        <div class="card-header" style="background: #90B664; color: white;">
+                        <div class="card-header" style="background: #5e4a90; color: white;">
                             <h5 class="mb-0 d-flex justify-content-between align-items-center">
                                 Results
-                                <button class="btn btn-sm" style="border: 1px solid rgb(94, 74, 144); color: rgb(94, 74, 144); background: white;" onmouseover="this.style.background='#90B664';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#90B664'" onclick="exportCsv()">Export</button>
+                                <button class="btn btn-sm" style="border: 1px solid rgb(94, 74, 144); color: rgb(94, 74, 144); background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="exportCsv()">Export</button>
                             </h5>
                         </div>
                         <div class="card-body">
@@ -418,7 +418,7 @@
                 const items = (data.changes[cat.key] || []).sort((a, b) => a.campaign_name.localeCompare(b.campaign_name));
                 if (items.length === 0) continue;
 
-                html += `<h6 class="mt-3" style="color: #90B664;">${cat.label} (${items.length})</h6>`;
+                html += `<h6 class="mt-3" style="color: #5e4a90;">${cat.label} (${items.length})</h6>`;
                 html += `<div class="table-responsive"><table class="table table-sm result-table"><thead><tr>
                     <th class="col-campaign">Campagne</th><th class="col-metric">Marge</th><th class="col-metric">OPB</th><th class="col-metric">Klikken</th><th class="col-metric">ROAS</th>
                 </tr></thead><tbody>`;
@@ -516,7 +516,7 @@
                         <td style="padding: 6px 12px;">${changes}</td>
                         <td style="padding: 6px 12px;">${statusBadge}${dryRunBadge}</td>
                         <td style="padding: 6px 12px; text-align: center; white-space: nowrap;">
-                            <button class="btn btn-sm" style="border: 1px solid #90B664; color: #90B664; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#90B664';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#90B664'" onclick="downloadHistoryRun(event, ${r.run_id})">Export</button>
+                            <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="downloadHistoryRun(event, ${r.run_id})">Export</button>
                         </td>
                     </tr>`;
                 }).join('');

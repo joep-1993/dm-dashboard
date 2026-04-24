@@ -8,7 +8,7 @@
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
         .drop-zone {
-            border: 2px dashed #90B664;
+            border: 2px dashed #5e4a90;
             border-radius: 12px;
             padding: 2rem;
             text-align: center;
@@ -20,7 +20,7 @@
         .drop-zone .icon { font-size: 2rem; margin-bottom: 0.5rem; }
         .paste-grid { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
         .paste-grid th, .paste-grid td { border: 1px solid #ddd; padding: 4px 8px; }
-        .paste-grid th input { border: none; background: #90B664; color: white; font-weight: 600; width: 100%; padding: 2px 4px; font-size: 0.8rem; }
+        .paste-grid th input { border: none; background: #5e4a90; color: white; font-weight: 600; width: 100%; padding: 2px 4px; font-size: 0.8rem; }
         .paste-grid td { font-family: monospace; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .paste-area { max-height: 400px; overflow: auto; }
         .preview-info { font-size: 0.85rem; color: #636e72; }
@@ -90,7 +90,7 @@
     <div class="container mt-4 pb-5">
         <!-- Settings -->
         <div class="card mb-4">
-            <div class="card-header" style="background: #90B664; color: white;">
+            <div class="card-header" style="background: #5e4a90; color: white;">
                 <h5 class="mb-0">Upload Settings</h5>
             </div>
             <div class="card-body">
@@ -98,7 +98,7 @@
                     <div class="col-md-5">
                         <label for="tableName" class="form-label">Table Name</label>
                         <div class="input-group">
-                            <span class="input-group-text" style="background:#90B664; color:white; font-weight:600;">pa.</span>
+                            <span class="input-group-text" style="background:#5e4a90; color:white; font-weight:600;">pa.</span>
                             <input type="text" class="form-control" id="tableName" placeholder="e.g. joep_test" pattern="[a-zA-Z_][a-zA-Z0-9_]*">
                         </div>
                         <small class="text-muted">Letters, numbers, and underscores only.</small>
@@ -114,7 +114,7 @@
 
         <!-- Data Input -->
         <div class="card mb-4">
-            <div class="card-header" style="background: #90B664; color: white;">
+            <div class="card-header" style="background: #5e4a90; color: white;">
                 <h5 class="mb-0">Data Input</h5>
             </div>
             <div class="card-body">
@@ -138,7 +138,7 @@
                         <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none" onchange="handleFile(this.files[0])">
                         <div id="filePreview" class="paste-area mt-3" style="display:none;"></div>
                         <div class="mt-3 d-flex gap-2">
-                            <button class="btn" style="background:#AA3A95;color:white;border:none;" onmouseover="this.style.backgroundColor='#C24EA9'" onmouseout="this.style.backgroundColor='#AA3A95'" onclick="uploadFile()" id="uploadFileBtn" disabled>Upload to Redshift</button>
+                            <button class="btn" style="background:#CC5500;color:white;border:none;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="uploadFile()" id="uploadFileBtn" disabled>Upload to Redshift</button>
                             <button class="btn btn-outline-secondary" onclick="clearFile()">Clear</button>
                         </div>
                         </div>
@@ -155,7 +155,7 @@
                         </div>
                         <div id="pastePreview" class="paste-area mt-3" style="display:none;"></div>
                         <div class="mt-3">
-                            <button class="btn" style="background:#AA3A95;color:white;border:none;" onmouseover="this.style.backgroundColor='#C24EA9'" onmouseout="this.style.backgroundColor='#AA3A95'" onclick="uploadPaste()" id="uploadPasteBtn" disabled>Upload to Redshift</button>
+                            <button class="btn" style="background:#CC5500;color:white;border:none;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="uploadPaste()" id="uploadPasteBtn" disabled>Upload to Redshift</button>
                         </div>
                         </div>
                     </div>
@@ -249,7 +249,7 @@
                 if (editable) {
                     html += `<th><input type="text" value="${escAttr(h)}" data-col="${i}" onchange="updateHeader(this, '${containerId}')"></th>`;
                 } else {
-                    html += `<th style="background:#90B664;color:white;padding:4px 8px;font-size:0.8rem;">${escHtml(h)}</th>`;
+                    html += `<th style="background:#5e4a90;color:white;padding:4px 8px;font-size:0.8rem;">${escHtml(h)}</th>`;
                 }
             });
             html += '</tr></thead><tbody>';
