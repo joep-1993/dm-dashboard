@@ -346,36 +346,44 @@ class KeywordMatcher:
         if not facet_lookup:
             return result
 
-        best_match = process.extractOne(
+        # v23: Iterate the top candidates instead of bailing after the first one
+        # fails validation — with substring-heavy type facets (e.g. "ontstopper"
+        # matches 5 values equally), extractOne often returns an invalid one first
+        # and we miss the semantically-valid candidate. Pick best by (score, count).
+        candidates = process.extract(
             keyword_normalized,
             list(facet_lookup.keys()),
-            scorer=fuzz.partial_ratio
+            scorer=fuzz.partial_ratio,
+            limit=10,
         )
 
-        if best_match:
-            matched_name = best_match[0]
-            score = best_match[1] - 5  # Slight penalty for partial match
+        best = None  # (score_after_penalty, count, fv)
+        for matched_name, raw_score in candidates:
             fv = facet_lookup[matched_name]
+            score = raw_score - 5  # penalty preserved from v14
 
-            # v5: Validate the fuzzy match makes sense (length checks)
             if not self._is_valid_fuzzy_match(keyword_normalized, matched_name):
-                return result
-
-            # v12: Validate semantic match (prevents pyjama -> pyjamabroeken)
+                continue
             if not self._is_semantic_match(keyword_normalized, matched_name):
-                return result
+                continue
 
-            # Apply stricter threshold for winkel/merk facets
             threshold = self._get_threshold_for_facet(fv.facet_name)
+            if score < threshold:
+                continue
 
-            if score >= threshold:
-                return MatchResult(
-                    keyword=keyword,
-                    facet_value=fv,
-                    match_type='fuzzy',
-                    score=score,
-                    matched_text=fv.facet_value_name
-                )
+            cand = (score, getattr(fv, "count", 0) or 0, fv)
+            if best is None or cand > best:
+                best = cand
+
+        if best:
+            score, _, fv = best
+            return MatchResult(
+                keyword=keyword,
+                facet_value=fv,
+                match_type='fuzzy',
+                score=score,
+                matched_text=fv.facet_value_name,
+            )
 
         return result
 

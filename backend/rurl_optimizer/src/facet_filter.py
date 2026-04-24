@@ -16,6 +16,7 @@ class FacetValue:
     facet_value_id: int
     facet_value_name: str
     url: str
+    count: int = 0  # Number of products on this facet page (from Search API)
 
     @property
     def url_fragment(self) -> str:
@@ -49,6 +50,7 @@ class FacetFilter:
             # v5: Added main_category columns for cross-category lookup
             'main_category_id': self._find_column(['main_category_id', 'MainCategoryId']),
             'main_category_name': self._find_column(['main_category_name', 'MainCategoryName']),
+            'count': self._find_column(['count', 'product_count', 'Count']),
         }
 
     def _find_column(self, candidates: list[str]) -> Optional[str]:
@@ -246,12 +248,21 @@ class FacetFilter:
 
         for _, row in filtered_df.iterrows():
             try:
+                count_col = self.col_mapping.get('count')
+                count_val = 0
+                if count_col:
+                    raw = row.get(count_col, 0)
+                    try:
+                        count_val = int(raw) if raw is not None and str(raw) != 'nan' else 0
+                    except (ValueError, TypeError):
+                        count_val = 0
                 fv = FacetValue(
                     facet_id=int(row.get(self.col_mapping['facet_id'], 0)),
                     facet_name=str(row.get(self.col_mapping['facet_name'], '')),
                     facet_value_id=int(row.get(self.col_mapping['facet_value_id'], 0)),
                     facet_value_name=str(row.get(self.col_mapping['facet_value_name'], '')),
-                    url=str(row.get(self.col_mapping['url'], ''))
+                    url=str(row.get(self.col_mapping['url'], '')),
+                    count=count_val,
                 )
                 facet_values.append(fv)
             except (ValueError, TypeError):
