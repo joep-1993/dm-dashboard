@@ -84,7 +84,9 @@ def download(task_id: str):
         raise HTTPException(404, "No output for this task")
     if not os.path.exists(path):
         raise HTTPException(410, "Output missing on disk")
-    return FileResponse(path, media_type="text/csv", filename=os.path.basename(path))
+    media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" \
+        if path.lower().endswith(".xlsx") else "text/csv"
+    return FileResponse(path, media_type=media, filename=os.path.basename(path))
 
 
 @router.get("/history")

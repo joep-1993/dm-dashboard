@@ -170,6 +170,14 @@ def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: st
     _history_append(task_id)
 
 
+def _history_update_latest(task_id: str, patch: Dict[str, Any]) -> None:
+    """Patch the most recent history entry for this task_id (if any)."""
+    with _HISTORY_LOCK:
+        if _HISTORY and _HISTORY[0].get("task_id") == task_id:
+            _HISTORY[0].update(patch)
+            _save_history_to_disk()
+
+
 def _history_append(task_id: str) -> None:
     t = _get(task_id)
     if not t:
@@ -187,6 +195,23 @@ def _history_append(task_id: str) -> None:
             "params": t.get("params"),
         })
         _save_history_to_disk()
+
+
+def _write_xlsx_output(df, csv_path: Path) -> Path:
+    """
+    Reorder `df` so original_url + redirect_url lead, write as .xlsx next to
+    the given CSV path, delete the CSV, and return the xlsx Path.
+    """
+    lead = [c for c in ("original_url", "redirect_url") if c in df.columns]
+    tail = [c for c in df.columns if c not in lead]
+    df = df[lead + tail]
+    xlsx_path = csv_path.with_suffix(".xlsx")
+    df.to_excel(xlsx_path, index=False)
+    try:
+        csv_path.unlink()
+    except FileNotFoundError:
+        pass
+    return xlsx_path
 
 
 def _normalize_upload(csv_bytes: bytes) -> bytes:
@@ -379,15 +404,15 @@ def start_optimize(
             try:
                 from backend import rurl_optimizer_persistence as pers
                 prev_df = pers.load_previous(list(cached_urls))
-                prev_df.to_csv(output_path, index=False)
+                xlsx_path = _write_xlsx_output(prev_df, output_path)
                 _set(task_id, {
                     "status": "completed", "progress": 100,
                     "message": f"All {len(cached_urls):,} URLs served from cache",
                     "started_at": datetime.now().isoformat(),
                     "finished_at": datetime.now().isoformat(),
-                    "output_path": str(output_path), "script": "cache_only",
+                    "output_path": str(xlsx_path), "script": "cache_only",
                 })
-                _append_log(task_id, f"Wrote {len(prev_df):,} cached rows to {output_path.name}")
+                _append_log(task_id, f"Wrote {len(prev_df):,} cached rows to {xlsx_path.name}")
                 _history_append(task_id)
             except Exception as e:
                 _set(task_id, {"status": "failed", "error": f"cache-only write failed: {e}",
@@ -397,7 +422,9 @@ def start_optimize(
 
         _run_subprocess(task_id, argv, output_path, script="main_parallel_v2")
 
-        # After a successful subprocess run, upsert + combine with cached rows.
+        # After a successful subprocess run, upsert + combine with cached rows
+        # into the CSV (xlsx conversion happens at the very end, after any
+        # also_global chain has updated output_path).
         if (_get(task_id) or {}).get("status") == "completed" and output_path.exists():
             try:
                 from backend import rurl_optimizer_persistence as pers
@@ -407,16 +434,15 @@ def start_optimize(
                 _append_log(task_id, f"Persistence: upserted {n_up:,} rows to rurl_processed.")
                 if cached_urls:
                     prev_df = pers.load_previous(list(cached_urls))
-                    # Align columns — prev_df has only the 5 DB cols; pad missing with NA.
                     for col in fresh_df.columns:
                         if col not in prev_df.columns:
                             prev_df[col] = pd.NA
                     prev_df = prev_df[fresh_df.columns.tolist()]
-                    combined = pd.concat([fresh_df, prev_df], ignore_index=True)
-                    combined.to_csv(output_path, index=False)
+                    final_df = pd.concat([fresh_df, prev_df], ignore_index=True)
+                    final_df.to_csv(output_path, index=False)
                     _append_log(task_id,
                                 f"Persistence: combined output = {len(fresh_df):,} fresh + "
-                                f"{len(prev_df):,} cached = {len(combined):,} rows.")
+                                f"{len(prev_df):,} cached = {len(final_df):,} rows.")
             except Exception as e:
                 _append_log(task_id, f"[warn] persistence post-step failed: {e}")
         if also_global and (_get(task_id) or {}).get("status") == "completed":
@@ -436,6 +462,26 @@ def start_optimize(
             ]
             _append_log(task_id, "--- Running global R-URL pass ---")
             _run_subprocess(task_id, argv2, global_out, script="process_global_rurls")
+
+        # Final step: convert whatever CSV ended up as the output to .xlsx
+        # (main run CSV, or the global-pass CSV if also_global was on).
+        if (_get(task_id) or {}).get("status") == "completed":
+            try:
+                import pandas as pd
+                final_csv = Path((_get(task_id) or {}).get("output_path", ""))
+                if final_csv.suffix == ".csv" and final_csv.exists():
+                    df = pd.read_csv(final_csv)
+                    xlsx_path = _write_xlsx_output(df, final_csv)
+                    _set(task_id, {
+                        "output_path": str(xlsx_path),
+                        "message": f"Done. Output: {xlsx_path.name}",
+                    })
+                    _history_update_latest(task_id, {
+                        "output_path": str(xlsx_path),
+                        "message": f"Done. Output: {xlsx_path.name}",
+                    })
+            except Exception as e:
+                _append_log(task_id, f"[warn] xlsx conversion failed: {e}")
 
     threading.Thread(target=_runner, daemon=True).start()
     return task_id
