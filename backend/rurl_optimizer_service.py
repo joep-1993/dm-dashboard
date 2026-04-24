@@ -156,6 +156,29 @@ def _history_append(task_id: str) -> None:
     })
 
 
+def _normalize_upload(csv_bytes: bytes) -> bytes:
+    """
+    Ensure the uploaded CSV has a column named 'r_url'. If the file has a
+    single column with any other name, rename it. If it has multiple columns,
+    leave it untouched (the optimizer expects an 'r_url' column then, which
+    the Redshift path already produces).
+    """
+    import io
+    import pandas as pd
+    try:
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+    except Exception:
+        return csv_bytes
+    if "r_url" in df.columns:
+        return csv_bytes
+    if len(df.columns) == 1:
+        df.columns = ["r_url"]
+        buf = io.StringIO()
+        df.to_csv(buf, index=False)
+        return buf.getvalue().encode("utf-8")
+    return csv_bytes
+
+
 def _read_url_column(csv_path: Path, url_column: str) -> list[str]:
     """Read only the URL column from a CSV. Returns empty list on any failure."""
     try:
@@ -244,7 +267,7 @@ def start_optimize(
         if not csv_bytes:
             raise ValueError("csv_bytes required when source=upload")
         input_path = INPUT_DIR / f"input_{task_id}_{filename}"
-        input_path.write_bytes(csv_bytes)
+        input_path.write_bytes(_normalize_upload(csv_bytes))
 
     output_path = OUTPUT_DIR / f"redirects_{task_id}_{ts}.csv"
 

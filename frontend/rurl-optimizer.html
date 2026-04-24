@@ -101,15 +101,13 @@
                                 <input type="number" class="form-control" id="lookbackDays" value="365" min="1" max="730">
                             </div>
                             <div class="col-md-2">
-                                <label for="urlColumn" class="form-label">URL column</label>
-                                <input type="text" class="form-control" id="urlColumn" value="r_url">
-                            </div>
-                            <div class="col-md-2">
                                 <label for="workers" class="form-label">Workers</label>
-                                <input type="number" class="form-control" id="workers" min="1" max="32" placeholder="auto">
+                                <input type="number" class="form-control" id="workers" min="0" max="32" placeholder="auto" title="0 or empty = auto">
                             </div>
                             <div class="col-md-2">
-                                <label for="threshold" class="form-label">Fuzzy threshold</label>
+                                <label for="threshold" class="form-label">Fuzzy threshold
+                                    <span class="text-muted" style="cursor: help;" title="Minimum similarity score (0-100) for a fuzzy string match between the keyword in the R-URL and a facet value name. Higher = stricter: 100 requires an exact match; 80 (default) allows small typos or variants; 50 is very lenient. Keywords or facet values shorter than 3 characters are never fuzzy-matched.">&#9432;</span>
+                                </label>
                                 <input type="number" class="form-control" id="threshold" value="80" min="50" max="100">
                             </div>
 
@@ -193,6 +191,11 @@
         let currentTaskId = null;
         let pollTimer = null;
 
+        // Workers: 0 → empty (so 'auto' placeholder is visible again)
+        document.getElementById('workers').addEventListener('input', (e) => {
+            if (e.target.value === '0') e.target.value = '';
+        });
+
         // Toggle upload vs Redshift fields
         document.querySelectorAll('input[name="source"]').forEach(el => {
             el.addEventListener('change', () => {
@@ -215,9 +218,8 @@
             } else {
                 fd.append('lookback_days', document.getElementById('lookbackDays').value || '365');
             }
-            fd.append('url_column', document.getElementById('urlColumn').value || 'r_url');
             const w = document.getElementById('workers').value;
-            if (w) fd.append('workers', w);
+            if (w && Number(w) > 0) fd.append('workers', w);
             fd.append('threshold', document.getElementById('threshold').value || '80');
             fd.append('multi_facet', document.getElementById('multiFacet').checked);
             fd.append('also_global', document.getElementById('alsoGlobal').checked);
