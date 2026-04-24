@@ -558,7 +558,7 @@ async function refreshStatus() {
                                     <div class="mb-1" style="font-size: 0.875rem;"></div>
                                 </div>
                                 ${needsExpand ? `
-                                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="toggleContent(${index})">
+                                    <button class="btn btn-sm" style="border: 1px solid #90B664; color: #90B664; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#90B664';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#90B664'" onclick="toggleContent(${index})">
                                         <span id="toggle-text-${index}">View Full Content</span>
                                     </button>
                                 ` : ''}

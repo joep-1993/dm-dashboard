@@ -2,10 +2,11 @@
 
 /* Custom Color Scheme */
 :root {
-    --color-navbar: #5e4a90;    /* Purple - for top navbar only */
+    --color-navbar: #13A0D3;    /* Teal - for top navbar only */
+    --color-navbar-light: #3EB5DF;  /* Lighter teal - for submenu drop-down */
     --color-section: #E8E9EB;   /* Light grey - for section headers */
-    --color-button: #CC5500;    /* Burnt orange - for buttons */
-    --color-button-hover: #E97451;  /* Coral orange - for button hover */
+    --color-button: #AA3A95;    /* Magenta - for buttons */
+    --color-button-hover: #C24EA9;  /* Lighter magenta - for button hover */
 }
 
 /* Match section header size with topbar menu items */
@@ -98,7 +99,7 @@ body {
     top: 100%;
     left: 0;
     padding-top: 0.25rem;
-    background-color: #7b6aa8;
+    background-color: var(--color-navbar-light);
     border-radius: 0.4rem;
     padding-bottom: 0.4rem;
     min-width: 210px;

@@ -25,8 +25,8 @@
         .status-404 { color: #dc3545; font-weight: bold; }
         .status-error { color: #dc3545; font-weight: bold; }
         .upload-zone { border: 2px dashed #dee2e6; border-radius: 8px; padding: 1.5rem; text-align: center; cursor: pointer; transition: all 0.2s; }
-        .upload-zone:hover { border-color: #5e4a90; background: #f8f9fc; }
-        .upload-zone.dragover { border-color: #5e4a90; background: #f0eef5; }
+        .upload-zone:hover { border-color: #90B664; background: #f8f9fc; }
+        .upload-zone.dragover { border-color: #90B664; background: #f0eef5; }
     </style>
 </head>
 <body>
@@ -149,7 +149,7 @@
                     <h5 class="mb-0">Results</h5>
                     <div>
                         <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyAllToClipboard()">Copy for Excel</button>
-                        <button class="btn btn-sm" style="border-color: #CC5500; color: #CC5500;" onmouseover="this.style.backgroundColor='#CC5500';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#CC5500'" onclick="downloadExcel()">Download Excel</button>
+                        <button class="btn btn-sm" style="border-color: #AA3A95; color: #AA3A95;" onmouseover="this.style.backgroundColor='#AA3A95';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#AA3A95'" onclick="downloadExcel()">Download Excel</button>
                     </div>
                 </div>
                 <div class="card-body">
@@ -327,7 +327,7 @@
                 statusCounts[status] = (statusCounts[status] || 0) + 1;
             });
 
-            let summaryHtml = `<span class="badge" style="background-color: #CC5500;">Total: ${results.length}</span>`;
+            let summaryHtml = `<span class="badge" style="background-color: #AA3A95;">Total: ${results.length}</span>`;
             Object.keys(statusCounts).sort().forEach(status => {
                 const badgeClass = status === '200' ? 'bg-success' :
                                    status.startsWith('3') ? 'bg-warning text-dark' :
