@@ -73,13 +73,6 @@
                         <h5 class="mb-0">Upload & run</h5>
                     </div>
                     <div class="card-body">
-                        <p class="text-muted small mb-3">
-                            Converts generic R-URLs (<code>/products/&lt;cat&gt;/&lt;cat_id&gt;/r/&lt;keyword&gt;/</code>) into
-                            filtered category pages with facets. Taxonomy and facet data is pulled
-                            live from the Beslist Taxonomy + Search APIs. Provide R-URLs via CSV upload
-                            or pull them from Redshift (last N days of traffic).
-                        </p>
-
                         <form id="runForm" class="row g-3">
                             <div class="col-12">
                                 <label class="form-label">Input source</label>
@@ -325,8 +318,8 @@
                     const msg = h.error || h.message || '';
                     const outName = h.output_path ? h.output_path.split('/').pop() : '';
                     const dl = h.status === 'completed' && h.task_id
-                        ? `<a href="/api/rurl/download/${h.task_id}">${outName}</a>`
-                        : (outName || '—');
+                        ? `<a href="/api/rurl/download/${h.task_id}" class="btn btn-sm btn-success">Download CSV</a>`
+                        : '—';
                     return `<tr class="history-row">
                         <td style="padding: 6px 12px;">${started}</td>
                         <td style="padding: 6px 12px;">${h.script || ''}</td>
