@@ -541,6 +541,10 @@ def main():
 
     for col in patched_indexed.columns:
         if col in df_indexed.columns:
+            # Cast to object to avoid FutureWarning when writing strings into
+            # an originally-numeric column.
+            if df_indexed[col].dtype != patched_indexed[col].dtype:
+                df_indexed[col] = df_indexed[col].astype(object)
             df_indexed.loc[patched_indexed.index, col] = patched_indexed[col]
 
     df_result = df_indexed.reset_index()

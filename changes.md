@@ -1,4 +1,0 @@
-- please give the progress bar in Auto-redirects the same layout as the progress bar in FAQ's
-- the "completed" label in Progress in Auto-redirects seems not in the middle vertically, could you fix that  
-- please change the "Donwload Results CSV" button to "Download Results Excel" and change the CSV output to .xlsx
-- please change the output excel format so the first 2 columns are original_url and redirect_url

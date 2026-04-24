@@ -300,14 +300,22 @@
             if (wasAtBottom) logEl.scrollTop = logEl.scrollHeight;
 
             // Parse summary stats out of the tail of the log, if present.
+            // Prefer the '==> Final:' line (emitted after cache merge + also_global)
+            // over the per-subprocess 'Total URLs processed:' which only counts fresh rows.
             const log = (t.log || []).join('\n');
-            const totalMatch = log.match(/Total URLs processed:\s+([\d,]+)/);
-            const successMatch = log.match(/Successful redirects:\s+([\d,]+)/);
+            const finalMatch = log.match(/==> Final:\s+([\d,]+)\s+total URLs[^,]*,\s+([\d,]+)\s+successful/);
+            const totalMatch = finalMatch || log.match(/Total URLs processed:\s+([\d,]+)/);
+            const successMatch = finalMatch || log.match(/Successful redirects:\s+([\d,]+)/);
             const prodMatch = log.match(/Production ready \(A\+B\):\s+([\d,]+)/);
             if (totalMatch || successMatch || prodMatch) {
                 document.getElementById('statsRow').style.display = '';
-                if (totalMatch) document.getElementById('statTotal').textContent = totalMatch[1];
-                if (successMatch) document.getElementById('statSuccess').textContent = successMatch[1];
+                if (finalMatch) {
+                    document.getElementById('statTotal').textContent = finalMatch[1];
+                    document.getElementById('statSuccess').textContent = finalMatch[2];
+                } else {
+                    if (totalMatch) document.getElementById('statTotal').textContent = totalMatch[1];
+                    if (successMatch) document.getElementById('statSuccess').textContent = successMatch[1];
+                }
                 if (prodMatch) document.getElementById('statProdReady').textContent = prodMatch[1];
             }
         }

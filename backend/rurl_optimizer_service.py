@@ -97,11 +97,13 @@ def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: st
         "output_path": str(output_path),
         "script": script,
     })
-    _append_log(task_id, f"$ {' '.join(shlex.quote(a) for a in argv)}")
+    _append_log(task_id, f"--- Running {script} ---")
 
     env = os.environ.copy()
     # Ensure the bundled package can import its sibling modules (src/, config).
     env["PYTHONPATH"] = str(PKG_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+    # Silence noisy DeprecationWarning / FutureWarning from pandas / pyarrow.
+    env["PYTHONWARNINGS"] = "ignore::DeprecationWarning,ignore::FutureWarning"
 
     try:
         proc = subprocess.Popen(
@@ -422,33 +424,21 @@ def start_optimize(
 
         _run_subprocess(task_id, argv, output_path, script="main_parallel_v2")
 
-        # After a successful subprocess run, upsert + combine with cached rows
-        # into the CSV (xlsx conversion happens at the very end, after any
-        # also_global chain has updated output_path).
+        # 1. Upsert the fresh rows to rurl_processed BEFORE the global chain
+        #    (so cached-row merging doesn't pollute global-pass input).
         if (_get(task_id) or {}).get("status") == "completed" and output_path.exists():
             try:
                 from backend import rurl_optimizer_persistence as pers
                 import pandas as pd
                 fresh_df = pd.read_csv(output_path)
                 n_up = pers.upsert_results(fresh_df)
-                _append_log(task_id, f"Persistence: upserted {n_up:,} rows to rurl_processed.")
-                if cached_urls:
-                    prev_df = pers.load_previous(list(cached_urls))
-                    for col in fresh_df.columns:
-                        if col not in prev_df.columns:
-                            prev_df[col] = pd.NA
-                    prev_df = prev_df[fresh_df.columns.tolist()]
-                    final_df = pd.concat([fresh_df, prev_df], ignore_index=True)
-                    final_df.to_csv(output_path, index=False)
-                    _append_log(task_id,
-                                f"Persistence: combined output = {len(fresh_df):,} fresh + "
-                                f"{len(prev_df):,} cached = {len(final_df):,} rows.")
+                _append_log(task_id, f"Cached {n_up:,} fresh rows to rurl_processed.")
             except Exception as e:
-                _append_log(task_id, f"[warn] persistence post-step failed: {e}")
+                _append_log(task_id, f"[warn] persistence upsert failed: {e}")
+
+        # 2. Optional: global R-URL chain (runs on fresh rows only — cached rows
+        #    have no main_category column, which would confuse its keyword filter).
         if also_global and (_get(task_id) or {}).get("status") == "completed":
-            # Chain the global R-URL pass. It reads INPUT_FILE from its own
-            # module constant, so we run a tiny inline wrapper instead of
-            # editing the script.
             global_out = OUTPUT_DIR / f"redirects_global_{task_id}_{ts}.csv"
             argv2 = [
                 sys.executable, "-c",
@@ -460,25 +450,55 @@ def start_optimize(
                     "g.main()"
                 ),
             ]
-            _append_log(task_id, "--- Running global R-URL pass ---")
+            _append_log(task_id, "--- Running global R-URL pass on fresh rows ---")
             _run_subprocess(task_id, argv2, global_out, script="process_global_rurls")
 
-        # Final step: convert whatever CSV ended up as the output to .xlsx
-        # (main run CSV, or the global-pass CSV if also_global was on).
+        # 3. Merge cached rows into whatever the current output CSV is (main or global).
+        if cached_urls and (_get(task_id) or {}).get("status") == "completed":
+            try:
+                from backend import rurl_optimizer_persistence as pers
+                import pandas as pd
+                current_csv = Path((_get(task_id) or {}).get("output_path", ""))
+                if current_csv.suffix == ".csv" and current_csv.exists():
+                    fresh_df = pd.read_csv(current_csv)
+                    prev_df = pers.load_previous(list(cached_urls))
+                    for col in fresh_df.columns:
+                        if col not in prev_df.columns:
+                            prev_df[col] = pd.NA
+                    prev_df = prev_df[fresh_df.columns.tolist()]
+                    final_df = pd.concat([fresh_df, prev_df], ignore_index=True)
+                    final_df.to_csv(current_csv, index=False)
+                    _append_log(task_id,
+                                f"Merged {len(prev_df):,} cached rows with "
+                                f"{len(fresh_df):,} freshly-processed -> "
+                                f"{len(final_df):,} total.")
+            except Exception as e:
+                _append_log(task_id, f"[warn] cache merge failed: {e}")
+
+        # 4. Emit a clear final summary + convert to xlsx.
         if (_get(task_id) or {}).get("status") == "completed":
             try:
                 import pandas as pd
                 final_csv = Path((_get(task_id) or {}).get("output_path", ""))
                 if final_csv.suffix == ".csv" and final_csv.exists():
                     df = pd.read_csv(final_csv)
+                    succ = int(df.get("success", pd.Series(dtype=bool)).sum()) \
+                        if "success" in df.columns else len(df)
+                    fresh_n = len(df) - len(cached_urls)
+                    summary = (
+                        f"==> Final: {len(df):,} total URLs "
+                        f"({fresh_n:,} processed + {len(cached_urls):,} from cache), "
+                        f"{succ:,} successful."
+                    )
+                    _append_log(task_id, summary)
                     xlsx_path = _write_xlsx_output(df, final_csv)
                     _set(task_id, {
                         "output_path": str(xlsx_path),
-                        "message": f"Done. Output: {xlsx_path.name}",
+                        "message": f"Done. {len(df):,} URLs, {succ:,} successful -> {xlsx_path.name}",
                     })
                     _history_update_latest(task_id, {
                         "output_path": str(xlsx_path),
-                        "message": f"Done. Output: {xlsx_path.name}",
+                        "message": f"Done. {len(df):,} URLs, {succ:,} successful",
                     })
             except Exception as e:
                 _append_log(task_id, f"[warn] xlsx conversion failed: {e}")

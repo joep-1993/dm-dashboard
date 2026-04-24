@@ -91,3 +91,7 @@ scripts/search_volumes.py
 scripts/swagger_taxv2.json
 scripts/wishlist
 docs/indexnow_n8n.json
+
+# Local scratch
+changes.md
+backend/data/rurl_optimizer_history.json
