@@ -136,7 +136,7 @@
                 <div class="card mb-4 d-none" id="statusCard">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Progress</h5>
-                        <span id="statusBadge" class="badge bg-secondary d-inline-flex align-items-center" style="line-height: 1;">idle</span>
+                        <span id="statusBadge" class="badge bg-secondary d-inline-flex align-items-center justify-content-center" style="line-height: 1; padding: 0.45em 0.7em;">idle</span>
                     </div>
                     <div class="card-body">
                         <div class="d-flex justify-content-between mb-1">
@@ -284,8 +284,9 @@
                 queued: 'secondary', running: 'primary',
                 completed: 'success', failed: 'danger', cancelled: 'warning'
             }[t.status] || 'secondary';
-            badge.className = 'badge bg-' + color + ' d-inline-flex align-items-center';
+            badge.className = 'badge bg-' + color + ' d-inline-flex align-items-center justify-content-center';
             badge.style.lineHeight = '1';
+            badge.style.padding = '0.45em 0.7em';
             badge.textContent = t.status || 'unknown';
 
             document.getElementById('statusMsg').textContent = t.message || '';
