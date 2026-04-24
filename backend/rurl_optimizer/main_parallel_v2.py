@@ -189,6 +189,41 @@ def process_url_v2(args):
             'reason': parsed.error_message
         }
 
+    # V30: Shop-name short-circuit — if the keyword contains any SHOP_NAME
+    # word, skip matching entirely. Row stays in the output for visibility
+    # but without a redirect URL.
+    _kw_words = parsed.keyword.lower().split() if parsed.keyword else []
+    _shops = [w for w in _kw_words if w in SHOP_NAMES]
+    if _shops:
+        return {
+            'original_url': url,
+            'main_category': parsed.main_category or '',
+            'original_category': category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else '',
+            'keyword': parsed.keyword,
+            'redirect_url': None,
+            'redirect_category': '',
+            'is_cross_category': False,
+            'facet_fragment': '',
+            'facet_names': '',
+            'facet_value_names': '',
+            'facet_count': 0,
+            'match_score': 0,
+            'match_type': 'shop_name',
+            'reliability_score': 0,
+            'reliability_tier': 'D',
+            'matched_keywords': '',
+            'unmatched_keywords': '',
+            'match_coverage': 0.0,
+            'has_stopwords': False,
+            'stopwords_found': '',
+            'shop_in_keyword': ', '.join(_shops),
+            'keyword_type': 'shop_only',
+            'has_dimensions': False,
+            'merk_of_shop_missing': '',
+            'success': False,
+            'reason': 'shop_name detected',
+        }
+
     result = None
 
     # ==========================================================================

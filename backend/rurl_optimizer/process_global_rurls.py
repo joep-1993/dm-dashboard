@@ -143,6 +143,18 @@ def process_global_url(args):
     if not keyword:
         return empty
 
+    # V30: Shop-name short-circuit — keep the row but skip matching.
+    _shops = [w for w in keyword.lower().split() if w in SHOP_NAMES]
+    if _shops:
+        shop_row = dict(empty)
+        shop_row.update({
+            'match_type': 'shop_name',
+            'shop_in_keyword': ', '.join(_shops),
+            'keyword_type': 'shop_only',
+            'reason': 'shop_name detected',
+        })
+        return shop_row
+
     result = None
     HIGH_SUBCAT_THRESHOLD = 95
 

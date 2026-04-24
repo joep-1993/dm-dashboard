@@ -137,7 +137,7 @@ STOPWORDS = {
 
     # Positie-voorzetsels (V27)
     # NB: 'rond' verwijderd (= vorm-facet), 'binnen'/'buiten' verwijderd (= facetwaarden)
-    'zonder', 'via', 'tussen', 'achter', 'naast', 'per',
+    'via', 'tussen', 'achter', 'naast', 'per',
 
     # --- Locatie-aanduidingen (V6) ---
     # V27: VERWIJDERD - hier bestaan facets/subcategorieën voor
