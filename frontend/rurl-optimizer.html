@@ -318,7 +318,7 @@
                     const msg = h.error || h.message || '';
                     const outName = h.output_path ? h.output_path.split('/').pop() : '';
                     const dl = h.status === 'completed' && h.task_id
-                        ? `<a href="/api/rurl/download/${h.task_id}" class="btn btn-sm btn-success">Download CSV</a>`
+                        ? `<a href="/api/rurl/download/${h.task_id}" class="btn btn-sm btn-primary" target="_blank">Download CSV</a>`
                         : '—';
                     return `<tr class="history-row">
                         <td style="padding: 6px 12px;">${started}</td>
