@@ -105,6 +105,12 @@ SYNONYMS = {
     "dimbaar": ["instelbaar", "regelbaar"],
     "verstelbaar": ["kantelbaar", "draaibaar", "flexibel", "aanpasbaar", "knikbaar"],
     "inklapbaar": ["opvouwbaar", "vouwbaar", "plooibaar"],
+    # V29: antonym-style aliases — users often type "uit..." even though the
+    # catalog labels products as "in..." (a sleeper sofa is 'inklapbaar' but
+    # people search 'uitklappen').
+    "uitklapbaar": ["inklapbaar", "opvouwbaar", "vouwbaar"],
+    "uitklappen": ["inklapbaar", "opvouwbaar", "vouwbaar"],
+    "uitvouwbaar": ["inklapbaar", "opvouwbaar", "vouwbaar"],
     "duurzaam": ["eco", "ecologisch", "groen", "milieuvriendelijk", "gerecycled"],
     "warm wit": ["warmwit", "2700k", "3000k"],
     "koud wit": ["koel wit", "daglicht", "4000k", "6000k", "6500k"],

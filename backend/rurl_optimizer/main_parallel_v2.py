@@ -251,6 +251,37 @@ def process_url_v2(args):
                         result = builder.build(parsed, parent_match)
                         result.reason = f"[parent_subcat] " + result.reason
 
+    # 2b. V29: SUB-SUBCATEGORIE NAAM MATCHING (≥95) — when the URL pins a
+    #     subcategory, first look for a child subcategory whose display name
+    #     matches the keyword. Fixes cases like
+    #       /main_sanitair_559434/r/wandpaneel/  ->  .../559434_560019 (Douchepanelen)
+    HIGH_SUBCAT_THRESHOLD = 95
+    if not result and parsed.subcategory_name:
+        categories_df = d.get('categories_df')
+        if categories_df is not None:
+            child_match = matcher.match_subcategory_name(
+                parsed.keyword, categories_df, main_category=parsed.subcategory_name
+            )
+            if not child_match or child_match.get('score', 0) < HIGH_SUBCAT_THRESHOLD:
+                for kw in parsed.keyword.lower().split():
+                    if len(kw) < 4:
+                        continue
+                    wm = matcher.match_subcategory_name(
+                        kw, categories_df, main_category=parsed.subcategory_name
+                    )
+                    if wm and wm.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
+                        child_match = wm
+                        break
+            if child_match and child_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
+                result = builder.build_subcategory_redirect(
+                    original_url=url,
+                    keyword=parsed.keyword,
+                    subcategory_match=child_match,
+                    main_category=parsed.main_category,
+                    existing_facet=parsed.existing_facet,
+                )
+                result.reason = f"[child_subcat] " + result.reason
+
     # 3. V14.1: SUBCATEGORIE NAAM MATCHING met HOGE SCORE (≥95) binnen maincat
     # Voor generieke termen: "scharnieren" -> subcategorie "Deurscharnieren"
     # Dit voorkomt dat een specifieke facet ("Onzichtbare scharnieren") wordt gekozen

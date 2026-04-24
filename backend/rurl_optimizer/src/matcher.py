@@ -578,6 +578,20 @@ class KeywordMatcher:
 
         return sorted_results
 
+    @staticmethod
+    def _collapse_double_vowels(s: str) -> str:
+        """
+        Dutch plural/closed-vs-open-syllable normalizer.
+
+        Many Dutch nouns keep a single vowel in the plural (open syllable) but
+        use a doubled vowel in the singular (closed syllable):
+          paneel / panelen    verhaal / verhalen    boot / boten
+        Collapsing 'aa','ee','oo','uu' -> single letter makes the two forms
+        comparable after '-en' is stripped.
+        """
+        import re as _re
+        return _re.sub(r'([aeouAEOU])\1+', r'\1', s)
+
     def _is_semantic_match(self, keyword: str, facet_value_name: str) -> bool:
         """
         v12: Check if the match is semantically valid.
@@ -624,6 +638,10 @@ class KeywordMatcher:
 
         # Check if base forms match exactly
         if kw_base == fv_base:
+            return True
+
+        # V29: Dutch double-vowel normalization (paneel <-> panelen, boot <-> boten).
+        if self._collapse_double_vowels(kw_base) == self._collapse_double_vowels(fv_base):
             return True
 
         # V12 STRICTER RULE: Keyword at START of facet
