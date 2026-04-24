@@ -96,9 +96,13 @@
                                 <label for="csvFile" class="form-label">Input CSV</label>
                                 <input type="file" class="form-control" id="csvFile" accept=".csv">
                             </div>
-                            <div class="col-md-3 d-none" id="lookbackField">
+                            <div class="col-md-2 d-none" id="lookbackField">
                                 <label for="lookbackDays" class="form-label">Lookback days</label>
                                 <input type="number" class="form-control" id="lookbackDays" value="365" min="1" max="730">
+                            </div>
+                            <div class="col-md-2 d-none" id="limitField">
+                                <label for="rowLimit" class="form-label">Limit</label>
+                                <input type="number" class="form-control" id="rowLimit" min="1" placeholder="no limit" title="Cap the number of URLs returned from Redshift. Empty = no limit.">
                             </div>
                             <div class="col-md-2">
                                 <label for="workers" class="form-label">Workers</label>
@@ -197,6 +201,7 @@
                 const isRedshift = document.getElementById('srcRedshift').checked;
                 document.getElementById('uploadField').classList.toggle('d-none', isRedshift);
                 document.getElementById('lookbackField').classList.toggle('d-none', !isRedshift);
+                document.getElementById('limitField').classList.toggle('d-none', !isRedshift);
                 document.getElementById('csvFile').required = !isRedshift;
             });
         });
@@ -212,6 +217,8 @@
                 fd.append('file', file);
             } else {
                 fd.append('lookback_days', document.getElementById('lookbackDays').value || '365');
+                const lim = document.getElementById('rowLimit').value;
+                if (lim && Number(lim) > 0) fd.append('row_limit', lim);
             }
             const w = document.getElementById('workers').value;
             if (w && Number(w) > 0) fd.append('workers', w);

@@ -201,7 +201,7 @@ def _filter_input_csv(csv_path: Path, url_column: str, skip_urls: set[str]) -> N
     df[mask].to_csv(csv_path, index=False)
 
 
-def _fetch_redshift_rurls(lookback_days: int = 365) -> bytes:
+def _fetch_redshift_rurls(lookback_days: int = 365, row_limit: Optional[int] = None) -> bytes:
     """Pull R-URLs with visits + revenue from Redshift for the last N days."""
     from backend.database import get_redshift_connection
     import csv
@@ -228,7 +228,10 @@ def _fetch_redshift_rurls(lookback_days: int = 365) -> bytes:
       AND dv.url LIKE '%beslist.nl%'
       AND dv.url LIKE '%/r/%'
     GROUP BY 1, 2, 3
+    ORDER BY visits DESC
     """
+    if row_limit and row_limit > 0:
+        sql += f"\n    LIMIT {int(row_limit)}"
 
     conn = get_redshift_connection()
     cur = conn.cursor()
@@ -254,6 +257,7 @@ def start_optimize(
     also_global: bool,
     source: str = "upload",
     lookback_days: int = 365,
+    row_limit: Optional[int] = None,
     force_reprocess: bool = False,
 ) -> str:
     task_id = uuid.uuid4().hex[:8]
@@ -298,6 +302,7 @@ def start_optimize(
             "also_global": also_global,
             "source": source,
             "lookback_days": lookback_days if source == "redshift" else None,
+            "row_limit": row_limit if source == "redshift" else None,
             "force_reprocess": force_reprocess,
         },
     })
@@ -306,9 +311,11 @@ def start_optimize(
         if source == "redshift":
             _set(task_id, {"status": "running", "progress": 1,
                            "message": f"Querying Redshift (last {lookback_days} days)..."})
-            _append_log(task_id, f"Fetching R-URLs from Redshift (last {lookback_days} days)...")
+            _append_log(task_id,
+                        f"Fetching R-URLs from Redshift (last {lookback_days} days"
+                        + (f", limit {row_limit}" if row_limit else "") + ")...")
             try:
-                data = _fetch_redshift_rurls(lookback_days)
+                data = _fetch_redshift_rurls(lookback_days, row_limit)
                 input_path.write_bytes(data)
                 nrows = data.count(b"\n") - 1
                 _append_log(task_id, f"Redshift returned {nrows:,} rows -> {input_path.name}")

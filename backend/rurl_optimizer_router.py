@@ -27,6 +27,7 @@ async def optimize(
     also_global: bool = Form(False),
     source: str = Form("upload"),
     lookback_days: int = Form(365),
+    row_limit: Optional[int] = Form(None),
     force_reprocess: bool = Form(False),
 ):
     if source not in ("upload", "redshift"):
@@ -54,6 +55,7 @@ async def optimize(
         also_global=also_global,
         source=source,
         lookback_days=lookback_days,
+        row_limit=row_limit,
         force_reprocess=force_reprocess,
     )
     return {"task_id": task_id, "status": "started"}
