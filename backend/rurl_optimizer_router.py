@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
+from typing import Optional
 
 from backend import rurl_optimizer_service as svc
 
@@ -19,27 +20,42 @@ def health():
 
 @router.post("/optimize")
 async def optimize(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
     workers: int = Form(0),
     threshold: int = Form(80),
     multi_facet: bool = Form(True),
     url_column: str = Form("r_url"),
     also_global: bool = Form(False),
+    source: str = Form("upload"),
+    lookback_days: int = Form(365),
+    force_reprocess: bool = Form(False),
 ):
-    body = await file.read()
-    if not body:
-        raise HTTPException(400, "Empty file")
-    if not file.filename.lower().endswith(".csv"):
-        raise HTTPException(400, "Expected a .csv file")
+    if source not in ("upload", "redshift"):
+        raise HTTPException(400, "source must be 'upload' or 'redshift'")
+
+    body: Optional[bytes] = None
+    filename: Optional[str] = None
+    if source == "upload":
+        if not file or not file.filename:
+            raise HTTPException(400, "File required when source=upload")
+        body = await file.read()
+        if not body:
+            raise HTTPException(400, "Empty file")
+        if not file.filename.lower().endswith(".csv"):
+            raise HTTPException(400, "Expected a .csv file")
+        filename = os.path.basename(file.filename)
 
     task_id = svc.start_optimize(
         csv_bytes=body,
-        filename=os.path.basename(file.filename),
+        filename=filename,
         workers=workers or None,
         threshold=threshold,
         multi_facet=multi_facet,
         url_column=url_column,
         also_global=also_global,
+        source=source,
+        lookback_days=lookback_days,
+        force_reprocess=force_reprocess,
     )
     return {"task_id": task_id, "status": "started"}
 

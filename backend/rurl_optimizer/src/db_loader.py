@@ -1,219 +1,335 @@
 """
 Data loading module for Beslist.nl R-URL Optimizer.
-Supports loading from Redshift database or cached CSV files.
+
+Phase 1 rewrite (2026-04-24): sources category + facet data from the
+Taxonomy v2 API and Search API v2 instead of Redshift. Cached to CSV
+in data/cache so subsequent runs are instant.
+
+The three DataFrames returned keep the same shape the matcher expects:
+  - main_categories: cat_id, name, table_name
+  - categories:      cat_id, url_name, display_name
+  - facets:          facet_id, facet_name, facet_value_id, facet_value_name,
+                     url, main_category_id, main_category_name
 """
 
-import pandas as pd
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import time
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
-import sys
 
-# Add parent directory to path for config import
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
 
+logger = logging.getLogger(__name__)
+
+TAXV2_BASE_URL = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
+SEARCH_BASE_URL = "https://productsearch-v2.api.beslist.nl"
+LOCALE = "nl-NL"
+SEARCH_LOCALE = "nl-nl"
+MAX_WORKERS = 12
+HTTP_TIMEOUT = 30
+
+
+def _fetch_json(url: str, retries: int = 2) -> dict | list:
+    """GET JSON with a small retry. Raises on final failure."""
+    last_exc: Exception | None = None
+    for _ in range(retries + 1):
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            last_exc = e
+            time.sleep(0.3)
+    raise last_exc  # type: ignore[misc]
+
+
+def _pick_label(labels: list | None, locale: str = LOCALE) -> dict:
+    """Pick the label for the requested locale; fall back to the first one."""
+    if not labels:
+        return {}
+    for lab in labels:
+        if lab.get("locale") == locale:
+            return lab
+    return labels[0]
+
 
 class DataLoader:
-    """Handles loading category and facet data from database or cache."""
+    """Loads categories and facets from taxv2 + Search APIs with CSV caching."""
 
     def __init__(self, use_cache: bool = True):
-        """
-        Initialize the data loader.
-
-        Args:
-            use_cache: If True, prefer loading from CSV cache files.
-        """
         self.use_cache = use_cache
-        self._connection = None
+        self._tree_cache: dict | None = None
+        self._facet_meta_cache: dict[int, str] | None = None
 
-    def _get_connection(self):
-        """Create Redshift database connection if not using cache."""
-        if self._connection is None:
+    # ------------------------------------------------------------------
+    # Taxonomy v2 — category tree (BFS)
+    # ------------------------------------------------------------------
+    def _fetch_category_tree(self) -> dict:
+        """
+        Crawl /api/Categories/{id}?includeSubCategories=true in parallel.
+
+        Returns dict with:
+          id_to_name:      cat_id -> nl-NL display name
+          id_to_url_slug:  cat_id -> nl-NL urlSlug
+          id_to_parent:    cat_id -> parentId (None for roots)
+          id_to_root:      cat_id -> root (main category) id
+          root_ids:        list of root ids in tree order
+        """
+        if self._tree_cache is not None:
+            return self._tree_cache
+
+        t0 = time.time()
+        roots = _fetch_json(f"{TAXV2_BASE_URL}/api/Categories?locale={LOCALE}")
+        if not isinstance(roots, list):
+            raise RuntimeError(f"Unexpected taxv2 response: {type(roots).__name__}")
+
+        id_to_name: dict[int, str] = {}
+        id_to_url_slug: dict[int, str] = {}
+        id_to_parent: dict[int, int | None] = {}
+        id_to_root: dict[int, int] = {}
+        root_ids: list[int] = []
+
+        for cat in roots:
+            cid = cat.get("id")
+            if cid is None:
+                continue
+            lab = _pick_label(cat.get("labels"))
+            id_to_name[cid] = lab.get("name") or str(cid)
+            id_to_url_slug[cid] = lab.get("urlSlug") or ""
+            id_to_parent[cid] = cat.get("parentId")
+            id_to_root[cid] = cid
+            root_ids.append(cid)
+
+        def fetch_detail(cid: int):
+            url = f"{TAXV2_BASE_URL}/api/Categories/{cid}?includeSubCategories=true&includeFacets=false"
             try:
-                import psycopg2
-                self._connection = psycopg2.connect(
-                    host=config.DB_CONFIG['host'],
-                    port=config.DB_CONFIG['port'],
-                    database=config.DB_CONFIG['database'],
-                    user=config.DB_CONFIG['user'],
-                    password=config.DB_CONFIG['password'],
-                    sslmode=config.DB_CONFIG['sslmode']
-                )
+                return cid, _fetch_json(url)
             except Exception as e:
-                raise ConnectionError(f"Failed to connect to Redshift: {e}")
-        return self._connection
+                return cid, {"__error__": str(e)}
 
+        frontier = list(id_to_parent.keys())
+        fetch_errors = 0
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+            while frontier:
+                results = list(ex.map(fetch_detail, frontier))
+                nxt: list[int] = []
+                for cid, detail in results:
+                    if "__error__" in detail:
+                        fetch_errors += 1
+                        continue
+                    root = id_to_root.get(cid, cid)
+                    for sub in detail.get("subCategories") or []:
+                        sid = sub.get("id")
+                        if sid is None or sid in id_to_parent:
+                            continue
+                        lab = _pick_label(sub.get("labels"))
+                        id_to_name[sid] = lab.get("name") or str(sid)
+                        id_to_url_slug[sid] = lab.get("urlSlug") or ""
+                        id_to_parent[sid] = sub.get("parentId", cid)
+                        id_to_root[sid] = root
+                        nxt.append(sid)
+                frontier = nxt
+
+        logger.info(
+            "Taxv2 BFS: %d cats crawled in %.1fs (errors=%d)",
+            len(id_to_parent), time.time() - t0, fetch_errors,
+        )
+        self._tree_cache = {
+            "id_to_name": id_to_name,
+            "id_to_url_slug": id_to_url_slug,
+            "id_to_parent": id_to_parent,
+            "id_to_root": id_to_root,
+            "root_ids": root_ids,
+        }
+        return self._tree_cache
+
+    # ------------------------------------------------------------------
+    # Taxonomy v2 — facet metadata (id -> urlSlug)
+    # ------------------------------------------------------------------
+    def _fetch_facet_meta(self) -> dict[int, str]:
+        """Return mapping facet_id -> urlSlug (e.g. 1290 -> 'merk')."""
+        if self._facet_meta_cache is not None:
+            return self._facet_meta_cache
+
+        t0 = time.time()
+        out: dict[int, str] = {}
+        # /api/Facets returns the full list as a bare array — skip/take are ignored.
+        data = _fetch_json(f"{TAXV2_BASE_URL}/api/Facets")
+        items = data.get("items") if isinstance(data, dict) else data
+        for f in items or []:
+            fid = f.get("id")
+            if fid is None:
+                continue
+            lab = _pick_label(f.get("labels"))
+            slug = lab.get("urlSlug")
+            if slug:
+                out[fid] = slug
+        logger.info("Taxv2 facet metadata: %d facets in %.1fs", len(out), time.time() - t0)
+        self._facet_meta_cache = out
+        return out
+
+    # ------------------------------------------------------------------
+    # Public API — same shape as before
+    # ------------------------------------------------------------------
     def load_main_categories(self) -> pd.DataFrame:
-        """
-        Load main categories from dim_category.
-
-        Returns:
-            DataFrame with columns: cat_id, name, table_name
-        """
+        """Return DataFrame: cat_id, name, table_name."""
         cache_path = config.CACHE_DIR / "main_categories.csv"
-
         if self.use_cache and cache_path.exists():
             return pd.read_csv(cache_path)
 
-        query = """
-        SELECT DISTINCT
-            main_category_id AS cat_id,
-            main_category_name AS name,
-            table_name
-        FROM beslistbi.datamart.dim_category
-        WHERE category_is_live = 1
-        """
-        df = pd.read_sql(query, self._get_connection())
-
-        # Cache for future use
+        tree = self._fetch_category_tree()
+        rows = []
+        for rid in tree["root_ids"]:
+            slug = tree["id_to_url_slug"].get(rid, "")
+            rows.append({
+                "cat_id": rid,
+                "name": tree["id_to_name"][rid],
+                "table_name": slug,  # legacy column — use slug as stand-in
+            })
+        df = pd.DataFrame(rows)
         df.to_csv(cache_path, index=False)
-
         return df
 
     def load_categories(self) -> pd.DataFrame:
-        """
-        Load category URLs from tblcategories_online.
-
-        Returns:
-            DataFrame with columns: cat_id, url_name, display_name
-
-        Note V20: Excludes product-series categories where both cat_id and p3 are filled.
-        These are categories like "Tefal Easy Fry Dual XXL" that should not be used
-        for subcategory name matching as they are product-specific landing pages.
-        """
+        """Return DataFrame: cat_id, url_name, display_name (all enabled subcats)."""
         cache_path = config.CACHE_DIR / "categories.csv"
-
         if self.use_cache and cache_path.exists():
             return pd.read_csv(cache_path)
 
-        # V20: Exclude categories where cat_id AND p3 are both filled
-        # These are product-series categories (e.g., Tefal Easy Fry Dual XXL)
-        # V22: Also exclude INACTIVE categories
-        query = """
-        SELECT
-            cat_id,
-            url_name,
-            display_name
-        FROM beslistbi.hda.tblcategories_online
-        WHERE actual_ind = 1
-            AND deleted_ind = 0
-            AND cat_is_live = 1
-            AND (p3 IS NULL OR cat_id IS NULL)
-            AND display_name NOT ILIKE 'INACTIVE%'
-        """
-        df = pd.read_sql(query, self._get_connection())
-
+        tree = self._fetch_category_tree()
+        rows = []
+        for cid, slug in tree["id_to_url_slug"].items():
+            if not slug:
+                continue
+            # Skip roots (main categories) — old `tblcategories_online` only had subcats
+            if tree["id_to_parent"][cid] is None:
+                continue
+            rows.append({
+                "cat_id": cid,
+                "url_name": slug,
+                "display_name": tree["id_to_name"][cid],
+            })
+        df = pd.DataFrame(rows)
         df.to_csv(cache_path, index=False)
-
         return df
 
     def load_facets(self) -> pd.DataFrame:
         """
-        Load facet values from facet_facetvalues.
+        Return DataFrame: facet_id, facet_name, facet_value_id, facet_value_name,
+        url, main_category_id, main_category_name, category_id, category_url_slug, count.
 
-        Returns:
-            DataFrame with facet data for NL.
+        Only includes (cat, facet, value) combos that actually have products,
+        as reported by the Search API.
         """
         cache_path = config.CACHE_DIR / "facets.csv"
-
         if self.use_cache and cache_path.exists():
             return pd.read_csv(cache_path)
 
-        query = """
-        SELECT *
-        FROM beslistbi.bt.facet_facetvalues
-        WHERE actual_ind = 1
-            AND deleted_ind = 0
-            AND country = 'nl'
-        """
-        df = pd.read_sql(query, self._get_connection())
+        tree = self._fetch_category_tree()
+        facet_meta = self._fetch_facet_meta()
 
+        # Query every subcategory's facet counts via the Search API in parallel.
+        sub_ids = [
+            cid for cid, parent in tree["id_to_parent"].items()
+            if parent is not None and tree["id_to_url_slug"].get(cid)
+        ]
+        logger.info("Fetching facets for %d subcategories via Search API...", len(sub_ids))
+
+        def fetch_cat_facets(cid: int):
+            slug = tree["id_to_url_slug"][cid]
+            url = (
+                f"{SEARCH_BASE_URL}/search/products"
+                f"?category={urllib.parse.quote(slug)}"
+                f"&countryLanguage={SEARCH_LOCALE}&isBot=false&limit=1"
+            )
+            try:
+                data = _fetch_json(url)
+                return cid, data.get("facets") or []
+            except Exception as e:
+                return cid, {"__error__": str(e)}
+
+        rows: list[dict] = []
+        errors = 0
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+            futures = {ex.submit(fetch_cat_facets, cid): cid for cid in sub_ids}
+            done = 0
+            for fut in as_completed(futures):
+                cid, result = fut.result()
+                done += 1
+                if done % 500 == 0:
+                    logger.info("  ...%d/%d cats (%.1fs elapsed)",
+                                done, len(sub_ids), time.time() - t0)
+                if isinstance(result, dict) and "__error__" in result:
+                    errors += 1
+                    continue
+
+                slug = tree["id_to_url_slug"][cid]
+                root = tree["id_to_root"][cid]
+                root_slug = tree["id_to_url_slug"].get(root, "")
+                root_name = tree["id_to_name"].get(root, "")
+
+                for f in result:
+                    fid = f.get("id")
+                    fname = facet_meta.get(fid) or f.get("label") or ""
+                    if not fid or not fname:
+                        continue
+                    for v in f.get("values") or []:
+                        vid = v.get("id")
+                        if vid is None:
+                            continue
+                        rows.append({
+                            "facet_id": fid,
+                            "facet_name": fname,
+                            "facet_value_id": vid,
+                            "facet_value_name": v.get("facetValue") or "",
+                            "url": f"/products/{root_slug}/{slug}/c/{fname}~{vid}",
+                            "main_category_id": root,
+                            "main_category_name": root_name,
+                            "category_id": cid,
+                            "category_url_slug": slug,
+                            "count": v.get("count") or 0,
+                        })
+
+        logger.info(
+            "Facet fetch complete: %d rows in %.1fs (errors=%d)",
+            len(rows), time.time() - t0, errors,
+        )
+        df = pd.DataFrame(rows)
         df.to_csv(cache_path, index=False)
-
         return df
 
     def load_r_urls(self, filepath: str) -> pd.DataFrame:
-        """
-        Load R-URLs to process from CSV file.
-
-        Args:
-            filepath: Path to CSV with R-URLs
-
-        Returns:
-            DataFrame with R-URL data
-        """
         return pd.read_csv(filepath)
 
     def save_to_cache(self, df: pd.DataFrame, filename: str) -> Path:
-        """
-        Save a DataFrame to the cache directory.
-
-        Args:
-            df: DataFrame to save
-            filename: Name of the cache file (e.g., 'facets.csv')
-
-        Returns:
-            Path to the saved file
-        """
         cache_path = config.CACHE_DIR / filename
         df.to_csv(cache_path, index=False)
         return cache_path
 
     def close(self):
-        """Close database connection."""
-        if self._connection:
-            self._connection.close()
-            self._connection = None
-
-
-def create_sample_facets_cache():
-    """
-    Create a sample facets.csv file for testing.
-    Based on the example from CLAUDE.md (Parasols category).
-    """
-    sample_data = {
-        'facet_id': [1, 1, 1, 2, 2, 2, 3, 3, 3],
-        'facet_name': [
-            'type_parasol', 'type_parasol', 'type_parasol',
-            'kleur', 'kleur', 'kleur',
-            'merk', 'merk', 'merk'
-        ],
-        'facet_value_id': [
-            3599193, 3599194, 3599195,
-            100, 101, 102,
-            200, 201, 202
-        ],
-        'facet_value_name': [
-            'Zweefparasols', 'Stokparasols', 'Strandparasols',
-            'Grijs', 'Zwart', 'Wit',
-            'Madison', 'Platinum', 'Doppler'
-        ],
-        'url': [
-            '/products/tuin_accessoires/tuin_accessoires_504063/c/type_parasol~3599193',
-            '/products/tuin_accessoires/tuin_accessoires_504063/c/type_parasol~3599194',
-            '/products/tuin_accessoires/tuin_accessoires_504063/c/type_parasol~3599195',
-            '/products/tuin_accessoires/tuin_accessoires_504063/c/kleur~100',
-            '/products/tuin_accessoires/tuin_accessoires_504063/c/kleur~101',
-            '/products/tuin_accessoires/tuin_accessoires_504063/c/kleur~102',
-            '/products/tuin_accessoires/tuin_accessoires_504063/c/merk~200',
-            '/products/tuin_accessoires/tuin_accessoires_504063/c/merk~201',
-            '/products/tuin_accessoires/tuin_accessoires_504063/c/merk~202',
-        ]
-    }
-
-    df = pd.DataFrame(sample_data)
-    cache_path = config.CACHE_DIR / "facets.csv"
-    df.to_csv(cache_path, index=False)
-    print(f"Sample facets cache created at: {cache_path}")
-    return df
+        pass
 
 
 if __name__ == "__main__":
-    # Create sample data for testing
-    create_sample_facets_cache()
-
-    # Test loading
-    loader = DataLoader(use_cache=True)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    loader = DataLoader(use_cache=False)
+    mc = loader.load_main_categories()
+    print(f"main_categories: {len(mc)} rows")
+    print(mc.head())
+    cats = loader.load_categories()
+    print(f"\ncategories: {len(cats)} rows")
+    print(cats.head())
     facets = loader.load_facets()
-    print(f"\nLoaded {len(facets)} facet records")
+    print(f"\nfacets: {len(facets)} rows")
     print(facets.head())

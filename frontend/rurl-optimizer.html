@@ -75,14 +75,32 @@
                     <div class="card-body">
                         <p class="text-muted small mb-3">
                             Converts generic R-URLs (<code>/products/&lt;cat&gt;/&lt;cat_id&gt;/r/&lt;keyword&gt;/</code>) into
-                            filtered category pages with facets. Upload a CSV with an <code>r_url</code> column;
-                            the tool pulls taxonomy+facet data from Redshift and matches each URL to its best redirect.
+                            filtered category pages with facets. Taxonomy and facet data is pulled
+                            live from the Beslist Taxonomy + Search APIs. Provide R-URLs via CSV upload
+                            or pull them from Redshift (last N days of traffic).
                         </p>
 
                         <form id="runForm" class="row g-3">
-                            <div class="col-md-6">
+                            <div class="col-12">
+                                <label class="form-label">Input source</label>
+                                <div>
+                                    <div class="form-check form-check-inline">
+                                        <input type="radio" class="form-check-input" name="source" id="srcUpload" value="upload" checked>
+                                        <label for="srcUpload" class="form-check-label">File upload</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input type="radio" class="form-check-input" name="source" id="srcRedshift" value="redshift">
+                                        <label for="srcRedshift" class="form-check-label">Redshift (last 365 days)</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6" id="uploadField">
                                 <label for="csvFile" class="form-label">Input CSV</label>
-                                <input type="file" class="form-control" id="csvFile" accept=".csv" required>
+                                <input type="file" class="form-control" id="csvFile" accept=".csv">
+                            </div>
+                            <div class="col-md-3 d-none" id="lookbackField">
+                                <label for="lookbackDays" class="form-label">Lookback days</label>
+                                <input type="number" class="form-control" id="lookbackDays" value="365" min="1" max="730">
                             </div>
                             <div class="col-md-2">
                                 <label for="urlColumn" class="form-label">URL column</label>
@@ -105,6 +123,10 @@
                                 <div class="form-check form-check-inline">
                                     <input type="checkbox" class="form-check-input" id="alsoGlobal">
                                     <label for="alsoGlobal" class="form-check-label">Also process mainpage R-urls</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input type="checkbox" class="form-check-input" id="forceReprocess">
+                                    <label for="forceReprocess" class="form-check-label" title="Ignore the persistent cache and re-run every URL from scratch.">Force reprocess all</label>
                                 </div>
                             </div>
 
@@ -173,19 +195,35 @@
         let currentTaskId = null;
         let pollTimer = null;
 
+        // Toggle upload vs Redshift fields
+        document.querySelectorAll('input[name="source"]').forEach(el => {
+            el.addEventListener('change', () => {
+                const isRedshift = document.getElementById('srcRedshift').checked;
+                document.getElementById('uploadField').classList.toggle('d-none', isRedshift);
+                document.getElementById('lookbackField').classList.toggle('d-none', !isRedshift);
+                document.getElementById('csvFile').required = !isRedshift;
+            });
+        });
+
         document.getElementById('runForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const file = document.getElementById('csvFile').files[0];
-            if (!file) { alert('Please choose a CSV file.'); return; }
-
+            const source = document.querySelector('input[name="source"]:checked').value;
             const fd = new FormData();
-            fd.append('file', file);
+            fd.append('source', source);
+            if (source === 'upload') {
+                const file = document.getElementById('csvFile').files[0];
+                if (!file) { alert('Please choose a CSV file.'); return; }
+                fd.append('file', file);
+            } else {
+                fd.append('lookback_days', document.getElementById('lookbackDays').value || '365');
+            }
             fd.append('url_column', document.getElementById('urlColumn').value || 'r_url');
             const w = document.getElementById('workers').value;
             if (w) fd.append('workers', w);
             fd.append('threshold', document.getElementById('threshold').value || '80');
             fd.append('multi_facet', document.getElementById('multiFacet').checked);
             fd.append('also_global', document.getElementById('alsoGlobal').checked);
+            fd.append('force_reprocess', document.getElementById('forceReprocess').checked);
 
             document.getElementById('runBtn').disabled = true;
             try {

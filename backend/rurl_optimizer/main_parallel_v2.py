@@ -656,6 +656,9 @@ def main():
         # Match by original_url since order may differ with imap_unordered
         url_to_visits = dict(zip(df[args.column], df['visits']))
         results_df['visits'] = results_df['original_url'].map(url_to_visits)
+    if 'visit_rev' in df.columns:
+        url_to_rev = dict(zip(df[args.column], df['visit_rev']))
+        results_df['visit_rev'] = results_df['original_url'].map(url_to_rev)
 
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     results_df.to_csv(args.output, index=False)
