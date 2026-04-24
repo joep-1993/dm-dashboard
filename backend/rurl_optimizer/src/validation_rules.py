@@ -404,6 +404,30 @@ PRODUCT_TYPE_FACETS = {
 DUTCH_SUFFIXES = ['s', 'en', 'jes', 'tjes', 'eren']
 
 
+def detect_shops_in_keyword(keyword: str) -> list[str]:
+    """
+    Return every SHOP_NAME (single- or multi-word) that appears in the
+    keyword. Word-boundary aware so 'davids' doesn't trigger 'da'.
+    """
+    if not keyword:
+        return []
+    import re as _re
+    kw = keyword.lower().strip()
+    tokens = kw.split()
+    token_set = set(tokens)
+    hits = []
+    for shop in SHOP_NAMES:
+        s = shop.lower()
+        if ' ' in s:
+            # multi-word: whole-phrase substring with word boundaries
+            if _re.search(r'(?:^|\s)' + _re.escape(s) + r'(?:\s|$)', kw):
+                hits.append(shop)
+        else:
+            if s in token_set:
+                hits.append(shop)
+    return hits
+
+
 # ==============================================================================
 # MATCHING VOLGORDE (V5-V6)
 # ==============================================================================

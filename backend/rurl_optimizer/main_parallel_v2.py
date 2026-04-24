@@ -192,8 +192,8 @@ def process_url_v2(args):
     # V30: Shop-name short-circuit — if the keyword contains any SHOP_NAME
     # word, skip matching entirely. Row stays in the output for visibility
     # but without a redirect URL.
-    _kw_words = parsed.keyword.lower().split() if parsed.keyword else []
-    _shops = [w for w in _kw_words if w in SHOP_NAMES]
+    from src.validation_rules import detect_shops_in_keyword as _detect_shops
+    _shops = _detect_shops(parsed.keyword)
     if _shops:
         return {
             'original_url': url,

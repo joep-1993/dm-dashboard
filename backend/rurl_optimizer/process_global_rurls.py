@@ -144,7 +144,8 @@ def process_global_url(args):
         return empty
 
     # V30: Shop-name short-circuit — keep the row but skip matching.
-    _shops = [w for w in keyword.lower().split() if w in SHOP_NAMES]
+    from src.validation_rules import detect_shops_in_keyword as _detect_shops
+    _shops = _detect_shops(keyword)
     if _shops:
         shop_row = dict(empty)
         shop_row.update({
