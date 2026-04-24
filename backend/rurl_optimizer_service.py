@@ -30,7 +30,38 @@ INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 _TASKS: Dict[str, Dict[str, Any]] = {}
 _TASKS_LOCK = threading.Lock()
-_HISTORY: deque = deque(maxlen=50)
+
+# History is persisted to disk (same pattern as DMA+) so uvicorn --reload or
+# a machine reboot doesn't wipe the Recent runs table.
+_HISTORY_FILE: Path = Path(__file__).parent / "data" / "rurl_optimizer_history.json"
+_HISTORY_LOCK = threading.Lock()
+
+
+def _load_history_from_disk() -> deque:
+    if _HISTORY_FILE.exists():
+        try:
+            import json as _json
+            data = _json.loads(_HISTORY_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return deque(data, maxlen=200)
+        except Exception as e:
+            logger.warning(f"Failed to load rurl history from {_HISTORY_FILE}: {e}")
+    return deque(maxlen=200)
+
+
+def _save_history_to_disk():
+    try:
+        import json as _json
+        _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _HISTORY_FILE.write_text(
+            _json.dumps(list(_HISTORY), default=str, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.warning(f"Failed to save rurl history to {_HISTORY_FILE}: {e}")
+
+
+_HISTORY: deque = _load_history_from_disk()
 
 # tqdm writes lines like "Processing:  42%|████▏     | 4200/10000 [00:15<00:20, ...]"
 _TQDM_RE = re.compile(r"(?P<pct>\d+)%\|.*?\|\s*(?P<cur>\d+)/(?P<tot>\d+)")
@@ -143,17 +174,19 @@ def _history_append(task_id: str) -> None:
     t = _get(task_id)
     if not t:
         return
-    _HISTORY.appendleft({
-        "task_id": task_id,
-        "script": t.get("script"),
-        "status": t.get("status"),
-        "started_at": t.get("started_at"),
-        "finished_at": t.get("finished_at"),
-        "message": t.get("message"),
-        "error": t.get("error"),
-        "output_path": t.get("output_path"),
-        "params": t.get("params"),
-    })
+    with _HISTORY_LOCK:
+        _HISTORY.appendleft({
+            "task_id": task_id,
+            "script": t.get("script"),
+            "status": t.get("status"),
+            "started_at": t.get("started_at"),
+            "finished_at": t.get("finished_at"),
+            "message": t.get("message"),
+            "error": t.get("error"),
+            "output_path": t.get("output_path"),
+            "params": t.get("params"),
+        })
+        _save_history_to_disk()
 
 
 def _normalize_upload(csv_bytes: bytes) -> bytes:
