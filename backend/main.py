@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response as FastAPIResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response as FastAPIResponse, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, RedirectResponse, Response, HTMLResponse
@@ -2501,7 +2501,8 @@ from backend.unique_titles import (
     generate_csv_for_upload,
     upload_titles_to_api,
     delete_title,
-    search_titles
+    search_titles,
+    queue_urls_for_generation
 )
 
 # Initialize table on startup
@@ -2667,6 +2668,23 @@ async def delete_unique_title(url: str):
             raise HTTPException(status_code=404, detail="Title not found")
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/unique-titles/queue")
+async def queue_unique_titles(payload: dict = Body(...)):
+    """Add URLs to the database so they become eligible for AI title generation."""
+    raw = payload.get("urls")
+    if isinstance(raw, str):
+        urls = [line for line in raw.splitlines()]
+    elif isinstance(raw, list):
+        urls = raw
+    else:
+        raise HTTPException(status_code=400, detail="Provide 'urls' as a string or list")
+
+    try:
+        return queue_urls_for_generation(urls)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

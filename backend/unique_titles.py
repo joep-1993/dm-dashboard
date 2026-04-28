@@ -129,6 +129,58 @@ def bulk_upsert_titles(titles: List[Dict]) -> Dict:
     }
 
 
+def queue_urls_for_generation(urls: List[str]) -> Dict:
+    """
+    Insert URLs into pa.unique_titles with NULL title/description/h1 so the
+    AI batch picks them up (eligible = ai_processed IS NULL/FALSE).
+    Existing URLs are left untouched.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    added = 0
+    skipped = 0
+    invalid = 0
+
+    try:
+        for raw in urls:
+            url = (raw or '').strip().lower()
+            if not url:
+                invalid += 1
+                continue
+            # Strip domain prefix to keep relative paths consistent with the rest of the app
+            for prefix in ("https://www.beslist.nl", "http://www.beslist.nl",
+                           "https://beslist.nl", "http://beslist.nl"):
+                if url.startswith(prefix):
+                    url = url[len(prefix):]
+                    break
+            if not url.startswith('/'):
+                invalid += 1
+                continue
+            try:
+                cur.execute("""
+                    INSERT INTO pa.unique_titles (url, created_at)
+                    VALUES (%s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (url) DO NOTHING
+                """, (url,))
+                if cur.rowcount > 0:
+                    added += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                print(f"[UNIQUE_TITLES] Error queuing {url}: {e}")
+                invalid += 1
+        conn.commit()
+    except Exception as e:
+        print(f"[UNIQUE_TITLES] Queue error: {e}")
+        conn.rollback()
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+    return {"added": added, "skipped": skipped, "invalid": invalid}
+
+
 def get_all_titles(limit: int = 0) -> List[Dict]:
     """Get all titles from database. Optional limit for batched uploads."""
     conn = get_db_connection()
