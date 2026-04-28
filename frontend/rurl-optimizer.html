@@ -172,8 +172,9 @@
                 </div>
 
                 <div class="card mb-4">
-                    <div class="card-header">
+                    <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Recent runs</h5>
+                        <a href="/api/rurl/export-all" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" title="Download every stored run output combined into one XLSX (v1 and v2 on separate sheets).">Export all</a>
                     </div>
                     <div class="card-body p-0">
                         <table class="table mb-0" id="historyTable">

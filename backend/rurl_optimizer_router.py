@@ -100,3 +100,57 @@ def delete_history(task_id: str):
     if not svc.delete_history_entry(task_id):
         raise HTTPException(404, "Run not found")
     return {"deleted": True}
+
+
+@router.get("/export-all")
+def export_all():
+    """Combined export of every stored run output across v1 and v2.
+
+    Pulls from the shared rurl_run_output table, concats by version, and
+    returns a single XLSX with one sheet per engine version.
+    """
+    import io
+    import pandas as pd
+    from datetime import datetime
+    from backend import rurl_optimizer_persistence as pers
+
+    by_version = pers.list_run_outputs_by_version()
+    if not by_version:
+        raise HTTPException(404, "No run outputs available")
+
+    def _parse(content: bytes, mime: str, filename: str):
+        is_xlsx = (
+            "spreadsheetml" in (mime or "")
+            or filename.lower().endswith(".xlsx")
+        )
+        try:
+            if is_xlsx:
+                return pd.read_excel(io.BytesIO(content))
+            return pd.read_csv(io.BytesIO(content))
+        except Exception:
+            return None
+
+    out_buf = io.BytesIO()
+    with pd.ExcelWriter(out_buf, engine="openpyxl") as w:
+        wrote_any = False
+        for version in sorted(by_version.keys()):
+            frames = []
+            for task_id, fname, mime, content in by_version[version]:
+                df = _parse(content, mime, fname)
+                if df is not None and len(df):
+                    df = df.assign(_run_id=task_id)
+                    frames.append(df)
+            if not frames:
+                continue
+            combined = pd.concat(frames, ignore_index=True, sort=False)
+            combined.to_excel(w, sheet_name=f"v{version}", index=False)
+            wrote_any = True
+        if not wrote_any:
+            raise HTTPException(404, "No run outputs could be parsed")
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Response(
+        content=out_buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="rurl_export_all_{ts}.xlsx"'},
+    )

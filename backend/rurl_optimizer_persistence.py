@@ -146,6 +146,34 @@ def list_run_output_task_ids() -> set[str]:
         return_db_connection(conn)
 
 
+def list_run_outputs_by_version() -> dict:
+    """Return all stored run outputs grouped by engine version.
+
+    Used by the cross-engine 'Export all' endpoint. Shape:
+        {1: [(task_id, filename, mime, bytes), ...],
+         2: [(task_id, filename, mime, bytes), ...]}
+    """
+    ensure_output_table()
+    out: dict = {}
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT task_id, version, filename, mime, content, created_at
+                   FROM rurl_run_output ORDER BY created_at"""
+            )
+            for r in cur.fetchall():
+                content = r["content"]
+                if hasattr(content, "tobytes"):
+                    content = content.tobytes()
+                out.setdefault(int(r["version"]), []).append(
+                    (r["task_id"], r["filename"], r["mime"], bytes(content))
+                )
+        return out
+    finally:
+        return_db_connection(conn)
+
+
 def delete_run_output(task_id: str) -> bool:
     ensure_output_table()
     conn = get_db_connection()
