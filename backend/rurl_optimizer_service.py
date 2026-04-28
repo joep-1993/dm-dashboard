@@ -22,14 +22,21 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+ENGINE_VERSION = 1
 PKG_DIR = Path(__file__).parent / "rurl_optimizer"
-OUTPUT_DIR = Path("/tmp/rurl-optimizer-output")
-INPUT_DIR = Path("/tmp/rurl-optimizer-input")
+# Persisted under backend/data/ (same dir as the history JSON) so output
+# files survive uvicorn restarts and /tmp wipes — required for the Export
+# button on old history rows.
+OUTPUT_DIR = Path(__file__).parent / "data" / "rurl-optimizer-output"
+INPUT_DIR = Path(__file__).parent / "data" / "rurl-optimizer-input"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 _TASKS: Dict[str, Dict[str, Any]] = {}
 _TASKS_LOCK = threading.Lock()
+# Tracks the runner thread per task so the stale-task sweep can tell
+# "subprocess died" apart from "still in Redshift fetch / Python phase".
+_THREADS: Dict[str, threading.Thread] = {}
 
 # History is persisted to disk (same pattern as DMA+) so uvicorn --reload or
 # a machine reboot doesn't wipe the Recent runs table.
@@ -88,7 +95,17 @@ def _append_log(task_id: str, line: str) -> None:
             del log[: len(log) - 500]
 
 
-def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: str) -> None:
+def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: str, optional_output: bool = False) -> None:
+    # Capture prior state so an optional auxiliary stage can restore it if it
+    # exits cleanly without producing output (e.g. global pass, no globals).
+    prior = _get(task_id) or {}
+    prior_state = {
+        "status": prior.get("status"),
+        "progress": prior.get("progress"),
+        "message": prior.get("message"),
+        "output_path": prior.get("output_path"),
+        "script": prior.get("script"),
+    } if optional_output else None
     _set(task_id, {
         "status": "running",
         "progress": 0,
@@ -167,6 +184,15 @@ def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: st
             "message": f"Done. Output: {output_path.name}",
             "finished_at": datetime.now().isoformat(),
         })
+    elif rc == 0 and optional_output:
+        # Auxiliary stage exited cleanly without writing output (e.g. the
+        # global R-URL pass when no global URLs are present). Restore the
+        # prior status / output_path so the main stage's success still
+        # stands and downstream steps (cache merge, xlsx, DB save) run.
+        if prior_state:
+            _set(task_id, {k: v for k, v in prior_state.items() if v is not None})
+        _append_log(task_id, f"[info] {script}: nothing to write (no output file)")
+        return
     else:
         _set(task_id, {
             "status": "failed",
@@ -455,7 +481,7 @@ def start_optimize(
                 ),
             ]
             _append_log(task_id, "--- Running global R-URL pass on fresh rows ---")
-            _run_subprocess(task_id, argv2, global_out, script="process_global_rurls")
+            _run_subprocess(task_id, argv2, global_out, script="process_global_rurls", optional_output=True)
 
         # 3. Merge cached rows into whatever the current output CSV is (main or global).
         if cached_urls and (_get(task_id) or {}).get("status") == "completed":
@@ -507,11 +533,72 @@ def start_optimize(
             except Exception as e:
                 _append_log(task_id, f"[warn] xlsx conversion failed: {e}")
 
-    threading.Thread(target=_runner, daemon=True).start()
+        # Persist the final output bytes to Postgres so /download survives
+        # any /tmp wipe / restart. Mark history with output_in_db=True so
+        # the frontend only renders Export when bytes are durable.
+        try:
+            final_path = Path((_get(task_id) or {}).get("output_path", ""))
+            if (_get(task_id) or {}).get("status") == "completed" and final_path.exists():
+                from backend import rurl_optimizer_persistence as pers
+                mime = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        if final_path.suffix.lower() == ".xlsx" else "text/csv")
+                pers.save_run_output(task_id, ENGINE_VERSION, final_path.name, mime, final_path.read_bytes())
+                _set(task_id, {"output_in_db": True})
+                _history_update_latest(task_id, {"output_in_db": True})
+        except Exception as e:
+            _append_log(task_id, f"[warn] save_run_output failed: {e}")
+
+    th = threading.Thread(target=_runner, daemon=True)
+    _THREADS[task_id] = th
+    th.start()
     return task_id
 
 
+def _is_pid_alive(pid) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _sweep_stale_tasks() -> None:
+    """Finalize 'running' tasks whose runner thread is no longer alive.
+
+    Only triggers when the runner thread has exited (so a task still in
+    the Redshift fetch / Python orchestration phase isn't prematurely
+    failed).
+    """
+    with _TASKS_LOCK:
+        ids = list(_TASKS.keys())
+    for tid in ids:
+        t = _get(tid) or {}
+        if t.get("status") != "running":
+            continue
+        th = _THREADS.get(tid)
+        if th is not None and th.is_alive():
+            continue
+        out_path = t.get("output_path") or ""
+        if out_path and Path(out_path).exists():
+            _set(tid, {
+                "status": "completed",
+                "progress": 100,
+                "message": t.get("message") or f"Recovered. Output: {Path(out_path).name}",
+                "finished_at": t.get("finished_at") or datetime.now().isoformat(),
+            })
+        else:
+            _set(tid, {
+                "status": "failed",
+                "error": t.get("error") or "Process exited without finalizing status",
+                "finished_at": t.get("finished_at") or datetime.now().isoformat(),
+            })
+        _history_append(tid)
+
+
 def get_status(task_id: str) -> Optional[Dict[str, Any]]:
+    _sweep_stale_tasks()
     return _get(task_id)
 
 
@@ -523,15 +610,45 @@ def cancel(task_id: str) -> bool:
     return True
 
 
-def get_output_path(task_id: str) -> Optional[str]:
-    t = _get(task_id)
-    if not t:
+def get_output_bytes(task_id: str):
+    """Return (filename, mime, content_bytes) from the DB, or None."""
+    try:
+        from backend import rurl_optimizer_persistence as pers
+        return pers.get_run_output(task_id)
+    except Exception as e:
+        logger.warning(f"get_run_output failed: {e}")
         return None
-    return t.get("output_path")
 
 
 def get_history() -> list:
-    return list(_HISTORY)
+    """Return history with output_in_db flagged. Purge completed entries
+    that no longer have bytes on the server (Export would 404)."""
+    _sweep_stale_tasks()
+    try:
+        from backend import rurl_optimizer_persistence as pers
+        db_ids = pers.list_run_output_task_ids()
+    except Exception as e:
+        logger.warning(f"history db check failed: {e}")
+        return list(_HISTORY)
+
+    with _HISTORY_LOCK:
+        kept = []
+        purged = False
+        for h in _HISTORY:
+            tid = h.get("task_id")
+            status = h.get("status")
+            in_db = tid in db_ids
+            if status == "completed" and not in_db:
+                purged = True
+                continue
+            if in_db and not h.get("output_in_db"):
+                h = {**h, "output_in_db": True}
+            kept.append(h)
+        if purged:
+            _HISTORY.clear()
+            _HISTORY.extend(kept)
+            _save_history_to_disk()
+        return list(_HISTORY)
 
 
 def delete_history_entry(task_id: str) -> bool:
@@ -557,4 +674,9 @@ def delete_history_entry(task_id: str) -> bool:
                 p.unlink()
         except Exception as e:
             logger.warning(f"Failed to remove output file {out_path}: {e}")
+    try:
+        from backend import rurl_optimizer_persistence as pers
+        pers.delete_run_output(task_id)
+    except Exception as e:
+        logger.warning(f"delete_run_output failed: {e}")
     return removed
