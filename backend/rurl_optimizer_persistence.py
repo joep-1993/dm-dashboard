@@ -146,6 +146,23 @@ def list_run_output_task_ids() -> set[str]:
         return_db_connection(conn)
 
 
+def load_all_processed() -> pd.DataFrame:
+    """Return every row from rurl_processed (deduped: one row per URL)."""
+    ensure_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT original_url, redirect_url, reliability_tier,
+                          reliability_score, match_type, reason, processed_at
+                   FROM rurl_processed
+                   ORDER BY processed_at DESC"""
+            )
+            return pd.DataFrame(cur.fetchall())
+    finally:
+        return_db_connection(conn)
+
+
 def list_run_outputs_by_version() -> dict:
     """Return all stored run outputs grouped by engine version.
 

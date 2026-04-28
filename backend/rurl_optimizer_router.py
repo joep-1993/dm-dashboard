@@ -104,53 +104,51 @@ def delete_history(task_id: str):
 
 @router.get("/export-all")
 def export_all():
-    """Combined export of every stored run output across v1 and v2.
+    """Export every URL ever processed (deduped, from rurl_processed).
 
-    Pulls from the shared rurl_run_output table, concats by version, and
-    returns a single XLSX with one sheet per engine version.
+    One row per unique original_url, projected to the v2 user-facing
+    schema. visits/revenue are intentionally omitted because they aren't
+    cached per-URL (they're time-dependent, only meaningful per-run).
     """
     import io
     import pandas as pd
     from datetime import datetime
     from backend import rurl_optimizer_persistence as pers
+    from backend.rurl_optimizer_v2_service import (
+        _main_category_from_redirect,
+        _deepest_category_from_redirect,
+    )
 
-    by_version = pers.list_run_outputs_by_version()
-    if not by_version:
-        raise HTTPException(404, "No run outputs available")
+    df = pers.load_all_processed()
+    if df.empty:
+        raise HTTPException(404, "No processed URLs available")
 
-    def _parse(content: bytes, mime: str, filename: str):
-        is_xlsx = (
-            "spreadsheetml" in (mime or "")
-            or filename.lower().endswith(".xlsx")
-        )
-        try:
-            if is_xlsx:
-                return pd.read_excel(io.BytesIO(content))
-            return pd.read_csv(io.BytesIO(content))
-        except Exception:
-            return None
+    out = pd.DataFrame()
+    out["old url"] = df["original_url"]
+    out["new url"] = df["redirect_url"]
+    out["score"] = df["reliability_score"]
+    out["main_category"] = df["redirect_url"].apply(_main_category_from_redirect)
+    out["deepest_category"] = df["redirect_url"].apply(_deepest_category_from_redirect)
+    out["reason"] = df["reason"]
+    out["processed_at"] = df["processed_at"]
 
-    out_buf = io.BytesIO()
-    with pd.ExcelWriter(out_buf, engine="openpyxl") as w:
-        wrote_any = False
-        for version in sorted(by_version.keys()):
-            frames = []
-            for task_id, fname, mime, content in by_version[version]:
-                df = _parse(content, mime, fname)
-                if df is not None and len(df):
-                    df = df.assign(_run_id=task_id)
-                    frames.append(df)
-            if not frames:
-                continue
-            combined = pd.concat(frames, ignore_index=True, sort=False)
-            combined.to_excel(w, sheet_name=f"v{version}", index=False)
-            wrote_any = True
-        if not wrote_any:
-            raise HTTPException(404, "No run outputs could be parsed")
+    out["__s"] = pd.to_numeric(out["score"], errors="coerce")
+    out = out.sort_values("__s", ascending=False, na_position="last").drop(columns="__s")
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        out.to_excel(w, index=False, sheet_name="all_processed")
+        # Center-align score column for visual consistency with per-run xlsx.
+        ws = w.sheets["all_processed"]
+        from openpyxl.styles import Alignment
+        center = Alignment(horizontal="center", vertical="center")
+        score_col = list(out.columns).index("score") + 1
+        for row in range(1, ws.max_row + 1):
+            ws.cell(row=row, column=score_col).alignment = center
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Response(
-        content=out_buf.getvalue(),
+        content=buf.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="rurl_export_all_{ts}.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="rurl_all_processed_{ts}.xlsx"'},
     )

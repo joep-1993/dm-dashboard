@@ -249,6 +249,47 @@ def _history_append(task_id: str) -> None:
 
 TAXV2_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
 _SLUG_TO_MAINCAT: Dict[str, str] = {}
+_CAT_ID_TO_DEEPEST: Dict[str, str] = {}
+
+
+def _ensure_cat_id_lookup() -> Dict[str, str]:
+    """Build a deepest cat_id -> readable deepest_cat name (lazy, cached)."""
+    global _CAT_ID_TO_DEEPEST
+    if _CAT_ID_TO_DEEPEST:
+        return _CAT_ID_TO_DEEPEST
+    try:
+        from backend.category_keyword_service import PRELOADED_CATEGORIES
+        _CAT_ID_TO_DEEPEST = {
+            str(c["cat_id"]): c["deepest_cat"]
+            for c in PRELOADED_CATEGORIES
+            if c.get("cat_id") and c.get("deepest_cat")
+        }
+    except Exception as e:
+        logger.warning(f"could not build cat_id->deepest lookup: {e}")
+    return _CAT_ID_TO_DEEPEST
+
+
+def _deepest_category_from_redirect(redirect_url) -> str:
+    """Resolve the readable deepest-category name from a redirect URL.
+
+    Extracts the trailing _<digits> from the path before any /c/ facet
+    segment and looks it up in PRELOADED_CATEGORIES (cat_id -> deepest_cat).
+    Used by the cross-engine 'Export all' endpoint where the per-row
+    redirect_category isn't available (rurl_processed doesn't cache it).
+    """
+    if not redirect_url or not isinstance(redirect_url, str):
+        return ""
+    path = redirect_url.split("/c/", 1)[0]
+    parts = path.rstrip("/").split("/")
+    cat_id = ""
+    if parts:
+        for tok in reversed(parts[-1].split("_")):
+            if tok.isdigit():
+                cat_id = tok
+                break
+    if not cat_id:
+        return ""
+    return _ensure_cat_id_lookup().get(cat_id, "")
 
 
 def _ensure_slug_lookup() -> Dict[str, str]:
