@@ -186,6 +186,7 @@ SHOP_NAMES = {
     'hubo', 'hubo.nl',
     'bouwmaat',
     'toolstation',
+    'cranenbroek', 'cranenbroek.nl', 'van cranenbroek',
 
     # --- Supermarkten ---
     'albert heijn', 'ah', 'ah.nl',

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from typing import Optional
 
 from backend import rurl_optimizer_v2_service as svc
@@ -32,6 +32,7 @@ async def optimize(
     lookback_days: int = Form(365),
     row_limit: Optional[int] = Form(None),
     force_reprocess: bool = Form(False),
+    exclude_shopnames: bool = Form(False),
 ):
     if source not in ("upload", "redshift"):
         raise HTTPException(400, "source must be 'upload' or 'redshift'")
@@ -60,6 +61,7 @@ async def optimize(
         lookback_days=lookback_days,
         row_limit=row_limit,
         force_reprocess=force_reprocess,
+        exclude_shopnames=exclude_shopnames,
     )
     return {"task_id": task_id, "status": "started"}
 
@@ -82,14 +84,15 @@ def cancel(task_id: str):
 
 @router.get("/download/{task_id}")
 def download(task_id: str):
-    path = svc.get_output_path(task_id)
-    if not path:
+    blob = svc.get_output_bytes(task_id)
+    if not blob:
         raise HTTPException(404, "No output for this task")
-    if not os.path.exists(path):
-        raise HTTPException(410, "Output missing on disk")
-    media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" \
-        if path.lower().endswith(".xlsx") else "text/csv"
-    return FileResponse(path, media_type=media, filename=os.path.basename(path))
+    filename, mime, content = blob
+    return Response(
+        content=content,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/history")

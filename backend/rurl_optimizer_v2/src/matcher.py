@@ -372,7 +372,9 @@ class KeywordMatcher:
                 continue
 
             cand = (score, getattr(fv, "count", 0) or 0, fv)
-            if best is None or cand > best:
+            # Only tiebreak on (score, count); FacetValue isn't orderable so
+            # comparing the full tuple raises TypeError when both ties match.
+            if best is None or (cand[0], cand[1]) > (best[0], best[1]):
                 best = cand
 
         if best:

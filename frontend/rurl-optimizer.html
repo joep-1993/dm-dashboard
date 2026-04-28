@@ -74,14 +74,8 @@
             <div class="col-md-10 mx-auto">
 
                 <div class="card mb-4">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="card-header">
                         <h5 class="mb-0">Upload & run</h5>
-                        <div class="form-check form-switch mb-0">
-                            <input class="form-check-input" type="checkbox" id="useV2" checked>
-                            <label class="form-check-label" for="useV2" title="Switch between the original engine (v1) and the v2 engine. Persistence is shared.">
-                                <span class="badge bg-info">2.0</span>
-                            </label>
-                        </div>
                     </div>
                     <div class="card-body">
                         <form id="runForm" class="row g-3">
@@ -129,6 +123,14 @@
                                     <input type="checkbox" class="form-check-input" id="forceReprocess">
                                     <label for="forceReprocess" class="form-check-label" title="Ignore the persistent cache and re-run every URL from scratch.">Force reprocess all</label>
                                 </div>
+                                <div class="form-check form-check-inline">
+                                    <input type="checkbox" class="form-check-input" id="excludeShopnames">
+                                    <label for="excludeShopnames" class="form-check-label" title="Drop URLs whose keyword contains a SHOP_NAME (e.g. hema, hubo, kruidvat) before processing so they don't count toward the limit.">Exclude shopnames</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input type="checkbox" class="form-check-input" id="useV2" checked>
+                                    <label for="useV2" class="form-check-label" title="Switch between the original engine (v1) and the v2 engine. Persistence is shared.">2.0</label>
+                                </div>
                             </div>
 
                             <div class="col-12 d-flex justify-content-end gap-2">
@@ -155,10 +157,10 @@
                                  id="progressBar" style="width: 0%"></div>
                         </div>
 
-                        <div class="row g-2 mb-3" id="statsRow" style="display:none;">
+                        <div class="row g-2 mb-2" id="statsRow" style="display:none;">
                             <div class="col"><div class="stat-box bg-light"><div class="num" id="statTotal">0</div><div class="label">Total</div></div></div>
-                            <div class="col"><div class="stat-box bg-light"><div class="num" id="statSuccess">0</div><div class="label">Success</div></div></div>
-                            <div class="col"><div class="stat-box bg-light"><div class="num" id="statProdReady">0</div><div class="label">Prod ready (A+B)</div></div></div>
+                            <div class="col"><div class="stat-box bg-light"><div class="num" id="statSuccess">0</div><div class="label">Redirect found</div></div></div>
+                            <div class="col"><div class="stat-box bg-light"><div class="num" id="statSkipped">0</div><div class="label">URLs skipped</div></div></div>
                         </div>
 
                         <div class="log-output" id="logOutput"></div>
@@ -178,7 +180,7 @@
                             <thead class="table-light">
                                 <tr>
                                     <th style="padding: 8px 12px;">Started</th>
-                                    <th style="padding: 8px 12px;">Script</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Version</th>
                                     <th style="padding: 8px 12px;">Status</th>
                                     <th style="padding: 8px 12px;">Input</th>
                                     <th style="padding: 8px 12px;">Message</th>
@@ -245,6 +247,7 @@
             fd.append('threshold', document.getElementById('threshold').value || '80');
             fd.append('also_global', document.getElementById('alsoGlobal').checked);
             fd.append('force_reprocess', document.getElementById('forceReprocess').checked);
+            fd.append('exclude_shopnames', document.getElementById('excludeShopnames').checked);
 
             document.getElementById('runBtn').disabled = true;
             try {
@@ -324,8 +327,10 @@
             const finalMatch = log.match(/==> Final:\s+([\d,]+)\s+total URLs[^,]*,\s+([\d,]+)\s+successful/);
             const totalMatch = finalMatch || log.match(/Total URLs processed:\s+([\d,]+)/);
             const successMatch = finalMatch || log.match(/Successful redirects:\s+([\d,]+)/);
-            const prodMatch = log.match(/Production ready \(A\+B\):\s+([\d,]+)/);
-            if (totalMatch || successMatch || prodMatch) {
+            // URLs already in the persistence cache and skipped this run.
+            // Engine logs: "Persistence: 99 of 100 URLs already processed — skipping them."
+            const skippedMatch = log.match(/Persistence:\s+([\d,]+)\s+of\s+[\d,]+\s+URLs already processed/);
+            if (totalMatch || successMatch || skippedMatch) {
                 document.getElementById('statsRow').style.display = '';
                 if (finalMatch) {
                     document.getElementById('statTotal').textContent = finalMatch[1];
@@ -334,7 +339,7 @@
                     if (totalMatch) document.getElementById('statTotal').textContent = totalMatch[1];
                     if (successMatch) document.getElementById('statSuccess').textContent = successMatch[1];
                 }
-                if (prodMatch) document.getElementById('statProdReady').textContent = prodMatch[1];
+                if (skippedMatch) document.getElementById('statSkipped').textContent = skippedMatch[1];
             }
         }
 
@@ -361,21 +366,21 @@
                     const color = {
                         completed: 'success', failed: 'danger', cancelled: 'warning', running: 'primary'
                     }[h.status] || 'secondary';
-                    const versionBadge = h._version === 'v2'
-                        ? '<span class="badge bg-info" style="font-size: 0.65rem;">v2</span>'
-                        : '<span class="badge bg-secondary" style="font-size: 0.65rem;">v1</span>';
+                    const versionBadge = h._version === 'v2' ? 'v2' : 'v1';
                     const filename = (h.params && h.params.filename) || '';
                     const msg = h.error || h.message || '';
-                    const dl = h.status === 'completed' && h.task_id
+                    const dl = h.status === 'completed' && h.task_id && h.output_in_db
                         ? `<a href="${h._base}/download/${h.task_id}" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'">Export</a>`
                         : '';
                     const rm = h.task_id
-                        ? `<button type="button" class="btn btn-sm" data-rm-base="${h._base}" data-rm-task="${h.task_id}" style="border: 1px solid #d63031; color: #d63031; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; margin-left: 4px;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'">Remove</button>`
+                        ? `<button type="button" class="btn btn-sm" data-rm-base="${h._base}" data-rm-task="${h.task_id}" style="border: 1px solid #d63031; color: #d63031; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'">Remove</button>`
                         : '';
-                    const actions = (dl || rm) ? `${dl}${rm}` : '—';
+                    const actions = (dl || rm)
+                        ? `<div style="display: inline-flex; gap: 4px; align-items: center;">${dl}${rm}</div>`
+                        : '—';
                     return `<tr class="history-row">
-                        <td style="padding: 6px 12px;">${started} ${versionBadge}</td>
-                        <td style="padding: 6px 12px;">${h.script || ''}</td>
+                        <td style="padding: 6px 12px;">${started}</td>
+                        <td style="padding: 6px 12px; text-align: center;">${versionBadge}</td>
                         <td style="padding: 6px 12px;"><span class="badge bg-${color}">${h.status || ''}</span></td>
                         <td style="padding: 6px 12px;">${filename}</td>
                         <td style="padding: 6px 12px;">${msg}</td>

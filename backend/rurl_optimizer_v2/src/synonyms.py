@@ -148,6 +148,20 @@ SYNONYMS = {
     "portemonnee": ["portemonee", "portemonnaie", "beurs"],
     "portemonee": ["portemonnee", "portemonnaie", "beurs"],
     "portemonnaie": ["portemonnee", "portemonee", "beurs"],
+
+    # ==========================================================================
+    # SANITAIR / BADKAMER (wc <-> toilet)
+    # ==========================================================================
+    "wc": ["toilet"],
+    "toilet": ["wc"],
+    "wc papier": ["toiletpapier", "toilet papier", "wc-papier", "toiletrol"],
+    "wc-papier": ["toiletpapier", "wc papier", "toilet papier", "toiletrol"],
+    "toiletpapier": ["wc papier", "wc-papier", "toilet papier", "toiletrol"],
+    "toilet papier": ["toiletpapier", "wc papier", "wc-papier", "toiletrol"],
+    "wc ontstoppers": ["toilet ontstoppers", "toiletontstoppers", "wc-ontstoppers"],
+    "wc-ontstoppers": ["toilet ontstoppers", "toiletontstoppers", "wc ontstoppers"],
+    "toilet ontstoppers": ["wc ontstoppers", "wc-ontstoppers", "toiletontstoppers"],
+    "toiletontstoppers": ["wc ontstoppers", "wc-ontstoppers", "toilet ontstoppers"],
 }
 
 # Reverse mapping: facet value -> search terms that should match it

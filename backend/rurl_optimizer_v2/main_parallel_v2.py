@@ -150,6 +150,40 @@ def process_url_v2(args):
     from src.reliability_scorer import calculate_reliability_score, get_reliability_tier
     from src.validation_rules import STOPWORDS, SHOP_NAMES
 
+    # Hard exclusion: external API URLs that should never be processed.
+    # Skip parsing/matching entirely and emit a visible row with a reason.
+    EXCLUDED_HOSTS = ("api.scrape.do",)
+    url_lower = (url or "").lower()
+    if any(h in url_lower for h in EXCLUDED_HOSTS):
+        return {
+            'original_url': url,
+            'main_category': '',
+            'original_category': '',
+            'keyword': '',
+            'redirect_url': None,
+            'redirect_category': '',
+            'is_cross_category': False,
+            'facet_fragment': '',
+            'facet_names': '',
+            'facet_value_names': '',
+            'facet_count': 0,
+            'match_score': 0,
+            'match_type': 'excluded',
+            'reliability_score': 0,
+            'reliability_tier': 'D',
+            'matched_keywords': '',
+            'unmatched_keywords': '',
+            'match_coverage': 0.0,
+            'has_stopwords': False,
+            'stopwords_found': '',
+            'shop_in_keyword': '',
+            'keyword_type': 'excluded',
+            'has_dimensions': False,
+            'merk_of_shop_missing': '',
+            'success': False,
+            'reason': 'Excluded URL: external API host (api.scrape.do)',
+        }
+
     d = _worker_data
     parser = d['parser']
     facet_filter = d['facet_filter']

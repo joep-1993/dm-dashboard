@@ -22,14 +22,21 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+ENGINE_VERSION = 2
 PKG_DIR = Path(__file__).parent / "rurl_optimizer_v2"
-OUTPUT_DIR = Path("/tmp/rurl-optimizer-v2-output")
-INPUT_DIR = Path("/tmp/rurl-optimizer-v2-input")
+# Persisted under backend/data/ (same dir as the history JSON) so output
+# files survive uvicorn restarts and /tmp wipes — required for the Export
+# button on old history rows.
+OUTPUT_DIR = Path(__file__).parent / "data" / "rurl-optimizer-v2-output"
+INPUT_DIR = Path(__file__).parent / "data" / "rurl-optimizer-v2-input"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 _TASKS: Dict[str, Dict[str, Any]] = {}
 _TASKS_LOCK = threading.Lock()
+# Tracks the runner thread per task so the stale-task sweep can tell
+# "subprocess died" apart from "still in Redshift fetch / Python phase".
+_THREADS: Dict[str, threading.Thread] = {}
 
 # History is persisted to disk (same pattern as DMA+) so uvicorn --reload or
 # a machine reboot doesn't wipe the Recent runs table.
@@ -88,7 +95,17 @@ def _append_log(task_id: str, line: str) -> None:
             del log[: len(log) - 500]
 
 
-def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: str) -> None:
+def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: str, optional_output: bool = False) -> None:
+    # Capture prior state so an optional auxiliary stage can restore it if it
+    # exits cleanly without producing output (e.g. global pass, no globals).
+    prior = _get(task_id) or {}
+    prior_state = {
+        "status": prior.get("status"),
+        "progress": prior.get("progress"),
+        "message": prior.get("message"),
+        "output_path": prior.get("output_path"),
+        "script": prior.get("script"),
+    } if optional_output else None
     _set(task_id, {
         "status": "running",
         "progress": 0,
@@ -167,6 +184,15 @@ def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: st
             "message": f"Done. Output: {output_path.name}",
             "finished_at": datetime.now().isoformat(),
         })
+    elif rc == 0 and optional_output:
+        # Auxiliary stage exited cleanly without writing output (e.g. the
+        # global R-URL pass when no global URLs are present). Restore the
+        # prior status / output_path so the main stage's success still
+        # stands and downstream steps (cache merge, xlsx, DB save) run.
+        if prior_state:
+            _set(task_id, {k: v for k, v in prior_state.items() if v is not None})
+        _append_log(task_id, f"[info] {script}: nothing to write (no output file)")
+        return
     else:
         _set(task_id, {
             "status": "failed",
@@ -188,31 +214,140 @@ def _history_append(task_id: str) -> None:
     t = _get(task_id)
     if not t:
         return
+    new_entry = {
+        "task_id": task_id,
+        "script": t.get("script"),
+        "status": t.get("status"),
+        "started_at": t.get("started_at"),
+        "finished_at": t.get("finished_at"),
+        "message": t.get("message"),
+        "error": t.get("error"),
+        "output_path": t.get("output_path"),
+        "params": t.get("params"),
+    }
     with _HISTORY_LOCK:
-        _HISTORY.appendleft({
-            "task_id": task_id,
-            "script": t.get("script"),
-            "status": t.get("status"),
-            "started_at": t.get("started_at"),
-            "finished_at": t.get("finished_at"),
-            "message": t.get("message"),
-            "error": t.get("error"),
-            "output_path": t.get("output_path"),
-            "params": t.get("params"),
-        })
+        # Dedupe by task_id: a single user-initiated run can hit this
+        # function multiple times (main pass, global pass, cache_only,
+        # xlsx step). Update the existing entry in place so the UI shows
+        # one row per run, while preserving the original start time and
+        # the user-facing script name from the first stage.
+        for i, h in enumerate(_HISTORY):
+            if h.get("task_id") == task_id:
+                merged = {**h, **new_entry}
+                if h.get("started_at"):
+                    merged["started_at"] = h["started_at"]
+                if h.get("script") and h["script"] != "process_global_rurls":
+                    merged["script"] = h["script"]
+                if h.get("params"):
+                    merged["params"] = h["params"]
+                _HISTORY[i] = merged
+                _save_history_to_disk()
+                return
+        _HISTORY.appendleft(new_entry)
         _save_history_to_disk()
 
 
+TAXV2_BASE = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
+_SLUG_TO_MAINCAT: Dict[str, str] = {}
+
+
+def _ensure_slug_lookup() -> Dict[str, str]:
+    """Build a urlSlug -> readable name map for root categories via taxv2.
+
+    Lazy + cached for the lifetime of the worker. Falls back to an empty
+    dict on any API failure; callers handle the miss with slug cleanup.
+    """
+    global _SLUG_TO_MAINCAT
+    if _SLUG_TO_MAINCAT:
+        return _SLUG_TO_MAINCAT
+    try:
+        import requests
+        r = requests.get(
+            f"{TAXV2_BASE}/api/Categories",
+            params={"rootCategoriesOnly": "true", "locale": "nl-NL"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        for cat in r.json() or []:
+            for lbl in (cat.get("labels") or []):
+                slug = (lbl.get("urlSlug") or "").strip()
+                name = (lbl.get("name") or "").strip()
+                if slug and name:
+                    _SLUG_TO_MAINCAT[slug] = name
+    except Exception as e:
+        logger.warning(f"taxv2 main-category lookup failed: {e}")
+    return _SLUG_TO_MAINCAT
+
+
+def _main_category_from_redirect(redirect_url) -> str:
+    """Resolve the readable main-category name for a redirect URL via taxv2.
+
+    Extracts the main-category slug from `/products/<slug>/...` and looks
+    it up against taxv2's root-category urlSlug list. Falls back to a
+    cleaned slug when taxv2 doesn't have a match.
+    """
+    import re as _re
+    if not redirect_url or not isinstance(redirect_url, str):
+        return ""
+    m = _re.search(r"/products/([^/]+)", redirect_url)
+    if not m:
+        return ""
+    slug = m.group(1).strip()
+    name = _ensure_slug_lookup().get(slug)
+    if name:
+        return name
+    return slug.replace("_", " ").strip()
+
+
 def _write_xlsx_output(df, csv_path: Path) -> Path:
+    """Project to the user-facing columns and write as .xlsx.
+
+    Output schema (per 2.0 changes):
+      old url | new url | score | main_category | deepest_category | visits | revenue | reason
     """
-    Reorder `df` so original_url + redirect_url lead, write as .xlsx next to
-    the given CSV path, delete the CSV, and return the xlsx Path.
-    """
-    lead = [c for c in ("original_url", "redirect_url") if c in df.columns]
-    tail = [c for c in df.columns if c not in lead]
-    df = df[lead + tail]
+    import pandas as pd
+
+    out = pd.DataFrame()
+    out["old url"] = df.get("original_url", pd.Series(dtype=object))
+    out["new url"] = df.get("redirect_url", pd.Series(dtype=object))
+    out["score"] = df.get("reliability_score", pd.Series(dtype="Int64"))
+    if "redirect_url" in df.columns:
+        out["main_category"] = df["redirect_url"].apply(_main_category_from_redirect)
+    else:
+        out["main_category"] = ""
+    out["deepest_category"] = df.get("redirect_category", pd.Series(dtype=object))
+    out["visits"] = df.get("visits", pd.Series(dtype=object))
+    out["revenue"] = df.get("visit_rev", pd.Series(dtype=object))
+    out["reason"] = df.get("reason", pd.Series(dtype=object))
+
+    # Sort by score (descending). Coerce to numeric so non-numeric values
+    # (NaN, strings) sort to the bottom rather than crashing the comparison.
+    out["__score_sort"] = pd.to_numeric(out["score"], errors="coerce")
+    out = out.sort_values("__score_sort", ascending=False, na_position="last").drop(
+        columns="__score_sort"
+    )
+
     xlsx_path = csv_path.with_suffix(".xlsx")
-    df.to_excel(xlsx_path, index=False)
+    out.to_excel(xlsx_path, index=False)
+
+    # Post-process: center-align score / visits / revenue columns.
+    try:
+        from openpyxl import load_workbook
+        from openpyxl.styles import Alignment
+        wb = load_workbook(xlsx_path)
+        ws = wb.active
+        center = Alignment(horizontal="center", vertical="center")
+        col_idx = {name: i + 1 for i, name in enumerate(out.columns)}
+        for name in ("score", "visits", "revenue"):
+            ci = col_idx.get(name)
+            if not ci:
+                continue
+            for row in range(1, ws.max_row + 1):
+                ws.cell(row=row, column=ci).alignment = center
+        wb.save(xlsx_path)
+    except Exception as e:
+        logger.warning(f"xlsx alignment post-process failed: {e}")
+
     try:
         csv_path.unlink()
     except FileNotFoundError:
@@ -263,6 +398,30 @@ def _filter_input_csv(csv_path: Path, url_column: str, skip_urls: set[str]) -> N
         return
     mask = ~df[url_column].astype(str).isin(skip_urls)
     df[mask].to_csv(csv_path, index=False)
+
+
+def _url_contains_shopname(url: str) -> bool:
+    """True if the R-URL keyword segment contains any SHOP_NAME word.
+
+    Mirrors the engine's V30 short-circuit: extract /r/<keyword>, replace
+    underscores with spaces, run detect_shops_in_keyword. Used as a
+    pre-filter so shop-name URLs don't burn through the row_limit.
+    """
+    if not url:
+        return False
+    import re as _re
+    m = _re.search(r"/r/([^/?#]+)", url)
+    if not m:
+        return False
+    keyword = m.group(1).replace("_", " ").strip()
+    if not keyword:
+        return False
+    try:
+        from backend.rurl_optimizer_v2.src.validation_rules import detect_shops_in_keyword
+        return bool(detect_shops_in_keyword(keyword))
+    except Exception as e:
+        logger.warning(f"shopname pre-filter failed: {e}")
+        return False
 
 
 def _fetch_redshift_rurls(lookback_days: int = 365, row_limit: Optional[int] = None) -> bytes:
@@ -323,6 +482,7 @@ def start_optimize(
     lookback_days: int = 365,
     row_limit: Optional[int] = None,
     force_reprocess: bool = False,
+    exclude_shopnames: bool = False,
 ) -> str:
     task_id = uuid.uuid4().hex[:8]
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -379,7 +539,44 @@ def start_optimize(
                         f"Fetching R-URLs from Redshift (last {lookback_days} days"
                         + (f", limit {row_limit}" if row_limit else "") + ")...")
             try:
-                data = _fetch_redshift_rurls(lookback_days, row_limit)
+                # Oversample so we have headroom to drop URLs already in
+                # rurl_processed (and optionally URLs containing shop names)
+                # and still hit row_limit fresh URLs. When the user forces
+                # reprocessing AND isn't shop-filtering, fall back to raw
+                # row_limit.
+                needs_oversample = (not force_reprocess) or exclude_shopnames
+                if needs_oversample and row_limit:
+                    fetch_limit = max(row_limit * 10, 1000)
+                else:
+                    fetch_limit = row_limit
+                data = _fetch_redshift_rurls(lookback_days, fetch_limit)
+                if needs_oversample and row_limit:
+                    import io as _io
+                    import pandas as _pd
+                    df_rs = _pd.read_csv(_io.BytesIO(data))
+                    raw_n = len(df_rs)
+                    cached_n = 0
+                    if not force_reprocess:
+                        from backend import rurl_optimizer_persistence as pers
+                        cached = pers.already_processed(df_rs["r_url"].tolist())
+                        df_rs = df_rs[~df_rs["r_url"].isin(cached)]
+                        cached_n = len(cached)
+                    shop_n = 0
+                    if exclude_shopnames:
+                        shop_mask = df_rs["r_url"].apply(_url_contains_shopname)
+                        shop_n = int(shop_mask.sum())
+                        df_rs = df_rs[~shop_mask]
+                    df_rs = df_rs.head(row_limit)
+                    buf = _io.StringIO()
+                    df_rs.to_csv(buf, index=False)
+                    data = buf.getvalue().encode("utf-8")
+                    parts = [f"Redshift returned {raw_n:,} rows"]
+                    if cached_n:
+                        parts.append(f"{cached_n:,} already processed")
+                    if shop_n:
+                        parts.append(f"{shop_n:,} contained shopnames")
+                    parts.append(f"keeping {len(df_rs):,} fresh URLs")
+                    _append_log(task_id, "; ".join(parts) + ".")
                 input_path.write_bytes(data)
                 nrows = data.count(b"\n") - 1
                 _append_log(task_id, f"Redshift returned {nrows:,} rows -> {input_path.name}")
@@ -404,6 +601,20 @@ def start_optimize(
                         f"Persistence: {len(cached_urls):,} of {len(all_input_urls):,} URLs "
                         f"already processed — skipping them.")
             _filter_input_csv(input_path, url_column, cached_urls)
+
+        # Optional: drop URLs whose keyword contains a SHOP_NAME so they
+        # don't burn through the row_limit. For the redshift path the
+        # input file was already filtered upstream; this is mostly for
+        # the upload path (and as a safety net if the upstream filter
+        # missed anything).
+        if exclude_shopnames:
+            remaining_urls = _read_url_column(input_path, url_column)
+            shop_urls = {u for u in remaining_urls if _url_contains_shopname(u)}
+            if shop_urls:
+                _append_log(task_id,
+                            f"Shopname filter: dropping {len(shop_urls):,} of "
+                            f"{len(remaining_urls):,} remaining URLs.")
+                _filter_input_csv(input_path, url_column, shop_urls)
 
         # Short-circuit: every URL is cached — write output directly from the cache.
         if cached_urls and len(cached_urls) >= len(all_input_urls):
@@ -455,7 +666,7 @@ def start_optimize(
                 ),
             ]
             _append_log(task_id, "--- Running global R-URL pass on fresh rows ---")
-            _run_subprocess(task_id, argv2, global_out, script="process_global_rurls")
+            _run_subprocess(task_id, argv2, global_out, script="process_global_rurls", optional_output=True)
 
         # 3. Merge cached rows into whatever the current output CSV is (main or global).
         if cached_urls and (_get(task_id) or {}).get("status") == "completed":
@@ -507,11 +718,73 @@ def start_optimize(
             except Exception as e:
                 _append_log(task_id, f"[warn] xlsx conversion failed: {e}")
 
-    threading.Thread(target=_runner, daemon=True).start()
+        # Persist the final output bytes to Postgres so /download survives
+        # any /tmp wipe / restart. Mark history with output_in_db=True so
+        # the frontend only renders Export when bytes are durable.
+        try:
+            final_path = Path((_get(task_id) or {}).get("output_path", ""))
+            if (_get(task_id) or {}).get("status") == "completed" and final_path.exists():
+                from backend import rurl_optimizer_persistence as pers
+                mime = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        if final_path.suffix.lower() == ".xlsx" else "text/csv")
+                pers.save_run_output(task_id, ENGINE_VERSION, final_path.name, mime, final_path.read_bytes())
+                _set(task_id, {"output_in_db": True})
+                _history_update_latest(task_id, {"output_in_db": True})
+        except Exception as e:
+            _append_log(task_id, f"[warn] save_run_output failed: {e}")
+
+    th = threading.Thread(target=_runner, daemon=True)
+    _THREADS[task_id] = th
+    th.start()
     return task_id
 
 
+def _is_pid_alive(pid) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _sweep_stale_tasks() -> None:
+    """Finalize 'running' tasks whose runner thread is no longer alive.
+
+    Only triggers when the runner thread has exited (so a task still in the
+    Redshift fetch / Python orchestration phase isn't prematurely failed).
+    If a final output file exists on disk we mark the task completed;
+    otherwise failed.
+    """
+    with _TASKS_LOCK:
+        ids = list(_TASKS.keys())
+    for tid in ids:
+        t = _get(tid) or {}
+        if t.get("status") != "running":
+            continue
+        th = _THREADS.get(tid)
+        if th is not None and th.is_alive():
+            continue
+        out_path = t.get("output_path") or ""
+        if out_path and Path(out_path).exists():
+            _set(tid, {
+                "status": "completed",
+                "progress": 100,
+                "message": t.get("message") or f"Recovered. Output: {Path(out_path).name}",
+                "finished_at": t.get("finished_at") or datetime.now().isoformat(),
+            })
+        else:
+            _set(tid, {
+                "status": "failed",
+                "error": t.get("error") or "Process exited without finalizing status",
+                "finished_at": t.get("finished_at") or datetime.now().isoformat(),
+            })
+        _history_append(tid)
+
+
 def get_status(task_id: str) -> Optional[Dict[str, Any]]:
+    _sweep_stale_tasks()
     return _get(task_id)
 
 
@@ -523,15 +796,45 @@ def cancel(task_id: str) -> bool:
     return True
 
 
-def get_output_path(task_id: str) -> Optional[str]:
-    t = _get(task_id)
-    if not t:
+def get_output_bytes(task_id: str):
+    """Return (filename, mime, content_bytes) from the DB, or None."""
+    try:
+        from backend import rurl_optimizer_persistence as pers
+        return pers.get_run_output(task_id)
+    except Exception as e:
+        logger.warning(f"get_run_output failed: {e}")
         return None
-    return t.get("output_path")
 
 
 def get_history() -> list:
-    return list(_HISTORY)
+    """Return history with output_in_db flagged. Purge completed entries
+    that no longer have bytes on the server (Export would 404)."""
+    _sweep_stale_tasks()
+    try:
+        from backend import rurl_optimizer_persistence as pers
+        db_ids = pers.list_run_output_task_ids()
+    except Exception as e:
+        logger.warning(f"history db check failed: {e}")
+        return list(_HISTORY)
+
+    with _HISTORY_LOCK:
+        kept = []
+        purged = False
+        for h in _HISTORY:
+            tid = h.get("task_id")
+            status = h.get("status")
+            in_db = tid in db_ids
+            if status == "completed" and not in_db:
+                purged = True
+                continue
+            if in_db and not h.get("output_in_db"):
+                h = {**h, "output_in_db": True}
+            kept.append(h)
+        if purged:
+            _HISTORY.clear()
+            _HISTORY.extend(kept)
+            _save_history_to_disk()
+        return list(_HISTORY)
 
 
 def delete_history_entry(task_id: str) -> bool:
@@ -557,4 +860,9 @@ def delete_history_entry(task_id: str) -> bool:
                 p.unlink()
         except Exception as e:
             logger.warning(f"Failed to remove output file {out_path}: {e}")
+    try:
+        from backend import rurl_optimizer_persistence as pers
+        pers.delete_run_output(task_id)
+    except Exception as e:
+        logger.warning(f"delete_run_output failed: {e}")
     return removed
