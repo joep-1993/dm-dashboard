@@ -539,34 +539,55 @@ def start_optimize(
                         f"Fetching R-URLs from Redshift (last {lookback_days} days"
                         + (f", limit {row_limit}" if row_limit else "") + ")...")
             try:
-                # Oversample so we have headroom to drop URLs already in
-                # rurl_processed (and optionally URLs containing shop names)
-                # and still hit row_limit fresh URLs. When the user forces
-                # reprocessing AND isn't shop-filtering, fall back to raw
-                # row_limit.
+                # Iterative fetch: start with a 10x oversample, then double
+                # the LIMIT each round if we don't have enough fresh URLs
+                # after dropping cached + (optionally) shopname rows. Stops
+                # when we have row_limit fresh URLs, Redshift is exhausted
+                # (returned fewer rows than asked), or we hit MAX_FETCH.
                 needs_oversample = (not force_reprocess) or exclude_shopnames
-                if needs_oversample and row_limit:
-                    fetch_limit = max(row_limit * 10, 1000)
-                else:
-                    fetch_limit = row_limit
-                data = _fetch_redshift_rurls(lookback_days, fetch_limit)
                 if needs_oversample and row_limit:
                     import io as _io
                     import pandas as _pd
-                    df_rs = _pd.read_csv(_io.BytesIO(data))
-                    raw_n = len(df_rs)
+                    from backend import rurl_optimizer_persistence as pers
+                    MAX_FETCH = 1_000_000
+                    fetch_limit = max(row_limit * 10, 1000)
+                    df_rs = None
+                    raw_n = 0
                     cached_n = 0
-                    if not force_reprocess:
-                        from backend import rurl_optimizer_persistence as pers
-                        cached = pers.already_processed(df_rs["r_url"].tolist())
-                        df_rs = df_rs[~df_rs["r_url"].isin(cached)]
-                        cached_n = len(cached)
                     shop_n = 0
-                    if exclude_shopnames:
-                        shop_mask = df_rs["r_url"].apply(_url_contains_shopname)
-                        shop_n = int(shop_mask.sum())
-                        df_rs = df_rs[~shop_mask]
-                    df_rs = df_rs.head(row_limit)
+                    while True:
+                        data = _fetch_redshift_rurls(lookback_days, fetch_limit)
+                        df_full = _pd.read_csv(_io.BytesIO(data))
+                        raw_n = len(df_full)
+                        df_filtered = df_full
+                        if not force_reprocess:
+                            cached = pers.already_processed(df_filtered["r_url"].tolist())
+                            df_filtered = df_filtered[~df_filtered["r_url"].isin(cached)]
+                            cached_n = len(cached)
+                        if exclude_shopnames:
+                            shop_mask = df_filtered["r_url"].apply(_url_contains_shopname)
+                            shop_n = int(shop_mask.sum())
+                            df_filtered = df_filtered[~shop_mask]
+                        if len(df_filtered) >= row_limit:
+                            df_rs = df_filtered.head(row_limit)
+                            break
+                        if raw_n < fetch_limit:
+                            # Redshift returned everything it has — can't go further.
+                            df_rs = df_filtered
+                            _append_log(task_id,
+                                        f"Redshift exhausted at {raw_n:,} rows; "
+                                        f"only {len(df_filtered):,} fresh URLs available.")
+                            break
+                        if fetch_limit >= MAX_FETCH:
+                            df_rs = df_filtered
+                            _append_log(task_id,
+                                        f"[warn] hit fetch cap of {MAX_FETCH:,}; "
+                                        f"only {len(df_filtered):,} fresh URLs available.")
+                            break
+                        fetch_limit = min(fetch_limit * 2, MAX_FETCH)
+                        _append_log(task_id,
+                                    f"Only {len(df_filtered):,} fresh URLs after filtering "
+                                    f"{raw_n:,} rows; expanding fetch to {fetch_limit:,}...")
                     buf = _io.StringIO()
                     df_rs.to_csv(buf, index=False)
                     data = buf.getvalue().encode("utf-8")
@@ -577,6 +598,8 @@ def start_optimize(
                         parts.append(f"{shop_n:,} contained shopnames")
                     parts.append(f"keeping {len(df_rs):,} fresh URLs")
                     _append_log(task_id, "; ".join(parts) + ".")
+                else:
+                    data = _fetch_redshift_rurls(lookback_days, row_limit)
                 input_path.write_bytes(data)
                 nrows = data.count(b"\n") - 1
                 _append_log(task_id, f"Redshift returned {nrows:,} rows -> {input_path.name}")
