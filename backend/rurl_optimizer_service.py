@@ -621,8 +621,7 @@ def get_output_bytes(task_id: str):
 
 
 def get_history() -> list:
-    """Return history with output_in_db flagged. Purge completed entries
-    that no longer have bytes on the server (Export would 404)."""
+    """Return history with output_in_db flagged for the Export button."""
     _sweep_stale_tasks()
     try:
         from backend import rurl_optimizer_persistence as pers
@@ -632,21 +631,14 @@ def get_history() -> list:
         return list(_HISTORY)
 
     with _HISTORY_LOCK:
-        kept = []
-        purged = False
-        for h in _HISTORY:
+        updated = False
+        for i, h in enumerate(_HISTORY):
             tid = h.get("task_id")
-            status = h.get("status")
             in_db = tid in db_ids
-            if status == "completed" and not in_db:
-                purged = True
-                continue
             if in_db and not h.get("output_in_db"):
-                h = {**h, "output_in_db": True}
-            kept.append(h)
-        if purged:
-            _HISTORY.clear()
-            _HISTORY.extend(kept)
+                _HISTORY[i] = {**h, "output_in_db": True}
+                updated = True
+        if updated:
             _save_history_to_disk()
         return list(_HISTORY)
 
