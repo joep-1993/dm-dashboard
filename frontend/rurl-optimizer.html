@@ -74,8 +74,14 @@
             <div class="col-md-10 mx-auto">
 
                 <div class="card mb-4">
-                    <div class="card-header">
+                    <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Upload & run</h5>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="useV2" checked>
+                            <label class="form-check-label" for="useV2" title="Switch between the original engine (v1) and the v2 engine. Persistence is shared.">
+                                <span class="badge bg-info">2.0</span>
+                            </label>
+                        </div>
                     </div>
                     <div class="card-body">
                         <form id="runForm" class="row g-3">
@@ -192,7 +198,17 @@
 
     <script>
         let currentTaskId = null;
+        let currentApiBase = null;
         let pollTimer = null;
+
+        function apiBase() {
+            return document.getElementById('useV2').checked ? '/api/rurl-v2' : '/api/rurl';
+        }
+        // Reload history when toggle flips so the badges/download links stay coherent.
+        document.addEventListener('DOMContentLoaded', () => {
+            const v2 = document.getElementById('useV2');
+            if (v2) v2.addEventListener('change', loadHistory);
+        });
 
         // Workers: 0 → empty (so 'auto' placeholder is visible again)
         document.getElementById('workers').addEventListener('input', (e) => {
@@ -232,7 +248,8 @@
 
             document.getElementById('runBtn').disabled = true;
             try {
-                const resp = await fetch('/api/rurl/optimize', { method: 'POST', body: fd });
+                currentApiBase = apiBase();
+                const resp = await fetch(currentApiBase + '/optimize', { method: 'POST', body: fd });
                 if (!resp.ok) throw new Error(await resp.text());
                 const data = await resp.json();
                 currentTaskId = data.task_id;
@@ -248,7 +265,7 @@
 
         document.getElementById('cancelBtn').addEventListener('click', async () => {
             if (!currentTaskId) return;
-            await fetch('/api/rurl/cancel/' + currentTaskId, { method: 'POST' });
+            await fetch((currentApiBase || apiBase()) + '/cancel/' + currentTaskId, { method: 'POST' });
         });
 
         function startPolling() {
@@ -260,7 +277,7 @@
         async function pollStatus() {
             if (!currentTaskId) return;
             try {
-                const r = await fetch('/api/rurl/status/' + currentTaskId);
+                const r = await fetch((currentApiBase || apiBase()) + '/status/' + currentTaskId);
                 if (!r.ok) return;
                 const t = await r.json();
                 renderStatus(t);
@@ -271,7 +288,7 @@
                     document.getElementById('cancelBtn').classList.add('d-none');
                     if (t.status === 'completed') {
                         document.getElementById('downloadWrap').classList.remove('d-none');
-                        document.getElementById('downloadBtn').href = '/api/rurl/download/' + currentTaskId;
+                        document.getElementById('downloadBtn').href = (currentApiBase || apiBase()) + '/download/' + currentTaskId;
                     }
                     loadHistory();
                 }
@@ -323,9 +340,17 @@
 
         async function loadHistory() {
             try {
-                const r = await fetch('/api/rurl/history');
-                if (!r.ok) return;
-                const rows = await r.json();
+                const [r1, r2] = await Promise.all([
+                    fetch('/api/rurl/history').catch(() => null),
+                    fetch('/api/rurl-v2/history').catch(() => null),
+                ]);
+                const rows1 = (r1 && r1.ok) ? (await r1.json()).map(h => ({ ...h, _version: 'v1', _base: '/api/rurl' })) : [];
+                const rows2 = (r2 && r2.ok) ? (await r2.json()).map(h => ({ ...h, _version: 'v2', _base: '/api/rurl-v2' })) : [];
+                const rows = [...rows1, ...rows2].sort((a, b) => {
+                    const da = a.started_at ? new Date(a.started_at).getTime() : 0;
+                    const db = b.started_at ? new Date(b.started_at).getTime() : 0;
+                    return db - da;
+                });
                 const tbody = document.getElementById('historyBody');
                 if (!rows.length) {
                     tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">No runs yet</td></tr>';
@@ -336,23 +361,51 @@
                     const color = {
                         completed: 'success', failed: 'danger', cancelled: 'warning', running: 'primary'
                     }[h.status] || 'secondary';
+                    const versionBadge = h._version === 'v2'
+                        ? '<span class="badge bg-info" style="font-size: 0.65rem;">v2</span>'
+                        : '<span class="badge bg-secondary" style="font-size: 0.65rem;">v1</span>';
                     const filename = (h.params && h.params.filename) || '';
                     const msg = h.error || h.message || '';
-                    const outName = h.output_path ? h.output_path.split('/').pop() : '';
                     const dl = h.status === 'completed' && h.task_id
-                        ? `<a href="/api/rurl/download/${h.task_id}" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'">Export</a>`
-                        : '—';
+                        ? `<a href="${h._base}/download/${h.task_id}" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'">Export</a>`
+                        : '';
+                    const rm = h.task_id
+                        ? `<button type="button" class="btn btn-sm" data-rm-base="${h._base}" data-rm-task="${h.task_id}" style="border: 1px solid #d63031; color: #d63031; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; margin-left: 4px;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'">Remove</button>`
+                        : '';
+                    const actions = (dl || rm) ? `${dl}${rm}` : '—';
                     return `<tr class="history-row">
-                        <td style="padding: 6px 12px;">${started}</td>
+                        <td style="padding: 6px 12px;">${started} ${versionBadge}</td>
                         <td style="padding: 6px 12px;">${h.script || ''}</td>
                         <td style="padding: 6px 12px;"><span class="badge bg-${color}">${h.status || ''}</span></td>
                         <td style="padding: 6px 12px;">${filename}</td>
                         <td style="padding: 6px 12px;">${msg}</td>
-                        <td style="padding: 6px 12px;">${dl}</td>
+                        <td style="padding: 6px 12px;">${actions}</td>
                     </tr>`;
                 }).join('');
             } catch (e) { console.error(e); }
         }
+
+        document.getElementById('historyBody').addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-rm-task]');
+            if (!btn) return;
+            const taskId = btn.dataset.rmTask;
+            const base = btn.dataset.rmBase;
+            if (!confirm('Remove this run from the history?')) return;
+            btn.disabled = true;
+            try {
+                const r = await fetch(`${base}/history/${taskId}`, { method: 'DELETE' });
+                if (!r.ok && r.status !== 404) {
+                    const txt = await r.text();
+                    alert('Remove failed: ' + txt);
+                    btn.disabled = false;
+                    return;
+                }
+                loadHistory();
+            } catch (err) {
+                alert('Remove failed: ' + err.message);
+                btn.disabled = false;
+            }
+        });
 
         loadHistory();
     </script>

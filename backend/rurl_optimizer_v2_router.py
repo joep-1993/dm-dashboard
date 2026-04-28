@@ -1,5 +1,8 @@
 """
-HTTP surface for the R-URL Optimizer tool.
+HTTP surface for the R-URL Optimizer tool — v2.
+
+Mirrors rurl_optimizer_router but mounted at /api/rurl-v2 and backed by
+rurl_optimizer_v2_service. Persistence (rurl_processed table) is shared with v1.
 """
 from __future__ import annotations
 
@@ -8,14 +11,14 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from typing import Optional
 
-from backend import rurl_optimizer_service as svc
+from backend import rurl_optimizer_v2_service as svc
 
-router = APIRouter(prefix="/api/rurl", tags=["rurl"])
+router = APIRouter(prefix="/api/rurl-v2", tags=["rurl-v2"])
 
 
 @router.get("/health")
 def health():
-    return {"status": "healthy", "service": "rurl_optimizer"}
+    return {"status": "healthy", "service": "rurl_optimizer_v2"}
 
 
 @router.post("/optimize")

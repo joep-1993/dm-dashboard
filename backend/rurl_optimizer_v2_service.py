@@ -22,9 +22,9 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-PKG_DIR = Path(__file__).parent / "rurl_optimizer"
-OUTPUT_DIR = Path("/tmp/rurl-optimizer-output")
-INPUT_DIR = Path("/tmp/rurl-optimizer-input")
+PKG_DIR = Path(__file__).parent / "rurl_optimizer_v2"
+OUTPUT_DIR = Path("/tmp/rurl-optimizer-v2-output")
+INPUT_DIR = Path("/tmp/rurl-optimizer-v2-input")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -33,7 +33,7 @@ _TASKS_LOCK = threading.Lock()
 
 # History is persisted to disk (same pattern as DMA+) so uvicorn --reload or
 # a machine reboot doesn't wipe the Recent runs table.
-_HISTORY_FILE: Path = Path(__file__).parent / "data" / "rurl_optimizer_history.json"
+_HISTORY_FILE: Path = Path(__file__).parent / "data" / "rurl_optimizer_v2_history.json"
 _HISTORY_LOCK = threading.Lock()
 
 
