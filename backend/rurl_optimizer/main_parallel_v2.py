@@ -588,7 +588,7 @@ def print_summary(results_df):
         print(f"  Tier {tier}: {count:,} ({100*count/total:.1f}%)")
 
     prod_ready = len(results_df[results_df['reliability_tier'].isin(['A', 'B'])])
-    print(f"\n✓ Production ready (A+B): {prod_ready:,} ({100*prod_ready/total:.1f}%)")
+    print(f"\nProduction ready (A+B): {prod_ready:,} ({100*prod_ready/total:.1f}%)")
 
 
 def main():

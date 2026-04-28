@@ -104,6 +104,10 @@ def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: st
     env["PYTHONPATH"] = str(PKG_DIR) + os.pathsep + env.get("PYTHONPATH", "")
     # Silence noisy DeprecationWarning / FutureWarning from pandas / pyarrow.
     env["PYTHONWARNINGS"] = "ignore::DeprecationWarning,ignore::FutureWarning"
+    # Force UTF-8 for stdio so non-ASCII glyphs in print() don't crash on
+    # Windows (default cp1252) — see UnicodeEncodeError on '✓' etc.
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
 
     try:
         proc = subprocess.Popen(

@@ -621,7 +621,7 @@ def main():
     for _, row in matched.iterrows():
         kw = row['keyword'][:30]
         redir = str(row.get('redirect_url', ''))[-50:]
-        print(f"  {kw:<30s} → ...{redir}  (score:{row['match_score']}, tier:{row['reliability_tier']})")
+        print(f"  {kw:<30s} -> ...{redir}  (score:{row['match_score']}, tier:{row['reliability_tier']})")
 
     # Overall stats V29
     print(f"\n--- Overall stats V29 ---")
