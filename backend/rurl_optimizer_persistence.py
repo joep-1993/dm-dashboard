@@ -22,23 +22,42 @@ CREATE TABLE IF NOT EXISTS rurl_processed (
     reliability_tier TEXT,
     reliability_score INT,
     match_type       TEXT,
+    reason           TEXT,
     processed_at     TIMESTAMPTZ DEFAULT now()
 )
 """
 
+# Idempotent migration so existing tables without the reason column get it.
+TABLE_MIGRATIONS = (
+    "ALTER TABLE rurl_processed ADD COLUMN IF NOT EXISTS reason TEXT",
+)
+
 UPSERT_SQL = """
 INSERT INTO rurl_processed
-    (original_url, redirect_url, reliability_tier, reliability_score, match_type, processed_at)
+    (original_url, redirect_url, reliability_tier, reliability_score, match_type, reason, processed_at)
 VALUES %s
 ON CONFLICT (original_url) DO UPDATE SET
     redirect_url      = EXCLUDED.redirect_url,
     reliability_tier  = EXCLUDED.reliability_tier,
     reliability_score = EXCLUDED.reliability_score,
     match_type        = EXCLUDED.match_type,
+    reason            = EXCLUDED.reason,
     processed_at      = now()
 """
 
 _TABLE_READY = False
+_OUTPUT_TABLE_READY = False
+
+OUTPUT_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS rurl_run_output (
+    task_id    TEXT PRIMARY KEY,
+    version    SMALLINT NOT NULL DEFAULT 1,
+    filename   TEXT NOT NULL,
+    mime       TEXT NOT NULL,
+    content    BYTEA NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+)
+"""
 
 
 def ensure_table() -> None:
@@ -50,10 +69,100 @@ def ensure_table() -> None:
     try:
         with conn.cursor() as cur:
             cur.execute(TABLE_DDL)
+            for stmt in TABLE_MIGRATIONS:
+                cur.execute(stmt)
         conn.commit()
         _TABLE_READY = True
     finally:
         return_db_connection(conn)
+
+
+def ensure_output_table() -> None:
+    global _OUTPUT_TABLE_READY
+    if _OUTPUT_TABLE_READY:
+        return
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(OUTPUT_TABLE_DDL)
+        conn.commit()
+        _OUTPUT_TABLE_READY = True
+    finally:
+        return_db_connection(conn)
+
+
+def save_run_output(task_id: str, version: int, filename: str, mime: str, content: bytes) -> None:
+    """Persist a run's output bytes so /download survives /tmp wipes and restarts."""
+    ensure_output_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO rurl_run_output (task_id, version, filename, mime, content)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (task_id) DO UPDATE SET
+                       version  = EXCLUDED.version,
+                       filename = EXCLUDED.filename,
+                       mime     = EXCLUDED.mime,
+                       content  = EXCLUDED.content,
+                       created_at = now()""",
+                (task_id, int(version), filename, mime, psycopg2_bytes(content)),
+            )
+        conn.commit()
+    finally:
+        return_db_connection(conn)
+
+
+def get_run_output(task_id: str):
+    """Return (filename, mime, content_bytes) or None."""
+    ensure_output_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT filename, mime, content FROM rurl_run_output WHERE task_id = %s",
+                (task_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            content = row["content"]
+            if hasattr(content, "tobytes"):
+                content = content.tobytes()
+            return row["filename"], row["mime"], bytes(content)
+    finally:
+        return_db_connection(conn)
+
+
+def list_run_output_task_ids() -> set[str]:
+    """Return all task_ids that currently have stored output bytes."""
+    ensure_output_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT task_id FROM rurl_run_output")
+            return {r["task_id"] for r in cur.fetchall()}
+    finally:
+        return_db_connection(conn)
+
+
+def delete_run_output(task_id: str) -> bool:
+    ensure_output_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM rurl_run_output WHERE task_id = %s", (task_id,))
+            deleted = cur.rowcount > 0
+        conn.commit()
+        return deleted
+    finally:
+        return_db_connection(conn)
+
+
+def psycopg2_bytes(b: bytes):
+    """psycopg2 expects memoryview/bytes for BYTEA parameter binding."""
+    import psycopg2
+    return psycopg2.Binary(b)
 
 
 def already_processed(urls: Iterable[str]) -> set[str]:
@@ -85,6 +194,7 @@ def upsert_results(df: pd.DataFrame) -> int:
     missing = [c for c in cols if c not in df.columns]
     if missing:
         raise ValueError(f"results CSV missing required columns: {missing}")
+    has_reason = "reason" in df.columns
 
     def _int_or_none(v):
         try:
@@ -99,6 +209,7 @@ def upsert_results(df: pd.DataFrame) -> int:
             None if pd.isna(r["reliability_tier"]) else str(r["reliability_tier"]),
             _int_or_none(r["reliability_score"]),
             None if pd.isna(r["match_type"]) else str(r["match_type"]),
+            (None if (not has_reason or pd.isna(r["reason"])) else str(r["reason"])),
             pd.Timestamp.now(tz="UTC"),
         )
         for _, r in df.iterrows()
@@ -110,7 +221,7 @@ def upsert_results(df: pd.DataFrame) -> int:
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            execute_values(cur, UPSERT_SQL, rows, template="(%s,%s,%s,%s,%s,%s)")
+            execute_values(cur, UPSERT_SQL, rows, template="(%s,%s,%s,%s,%s,%s,%s)")
         conn.commit()
         return len(rows)
     finally:
@@ -123,13 +234,13 @@ def load_previous(urls: Iterable[str]) -> pd.DataFrame:
     url_list = [u for u in urls if u]
     if not url_list:
         return pd.DataFrame(columns=["original_url", "redirect_url", "reliability_tier",
-                                     "reliability_score", "match_type", "processed_at"])
+                                     "reliability_score", "match_type", "reason", "processed_at"])
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT original_url, redirect_url, reliability_tier,
-                          reliability_score, match_type, processed_at
+                          reliability_score, match_type, reason, processed_at
                    FROM rurl_processed
                    WHERE original_url = ANY(%s)""",
                 (url_list,),
