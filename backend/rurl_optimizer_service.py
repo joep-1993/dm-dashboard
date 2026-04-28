@@ -135,6 +135,14 @@ def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: st
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            # Force UTF-8 decode on the parent side too (subprocess already
+            # writes UTF-8 via PYTHONIOENCODING). Without this, the parent
+            # uses the system default — cp1252 on Windows — and a single
+            # non-ASCII byte in the engine's stdout (a product name, a
+            # Dutch log line, a URL with ü/é) raises UnicodeDecodeError
+            # mid-loop and kills the runner thread silently.
+            encoding="utf-8",
+            errors="replace",
         )
     except FileNotFoundError as e:
         _set(task_id, {"status": "failed", "error": f"Failed to start: {e}"})
