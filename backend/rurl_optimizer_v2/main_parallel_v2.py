@@ -147,7 +147,8 @@ def process_url_v2(args):
     url, multi_facet = args
 
     import re  # Nodig voor DIMENSION_PATTERN + V30 coverage check (moet vóór gebruik staan)
-    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity
+    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity, _v27_reject_reason
+    from src.search_derived import derive_redirect as derive_search_redirect
     from src.validation_rules import STOPWORDS, SHOP_NAMES
 
     # Hard exclusion: external API URLs that should never be processed.
@@ -223,11 +224,57 @@ def process_url_v2(args):
             'reason': parsed.error_message
         }
 
+    # V27: Stopwords-only short-circuit. If every token in the keyword is a
+    # stopword (e.g. "de goedkoopste", "beste koop consumentenbond"), there
+    # is nothing to match against a facet — and the engine's previous
+    # fallback (no redirect, score 0) discarded perfectly usable category
+    # traffic. Redirect to the clean category page that the R-URL already
+    # carried instead. Skipped for parsed URLs without a category — those
+    # don't apply (mainpage search URLs fail parsing earlier anyway).
+    from src.validation_rules import STOPWORDS, SHOP_NAMES, detect_shops_in_keyword as _detect_shops
+    _kw_tokens = [w for w in (parsed.keyword or '').lower().split() if len(w) >= 2]
+    _shops_in_kw = _detect_shops(parsed.keyword)
+    _non_stop_non_shop = [w for w in _kw_tokens if w not in STOPWORDS and w not in SHOP_NAMES]
+    if (parsed.full_category_path
+            and _kw_tokens
+            and not _non_stop_non_shop
+            and not _shops_in_kw):
+        clean_url = f"https://www.beslist.nl{parsed.full_category_path}/"
+        return {
+            'original_url': url,
+            'main_category': parsed.main_category or '',
+            'original_category': category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else '',
+            'keyword': parsed.keyword,
+            'redirect_url': clean_url,
+            'redirect_category': category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else (parsed.main_category or ''),
+            'is_cross_category': False,
+            'facet_fragment': '',
+            'facet_names': '',
+            'facet_value_names': '',
+            'facet_count': 0,
+            'match_score': 0,
+            'match_type': 'stopwords_only_clean_category',
+            'reliability_score': 80,  # category page is a safe landing — no facet so no bad-facet risk
+            'reliability_tier': 'B',
+            'h1_similarity': 0,
+            'reject_reason': '',
+            'matched_keywords': '',
+            'unmatched_keywords': ', '.join(_kw_tokens),
+            'match_coverage': 0.0,
+            'has_stopwords': True,
+            'stopwords_found': ', '.join(t for t in _kw_tokens if t in STOPWORDS),
+            'shop_in_keyword': '',
+            'keyword_type': 'stopwords_only',
+            'has_dimensions': False,
+            'merk_of_shop_missing': '',
+            'success': True,
+            'reason': 'V27: keyword is stopwords-only — redirected to clean category URL',
+        }
+
     # V30: Shop-name short-circuit — if the keyword contains any SHOP_NAME
     # word, skip matching entirely. Row stays in the output for visibility
     # but without a redirect URL.
-    from src.validation_rules import detect_shops_in_keyword as _detect_shops
-    _shops = _detect_shops(parsed.keyword)
+    _shops = _shops_in_kw
     if _shops:
         return {
             'original_url': url,
@@ -580,26 +627,79 @@ def process_url_v2(args):
             reason=r.reason,
             match_coverage=match_coverage,  # V21: pass coverage to reliability scorer
             h1_similarity=h1_similarity,    # V26: H1 similarity as trust signal
+            matched_keywords=matched_keywords,    # V27: generic-adjective + long-unmatched floors
+            unmatched_keywords=unmatched_keywords,
         )
         reliability_tier = get_reliability_tier(reliability_score)
+    # V27: Only surface the rejection reason when the scorer actually
+    # acted on it (score dropped to 0). The subcategory_name scoring branch
+    # returns early before V27 runs, so without this gate the export would
+    # show a "rejected" reason on rows whose score was never reduced.
+    reject_reason = (
+        _v27_reject_reason(matched_keywords, unmatched_keywords) or ''
+        if reliability_score == 0 else ''
+    )
+
+    # V28: cache-only search-derived rescue + disagree-warning.
+    # The prefetch step ran sequentially before this pool spawned and
+    # populated the SQLite cache; here we only read. Skipped when the row
+    # has no matchable token (already redirected by other branches).
+    final_redirect_url = r.redirect_url
+    final_redirect_cat_name = redirect_cat_name
+    final_match_type = r.match_type
+    final_reason = r.reason
+    final_score = reliability_score
+    final_tier = reliability_tier
+    flag_for_review = ''
+    search_derived_total = None
+    search_derived_dom_cat = ''
+    search_derived_dom_share = None
+
+    if has_matchable and parsed.main_category and parsed.keyword:
+        derived = derive_search_redirect(parsed.main_category, parsed.keyword)
+        search_derived_total = derived.get('total')
+        search_derived_dom_cat = derived.get('dom_cat_name', '') or ''
+        search_derived_dom_share = derived.get('dom_cat_share')
+
+        if reliability_score < 50 and derived.get('redirect_url'):
+            final_redirect_url = derived['redirect_url']
+            final_redirect_cat_name = derived['dom_cat_name']
+            final_match_type = 'search_derived_subcat'
+            final_score = 75
+            final_tier = get_reliability_tier(final_score)
+            final_reason = (
+                f"[V28] Search-derived: {derived.get('total')} products dominantly "
+                f"in '{derived['dom_cat_name']}' ({int(100*derived['dom_cat_share'])}%)"
+            )
+            reject_reason = ''
+        elif reliability_score >= 70 and derived.get('mode') == 'and' and not derived.get('redirect_url'):
+            flag_for_review = (
+                f"[V28] Legacy score {reliability_score}, but search "
+                f"({derived.get('total')} products) shows no dominant deepest_cat"
+            )
 
     return {
         'original_url': r.original_url,
         'main_category': r.main_category,
         'original_category': original_cat_name,
         'keyword': r.keyword,
-        'redirect_url': r.redirect_url,
-        'redirect_category': redirect_cat_name,
+        'redirect_url': final_redirect_url,
+        'redirect_category': final_redirect_cat_name,
         'is_cross_category': is_cross_category,
         'facet_fragment': r.facet_fragment,
         'facet_names': r.facet_names,
         'facet_value_names': r.facet_value_names,
         'facet_count': r.facet_count,
         'match_score': r.match_score,
-        'match_type': r.match_type,
-        'reliability_score': reliability_score,
-        'reliability_tier': reliability_tier,
+        'match_type': final_match_type,
+        'reliability_score': final_score,
+        'reliability_tier': final_tier,
         'h1_similarity': h1_similarity,  # V26: synthetic H1 overlap (0-100)
+        'reject_reason': reject_reason,  # V27: why the row was hard-rejected
+        'flag_for_review': flag_for_review,  # V28: legacy-confident but search disagrees
+        'search_derived_total': search_derived_total,
+        'search_derived_dom_cat': search_derived_dom_cat,
+        'search_derived_dom_share': search_derived_dom_share,
         'matched_keywords': matched_keywords_str,
         'unmatched_keywords': unmatched_keywords_str,
         'match_coverage': match_coverage,
@@ -609,8 +709,8 @@ def process_url_v2(args):
         'keyword_type': keyword_type,  # V23.1: Type keyword (product, shop_only, stopwords_only, etc.)
         'has_dimensions': has_dims,  # V23.2: Bevat keyword afmetingen (200cm, 120x80, etc.)
         'merk_of_shop_missing': getattr(r, 'merk_of_shop_missing', ''),
-        'success': r.success,
-        'reason': r.reason
+        'success': bool(final_redirect_url),
+        'reason': final_reason,
     }
 
 
@@ -652,6 +752,8 @@ def main():
                         help='Batch size for progress updates')
     parser.add_argument('--chunksize', type=int, default=100,
                         help='Chunk size for multiprocessing (default: 100)')
+    parser.add_argument('--no-v28', action='store_true',
+                        help='Skip the V28 search-derived prefetch + rescue layer')
 
     args = parser.parse_args()
 
@@ -703,6 +805,24 @@ def main():
         return
 
     print(f"\nURLs to process: {total_remaining:,} (skipped {len(processed_urls):,} already done)")
+
+    # V28: Prefetch search-derived signals once, sequentially, throttled.
+    # The parallel matcher reads from the SQLite cache only — never hits
+    # the API — so worker count is decoupled from API rate.
+    if not getattr(args, 'no_v28', False):
+        from src.parser import RUrlParser as _Parser
+        from src import search_derived as _sd
+        _parser = _Parser()
+        _pairs = []
+        for u in urls_to_process:
+            p = _parser.parse(u)
+            if p.is_valid and p.main_category and p.keyword:
+                _pairs.append((p.main_category, p.keyword))
+        if _pairs:
+            print(f"\n[V28] Prefetching search signals for {len(set(_pairs)):,} unique "
+                  f"(maincat, keyword) pairs at {_sd.SEARCH_QPS} QPS...")
+            stats = _sd.prefetch_pairs(_pairs)
+            print(f"[V28] Prefetch done: {stats}")
 
     # Process with pool
     print(f"\nProcessing {total_remaining:,} URLs with {num_workers} workers...")

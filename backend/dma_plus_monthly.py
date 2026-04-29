@@ -328,6 +328,77 @@ def _record_errors(task_id: str, errors: list):
 # ---------------------------------------------------------------------------
 # Monthly Delta orchestrator
 # ---------------------------------------------------------------------------
+def _run_combined_exclusion(task_id, exc_wb, src_exc, rex_wb, src_rex, country,
+                            exc_source_sheet, rex_source_sheet, processor_call):
+    """Runner for the combined Exclude + Reverse-Exclude pass.
+
+    The combined processor handles both workbooks in a single API session
+    (one campaign prefetch, one ad-group walk). After it returns, this
+    helper extracts per-row results from each workbook and records errors
+    against the appropriate operation label.
+    """
+    _check_cancelled(task_id)
+    _patch_campaign_processor(country)
+    client = _get_client()
+    customer_id = COUNTRY_CONFIG[country]["customer_id"]
+
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    captured = io.StringIO()
+    sys.stdout = captured
+    sys.stderr = captured
+    try:
+        processor_call(client, exc_wb, rex_wb, customer_id)
+    finally:
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+
+    for line in captured.getvalue().splitlines():
+        _append_log(task_id, line)
+
+    out = {"exclude": {"rows": 0, "errors": 0},
+           "reverse_exclude": {"rows": 0, "errors": 0}}
+
+    if exc_wb is not None:
+        exc_results = _extract_results(exc_wb, "uitsluiten", 5, 6)
+        errors = []
+        for i, r in enumerate(exc_results):
+            if r.get("success"):
+                continue
+            src_row = src_exc[i] if i < len(src_exc) else None
+            errors.append({
+                "country": country, "operation": "exclude",
+                "source_sheet": exc_source_sheet, "source_row": src_row,
+                "shop": r.get("shop_name") or r.get("shop") or "",
+                "maincat": r.get("maincat") or "",
+                "cl1": r.get("cl1") or "",
+                "error": r.get("error") or "",
+            })
+        if errors:
+            _record_errors(task_id, errors)
+        out["exclude"] = {"rows": len(exc_results), "errors": len(errors)}
+
+    if rex_wb is not None:
+        rex_results = _extract_results(rex_wb, "verwijderen", 5, 6)
+        errors = []
+        for i, r in enumerate(rex_results):
+            if r.get("success"):
+                continue
+            src_row = src_rex[i] if i < len(src_rex) else None
+            errors.append({
+                "country": country, "operation": "reverse_exclude",
+                "source_sheet": rex_source_sheet, "source_row": src_row,
+                "shop": r.get("shop_name") or r.get("shop") or "",
+                "maincat": r.get("maincat") or "",
+                "cl1": r.get("cl1") or "",
+                "error": r.get("error") or "",
+            })
+        if errors:
+            _record_errors(task_id, errors)
+        out["reverse_exclude"] = {"rows": len(rex_results), "errors": len(errors)}
+
+    return out
+
+
 def _run_one_operation(task_id, op_label, wb, src_rows, country, source_sheet,
                        processor_call, extract_cols):
     """
@@ -440,40 +511,42 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes, dry_run: bool = False):
                     _append_log(task_id, f"[{country}] Include: no rows")
                     summary[country]["include"] = {"rows": 0, "errors": 0}
 
-                # EXCLUDE
-                _check_cancelled(task_id)
-                _append_log(task_id, f"[{country}] Exclude ({nieuw_name})",
-                            message=f"{country} Exclude...")
-                wb_exc, src_exc = _build_exclusion_workbook_from_source(nieuw_ws)
-                if len(src_exc) > 0:
-                    n_rows, n_err = _run_one_operation(
-                        task_id, "exclude", wb_exc, src_exc, country, nieuw_name,
-                        lambda c, w, cid: cp.process_exclusion_sheet_v2(c, w, cid, dry_run=dry_run),
-                        ("uitsluiten", 5, 6),
-                    )
-                    summary[country]["exclude"] = {"rows": n_rows, "errors": n_err}
-                else:
-                    summary[country]["exclude"] = {"rows": 0, "errors": 0}
             else:
                 _append_log(task_id, f"[{country}] '{nieuw_name}' sheet missing — skipping Include/Exclude")
 
+            # COMBINED EXCLUDE + REVERSE-EXCLUDE
+            # Build both workbooks (when their source sheets exist), then run a
+            # single combined pass that pre-fetches PLA campaigns once and
+            # walks each ad group once. Either side may end up empty.
+            wb_exc, src_exc = (None, [])
+            wb_rex, src_rex = (None, [])
+            if nieuw_name in src_wb.sheetnames:
+                wb_exc, src_exc = _build_exclusion_workbook_from_source(src_wb[nieuw_name])
+            if afvallers_name in src_wb.sheetnames:
+                wb_rex, src_rex = _build_reverse_exclusion_workbook_from_source(src_wb[afvallers_name])
+
+            if len(src_exc) > 0 or len(src_rex) > 0:
+                _check_cancelled(task_id)
+                _append_log(task_id,
+                            f"[{country}] Combined Exclude + Reverse-exclude "
+                            f"({len(src_exc)} + {len(src_rex)} rows)",
+                            message=f"{country} Exclude + Reverse-exclude...")
+                combined_summary = _run_combined_exclusion(
+                    task_id, wb_exc, src_exc, wb_rex, src_rex, country,
+                    nieuw_name, afvallers_name,
+                    lambda c, ewb, rwb, cid: cp.process_combined_exclusion_v2(
+                        c, ewb, rwb, cid, dry_run=dry_run),
+                )
+                summary[country]["exclude"] = combined_summary.get(
+                    "exclude", {"rows": 0, "errors": 0})
+                summary[country]["reverse_exclude"] = combined_summary.get(
+                    "reverse_exclude", {"rows": 0, "errors": 0})
+            else:
+                summary[country]["exclude"] = {"rows": 0, "errors": 0}
+                summary[country]["reverse_exclude"] = {"rows": 0, "errors": 0}
+
             if afvallers_name in src_wb.sheetnames:
                 afv_ws = src_wb[afvallers_name]
-
-                # REVERSE EXCLUDE
-                _check_cancelled(task_id)
-                _append_log(task_id, f"[{country}] Reverse-exclude ({afvallers_name})",
-                            message=f"{country} Reverse exclude...")
-                wb_rex, src_rex = _build_reverse_exclusion_workbook_from_source(afv_ws)
-                if len(src_rex) > 0:
-                    n_rows, n_err = _run_one_operation(
-                        task_id, "reverse_exclude", wb_rex, src_rex, country, afvallers_name,
-                        lambda c, w, cid: cp.process_reverse_exclusion_sheet(c, w, cid, dry_run=dry_run),
-                        ("verwijderen", 5, 6),
-                    )
-                    summary[country]["reverse_exclude"] = {"rows": n_rows, "errors": n_err}
-                else:
-                    summary[country]["reverse_exclude"] = {"rows": 0, "errors": 0}
 
                 # REVERSE INCLUDE
                 _check_cancelled(task_id)

@@ -97,7 +97,7 @@ def process_global_url(args):
 
     url, keyword = args
 
-    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity
+    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity, _v27_reject_reason
     from src.validation_rules import (
         STOPWORDS, SHOP_NAMES, SUBCATEGORY_MATCH_THRESHOLD
     )
@@ -384,8 +384,17 @@ def process_global_url(args):
             reason=r.reason,
             match_coverage=match_coverage,
             h1_similarity=h1_similarity,
+            matched_keywords=matched_keywords,    # V27: generic-adjective + long-unmatched floors
+            unmatched_keywords=unmatched_keywords,
         )
         reliability_tier = get_reliability_tier(reliability_score)
+    # V27: only surface the reason when the scorer actually rejected
+    # (score=0). Subcategory-name matches return early in the scorer and
+    # would otherwise carry a misleading flag.
+    reject_reason = (
+        _v27_reject_reason(matched_keywords, unmatched_keywords) or ''
+        if reliability_score == 0 else ''
+    )
 
     return {
         'original_url': r.original_url,
@@ -404,6 +413,7 @@ def process_global_url(args):
         'reliability_score': reliability_score,
         'reliability_tier': reliability_tier,
         'h1_similarity': h1_similarity,  # V26: synthetic H1 overlap (0-100)
+        'reject_reason': reject_reason,  # V27: why the row was hard-rejected
         'matched_keywords': ', '.join(matched_keywords),
         'unmatched_keywords': ', '.join(unmatched_keywords),
         'match_coverage': match_coverage,

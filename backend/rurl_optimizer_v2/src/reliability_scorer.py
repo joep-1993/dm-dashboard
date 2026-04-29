@@ -90,6 +90,40 @@ def compute_h1_similarity(
     return int(fuzz.token_set_ratio(rurl_h1.lower(), redirect_h1.lower()))
 
 
+def _v27_reject_reason(
+    matched_keywords: Optional[list],
+    unmatched_keywords: Optional[list],
+    long_token_threshold: int = 8,
+) -> Optional[str]:
+    """V27: Decide whether a match should be hard-rejected (score → 0).
+
+    Returns a short human-readable reason string, or None when the match
+    survives. Centralised so the scorer and the export pipeline agree on
+    why a row got dropped.
+
+    Rules:
+    1. Generic-only: every matched token is a generic size/color/shape
+       adjective (e.g. "Creme" carrying a "tretinoine creme" query).
+    2. Long unmatched token: any unmatched non-stopword token of length
+       >= long_token_threshold. Long tokens are almost always brands,
+       ingredients or product types — losing them in the match means the
+       redirect is missing the user's actual intent.
+    """
+    from src.validation_rules import GENERIC_ADJECTIVES
+
+    matched = [w.lower().strip() for w in (matched_keywords or []) if w and w.strip()]
+    unmatched = [w.lower().strip() for w in (unmatched_keywords or []) if w and w.strip()]
+
+    if matched and all(w in GENERIC_ADJECTIVES for w in matched):
+        return f"V27: only generic adjective(s) matched: {', '.join(matched)}"
+
+    long_unmatched = [w for w in unmatched if len(w) >= long_token_threshold]
+    if long_unmatched:
+        return f"V27: long unmatched token(s): {', '.join(long_unmatched)}"
+
+    return None
+
+
 def calculate_reliability_score(
     match_score: int,
     facet_count: int,
@@ -100,6 +134,8 @@ def calculate_reliability_score(
     reason: str,
     match_coverage: float = 100.0,  # V21: match_coverage als percentage (0-100)
     h1_similarity: Optional[int] = None,  # V26: synthetic H1 similarity (0-100)
+    matched_keywords: Optional[list] = None,  # V27: tokens that actually matched
+    unmatched_keywords: Optional[list] = None,  # V27: tokens that did NOT match
 ) -> int:
     """
     Calculate reliability score for a redirect.
@@ -250,17 +286,26 @@ def calculate_reliability_score(
     elif match_coverage < 75.0:
         base_score -= 10  # Redelijk
 
-    # V26: H1 similarity bump — small tiebreaker, not a decider. High overlap
-    # between the synthetic R-URL H1 and the redirect H1 reinforces trust;
-    # very low overlap is a soft warning that the landing page may not match
-    # what the user typed.
+    # V26 / V27: H1 similarity tiers (tightened in V27).
+    # Synthetic R-URL H1 vs redirect H1 — see compute_h1_similarity. The
+    # earlier V26 thresholds (≥85 / <60 / <40) let mediocre matches through;
+    # V27 tightens the band so genuine semantic mismatches (e.g. "Mini" vs
+    # "mini gps tracker", token_set_ratio ≈ 50) drop into a real penalty.
     if h1_similarity is not None:
         if h1_similarity >= 85:
             base_score += 5
-        elif h1_similarity < 40:
-            base_score -= 10
-        elif h1_similarity < 60:
-            base_score -= 5
+        elif h1_similarity >= 70:
+            base_score += 0  # neutral — clearly related but not a near-twin
+        elif h1_similarity >= 50:
+            base_score -= 10  # was -5 in V26
+        else:
+            base_score -= 20  # was -10 in V26
+
+    # V27: Hard-rejection rules — generic-only matches and long unmatched
+    # tokens. Reasons are computed by _v27_reject_reason so the export
+    # pipeline can surface them in the same wording.
+    if _v27_reject_reason(matched_keywords, unmatched_keywords) is not None:
+        return 0
 
     # Clamp to 0-100
     return max(0, min(100, int(base_score)))

@@ -2888,10 +2888,12 @@ def process_reverse_inclusion_sheet_v2(
     dry_run: bool = False,
 ):
     """
-    Process the 'toevoegen' sheet - removes (deletes) ad groups.
+    Process the 'toevoegen' sheet - pauses ad groups.
 
     This is the reverse of process_inclusion_sheet_v2. Instead of creating
-    ad groups, it finds existing ad groups and removes them.
+    ad groups, it finds existing ad groups and pauses them. Pausing keeps
+    history + the listing tree intact, so a later Include Shops run can
+    re-enable the same ad group instead of recreating it from scratch.
 
     Excel columns:
     A. shop_name - Used to build ad group name: PLA/{shop_name}_{cl1}
@@ -2918,9 +2920,9 @@ def process_reverse_inclusion_sheet_v2(
     """
     print(f"\n{'='*70}")
     print(f"PROCESSING REVERSE INCLUSION SHEET (V2): '{SHEET_REVERSE_INCLUSION}'")
-    print(f"(REMOVING AD GROUPS)")
+    print(f"(PAUSING AD GROUPS)")
     if dry_run:
-        print("(DRY RUN: no ad groups will actually be removed from Google Ads)")
+        print("(DRY RUN: no ad groups will actually be paused in Google Ads)")
     print(f"{'='*70}\n")
 
     try:
@@ -2977,11 +2979,11 @@ def process_reverse_inclusion_sheet_v2(
 
     total_campaigns = len(campaigns_to_process)
     total_ad_groups = sum(len(c['ad_groups']) for c in campaigns_to_process.values())
-    print(f"   Found {total_campaigns} campaign(s) with {total_ad_groups} unique ad group(s) to remove")
+    print(f"   Found {total_campaigns} campaign(s) with {total_ad_groups} unique ad group(s) to pause")
 
     # Step 2: Process each campaign and its ad groups
-    successful_removals = 0
-    failed_removals = 0
+    successful_pauses = 0
+    failed_pauses = 0
     processed_ag_count = 0
 
     for camp_idx, (campaign_name, campaign_data) in enumerate(campaigns_to_process.items(), start=1):
@@ -2990,7 +2992,7 @@ def process_reverse_inclusion_sheet_v2(
         print(f"{'─'*70}")
         print(f"   Maincat: {campaign_data['maincat']}")
         print(f"   Custom Label 1: {campaign_data['cl1']}")
-        print(f"   Ad Groups to remove: {len(campaign_data['ad_groups'])}")
+        print(f"   Ad Groups to pause: {len(campaign_data['ad_groups'])}")
 
         # Process each ad group (shop_name) in this campaign
         for shop_name, ag_data in campaign_data['ad_groups'].items():
@@ -3017,46 +3019,46 @@ def process_reverse_inclusion_sheet_v2(
                 print(f"      ✅ Found ad group (ID: {ad_group_info['ad_group_id']})")
                 print(f"         Current status: {ad_group_info['ad_group_status']}")
 
-                # Check if already removed
-                if ad_group_info['ad_group_status'] == 'REMOVED':
-                    print(f"      ℹ️  Ad group is already REMOVED")
-                    # Mark as successful anyway
+                # Check if already paused or removed — both are no-ops here.
+                if ad_group_info['ad_group_status'] in ('PAUSED', 'REMOVED'):
+                    status_label = ad_group_info['ad_group_status']
+                    print(f"      ℹ️  Ad group is already {status_label}")
                     for row_info in ag_data['rows']:
                         row_num = row_info['idx']
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = True
-                        sheet.cell(row=row_num, column=COL_ERR + 1).value = "Already removed"
-                    successful_removals += 1
+                        sheet.cell(row=row_num, column=COL_ERR + 1).value = f"Already {status_label.lower()}"
+                    successful_pauses += 1
                     continue
 
-                # Remove the ad group (skipped under dry_run)
+                # Pause the ad group (skipped under dry_run)
                 if dry_run:
-                    print(f"      [DRY RUN] Would remove ad group")
+                    print(f"      [DRY RUN] Would pause ad group")
                     success = True
                 else:
-                    print(f"      Removing ad group...")
-                    success = remove_ad_group(
+                    print(f"      Pausing ad group...")
+                    success = pause_ad_group(
                         client=client,
                         customer_id=customer_id,
                         ad_group_resource_name=ad_group_info['ad_group_resource_name']
                     )
 
                 if success:
-                    print(f"      ✅ Ad group removed successfully")
-                    successful_removals += 1
+                    print(f"      ✅ Ad group paused successfully")
+                    successful_pauses += 1
                     # Mark all rows for this ad group as successful
                     for row_info in ag_data['rows']:
                         row_num = row_info['idx']
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = True
                         sheet.cell(row=row_num, column=COL_ERR + 1).value = ""
                 else:
-                    raise Exception("Failed to remove ad group")
+                    raise Exception("Failed to pause ad group")
 
                 time.sleep(0.3)  # Small delay between API calls
 
             except Exception as e:
                 error_msg = str(e)
                 print(f"      ❌ Failed: {error_msg}")
-                failed_removals += 1
+                failed_pauses += 1
                 # Mark all rows for this ad group as failed
                 for row_info in ag_data['rows']:
                     row_num = row_info['idx']
@@ -3084,8 +3086,8 @@ def process_reverse_inclusion_sheet_v2(
     print(f"{'='*70}")
     print(f"Total campaigns: {total_campaigns}")
     print(f"Total ad groups: {total_ad_groups}")
-    print(f"✅ Removed: {successful_removals}")
-    print(f"❌ Failed: {failed_removals}")
+    print(f"✅ Paused: {successful_pauses}")
+    print(f"❌ Failed: {failed_pauses}")
     print(f"{'='*70}\n")
 
 
@@ -5747,6 +5749,338 @@ def process_exclusion_sheet_v2(
             # (important: the /api/dma-plus/status "log" field is truncated to the last 5000 chars).
             print(f"Missing campaigns in {mc_name} ({len(missing)}): {', '.join(missing)}")
     print(f"{'='*70}\n")
+
+
+def process_combined_exclusion_v2(
+    client: GoogleAdsClient,
+    exc_workbook: Optional[openpyxl.Workbook],
+    rex_workbook: Optional[openpyxl.Workbook],
+    customer_id: str,
+    file_path: str = None,
+    save_interval: int = 10,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Combined Exclude + Reverse-Exclude in a single pass.
+
+    The two operations share the heaviest costs — pre-fetching every PLA
+    campaign and walking each ad group's listing tree — so running them
+    together avoids doing each twice. Per-ad-group calls to
+    add_shop_exclusions_batch and reverse_exclusion_batch still run as
+    separate API mutates (each is already optimised internally), but each
+    ad group is only visited once per (maincat_id, cl1) group.
+
+    Either workbook may be omitted (None) — the function then degenerates
+    to the surviving operation, but still benefits from the shared cache
+    if the other workbook is present in a later call.
+
+    Returns a dict per workbook with row + error counts:
+        {"exclude": {"rows": n, "errors": n},
+         "reverse_exclude": {"rows": n, "errors": n}}
+    """
+    print(f"\n{'='*70}")
+    print(f"PROCESSING COMBINED EXCLUSION + REVERSE EXCLUSION (V2)")
+    if dry_run:
+        print("(DRY RUN: no shop exclusions will actually be added/removed)")
+    print(f"{'='*70}")
+
+    # cat_ids mapping is identical between the two workbooks (built from the
+    # same source data) — load from whichever is present.
+    print("\nLoading cat_ids mapping...")
+    cat_ids_source = exc_workbook or rex_workbook
+    if cat_ids_source is None:
+        print("❌ Neither exclusion nor reverse-exclusion workbook was provided")
+        return {"exclude": {"rows": 0, "errors": 0},
+                "reverse_exclude": {"rows": 0, "errors": 0}}
+    cat_ids_mapping = load_cat_ids_mapping(cat_ids_source)
+    if not cat_ids_mapping:
+        print("❌ No cat_ids mapping loaded, cannot process")
+        return {"exclude": {"rows": 0, "errors": 0},
+                "reverse_exclude": {"rows": 0, "errors": 0}}
+
+    # Pre-fetch ALL PLA campaigns + ad groups exactly once for the whole pass.
+    print("\nPre-fetching PLA campaigns and ad groups (shared)...")
+    campaign_cache = prefetch_pla_campaigns_and_ad_groups(client, customer_id, "PLA/")
+
+    # Column layouts. Both sheets share the leading shop_name / Shop ID /
+    # maincat / maincat_id / cl1 columns; the result columns sit at different
+    # indices because the exclusion sheet has no budget column.
+    EXC_COL_SHOP, EXC_COL_MAINCAT = 0, 2
+    EXC_COL_MAINCAT_ID, EXC_COL_CL1 = 3, 4
+    EXC_COL_STATUS, EXC_COL_ERROR = 5, 6
+
+    REX_COL_SHOP, REX_COL_MAINCAT = 0, 2
+    REX_COL_MAINCAT_ID, REX_COL_CL1 = 3, 4
+    REX_COL_STATUS, REX_COL_ERROR = 5, 6
+
+    # Group key: (maincat_id, cl1). Per group we collect:
+    #   - excludes: list of (sheet, row_idx, shop_name)
+    #   - unexcludes: list of (sheet, row_idx, shop_name)
+    # The "sheet" handle is kept so we can write the per-row status back
+    # to the right workbook at the end.
+    groups: dict = defaultdict(lambda: {"excludes": [], "unexcludes": [],
+                                         "maincat_name": None})
+    rows_with_missing_fields_exc: list = []
+    rows_with_missing_fields_rex: list = []
+
+    def _ingest(sheet, op: str,
+                col_shop, col_maincat, col_maincat_id, col_cl1,
+                col_status, col_error,
+                missing_bucket: list):
+        for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=False), start=2):
+            status_value = row[col_status].value if len(row) > col_status else None
+            if status_value is not None and status_value != '':
+                continue
+            shop_name = row[col_shop].value
+            maincat_name = row[col_maincat].value if len(row) > col_maincat else None
+            maincat_id = row[col_maincat_id].value
+            cl1 = row[col_cl1].value
+            if not shop_name:
+                continue
+            missing = []
+            if not maincat_id:
+                missing.append("maincat_id")
+            if not cl1:
+                missing.append("custom_label_1")
+            if missing:
+                missing_bucket.append((idx, sheet, col_status, col_error, missing))
+                continue
+            mid_str, cl1_str = str(maincat_id), str(cl1)
+            grp = groups[(mid_str, cl1_str)]
+            if maincat_name and not grp["maincat_name"]:
+                grp["maincat_name"] = str(maincat_name)
+            entry = (sheet, idx, shop_name, col_status, col_error)
+            if op == "exclude":
+                grp["excludes"].append(entry)
+            else:
+                grp["unexcludes"].append(entry)
+
+    if exc_workbook is not None and SHEET_EXCLUSION in exc_workbook.sheetnames:
+        _ingest(exc_workbook[SHEET_EXCLUSION], "exclude",
+                EXC_COL_SHOP, EXC_COL_MAINCAT, EXC_COL_MAINCAT_ID, EXC_COL_CL1,
+                EXC_COL_STATUS, EXC_COL_ERROR, rows_with_missing_fields_exc)
+    if rex_workbook is not None and "verwijderen" in rex_workbook.sheetnames:
+        _ingest(rex_workbook["verwijderen"], "unexclude",
+                REX_COL_SHOP, REX_COL_MAINCAT, REX_COL_MAINCAT_ID, REX_COL_CL1,
+                REX_COL_STATUS, REX_COL_ERROR, rows_with_missing_fields_rex)
+
+    # Mark missing-field rows.
+    for idx, sheet, col_status, col_error, missing in (
+            rows_with_missing_fields_exc + rows_with_missing_fields_rex):
+        sheet.cell(row=idx, column=col_status + 1).value = False
+        sheet.cell(row=idx, column=col_error + 1).value = (
+            f"Missing required fields: {', '.join(missing)}"
+        )
+
+    total_groups = len(groups)
+    total_excludes = sum(len(g["excludes"]) for g in groups.values())
+    total_unexcludes = sum(len(g["unexcludes"]) for g in groups.values())
+    print(f"\nGrouped {total_excludes} exclude row(s) + {total_unexcludes} reverse-exclude "
+          f"row(s) into {total_groups} unique (maincat_id, cl1) group(s).")
+
+    if total_groups == 0:
+        return {
+            "exclude": {"rows": 0, "errors": len(rows_with_missing_fields_exc)},
+            "reverse_exclude": {"rows": 0, "errors": len(rows_with_missing_fields_rex)},
+        }
+
+    exc_success = exc_error = rex_success = rex_error = 0
+    groups_processed = 0
+
+    for (maincat_id_str, cl1_str), grp in groups.items():
+        groups_processed += 1
+        excludes = grp["excludes"]
+        unexcludes = grp["unexcludes"]
+        mc_name = grp.get("maincat_name") or f"maincat_id={maincat_id_str}"
+        print(f"\n{'='*60}")
+        print(f"[Group {groups_processed}/{total_groups}] {mc_name} / cl1={cl1_str}")
+        print(f"  to exclude: {len(excludes)}, to un-exclude: {len(unexcludes)}")
+
+        # CL3 targeting: split shop_name at | (e.g. "Hbm-machines.com|NL").
+        def _targets(entries):
+            return [name.split('|')[0] if '|' in name else name
+                    for _, _, name, _, _ in entries]
+
+        exc_targets = _targets(excludes)
+        rex_targets = _targets(unexcludes)
+        # Map targeting names back to original entries (one targeting name can
+        # map to multiple originals across both sheets).
+        exc_target_to_entries: dict = defaultdict(list)
+        for entry, tgt in zip(excludes, exc_targets):
+            exc_target_to_entries[tgt].append(entry)
+        rex_target_to_entries: dict = defaultdict(list)
+        for entry, tgt in zip(unexcludes, rex_targets):
+            rex_target_to_entries[tgt].append(entry)
+
+        # Per-shop bookkeeping (separate maps per op).
+        exc_shop_results = {name: {'success': 0, 'already': 0, 'errors': []}
+                            for _, _, name, _, _ in excludes}
+        rex_shop_results = {name: {'success': 0, 'not_found': 0, 'errors': []}
+                            for _, _, name, _, _ in unexcludes}
+
+        deepest_cats = cat_ids_mapping.get(maincat_id_str, [])
+        if not deepest_cats:
+            print(f"  ⚠️  No deepest_cats found for maincat_id={maincat_id_str}")
+            for sh, idx, _, col_st, col_err in excludes:
+                sh.cell(row=idx, column=col_st + 1).value = False
+                sh.cell(row=idx, column=col_err + 1).value = (
+                    f"No deepest_cats for maincat_id={maincat_id_str}"
+                )
+                exc_error += 1
+            for sh, idx, _, col_st, col_err in unexcludes:
+                sh.cell(row=idx, column=col_st + 1).value = False
+                sh.cell(row=idx, column=col_err + 1).value = (
+                    f"No deepest_cats for maincat_id={maincat_id_str}"
+                )
+                rex_error += 1
+            continue
+
+        campaigns_found = 0
+        for deepest_cat in deepest_cats:
+            campaign_name = f"PLA/{deepest_cat}_{cl1_str}"
+            campaign_data = campaign_cache.get(campaign_name)
+            if not campaign_data:
+                print(f"    ⚠️  Campaign not found in cache: {campaign_name}")
+                continue
+            campaigns_found += 1
+            ad_groups = campaign_data['ad_groups']
+            print(f"    📁 Campaign: {campaign_name} ({len(ad_groups)} ad group(s))")
+            tree_verb = "Tree to modify" if dry_run else "Tree modified"
+            print(f"      🌳 {tree_verb}: Campaign '{campaign_name}' → "
+                  f"Maincat '{mc_name}' → CL1 '{cl1_str}'")
+
+            for ag in ad_groups:
+                ag_id = str(ag['id'])
+                ag_name = ag['name']
+
+                # ---- ADD EXCLUSIONS for this ad group ----
+                if exc_targets:
+                    unique_targets = list(set(exc_targets))
+                    try:
+                        if dry_run:
+                            res = {'success': list(unique_targets),
+                                   'already_excluded': [], 'errors': []}
+                        else:
+                            res = add_shop_exclusions_batch(
+                                client=client, customer_id=customer_id,
+                                ad_group_id=ag_id, ad_group_name=ag_name,
+                                shop_names=unique_targets,
+                            )
+                        if res['errors']:
+                            print(f"      ❌ {ag_name} exclude: {len(res['errors'])} error(s)")
+                        elif res['success']:
+                            print(f"      ✅ {ag_name} exclude: {len(res['success'])} added, "
+                                  f"{len(res['already_excluded'])} already excluded")
+                        else:
+                            print(f"      ⏭️  {ag_name} exclude: all "
+                                  f"{len(res['already_excluded'])} already excluded")
+                        for tgt in res['success']:
+                            for _, _, orig, _, _ in exc_target_to_entries.get(tgt, []):
+                                exc_shop_results[orig]['success'] += 1
+                        for tgt in res['already_excluded']:
+                            for _, _, orig, _, _ in exc_target_to_entries.get(tgt, []):
+                                exc_shop_results[orig]['already'] += 1
+                        for tgt, err in res['errors']:
+                            for _, _, orig, _, _ in exc_target_to_entries.get(tgt, []):
+                                exc_shop_results[orig]['errors'].append(f"{ag_name}: {err}")
+                    except Exception as e:
+                        msg = str(e)[:50]
+                        print(f"      ❌ {ag_name} exclude: {msg}")
+                        for orig in exc_shop_results:
+                            exc_shop_results[orig]['errors'].append(f"{ag_name}: {msg}")
+                    time.sleep(0.3)
+
+                # ---- REMOVE EXCLUSIONS for this ad group ----
+                if rex_targets:
+                    unique_targets = list(set(rex_targets))
+                    try:
+                        if dry_run:
+                            res = {'success': list(unique_targets),
+                                   'not_found': [], 'errors': []}
+                        else:
+                            res = reverse_exclusion_batch(
+                                client=client, customer_id=customer_id,
+                                ad_group_id=ag_id, ad_group_name=ag_name,
+                                shop_names=unique_targets,
+                            )
+                        if res['errors']:
+                            print(f"      ❌ {ag_name} unexclude: {len(res['errors'])} error(s)")
+                        elif res['success']:
+                            print(f"      ✅ {ag_name} unexclude: {len(res['success'])} removed, "
+                                  f"{len(res['not_found'])} not found")
+                        else:
+                            print(f"      ⏭️  {ag_name} unexclude: all "
+                                  f"{len(res['not_found'])} not found")
+                        for tgt in res['success']:
+                            for _, _, orig, _, _ in rex_target_to_entries.get(tgt, []):
+                                rex_shop_results[orig]['success'] += 1
+                        for tgt in res['not_found']:
+                            for _, _, orig, _, _ in rex_target_to_entries.get(tgt, []):
+                                rex_shop_results[orig]['not_found'] += 1
+                        for tgt, err in res['errors']:
+                            for _, _, orig, _, _ in rex_target_to_entries.get(tgt, []):
+                                rex_shop_results[orig]['errors'].append(f"{ag_name}: {err}")
+                    except Exception as e:
+                        msg = str(e)[:50]
+                        print(f"      ❌ {ag_name} unexclude: {msg}")
+                        for orig in rex_shop_results:
+                            rex_shop_results[orig]['errors'].append(f"{ag_name}: {msg}")
+                    time.sleep(0.3)
+
+        # Write back per-row statuses.
+        for sh, idx, name, col_st, col_err in excludes:
+            r = exc_shop_results[name]
+            if campaigns_found == 0:
+                sh.cell(row=idx, column=col_st + 1).value = False
+                sh.cell(row=idx, column=col_err + 1).value = (
+                    f"No campaigns found for maincat_id={maincat_id_str}"
+                )
+                exc_error += 1
+            elif r['errors']:
+                sh.cell(row=idx, column=col_st + 1).value = False
+                sh.cell(row=idx, column=col_err + 1).value = "; ".join(r['errors'][:3])[:100]
+                exc_error += 1
+            else:
+                sh.cell(row=idx, column=col_st + 1).value = True
+                sh.cell(row=idx, column=col_err + 1).value = ""
+                exc_success += 1
+
+        for sh, idx, name, col_st, col_err in unexcludes:
+            r = rex_shop_results[name]
+            if campaigns_found == 0:
+                sh.cell(row=idx, column=col_st + 1).value = False
+                sh.cell(row=idx, column=col_err + 1).value = (
+                    f"No campaigns found for maincat_id={maincat_id_str}"
+                )
+                rex_error += 1
+            elif r['errors']:
+                sh.cell(row=idx, column=col_st + 1).value = False
+                sh.cell(row=idx, column=col_err + 1).value = "; ".join(r['errors'][:3])[:100]
+                rex_error += 1
+            else:
+                sh.cell(row=idx, column=col_st + 1).value = True
+                sh.cell(row=idx, column=col_err + 1).value = ""
+                rex_success += 1
+
+        if file_path and groups_processed % save_interval == 0:
+            print(f"\n💾 Saving progress ({groups_processed}/{total_groups})...")
+
+    print(f"\n{'='*70}")
+    print(f"COMBINED EXCLUSION + REVERSE EXCLUSION SUMMARY")
+    print(f"{'='*70}")
+    print(f"Groups processed: {groups_processed}")
+    print(f"Exclude   — rows OK: {exc_success}, failed: "
+          f"{exc_error + len(rows_with_missing_fields_exc)}")
+    print(f"R-exclude — rows OK: {rex_success}, failed: "
+          f"{rex_error + len(rows_with_missing_fields_rex)}")
+    print(f"{'='*70}\n")
+
+    return {
+        "exclude": {"rows": exc_success + exc_error,
+                    "errors": exc_error + len(rows_with_missing_fields_exc)},
+        "reverse_exclude": {"rows": rex_success + rex_error,
+                            "errors": rex_error + len(rows_with_missing_fields_rex)},
+    }
 
 
 def process_exclusion_sheet_new(

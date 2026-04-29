@@ -82,7 +82,7 @@ STOPWORDS = {
     'korting', 'kortingen', 'kortingscode',
     'sale', 'deal', 'deals',
     'beste', 'best', 'top',
-    'goedkoop', 'goedkope', 'goedkoopste',
+    'goedkoop', 'goedkope', 'goedkoper', 'goedkopere', 'goedkoopst', 'goedkoopste',
     'budget', 'voordelig', 'voordelige', 'voordeel',
     'premium', 'luxe', 'pro', 'plus',
     'gratis', 'uitverkoop', 'opruiming', 'outlet',
@@ -151,6 +151,45 @@ STOPWORDS = {
 
     # V26: Bijvoeglijke naamwoorden VERWIJDERD - hier bestaan WEL facets voor
     # Verwijderd: 'groot', 'grote', 'klein', 'kleine', 'lang', 'lange', 'kort', 'korte'
+}
+
+
+# ==============================================================================
+# GENERIC ADJECTIVES (V27) - Mogen NIET de enige matchende token zijn.
+# ==============================================================================
+# Deze woorden bestaan vaak als facet value (size/color/shape/state), maar als
+# zij als enige matchen verandert dat de bedoeling van de query volledig:
+#   - "tretinoine creme kopen" → "creme" mag niet de enige match zijn (de
+#     gebruiker zoekt tretinoïne, niet alle crème-producten in Drogisterij).
+#   - "mini gps-tracker" → "mini" mag niet de enige match zijn (gps-tracker
+#     is het hoofdnoun; "Mini" is een hondenmaat in dg_voer).
+#
+# Anders dan STOPWORDS zijn deze woorden NIET genegeerd door de matcher —
+# ze tellen mee als geldige facet-match zolang er minstens één ander
+# inhoudelijk woord óók matcht. De reliability-scorer gebruikt deze set om
+# matches af te keuren waar generic adjectives het hele match-resultaat dragen.
+GENERIC_ADJECTIVES = {
+    # Maten / formaten
+    'mini', 'midi', 'maxi', 'mega', 'micro', 'macro',
+    'small', 'medium', 'large', 'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl',
+    'klein', 'kleine', 'groot', 'grote', 'middel', 'middelgroot', 'middelgrote',
+    'kort', 'korte', 'lang', 'lange', 'smal', 'smalle', 'breed', 'brede',
+    'dun', 'dunne', 'dik', 'dikke',
+    'hoog', 'hoge', 'laag', 'lage',
+    'compact', 'compacte',
+    # Kleuren
+    'wit', 'witte', 'zwart', 'zwarte', 'grijs', 'grijze',
+    'rood', 'rode', 'blauw', 'blauwe', 'groen', 'groene',
+    'geel', 'gele', 'oranje', 'paars', 'paarse', 'roze', 'bruin', 'bruine',
+    'beige', 'creme', 'crème', 'goud', 'gouden', 'zilver', 'zilveren',
+    # Vormen / oppervlak
+    'rond', 'ronde', 'vierkant', 'vierkante', 'rechthoekig', 'rechthoekige',
+    'ovaal', 'ovale', 'plat', 'platte',
+    'glad', 'gladde', 'ruw', 'ruwe', 'zacht', 'zachte', 'hard', 'harde',
+    # Materialen die als "look" dienen (vaak misleidende facet hits)
+    'metalen', 'houten', 'plastic', 'rubber', 'rubberen',
+    # Opmerkelijke generieke kwalificaties
+    'basic', 'standaard', 'algemeen', 'algemene',
 }
 
 
