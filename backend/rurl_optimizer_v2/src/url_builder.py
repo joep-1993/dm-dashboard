@@ -134,6 +134,26 @@ class UrlBuilder:
                     merk_of_shop_missing=merk_missing_msg
                 )
 
+            # V26: An R-URL that already carries a maincat may only redirect to
+            # another deepest_cat within the same maincat. Cross-maincat moves
+            # are almost always a worse landing page than no redirect.
+            if is_different_main_cat and parsed_url.main_category:
+                return RedirectResult(
+                    original_url=parsed_url.original_url,
+                    redirect_url=None,
+                    facet_fragment='',
+                    match_score=match_result.score,
+                    match_type='cross_maincat_blocked',
+                    success=False,
+                    reason=f"[V26] Cross-maincat redirect blocked: facet '{match_result.facet_value.facet_name}' lives in '{facet_main_cat}', R-URL is in '{parsed_url.main_category}'",
+                    keyword=parsed_url.keyword,
+                    facet_count=0,
+                    main_category=parsed_url.main_category,
+                    subcategory_id=parsed_url.subcategory_id,
+                    facet_names=match_result.facet_value.facet_name,
+                    facet_value_names=match_result.matched_text,
+                )
+
             # Facet comes from different category - use its own path
             category_path = self._extract_category_path_from_facet_url(match_result.facet_value.url)
             if category_path:
@@ -363,6 +383,28 @@ class UrlBuilder:
             # Only use the cross-category facet (don't mix with original category facets)
             facet_fragment = cross_cat_match.facet_value.url_fragment
 
+            # V26: Block cross-maincat redirects when the R-URL already has a
+            # maincat — landing in a different maincat is almost never the
+            # right answer for a categorised R-URL.
+            cross_main_cat = self._extract_main_category_from_facet_url(category_path)
+            if (parsed_url.main_category and cross_main_cat
+                    and cross_main_cat != parsed_url.main_category):
+                return RedirectResult(
+                    original_url=parsed_url.original_url,
+                    redirect_url=None,
+                    facet_fragment='',
+                    match_score=cross_cat_match.score,
+                    match_type='cross_maincat_blocked',
+                    success=False,
+                    reason=f"[V26] Cross-maincat redirect blocked: cross-category match in '{cross_main_cat}', R-URL is in '{parsed_url.main_category}'",
+                    keyword=parsed_url.keyword,
+                    facet_count=0,
+                    main_category=parsed_url.main_category,
+                    subcategory_id=parsed_url.subcategory_id,
+                    facet_names=cross_cat_match.facet_value.facet_name,
+                    facet_value_names=cross_cat_match.matched_text,
+                )
+
             redirect_url = f"{self.base_url}{category_path}/c/{facet_fragment}"
 
             return RedirectResult(
@@ -433,6 +475,25 @@ class UrlBuilder:
                     facet_names=primary_match.facet_value.facet_name,
                     facet_value_names=primary_match.matched_text,
                     merk_of_shop_missing=merk_missing_msg
+                )
+
+            # V26: Block any non-merk/winkel cross-maincat redirect too —
+            # categorised R-URLs must stay in their own maincat.
+            if is_different_main_cat and parsed_url.main_category:
+                return RedirectResult(
+                    original_url=parsed_url.original_url,
+                    redirect_url=None,
+                    facet_fragment='',
+                    match_score=primary_match.score,
+                    match_type='cross_maincat_blocked',
+                    success=False,
+                    reason=f"[V26] Cross-maincat redirect blocked: facet '{primary_match.facet_value.facet_name}' lives in '{facet_main_cat}', R-URL is in '{parsed_url.main_category}'",
+                    keyword=parsed_url.keyword,
+                    facet_count=0,
+                    main_category=parsed_url.main_category,
+                    subcategory_id=parsed_url.subcategory_id,
+                    facet_names=primary_match.facet_value.facet_name,
+                    facet_value_names=primary_match.matched_text,
                 )
 
             if category_path:

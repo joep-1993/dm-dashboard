@@ -97,7 +97,7 @@ def process_global_url(args):
 
     url, keyword = args
 
-    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier
+    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity
     from src.validation_rules import (
         STOPWORDS, SHOP_NAMES, SUBCATEGORY_MATCH_THRESHOLD
     )
@@ -360,6 +360,16 @@ def process_global_url(args):
     else:
         keyword_type = 'no_matchable'
 
+    # V26: Synthetic H1 similarity (no crawling — built from URL components).
+    # Global R-URLs have no original deepest_cat (they're maincat-level), so
+    # only the keyword feeds the R-URL side.
+    h1_similarity = compute_h1_similarity(
+        keyword=keyword,
+        original_cat_name=None,
+        redirect_cat_name=redirect_cat_name,
+        facet_value_names=r.facet_value_names,
+    ) if r.success else 0
+
     # Reliability score — global URLs zijn altijd cross-category
     reliability_score = 0
     reliability_tier = 'D'
@@ -372,7 +382,8 @@ def process_global_url(args):
             facet_value_names=r.facet_value_names,
             keyword=keyword,
             reason=r.reason,
-            match_coverage=match_coverage
+            match_coverage=match_coverage,
+            h1_similarity=h1_similarity,
         )
         reliability_tier = get_reliability_tier(reliability_score)
 
@@ -392,6 +403,7 @@ def process_global_url(args):
         'match_type': r.match_type,
         'reliability_score': reliability_score,
         'reliability_tier': reliability_tier,
+        'h1_similarity': h1_similarity,  # V26: synthetic H1 overlap (0-100)
         'matched_keywords': ', '.join(matched_keywords),
         'unmatched_keywords': ', '.join(unmatched_keywords),
         'match_coverage': match_coverage,

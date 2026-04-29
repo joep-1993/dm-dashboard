@@ -147,7 +147,7 @@ def process_url_v2(args):
     url, multi_facet = args
 
     import re  # Nodig voor DIMENSION_PATTERN + V30 coverage check (moet vóór gebruik staan)
-    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier
+    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity
     from src.validation_rules import STOPWORDS, SHOP_NAMES
 
     # Hard exclusion: external API URLs that should never be processed.
@@ -558,6 +558,14 @@ def process_url_v2(args):
     else:
         keyword_type = 'no_matchable'
 
+    # V26: Synthetic H1 similarity — built from URL components, no crawling.
+    h1_similarity = compute_h1_similarity(
+        keyword=r.keyword,
+        original_cat_name=original_cat_name,
+        redirect_cat_name=redirect_cat_name,
+        facet_value_names=r.facet_value_names,
+    ) if r.success else 0
+
     # V21: Calculate reliability score WITH match_coverage
     reliability_score = 0
     reliability_tier = 'D'
@@ -570,7 +578,8 @@ def process_url_v2(args):
             facet_value_names=r.facet_value_names,
             keyword=r.keyword,
             reason=r.reason,
-            match_coverage=match_coverage  # V21: pass coverage to reliability scorer
+            match_coverage=match_coverage,  # V21: pass coverage to reliability scorer
+            h1_similarity=h1_similarity,    # V26: H1 similarity as trust signal
         )
         reliability_tier = get_reliability_tier(reliability_score)
 
@@ -590,6 +599,7 @@ def process_url_v2(args):
         'match_type': r.match_type,
         'reliability_score': reliability_score,
         'reliability_tier': reliability_tier,
+        'h1_similarity': h1_similarity,  # V26: synthetic H1 overlap (0-100)
         'matched_keywords': matched_keywords_str,
         'unmatched_keywords': unmatched_keywords_str,
         'match_coverage': match_coverage,

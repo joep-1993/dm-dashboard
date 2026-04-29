@@ -56,6 +56,40 @@ BAD_CROSS_CATEGORY_PATTERNS = [
 ]
 
 
+def compute_h1_similarity(
+    keyword: str,
+    original_cat_name: Optional[str],
+    redirect_cat_name: Optional[str],
+    facet_value_names: Optional[str],
+) -> int:
+    """
+    V26: Synthetic H1 similarity (0-100) used as a trust signal.
+
+    We don't crawl the live pages — instead we build the H1 from the URL
+    components we already have:
+
+    - R-URL H1   ≈ keyword (+ original deepest_cat label if any). This mirrors
+      what a Beslist search-result page shows for /<maincat>/<subcat>/r/<keyword>.
+    - Redirect H1 ≈ redirect deepest_cat label + facet_value_names. Beslist
+      facet pages render as "<deepest_cat> <facet value(s)>".
+
+    Compares with token_set_ratio so word order and small fragments don't
+    matter. Returns 0 when either side is empty.
+    """
+    try:
+        from fuzzywuzzy import fuzz
+    except ImportError:
+        return 0
+
+    rurl_parts = [p for p in [keyword, original_cat_name] if p]
+    redirect_parts = [p for p in [redirect_cat_name, facet_value_names] if p]
+    rurl_h1 = " ".join(rurl_parts).strip()
+    redirect_h1 = " ".join(redirect_parts).replace(",", " ").strip()
+    if not rurl_h1 or not redirect_h1:
+        return 0
+    return int(fuzz.token_set_ratio(rurl_h1.lower(), redirect_h1.lower()))
+
+
 def calculate_reliability_score(
     match_score: int,
     facet_count: int,
@@ -64,7 +98,8 @@ def calculate_reliability_score(
     facet_value_names: Optional[str],
     keyword: str,
     reason: str,
-    match_coverage: float = 100.0  # V21: match_coverage als percentage (0-100)
+    match_coverage: float = 100.0,  # V21: match_coverage als percentage (0-100)
+    h1_similarity: Optional[int] = None,  # V26: synthetic H1 similarity (0-100)
 ) -> int:
     """
     Calculate reliability score for a redirect.
@@ -214,6 +249,18 @@ def calculate_reliability_score(
         base_score -= 20  # Matig
     elif match_coverage < 75.0:
         base_score -= 10  # Redelijk
+
+    # V26: H1 similarity bump — small tiebreaker, not a decider. High overlap
+    # between the synthetic R-URL H1 and the redirect H1 reinforces trust;
+    # very low overlap is a soft warning that the landing page may not match
+    # what the user typed.
+    if h1_similarity is not None:
+        if h1_similarity >= 85:
+            base_score += 5
+        elif h1_similarity < 40:
+            base_score -= 10
+        elif h1_similarity < 60:
+            base_score -= 5
 
     # Clamp to 0-100
     return max(0, min(100, int(base_score)))
