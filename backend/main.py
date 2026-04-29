@@ -178,6 +178,41 @@ async def startup_event():
     """Run startup tasks for all services."""
     await cleanup_thema_ads_jobs()
 
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close long-lived HTTP sessions to prevent CLOSE_WAIT socket buildup."""
+    from backend import gpt_service, scraper_service, link_validator, faq_service, ai_titles_service
+    from backend.url_validator_service import _taxonomy
+
+    for label, session in [
+        ("gpt_service", getattr(gpt_service, "_http_client", None)),
+        ("scraper_service", getattr(scraper_service, "_session", None)),
+        ("link_validator", getattr(link_validator, "_es_session", None)),
+        ("faq_service", getattr(faq_service, "_faq_session", None)),
+        ("ai_titles_http", getattr(ai_titles_service, "_http_session", None)),
+        ("url_validator", getattr(_taxonomy, "_session", None)),
+    ]:
+        if session is not None:
+            try:
+                session.close()
+                print(f"[SHUTDOWN] Closed {label} session")
+            except Exception as e:
+                print(f"[SHUTDOWN] Error closing {label}: {e}")
+
+    # Close OpenAI clients (they wrap an internal httpx client)
+    for label, client in [
+        ("gpt_service", getattr(gpt_service, "_openai_client", None)),
+        ("ai_titles", getattr(ai_titles_service, "_openai_client", None)),
+        ("faq_service", getattr(faq_service, "_openai_client", None)),
+    ]:
+        if client is not None:
+            try:
+                client.close()
+                print(f"[SHUTDOWN] Closed {label} OpenAI client")
+            except Exception as e:
+                print(f"[SHUTDOWN] Error closing {label}: {e}")
+
 # CORS for frontend. Set CORS_ORIGINS (comma-separated) in env to restrict; default = "*".
 _cors_origins_env = os.getenv("CORS_ORIGINS", "*").strip()
 _cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] or ["*"]

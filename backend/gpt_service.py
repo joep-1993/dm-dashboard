@@ -2,8 +2,9 @@ import os
 from openai import OpenAI
 from typing import List, Dict
 
-# Initialize client
+# Initialize client (also exposed as _openai_client for shutdown handler)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_openai_client = client
 
 # Model selection (configure in .env)
 MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
