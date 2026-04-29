@@ -6,6 +6,7 @@ This file contains helper functions for Google Ads listing tree operations.
 
 import time
 from google.ads.googleads.errors import GoogleAdsException
+from google.api_core import protobuf_helpers
 
 # Global counter for temporary resource names
 _temp_id_counter = -1
@@ -383,7 +384,7 @@ def add_shopping_ad_group(client, customer_id, campaign_resource_name, ad_group_
     # Escape single quotes in ad group name for GAQL (replace ' with \')
     escaped_ad_group_name = ad_group_name.replace("'", "\\'")
     query = f"""
-        SELECT ad_group.id, ad_group.resource_name, ad_group.name
+        SELECT ad_group.id, ad_group.resource_name, ad_group.name, ad_group.status
         FROM ad_group
         WHERE ad_group.campaign = '{campaign_resource_name}'
         AND ad_group.name = '{escaped_ad_group_name}'
@@ -393,8 +394,30 @@ def add_shopping_ad_group(client, customer_id, campaign_resource_name, ad_group_
     response = google_ads_service.search(customer_id=customer_id, query=query)
 
     for row in response:
-        print(f"      ✅ Ad group '{ad_group_name}' already exists (ID: {row.ad_group.id}). Using existing ad group.")
-        return row.ad_group.resource_name, False
+        existing_status = row.ad_group.status
+        # Re-enable a paused ad group instead of leaving it inactive — when
+        # Include Shops re-adds a shop that was previously paused, the user
+        # expects the existing ad group to come back online.
+        action = "reused"
+        if existing_status == client.enums.AdGroupStatusEnum.PAUSED:
+            update_op = client.get_type("AdGroupOperation")
+            update_op.update.resource_name = row.ad_group.resource_name
+            update_op.update.status = client.enums.AdGroupStatusEnum.ENABLED
+            client.copy_from(
+                update_op.update_mask,
+                protobuf_helpers.field_mask(None, update_op.update._pb),
+            )
+            try:
+                ad_group_service.mutate_ad_groups(
+                    customer_id=customer_id, operations=[update_op]
+                )
+                action = "reactivated"
+                print(f"      ▶️  Ad group '{ad_group_name}' was PAUSED — re-enabled (ID: {row.ad_group.id}).")
+            except GoogleAdsException as ex:
+                print(f"      ⚠️  Failed to re-enable paused ad group '{ad_group_name}': {ex}")
+        else:
+            print(f"      ✅ Ad group '{ad_group_name}' already exists (ID: {row.ad_group.id}). Using existing ad group.")
+        return row.ad_group.resource_name, False, action
 
     # No (active) ad group exists — create one
     ad_group_operation = client.get_type("AdGroupOperation")
@@ -416,7 +439,7 @@ def add_shopping_ad_group(client, customer_id, campaign_resource_name, ad_group_
 
     ad_group_resource_name = ad_group_response.results[0].resource_name
     print(f"      ✅ Ad group created: {ad_group_name}")
-    return ad_group_resource_name, True
+    return ad_group_resource_name, True, "created"
 
 
 def ensure_campaign_label_exists(client, customer_id, label_name):

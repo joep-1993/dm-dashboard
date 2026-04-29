@@ -363,7 +363,8 @@ def _populate_cat_ids_from_csv(ws_cat):
 # ---------------------------------------------------------------------------
 # Extract results from workbook after processing
 # ---------------------------------------------------------------------------
-def _extract_results(wb: openpyxl.Workbook, sheet_name: str, result_col: int, error_col: int) -> list:
+def _extract_results(wb: openpyxl.Workbook, sheet_name: str, result_col: int, error_col: int,
+                     note_col: Optional[int] = None) -> list:
     """Read back results from the processed workbook."""
     results = []
     if sheet_name not in wb.sheetnames:
@@ -377,12 +378,18 @@ def _extract_results(wb: openpyxl.Workbook, sheet_name: str, result_col: int, er
             continue
         result_val = cells[result_col].value if result_col < len(cells) else None
         error_val = cells[error_col].value if error_col < len(cells) else None
+        note_val = (
+            cells[note_col].value
+            if note_col is not None and note_col < len(cells)
+            else None
+        )
         row_data = [c.value for c in cells]
         results.append({
             "row": row_idx,
             "data": row_data,
             "success": result_val is True or str(result_val).upper() == "TRUE",
             "error": str(error_val) if error_val else None,
+            "note": str(note_val) if note_val else "",
         })
     return results
 
@@ -544,7 +551,9 @@ def _run_operation(task_id: str, operation: str, country: str,
                 sys.stderr = old_stderr
 
             full_log = captured.getvalue()
-            results = _extract_results(wb, "toevoegen", 6, 7)  # col G=result, H=error
+            # Inclusion writes a per-row note in col I (e.g. "reactivated paused
+            # ad group"); exclusion / reverse_* don't, so they pass note_col=None.
+            results = _extract_results(wb, "toevoegen", 6, 7, note_col=8)
             result_data = {
                 "rows_processed": len(results),
                 "successes": sum(1 for r in results if r["success"]),
@@ -793,6 +802,50 @@ def _run_operation(task_id: str, operation: str, country: str,
             result_data["edited_trees"] = tree_count
             result_data["dry_run"] = bool(dry_run)
 
+        # Slim per-row results for the export. Processed-sheet layout is
+        # [shop_name, Shop ID, maincat, maincat_id, cl1, ...] — the input file
+        # only carries shop / maincat / maincat_id (the cl1 fanout is internal),
+        # so the export mirrors the input by aggregating cl1 rows back into one
+        # entry per (shop, maincat, maincat_id).
+        _SOURCE_SHEET_BY_OP = {
+            "inclusion": "toevoegen",
+            "reverse_inclusion": "toevoegen",
+            "exclusion": "uitsluiten",
+            "reverse_exclusion": "verwijderen",
+        }
+        row_results: list = []
+        source_sheet = _SOURCE_SHEET_BY_OP.get(operation, "")
+        if source_sheet and result_data and result_data.get("details"):
+            agg: dict = {}
+            order: list = []
+            for d in result_data["details"]:
+                data = d.get("data") or []
+                shop = data[0] if len(data) > 0 else ""
+                maincat = data[2] if len(data) > 2 else ""
+                maincat_id = data[3] if len(data) > 3 else ""
+                key = (shop, maincat, maincat_id)
+                if key not in agg:
+                    agg[key] = {"success": True, "errors": [], "notes": []}
+                    order.append(key)
+                if not d.get("success"):
+                    agg[key]["success"] = False
+                err = d.get("error")
+                if err and err not in agg[key]["errors"]:
+                    agg[key]["errors"].append(err)
+                note = d.get("note")
+                if note and note not in agg[key]["notes"]:
+                    agg[key]["notes"].append(note)
+            for key in order:
+                shop, maincat, maincat_id = key
+                row_results.append({
+                    "shop_name": shop,
+                    "maincat": maincat,
+                    "maincat_id": maincat_id,
+                    "success": agg[key]["success"],
+                    "error": "; ".join(agg[key]["errors"]) if agg[key]["errors"] else "",
+                    "note": "; ".join(agg[key]["notes"]) if agg[key]["notes"] else "",
+                })
+
         # Add to history
         _history_append({
             "task_id": task_id,
@@ -803,6 +856,8 @@ def _run_operation(task_id: str, operation: str, country: str,
             "status": "completed",
             "summary": _summarize_result(operation, result_data),
             "affected": affected,
+            "row_results": row_results,
+            "source_sheet": source_sheet,
             "dry_run": bool(dry_run),
             "edited_campaigns": result_data.get("edited_campaigns", 0) if result_data else 0,
             "edited_ad_groups": result_data.get("edited_ad_groups", 0) if result_data else 0,

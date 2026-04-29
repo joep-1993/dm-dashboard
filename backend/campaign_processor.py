@@ -2361,6 +2361,7 @@ def process_inclusion_sheet_v2(
     COL_BUDGET = 5         # F: budget
     COL_RESULT = 6         # G: result (TRUE/FALSE)
     COL_ERR = 7            # H: error message
+    COL_NOTE = 8           # I: per-row note (e.g. "reactivated paused ad group")
 
     # Step 1: Read all rows and group by campaign (maincat + cl1), then by shop_name
     campaigns = defaultdict(lambda: {
@@ -2522,6 +2523,7 @@ def process_inclusion_sheet_v2(
             print(f"\n   Processing {len(ad_groups)} ad group(s)...")
             ad_groups_processed = []
             ad_group_errors = {}
+            ad_group_actions = {}  # shop_name → "created"/"reused"/"reactivated"
 
             for ag_idx, (shop_name, ag_data) in enumerate(ad_groups.items(), start=1):
                 # Build ad group name: PLA/{shop_name}_{cl1}
@@ -2533,12 +2535,16 @@ def process_inclusion_sheet_v2(
                     maincat_ids = sorted(ag_data['maincat_ids'])
                     print(f"      Maincat IDs (CL4): {maincat_ids}")
 
-                    # Create ad group (status: ENABLED - set in add_shopping_ad_group)
+                    # Create ad group (status: ENABLED - set in add_shopping_ad_group).
+                    # ag_action ∈ {"created","reused","reactivated"} — surfaced in
+                    # the export so users can see when a paused ad group was
+                    # re-enabled vs. freshly created.
+                    ag_action = "created"
                     if dry_run:
                         ad_group_resource_name = f"customers/{customer_id}/adGroups/DRY_RUN_{uuid.uuid4().hex[:10]}"
                         print(f"      [DRY RUN] Would create ad group → {ad_group_resource_name}")
                     else:
-                        ad_group_resource_name, _ = add_shopping_ad_group(
+                        ad_group_resource_name, _, ag_action = add_shopping_ad_group(
                             client=client,
                             customer_id=customer_id,
                             campaign_resource_name=campaign_resource_name,
@@ -2549,6 +2555,7 @@ def process_inclusion_sheet_v2(
                     if not ad_group_resource_name:
                         raise Exception(f"Failed to create/find ad group")
 
+                    ad_group_actions[shop_name] = ag_action
                     print(f"      ✅ Ad group ready: {ad_group_resource_name}")
 
                     # Tag ad group with DM_DASHBOARD label (live runs only)
@@ -2609,17 +2616,27 @@ def process_inclusion_sheet_v2(
                     print(f"      ❌ Failed: {error_msg}")
                     ad_group_errors[shop_name] = error_msg
 
-            # Mark rows as successful/failed
+            # Mark rows as successful/failed. Notes surface non-default actions
+            # ("reactivated"/"reused") so users can spot them in the export.
+            _ACTION_NOTES = {
+                "reactivated": "reactivated paused ad group",
+                "reused": "ad group already existed",
+                "created": "",
+            }
             for shop_name, ag_data in ad_groups.items():
                 for row_info in ag_data['rows']:
                     row_num = row_info['idx']
                     if shop_name in ad_groups_processed:
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = True
                         sheet.cell(row=row_num, column=COL_ERR + 1).value = ""
+                        sheet.cell(row=row_num, column=COL_NOTE + 1).value = (
+                            _ACTION_NOTES.get(ad_group_actions.get(shop_name, "created"), "")
+                        )
                     else:
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = False
                         error_msg = ad_group_errors.get(shop_name, "Failed to process ad group")
                         sheet.cell(row=row_num, column=COL_ERR + 1).value = error_msg[:100]
+                        sheet.cell(row=row_num, column=COL_NOTE + 1).value = ""
 
             if len(ad_groups_processed) > 0:
                 successful_campaigns += 1
@@ -3657,7 +3674,7 @@ def process_inclusion_sheet_legacy(
                     ad_group_name = f"PLA/{shop_name}_{custom_label_1}"
                     print(f"      Checking/creating ad group: {ad_group_name}")
 
-                    ad_group_resource_name, _ = add_shopping_ad_group(
+                    ad_group_resource_name, _, _ = add_shopping_ad_group(
                         client=client,
                         customer_id=customer_id,
                         campaign_resource_name=campaign_resource_name,
@@ -4070,7 +4087,7 @@ def process_uitbreiding_sheet(
                     if not ad_group_resource_name:
                         # Create new ad group
                         print(f"      📦 Creating ad group: {ad_group_name}")
-                        ad_group_resource_name, _ = add_shopping_ad_group(
+                        ad_group_resource_name, _, _ = add_shopping_ad_group(
                             client=client,
                             customer_id=customer_id,
                             campaign_resource_name=campaign_resource_name,

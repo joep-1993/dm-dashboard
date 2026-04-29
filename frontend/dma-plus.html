@@ -644,6 +644,31 @@
         }
         const h = historyData[idx];
         if (!h) return;
+
+        // Inclusion / exclusion / reverse_* runs export a single sheet that
+        // mirrors the input layout: shop_name, maincat, maincat_id + status
+        // (TRUE/FALSE) + error. Sheet name matches the source sheet that the
+        // operation reads from (toevoegen / uitsluiten / verwijderen).
+        if (Array.isArray(h.row_results) && h.source_sheet) {
+            const rows = [['shop_name', 'maincat', 'maincat_id', 'status', 'error', 'note']];
+            for (const r of h.row_results) {
+                rows.push([
+                    r.shop_name || '',
+                    r.maincat || '',
+                    r.maincat_id || '',
+                    r.success ? 'TRUE' : 'FALSE',
+                    r.error || '',
+                    r.note || '',
+                ]);
+            }
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            ws['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 14 }, { wch: 8 }, { wch: 60 }, { wch: 36 }];
+            XLSX.utils.book_append_sheet(wb, ws, h.source_sheet);
+            XLSX.writeFile(wb, `dma_plus_${h.operation}_${(h.completed_at || '').slice(0,10)}.xlsx`);
+            return;
+        }
+
         const aff = h.affected || {};
         const trees = aff.trees || [];
         const missing = aff.missing_campaigns || [];
