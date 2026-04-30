@@ -213,10 +213,12 @@
                                           placeholder="/products/category/...&#10;/products/category/subcategory" required></textarea>
                                 <div class="form-text">Relative URLs starting with `/`. Full beslist.nl URLs are accepted and stripped.</div>
                             </div>
-                            <button type="submit" class="btn btn-primary" id="queueBtn">
-                                <span id="queueBtnText">Add to Queue</span>
-                                <span id="queueSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
-                            </button>
+                            <div class="d-flex justify-content-end">
+                                <button type="submit" class="btn btn-primary" id="queueBtn">
+                                    <span id="queueBtnText">Add to Queue</span>
+                                    <span id="queueSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                </button>
+                            </div>
                         </form>
                         <div id="queueResult" class="mt-3 d-none">
                             <div class="alert" id="queueAlert"></div>
@@ -252,18 +254,20 @@
                                 <label for="titleH1" class="form-label">H1 Title <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control" id="titleH1" placeholder="H1 heading..." required>
                             </div>
-                            <button type="submit" class="btn btn-primary" id="saveBtn">
-                                <span id="saveBtnText">Save</span>
-                                <span id="saveSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
-                            </button>
-                            <button type="button" class="btn btn-outline-secondary" id="clearBtn">Clear</button>
-                            <button type="button" class="btn d-none" id="removeBtn"
-                                    style="border: 1px solid #d63031; color: #d63031; background: white;"
-                                    onmouseover="this.style.background='#d63031';this.style.color='white'"
-                                    onmouseout="this.style.background='white';this.style.color='#d63031'">
-                                <span id="removeBtnText">Remove</span>
-                                <span id="removeSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
-                            </button>
+                            <div class="d-flex justify-content-end gap-2">
+                                <button type="button" class="btn d-none" id="removeBtn"
+                                        style="border: 1px solid #d63031; color: #d63031; background: white;"
+                                        onmouseover="this.style.background='#d63031';this.style.color='white'"
+                                        onmouseout="this.style.background='white';this.style.color='#d63031'">
+                                    <span id="removeBtnText">Remove</span>
+                                    <span id="removeSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" id="clearBtn">Clear</button>
+                                <button type="submit" class="btn btn-primary" id="saveBtn">
+                                    <span id="saveBtnText">Save</span>
+                                    <span id="saveSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                </button>
+                            </div>
                         </form>
                         <div id="saveResult" class="mt-3 d-none">
                             <div class="alert" id="saveAlert"></div>
@@ -301,10 +305,12 @@
                                     CSV must have columns: url, title, description, h1_title (semicolon separated)
                                 </div>
                             </div>
-                            <button type="submit" class="btn btn-secondary" id="importBtn">
-                                <span id="importBtnText">Import to Database</span>
-                                <span id="importSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
-                            </button>
+                            <div class="d-flex justify-content-end">
+                                <button type="submit" class="btn btn-secondary" id="importBtn">
+                                    <span id="importBtnText">Import to Database</span>
+                                    <span id="importSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                </button>
+                            </div>
                         </form>
                         <div id="importResult" class="mt-3 d-none">
                             <div class="alert" id="importAlert"></div>
