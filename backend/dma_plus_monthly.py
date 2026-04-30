@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sys
 import time
 import uuid
 import logging
 import threading
+import zipfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -63,6 +65,87 @@ for _stream_name in ("stdout", "stderr"):
             _stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _repair_xlsx_bytes(wb_bytes: bytes) -> bytes:
+    """Remove references to missing drawing files from an xlsx archive.
+
+    Some tools (e.g. certain exports) leave dangling <Relationship> entries
+    that point to ``xl/drawings/drawingN.xml`` files that aren't actually
+    present in the zip.  openpyxl chokes on those with a ``KeyError``.
+
+    This function rewrites the archive in-memory: for every worksheet ``.rels``
+    file it strips ``<Relationship>`` elements whose ``Target`` points to a
+    missing drawing, and also removes the matching ``<Override>`` from
+    ``[Content_Types].xml``.
+    """
+    src = zipfile.ZipFile(io.BytesIO(wb_bytes))
+    names_in_zip = set(src.namelist())
+
+    # Quick check: nothing to repair if all referenced drawings exist.
+    needs_repair = False
+    for name in names_in_zip:
+        if name.endswith(".rels") and "worksheets" in name:
+            rels_xml = src.read(name).decode("utf-8")
+            if "drawing" in rels_xml.lower():
+                # Inspect individual targets
+                for m in re.finditer(r'Target="([^"]*drawing[^"]*)"', rels_xml, re.IGNORECASE):
+                    target = m.group(1)
+                    # Resolve relative target against the .rels location
+                    base = name.rsplit("/", 2)[0]  # e.g. xl/worksheets
+                    resolved = os.path.normpath(f"{base}/{target}").replace("\\", "/")
+                    if resolved not in names_in_zip:
+                        needs_repair = True
+                        break
+        if needs_repair:
+            break
+
+    if not needs_repair:
+        return wb_bytes
+
+    buf = io.BytesIO()
+    dst = zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED)
+
+    removed_drawings: set[str] = set()
+
+    for item in src.infolist():
+        data = src.read(item.filename)
+
+        if item.filename.endswith(".rels") and "worksheets" in item.filename:
+            text = data.decode("utf-8")
+            base = item.filename.rsplit("/", 2)[0]
+
+            def _keep(m: re.Match) -> str:
+                tag = m.group(0)
+                tm = re.search(r'Target="([^"]*)"', tag)
+                if tm and "drawing" in tm.group(1).lower():
+                    resolved = os.path.normpath(f"{base}/{tm.group(1)}").replace("\\", "/")
+                    if resolved not in names_in_zip:
+                        removed_drawings.add(resolved)
+                        return ""
+                return tag
+
+            text = re.sub(r"<Relationship\b[^>]*/>", _keep, text)
+            data = text.encode("utf-8")
+
+        if item.filename == "[Content_Types].xml" and removed_drawings:
+            text = data.decode("utf-8")
+            for rd in removed_drawings:
+                part_name = "/" + rd
+                text = re.sub(
+                    rf'<Override\b[^>]*PartName="{re.escape(part_name)}"[^>]*/>\s*',
+                    "", text,
+                )
+            data = text.encode("utf-8")
+
+        dst.writestr(item, data)
+
+    dst.close()
+    return buf.getvalue()
+
 
 # ---------------------------------------------------------------------------
 # Constants — matches the DMA+ delta file layout
@@ -482,6 +565,7 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes, dry_run: bool = False,
             "dry_run": dry_run,
         })
 
+        wb_bytes = _repair_xlsx_bytes(wb_bytes)
         src_wb = openpyxl.load_workbook(io.BytesIO(wb_bytes), data_only=True)
         _append_log(task_id, f"Source sheets: {src_wb.sheetnames}")
         if dry_run:

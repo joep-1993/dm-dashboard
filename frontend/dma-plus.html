@@ -444,7 +444,7 @@
                     showResults(d);
                 } else {
                     document.getElementById('progressBar').classList.add('bg-danger');
-                    alert('Operation failed: ' + (d.message || 'Unknown error'));
+                    alert('Operation failed: ' + (d.error || d.message || 'Unknown error'));
                 }
 
                 loadHistory();
