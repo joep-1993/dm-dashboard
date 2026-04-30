@@ -375,15 +375,6 @@ def _write_xlsx_output(df, csv_path: Path) -> Path:
     out["visits"] = df.get("visits", pd.Series(dtype=object))
     out["revenue"] = df.get("visit_rev", pd.Series(dtype=object))
     out["reason"] = df.get("reason", pd.Series(dtype=object))
-    # V27: rejection reason from the scorer (generic-only / long-unmatched).
-    # Empty for rows that survived. Rendered as the right-most column so it
-    # doesn't shift the existing layout.
-    out["reject_reason"] = df.get("reject_reason", pd.Series(dtype=object))
-    # V28: search-derived signals — only populated when the prefetch ran.
-    out["flag_for_review"] = df.get("flag_for_review", pd.Series(dtype=object))
-    out["search_derived_total"] = df.get("search_derived_total", pd.Series(dtype=object))
-    out["search_derived_dom_cat"] = df.get("search_derived_dom_cat", pd.Series(dtype=object))
-    out["search_derived_dom_share"] = df.get("search_derived_dom_share", pd.Series(dtype=object))
 
     # Sort by score (descending). Coerce to numeric so non-numeric values
     # (NaN, strings) sort to the bottom rather than crashing the comparison.

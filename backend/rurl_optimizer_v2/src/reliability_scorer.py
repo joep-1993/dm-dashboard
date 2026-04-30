@@ -307,6 +307,13 @@ def calculate_reliability_score(
     if _v27_reject_reason(matched_keywords, unmatched_keywords) is not None:
         return 0
 
+    # V28: When the URL builder dropped a duplicate facet name (Beslist
+    # URLs only allow one value per facet name), the resulting redirect is
+    # essentially "back to the original URL minus the keyword" — devalue
+    # heavily so it lands in tier D and reviewers spot it.
+    if match_type == 'duplicate_facet_dropped':
+        base_score = min(base_score, 25)
+
     # Clamp to 0-100
     return max(0, min(100, int(base_score)))
 

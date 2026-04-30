@@ -164,6 +164,82 @@ SYNONYMS = {
     "toiletontstoppers": ["wc ontstoppers", "wc-ontstoppers", "toilet ontstoppers"],
 }
 
+# V28: Compound-noun decomposition. Dutch retail keywords often glue a
+# location/specifier onto a base noun: "huistelefoon" = "huis" + "telefoon".
+# Indexed facet values usually carry only the base noun ("Senioren telefoon",
+# not "Senioren huistelefoon"), so the legacy fuzzy matcher misses them.
+# When the full keyword fails to match, we retry with each compound token
+# replaced by its base. Keep this dict targeted — over-generalising creates
+# false-positive matches.
+COMPOUND_DECOMPOSITIONS = {
+    # Telefonie
+    "huistelefoon": "telefoon",
+    "huistelefoons": "telefoon",
+    "draadloze telefoon": "telefoon",
+    # Verlichting
+    "wandlamp": "lamp",
+    "tafellamp": "lamp",
+    "bureaulamp": "lamp",
+    "vloerlamp": "lamp",
+    "staande lamp": "lamp",
+    "hanglamp": "lamp",
+    "plafondlamp": "lamp",
+    # Textiel
+    "vloerkleed": "kleed",
+    "tafelkleed": "kleed",
+    "wandkleed": "kleed",
+    # Meubilair
+    "tuintafel": "tafel",
+    "salontafel": "tafel",
+    "eettafel": "tafel",
+    "bureautafel": "tafel",
+    "kinderstoel": "stoel",
+    "bureaustoel": "stoel",
+    "tuinstoel": "stoel",
+    "kantoorstoel": "stoel",
+    "kinderbed": "bed",
+    "stapelbed": "bed",
+    # Tuin
+    "tuinslang": "slang",
+    "tuinhuisje": "tuinhuis",
+    # Sport / outdoor
+    "wandelstok": "stok",
+    "kinderfiets": "fiets",
+    "elektrische fiets": "fiets",
+}
+
+
+def expand_compounds(keyword: str) -> list[str]:
+    """V28: Generate variants of `keyword` where each compound token is
+    replaced by its base noun (per COMPOUND_DECOMPOSITIONS). Returns the
+    original keyword first, followed by deduplicated decomposed variants.
+    """
+    if not keyword:
+        return [keyword]
+    kw_lower = keyword.lower()
+    variants = [keyword]
+    seen = {kw_lower}
+
+    # Whole-keyword lookup (handles phrasal compounds like "draadloze telefoon").
+    if kw_lower in COMPOUND_DECOMPOSITIONS:
+        v = COMPOUND_DECOMPOSITIONS[kw_lower]
+        if v not in seen:
+            variants.append(v)
+            seen.add(v)
+
+    tokens = keyword.split()
+    for i, t in enumerate(tokens):
+        base = COMPOUND_DECOMPOSITIONS.get(t.lower())
+        if base:
+            new_tokens = list(tokens)
+            new_tokens[i] = base
+            variant = " ".join(new_tokens)
+            if variant.lower() not in seen:
+                variants.append(variant)
+                seen.add(variant.lower())
+    return variants
+
+
 # Reverse mapping: facet value -> search terms that should match it
 # Built from SYNONYMS
 REVERSE_SYNONYMS = {}

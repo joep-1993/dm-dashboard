@@ -114,7 +114,14 @@ def _fetch_live(maincat: str, keyword: str) -> Optional[dict]:
 
 
 def _classify(api_resp: Optional[dict]) -> dict:
-    """Boil an API response down to the small dict we cache."""
+    """Boil an API response down to the small dict we cache.
+
+    V28: uses the response's `categories` array — which carries per-category
+    product counts across the *entire* result set — instead of sampling the
+    top-N products. Top-N sampling can mislead when the API ranks broader
+    cats first (e.g. "senioren huistelefoon" returned 7/10 Mobiele telefoons
+    in the sample but the true split is 139 Huistelefoons / 3 Mobiele).
+    """
     if api_resp is None:
         return {"mode": "error", "total": None}
     total = api_resp.get("total") or 0
@@ -124,13 +131,37 @@ def _classify(api_resp: Optional[dict]) -> dict:
     if total >= AND_MODE_TOTAL_THRESHOLD:
         return {"mode": "fallback", "total": total}
 
+    out = {"mode": "and", "total": total}
+
+    cats_resp = api_resp.get("categories") or []
+    if cats_resp:
+        # Pick the deepest depth that has at least one category — that's
+        # the "leaf" level for this query — then pick the cat with the
+        # highest count among siblings at that depth.
+        max_depth = max((c.get("depth") or 0) for c in cats_resp)
+        leaf_cats = [c for c in cats_resp if (c.get("depth") or 0) == max_depth]
+        leaf_cats.sort(key=lambda c: -(c.get("count") or 0))
+        sum_at_leaf = sum((c.get("count") or 0) for c in leaf_cats) or 1
+        top = leaf_cats[0]
+        share = (top.get("count") or 0) / sum_at_leaf
+        out.update({
+            "dom_cat_id": top.get("id"),
+            "dom_cat_name": top.get("name", ""),
+            "dom_cat_url_slug": top.get("urlName", ""),
+            "dom_cat_share": round(share, 2),
+            "dom_cat_count": top.get("count") or 0,
+            "dom_cat_depth": max_depth,
+        })
+        return out
+
+    # Fallback path (older cache entries / unusual responses): sample the
+    # returned products.
     rows = []
     for p in products:
         cats = p.get("categories") or []
         if cats:
             c = cats[-1]
             rows.append((c.get("id"), c.get("name", ""), c.get("urlName", "")))
-    out = {"mode": "and", "total": total}
     if rows:
         counter = Counter(rows)
         (cat_id, cat_name, cat_slug), count = counter.most_common(1)[0]

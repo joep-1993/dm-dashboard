@@ -175,12 +175,31 @@ class UrlBuilder:
                     facet_value_names=match_result.matched_text
                 )
 
-        # Facet is valid for original category - use original path
-        # Combine with existing facet from original URL if present
-        if parsed_url.existing_facet:
+        # Facet is valid for original category - use original path.
+        # V28: Beslist URLs only support one value per facet name. If the
+        # new facet name already exists in the original URL's facet
+        # fragment, the new value cannot be added — keep only the original
+        # facet and mark the match for a heavy score penalty downstream.
+        existing_names = self._existing_facet_names(parsed_url.existing_facet)
+        new_facet_name = match_result.facet_value.facet_name
+        duplicate = bool(parsed_url.existing_facet) and new_facet_name in existing_names
+
+        if duplicate:
+            combined_fragment = parsed_url.existing_facet
+            final_match_type = 'duplicate_facet_dropped'
+            final_reason = (
+                f"[V28] '{new_facet_name}' value already present in original URL; "
+                f"new value '{match_result.matched_text}' dropped, kept "
+                f"'{parsed_url.existing_facet}'"
+            )
+        elif parsed_url.existing_facet:
             combined_fragment = f"{parsed_url.existing_facet}~~{facet_fragment}"
+            final_match_type = match_result.match_type
+            final_reason = f"Matched '{parsed_url.keyword}' to '{match_result.matched_text}' ({match_result.match_type}, score: {match_result.score})"
         else:
             combined_fragment = facet_fragment
+            final_match_type = match_result.match_type
+            final_reason = f"Matched '{parsed_url.keyword}' to '{match_result.matched_text}' ({match_result.match_type}, score: {match_result.score})"
 
         redirect_url = (
             f"{self.base_url}"
@@ -193,9 +212,9 @@ class UrlBuilder:
             redirect_url=redirect_url,
             facet_fragment=combined_fragment,
             match_score=match_result.score,
-            match_type=match_result.match_type,
+            match_type=final_match_type,
             success=True,
-            reason=f"Matched '{parsed_url.keyword}' to '{match_result.matched_text}' ({match_result.match_type}, score: {match_result.score})",
+            reason=final_reason,
             keyword=parsed_url.keyword,
             facet_count=1 + (1 if parsed_url.existing_facet else 0),
             main_category=parsed_url.main_category,
@@ -261,6 +280,24 @@ class UrlBuilder:
         if len(parts) >= 3 and parts[0] == 'products':
             return parts[2]  # e.g., "huis_tuin_505062_505149"
         return None
+
+    def _existing_facet_names(self, existing_facet: str) -> set:
+        """V28: Extract the facet NAMES (not values) already present in the
+        original URL's /c/ fragment.
+
+        Beslist URLs only allow one value per facet name. A fragment like
+        'merk~250064~~kleur~12345' has names {'merk', 'kleur'}; trying to
+        add another 'merk~...' would produce an invalid double-merk URL.
+        """
+        if not existing_facet:
+            return set()
+        names: set = set()
+        for piece in existing_facet.split("~~"):
+            if "~" in piece:
+                name, _, _ = piece.partition("~")
+                if name:
+                    names.add(name)
+        return names
 
     def _facet_matches_category(self, facet_url: str, parsed_url: ParsedRUrl) -> bool:
         """
@@ -522,17 +559,34 @@ class UrlBuilder:
         # V18: Only use facets that are valid for the R-URL's exact subcategory
         # This prevents combining facets from parent categories that don't exist in the target subcat
         if facets_from_same_category:
+            # V28: Drop new facets whose name already exists in the original
+            # URL's /c/ fragment — Beslist URLs only allow one value per
+            # facet name. The original value wins; the new ones are
+            # discarded and the row is flagged for a heavy score penalty.
+            existing_names = self._existing_facet_names(parsed_url.existing_facet)
+            dropped_for_dup = [r for r in facets_from_same_category
+                               if r.facet_value.facet_name in existing_names]
+            kept_new_facets = [r for r in facets_from_same_category
+                               if r.facet_value.facet_name not in existing_names]
+
             # V25: Sorteer facets alfabetisch op facet_name voor consistente URLs
-            sorted_facets = sorted(facets_from_same_category, key=lambda r: r.facet_value.facet_name)
+            sorted_facets = sorted(kept_new_facets, key=lambda r: r.facet_value.facet_name)
             facet_fragments = [r.facet_value.url_fragment for r in sorted_facets]
             combined_fragment = '~~'.join(facet_fragments)
 
-            # Add existing facet from original URL if present
+            # Add existing facet from original URL if present.
             if parsed_url.existing_facet:
-                combined_fragment = f"{parsed_url.existing_facet}~~{combined_fragment}"
+                if combined_fragment:
+                    combined_fragment = f"{parsed_url.existing_facet}~~{combined_fragment}"
+                else:
+                    combined_fragment = parsed_url.existing_facet
 
-            # Calculate combined score (average)
-            avg_score = sum(r.score for r in sorted_facets) // len(sorted_facets)
+            # Score: average of the kept facets if any survived, else fall
+            # back to the dropped-duplicates' score so the output isn't 0.
+            if sorted_facets:
+                avg_score = sum(r.score for r in sorted_facets) // len(sorted_facets)
+            else:
+                avg_score = sum(r.score for r in dropped_for_dup) // max(1, len(dropped_for_dup))
 
             redirect_url = (
                 f"{self.base_url}"
@@ -541,15 +595,25 @@ class UrlBuilder:
             )
 
             # V25: Gebruik sorted_facets voor consistente volgorde in output
-            matched_terms = [r.matched_text for r in sorted_facets]
-            facet_names = [r.facet_value.facet_name for r in sorted_facets]
+            display_facets = sorted_facets if sorted_facets else dropped_for_dup
+            matched_terms = [r.matched_text for r in display_facets]
+            facet_names = [r.facet_value.facet_name for r in display_facets]
 
-            # Bepaal match_type op basis van aantal facets
-            if len(sorted_facets) == 1:
-                # Single facet: gebruik het originele match type (exact/fuzzy)
+            # V28: When a duplicate was dropped, flag the match_type so the
+            # reliability scorer can apply a heavy cap.
+            if dropped_for_dup:
+                single_match_type = 'duplicate_facet_dropped'
+                dropped_names = ", ".join(sorted({r.facet_value.facet_name for r in dropped_for_dup}))
+                reason_text = (
+                    f"[V28] Dropped duplicate facet name(s) '{dropped_names}' — "
+                    f"already present in original URL fragment '{parsed_url.existing_facet}'"
+                )
+            elif len(sorted_facets) == 1:
                 single_match_type = 'exact' if avg_score == 100 else 'fuzzy'
+                reason_text = f"Matched {len(sorted_facets)} facet: {', '.join(matched_terms)}"
             else:
                 single_match_type = 'multi'
+                reason_text = f"Matched {len(sorted_facets)} facets: {', '.join(matched_terms)}"
 
             return RedirectResult(
                 original_url=parsed_url.original_url,
@@ -558,7 +622,7 @@ class UrlBuilder:
                 match_score=avg_score,
                 match_type=single_match_type,
                 success=True,
-                reason=f"Matched {len(sorted_facets)} facet{'s' if len(sorted_facets) > 1 else ''}: {', '.join(matched_terms)}",
+                reason=reason_text,
                 keyword=parsed_url.keyword,
                 facet_count=len(sorted_facets) + (1 if parsed_url.existing_facet else 0),
                 main_category=parsed_url.main_category,

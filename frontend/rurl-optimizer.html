@@ -90,11 +90,19 @@
                                         <input type="radio" class="form-check-input" name="source" id="srcRedshift" value="redshift">
                                         <label for="srcRedshift" class="form-check-label">Redshift</label>
                                     </div>
+                                    <div class="form-check form-check-inline">
+                                        <input type="radio" class="form-check-input" name="source" id="srcManual" value="manual">
+                                        <label for="srcManual" class="form-check-label">Manual input</label>
+                                    </div>
                                 </div>
                             </div>
                             <div class="col-md-6" id="uploadField">
                                 <label for="csvFile" class="form-label">Input CSV</label>
                                 <input type="file" class="form-control" id="csvFile" accept=".csv">
+                            </div>
+                            <div class="col-md-12 d-none" id="manualField">
+                                <label for="manualUrls" class="form-label">URLs (one per line)</label>
+                                <textarea class="form-control" id="manualUrls" rows="6" placeholder="https://www.beslist.nl/products/.../r/keyword/&#10;https://www.beslist.nl/products/.../r/another_keyword/" style="font-family: monospace; font-size: 0.85rem;"></textarea>
                             </div>
                             <div class="col-md-2 d-none" id="lookbackField">
                                 <label for="lookbackDays" class="form-label">Lookback days</label>
@@ -218,14 +226,18 @@
             if (e.target.value === '0') e.target.value = '';
         });
 
-        // Toggle upload vs Redshift fields
+        // Toggle upload / Redshift / manual fields based on the source radio.
         document.querySelectorAll('input[name="source"]').forEach(el => {
             el.addEventListener('change', () => {
-                const isRedshift = document.getElementById('srcRedshift').checked;
-                document.getElementById('uploadField').classList.toggle('d-none', isRedshift);
+                const source = document.querySelector('input[name="source"]:checked').value;
+                const isUpload = source === 'upload';
+                const isRedshift = source === 'redshift';
+                const isManual = source === 'manual';
+                document.getElementById('uploadField').classList.toggle('d-none', !isUpload);
+                document.getElementById('manualField').classList.toggle('d-none', !isManual);
                 document.getElementById('lookbackField').classList.toggle('d-none', !isRedshift);
                 document.getElementById('limitField').classList.toggle('d-none', !isRedshift);
-                document.getElementById('csvFile').required = !isRedshift;
+                document.getElementById('csvFile').required = isUpload;
             });
         });
 
@@ -233,11 +245,22 @@
             e.preventDefault();
             const source = document.querySelector('input[name="source"]:checked').value;
             const fd = new FormData();
-            fd.append('source', source);
+            // "Manual input" is a frontend convenience: we wrap the textarea
+            // contents in a single-column CSV and post it through the
+            // existing upload path. The backend never sees source=manual.
+            const backendSource = source === 'manual' ? 'upload' : source;
+            fd.append('source', backendSource);
             if (source === 'upload') {
                 const file = document.getElementById('csvFile').files[0];
                 if (!file) { alert('Please choose a CSV file.'); return; }
                 fd.append('file', file);
+            } else if (source === 'manual') {
+                const raw = document.getElementById('manualUrls').value || '';
+                const urls = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                if (urls.length === 0) { alert('Paste at least one URL.'); return; }
+                const csv = 'r_url\n' + urls.join('\n') + '\n';
+                const blob = new Blob([csv], { type: 'text/csv' });
+                fd.append('file', blob, 'manual_input.csv');
             } else {
                 fd.append('lookback_days', document.getElementById('lookbackDays').value || '365');
                 const lim = document.getElementById('rowLimit').value;

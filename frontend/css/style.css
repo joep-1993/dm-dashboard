@@ -382,3 +382,21 @@ body {
     border-color: var(--color-button-hover);
     color: white;
 }
+
+/* Sticky top navbar must always sit above sticky table headers.
+   Bootstrap defaults both .navbar.sticky-top and thead.sticky-top to
+   z-index 1020, and at equal z-index the later DOM element wins — so
+   thead lands on top of the navbar when scrolling. !important is
+   needed because some pages re-declare .sticky-top with their own
+   higher-specificity rules. Pushing the thead's `top` below the navbar
+   height keeps both visible while scrolling.
+
+   Navbar height is ~74px with our padding (1rem top + 1rem bottom +
+   1.5rem brand × 1.5 line-height ≈ 36px). 80px gives safe clearance. */
+.navbar.sticky-top {
+    z-index: 1030 !important;
+}
+thead.sticky-top {
+    top: 80px !important;
+    z-index: 1019 !important;
+}

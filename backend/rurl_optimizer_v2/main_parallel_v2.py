@@ -511,6 +511,45 @@ def process_url_v2(args):
                     existing_facet=parsed.existing_facet  # V19: preserve existing facet
                 )
 
+    # V28: Compound-decomposition retry. Dutch retail keywords often glue
+    # a specifier onto a base noun (e.g. "huistelefoon" = "huis"+"telefoon")
+    # but indexed facet values usually carry only the base. If nothing
+    # matched yet, retry the same matching pipeline with each compound
+    # token replaced by its base from COMPOUND_DECOMPOSITIONS, and use the
+    # first variant that produces a hit.
+    if not result and parsed.keyword:
+        from src.synonyms import expand_compounds
+        variants = expand_compounds(parsed.keyword)
+        for variant in variants[1:]:   # skip the original (already tried)
+            v_match = None
+            v_facets = facet_values
+            if v_facets:
+                v_match = matcher.match_with_partial(variant, v_facets)
+                if v_match.is_match:
+                    result = builder.build(parsed, v_match)
+                    result.reason = f"[V28 compound:{variant!r}] " + result.reason
+                    break
+            # Try maincat-level facets as well
+            mc_facets_df = facet_filter.filter_by_main_category(parsed.main_category)
+            if not mc_facets_df.empty:
+                mc_facets = facet_filter.get_facet_values(mc_facets_df)
+                if multi_facet or ' ' in variant:
+                    mc_results = matcher.match_multi_word(
+                        variant, mc_facets, all_type_facets=all_type_facets,
+                        require_type_for_merk=True,
+                        current_main_category=parsed.main_category,
+                    )
+                    if mc_results:
+                        result = builder.build_multi_facet(parsed, mc_results)
+                        result.reason = f"[V28 compound:{variant!r}][maincat] " + result.reason
+                        break
+                else:
+                    mc_match = matcher.match_with_partial(variant, mc_facets)
+                    if mc_match.is_match:
+                        result = builder.build(parsed, mc_match)
+                        result.reason = f"[V28 compound:{variant!r}][maincat] " + result.reason
+                        break
+
     if not result:
         result = builder.build_category_only(parsed)
 
@@ -662,7 +701,13 @@ def process_url_v2(args):
         search_derived_dom_share = derived.get('dom_cat_share')
 
         if reliability_score < 50 and derived.get('redirect_url'):
-            final_redirect_url = derived['redirect_url']
+            # Preserve any /c/<facet> the original URL carried — search-derived
+            # rescue should never silently strip an existing facet selection.
+            base_redirect = derived['redirect_url'].rstrip('/')
+            if parsed.existing_facet:
+                final_redirect_url = f"{base_redirect}/c/{parsed.existing_facet}"
+            else:
+                final_redirect_url = derived['redirect_url']
             final_redirect_cat_name = derived['dom_cat_name']
             final_match_type = 'search_derived_subcat'
             final_score = 75
@@ -670,6 +715,8 @@ def process_url_v2(args):
             final_reason = (
                 f"[V28] Search-derived: {derived.get('total')} products dominantly "
                 f"in '{derived['dom_cat_name']}' ({int(100*derived['dom_cat_share'])}%)"
+                + (f"; preserved original facet '{parsed.existing_facet}'"
+                   if parsed.existing_facet else "")
             )
             reject_reason = ''
         elif reliability_score >= 70 and derived.get('mode') == 'and' and not derived.get('redirect_url'):
