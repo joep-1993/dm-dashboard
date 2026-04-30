@@ -365,12 +365,14 @@ def _run_combined_exclusion(task_id, exc_wb, src_exc, rex_wb, src_rex, country,
             if r.get("success"):
                 continue
             src_row = src_exc[i] if i < len(src_exc) else None
+            data = r.get("data") or []
             errors.append({
                 "country": country, "operation": "exclude",
                 "source_sheet": exc_source_sheet, "source_row": src_row,
-                "shop": r.get("shop_name") or r.get("shop") or "",
-                "maincat": r.get("maincat") or "",
-                "cl1": r.get("cl1") or "",
+                "shop": str(data[0]) if len(data) > 0 and data[0] else "",
+                "maincat": str(data[2]) if len(data) > 2 and data[2] else "",
+                "maincat_id": str(data[3]) if len(data) > 3 and data[3] else "",
+                "cl1": str(data[4]) if len(data) > 4 and data[4] else "",
                 "error": r.get("error") or "",
             })
         if errors:
@@ -384,12 +386,14 @@ def _run_combined_exclusion(task_id, exc_wb, src_exc, rex_wb, src_rex, country,
             if r.get("success"):
                 continue
             src_row = src_rex[i] if i < len(src_rex) else None
+            data = r.get("data") or []
             errors.append({
                 "country": country, "operation": "reverse_exclude",
                 "source_sheet": rex_source_sheet, "source_row": src_row,
-                "shop": r.get("shop_name") or r.get("shop") or "",
-                "maincat": r.get("maincat") or "",
-                "cl1": r.get("cl1") or "",
+                "shop": str(data[0]) if len(data) > 0 and data[0] else "",
+                "maincat": str(data[2]) if len(data) > 2 and data[2] else "",
+                "maincat_id": str(data[3]) if len(data) > 3 and data[3] else "",
+                "cl1": str(data[4]) if len(data) > 4 and data[4] else "",
                 "error": r.get("error") or "",
             })
         if errors:
@@ -438,19 +442,20 @@ def _run_one_operation(task_id, op_label, wb, src_rows, country, source_sheet,
 
     # Map synth row → source row
     errors = []
-    rows_with_status = [r for r in results]
-    for i, r in enumerate(rows_with_status):
+    for i, r in enumerate(results):
         if r.get("success"):
             continue
         src_row = src_rows[i] if i < len(src_rows) else None
+        data = r.get("data") or []
         errors.append({
             "country": country,
             "operation": op_label,
             "source_sheet": source_sheet,
             "source_row": src_row,
-            "shop": r.get("shop_name") or r.get("shop") or "",
-            "maincat": r.get("maincat") or "",
-            "cl1": r.get("cl1") or "",
+            "shop": str(data[0]) if len(data) > 0 and data[0] else "",
+            "maincat": str(data[2]) if len(data) > 2 and data[2] else "",
+            "maincat_id": str(data[3]) if len(data) > 3 and data[3] else "",
+            "cl1": str(data[4]) if len(data) > 4 and data[4] else "",
             "error": r.get("error") or "",
         })
     if errors:
@@ -576,24 +581,62 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes, dry_run: bool = False,
             overall_progress = min(95, overall_progress + 45)
             _set_task(task_id, {**(_get_task(task_id) or {}), "progress": overall_progress})
 
-        # Write errors report xlsx
+        # ── Build output xlsx ──────────────────────────────────────────
+        # The output mirrors the input structure: one sheet per source sheet,
+        # with the same columns (shop_name, maincat, maincat_id) plus Status
+        # and Errors.  A summary sheet is prepended for quick overview.
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_path = OUTPUT_DIR / f"dma_plus_monthly_{ts}.xlsx"
+        out_path = OUTPUT_DIR / f"dma_plus_monthly_delta_{ts}.xlsx"
+        all_errors = (_get_task(task_id) or {}).get("errors", [])
+
+        # Build error lookup: (source_sheet, source_row) → list of messages
+        error_lookup: Dict[tuple, List[str]] = defaultdict(list)
+        for err in all_errors:
+            key = (err.get("source_sheet"), err.get("source_row"))
+            op = err.get("operation", "")
+            cl1 = err.get("cl1", "")
+            msg = err.get("error") or "unknown error"
+            error_lookup[key].append(f"[{op}/{cl1}] {msg}")
+
+        # Collect all source rows per sheet (preserving input order)
+        source_rows_by_sheet: Dict[str, list] = {}
+        for c in countries:
+            for sheet_type in ("nieuw", "afvallers"):
+                sname = DMA_PLUS_SHEETS[c][sheet_type]
+                if sname in src_wb.sheetnames and sname not in source_rows_by_sheet:
+                    source_rows_by_sheet[sname] = list(_iter_source_rows(src_wb[sname]))
+
         out_wb = openpyxl.Workbook()
-        ws = out_wb.active
-        ws.title = "summary"
-        ws.append(["country", "operation", "rows", "errors"])
+
+        # Sheet 1: summary
+        ws_sum = out_wb.active
+        ws_sum.title = "summary"
+        ws_sum.append(["country", "operation", "rows", "errors"])
         for cc, ops in summary.items():
             for op, v in ops.items():
-                ws.append([cc, op, v.get("rows", 0), v.get("errors", 0)])
+                ws_sum.append([cc, op, v.get("rows", 0), v.get("errors", 0)])
 
-        err_ws = out_wb.create_sheet("errors")
+        # Per source sheet: mirror input columns + Status + Errors
+        for sname, rows in source_rows_by_sheet.items():
+            safe_name = sname[:31]  # Excel 31-char sheet-name limit
+            ws_out = out_wb.create_sheet(safe_name)
+            ws_out.append(["shop_name", "maincat", "maincat_id", "Status", "Errors"])
+            for src_idx, shop, maincat, maincat_id in rows:
+                errs = error_lookup.get((sname, src_idx), [])
+                status = "ERROR" if errs else "OK"
+                error_text = "; ".join(errs) if errs else ""
+                ws_out.append([shop, maincat, maincat_id, status, error_text])
+
+        # Sheet: all_errors (detailed, flat — kept for debugging)
+        err_ws = out_wb.create_sheet("all_errors")
         err_ws.append(["country", "operation", "source_sheet", "source_row",
-                       "shop", "maincat", "cl1", "error"])
-        for err in (_get_task(task_id) or {}).get("errors", []):
-            err_ws.append([err.get("country"), err.get("operation"), err.get("source_sheet"),
-                           err.get("source_row"), err.get("shop"), err.get("maincat"),
-                           err.get("cl1"), err.get("error")])
+                       "shop", "maincat", "maincat_id", "cl1", "error"])
+        for err in all_errors:
+            err_ws.append([err.get("country"), err.get("operation"),
+                           err.get("source_sheet"), err.get("source_row"),
+                           err.get("shop"), err.get("maincat"),
+                           err.get("maincat_id"), err.get("cl1"),
+                           err.get("error")])
         out_wb.save(out_path)
 
         total_errors = len((_get_task(task_id) or {}).get("errors", []))

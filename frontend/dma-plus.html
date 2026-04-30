@@ -523,9 +523,9 @@
             breakdown += '</tbody></table>';
             if (task.errors && task.errors.length > 0) {
                 breakdown += `<h6 class="mt-3">Errors (${task.errors.length})</h6>`;
-                breakdown += '<div class="table-responsive" style="max-height:300px;"><table class="table table-sm table-striped"><thead class="table-dark"><tr><th>Country</th><th>Op</th><th>Sheet</th><th>Row</th><th>Shop</th><th>Maincat</th><th>cl1</th><th>Error</th></tr></thead><tbody>';
+                breakdown += '<div class="table-responsive" style="max-height:300px;"><table class="table table-sm table-striped"><thead class="table-dark"><tr><th>Country</th><th>Op</th><th>Sheet</th><th>Row</th><th>Shop</th><th>Maincat</th><th>Maincat ID</th><th>cl1</th><th>Error</th></tr></thead><tbody>';
                 for (const e of task.errors.slice(0, 500)) {
-                    breakdown += `<tr><td>${escHtml(e.country)}</td><td>${escHtml(e.operation)}</td><td>${escHtml(e.source_sheet)}</td><td>${escHtml(e.source_row)}</td><td>${escHtml(e.shop)}</td><td>${escHtml(e.maincat)}</td><td>${escHtml(e.cl1)}</td><td>${escHtml(e.error)}</td></tr>`;
+                    breakdown += `<tr><td>${escHtml(e.country)}</td><td>${escHtml(e.operation)}</td><td>${escHtml(e.source_sheet)}</td><td>${escHtml(e.source_row)}</td><td>${escHtml(e.shop)}</td><td>${escHtml(e.maincat)}</td><td>${escHtml(e.maincat_id)}</td><td>${escHtml(e.cl1)}</td><td>${escHtml(e.error)}</td></tr>`;
                 }
                 breakdown += '</tbody></table></div>';
             }
