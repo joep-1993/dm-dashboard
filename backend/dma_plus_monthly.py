@@ -459,8 +459,13 @@ def _run_one_operation(task_id, op_label, wb, src_rows, country, source_sheet,
     return len(results), len(errors)
 
 
-def run_monthly_delta(task_id: str, wb_bytes: bytes, dry_run: bool = False):
-    """Background-thread target for the monthly delta flow."""
+def run_monthly_delta(task_id: str, wb_bytes: bytes, dry_run: bool = False,
+                      country: str = "BOTH"):
+    """Background-thread target for the monthly delta flow.
+
+    `country` is one of 'NL', 'BE', or 'BOTH'. The default mirrors the
+    historic behaviour of running both countries from the same workbook.
+    """
     try:
         _set_task(task_id, {
             **(_get_task(task_id) or {}),
@@ -482,7 +487,10 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes, dry_run: bool = False):
         overall_progress = 5
         summary: dict = {}
 
-        for country in ("NL", "BE"):
+        # Filter the country list per user selection (BOTH = the historic behaviour).
+        country_filter = (country or "BOTH").upper()
+        countries = ("NL", "BE") if country_filter == "BOTH" else (country_filter,)
+        for country in countries:
             _check_cancelled(task_id)
             _append_log(task_id, f"==== Country: {country} ====", progress=overall_progress,
                         message=f"Processing {country}..." + (" [DRY RUN]" if dry_run else ""))
@@ -710,19 +718,22 @@ def run_category_coverage(task_id: str, country: str):
 # ---------------------------------------------------------------------------
 # Public entry points (called from router)
 # ---------------------------------------------------------------------------
-def start_monthly(wb_bytes: bytes, dry_run: bool = False) -> str:
+def start_monthly(wb_bytes: bytes, dry_run: bool = False,
+                  country: str = "BOTH") -> str:
     task_id = uuid.uuid4().hex[:8]
+    label = "NL+BE" if country == "BOTH" else country
     _set_task(task_id, {
         "status": "queued",
         "operation": "monthly_delta",
-        "country": "NL+BE",
+        "country": label,
         "progress": 0,
         "message": "Queued..." + (" [DRY RUN]" if dry_run else ""),
         "started_at": datetime.now().isoformat(),
         "dry_run": dry_run,
     })
     threading.Thread(target=run_monthly_delta, args=(task_id, wb_bytes),
-                     kwargs={"dry_run": dry_run}, daemon=True).start()
+                     kwargs={"dry_run": dry_run, "country": country},
+                     daemon=True).start()
     return task_id
 
 

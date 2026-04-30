@@ -90,6 +90,7 @@
                         <select class="form-select form-select-sm" style="width: auto;" id="countrySelect" onchange="selectedCountry = this.value">
                             <option value="NL" selected>NL</option>
                             <option value="BE">BE</option>
+                            <option value="BOTH">NL + BE</option>
                         </select>
                     </div>
                     <div class="card-body">
@@ -313,8 +314,9 @@
         const dryRunWrap = document.getElementById('dryRun').parentElement;
         dryRunWrap.style.display = '';
 
-        // Country selector doesn't apply to Monthly (both NL + BE run from the file).
-        document.getElementById('countrySelect').disabled = isMonthly;
+        // Monthly previously ran both NL + BE unconditionally; now respects
+        // the country dropdown (added a 'Both' option for the old behaviour).
+        document.getElementById('countrySelect').disabled = false;
 
         // Swap Excel Upload helper text to match the selected op.
         const hint = document.getElementById('excelHint');
@@ -346,6 +348,7 @@
             const fd = new FormData();
             fd.append('file', fileInput.files[0]);
             fd.append('dry_run', document.getElementById('dryRun').checked);
+            fd.append('country', selectedCountry);   // NL / BE / BOTH
             try {
                 const r = await fetch(`${API}/api/dma-plus/monthly`, { method: 'POST', body: fd });
                 const d = await r.json();

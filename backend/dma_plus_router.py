@@ -160,12 +160,19 @@ def delete_history_entry(task_id: str):
 # per country. Reuses the same task-polling endpoints (/status, /cancel).
 
 @router.post("/monthly")
-async def monthly(file: UploadFile = File(...), dry_run: bool = Form(False)):
+async def monthly(
+    file: UploadFile = File(...),
+    dry_run: bool = Form(False),
+    country: str = Form("BOTH"),
+):
     wb_bytes = await file.read()
     if not wb_bytes:
         raise HTTPException(400, "Empty file")
-    task_id = start_monthly(wb_bytes, dry_run=dry_run)
-    return {"task_id": task_id, "status": "started", "dry_run": dry_run}
+    country = (country or "BOTH").upper()
+    if country not in ("NL", "BE", "BOTH"):
+        raise HTTPException(400, "country must be NL, BE, or BOTH")
+    task_id = start_monthly(wb_bytes, dry_run=dry_run, country=country)
+    return {"task_id": task_id, "status": "started", "dry_run": dry_run, "country": country}
 
 
 @router.post("/coverage")
