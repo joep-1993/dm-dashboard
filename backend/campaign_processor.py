@@ -3026,7 +3026,7 @@ def process_reverse_inclusion_sheet_v2(
                     for row_info in ag_data['rows']:
                         row_num = row_info['idx']
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = True
-                        sheet.cell(row=row_num, column=COL_ERR + 1).value = f"Already {status_label.lower()}"
+                        sheet.cell(row=row_num, column=COL_ERR + 1).value = f"Already {status_label.lower()} [{campaign_name} | {ad_group_name}]"
                     successful_pauses += 1
                     continue
 
@@ -3235,7 +3235,7 @@ def process_enable_inclusion_sheet_v2(
                     for row_info in ag_data['rows']:
                         row_num = row_info['idx']
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = True
-                        sheet.cell(row=row_num, column=COL_ERR + 1).value = "Already enabled"
+                        sheet.cell(row=row_num, column=COL_ERR + 1).value = f"Already enabled [{campaign_name} | {ad_group_name}]"
                     successful_enables += 1
                     continue
 
@@ -3429,7 +3429,7 @@ def process_pause_ad_groups_sheet(
                     for row_info in ag_data['rows']:
                         row_num = row_info['idx']
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = True
-                        sheet.cell(row=row_num, column=COL_ERR + 1).value = "Already paused"
+                        sheet.cell(row=row_num, column=COL_ERR + 1).value = f"Already paused [{campaign_name} | {ad_group_name}]"
                     successful_pauses += 1
                     continue
 
