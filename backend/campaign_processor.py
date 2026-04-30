@@ -2612,7 +2612,7 @@ def process_inclusion_sheet_v2(
                     time.sleep(1.0)
 
                 except Exception as e:
-                    error_msg = str(e)
+                    error_msg = f"[{campaign_name} | {ad_group_name}] {e}"
                     print(f"      ❌ Failed: {error_msg}")
                     ad_group_errors[shop_name] = error_msg
 
@@ -2634,8 +2634,8 @@ def process_inclusion_sheet_v2(
                         )
                     else:
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = False
-                        error_msg = ad_group_errors.get(shop_name, "Failed to process ad group")
-                        sheet.cell(row=row_num, column=COL_ERR + 1).value = error_msg[:100]
+                        error_msg = ad_group_errors.get(shop_name, f"Failed to process ad group in campaign '{campaign_name}'")
+                        sheet.cell(row=row_num, column=COL_ERR + 1).value = error_msg[:200]
                         sheet.cell(row=row_num, column=COL_NOTE + 1).value = ""
 
             if len(ad_groups_processed) > 0:
@@ -2649,7 +2649,7 @@ def process_inclusion_sheet_v2(
             for row_info in campaign_data['rows']:
                 row_num = row_info['idx']
                 sheet.cell(row=row_num, column=COL_RESULT + 1).value = False
-                sheet.cell(row=row_num, column=COL_ERR + 1).value = f"Campaign failed: {error_msg[:80]}"
+                sheet.cell(row=row_num, column=COL_ERR + 1).value = f"Campaign '{campaign_name}' failed: {error_msg[:150]}"
 
         # Save periodically
         if file_path and campaign_idx % 5 == 0:
@@ -3014,7 +3014,7 @@ def process_reverse_inclusion_sheet_v2(
                 )
 
                 if not ad_group_info:
-                    raise Exception(f"Ad group not found in campaign")
+                    raise Exception(f"Ad group '{ad_group_name}' not found in campaign '{campaign_name}'")
 
                 print(f"      ✅ Found ad group (ID: {ad_group_info['ad_group_id']})")
                 print(f"         Current status: {ad_group_info['ad_group_status']}")
@@ -3051,19 +3051,22 @@ def process_reverse_inclusion_sheet_v2(
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = True
                         sheet.cell(row=row_num, column=COL_ERR + 1).value = ""
                 else:
-                    raise Exception("Failed to pause ad group")
+                    raise Exception(f"Failed to pause ad group '{ad_group_name}' in campaign '{campaign_name}'")
 
                 time.sleep(0.3)  # Small delay between API calls
 
             except Exception as e:
                 error_msg = str(e)
+                # Prefix external errors with campaign/ad group context
+                if "not found" not in error_msg and "Failed to" not in error_msg:
+                    error_msg = f"[{campaign_name} | {ad_group_name}] {error_msg}"
                 print(f"      ❌ Failed: {error_msg}")
                 failed_pauses += 1
                 # Mark all rows for this ad group as failed
                 for row_info in ag_data['rows']:
                     row_num = row_info['idx']
                     sheet.cell(row=row_num, column=COL_RESULT + 1).value = False
-                    sheet.cell(row=row_num, column=COL_ERR + 1).value = error_msg[:100]
+                    sheet.cell(row=row_num, column=COL_ERR + 1).value = error_msg[:200]
 
             # Save periodically
             if file_path and processed_ag_count % 10 == 0:
@@ -3220,7 +3223,7 @@ def process_enable_inclusion_sheet_v2(
                 )
 
                 if not ad_group_info:
-                    raise Exception(f"Ad group not found in campaign")
+                    raise Exception(f"Ad group '{ad_group_name}' not found in campaign '{campaign_name}'")
 
                 print(f"      ✅ Found ad group (ID: {ad_group_info['ad_group_id']})")
                 print(f"         Current status: {ad_group_info['ad_group_status']}")
@@ -3253,19 +3256,22 @@ def process_enable_inclusion_sheet_v2(
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = True
                         sheet.cell(row=row_num, column=COL_ERR + 1).value = ""
                 else:
-                    raise Exception("Failed to enable ad group")
+                    raise Exception(f"Failed to enable ad group '{ad_group_name}' in campaign '{campaign_name}'")
 
                 time.sleep(0.3)  # Small delay between API calls
 
             except Exception as e:
                 error_msg = str(e)
+                # Prefix external errors with campaign/ad group context
+                if "not found" not in error_msg and "Failed to" not in error_msg:
+                    error_msg = f"[{campaign_name} | {ad_group_name}] {error_msg}"
                 print(f"      ❌ Failed: {error_msg}")
                 failed_enables += 1
                 # Mark all rows for this ad group as failed
                 for row_info in ag_data['rows']:
                     row_num = row_info['idx']
                     sheet.cell(row=row_num, column=COL_RESULT + 1).value = False
-                    sheet.cell(row=row_num, column=COL_ERR + 1).value = error_msg[:100]
+                    sheet.cell(row=row_num, column=COL_ERR + 1).value = error_msg[:200]
 
             # Save periodically
             if file_path and processed_ag_count % 10 == 0:
@@ -3412,7 +3418,7 @@ def process_pause_ad_groups_sheet(
                 )
 
                 if not ad_group_info:
-                    raise Exception(f"Ad group not found in campaign")
+                    raise Exception(f"Ad group '{ad_group_name}' not found in campaign '{campaign_name}'")
 
                 print(f"      ✅ Found ad group (ID: {ad_group_info['ad_group_id']})")
                 print(f"         Current status: {ad_group_info['ad_group_status']}")
@@ -3443,18 +3449,21 @@ def process_pause_ad_groups_sheet(
                         sheet.cell(row=row_num, column=COL_RESULT + 1).value = True
                         sheet.cell(row=row_num, column=COL_ERR + 1).value = ""
                 else:
-                    raise Exception("Failed to pause ad group")
+                    raise Exception(f"Failed to pause ad group '{ad_group_name}' in campaign '{campaign_name}'")
 
                 time.sleep(0.3)  # Small delay between API calls
 
             except Exception as e:
                 error_msg = str(e)
+                # Prefix external errors with campaign/ad group context
+                if "not found" not in error_msg and "Failed to" not in error_msg:
+                    error_msg = f"[{campaign_name} | {ad_group_name}] {error_msg}"
                 print(f"      ❌ Failed: {error_msg}")
                 failed_pauses += 1
                 for row_info in ag_data['rows']:
                     row_num = row_info['idx']
                     sheet.cell(row=row_num, column=COL_RESULT + 1).value = False
-                    sheet.cell(row=row_num, column=COL_ERR + 1).value = error_msg[:100]
+                    sheet.cell(row=row_num, column=COL_ERR + 1).value = error_msg[:200]
 
             # Save periodically
             if file_path and processed_ag_count % 10 == 0:
