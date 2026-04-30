@@ -438,7 +438,7 @@ def publish_all_content(environment: str = None, content_type: str = "all", task
                 "upload_sec": round(t4-t3, 1),
                 "total_sec": round(t4-t0, 1)
             },
-            "response": response.text[:1000] if response.text else None
+            "response": response.text if response.text else None
         }
     except requests.RequestException as e:
         return {
@@ -531,7 +531,7 @@ def publish_content_batched(batch_size: int = 5000, limit: int = None, dry_run: 
                 "items": len(batch_items),
                 "success": batch_success,
                 "status_code": response.status_code,
-                "response": response.text[:500] if response.text else None
+                "response": response.text if response.text else None
             }
 
             if batch_success:

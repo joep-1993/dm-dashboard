@@ -258,7 +258,12 @@
                 const raw = document.getElementById('manualUrls').value || '';
                 const urls = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
                 if (urls.length === 0) { alert('Paste at least one URL.'); return; }
-                const csv = 'r_url\n' + urls.join('\n') + '\n';
+                // CSV-quote every URL so commas inside slugs (e.g.
+                // "senioren_dect_telefoon,_grote_toetsen") don't get parsed
+                // as column separators on the backend. Double any literal
+                // quotes per RFC 4180.
+                const quote = u => '"' + u.replace(/"/g, '""') + '"';
+                const csv = 'r_url\n' + urls.map(quote).join('\n') + '\n';
                 const blob = new Blob([csv], { type: 'text/csv' });
                 fd.append('file', blob, 'manual_input.csv');
             } else {

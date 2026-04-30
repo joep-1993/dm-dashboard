@@ -31,6 +31,7 @@ from src.validation_rules import (
     SAME_CATEGORY_MIN_SCORE,
     PRODUCT_TYPE_FACETS,
     STOPWORDS,
+    SHOP_NAMES,
     DUTCH_SUFFIXES,
 )
 
@@ -103,7 +104,7 @@ class KeywordMatcher:
     """Matches keywords against facet values."""
 
     def __init__(self, fuzzy_threshold: int = None, strict_winkel: bool = True,
-                 use_token_coverage: bool = False):
+                 use_token_coverage: bool = True):
         """
         Initialize the matcher.
 
@@ -111,13 +112,14 @@ class KeywordMatcher:
             fuzzy_threshold: Minimum score for fuzzy match (0-100).
                            Defaults to config.FUZZY_THRESHOLD
             strict_winkel: If True, apply stricter matching for winkel facets
-            use_token_coverage: V29 EXPERIMENTAL — when True, multi-word
-                keywords are scored facet-value-centric (count how many
-                keyword tokens appear in each facet value, normalised by
-                facet length) instead of per-token. Removes the count-
-                tiebreak crutch that made "vaste telefoons kpn senioren"
-                land on "Draadloze telefoon" simply because it had more
-                products. Off by default until validated on a backtest.
+            use_token_coverage: V29 — when True (default), multi-word keywords
+                are scored facet-value-centric (count how many keyword tokens
+                appear in each facet value, normalised by facet length, with
+                a positional adjacency bonus) instead of the per-token
+                cascade. Removes the count-tiebreak crutch that made
+                "vaste telefoons kpn senioren" land on "Draadloze telefoon"
+                simply because it had the most products. Pass False to
+                fall back to the legacy path.
         """
         self.fuzzy_threshold = fuzzy_threshold or config.FUZZY_THRESHOLD
         self.strict_winkel = strict_winkel
@@ -394,17 +396,31 @@ class KeywordMatcher:
             if not fv_tokens:
                 continue
 
-            matched_kw = 0
-            for kt in kw_tokens:
+            # Track WHICH keyword positions matched, so we can reward
+            # contiguous matches over spread-out ones. For
+            # "vaste senioren telefoons":
+            #   Senioren telefoon → positions {1, 2}  (adjacent)
+            #   Vaste telefoon    → positions {0, 2}  (gap at 1)
+            # The keyword's natural reading favours adjacent matches —
+            # they're the "phrase inside the phrase" while the unmatched
+            # token between them just modifies the rest.
+            matched_positions: list = []
+            for i, kt in enumerate(kw_tokens):
                 if any(self._tokens_equal_modulo_morphology(kt, ft)
                        for ft in fv_tokens):
-                    matched_kw += 1
+                    matched_positions.append(i)
+            matched_kw = len(matched_positions)
             if matched_kw == 0:
                 continue
 
             coverage = matched_kw / len(kw_tokens)
             specificity = matched_kw / len(fv_tokens)
-            score = int(50 * coverage + 50 * specificity)
+            if matched_kw == 1:
+                adjacency = 1.0
+            else:
+                span = matched_positions[-1] - matched_positions[0] + 1
+                adjacency = matched_kw / span  # 1.0 when fully contiguous
+            score = int(50 * coverage + 30 * specificity + 20 * adjacency)
             if score < 50:
                 continue
 
@@ -546,6 +562,18 @@ class KeywordMatcher:
         Returns:
             List of MatchResults for each matching word
         """
+        # V29: try the facet-value-centric token-coverage scorer on the FULL
+        # keyword before falling into the per-word cascade. The per-word
+        # path scores tokens individually and uses a count tiebreak, which
+        # picks "Draadloze telefoon" for "vaste senioren telefoons" simply
+        # because Draadloze has the most products. Token-coverage compares
+        # how many keyword tokens each candidate facet value covers and
+        # rewards positional adjacency — picks "Senioren telefoon" instead.
+        if self.use_token_coverage:
+            tc = self.match_by_token_coverage(keyword, facet_values)
+            if tc.is_match:
+                return [tc]
+
         words = keyword.split()
         results = []
         has_type_match = False

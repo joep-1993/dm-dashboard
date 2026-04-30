@@ -188,6 +188,14 @@ COMPOUND_DECOMPOSITIONS = {
     "huistelefoon": "telefoon",
     "huistelefoons": "telefoon",
     "draadloze telefoon": "telefoon",
+    # Single-token concatenations of "senioren X" — Beslist's matcher
+    # doesn't decompose Dutch compounds, so the bare concatenated noun
+    # never reaches the right facet without an explicit phrase rewrite.
+    "seniorentelefoon": "senioren telefoon",
+    "seniorentelefoons": "senioren telefoon",
+    "seniorenmobiel": "senioren mobiel",
+    "seniorenmobiele": "senioren mobiel",
+    "seniorenhuistelefoon": "senioren telefoon",
     # Verlichting
     "wandlamp": "lamp",
     "tafellamp": "lamp",

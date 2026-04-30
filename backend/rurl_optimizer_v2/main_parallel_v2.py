@@ -92,7 +92,7 @@ def load_data_cache(cache_file):
 _worker_data = None
 
 
-def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=False):
+def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=True):
     """Initialize worker with pre-cached data."""
     global _worker_data
 
@@ -369,6 +369,46 @@ def process_url_v2(args):
                         result = builder.build(parsed, parent_match)
                         result.reason = f"[parent_subcat] " + result.reason
 
+    # 2c. V28: Compound-decomposition retry — runs BEFORE every subcategory-
+    # name fallback. Dutch retail keywords often glue a specifier onto a
+    # base noun ("huistelefoon" = "huis"+"telefoon"), but indexed facet
+    # values carry only the base ("Senioren telefoon"). If we don't try
+    # the decomposed variant before V14 / sub-subcat name matching, the
+    # partial match "huistelefoon" → subcat "Huistelefoons" wins at score
+    # ~99 and we miss the much better facet match.
+    if not result and parsed.keyword:
+        from src.synonyms import expand_compounds
+        variants = expand_compounds(parsed.keyword)
+        for variant in variants[1:]:   # skip the original (already tried)
+            v_match = None
+            v_facets = facet_values
+            if v_facets:
+                v_match = matcher.match_with_partial(variant, v_facets)
+                if v_match.is_match:
+                    result = builder.build(parsed, v_match)
+                    result.reason = f"[V28 compound:{variant!r}] " + result.reason
+                    break
+            # Try maincat-level facets as well
+            mc_facets_df = facet_filter.filter_by_main_category(parsed.main_category)
+            if not mc_facets_df.empty:
+                mc_facets = facet_filter.get_facet_values(mc_facets_df)
+                if multi_facet or ' ' in variant:
+                    mc_results = matcher.match_multi_word(
+                        variant, mc_facets, all_type_facets=all_type_facets,
+                        require_type_for_merk=True,
+                        current_main_category=parsed.main_category,
+                    )
+                    if mc_results:
+                        result = builder.build_multi_facet(parsed, mc_results)
+                        result.reason = f"[V28 compound:{variant!r}][maincat] " + result.reason
+                        break
+                else:
+                    mc_match = matcher.match_with_partial(variant, mc_facets)
+                    if mc_match.is_match:
+                        result = builder.build(parsed, mc_match)
+                        result.reason = f"[V28 compound:{variant!r}][maincat] " + result.reason
+                        break
+
     # 2b. V29: SUB-SUBCATEGORIE NAAM MATCHING (≥95) — when the URL pins a
     #     subcategory, first look for a child subcategory whose display name
     #     matches the keyword. Fixes cases like
@@ -513,45 +553,6 @@ def process_url_v2(args):
                     existing_facet=parsed.existing_facet  # V19: preserve existing facet
                 )
 
-    # V28: Compound-decomposition retry. Dutch retail keywords often glue
-    # a specifier onto a base noun (e.g. "huistelefoon" = "huis"+"telefoon")
-    # but indexed facet values usually carry only the base. If nothing
-    # matched yet, retry the same matching pipeline with each compound
-    # token replaced by its base from COMPOUND_DECOMPOSITIONS, and use the
-    # first variant that produces a hit.
-    if not result and parsed.keyword:
-        from src.synonyms import expand_compounds
-        variants = expand_compounds(parsed.keyword)
-        for variant in variants[1:]:   # skip the original (already tried)
-            v_match = None
-            v_facets = facet_values
-            if v_facets:
-                v_match = matcher.match_with_partial(variant, v_facets)
-                if v_match.is_match:
-                    result = builder.build(parsed, v_match)
-                    result.reason = f"[V28 compound:{variant!r}] " + result.reason
-                    break
-            # Try maincat-level facets as well
-            mc_facets_df = facet_filter.filter_by_main_category(parsed.main_category)
-            if not mc_facets_df.empty:
-                mc_facets = facet_filter.get_facet_values(mc_facets_df)
-                if multi_facet or ' ' in variant:
-                    mc_results = matcher.match_multi_word(
-                        variant, mc_facets, all_type_facets=all_type_facets,
-                        require_type_for_merk=True,
-                        current_main_category=parsed.main_category,
-                    )
-                    if mc_results:
-                        result = builder.build_multi_facet(parsed, mc_results)
-                        result.reason = f"[V28 compound:{variant!r}][maincat] " + result.reason
-                        break
-                else:
-                    mc_match = matcher.match_with_partial(variant, mc_facets)
-                    if mc_match.is_match:
-                        result = builder.build(parsed, mc_match)
-                        result.reason = f"[V28 compound:{variant!r}][maincat] " + result.reason
-                        break
-
     if not result:
         result = builder.build_category_only(parsed)
 
@@ -600,20 +601,38 @@ def process_url_v2(args):
         # Get matched values (lowercased for comparison)
         facet_values_lower = [fv.lower() for fv in match_target.split(', ')] if match_target else []
 
+        # V29: a keyword token also counts as matched if its compound base
+        # form (per COMPOUND_DECOMPOSITIONS) is represented in the facet
+        # value. Without this, "huistelefoon" → "Senioren telefoon" via the
+        # V28 compound retry succeeds at the matcher level but V27's
+        # "long unmatched token(s)" rule kills the reliability score
+        # because the original keyword token "huistelefoon" isn't literally
+        # in "Senioren telefoon" — only its decomposed form "telefoon" is.
+        from src.synonyms import COMPOUND_DECOMPOSITIONS as _CDEC
         for word in keyword_words:
             word_matched = False
             # Skip stopwords and shop names - they are intentionally not matched
             if word in STOPWORDS or word in SHOP_NAMES:
                 continue
 
-            # Check if this keyword word is represented in any facet value
-            for fv in facet_values_lower:
-                # Check various match patterns
-                if (word in fv or  # Word is contained in facet
-                    fv in word or  # Facet is contained in word
-                    word.rstrip('e').rstrip('s') in fv or  # Handle Dutch plurals/suffixes
-                    fv.rstrip('e').rstrip('s') in word):
-                    word_matched = True
+            # Build the set of forms to check against the facet value:
+            # the original token plus its compound base if known.
+            forms = [word]
+            base = _CDEC.get(word)
+            if base:
+                forms.append(base)
+
+            # Check if any form of this keyword word is represented in any facet value
+            for form in forms:
+                for fv in facet_values_lower:
+                    # Check various match patterns
+                    if (form in fv or  # Word is contained in facet
+                        fv in form or  # Facet is contained in word
+                        form.rstrip('e').rstrip('s') in fv or  # Handle Dutch plurals/suffixes
+                        fv.rstrip('e').rstrip('s') in form):
+                        word_matched = True
+                        break
+                if word_matched:
                     break
 
             if word_matched:
@@ -838,10 +857,13 @@ def main():
                         help='Chunk size for multiprocessing (default: 100)')
     parser.add_argument('--no-v28', action='store_true',
                         help='Skip the V28 search-derived prefetch + rescue layer')
-    parser.add_argument('--use-token-coverage', action='store_true',
-                        help='V29 EXPERIMENTAL: route multi-word keywords through '
-                             'the facet-value-centric token-coverage scorer instead '
-                             'of the per-token cascade. Off by default until validated.')
+    parser.add_argument('--no-token-coverage', action='store_true',
+                        help='V29: skip the facet-value-centric token-coverage scorer '
+                             'and use the legacy per-token cascade instead. The '
+                             'token-coverage scorer is on by default — it picks '
+                             '"Senioren telefoon" over "Draadloze telefoon" for '
+                             '"vaste senioren telefoons", where the legacy count-'
+                             'tiebreak gets it wrong.')
     parser.add_argument('--enable-facet-probe', action='store_true',
                         help='V29 EXPERIMENTAL: after V28 picks a dominant '
                              'deepest_cat, also probe candidate facet values to '
@@ -950,7 +972,7 @@ def main():
     with mp.Pool(
         processes=num_workers,
         initializer=init_worker_v2,
-        initargs=(cache_file, args.threshold, args.use_token_coverage)
+        initargs=(cache_file, args.threshold, not args.no_token_coverage)
     ) as pool:
         # Use imap_unordered for better throughput
         with tqdm(total=total_remaining, desc="Processing") as pbar:
