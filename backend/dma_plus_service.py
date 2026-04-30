@@ -464,7 +464,9 @@ def _run_operation(task_id: str, operation: str, country: str,
                 _build_exclusion_workbook_from_source,
                 _build_reverse_exclusion_workbook_from_source,
                 _build_reverse_inclusion_workbook_from_source,
+                _repair_xlsx_bytes,
             )
+            wb_bytes = _repair_xlsx_bytes(wb_bytes)
             probe_wb = openpyxl.load_workbook(io.BytesIO(wb_bytes), data_only=True, read_only=True)
             probe_sheets = set(probe_wb.sheetnames)
             delta_sheetnames = {
