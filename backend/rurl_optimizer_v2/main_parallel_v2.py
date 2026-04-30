@@ -601,44 +601,55 @@ def process_url_v2(args):
         # Get matched values (lowercased for comparison)
         facet_values_lower = [fv.lower() for fv in match_target.split(', ')] if match_target else []
 
-        # V29: a keyword token also counts as matched if its compound base
-        # form (per COMPOUND_DECOMPOSITIONS) is represented in the facet
-        # value. Without this, "huistelefoon" → "Senioren telefoon" via the
-        # V28 compound retry succeeds at the matcher level but V27's
-        # "long unmatched token(s)" rule kills the reliability score
-        # because the original keyword token "huistelefoon" isn't literally
-        # in "Senioren telefoon" — only its decomposed form "telefoon" is.
-        from src.synonyms import COMPOUND_DECOMPOSITIONS as _CDEC
-        for word in keyword_words:
-            word_matched = False
-            # Skip stopwords and shop names - they are intentionally not matched
-            if word in STOPWORDS or word in SHOP_NAMES:
-                continue
-
-            # Build the set of forms to check against the facet value:
-            # the original token plus its compound base if known.
-            forms = [word]
-            base = _CDEC.get(word)
-            if base:
-                forms.append(base)
-
-            # Check if any form of this keyword word is represented in any facet value
-            for form in forms:
-                for fv in facet_values_lower:
-                    # Check various match patterns
-                    if (form in fv or  # Word is contained in facet
-                        fv in form or  # Facet is contained in word
-                        form.rstrip('e').rstrip('s') in fv or  # Handle Dutch plurals/suffixes
-                        fv.rstrip('e').rstrip('s') in form):
-                        word_matched = True
-                        break
-                if word_matched:
-                    break
-
-            if word_matched:
+        # V29: trust the matcher when it used a semantic path. For synonym
+        # phrase rewrites and the token-coverage scorer, the matcher has
+        # already validated the match — V27's literal-substring check on
+        # unmatched_keywords is the wrong question to ask. Without this,
+        # e.g. "senioren telefoon" → "Senioren mobiel" (via synonym) gets
+        # 'telefoon' marked unmatched, V27 long-unmatched fires, score
+        # drops to 0, V28 rescue overrides the good match with bare subcat.
+        TRUSTED_MATCH_TYPES = {
+            'synonym', 'token_coverage',
+            'subcategory_name',  # already returns early in scorer
+        }
+        if r.match_type in TRUSTED_MATCH_TYPES:
+            for word in keyword_words:
+                if word in STOPWORDS or word in SHOP_NAMES:
+                    continue
                 matched_keywords.append(word)
-            else:
-                unmatched_keywords.append(word)
+        else:
+            # Default path: literal-substring check against facet_value_names.
+            # A keyword token also counts as matched if its compound base
+            # form (per COMPOUND_DECOMPOSITIONS) is represented — without this,
+            # "huistelefoon" → "Senioren telefoon" via the V28 compound retry
+            # would have its original token "huistelefoon" flagged unmatched
+            # even though its base form "telefoon" is in the facet.
+            from src.synonyms import COMPOUND_DECOMPOSITIONS as _CDEC
+            for word in keyword_words:
+                word_matched = False
+                if word in STOPWORDS or word in SHOP_NAMES:
+                    continue
+
+                forms = [word]
+                base = _CDEC.get(word)
+                if base:
+                    forms.append(base)
+
+                for form in forms:
+                    for fv in facet_values_lower:
+                        if (form in fv or
+                            fv in form or
+                            form.rstrip('e').rstrip('s') in fv or
+                            fv.rstrip('e').rstrip('s') in form):
+                            word_matched = True
+                            break
+                    if word_matched:
+                        break
+
+                if word_matched:
+                    matched_keywords.append(word)
+                else:
+                    unmatched_keywords.append(word)
 
     # Calculate coverage (excluding stopwords AND shop names from denominator)
     non_stopword_keywords = [w for w in keyword_words if w not in STOPWORDS and w not in SHOP_NAMES]
@@ -730,12 +741,69 @@ def process_url_v2(args):
             else:
                 final_redirect_url = derived['redirect_url']
 
+            # V29: try the matcher against the rescue subcat's facets first
+            # — if the keyword (or its synonym/compound expansion) matches a
+            # facet inside dom_cat, prefer that over a bare deepest_cat
+            # redirect. This catches the case where the original URL's
+            # subcat had no relevant facet but the dom_cat does, e.g.
+            # /elektronica/_19943088/r/senioren_telefoon/ → dom_cat is
+            # _19934132 (Mobiele telefoons), which has the Senioren mobiel
+            # facet via the senioren_telefoon ↔ senioren_mobiel synonym.
+            dom_slug = derived.get('dom_cat_url_slug')
+            local_match = None
+            if dom_slug:
+                # Extract subcat_id from slug (last numeric segment).
+                dom_subcat_id = ''
+                for part in reversed(dom_slug.split('_')):
+                    if part.isdigit():
+                        dom_subcat_id = part
+                        break
+                if dom_subcat_id:
+                    dom_facets_df = facet_filter.filter_by_subcategory(dom_subcat_id)
+                    if not dom_facets_df.empty:
+                        dom_facets = facet_filter.get_facet_values(dom_facets_df)
+                        dom_results = matcher.match_multi_word(
+                            parsed.keyword, dom_facets,
+                            current_main_category=parsed.main_category,
+                        )
+                        if dom_results:
+                            local_match = dom_results[0]
+            if local_match and local_match.is_match:
+                pf_name = local_match.facet_value.facet_name
+                pf_vid = local_match.facet_value.facet_value_id
+                pf_value_name = local_match.matched_text or ''
+                fragment = f"{pf_name}~{pf_vid}"
+                existing_names = {p.split('~', 1)[0]
+                                  for p in (parsed.existing_facet or '').split('~~')
+                                  if '~' in p}
+                if pf_name not in existing_names:
+                    if parsed.existing_facet:
+                        final_redirect_url = (
+                            f"{base_redirect}/c/{parsed.existing_facet}~~{fragment}"
+                        )
+                    else:
+                        final_redirect_url = f"{base_redirect}/c/{fragment}"
+                    final_match_type = 'search_derived_subcat_with_facet'
+                    final_reason_extra = (
+                        f"; appended {pf_name}~{pf_vid} ({pf_value_name!r}, "
+                        f"matcher score {local_match.score})"
+                    )
+                else:
+                    final_match_type = 'search_derived_subcat'
+                    final_reason_extra = ''
+                local_match_used = True
+            else:
+                local_match_used = False
+                probe = derive_search_facet(parsed.main_category, parsed.keyword)
+
             # V29: facet-probe extension — append a dominant facet on top of
             # the deepest_cat redirect when one is cached. Stage 1 (free,
             # from base response) and Stage 2 (filter probes) both feed
             # this same cache. Combines naturally with existing_facet via ~~.
-            probe = derive_search_facet(parsed.main_category, parsed.keyword)
-            if probe and probe.get('mode') in ('match', 'match_from_response'):
+            # Skipped when the local matcher already produced a match above.
+            if local_match_used:
+                pass  # match_type / reason already set
+            elif probe and probe.get('mode') in ('match', 'match_from_response'):
                 pf_name = probe.get('facet_name')
                 pf_vid = probe.get('value_id')
                 pf_value_name = probe.get('value_name', '')

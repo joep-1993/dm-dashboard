@@ -609,7 +609,16 @@ class UrlBuilder:
                     f"already present in original URL fragment '{parsed_url.existing_facet}'"
                 )
             elif len(sorted_facets) == 1:
-                single_match_type = 'exact' if avg_score == 100 else 'fuzzy'
+                # V29: preserve semantic match_types (synonym, token_coverage)
+                # so the downstream coverage logic can trust them. The old
+                # behaviour collapsed everything to 'fuzzy'/'exact' on score,
+                # which made V27's literal-substring unmatched-token check
+                # second-guess matches the matcher had already validated.
+                inner_type = sorted_facets[0].match_type
+                if inner_type in ('synonym', 'token_coverage'):
+                    single_match_type = inner_type
+                else:
+                    single_match_type = 'exact' if avg_score == 100 else 'fuzzy'
                 reason_text = f"Matched {len(sorted_facets)} facet: {', '.join(matched_terms)}"
             else:
                 single_match_type = 'multi'
