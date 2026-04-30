@@ -92,7 +92,7 @@ def load_data_cache(cache_file):
 _worker_data = None
 
 
-def init_worker_v2(cache_file, fuzzy_threshold):
+def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=False):
     """Initialize worker with pre-cached data."""
     global _worker_data
 
@@ -110,7 +110,8 @@ def init_worker_v2(cache_file, fuzzy_threshold):
     _worker_data = {
         'parser': RUrlParser(),
         'facet_filter': FacetFilter(data['facets_df']),
-        'matcher': KeywordMatcher(fuzzy_threshold=fuzzy_threshold),
+        'matcher': KeywordMatcher(fuzzy_threshold=fuzzy_threshold,
+                                  use_token_coverage=use_token_coverage),
         'builder': UrlBuilder(),
         'category_lookup': data['category_lookup'],
         'all_type_facets': data['all_type_facets'],
@@ -149,6 +150,7 @@ def process_url_v2(args):
     import re  # Nodig voor DIMENSION_PATTERN + V30 coverage check (moet vóór gebruik staan)
     from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity, _v27_reject_reason
     from src.search_derived import derive_redirect as derive_search_redirect
+    from src.facet_probe import derive_facet as derive_search_facet
     from src.validation_rules import STOPWORDS, SHOP_NAMES
 
     # Hard exclusion: external API URLs that should never be processed.
@@ -708,8 +710,42 @@ def process_url_v2(args):
                 final_redirect_url = f"{base_redirect}/c/{parsed.existing_facet}"
             else:
                 final_redirect_url = derived['redirect_url']
+
+            # V29: facet-probe extension — append a dominant facet on top of
+            # the deepest_cat redirect when one is cached. Stage 1 (free,
+            # from base response) and Stage 2 (filter probes) both feed
+            # this same cache. Combines naturally with existing_facet via ~~.
+            probe = derive_search_facet(parsed.main_category, parsed.keyword)
+            if probe and probe.get('mode') in ('match', 'match_from_response'):
+                pf_name = probe.get('facet_name')
+                pf_vid = probe.get('value_id')
+                pf_value_name = probe.get('value_name', '')
+                pf_cov = probe.get('coverage', 0)
+                fragment = f"{pf_name}~{pf_vid}"
+                # Avoid duplicating if existing_facet already used same facet name.
+                existing_names = {p.split('~', 1)[0]
+                                  for p in (parsed.existing_facet or '').split('~~')
+                                  if '~' in p}
+                if pf_name not in existing_names:
+                    if parsed.existing_facet:
+                        final_redirect_url = (
+                            f"{base_redirect}/c/{parsed.existing_facet}~~{fragment}"
+                        )
+                    else:
+                        final_redirect_url = f"{base_redirect}/c/{fragment}"
+                    final_match_type = 'search_derived_subcat_with_facet'
+                    final_reason_extra = (
+                        f"; appended {pf_name}~{pf_vid} ({pf_value_name!r}, "
+                        f"coverage {int(100*pf_cov)}%)"
+                    )
+                else:
+                    final_match_type = 'search_derived_subcat'
+                    final_reason_extra = ''
+            else:
+                final_match_type = 'search_derived_subcat'
+                final_reason_extra = ''
+
             final_redirect_cat_name = derived['dom_cat_name']
-            final_match_type = 'search_derived_subcat'
             final_score = 75
             final_tier = get_reliability_tier(final_score)
             final_reason = (
@@ -717,6 +753,7 @@ def process_url_v2(args):
                 f"in '{derived['dom_cat_name']}' ({int(100*derived['dom_cat_share'])}%)"
                 + (f"; preserved original facet '{parsed.existing_facet}'"
                    if parsed.existing_facet else "")
+                + final_reason_extra
             )
             reject_reason = ''
         elif reliability_score >= 70 and derived.get('mode') == 'and' and not derived.get('redirect_url'):
@@ -801,6 +838,18 @@ def main():
                         help='Chunk size for multiprocessing (default: 100)')
     parser.add_argument('--no-v28', action='store_true',
                         help='Skip the V28 search-derived prefetch + rescue layer')
+    parser.add_argument('--use-token-coverage', action='store_true',
+                        help='V29 EXPERIMENTAL: route multi-word keywords through '
+                             'the facet-value-centric token-coverage scorer instead '
+                             'of the per-token cascade. Off by default until validated.')
+    parser.add_argument('--enable-facet-probe', action='store_true',
+                        help='V29 EXPERIMENTAL: after V28 picks a dominant '
+                             'deepest_cat, also probe candidate facet values to '
+                             'find one covering ≥60%% of the result set, and '
+                             'append it to the redirect URL. Stage 1 reads from '
+                             "the V28 base response's facets[] (no extra calls); "
+                             'stage 2 falls back to per-value filter probes. '
+                             'Same SEARCH_QPS budget as V28 prefetch.')
 
     args = parser.parse_args()
 
@@ -871,6 +920,14 @@ def main():
             stats = _sd.prefetch_pairs(_pairs)
             print(f"[V28] Prefetch done: {stats}")
 
+            # V29: optional facet-probe pass — only fires when V28 cache says
+            # mode=and. Reads the cached surfaced_facets first (free), then
+            # falls back to per-value filter probes.
+            if getattr(args, 'enable_facet_probe', False):
+                from src import facet_probe as _fp
+                fp_stats = _fp.prefetch_facet_probes(_pairs)
+                print(f"[V29 facet-probe] Prefetch done: {fp_stats}")
+
     # Process with pool
     print(f"\nProcessing {total_remaining:,} URLs with {num_workers} workers...")
     start_time = time.time()
@@ -893,7 +950,7 @@ def main():
     with mp.Pool(
         processes=num_workers,
         initializer=init_worker_v2,
-        initargs=(cache_file, args.threshold)
+        initargs=(cache_file, args.threshold, args.use_token_coverage)
     ) as pool:
         # Use imap_unordered for better throughput
         with tqdm(total=total_remaining, desc="Processing") as pbar:

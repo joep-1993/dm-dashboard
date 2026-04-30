@@ -102,7 +102,8 @@ class MatchResult:
 class KeywordMatcher:
     """Matches keywords against facet values."""
 
-    def __init__(self, fuzzy_threshold: int = None, strict_winkel: bool = True):
+    def __init__(self, fuzzy_threshold: int = None, strict_winkel: bool = True,
+                 use_token_coverage: bool = False):
         """
         Initialize the matcher.
 
@@ -110,9 +111,17 @@ class KeywordMatcher:
             fuzzy_threshold: Minimum score for fuzzy match (0-100).
                            Defaults to config.FUZZY_THRESHOLD
             strict_winkel: If True, apply stricter matching for winkel facets
+            use_token_coverage: V29 EXPERIMENTAL — when True, multi-word
+                keywords are scored facet-value-centric (count how many
+                keyword tokens appear in each facet value, normalised by
+                facet length) instead of per-token. Removes the count-
+                tiebreak crutch that made "vaste telefoons kpn senioren"
+                land on "Draadloze telefoon" simply because it had more
+                products. Off by default until validated on a backtest.
         """
         self.fuzzy_threshold = fuzzy_threshold or config.FUZZY_THRESHOLD
         self.strict_winkel = strict_winkel
+        self.use_token_coverage = use_token_coverage
 
     def _get_threshold_for_facet(self, facet_name: str) -> int:
         """Get the matching threshold for a specific facet type."""
@@ -313,9 +322,127 @@ class KeywordMatcher:
             matched_text=''
         )
 
+    def _coverage_tokens(self, text: str) -> list[str]:
+        """V29: tokenize for token-coverage matching. Lowercase, strip
+        punctuation, drop stopwords + shops, drop tokens shorter than 3.
+        """
+        if not text:
+            return []
+        import re as _re
+        toks = _re.findall(r"[a-zÀ-ž]+", text.lower())
+        return [t for t in toks if len(t) >= 3
+                and t not in STOPWORDS
+                and t not in SHOP_NAMES]
+
+    def _tokens_equal_modulo_morphology(self, t1: str, t2: str) -> bool:
+        """V29: two tokens count as 'the same' under the coverage scorer
+        if they're exactly equal, equal after stripping a common Dutch
+        plural/diminutive suffix, equal after collapsing double vowels
+        (paneel↔panelen), or near-equal under a tight fuzz.ratio.
+        """
+        if not t1 or not t2:
+            return False
+        if t1 == t2:
+            return True
+        for suffix in ("en", "es", "er", "s"):
+            if len(t1) > len(suffix) + 2 and t1.endswith(suffix) and t1[:-len(suffix)] == t2:
+                return True
+            if len(t2) > len(suffix) + 2 and t2.endswith(suffix) and t2[:-len(suffix)] == t1:
+                return True
+        if self._collapse_double_vowels(t1) == self._collapse_double_vowels(t2):
+            return True
+        if abs(len(t1) - len(t2)) <= 2 and min(len(t1), len(t2)) >= 4:
+            if fuzz.ratio(t1, t2) >= 88:
+                return True
+        return False
+
+    def match_by_token_coverage(self, keyword: str,
+                                facet_values: list[FacetValue],
+                                exclude_winkel: bool = False) -> MatchResult:
+        """V29 EXPERIMENTAL: facet-value-centric scorer.
+
+        For each facet value, count how many of the keyword's content
+        tokens appear inside it (after morphology). Pick the value with
+        the highest (matched_count, score), where
+            score = 50 * keyword_coverage + 50 * facet_specificity
+        i.e. it rewards both "covers the keyword well" AND "doesn't have
+        a lot of other noise tokens".
+
+        Replaces the per-token cascade in match_multi_word for the
+        common multi-word keyword case where two facet values look
+        equally good under the per-token scorer but actually differ in
+        how many of the keyword's tokens they collectively explain.
+
+        Sample: keyword "senioren huistelefoon" → "senioren telefoon"
+        (after V28 compound decomposition).
+          - Senioren telefoon: matched=2 / cov=100% / spec=100% → 100
+          - Vaste telefoon:    matched=1 / cov= 50% / spec= 50% →  50
+        ⇒ Senioren telefoon wins, as expected.
+        """
+        kw_tokens = self._coverage_tokens(keyword)
+        if not kw_tokens:
+            return MatchResult(keyword=keyword, facet_value=None,
+                               match_type='none', score=0, matched_text='')
+
+        if exclude_winkel:
+            facet_values = [fv for fv in facet_values
+                            if fv.facet_name.lower() not in STRICT_FACETS]
+
+        best = None  # (matched_kw, score, count, fv)
+        for fv in facet_values:
+            fv_tokens = self._coverage_tokens(fv.facet_value_name)
+            if not fv_tokens:
+                continue
+
+            matched_kw = 0
+            for kt in kw_tokens:
+                if any(self._tokens_equal_modulo_morphology(kt, ft)
+                       for ft in fv_tokens):
+                    matched_kw += 1
+            if matched_kw == 0:
+                continue
+
+            coverage = matched_kw / len(kw_tokens)
+            specificity = matched_kw / len(fv_tokens)
+            score = int(50 * coverage + 50 * specificity)
+            if score < 50:
+                continue
+
+            count = getattr(fv, "count", 0) or 0
+            cand = (matched_kw, score, count, fv)
+            if best is None or cand[:3] > best[:3]:
+                best = cand
+
+        if best is None:
+            return MatchResult(keyword=keyword, facet_value=None,
+                               match_type='none', score=0, matched_text='')
+        matched_kw, score, _, fv = best
+        return MatchResult(
+            keyword=keyword, facet_value=fv,
+            match_type='token_coverage',
+            score=score,
+            matched_text=fv.facet_value_name,
+        )
+
     def match_with_partial(self, keyword: str, facet_values: list[FacetValue], exclude_winkel: bool = False) -> MatchResult:
         """
         Enhanced matching that also tries partial ratio for compound keywords.
+
+        V29: when use_token_coverage is on AND the keyword has 2+ content
+        tokens, route through match_by_token_coverage first. Single-token
+        keywords stay on the legacy path (the token-coverage scorer
+        degenerates to a simple "this token in facet" check there, where
+        the existing partial-ratio logic is still better).
+        """
+        if (self.use_token_coverage
+                and len(self._coverage_tokens(keyword)) >= 2):
+            tc = self.match_by_token_coverage(keyword, facet_values,
+                                              exclude_winkel=exclude_winkel)
+            if tc.is_match:
+                return tc
+
+        """
+        Existing implementation continues below.
 
         Useful for keywords like "zweefparasol 3m" matching "Zweefparasols".
 

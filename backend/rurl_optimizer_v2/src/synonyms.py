@@ -152,6 +152,18 @@ SYNONYMS = {
     # ==========================================================================
     # SANITAIR / BADKAMER (wc <-> toilet)
     # ==========================================================================
+    # ==========================================================================
+    # TELEFONIE (V28)
+    # ==========================================================================
+    # Beslist subcat _19934132 (Mobiele telefoons) has facet smart-of-classic
+    # value "Senioren mobiel" (id 8381795). The everyday Dutch phrase "senioren
+    # telefoon" semantically maps to that, but lexical fuzzy matching can't
+    # bridge "telefoon" → "mobiel". An explicit synonym closes the gap.
+    "senioren telefoon": ["senioren mobiel"],
+    "senioren mobiel": ["senioren telefoon"],
+    "ouderen telefoon": ["senioren mobiel", "senioren telefoon"],
+    "senioren mobieltje": ["senioren mobiel", "senioren telefoon"],
+
     "wc": ["toilet"],
     "toilet": ["wc"],
     "wc papier": ["toiletpapier", "toilet papier", "wc-papier", "toiletrol"],

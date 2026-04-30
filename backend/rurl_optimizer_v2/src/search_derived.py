@@ -32,9 +32,11 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import time
 import urllib.parse
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Optional
@@ -48,8 +50,13 @@ COUNTRY_LANG = "nl-nl"
 LIMIT = 50
 TIMEOUT = 10
 
-# Tunables — adjust here if IT clears a higher QPS or you want fresher data.
-SEARCH_QPS = 2.0
+# Tunables — adjust here if IT clears a different QPS or you want fresher data.
+# 30 QPS gets a 5k-keyword cold cache through in ~3 minutes. The prefetch is
+# parallelised across MAX_PREFETCH_WORKERS threads so we hit the rate cap
+# even when individual API calls are slow. The cap is enforced globally by
+# a token bucket — adding workers above the cap has no effect.
+SEARCH_QPS = 30.0
+MAX_PREFETCH_WORKERS = 20
 CACHE_TTL_DAYS = 7
 AND_MODE_TOTAL_THRESHOLD = 10000
 DOMINANCE_THRESHOLD = 0.60
@@ -132,6 +139,26 @@ def _classify(api_resp: Optional[dict]) -> dict:
         return {"mode": "fallback", "total": total}
 
     out = {"mode": "and", "total": total}
+
+    # V29: Capture surfaced facets[] so the facet_probe layer can read
+    # value counts directly from this response without extra API calls.
+    # Slim shape: list of {facet_id, values: [(value_id, value_name, count), ...]}.
+    # facet_name is not in the response — joined via cached facets.csv at probe time.
+    surfaced = []
+    for f in (api_resp.get("facets") or []):
+        fid = f.get("id")
+        if fid is None or fid == 1:  # skip winkel
+            continue
+        vals = []
+        for v in (f.get("values") or []):
+            vid = v.get("id")
+            if vid is None:
+                continue
+            vals.append([int(vid), v.get("facetValue") or "", int(v.get("count") or 0)])
+        if vals:
+            surfaced.append({"facet_id": int(fid), "values": vals})
+    if surfaced:
+        out["surfaced_facets"] = surfaced
 
     cats_resp = api_resp.get("categories") or []
     if cats_resp:
@@ -238,13 +265,39 @@ def derive_redirect(maincat: str, keyword: str) -> dict:
     return out
 
 
+class _TokenBucket:
+    """Reserve-slot rate limiter. Each acquire() atomically claims the next
+    interval; concurrent threads sleep outside the lock so the realised
+    throughput converges to exactly `qps` even under high worker counts.
+    """
+
+    def __init__(self, qps: float):
+        self._lock = threading.Lock()
+        self._interval = 1.0 / qps if qps > 0 else 0.0
+        self._next_slot = 0.0
+
+    def acquire(self) -> None:
+        if self._interval <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next_slot)
+            self._next_slot = slot + self._interval
+        wait = slot - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+
+
 def prefetch_pairs(pairs: Iterable[tuple[str, str]],
                    qps: float = SEARCH_QPS,
+                   max_workers: int = MAX_PREFETCH_WORKERS,
                    verbose: bool = True) -> dict:
-    """Sequentially fetch every (maincat, keyword) pair that isn't already
-    cached fresh. Throttled to `qps` calls per second.
+    """Concurrently fetch every (maincat, keyword) pair that isn't already
+    cached fresh. A shared TokenBucket caps global throughput at `qps`
+    regardless of `max_workers`. We hard-cap workers at MAX_PREFETCH_WORKERS
+    so a misconfigured `qps` can't spawn an unbounded pool.
 
-    Returns counts of {hits, misses, fetched, errors}.
+    Returns counts of {hits, fetched, errors, total_unique_pairs}.
     """
     seen: set[tuple[str, str]] = set()
     todo: list[tuple[str, str, str, str]] = []  # (maincat, keyword, mn, kn)
@@ -261,28 +314,46 @@ def prefetch_pairs(pairs: Iterable[tuple[str, str]],
             continue
         todo.append((maincat, keyword, mn, kn))
 
-    if verbose:
-        print(f"[V28 prefetch] cache hits: {hits}, to fetch: {len(todo)} "
-              f"at {qps} QPS (~{int(len(todo) / max(qps, 0.01))}s)")
+    # Cap workers so we never exceed the global limit AND never overshoot
+    # what the rate cap can actually feed. With response time ~0.2s, one
+    # worker sustains ~5 QPS, so qps/5 is the useful upper bound.
+    desired = min(MAX_PREFETCH_WORKERS, max(1, int(round(qps / 4))))
+    n_workers = min(max_workers, MAX_PREFETCH_WORKERS, desired) or 1
+    bucket = _TokenBucket(qps)
 
-    interval = 1.0 / qps if qps > 0 else 0.0
+    if verbose:
+        eta = int(len(todo) / max(qps, 0.01))
+        print(f"[V28 prefetch] cache hits: {hits}, to fetch: {len(todo)} "
+              f"at {qps} QPS / {n_workers} workers (~{eta}s)")
+
     fetched = 0
     errors = 0
-    last_call = 0.0
-    for i, (maincat, keyword, mn, kn) in enumerate(todo):
-        elapsed = time.monotonic() - last_call
-        if elapsed < interval:
-            time.sleep(interval - elapsed)
-        last_call = time.monotonic()
+    fetched_lock = threading.Lock()
+
+    def _worker(item):
+        maincat, keyword, mn, kn = item
+        bucket.acquire()
         api = _fetch_live(maincat, keyword)
-        if api is None:
-            errors += 1
         classified = _classify(api)
         _cache_put(mn, kn, classified)
-        fetched += 1
-        if verbose and (i + 1) % 50 == 0:
-            print(f"[V28 prefetch]   {i + 1}/{len(todo)} fetched "
-                  f"(errors so far: {errors})")
+        return api is not None
+
+    if todo:
+        with ThreadPoolExecutor(max_workers=n_workers) as ex:
+            futs = [ex.submit(_worker, item) for item in todo]
+            for f in as_completed(futs):
+                ok = False
+                try:
+                    ok = f.result()
+                except Exception as e:
+                    logger.debug(f"V28 prefetch worker error: {e}")
+                with fetched_lock:
+                    fetched += 1
+                    if not ok:
+                        errors += 1
+                    if verbose and fetched % 100 == 0:
+                        print(f"[V28 prefetch]   {fetched}/{len(todo)} fetched "
+                              f"(errors so far: {errors})")
 
     if verbose:
         print(f"[V28 prefetch] done: hits={hits} fetched={fetched} errors={errors}")
