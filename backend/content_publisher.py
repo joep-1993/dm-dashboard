@@ -271,6 +271,28 @@ def sanitize_for_api(text: str) -> str:
     return text.replace("'", "&#39;")
 
 
+def _normalize_url(url: str) -> str:
+    """Apply Beslist's URL canonicalization rules before publishing:
+      - strip query string (everything from '?', including tracking params)
+      - strip URL fragment (everything from '#')
+      - trailing-slash rule by structure:
+          * URL contains '/c/'  → MUST NOT end with '/'
+          * URL contains '/r/' but not '/c/' → MUST end with '/'
+          * URL contains neither            → MUST end with '/'
+    Case is preserved so production stores the URL as the publisher sent it.
+    """
+    if not url:
+        return ""
+    # Strip query string and fragment
+    url = url.split('?', 1)[0].split('#', 1)[0]
+    if '/c/' in url:
+        url = url.rstrip('/')
+    else:
+        if not url.endswith('/'):
+            url = url + '/'
+    return url
+
+
 def get_all_content_items() -> List[Dict]:
     """
     Fetch ALL content items from database for publishing.
@@ -295,22 +317,23 @@ def get_all_content_items() -> List[Dict]:
 
         rows = cur.fetchall()
 
-        # Build result list with case-insensitive deduplication
-        # This prevents publish failures from URLs that differ only in case
-        # (e.g., /type_parfum~123 vs /Type_parfum~123)
+        # Single dedup pass over the normalized URL form. We canonicalize
+        # via _normalize_url (strip ?…, strip #…, fix trailing slash by
+        # /c/-vs-/r/ rule) and use the lowercased canonical form as the
+        # dedup key. The URL we SEND to production is the normalized form
+        # — production should accept that as-is.
         result = []
-        seen_urls_lower = set()
-        duplicates_skipped = 0
+        seen_canon_lower = set()
+        normalised_collisions = 0
 
         for row in rows:
-            url = row['url']
-            url_lower = url.lower()
-
-            # Skip case-insensitive duplicates
-            if url_lower in seen_urls_lower:
-                duplicates_skipped += 1
+            url_raw = row['url']
+            url_norm = _normalize_url(url_raw)
+            canon_key = url_norm.lower()
+            if canon_key in seen_canon_lower:
+                normalised_collisions += 1
                 continue
-            seen_urls_lower.add(url_lower)
+            seen_canon_lower.add(canon_key)
 
             content_top = sanitize_for_api(row['content_top'] or "")
             # Use schema_org wrapped in script tag for content_faq
@@ -318,7 +341,7 @@ def get_all_content_items() -> List[Dict]:
             content_bottom = sanitize_for_api(faq_json_to_content_bottom(row['faq_json'])) if row['faq_json'] else ""
 
             item = {
-                "url": url,
+                "url": url_norm,
                 "content_top": content_top,
                 "content_bottom": content_bottom,
                 "content_faq": content_faq,
@@ -326,9 +349,13 @@ def get_all_content_items() -> List[Dict]:
             }
             result.append(item)
 
-        if duplicates_skipped > 0:
-            print(f"[Publisher] Skipped {duplicates_skipped} case-insensitive duplicate URLs")
+        if normalised_collisions > 0:
+            print(f"[Publisher] Skipped {normalised_collisions} URLs that collapsed to "
+                  f"the same canonical form (query/fragment/case/slash variants)")
 
+        # Alphabetical ordering for the payload (matches what the upstream
+        # API previously saw).
+        result.sort(key=lambda it: it["url"])
         return result
 
     finally:
