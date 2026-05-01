@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO Priority</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .threshold-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem 1rem; }
+        .threshold-grid label { font-size: 0.85rem; color: #555; }
+        .runs-table { font-size: 0.85rem; }
+        .runs-table td, .runs-table th { vertical-align: middle; }
+        .status-badge { font-size: 0.75rem; padding: 0.2rem 0.5rem; }
+        .progress-thin { height: 8px; }
+        /* DMA+-style results table */
+        #resultsTable { font-size: 0.82rem; }
+        #resultsTable thead tr { background: #f0f0f0; border-bottom: 2px solid #dee2e6; }
+        #resultsTable thead th,
+        .runs-table thead th {
+            padding: 8px 12px; vertical-align: middle; white-space: nowrap;
+            user-select: none; text-align: center;
+        }
+        #resultsTable thead th.sortable { cursor: pointer; }
+        #resultsTable thead th.sortable:hover { background: #e6e6e6; }
+        #resultsTable tbody td,
+        .runs-table tbody td { padding: 6px 12px; vertical-align: middle; white-space: nowrap; text-align: center; }
+        .sort-arrow { color: #adb5bd; margin-left: 4px; font-size: 0.7rem; }
+        .sort-arrow.active { color: #5e4a90; }
+        .results-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1rem; border-top: 1px solid #eee; font-size: 0.85rem; flex-wrap: wrap; }
+        .results-footer .notice { color: #636e72; }
+        .pagination-controls { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
+        .pagination-controls select { font-size: 0.85rem; width: auto; }
+        .pagination-controls .page-info { color: #636e72; }
+        .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+        .info-icon {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 18px; height: 18px; border-radius: 50%;
+            background: rgba(255,255,255,0.25); color: #fff;
+            font-size: 12px; font-weight: bold; font-family: serif;
+            cursor: help; margin-left: 0.5rem;
+        }
+        .btn-outline-orange {
+            color: #CC5500; border-color: #CC5500; background: transparent;
+        }
+        .btn-outline-orange:hover {
+            color: #fff; background: #CC5500; border-color: #CC5500;
+        }
+        .btn-outline-purple {
+            color: #5e4a90; border-color: #5e4a90; background: transparent;
+        }
+        .btn-outline-purple:hover {
+            color: #fff; background: #5e4a90; border-color: #5e4a90;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">SEO Priority</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/canonical.html" class="nav-dropdown-item">Canonicals</a>
+                        <a href="/static/faq.html" class="nav-dropdown-item">FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item">Kopteksten</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item">Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Redirects</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rurl-optimizer.html" class="nav-dropdown-item">Auto-Redirects</a>
+                        <a href="/static/rfinder.html" class="nav-dropdown-item">R-Finder</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item">Redirect Checker</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item">Redirect Generator</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/index-checker.html" class="nav-dropdown-item">Index Checker</a>
+                        <a href="/static/indexnow.html" class="nav-dropdown-item">IndexNow</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item">DMA Bidding</a>
+                        <a href="/static/dma-plus.html" class="nav-dropdown-item">DMA+</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item">GSD Budgets</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item">GSD Campaigns</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item">MC ID Finder</a>
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item">Thema Ads</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item">Keyword Planner</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item">Redshift Upload</a>
+                        <a href="/static/seo-prio.html" class="nav-dropdown-item active">SEO Priority</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item">URL Checker</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item">URL Validator</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 pb-5">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+
+                <!-- Run config -->
+                <div class="card mb-4">
+                    <div class="card-header bg-success text-white d-flex align-items-center">
+                        <h5 class="mb-0">Configure run <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title>Pulls 2 years of /c/ visits + revenue from Redshift, fans them out per facet, looks up current seoPriority in taxv2, and proposes ON/OFF toggles.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg></h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Start date</label>
+                                <input type="date" class="form-control" id="startDate">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">End date</label>
+                                <input type="date" class="form-control" id="endDate">
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mt-2">
+                            <div class="col-md-6 border-end pe-4">
+                                <strong class="d-block mb-2 text-success">Turn ON</strong>
+                                <div class="threshold-grid">
+                                    <div>
+                                        <label>Min % visits in cat</label>
+                                        <input type="number" step="0.1" class="form-control" id="onVisitsPct">
+                                    </div>
+                                    <div>
+                                        <label>Min % revenue in cat</label>
+                                        <input type="number" step="0.1" class="form-control" id="onRevenuePct">
+                                    </div>
+                                    <div>
+                                        <label>Min absolute visits</label>
+                                        <input type="number" step="1" class="form-control" id="onAbsVisits">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6 ps-4">
+                                <strong class="d-block mb-2 text-success">Turn OFF</strong>
+                                <div class="threshold-grid">
+                                    <div>
+                                        <label>Max % visits in cat</label>
+                                        <input type="number" step="0.1" class="form-control" id="offVisitsPct">
+                                    </div>
+                                    <div>
+                                        <label>Max % revenue in cat</label>
+                                        <input type="number" step="0.1" class="form-control" id="offRevenuePct">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2 mt-3">
+                            <button class="btn btn-outline-orange" onclick="resetThresholds()">Reset defaults</button>
+                            <button class="btn btn-success" id="startBtn" onclick="startRun()">Start run</button>
+                            <button class="btn btn-danger d-none" id="stopBtn" onclick="stopRun()">Stop</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active run status -->
+                <div class="card mb-4 d-none" id="statusCard">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Run status</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="statusMsg">…</span>
+                            <span id="statusCounts" class="text-muted small"></span>
+                        </div>
+                        <div class="progress mb-2" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" id="statusBar" style="width: 0%">0%</div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <div id="statusFooter" class="small text-muted">
+                                status: <span id="statusBadge" class="badge bg-secondary">idle</span>
+                                <span id="statusExtra"></span>
+                            </div>
+                            <a id="statusDownload" class="btn btn-outline-success btn-sm d-none" href="#">Download Excel</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Run results table (toggled by Watch) -->
+                <div class="card mb-4 d-none" id="resultsCard">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Run results <span id="resultsRunId" class="small text-muted font-monospace ms-2"></span></h5>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="showKeep" onchange="onFilterChange()">
+                            <label class="form-check-label small" for="showKeep">Show kept rows</label>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: 520px; overflow: auto;">
+                            <table class="table table-sm table-bordered mb-0" id="resultsTable">
+                                <thead style="position: sticky; top: 0; z-index: 1;">
+                                    <tr>
+                                        <th class="sortable" data-sort="main_cat_name">Main cat<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="deepest_cat_name">Deepest cat<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="facet_name">Facet<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="total_visits">Visits<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="total_revenue">Revenue<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="url_count">URLs<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="pct_visits_in_cat">% v<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="pct_revenue_in_cat">% r<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="current_seo_prio">Current<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="proposed_seo_prio">Proposed<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="action">Action<span class="sort-arrow">↕</span></th>
+                                        <th>Reason</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsBody">
+                                    <tr><td colspan="12" class="text-center text-muted py-3">No data</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="results-footer">
+                            <div class="notice" id="resultsCount">-</div>
+                            <div class="pagination-controls">
+                                <span>Per page:</span>
+                                <select class="form-select form-select-sm" id="perPage" onchange="resultsPage=1; renderResultsPage();">
+                                    <option value="25">25</option>
+                                    <option value="50" selected>50</option>
+                                    <option value="100">100</option>
+                                    <option value="250">250</option>
+                                </select>
+                                <button class="btn btn-outline-secondary btn-page" onclick="changeResultsPage(-1)" id="resPrevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                                <span class="page-info" id="resPageInfo">-</span>
+                                <button class="btn btn-outline-secondary btn-page" onclick="changeResultsPage(1)" id="resNextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Run summary -->
+                <div class="card mb-4 d-none" id="summaryCard">
+                    <div class="card-header">
+                        <h5 class="mb-0">Run summary</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="sumTotal" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <p class="text-muted mb-0">Total combinations</p>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="sumTurnOn" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <p class="text-muted mb-0">Proposed Turn ON</p>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="sumTurnOff" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <p class="text-muted mb-0">Proposed Turn OFF</p>
+                            </div>
+                            <div class="col-md-3 col-6 mb-3">
+                                <h3 id="sumKeep" style="color: #5e4a90; font-weight: 700;">-</h3>
+                                <p class="text-muted mb-0">Keep</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Run History -->
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Run History</h5>
+                        <button class="btn btn-sm btn-outline-purple" onclick="loadRuns()">Refresh</button>
+                    </div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-bordered mb-0 runs-table">
+                            <thead>
+                                <tr style="background:#f0f0f0; border-bottom: 2px solid #dee2e6;">
+                                    <th style="padding: 8px 12px;">Run</th>
+                                    <th style="padding: 8px 12px;">Started</th>
+                                    <th style="padding: 8px 12px;">Status</th>
+                                    <th style="padding: 8px 12px;">Rows</th>
+                                    <th style="padding: 8px 12px;">Date range</th>
+                                    <th style="padding: 8px 12px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="runsBody">
+                                <tr><td colspan="6" class="text-center text-muted py-3">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+<script>
+let _activeRunId = null;
+let _pollTimer = null;
+
+function fmtDate(yyyymmdd) {
+    if (!yyyymmdd || yyyymmdd.length !== 8) return yyyymmdd || '';
+    return `${yyyymmdd.slice(0,4)}-${yyyymmdd.slice(4,6)}-${yyyymmdd.slice(6,8)}`;
+}
+function toYYYYMMDD(isoDate) {
+    return (isoDate || '').replaceAll('-', '');
+}
+
+let _defaults = null;
+async function loadDefaults() {
+    const r = await fetch('/api/seo-prio/defaults');
+    _defaults = await r.json();
+    document.getElementById('startDate').value = fmtDate(_defaults.start_date);
+    document.getElementById('endDate').value = fmtDate(_defaults.end_date);
+    resetThresholds();
+}
+
+function resetThresholds() {
+    if (!_defaults) return;
+    const t = _defaults.thresholds;
+    document.getElementById('onVisitsPct').value = t.on_min_visits_pct;
+    document.getElementById('onRevenuePct').value = t.on_min_revenue_pct;
+    document.getElementById('onAbsVisits').value = t.on_min_abs_visits;
+    document.getElementById('offVisitsPct').value = t.off_max_visits_pct;
+    document.getElementById('offRevenuePct').value = t.off_max_revenue_pct;
+}
+
+async function startRun() {
+    const payload = {
+        start_date: toYYYYMMDD(document.getElementById('startDate').value),
+        end_date: toYYYYMMDD(document.getElementById('endDate').value),
+        thresholds: {
+            on_min_visits_pct: parseFloat(document.getElementById('onVisitsPct').value),
+            on_min_revenue_pct: parseFloat(document.getElementById('onRevenuePct').value),
+            on_min_abs_visits: parseInt(document.getElementById('onAbsVisits').value, 10),
+            off_max_visits_pct: parseFloat(document.getElementById('offVisitsPct').value),
+            off_max_revenue_pct: parseFloat(document.getElementById('offRevenuePct').value),
+        },
+    };
+    document.getElementById('startBtn').disabled = true;
+    const r = await fetch('/api/seo-prio/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    _activeRunId = data.run_id;
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').classList.remove('d-none');
+    document.getElementById('statusCard').classList.remove('d-none');
+    document.getElementById('statusDownload').classList.add('d-none');
+    document.getElementById('summaryCard').classList.add('d-none');
+    document.getElementById('resultsCard').classList.add('d-none');
+    pollStatus();
+    loadRuns();
+}
+
+async function stopRun() {
+    if (!_activeRunId) return;
+    await fetch('/api/seo-prio/stop/' + _activeRunId, {method: 'POST'});
+}
+
+async function pollStatus() {
+    if (_pollTimer) clearTimeout(_pollTimer);
+    if (!_activeRunId) return;
+    try {
+        const r = await fetch('/api/seo-prio/status/' + _activeRunId);
+        if (!r.ok) throw new Error('status');
+        const s = await r.json();
+        const total = s.progress_total || 1;
+        const done = s.progress || 0;
+        const pct = Math.min(100, Math.round((done / total) * 100));
+        document.getElementById('statusBar').style.width = pct + '%';
+        document.getElementById('statusBar').textContent = pct + '%';
+        document.getElementById('statusMsg').textContent = s.progress_msg || s.status;
+        document.getElementById('statusCounts').textContent =
+            (s.progress || 0).toLocaleString() + ' / ' + (s.progress_total || 0).toLocaleString();
+        const badge = document.getElementById('statusBadge');
+        badge.textContent = s.status;
+        badge.className = 'badge ' + statusBadgeClass(s.status);
+        document.getElementById('statusExtra').textContent =
+            s.error ? ' error: ' + s.error : '';
+
+        if (s.status === 'completed') {
+            const dl = document.getElementById('statusDownload');
+            dl.href = '/api/seo-prio/export/' + _activeRunId;
+            dl.classList.remove('d-none');
+            document.getElementById('stopBtn').classList.add('d-none');
+            loadSummary(_activeRunId);
+            loadRuns();
+            return;
+        }
+        if (s.status === 'failed' || s.status === 'stopped') {
+            document.getElementById('stopBtn').classList.add('d-none');
+            loadRuns();
+            return;
+        }
+    } catch (e) {
+        console.error(e);
+    }
+    _pollTimer = setTimeout(pollStatus, 2000);
+}
+
+async function loadSummary(runId) {
+    try {
+        const r = await fetch('/api/seo-prio/summary/' + runId);
+        if (!r.ok) return;
+        const s = await r.json();
+        document.getElementById('sumTotal').textContent = (s.total || 0).toLocaleString();
+        document.getElementById('sumTurnOn').textContent = (s.turn_on || 0).toLocaleString();
+        document.getElementById('sumTurnOff').textContent = (s.turn_off || 0).toLocaleString();
+        document.getElementById('sumKeep').textContent = (s.keep || 0).toLocaleString();
+        document.getElementById('summaryCard').classList.remove('d-none');
+    } catch (e) { console.error(e); }
+}
+
+function statusBadgeClass(status) {
+    return (
+        status === 'completed' ? 'bg-success' :
+        status === 'running'   ? 'bg-success' :
+        status === 'queued'    ? 'bg-primary' :
+        status === 'paused'    ? 'bg-warning text-dark' :
+        status === 'stopped'   ? 'bg-warning text-dark' :
+        status === 'failed'    ? 'bg-danger' :
+                                 'bg-secondary'
+    );
+}
+
+async function loadRuns() {
+    const r = await fetch('/api/seo-prio/runs');
+    const data = await r.json();
+    const body = document.getElementById('runsBody');
+    body.innerHTML = '';
+    if (!data.runs.length) {
+        body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No runs yet.</td></tr>';
+        return;
+    }
+    for (const run of data.runs) {
+        const params = run.params || {};
+        const tr = document.createElement('tr');
+        const badgeClass = statusBadgeClass(run.status);
+        const dateRange = (params.start_date && params.end_date)
+            ? `${fmtDate(params.start_date)} → ${fmtDate(params.end_date)}` : '';
+        tr.innerHTML = `
+            <td class="font-monospace small">${run.run_id}</td>
+            <td>${run.started_at ? new Date(run.started_at).toLocaleString() : ''}</td>
+            <td><span class="badge ${badgeClass} status-badge">${run.status}</span></td>
+            <td>${(run.row_count || 0).toLocaleString()}</td>
+            <td class="small">${dateRange}</td>
+            <td>
+                ${run.status === 'completed'
+                    ? `<a class="btn btn-sm btn-outline-purple me-1" href="/api/seo-prio/export/${run.run_id}">Export</a>`
+                    : ''}
+                <button class="btn btn-sm btn-outline-orange" onclick="resumeWatch('${run.run_id}')">Watch</button>
+            </td>`;
+        body.appendChild(tr);
+    }
+}
+
+function resumeWatch(runId) {
+    // Toggle: if Watch clicked again for the same run, hide the results table.
+    const card = document.getElementById('resultsCard');
+    if (_activeRunId === runId && !card.classList.contains('d-none')) {
+        card.classList.add('d-none');
+        return;
+    }
+    _activeRunId = runId;
+    document.getElementById('statusCard').classList.remove('d-none');
+    document.getElementById('statusDownload').classList.add('d-none');
+    document.getElementById('summaryCard').classList.add('d-none');
+    loadResults(runId);
+    pollStatus();
+}
+
+function actionBadge(action) {
+    if (action === 'turn_on')  return '<span class="badge bg-success">turn ON</span>';
+    if (action === 'turn_off') return '<span class="badge bg-danger">turn OFF</span>';
+    return '<span class="badge" style="background:#5e4a90; color:#fff;">keep</span>';
+}
+
+function fmtNum(n)   { return (n == null) ? '' : Number(n).toLocaleString(); }
+function fmtMoney(n) { return (n == null) ? '' : '€' + Number(n).toLocaleString(undefined, {maximumFractionDigits: 0}); }
+function fmtPct(n)   { return (n == null) ? '' : Number(n).toFixed(2) + '%'; }
+
+// Results table state (all rows fetched once; sort/filter/paginate locally)
+let _allResults = [];
+let _resultsTotalRows = 0;
+let resultsPage = 1;
+let _sortKey = 'total_visits';
+let _sortDir = 'desc';
+
+const NUMERIC_COLS = new Set(['total_visits', 'total_revenue', 'url_count', 'pct_visits_in_cat', 'pct_revenue_in_cat']);
+
+function getFilteredSorted() {
+    const showKeep = document.getElementById('showKeep').checked;
+    let rows = showKeep ? _allResults : _allResults.filter(r => r.action !== 'keep');
+    const k = _sortKey, dir = _sortDir === 'asc' ? 1 : -1;
+    rows = rows.slice().sort((a, b) => {
+        const av = a[k], bv = b[k];
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (NUMERIC_COLS.has(k)) return (Number(av) - Number(bv)) * dir;
+        return String(av).localeCompare(String(bv), undefined, {numeric: true}) * dir;
+    });
+    return rows;
+}
+
+function renderResultsPage() {
+    const rows = getFilteredSorted();
+    const perPage = parseInt(document.getElementById('perPage').value, 10);
+    const totalPages = Math.max(1, Math.ceil(rows.length / perPage));
+    if (resultsPage > totalPages) resultsPage = totalPages;
+    if (resultsPage < 1) resultsPage = 1;
+    const start = (resultsPage - 1) * perPage;
+    const slice = rows.slice(start, start + perPage);
+
+    const body = document.getElementById('resultsBody');
+    if (!slice.length) {
+        body.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-3">No rows match the current filter.</td></tr>';
+    } else {
+        body.innerHTML = slice.map(row => `
+            <tr>
+                <td>${row.main_cat_name || ''}</td>
+                <td>${row.deepest_cat_name || ''}</td>
+                <td>${row.facet_name || row.facet_slug || ''}</td>
+                <td>${fmtNum(row.total_visits)}</td>
+                <td>${fmtMoney(row.total_revenue)}</td>
+                <td>${fmtNum(row.url_count)}</td>
+                <td>${fmtPct(row.pct_visits_in_cat)}</td>
+                <td>${fmtPct(row.pct_revenue_in_cat)}</td>
+                <td>${row.current_seo_prio || ''}</td>
+                <td>${row.proposed_seo_prio || ''}</td>
+                <td>${actionBadge(row.action)}</td>
+                <td class="reason-cell small text-muted">${row.reason || ''}</td>
+            </tr>
+        `).join('');
+    }
+
+    document.getElementById('resPageInfo').textContent = `Page ${resultsPage} / ${totalPages}`;
+    document.getElementById('resPrevBtn').disabled = resultsPage <= 1;
+    document.getElementById('resNextBtn').disabled = resultsPage >= totalPages;
+    const filterNote = document.getElementById('showKeep').checked ? '' : ' (kept rows hidden)';
+    document.getElementById('resultsCount').textContent =
+        `${rows.length.toLocaleString()} of ${_resultsTotalRows.toLocaleString()} rows${filterNote}`;
+
+    // Update sort arrow indicators
+    document.querySelectorAll('#resultsTable thead th.sortable').forEach(th => {
+        const key = th.dataset.sort;
+        const arrow = th.querySelector('.sort-arrow');
+        if (key === _sortKey) {
+            arrow.textContent = _sortDir === 'asc' ? '↑' : '↓';
+            arrow.classList.add('active');
+        } else {
+            arrow.textContent = '↕';
+            arrow.classList.remove('active');
+        }
+    });
+}
+
+function changeResultsPage(delta) {
+    resultsPage += delta;
+    renderResultsPage();
+}
+
+function onFilterChange() {
+    resultsPage = 1;
+    renderResultsPage();
+}
+
+function setupSortHandlers() {
+    document.querySelectorAll('#resultsTable thead th.sortable').forEach(th => {
+        th.onclick = () => {
+            const key = th.dataset.sort;
+            if (_sortKey === key) {
+                _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                _sortKey = key;
+                _sortDir = NUMERIC_COLS.has(key) ? 'desc' : 'asc';
+            }
+            resultsPage = 1;
+            renderResultsPage();
+        };
+    });
+}
+setupSortHandlers();
+
+async function loadResults(runId) {
+    const card = document.getElementById('resultsCard');
+    document.getElementById('resultsRunId').textContent = runId;
+    document.getElementById('resultsCount').textContent = 'loading…';
+    card.classList.remove('d-none');
+    try {
+        const r = await fetch(`/api/seo-prio/results/${runId}?limit=0`);
+        if (!r.ok) throw new Error('results');
+        const data = await r.json();
+        _allResults = data.rows || [];
+        _resultsTotalRows = data.total || _allResults.length;
+        resultsPage = 1;
+        _sortKey = 'total_visits';
+        _sortDir = 'desc';
+        renderResultsPage();
+    } catch (e) {
+        document.getElementById('resultsCount').textContent = 'failed to load';
+        console.error(e);
+    }
+}
+
+loadDefaults();
+loadRuns();
+</script>
+</body>
+</html>

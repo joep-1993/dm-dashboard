@@ -4,7 +4,8 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Response as FastAPIResponse, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, RedirectResponse, Response, HTMLResponse
+from fastapi.responses import StreamingResponse, RedirectResponse, Response, HTMLResponse, JSONResponse
+import io
 import httpx
 from urllib.parse import urljoin
 from datetime import datetime
@@ -2553,6 +2554,83 @@ try:
     init_facet_classifications_table()
 except Exception as e:
     print(f"[STARTUP] Could not initialize facet_type_classifications table: {e}")
+
+# ============================================================================
+# SEO Priority tool
+# ============================================================================
+from backend import seo_prio_service
+
+try:
+    seo_prio_service.init_seo_prio_tables()
+except Exception as e:
+    print(f"[STARTUP] Could not initialize seo_prio tables: {e}")
+
+
+@app.get("/api/seo-prio/defaults")
+async def seo_prio_defaults():
+    start, end = seo_prio_service.default_date_range()
+    return {
+        "start_date": start,
+        "end_date": end,
+        "thresholds": seo_prio_service.DEFAULT_THRESHOLDS,
+    }
+
+
+@app.post("/api/seo-prio/start")
+async def seo_prio_start(payload: dict):
+    start_date = payload.get("start_date")
+    end_date = payload.get("end_date")
+    if not start_date or not end_date:
+        s, e = seo_prio_service.default_date_range()
+        start_date = start_date or s
+        end_date = end_date or e
+    thresholds = payload.get("thresholds") or {}
+    run_id = seo_prio_service.start_run({
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "thresholds": thresholds,
+    })
+    return {"run_id": run_id}
+
+
+@app.get("/api/seo-prio/status/{run_id}")
+async def seo_prio_status(run_id: str):
+    status = seo_prio_service.get_run_status(run_id)
+    if not status:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return status
+
+
+@app.post("/api/seo-prio/stop/{run_id}")
+async def seo_prio_stop(run_id: str):
+    ok = seo_prio_service.stop_run(run_id)
+    return {"stopped": ok}
+
+
+@app.get("/api/seo-prio/runs")
+async def seo_prio_runs():
+    return {"runs": seo_prio_service.list_runs()}
+
+
+@app.get("/api/seo-prio/summary/{run_id}")
+async def seo_prio_summary(run_id: str):
+    return seo_prio_service.get_run_summary(run_id)
+
+
+@app.get("/api/seo-prio/results/{run_id}")
+async def seo_prio_results(run_id: str, limit: int = 1000, offset: int = 0):
+    return seo_prio_service.get_run_results(run_id, limit=limit, offset=offset)
+
+
+@app.get("/api/seo-prio/export/{run_id}")
+async def seo_prio_export(run_id: str):
+    from fastapi.responses import StreamingResponse
+    blob = seo_prio_service.export_excel(run_id)
+    return StreamingResponse(
+        io.BytesIO(blob),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="seo_prio_{run_id}.xlsx"'},
+    )
 
 
 @app.get("/api/unique-titles/status")
