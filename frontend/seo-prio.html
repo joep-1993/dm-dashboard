@@ -52,6 +52,12 @@
         .btn-outline-purple:hover {
             color: #fff; background: #5e4a90; border-color: #5e4a90;
         }
+        .btn-outline-red {
+            color: #c0392b; border-color: #c0392b; background: transparent;
+        }
+        .btn-outline-red:hover {
+            color: #fff; background: #c0392b; border-color: #c0392b;
+        }
     </style>
 </head>
 <body>
@@ -451,7 +457,7 @@ async function loadRuns() {
         const dateRange = (params.start_date && params.end_date)
             ? `${fmtDate(params.start_date)} → ${fmtDate(params.end_date)}` : '';
         tr.innerHTML = `
-            <td class="font-monospace small">${run.run_id}</td>
+            <td class="font-monospace small"><a href="#" onclick="event.preventDefault(); resumeWatch('${run.run_id}')" class="text-decoration-none">${run.run_id}</a></td>
             <td>${run.started_at ? new Date(run.started_at).toLocaleString() : ''}</td>
             <td><span class="badge ${badgeClass} status-badge">${run.status}</span></td>
             <td>${(run.row_count || 0).toLocaleString()}</td>
@@ -460,10 +466,27 @@ async function loadRuns() {
                 ${run.status === 'completed'
                     ? `<a class="btn btn-sm btn-outline-purple me-1" href="/api/seo-prio/export/${run.run_id}">Export</a>`
                     : ''}
-                <button class="btn btn-sm btn-outline-orange" onclick="resumeWatch('${run.run_id}')">Watch</button>
+                <button class="btn btn-sm btn-outline-red" onclick="removeRun('${run.run_id}')">Remove</button>
             </td>`;
         body.appendChild(tr);
     }
+}
+
+async function removeRun(runId) {
+    if (!confirm(`Remove run ${runId}? This deletes the run and all its results.`)) return;
+    const r = await fetch('/api/seo-prio/runs/' + runId, {method: 'DELETE'});
+    if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert(err.detail || 'Failed to remove run');
+        return;
+    }
+    if (_activeRunId === runId) {
+        _activeRunId = null;
+        document.getElementById('resultsCard').classList.add('d-none');
+        document.getElementById('statusCard').classList.add('d-none');
+        document.getElementById('summaryCard').classList.add('d-none');
+    }
+    loadRuns();
 }
 
 function resumeWatch(runId) {

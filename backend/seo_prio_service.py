@@ -287,6 +287,25 @@ def stop_run(run_id: str) -> bool:
     return True
 
 
+def delete_run(run_id: str) -> bool:
+    """Delete a run and its results. Returns False if the run is still active."""
+    with _RUNS_LOCK:
+        run = _RUNS.get(run_id)
+        if run and run.get("status") in ("queued", "running"):
+            return False
+        _RUNS.pop(run_id, None)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM pa.seo_prio_results WHERE run_id = %s", (run_id,))
+        cur.execute("DELETE FROM pa.seo_prio_runs WHERE run_id = %s", (run_id,))
+        conn.commit()
+        return True
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
 def _should_stop(run_id: str) -> bool:
     with _RUNS_LOCK:
         return _RUNS.get(run_id, {}).get("stop", False)

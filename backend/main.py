@@ -2622,6 +2622,14 @@ async def seo_prio_results(run_id: str, limit: int = 1000, offset: int = 0):
     return seo_prio_service.get_run_results(run_id, limit=limit, offset=offset)
 
 
+@app.delete("/api/seo-prio/runs/{run_id}")
+async def seo_prio_delete(run_id: str):
+    ok = seo_prio_service.delete_run(run_id)
+    if not ok:
+        raise HTTPException(status_code=409, detail="Run is still active; stop it first")
+    return {"status": "deleted", "run_id": run_id}
+
+
 @app.get("/api/seo-prio/export/{run_id}")
 async def seo_prio_export(run_id: str):
     from fastapi.responses import StreamingResponse
