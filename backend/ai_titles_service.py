@@ -454,13 +454,13 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         print(f"[AI_TITLES] No H1 from API for {url}")
         return None
 
-    # Facets that should be treated as the category name themselves. When any of
-    # these is present on the URL, the actual category_name is suppressed so the
-    # facet value (e.g. "wandplaten") carries the product noun instead of the
-    # generic category (e.g. "Wanddecoratie").
-    CATEGORY_OVERRIDE_FACETS = {'t_wanddeco'}
+    # Type-facets carry the product type in their values (e.g. soort_bz="Dahliabollen",
+    # t_wanddeco="Wandplaten"), so the category name would be a duplicate in the title.
+    # Classification is per facet_name, cached in pa.facet_type_classifications.
+    from backend.facet_classifier import classify_facet
     has_category_override = any(
-        f['facet_name'].lower() in CATEGORY_OVERRIDE_FACETS for f in selected_facets
+        classify_facet(f['facet_name'], f.get('detail_value', ''), category_name)
+        for f in selected_facets
     )
     if has_category_override and category_name:
         # Strip category_name from end or start of the API H1 if it's already there

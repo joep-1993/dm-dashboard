@@ -2548,6 +2548,12 @@ try:
 except Exception as e:
     print(f"[STARTUP] Could not initialize unique_titles table: {e}")
 
+try:
+    from backend.facet_classifier import init_facet_classifications_table
+    init_facet_classifications_table()
+except Exception as e:
+    print(f"[STARTUP] Could not initialize facet_type_classifications table: {e}")
+
 
 @app.get("/api/unique-titles/status")
 async def get_unique_titles_status():
