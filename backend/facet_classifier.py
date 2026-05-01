@@ -125,15 +125,22 @@ def _classify_with_llm(facet_name: str, sample_value: str,
 
     prompt = (
         "Je krijgt een facet van een productpagina op een Nederlandse e-commerce site. "
-        "Bepaal of dit een 'type-facet' is: een facet waarvan de waarde zelf het producttype is, "
-        "zodat de categorienaam in een paginatitel overbodig zou zijn (een dubbeling).\n\n"
+        "Bepaal of dit een 'type-facet' is: een facet waarvan ELKE waarde duidelijk en "
+        "ondubbelzinnig het producttype zelf is, zodat de categorienaam in de paginatitel "
+        "een letterlijke dubbeling zou zijn.\n\n"
+        "BELANGRIJK: wees streng. Antwoord ALLEEN true als het overduidelijk een type-facet "
+        "is en alle mogelijke waarden van dit facet op zichzelf het producttype benoemen. "
+        "Bij twijfel — bijvoorbeeld als sommige waarden eigenschappen of subvarianten zijn die "
+        "niet zelfstandig het producttype noemen — antwoord false.\n\n"
         f"Facet naam: {facet_name}\n"
         f"Voorbeeld facet-waarde: {sample_value}\n"
         f"Categorienaam van de pagina: {category_name}\n\n"
         "Voorbeelden van WEL type-facets: 'soort_bz' (waarde 'Dahliabollen' in categorie 'bloembollen zaden'), "
         "'t_wanddeco' (waarde 'Wandplaten' in categorie 'wanddecoratie'). De facet-waarde IS het product.\n"
         "Voorbeelden van GEEN type-facets: 'merk' (Sony), 'kleur' (Rood), 'maat' (XL), 'materiaal' (Hout). "
-        "Deze beschrijven een eigenschap, niet het producttype zelf.\n\n"
+        "Ook GEEN type-facet als de waarden gemengd zijn (sommige zijn een producttype, andere "
+        "zijn een merklijn of eigenschap) — bijvoorbeeld 'Type' in 'Vibrators' met waarden als "
+        "'Big Jelly' of 'Magic Wand' die niet duidelijk vibrators benoemen.\n\n"
         'Antwoord met JSON: {"is_type_facet": true|false, "reason": "korte uitleg"}'
     )
 
