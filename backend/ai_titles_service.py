@@ -711,9 +711,19 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         example_clause = " ".join(met_parts)
 
         met_section = f"""
-PRODUCTEIGENSCHAPPEN — combineer tot één clause na productnaam: "{example_clause}"
+PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de productnaam staan, NOOIT ervoor.
 """
-        met_rule = f"""7. PRODUCTEIGENSCHAPPEN: Zet de bovenstaande clause ("{example_clause}") direct NA de productnaam. Gebruik precies deze formulering.
+        met_rule = f"""7. PRODUCTEIGENSCHAPPEN — KRITIEKE PLAATSINGSREGEL: De clause "{example_clause}" MOET direct NA de productnaam staan. Gebruik precies deze formulering, en zet hem NOOIT vooraan in de titel of vóór de doelgroep/merk/productnaam.
+
+   Volgorde in de titel is altijd: <merk> <doelgroep/kleur> <productnaam> <{example_clause}> <maat>
+   - FOUT: "Zonder beugel Kinder bh's 70A"  (zonder-clause vóór doelgroep en productnaam)
+   - GOED: "Kinder bh's zonder beugel 70A"
+   - FOUT: "Met capuchon Heren jassen"
+   - GOED: "Heren jassen met capuchon"
+   - FOUT: "met lange mouwen Dames poloshirts"
+   - GOED: "Dames poloshirts met lange mouwen"
+
+   Als de clause uit de input vooraan staat, VERPLAATS hem zelf naar achter de productnaam.
 """
     else:
         met_rule = """7. Voeg NOOIT het woord "met" toe aan de titel.
@@ -786,6 +796,28 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
             improved_h1 = improved_h1.rstrip() + " " + " ".join(voor_values)
         if size_values:
             improved_h1 = improved_h1.rstrip() + " " + " ".join(size_values)
+
+        # Re-append the category name if the AI dropped it. Only fires when the
+        # type-facet classifier did NOT strip it earlier (in that branch
+        # category_name was set to ''), so this won't undo legitimate type-facet
+        # stripping. Size values were appended above; insert the productnaam
+        # before them so the order stays "<...> <productnaam> <maat>". Use a
+        # word-boundary check so e.g. "Voer" isn't mistaken as present in
+        # "voeding" (a hallucinated word).
+        if category_name:
+            cat_present = re.search(
+                r'\b' + re.escape(category_name) + r'\b', improved_h1, re.IGNORECASE
+            )
+            if not cat_present:
+                if size_values:
+                    size_suffix = " " + " ".join(size_values)
+                    if improved_h1.endswith(size_suffix):
+                        head = improved_h1[: -len(size_suffix)].rstrip()
+                        improved_h1 = f"{head} {category_name.lower()}{size_suffix}"
+                    else:
+                        improved_h1 = improved_h1.rstrip() + " " + category_name.lower()
+                else:
+                    improved_h1 = improved_h1.rstrip() + " " + category_name.lower()
 
         # Capitalize first letter (unless it's a brand that starts lowercase, e.g. "iPhone")
         if improved_h1 and improved_h1[0].islower():
