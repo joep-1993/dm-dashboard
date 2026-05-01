@@ -586,10 +586,21 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         re.IGNORECASE
     )
     _size_abbrevs = {'xs', 'xxs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', '2xl', '3xl', '4xl', '5xl'}
+    # Adjectival size words that look like a Maat facet but should be placed BEFORE
+    # the productnaam (rule 9), not appended at the end. Without this, "Maat=Kleine"
+    # produces titles like "Rubberen Butterfly Kiss vibrators Kleine" instead of
+    # "Kleine rubberen Butterfly Kiss vibrators".
+    _adjectival_sizes = {
+        'klein', 'kleine', 'groot', 'grote', 'middel', 'middelgroot',
+        'mini', 'midi', 'maxi', 'extra groot', 'extra klein',
+    }
 
     def is_spec_value(val, fname):
         """Detect if a facet value is a specification that should go at the end."""
         vl = val.lower().strip()
+        # Adjectival size words go before the productnaam, not at the end.
+        if vl in _adjectival_sizes:
+            return False
         # Starts with "Maat" or "Wijdte"
         if vl.startswith('maat ') or vl.startswith('wijdte'):
             return True
@@ -746,7 +757,13 @@ Regels:
 5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan direct VOOR de productnaam maar NA kleuren/materialen, NOOIT met "voor" ervoor.
 6. NOOIT "in", "van" of "voor" toevoegen (doelgroep-achtervoegsel wordt automatisch toegevoegd).
 {met_rule}8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
-9. Als de facetten woorden bevatten zoals "Nieuw" of "Kleine"/"Grote", zet die als bijvoeglijk naamwoord VOOR de productnaam. Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
+9. Bijvoeglijke naamwoorden uit de facetten ("Nieuw"/"Nieuwe", "Klein"/"Kleine", "Groot"/"Grote", "Middel", "Mini", "Maxi") moeten ALTIJD VOOR de productnaam staan, NOOIT achteraan. Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
+   - FOUT: "Rubberen Butterfly Kiss vibrators Kleine"  (Kleine staat aan het einde)
+   - GOED: "Kleine rubberen Butterfly Kiss vibrators"
+   - FOUT: "Heren joggingbroeken Nieuwe"
+   - GOED: "Nieuwe Heren joggingbroeken"
+   - FOUT: "Houten salontafels Grote"
+   - GOED: "Grote houten salontafels"
 10. Verbuig bijvoeglijke naamwoorden correct (bijv. "Nieuw" → "Nieuwe" voor de-woorden, "Vrijstaand" → "Vrijstaande").
 11. Maak de titel natuurlijk lopend Nederlands.
 
