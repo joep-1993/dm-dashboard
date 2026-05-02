@@ -757,11 +757,13 @@ Regels:
 5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan direct VOOR de productnaam maar NA kleuren/materialen, NOOIT met "voor" ervoor.
 6. NOOIT "in", "van" of "voor" toevoegen (doelgroep-achtervoegsel wordt automatisch toegevoegd).
 {met_rule}8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
-9. Bijvoeglijke naamwoorden uit de facetten ("Nieuw"/"Nieuwe", "Klein"/"Kleine", "Groot"/"Grote", "Middel", "Mini", "Maxi") moeten ALTIJD VOOR de productnaam staan, NOOIT achteraan. Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
-   - FOUT: "Rubberen Butterfly Kiss vibrators Kleine"  (Kleine staat aan het einde)
+9. ALLE bijvoeglijke naamwoorden uit de facetten moeten VOOR de productnaam staan, NOOIT erna. Dit geldt niet alleen voor formaat ("Klein"/"Kleine", "Groot"/"Grote", "Middel", "Mini", "Maxi") en conditie ("Nieuw"/"Nieuwe"), maar ook voor kenmerken zoals "Waterdicht"/"Waterdichte", "Vrijstaand"/"Vrijstaande", "Luxe", "Modern"/"Moderne", "Klassiek"/"Klassieke", "Inbouw", "Hangend", "Opvouwbaar". Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
+   - FOUT: "Rubberen Butterfly Kiss vibrators Kleine"
    - GOED: "Kleine rubberen Butterfly Kiss vibrators"
-   - FOUT: "Heren joggingbroeken Nieuwe"
-   - GOED: "Nieuwe Heren joggingbroeken"
+   - FOUT: "Dames kunststof sporttassen Waterdichte"  (Waterdichte staat na de productnaam)
+   - GOED: "Dames kunststof waterdichte sporttassen"
+   - FOUT: "Inductie kookplaten Vrijstaande"
+   - GOED: "Vrijstaande inductie kookplaten"
    - FOUT: "Houten salontafels Grote"
    - GOED: "Grote houten salontafels"
 10. Verbuig bijvoeglijke naamwoorden correct (bijv. "Nieuw" → "Nieuwe" voor de-woorden, "Vrijstaand" → "Vrijstaande").
