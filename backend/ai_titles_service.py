@@ -682,13 +682,19 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
     for sv in size_originals + suffix_originals + voor_originals:
         ai_h1 = ai_h1.replace(sv, '').strip()
     for mv in met_values:
-        # Strip the raw value (e.g., "Korte mouwen") from the H1
+        # Strip the full value with its preposition first (e.g., "Zonder WiFi"),
+        # otherwise stripping only the bare "WiFi" leaves an orphan "Zonder"
+        # that the AI later treats as part of the title (→ "Zonder televisies
+        # zonder WiFi").
+        full_pat = re.compile(re.escape(mv), re.IGNORECASE)
+        ai_h1 = full_pat.sub('', ai_h1).strip()
+        # Then strip the bare value (e.g., "Korte mouwen") in case the API H1
+        # contains it without the "met "/"zonder " prefix.
         clean_mv = mv
         if clean_mv.lower().startswith('met '):
             clean_mv = clean_mv[4:]
         elif clean_mv.lower().startswith('zonder '):
             clean_mv = clean_mv[7:]
-        # Case-insensitive replace to catch "Korte mouwen" and "korte mouwen"
         pattern = re.compile(re.escape(clean_mv), re.IGNORECASE)
         ai_h1 = pattern.sub('', ai_h1).strip()
     # Clean up double spaces

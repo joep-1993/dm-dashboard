@@ -116,6 +116,7 @@
                             <div class="col-3 text-center">
                                 <h4 id="aiFailed" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h4>
                                 <small class="text-muted">Failed</small>
+                                <small id="aiTotalFailed" class="text-muted d-block" style="font-size: 0.7rem;" title="Persisted across sessions (ai_error IS NOT NULL)">total: -</small>
                             </div>
                         </div>
                     </div>
@@ -463,6 +464,7 @@
                 // Update stats
                 document.getElementById('aiPending').textContent = stats.pending?.toLocaleString() || '0';
                 document.getElementById('aiProcessed').textContent = stats.ai_processed?.toLocaleString() || '0';
+                document.getElementById('aiTotalFailed').textContent = 'total: ' + (stats.with_errors?.toLocaleString() || '0');
 
                 // Update processing status
                 const statusBadge = document.getElementById('aiStatusBadge');
