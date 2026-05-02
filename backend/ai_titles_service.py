@@ -591,8 +591,10 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
     # produces titles like "Rubberen Butterfly Kiss vibrators Kleine" instead of
     # "Kleine rubberen Butterfly Kiss vibrators".
     _adjectival_sizes = {
-        'klein', 'kleine', 'groot', 'grote', 'middel', 'middelgroot',
-        'mini', 'midi', 'maxi', 'extra groot', 'extra klein',
+        'klein', 'kleine', 'groot', 'grote', 'middel', 'middelgroot', 'middelgrote',
+        'mini', 'midi', 'maxi',
+        'extra groot', 'extra grote', 'extra klein', 'extra kleine',
+        'zeer groot', 'zeer grote', 'zeer klein', 'zeer kleine',
     }
 
     def is_spec_value(val, fname):
