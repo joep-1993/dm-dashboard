@@ -602,32 +602,71 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
         }
 
     # Remove standalone brand if another facet already contains the brand name
-    # e.g., Merk="Epson" + Productlijn="Epson EcoTank" → drop the standalone "Epson"
+    # e.g., Merk="Epson" + Productlijn="Epson EcoTank" → drop the standalone "Epson".
+    # Case-insensitive so Merk="Asus" + Productlijn="ASUS Zenbook" also dedupes.
     brand_facet = next((f for f in selected_facets if f['facet_name'].lower() == 'merk'), None)
     if brand_facet:
         brand_name = brand_facet['detail_value']
+        brand_lower = brand_name.lower()
         other_values = [f['detail_value'] for f in selected_facets if f is not brand_facet]
-        if any(brand_name in ov for ov in other_values):
+        if any(brand_lower in ov.lower() for ov in other_values):
             selected_facets = [f for f in selected_facets if f is not brand_facet]
-            # Also strip the standalone brand from the API H1
-            api_h1 = api_h1.replace(brand_name + ' ', '', 1) if api_h1.count(brand_name) > 1 else api_h1
+            # Also strip the standalone brand from the API H1 (case-insensitive)
+            if api_h1.lower().count(brand_lower) > 1:
+                api_h1 = re.sub(
+                    r'\b' + re.escape(brand_name) + r'\b ',
+                    '',
+                    api_h1,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
             brand_facet = None  # Brand was deduplicated
 
     # Collect brand/productlijn to strip from AI input and prepend in code after
-    # This avoids AI misplacing multi-word brands like "The Indian Maharadja"
+    # This avoids AI misplacing multi-word brands like "The Indian Maharadja".
+    # A lead facet is dropped when its full value is the prefix of another remaining
+    # facet's value (case-insensitive) — e.g. Productlijn="Lenovo IdeaPad" already
+    # covered by Modelnaam="Lenovo Ideapad 5" — to prevent the prepend from causing
+    # "Lenovo IdeaPad Lenovo Ideapad 5"-style duplication in the final title.
+    def _norm_ws(s: str) -> str:
+        return ' '.join(s.lower().split())
     lead_values = []  # Will be prepended to final title in order
     for lead_facet_name in ('merk', 'productlijn'):
         lead_facet = next((f for f in selected_facets if f['facet_name'].lower() == lead_facet_name), None)
-        if lead_facet:
-            lead_val = lead_facet['detail_value']
-            lead_values.append(lead_val)
-            # Strip from H1 so AI doesn't see it
-            if lead_val in api_h1:
-                api_h1 = api_h1.replace(lead_val, '').strip()
-                while '  ' in api_h1:
-                    api_h1 = api_h1.replace('  ', ' ')
-            # Remove from selected_facets so AI doesn't get it as facet either
+        if not lead_facet:
+            continue
+        lead_val = lead_facet['detail_value']
+        norm_lead = _norm_ws(lead_val)
+        other_facets = [f for f in selected_facets if f is not lead_facet]
+        is_redundant_prefix = norm_lead and any(
+            _norm_ws(f['detail_value']) == norm_lead
+            or _norm_ws(f['detail_value']).startswith(norm_lead + ' ')
+            for f in other_facets
+        )
+        if is_redundant_prefix:
+            # Drop entirely: the more specific facet already carries the lead value.
             selected_facets = [f for f in selected_facets if f is not lead_facet]
+            # Also strip the bare lead_val occurrence from api_h1 (case-insensitive,
+            # word-boundary) so the AI doesn't echo it back alongside the longer
+            # facet value. The model facet still feeds the AI the full string, so
+            # nothing is lost.
+            api_h1 = re.sub(
+                r'\b' + re.escape(lead_val) + r'\b\s*',
+                '',
+                api_h1,
+                count=1,
+                flags=re.IGNORECASE,
+            ).strip()
+            api_h1 = re.sub(r'\s+', ' ', api_h1)
+            continue
+        lead_values.append(lead_val)
+        # Strip from H1 so AI doesn't see it
+        if lead_val in api_h1:
+            api_h1 = api_h1.replace(lead_val, '').strip()
+            while '  ' in api_h1:
+                api_h1 = api_h1.replace('  ', ' ')
+        # Remove from selected_facets so AI doesn't get it as facet either
+        selected_facets = [f for f in selected_facets if f is not lead_facet]
 
     # Drop base color (Kleur) when a more specific shade (Kleurtint) or combination (Kleurcombinaties) is present
     # e.g., Kleur="Zwarte" + Kleurcombinaties="Zwart/goud" → drop "Zwarte"
