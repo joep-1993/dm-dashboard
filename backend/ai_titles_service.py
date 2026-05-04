@@ -145,6 +145,52 @@ def _dedupe_compound_category(h1: str, category_name: str) -> str:
     return ' '.join(new_words)
 
 
+def _dedupe_internal_compounds(h1: str) -> str:
+    """Drop earlier compound-spelling repeats inside `h1`.
+
+    Generalises `_dedupe_compound_category`: instead of matching against a known
+    category name, scans the H1 itself for any 1-token or 2-token run that
+    normalizes (via `_norm_for_dedupe` — strips spaces/`&`/`en`) to the same
+    form as another run. When 2+ matches exist, drops the earlier ones and
+    keeps the last. Catches API-side joined/split repetitions like:
+
+      "ronde plantentafels planten Tafels"  → "ronde planten Tafels"
+                                              (or the reverse, depending on
+                                               which side ends up last)
+      "Camerastatieven camera statieven"    → "camera statieven"
+
+    Where the existing dedupe-vs-category pass needs a known category_name to
+    fire and would miss these because the category here is `Tafels`, not
+    `Plantentafels`. 6-char minimum on the normalized form keeps short tokens
+    out (so "Maat 38" doesn't accidentally trip it).
+    """
+    if not h1:
+        return h1
+    words = h1.split()
+    n = len(words)
+    spans_by_norm: dict = {}
+    for start in range(n):
+        for end in range(start, min(start + 2, n)):
+            joined = _norm_for_dedupe(' '.join(words[start:end + 1]))
+            if len(joined) < 6:
+                continue
+            spans_by_norm.setdefault(joined, []).append((start, end + 1))
+
+    drop_set: set = set()
+    for spans in spans_by_norm.values():
+        if len(spans) < 2:
+            continue
+        spans.sort()
+        for s, e in spans[:-1]:
+            if any(d in drop_set for d in range(s, e)):
+                continue
+            for k in range(s, e):
+                drop_set.add(k)
+    if not drop_set:
+        return h1
+    return ' '.join(w for i, w in enumerate(words) if i not in drop_set)
+
+
 def _dedupe_facet_values(h1: str, selected_facets: list) -> str:
     """Drop earlier duplicates of any selected-facet detail_value in `h1`.
 
@@ -834,6 +880,7 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
         return None
 
     api_h1 = _dedupe_compound_category(api_h1, canonical_category)
+    api_h1 = _dedupe_internal_compounds(api_h1)
     api_h1 = _dedupe_facet_values(api_h1, selected_facets)
 
     # Type-facets carry the product type in their values (e.g. soort_bz="Dahliabollen",
@@ -874,7 +921,9 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
         # If no OpenAI, just return the API H1
         return {
             "h1_title": _dedupe_facet_values(
-                _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category),
+                _dedupe_internal_compounds(
+                    _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category)
+                ),
                 selected_facets,
             ),
             "original_h1": api_h1,
@@ -1235,7 +1284,9 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         print(f"[AI_TITLES] timings url={url} fetch={_t_fetch_ms:.0f}ms polish={_t_polish_ms:.0f}ms")
         return {
             "h1_title": _dedupe_facet_values(
-                _dedupe_compound_category(_strip_pre_clause_duplicates(improved_h1), canonical_category),
+                _dedupe_internal_compounds(
+                    _dedupe_compound_category(_strip_pre_clause_duplicates(improved_h1), canonical_category)
+                ),
                 selected_facets,
             ),
             "original_h1": api_h1,
@@ -1246,7 +1297,9 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         # Return API H1 as fallback
         return {
             "h1_title": _dedupe_facet_values(
-                _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category),
+                _dedupe_internal_compounds(
+                    _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category)
+                ),
                 selected_facets,
             ),
             "original_h1": api_h1,
