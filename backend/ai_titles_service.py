@@ -46,6 +46,64 @@ def _norm_for_dedupe(s: str) -> str:
     return s
 
 
+def _strip_pre_clause_duplicates(h1: str) -> str:
+    """Remove a bare token sequence that already appears inside a "met"/"zonder" clause.
+
+    The H1 generator and AI prompt cooperate to place feature values like
+    "Dierenprint", "leren band", "lange mouwen" inside a "met …" clause AFTER the
+    productnaam, but the same bare value also routinely sneaks in BEFORE the
+    productnaam (either via the API H1 or because the AI echoed it). This pass
+    walks each "met X" / "zonder X" clause and, when the phrase X appears
+    verbatim earlier in the H1 as a bare token run (not following another
+    met/zonder), drops the earlier occurrence. Only removes one bare occurrence
+    per clause.
+
+    Skips the bare match if it itself follows met/zonder (already a clause), so
+    legitimate two-clause titles like "schoenen met klittenband met sleehakken
+    en klittenband" are not collapsed.
+    """
+    if not h1:
+        return h1
+    tokens = h1.split()
+    if len(tokens) < 4:
+        return h1
+    PREPS = {'met', 'zonder'}
+    clauses = []  # (start_idx, end_idx_exclusive, phrase_tokens)
+    i = 0
+    while i < len(tokens):
+        if tokens[i].lower() in PREPS:
+            j = i + 1
+            phrase = []
+            while j < len(tokens) and tokens[j].lower() not in PREPS:
+                phrase.append(tokens[j])
+                j += 1
+            if phrase:
+                clauses.append((i, j, phrase))
+            i = j
+        else:
+            i += 1
+    if not clauses:
+        return h1
+    drop = set()
+    for clause_start, _clause_end, phrase in clauses:
+        phrase_str = ' '.join(phrase)
+        if len(phrase_str) < 4:
+            continue
+        plen = len(phrase)
+        for k in range(clause_start - plen + 1):
+            if any((k + d) in drop for d in range(plen)):
+                continue
+            if k > 0 and tokens[k - 1].lower() in PREPS:
+                continue
+            if all(tokens[k + d].lower() == phrase[d].lower() for d in range(plen)):
+                for d in range(plen):
+                    drop.add(k + d)
+                break
+    if not drop:
+        return h1
+    return ' '.join(t for idx, t in enumerate(tokens) if idx not in drop)
+
+
 def _dedupe_compound_category(h1: str, category_name: str) -> str:
     """Strip a duplicated compound spelling of the category from `h1`.
 
@@ -539,7 +597,7 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
     if not client:
         # If no OpenAI, just return the API H1
         return {
-            "h1_title": _dedupe_compound_category(api_h1, canonical_category),
+            "h1_title": _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category),
             "original_h1": api_h1,
         }
 
@@ -914,7 +972,7 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
                 improved_h1 = improved_h1[0].upper() + improved_h1[1:]
 
         return {
-            "h1_title": _dedupe_compound_category(improved_h1, canonical_category),
+            "h1_title": _dedupe_compound_category(_strip_pre_clause_duplicates(improved_h1), canonical_category),
             "original_h1": api_h1,
         }
 
@@ -922,7 +980,7 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
         print(f"[AI_TITLES] OpenAI improvement error for {url}: {e}")
         # Return API H1 as fallback
         return {
-            "h1_title": _dedupe_compound_category(api_h1, canonical_category),
+            "h1_title": _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category),
             "original_h1": api_h1,
         }
 
