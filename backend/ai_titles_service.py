@@ -145,6 +145,63 @@ def _dedupe_compound_category(h1: str, category_name: str) -> str:
     return ' '.join(new_words)
 
 
+def _dedupe_facet_values(h1: str, selected_facets: list) -> str:
+    """Drop earlier duplicates of any selected-facet detail_value in `h1`.
+
+    Catches facet-vs-facet duplication produced upstream by build_product_subject
+    when two facets carry the same or overlapping value (e.g. type_laptop +
+    productlijn_laptop both = "Chromebook" → "ASUS Chromebook Chromebook"; or
+    merk=Samsung + productlijn_mobtel="Samsung Galaxy" → "Samsung Galaxy Samsung
+    Galaxy A56 ..."). The existing `_dedupe_compound_category` only handles
+    facet-vs-category duplication; this is the symmetrical safety net for
+    facet-vs-facet.
+
+    For each unique facet detail_value of length ≥4, finds all standalone
+    token-run occurrences (word-boundary, case-insensitive) and, when there are
+    2+, drops every occurrence except the LAST (mirrors `_dedupe_compound_category`'s
+    last-wins policy because the canonical/longest form usually trails).
+
+    Longer facet values are processed before shorter ones so e.g. "Samsung
+    Galaxy" collapses first; the standalone "Samsung" check then sees only one
+    remaining occurrence and is a no-op. The 4-character minimum keeps short
+    size/colour codes ("5G", "S", "M") from being mistakenly deduped.
+    """
+    if not h1 or not selected_facets:
+        return h1
+    values = sorted(
+        {(f.get('detail_value') or '').strip() for f in selected_facets},
+        key=lambda v: -len(v.split()),
+    )
+    for v in values:
+        if not v or len(v) < 4:
+            continue
+        v_tokens = v.split()
+        words = h1.split()
+        n = len(words)
+        plen = len(v_tokens)
+        if plen == 0 or plen > n:
+            continue
+        matches = []
+        i = 0
+        while i <= n - plen:
+            if all(
+                words[i + k].lower().strip('.,!?;:') == v_tokens[k].lower()
+                for k in range(plen)
+            ):
+                matches.append((i, i + plen))
+                i += plen
+            else:
+                i += 1
+        if len(matches) < 2:
+            continue
+        drop = set()
+        for s, e in matches[:-1]:
+            for k in range(s, e):
+                drop.add(k)
+        h1 = ' '.join(w for idx, w in enumerate(words) if idx not in drop)
+    return h1
+
+
 def normalize_preposition_case(text: str) -> str:
     """
     Ensure prepositions like 'met', 'in', 'zonder' are lowercase,
@@ -768,6 +825,7 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
         return None
 
     api_h1 = _dedupe_compound_category(api_h1, canonical_category)
+    api_h1 = _dedupe_facet_values(api_h1, selected_facets)
 
     # Type-facets carry the product type in their values (e.g. soort_bz="Dahliabollen",
     # t_wanddeco="Wandplaten"), so the category name would be a duplicate in the title.
@@ -806,7 +864,10 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
     if not client:
         # If no OpenAI, just return the API H1
         return {
-            "h1_title": _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category),
+            "h1_title": _dedupe_facet_values(
+                _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category),
+                selected_facets,
+            ),
             "original_h1": api_h1,
         }
 
@@ -1164,7 +1225,10 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
 
         print(f"[AI_TITLES] timings url={url} fetch={_t_fetch_ms:.0f}ms polish={_t_polish_ms:.0f}ms")
         return {
-            "h1_title": _dedupe_compound_category(_strip_pre_clause_duplicates(improved_h1), canonical_category),
+            "h1_title": _dedupe_facet_values(
+                _dedupe_compound_category(_strip_pre_clause_duplicates(improved_h1), canonical_category),
+                selected_facets,
+            ),
             "original_h1": api_h1,
         }
 
@@ -1172,7 +1236,10 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         print(f"[AI_TITLES] OpenAI improvement error for {url}: {e}")
         # Return API H1 as fallback
         return {
-            "h1_title": _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category),
+            "h1_title": _dedupe_facet_values(
+                _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category),
+                selected_facets,
+            ),
             "original_h1": api_h1,
         }
 
