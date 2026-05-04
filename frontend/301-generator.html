@@ -7,8 +7,12 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        .results-table { max-height: 600px; overflow-y: auto; }
-        .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
+        .url-cell {
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.85rem;
+            white-space: normal;
+        }
         .url-cell.copyable { cursor: pointer; }
         .url-cell.copyable:hover { background-color: #e9ecef; }
         .url-cell.copied { background-color: #d4edda !important; transition: background-color 0.3s; }
@@ -19,6 +23,15 @@
         .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
         .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+        /* Keep the sticky thead opaque so rows don't bleed through.
+           The global rule in style.css handles `top` (80px, below the
+           navbar) and z-index. */
+        .results-table table thead.sticky-top th {
+            background-color: #f1f3f5 !important;
+            --bs-table-bg: #f1f3f5;
+            background-clip: padding-box;
+            box-shadow: inset 0 -2px 0 #dee2e6;
+        }
     </style>
 </head>
 <body>
@@ -196,23 +209,16 @@
                         <h5 class="mb-0">Results</h5>
                         <div>
                             <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyAllToClipboard()">Copy for Excel</button>
-                            <button class="btn btn-light btn-sm" onclick="downloadResults()">Download CSV</button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="downloadResults()">Download Excel</button>
                         </div>
                     </div>
                     <div class="card-body">
-                        <!-- Summary -->
-                        <div class="row mb-3" id="summaryRow">
-                            <div class="col-md-12">
-                                <div class="d-flex gap-3 flex-wrap" id="summaryStats"></div>
-                            </div>
-                        </div>
-
                         <!-- Results Table -->
                         <div class="results-table">
                             <table class="table table-sm table-bordered table-hover">
                                 <thead class="table-light sticky-top">
                                     <tr>
-                                        <th style="width: 5%">#</th>
+                                        <th class="text-center" style="width: 5%">#</th>
                                         <th style="width: 47%">Original URL</th>
                                         <th style="width: 47%">Redirect To</th>
                                     </tr>
@@ -231,6 +237,7 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script>
         let results = [];
         let facetRuleCount = 0;
@@ -498,28 +505,6 @@
         function showResults(data) {
             document.getElementById('resultsCard').style.display = 'block';
 
-            // Summary
-            let summaryHtml = `
-                <span class="badge bg-secondary">Total URLs checked: ${data.total}</span>
-                <span class="badge bg-warning text-dark">Needs redirect: ${data.needs_redirect}</span>
-                <span class="badge bg-success">No change needed: ${data.total - data.needs_redirect}</span>
-            `;
-            if (data.category_rules_applied > 0) {
-                summaryHtml += `<span class="badge bg-info">Category rules: ${data.category_rules_applied}</span>`;
-            }
-            if (data.facet_rules_applied > 0) {
-                summaryHtml += `<span class="badge bg-info">Facet rules: ${data.facet_rules_applied}</span>`;
-            }
-            document.getElementById('summaryStats').innerHTML = summaryHtml;
-
-            // Show search patterns if any were used
-            if (data.search_patterns && data.search_patterns.length > 0) {
-                let patternsHtml = `<div class="mt-2"><small class="text-muted">Searched for URLs containing: </small>`;
-                patternsHtml += data.search_patterns.map(p => `<code class="ms-1">${escapeHtml(p)}</code>`).join(' OR ');
-                patternsHtml += `</div>`;
-                document.getElementById('summaryStats').innerHTML += patternsHtml;
-            }
-
             // Table
             const tbody = document.getElementById('resultsBody');
             tbody.innerHTML = '';
@@ -528,9 +513,9 @@
                 const tr = document.createElement('tr');
                 tr.className = 'needs-redirect';
                 tr.innerHTML = `
-                    <td>${i + 1}</td>
-                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtml(r.original)}', this)">${truncateUrl(r.original)}</td>
-                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtml(r.redirect)}', this)">${truncateUrl(r.redirect)}</td>
+                    <td class="text-center">${i + 1}</td>
+                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtml(r.original)}', this)" title="${escapeHtml(r.original)}">${escapeHtml(r.original)}</td>
+                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtml(r.redirect)}', this)" title="${escapeHtml(r.redirect)}">${escapeHtml(r.redirect)}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -538,12 +523,6 @@
             if (results.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No URLs need redirects!</td></tr>';
             }
-        }
-
-        function truncateUrl(url, maxLen = 80) {
-            if (!url) return '';
-            if (url.length <= maxLen) return url;
-            return url.substring(0, maxLen) + '...';
         }
 
         function escapeHtml(text) {
@@ -574,17 +553,14 @@
         function downloadResults() {
             if (results.length === 0) return;
 
-            const csv = ['original,redirect'];
-            results.forEach(r => {
-                csv.push(`"${r.original}","${r.redirect}"`);
-            });
+            const aoa = [['original', 'redirect']];
+            results.forEach(r => aoa.push([r.original, r.redirect]));
 
-            const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = '301_redirects.csv';
-            a.click();
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = [{ wch: 80 }, { wch: 80 }];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Redirects');
+            XLSX.writeFile(wb, '301_redirects.xlsx');
         }
 
         // Add one empty rule row of each type on load
