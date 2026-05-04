@@ -168,16 +168,25 @@ def _dedupe_internal_compounds(h1: str) -> str:
         return h1
     words = h1.split()
     n = len(words)
-    spans_by_norm: dict = {}
+
+    def _stem(s: str) -> str:
+        # Fold trailing -s (Dutch/English plural) so "plantentafel" and
+        # "plantentafels" collapse to the same key. Only strip when the
+        # remaining form is still ≥6 chars to avoid mangling short words.
+        if s.endswith('s') and len(s) > 6:
+            return s[:-1]
+        return s
+
+    spans_by_stem: dict = {}
     for start in range(n):
         for end in range(start, min(start + 2, n)):
             joined = _norm_for_dedupe(' '.join(words[start:end + 1]))
             if len(joined) < 6:
                 continue
-            spans_by_norm.setdefault(joined, []).append((start, end + 1))
+            spans_by_stem.setdefault(_stem(joined), []).append((start, end + 1))
 
     drop_set: set = set()
-    for spans in spans_by_norm.values():
+    for spans in spans_by_stem.values():
         if len(spans) < 2:
             continue
         spans.sort()
@@ -189,6 +198,45 @@ def _dedupe_internal_compounds(h1: str) -> str:
     if not drop_set:
         return h1
     return ' '.join(w for i, w in enumerate(words) if i not in drop_set)
+
+
+def _dedupe_prefix_overlap(h1: str) -> str:
+    """Drop a token that's a strict prefix of an adjacent longer token.
+
+    Catches API-side fragmentation where Beslist's H1 renders the same product
+    type as both a standalone token and a joined longer form, e.g.:
+
+      "Lichtgroene planten plantentafel Tafels 55 cm lang"
+      → "Lichtgroene plantentafel Tafels 55 cm lang"
+
+    Only fires when both tokens are ≥6 chars and the longer is ≥3 chars longer
+    (so substantive nouns like "planten" → "plantentafel" trigger but short
+    series/brand fragments like "Aqua" prefix of "Aquariums" or "Sweat" prefix
+    of "sweaters" don't, where the shorter token is itself an information
+    carrier worth keeping). Looks ahead 1-2 positions so an intervening
+    adjective doesn't break the match.
+    """
+    if not h1:
+        return h1
+    words = h1.split()
+    n = len(words)
+    drop: set = set()
+    for i in range(n):
+        if i in drop:
+            continue
+        a = words[i].lower().strip('.,!?;:')
+        if len(a) < 6:
+            continue
+        for j in range(i + 1, min(i + 3, n)):
+            if j in drop:
+                continue
+            b = words[j].lower().strip('.,!?;:')
+            if len(b) >= len(a) + 3 and b.startswith(a):
+                drop.add(i)
+                break
+    if not drop:
+        return h1
+    return ' '.join(w for i, w in enumerate(words) if i not in drop)
 
 
 def _dedupe_facet_values(h1: str, selected_facets: list) -> str:
@@ -880,6 +928,7 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
         return None
 
     api_h1 = _dedupe_compound_category(api_h1, canonical_category)
+    api_h1 = _dedupe_prefix_overlap(api_h1)
     api_h1 = _dedupe_internal_compounds(api_h1)
     api_h1 = _dedupe_facet_values(api_h1, selected_facets)
 
@@ -922,7 +971,9 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
         return {
             "h1_title": _dedupe_facet_values(
                 _dedupe_internal_compounds(
-                    _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category)
+                    _dedupe_prefix_overlap(
+                        _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category)
+                    )
                 ),
                 selected_facets,
             ),
@@ -1285,7 +1336,9 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         return {
             "h1_title": _dedupe_facet_values(
                 _dedupe_internal_compounds(
-                    _dedupe_compound_category(_strip_pre_clause_duplicates(improved_h1), canonical_category)
+                    _dedupe_prefix_overlap(
+                        _dedupe_compound_category(_strip_pre_clause_duplicates(improved_h1), canonical_category)
+                    )
                 ),
                 selected_facets,
             ),
@@ -1298,7 +1351,9 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         return {
             "h1_title": _dedupe_facet_values(
                 _dedupe_internal_compounds(
-                    _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category)
+                    _dedupe_prefix_overlap(
+                        _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category)
+                    )
                 ),
                 selected_facets,
             ),
