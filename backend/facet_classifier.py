@@ -165,7 +165,83 @@ def _classify_with_llm(facet_name: str, sample_value: str,
         return False, f"llm error: {e}"
 
 
+# Facets that are NEVER type-facets in any category — hardcoded policy override.
+# Reason: their values are usually adjectival/brand-line descriptors that need the
+# category name to make sense in a title.
+_NEVER_TYPE_FACETS = {
+    'type productlijn',  # almost always a brand-tied series adjective (e.g. "Compact")
+}
+
+
 _MEM_CACHE: dict = {}
+
+
+def batch_classify_facets(facets: list, category_name: str) -> dict:
+    """
+    Look up is_type_facet for every facet in a single DB round-trip.
+
+    Same semantics as calling classify_facet() per facet, but resolves cache hits
+    in memory and merges the remaining lookups into one query keyed on
+    (facet_name = ANY(%s), sample_category = %s). For facets still uncached after
+    the DB hit, falls through to per-facet LLM classification (rare in practice
+    once preclassification has run).
+
+    Args:
+        facets: list of dicts with 'facet_name' and 'detail_value' (as returned
+                by extract_selected_facets).
+        category_name: category context for the lookup.
+
+    Returns:
+        dict mapping facet_name (lowercased, trimmed) -> is_type_facet (bool).
+    """
+    if not facets:
+        return {}
+    cat = (category_name or "").lower().strip()
+    norm_pairs = []  # (fname_lower, sample_value)
+    seen = set()
+    for f in facets:
+        fname = (f.get('facet_name') or '').lower().strip()
+        if not fname or fname in seen:
+            continue
+        seen.add(fname)
+        norm_pairs.append((fname, f.get('detail_value', '')))
+
+    result: dict = {}
+    missing = []
+    for fname, _sample in norm_pairs:
+        if fname in _NEVER_TYPE_FACETS:
+            result[fname] = False
+            continue
+        ck = (fname, cat)
+        if ck in _MEM_CACHE:
+            result[fname] = _MEM_CACHE[ck]
+        else:
+            missing.append(fname)
+
+    if missing:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT facet_name, is_type_facet FROM pa.facet_type_classifications "
+                "WHERE sample_category = %s AND facet_name = ANY(%s)",
+                (cat, missing),
+            )
+            for row in cur.fetchall():
+                fn = row['facet_name']
+                v = bool(row['is_type_facet'])
+                result[fn] = v
+                _MEM_CACHE[(fn, cat)] = v
+        finally:
+            cur.close()
+            return_db_connection(conn)
+
+    # For any facet still not classified, fall through to LLM-backed classify_facet.
+    sample_by_fname = dict(norm_pairs)
+    for fname in (fn for fn, _ in norm_pairs):
+        if fname not in result:
+            result[fname] = classify_facet(fname, sample_by_fname.get(fname, ''), category_name)
+    return result
 
 
 def classify_facet(facet_name: str, sample_value: str = "",
@@ -178,6 +254,10 @@ def classify_facet(facet_name: str, sample_value: str = "",
     fname = facet_name.lower().strip()
     cat = (category_name or "").lower().strip()
     if not fname:
+        return False
+
+    # Hardcoded policy override: certain facets are never type-facets.
+    if fname in _NEVER_TYPE_FACETS:
         return False
 
     key = (fname, cat)

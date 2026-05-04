@@ -248,12 +248,14 @@ def extract_selected_facets(api_response: Dict) -> List[Dict[str, str]]:
     facets = api_response.get("facets", [])
     for facet_group in facets:
         facet_name = facet_group.get("name", "")
+        url_name = facet_group.get("urlName", "")
         values = facet_group.get("values", [])
 
         for value in values:
             if value.get("selected", False):
                 selected.append({
                     "facet_name": facet_name,
+                    "url_name": url_name,
                     "facet_value": value.get("facetValue", ""),
                     "detail_value": value.get("detailValue", value.get("facetValue", ""))
                 })

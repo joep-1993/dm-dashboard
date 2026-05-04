@@ -175,6 +175,73 @@ def normalize_preposition_case(text: str) -> str:
     return ' '.join(result)
 
 
+# Module-level constants for facet categorization, hoisted out of
+# generate_title_from_api so they are not rebuilt per URL and are unit-testable.
+_PRODUCT_TYPE_SUFFIXES = (
+    'jassen', 'jacks', 'broeken', 'shirts', 'hemden', 'tops', 'blouses',
+    'schoenen', 'laarzen', 'sandalen', 'sneakers', 'boots', 'pumps', 'instappers',
+    'jurken', 'rokken', 'truien', 'vesten', 'pakken',
+    'tassen', 'horloges', 'brillen', 'sieraden',
+    'pannen', 'ovens', 'magnetrons', 'koelkasten', 'wasmachines',
+    'banken', 'stoelen', 'tafels', 'kasten', 'bedden',
+)
+_MET_FEATURE_VALUES = {
+    'korte mouwen', 'lange mouwen', 'driekwart mouwen',
+    'capuchon',
+    'ronde hals', 'v-hals', 'col', 'opstaande kraag',
+    'rits', 'knopen', 'drukknopen', 'veters',
+    'draaiplateau', 'grill',
+    'strepen',
+}
+_SPEC_UNITS_RE = re.compile(
+    r'^\d+[\.,]?\d*\s*'
+    r'(liter|liters|watt|volt|bar|pk|rpm|mph|kwh|kw'
+    r'|cm|mm|meter|m|inch|"'
+    r'|kg|gram|g|mg|ml|cl|dl|l'
+    r'|persoons|personen|deurs|zits)\b',
+    re.IGNORECASE,
+)
+_SIZE_ABBREVS = {'xs', 'xxs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl',
+                 '2xl', '3xl', '4xl', '5xl'}
+_ADJECTIVAL_SIZES = {
+    'klein', 'kleine', 'groot', 'grote', 'middel', 'middelgroot', 'middelgrote',
+    'mini', 'midi', 'maxi',
+    'extra groot', 'extra grote', 'extra klein', 'extra kleine',
+    'zeer groot', 'zeer grote', 'zeer klein', 'zeer kleine',
+}
+_ADJ_UNINFLECT = {'brede': 'breed', 'lange': 'lang', 'hoge': 'hoog',
+                  'diepe': 'diep', 'smalle': 'smal'}
+
+
+def is_spec_value(val: str, fname: str) -> bool:
+    """Detect if a facet value is a specification that should go at the end."""
+    vl = val.lower().strip()
+    if vl in _ADJECTIVAL_SIZES:
+        return False
+    if vl.startswith('maat ') or vl.startswith('wijdte'):
+        return True
+    if vl in ('grote maten', 'kleine maten'):
+        return True
+    if _SPEC_UNITS_RE.match(vl):
+        return True
+    if val.replace('.', '').replace(',', '').replace('-', '').strip().isdigit():
+        return True
+    if vl in _SIZE_ABBREVS:
+        return True
+    if fname.startswith('maat') or fname.startswith('wijdte'):
+        return True
+    if fname.startswith('vermogen'):
+        return True
+    if fname == 'aantal_puzzelstukjes':
+        return True
+    return False
+
+
+def _norm_ws(s: str) -> str:
+    """Whitespace+lowercase normalize for prefix-overlap comparisons."""
+    return ' '.join(s.lower().split())
+
+
 def format_dimensions(text: str) -> str:
     """
     Format dimension patterns to include 'x' between measurements.
@@ -573,11 +640,22 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
 
     # Type-facets carry the product type in their values (e.g. soort_bz="Dahliabollen",
     # t_wanddeco="Wandplaten"), so the category name would be a duplicate in the title.
-    # Classification is per facet_name, cached in pa.facet_type_classifications.
-    from backend.facet_classifier import classify_facet
+    # Classification is per (facet_name, category) pair, cached in
+    # pa.facet_type_classifications. Single batched DB lookup per URL instead of
+    # one per facet (the per-facet path opens a fresh DB connection each call).
+    from backend.facet_classifier import batch_classify_facets, _NEVER_TYPE_FACETS
+    type_class = batch_classify_facets(selected_facets, category_name)
+    # Treat any facet whose URL slug (url_name) is in the policy never-list as
+    # NOT a type-facet, regardless of whether the per-(facet_name, category)
+    # classification says True. The classifier is keyed on the API facet_name
+    # (e.g. "type") which may serve double duty across URL slugs (e.g.
+    # "type_productlijn" vs "type"); the URL slug is the more reliable signal
+    # for the policy.
+    _NEVER_URL_SLUGS = {'type_productlijn'}
     has_category_override = any(
-        classify_facet(f['facet_name'], f.get('detail_value', ''), category_name)
+        type_class.get((f.get('facet_name') or '').lower().strip(), False)
         for f in selected_facets
+        if (f.get('url_name') or '').lower() not in _NEVER_URL_SLUGS
     )
     if has_category_override and category_name:
         # Strip category_name from end or start of the API H1 if it's already there
@@ -622,14 +700,42 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
                 )
             brand_facet = None  # Brand was deduplicated
 
+    # When BOTH populaire_serie and type_productlijn URL slugs are present, treat
+    # the two values as a single inseparable productname chunk that is prepended
+    # together (e.g. "Teva Hurricane XLT 2"). Otherwise the AI would happily slot
+    # a colour or doelgroep between them ("Teva Hurricane Zwarte XLT 2"). Match
+    # on url_name (URL slug) rather than facet_name (display label) since the
+    # API exposes the slug under urlName and the display label drifts per category.
+    populaire_serie_facet = next(
+        (f for f in selected_facets if (f.get('url_name') or '').lower() == 'populaire_serie'),
+        None,
+    )
+    type_productlijn_facet = next(
+        (f for f in selected_facets if (f.get('url_name') or '').lower() == 'type_productlijn'),
+        None,
+    )
+    series_combined_chunk = ""
+    if populaire_serie_facet and type_productlijn_facet:
+        ps_val = populaire_serie_facet['detail_value']
+        tp_val = type_productlijn_facet['detail_value']
+        series_combined_chunk = f"{ps_val} {tp_val}"
+        # Strip both values from api_h1 so the AI doesn't see them split up.
+        for v in (ps_val, tp_val):
+            api_h1 = re.sub(r'\b' + re.escape(v) + r'\b', '', api_h1, count=1, flags=re.IGNORECASE)
+        api_h1 = re.sub(r'\s+', ' ', api_h1).strip()
+        # Drop both facets from selected_facets so neither becomes a lead_value
+        # nor a prompt facet — they'll re-enter via the prepended chunk.
+        selected_facets = [
+            f for f in selected_facets
+            if f is not populaire_serie_facet and f is not type_productlijn_facet
+        ]
+
     # Collect brand/productlijn to strip from AI input and prepend in code after
     # This avoids AI misplacing multi-word brands like "The Indian Maharadja".
     # A lead facet is dropped when its full value is the prefix of another remaining
     # facet's value (case-insensitive) — e.g. Productlijn="Lenovo IdeaPad" already
     # covered by Modelnaam="Lenovo Ideapad 5" — to prevent the prepend from causing
     # "Lenovo IdeaPad Lenovo Ideapad 5"-style duplication in the final title.
-    def _norm_ws(s: str) -> str:
-        return ' '.join(s.lower().split())
     lead_values = []  # Will be prepended to final title in order
     for lead_facet_name in ('merk', 'productlijn'):
         lead_facet = next((f for f in selected_facets if f['facet_name'].lower() == lead_facet_name), None)
@@ -697,94 +803,20 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
 
     # Strip redundant category name when a "Soort" facet already contains the product type
     # e.g., Soort="Parka jassen" + category_name="Jacks" → H1 "Parka jassen jacks" → strip "jacks"
-    _product_type_suffixes = (
-        'jassen', 'jacks', 'broeken', 'shirts', 'hemden', 'tops', 'blouses',
-        'schoenen', 'laarzen', 'sandalen', 'sneakers', 'boots', 'pumps', 'instappers',
-        'jurken', 'rokken', 'truien', 'vesten', 'pakken',
-        'tassen', 'horloges', 'brillen', 'sieraden',
-        'pannen', 'ovens', 'magnetrons', 'koelkasten', 'wasmachines',
-        'banken', 'stoelen', 'tafels', 'kasten', 'bedden',
-    )
     soort_facet = next((f for f in selected_facets if f['facet_name'].lower() == 'soort'), None)
     if soort_facet and category_name:
         soort_val = soort_facet['detail_value']
         # Check if the soort value ends with a product type word
         soort_last_word = soort_val.rsplit(None, 1)[-1].lower() if soort_val else ''
-        is_product_type = soort_last_word.endswith(_product_type_suffixes)
+        is_product_type = soort_last_word.endswith(_PRODUCT_TYPE_SUFFIXES)
         if is_product_type:
             # Strip trailing category name from H1 (case-insensitive)
             cat_pattern = re.compile(r'\s+' + re.escape(category_name) + r'\s*$', re.IGNORECASE)
             api_h1 = cat_pattern.sub('', api_h1).strip()
 
-    # Classify facets for placement
-    # Sizes: will be appended in code AFTER AI generates title (to prevent "met Maat" errors)
-    # Met-features: passed to AI with hint to add "met"
-    # Regular: passed to AI normally
-    # Feature values that need "met" added — these are product parts/features
-    # that the API returns WITHOUT "met" prefix in detail_value.
-    # (Values already starting with "met "/"zonder " are handled automatically)
-    met_feature_values = {
-        'korte mouwen', 'lange mouwen', 'driekwart mouwen',
-        'capuchon',
-        'ronde hals', 'v-hals', 'col', 'opstaande kraag',
-        'rits', 'knopen', 'drukknopen', 'veters',
-        'draaiplateau', 'grill',
-        'strepen',
-    }
-
-    # Auto-detect spec/size values: number+unit, bare numbers, size abbreviations, "Maat X", "Wijdte X"
-    _spec_units_re = re.compile(
-        r'^\d+[\.,]?\d*\s*'
-        r'(liter|liters|watt|volt|bar|pk|rpm|mph|kwh|kw'
-        r'|cm|mm|meter|m|inch|"'
-        r'|kg|gram|g|mg|ml|cl|dl|l'
-        r'|persoons|personen|deurs|zits)\b',
-        re.IGNORECASE
-    )
-    _size_abbrevs = {'xs', 'xxs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', '2xl', '3xl', '4xl', '5xl'}
-    # Adjectival size words that look like a Maat facet but should be placed BEFORE
-    # the productnaam (rule 9), not appended at the end. Without this, "Maat=Kleine"
-    # produces titles like "Rubberen Butterfly Kiss vibrators Kleine" instead of
-    # "Kleine rubberen Butterfly Kiss vibrators".
-    _adjectival_sizes = {
-        'klein', 'kleine', 'groot', 'grote', 'middel', 'middelgroot', 'middelgrote',
-        'mini', 'midi', 'maxi',
-        'extra groot', 'extra grote', 'extra klein', 'extra kleine',
-        'zeer groot', 'zeer grote', 'zeer klein', 'zeer kleine',
-    }
-
-    def is_spec_value(val, fname):
-        """Detect if a facet value is a specification that should go at the end."""
-        vl = val.lower().strip()
-        # Adjectival size words go before the productnaam, not at the end.
-        if vl in _adjectival_sizes:
-            return False
-        # Starts with "Maat" or "Wijdte"
-        if vl.startswith('maat ') or vl.startswith('wijdte'):
-            return True
-        # "Grote maten" / "Kleine maten"
-        if vl in ('grote maten', 'kleine maten'):
-            return True
-        # Number + unit pattern: "30 liter", "900 Watt", "23 cm", etc.
-        if _spec_units_re.match(vl):
-            return True
-        # Bare number (e.g., "57" from maat facets)
-        if val.replace('.', '').replace(',', '').replace('-', '').strip().isdigit():
-            return True
-        # Standard size abbreviations
-        if vl in _size_abbrevs:
-            return True
-        # Facet name hints (fallback for less common facet names)
-        if fname.startswith('maat') or fname.startswith('wijdte'):
-            return True
-        # Power/output facets (e.g., "Vermogen (Watt)")
-        if fname.startswith('vermogen'):
-            return True
-        # Puzzle piece counts (e.g., "500 Stukjes", "1000 Stukken")
-        if fname == 'aantal_puzzelstukjes':
-            return True
-        return False
-
+    # Sizes: appended after AI runs (to prevent "met Maat" errors).
+    # Met-features: passed to AI with a hint to wrap them in "met X" clause.
+    # Regular: passed to AI as-is.
     size_values = []       # Display values to append at end (e.g., "Maat 57")
     size_originals = []    # Original values to strip from H1 (e.g., "57")
     suffix_values = []     # Values appended after title but before size (e.g., "Zwart/goud")
@@ -803,10 +835,9 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
                 val = f"Maat {val}"
             # Strip trailing inflected adjective for end-placement
             # "60 cm brede" → "60 cm breed" (uninflect Dutch adjective at end of title)
-            _adj_uninflect = {'brede': 'breed', 'lange': 'lang', 'hoge': 'hoog', 'diepe': 'diep', 'smalle': 'smal'}
             last_word = val.rsplit(None, 1)[-1].lower() if ' ' in val else ''
-            if last_word in _adj_uninflect:
-                val = val[:-(len(last_word))] + _adj_uninflect[last_word]
+            if last_word in _ADJ_UNINFLECT:
+                val = val[:-(len(last_word))] + _ADJ_UNINFLECT[last_word]
             size_values.append(val)
         elif fname == 'doelgroep_drogisterij':
             voor_originals.append(val)
@@ -826,7 +857,7 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
             elif val.lower().endswith('print'):
                 met_values.append(val)
             # Known feature values that need "met" added
-            elif val.lower() in met_feature_values:
+            elif val.lower() in _MET_FEATURE_VALUES:
                 met_values.append(val)
             # Facet names that should always be met-features
             elif fname == 'materiaal band':
@@ -968,9 +999,15 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
             if word.lower() not in all_input_words and word in improved_h1.split():
                 improved_h1 = ' '.join(w for w in improved_h1.split() if w != word)
 
-        # Prepend brand/productlijn (stripped before AI, prepended in code)
-        if lead_values:
-            improved_h1 = ' '.join(lead_values) + ' ' + improved_h1
+        # Prepend brand/productlijn (stripped before AI, prepended in code).
+        # When a populaire_serie+type_productlijn combo was detected, append the
+        # combined chunk AFTER the brand lead values so the order is
+        # <merk> <populaire_serie> <type_productlijn> <rest>.
+        prefix_chunks = list(lead_values)
+        if series_combined_chunk:
+            prefix_chunks.append(series_combined_chunk)
+        if prefix_chunks:
+            improved_h1 = ' '.join(prefix_chunks) + ' ' + improved_h1
 
         # Append suffix values (e.g., color combos), voor values, then size values at the end
         if suffix_values:
