@@ -31,26 +31,41 @@ BASE_URL = "https://www.beslist.nl"
 LOWERCASE_WORDS = {"met", "in", "zonder", "van", "voor", "tot", "op", "aan", "uit", "bij", "naar", "over", "onder", "tegen", "tussen", "door", "om", "en", "of"}
 
 
+def _norm_for_dedupe(s: str) -> str:
+    """Normalize a span for compound-category dedupe.
+
+    Folds the separators that the H1 generator and taxonomy use interchangeably:
+    "ovens & fornuizen" / "ovens en fornuizen" / "ovensfornuizen" all collapse
+    to the same key. Strips whitespace, hyphens, ampersands, and the standalone
+    Dutch conjunction "en" when it sits between separators.
+    """
+    s = s.lower()
+    s = re.sub(r'\s*&\s*', ' ', s)
+    s = re.sub(r'(?:^|\s)en(?=\s|$)', ' ', s)
+    s = re.sub(r'[\s\-]+', '', s)
+    return s
+
+
 def _dedupe_compound_category(h1: str, category_name: str) -> str:
     """Strip a duplicated compound spelling of the category from `h1`.
 
     When the H1 contains the category in two spelling variants (joined vs split,
-    e.g. "massageolie" + "massage olie"), keep the LAST occurrence and drop the
-    earlier ones. Last-wins because the canonical taxv2 category name is appended
-    at the end of the H1 by the upstream pipeline.
+    `&` vs ` en `, etc., e.g. "massageolie" + "massage olie", or
+    "ovens en fornuizen" + "ovens & fornuizen"), keep the LAST occurrence and
+    drop the earlier ones. Last-wins because the canonical taxv2 category name
+    is appended at the end of the H1 by the upstream pipeline.
     """
     if not h1 or not category_name:
         return h1
-    cat_norm = re.sub(r'[\s-]+', '', category_name.lower())
+    cat_norm = _norm_for_dedupe(category_name)
     if len(cat_norm) < 4:
         return h1
     words = h1.split()
     matches = []
     n = len(words)
     for start in range(n):
-        joined = ''
         for end in range(start, n):
-            joined += re.sub(r'[\s-]+', '', words[end].lower())
+            joined = _norm_for_dedupe(' '.join(words[start:end + 1]))
             if len(joined) > len(cat_norm):
                 break
             if joined == cat_norm:
@@ -58,10 +73,16 @@ def _dedupe_compound_category(h1: str, category_name: str) -> str:
                 break
     if len(matches) < 2:
         return h1
+    # Drop earlier matches; keep only the last (canonical) occurrence.
+    # Resolve overlaps among the to-drop set by preferring earliest non-overlapping spans.
     drop_set = set()
+    last_drop_end = -1
     for s, e in matches[:-1]:
+        if s < last_drop_end:
+            continue
         for i in range(s, e):
             drop_set.add(i)
+        last_drop_end = e
     new_words = [w for i, w in enumerate(words) if i not in drop_set]
     return ' '.join(new_words)
 
