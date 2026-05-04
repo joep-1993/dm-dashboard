@@ -233,8 +233,8 @@ async function refreshFaqStatus() {
                                 </button>
                             </div>
                         </div>
-                        <button class="btn btn-sm btn-danger" style="width: 30px; height: 30px; padding: 0; line-height: 30px;" onclick="deleteFaqResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
-                            x
+                        <button class="btn btn-sm btn-danger-invert d-inline-flex align-items-center justify-content-center" style="width: 30px; height: 30px; padding: 0; font-size: 1.1rem; line-height: 1;" onclick="deleteFaqResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
+                            ×
                         </button>
                     </div>
                 `;

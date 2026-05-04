@@ -357,6 +357,30 @@ body {
     color: white;
 }
 
+.btn-outline-purple {
+    color: #5e4a90;
+    border: 1px solid #5e4a90;
+    background-color: transparent;
+}
+
+.btn-outline-purple:hover {
+    background-color: #5e4a90;
+    border-color: #5e4a90;
+    color: white;
+}
+
+.btn-danger-invert {
+    background-color: #dc3545;
+    border: 1px solid #dc3545;
+    color: white;
+}
+
+.btn-danger-invert:hover {
+    background-color: transparent;
+    border-color: #dc3545;
+    color: #dc3545;
+}
+
 /* Danger buttons - keep red for destructive actions */
 .btn-danger {
     background-color: #dc3545;

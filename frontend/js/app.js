@@ -564,7 +564,7 @@ async function refreshStatus() {
                                 ` : ''}
                             </div>
                         </div>
-                        <button class="btn btn-sm btn-danger ms-2" onclick="deleteResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
+                        <button class="btn btn-sm btn-danger-invert ms-2" onclick="deleteResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
                             ×
                         </button>
                     </div>

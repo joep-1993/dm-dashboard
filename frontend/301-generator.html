@@ -95,9 +95,11 @@
                                 <div style="width: 31px;"></div>
                             </div>
                         </div>
-                        <button class="btn btn-outline-secondary btn-sm mb-2" onclick="addCategoryRule()">+ Add Category Rule</button>
-                        <button class="btn btn-outline-info btn-sm mb-2 ms-2" onclick="toggleCategoryBulkInput()">Bulk Paste</button>
-                        <button class="btn btn-outline-danger btn-sm mb-2 ms-2" onclick="removeAllCategoryRules()">Remove All</button>
+                        <div class="text-end">
+                            <button class="btn btn-outline-secondary btn-sm mb-2" onclick="addCategoryRule()">+ Add Category Rule</button>
+                            <button class="btn btn-outline-info btn-sm mb-2 ms-2" onclick="toggleCategoryBulkInput()">Bulk Paste</button>
+                            <button class="btn btn-outline-danger btn-sm mb-2 ms-2" onclick="removeAllCategoryRules()">Remove All</button>
+                        </div>
                         <div id="categoryBulkInput" class="d-none mb-3">
                             <small class="text-muted d-block mb-1">Paste from Excel (tab-separated): <code>old_category</code> → <code>new_category</code></small>
                             <textarea class="form-control form-control-sm mb-2" id="categoryBulkText" rows="4"></textarea>
@@ -114,9 +116,11 @@
                                 <div style="width: 31px;"></div>
                             </div>
                         </div>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="addFacetRule()">+ Add Facet Rule</button>
-                        <button class="btn btn-outline-info btn-sm ms-2" onclick="toggleFacetBulkInput()">Bulk Paste</button>
-                        <button class="btn btn-outline-danger btn-sm ms-2" onclick="removeAllFacetRules()">Remove All</button>
+                        <div class="text-end">
+                            <button class="btn btn-outline-secondary btn-sm" onclick="addFacetRule()">+ Add Facet Rule</button>
+                            <button class="btn btn-outline-info btn-sm ms-2" onclick="toggleFacetBulkInput()">Bulk Paste</button>
+                            <button class="btn btn-outline-danger btn-sm ms-2" onclick="removeAllFacetRules()">Remove All</button>
+                        </div>
                         <div id="facetBulkInput" class="d-none mt-2">
                             <small class="text-muted d-block mb-1">Paste from Excel (tab-separated): <code>old_facet</code> → <code>new_facet</code> → <code>category_filter</code> (optional)</small>
                             <textarea class="form-control form-control-sm mb-2" id="facetBulkText" rows="4"></textarea>
@@ -154,7 +158,7 @@
                                                 <label for="limitInput" class="form-label small">Limit</label>
                                                 <input type="number" class="form-control form-control-sm" id="limitInput" value="10000">
                                             </div>
-                                            <button class="btn btn-primary btn-sm" onclick="generate()" id="generateBtn">
+                                            <button class="btn btn-primary btn-sm ms-auto" onclick="generate()" id="generateBtn">
                                                 Generate 301 Redirects
                                             </button>
                                         </div>
@@ -163,9 +167,11 @@
                                         <label for="urlInput" class="form-label">Enter URLs (one per line or comma-separated)</label>
                                         <textarea class="form-control" id="urlInput" rows="6" placeholder="/products/fietsen/fietsen_123/c/merk~456~~materiaal~789
 /products/horloge/horloge_123/c/serie~456~~kleur~789"></textarea>
-                                        <button class="btn btn-primary mt-3" onclick="generate()" id="generateBtnManual">
-                                            Generate 301 Redirects
-                                        </button>
+                                        <div class="d-flex justify-content-end">
+                                            <button class="btn btn-primary mt-3" onclick="generate()" id="generateBtnManual">
+                                                Generate 301 Redirects
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                     </div>
@@ -238,7 +244,7 @@
                     <div class="d-flex align-items-center gap-2">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., fietsen_484521_484542" data-field="old_cat">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., fietsen_484521" data-field="new_cat">
-                        <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
+                        <button class="btn btn-sm btn-danger-invert flex-shrink-0" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
                     </div>
                 </div>
             `;
@@ -258,7 +264,7 @@
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., merk~123 or merk" data-field="old_facet">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., materiaal~456 or materiaal" data-field="new_facet">
                         <input type="text" class="form-control form-control-sm" style="flex: 0.75;" placeholder="e.g., /fietsen/" data-field="category">
-                        <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeFacetRule(${facetRuleCount})">×</button>
+                        <button class="btn btn-sm btn-danger-invert flex-shrink-0" onclick="removeFacetRule(${facetRuleCount})">×</button>
                     </div>
                 </div>
             `;
@@ -354,7 +360,7 @@
                     <div class="d-flex align-items-center gap-2">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${oldCat}" data-field="old_cat">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${newCat}" data-field="new_cat">
-                        <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
+                        <button class="btn btn-sm btn-danger-invert flex-shrink-0" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
                     </div>
                 </div>
             `;
@@ -370,7 +376,7 @@
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${oldFacet}" data-field="old_facet">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${newFacet}" data-field="new_facet">
                         <input type="text" class="form-control form-control-sm" style="flex: 0.75;" value="${category}" data-field="category">
-                        <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeFacetRule(${facetRuleCount})">×</button>
+                        <button class="btn btn-sm btn-danger-invert flex-shrink-0" onclick="removeFacetRule(${facetRuleCount})">×</button>
                     </div>
                 </div>
             `;
