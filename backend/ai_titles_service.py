@@ -866,7 +866,7 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
 
     # Append category name if missing from H1 (e.g., "Vrijstaande 23 liter" → "Vrijstaande 23 liter magnetrons")
     if category_name and category_name.lower() not in api_h1.lower():
-        api_h1 = api_h1.rstrip() + " " + category_name.lower()
+        api_h1 = api_h1.rstrip() + " " + category_name
 
     # Step 2: Use OpenAI to improve the H1
     client = get_openai_client()
@@ -1218,11 +1218,11 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
                     size_suffix = " " + " ".join(size_values)
                     if improved_h1.endswith(size_suffix):
                         head = improved_h1[: -len(size_suffix)].rstrip()
-                        improved_h1 = f"{head} {category_name.lower()}{size_suffix}"
+                        improved_h1 = f"{head} {category_name}{size_suffix}"
                     else:
-                        improved_h1 = improved_h1.rstrip() + " " + category_name.lower()
+                        improved_h1 = improved_h1.rstrip() + " " + category_name
                 else:
-                    improved_h1 = improved_h1.rstrip() + " " + category_name.lower()
+                    improved_h1 = improved_h1.rstrip() + " " + category_name
 
         # Capitalize first letter (unless it's a brand that starts lowercase, e.g. "iPhone")
         if improved_h1 and improved_h1[0].islower():

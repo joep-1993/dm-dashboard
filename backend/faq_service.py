@@ -389,7 +389,7 @@ def build_product_subject(selected_facets: List[Dict[str, str]], category_name: 
     )
 
     if needs_category:
-        parts.append(category_name.lower())
+        parts.append(category_name)
 
     return " ".join(parts)
 
