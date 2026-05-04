@@ -31,6 +31,41 @@ BASE_URL = "https://www.beslist.nl"
 LOWERCASE_WORDS = {"met", "in", "zonder", "van", "voor", "tot", "op", "aan", "uit", "bij", "naar", "over", "onder", "tegen", "tussen", "door", "om", "en", "of"}
 
 
+def _dedupe_compound_category(h1: str, category_name: str) -> str:
+    """Strip a duplicated compound spelling of the category from `h1`.
+
+    When the H1 contains the category in two spelling variants (joined vs split,
+    e.g. "massageolie" + "massage olie"), keep the LAST occurrence and drop the
+    earlier ones. Last-wins because the canonical taxv2 category name is appended
+    at the end of the H1 by the upstream pipeline.
+    """
+    if not h1 or not category_name:
+        return h1
+    cat_norm = re.sub(r'[\s-]+', '', category_name.lower())
+    if len(cat_norm) < 4:
+        return h1
+    words = h1.split()
+    matches = []
+    n = len(words)
+    for start in range(n):
+        joined = ''
+        for end in range(start, n):
+            joined += re.sub(r'[\s-]+', '', words[end].lower())
+            if len(joined) > len(cat_norm):
+                break
+            if joined == cat_norm:
+                matches.append((start, end + 1))
+                break
+    if len(matches) < 2:
+        return h1
+    drop_set = set()
+    for s, e in matches[:-1]:
+        for i in range(s, e):
+            drop_set.add(i)
+    new_words = [w for i, w in enumerate(words) if i not in drop_set]
+    return ' '.join(new_words)
+
+
 def normalize_preposition_case(text: str) -> str:
     """
     Ensure prepositions like 'met', 'in', 'zonder' are lowercase,
@@ -449,10 +484,13 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
     api_h1 = page_data.get("h1_title", "")
     selected_facets = page_data.get("selected_facets", [])
     category_name = page_data.get("category_name", "")
+    canonical_category = category_name
 
     if not api_h1:
         print(f"[AI_TITLES] No H1 from API for {url}")
         return None
+
+    api_h1 = _dedupe_compound_category(api_h1, canonical_category)
 
     # Type-facets carry the product type in their values (e.g. soort_bz="Dahliabollen",
     # t_wanddeco="Wandplaten"), so the category name would be a duplicate in the title.
@@ -480,7 +518,7 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
     if not client:
         # If no OpenAI, just return the API H1
         return {
-            "h1_title": api_h1,
+            "h1_title": _dedupe_compound_category(api_h1, canonical_category),
             "original_h1": api_h1,
         }
 
@@ -855,7 +893,7 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
                 improved_h1 = improved_h1[0].upper() + improved_h1[1:]
 
         return {
-            "h1_title": improved_h1,
+            "h1_title": _dedupe_compound_category(improved_h1, canonical_category),
             "original_h1": api_h1,
         }
 
@@ -863,7 +901,7 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
         print(f"[AI_TITLES] OpenAI improvement error for {url}: {e}")
         # Return API H1 as fallback
         return {
-            "h1_title": api_h1,
+            "h1_title": _dedupe_compound_category(api_h1, canonical_category),
             "original_h1": api_h1,
         }
 
