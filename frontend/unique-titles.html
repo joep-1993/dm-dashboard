@@ -924,7 +924,7 @@
                             <p class="mb-1 small"><strong>URL:</strong> <code>${item.url}</code></p>
                             <p class="mb-1 small"><strong>Title:</strong> ${item.title}</p>
                             <p class="mb-1 small"><strong>H1:</strong> ${item.h1_title}</p>
-                            <button class="btn btn-sm btn-outline-primary" onclick="editTitle('${encodeURIComponent(JSON.stringify(item))}')">Edit</button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editTitle('${encodeURIComponent(JSON.stringify(item)).replace(/'/g, '%27')}')">Edit</button>
                         </div>
                     </div>
                 `).join('');
