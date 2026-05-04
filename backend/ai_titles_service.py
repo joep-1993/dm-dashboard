@@ -846,6 +846,7 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
         None,
     )
     series_combined_chunk = ""
+    pre_chunk_modifiers: List[str] = []  # colour values rendered BEFORE the brand+series chunk
     if populaire_serie_facet and type_productlijn_facet:
         ps_val = populaire_serie_facet['detail_value']
         tp_val = type_productlijn_facet['detail_value']
@@ -860,6 +861,24 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
             f for f in selected_facets
             if f is not populaire_serie_facet and f is not type_productlijn_facet
         ]
+        # Render colour modifiers BEFORE the brand+series chunk so the final order
+        # is "<colour> <merk> <populaire_serie> <type_productlijn> <rest>". Avoids
+        # the AI inserting the colour in the middle of the chunk. Only kleur/
+        # kleurtint count here (kleurcombi stays as a suffix); materiaal is left
+        # alone because it often reads better as an adjective adjacent to the
+        # productnaam ("Asics Gel Nimbus leren herenschoenen").
+        colour_facets = [
+            f for f in selected_facets
+            if (f.get('url_name') or '').lower().startswith('kleur')
+            and not (f.get('url_name') or '').lower().startswith('kleurcombi')
+        ]
+        for cf in colour_facets:
+            cv = cf['detail_value']
+            pre_chunk_modifiers.append(cv)
+            api_h1 = re.sub(r'\b' + re.escape(cv) + r'\b', '', api_h1, count=1, flags=re.IGNORECASE)
+        api_h1 = re.sub(r'\s+', ' ', api_h1).strip()
+        if colour_facets:
+            selected_facets = [f for f in selected_facets if f not in colour_facets]
 
     # Collect brand/productlijn to strip from AI input and prepend in code after
     # This avoids AI misplacing multi-word brands like "The Indian Maharadja".
@@ -1097,10 +1116,9 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         )
 
         # Prepend brand/productlijn (stripped before AI, prepended in code).
-        # When a populaire_serie+type_productlijn combo was detected, append the
-        # combined chunk AFTER the brand lead values so the order is
-        # <merk> <populaire_serie> <type_productlijn> <rest>.
-        prefix_chunks = list(lead_values)
+        # When a populaire_serie+type_productlijn combo was detected, the order is
+        # <colour> <merk> <populaire_serie> <type_productlijn> <rest>.
+        prefix_chunks = list(pre_chunk_modifiers) + list(lead_values)
         if series_combined_chunk:
             prefix_chunks.append(series_combined_chunk)
         if prefix_chunks:
