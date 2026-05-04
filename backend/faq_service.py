@@ -391,16 +391,26 @@ def build_product_subject(selected_facets: List[Dict[str, str]], category_name: 
 
 # --- Product Search API ---
 
-def fetch_products_api(url: str) -> Optional[Dict]:
+def fetch_products_api(url: str, include_related: bool = True) -> Optional[Dict]:
     """
     Fetch product data from the Product Search API.
+
+    Args:
+        url: Page URL.
+        include_related: If True (default), also extract the products list and
+            related-PLP URL list — needed for the FAQ generation flow. If False,
+            skip both (saves ~30% of post-fetch work). The titles generation flow
+            only reads h1_title/selected_facets/category_name and can opt out.
 
     Returns:
         Dict with:
         - url: Original URL
         - h1_title: Page title (from category)
         - product_subject: Subject built from selected facets
-        - products: List of products with title and description
+        - products: List of products with title and description (empty when
+          include_related=False)
+        - product_urls: List of product detail URLs (empty when
+          include_related=False)
         - error: (optional) Error reason if API call failed
     """
     try:
@@ -456,8 +466,8 @@ def fetch_products_api(url: str) -> Optional[Dict]:
         # Extract selected facets
         selected_facets = extract_selected_facets(data)
 
-        # Extract related PLP URLs for hyperlinks in FAQ answers
-        related_plp_urls = extract_related_plp_urls(data)
+        # Extract related PLP URLs for hyperlinks in FAQ answers (FAQ flow only)
+        related_plp_urls = extract_related_plp_urls(data) if include_related else []
 
         # Get category name from CSV lookup (preferred) or fall back to API product data
         csv_maincat, csv_deepest = lookup_category(main_category, category)
@@ -477,42 +487,43 @@ def fetch_products_api(url: str) -> Optional[Dict]:
         # Build product subject from selected facets
         product_subject = build_product_subject(selected_facets, deepest_category_name)
 
-        # Extract products and their URLs
+        # Extract products and their URLs (FAQ flow only — titles flow opts out)
         products = []
         product_urls = []
-        api_products = data.get("products", [])[:30]  # Limit for FAQ generation
+        if include_related:
+            api_products = data.get("products", [])[:30]  # Limit for FAQ generation
 
-        for product in api_products:
-            # Skip orResult products - only include exact matches (type="result")
-            product_type = product.get("type", "")
-            if product_type == "orResult":
-                continue
+            for product in api_products:
+                # Skip orResult products - only include exact matches (type="result")
+                product_type = product.get("type", "")
+                if product_type == "orResult":
+                    continue
 
-            title = product.get("title", product.get("description", ""))[:100]
-            description = product.get("description", title)[:200]
-            plp_url = product.get("plpUrl", "")
-            shop_count = product.get("shopCount", 0)
+                title = product.get("title", product.get("description", ""))[:100]
+                description = product.get("description", title)[:200]
+                plp_url = product.get("plpUrl", "")
+                shop_count = product.get("shopCount", 0)
 
-            if title:
-                products.append({
-                    "title": title,
-                    "description": description
-                })
-
-            # Extract product URLs (/p/ URLs) for FAQ hyperlinks
-            # Only include products with at least 2 offers (shopCount >= 2)
-            if plp_url and "/p/" in plp_url and shop_count >= 2:
-                # Make it a full URL if relative
-                if plp_url.startswith("/"):
-                    full_url = f"{BASE_URL}{plp_url}"
-                else:
-                    full_url = plp_url
-                # Avoid duplicates
-                if not any(p["url"] == full_url for p in product_urls):
-                    product_urls.append({
-                        "url": full_url,
-                        "label": title[:50] if title else "Product"
+                if title:
+                    products.append({
+                        "title": title,
+                        "description": description
                     })
+
+                # Extract product URLs (/p/ URLs) for FAQ hyperlinks
+                # Only include products with at least 2 offers (shopCount >= 2)
+                if plp_url and "/p/" in plp_url and shop_count >= 2:
+                    # Make it a full URL if relative
+                    if plp_url.startswith("/"):
+                        full_url = f"{BASE_URL}{plp_url}"
+                    else:
+                        full_url = plp_url
+                    # Avoid duplicates
+                    if not any(p["url"] == full_url for p in product_urls):
+                        product_urls.append({
+                            "url": full_url,
+                            "label": title[:50] if title else "Product"
+                        })
 
         # Use product_subject as title if available, otherwise use category
         h1_title = product_subject if product_subject else deepest_category_name if deepest_category_name else main_category

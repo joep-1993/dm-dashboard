@@ -242,6 +242,127 @@ def _norm_ws(s: str) -> str:
     return ' '.join(s.lower().split())
 
 
+# --- Polish prompt variants (v1: detailed, v2: short) ---
+
+_POLISH_PROMPT_V2_TEMPLATE = (
+    'Je krijgt een Nederlandse SEO-titel die al de juiste woorden in ongeveer de '
+    'juiste volgorde heeft. Lever ALLEEN de gepolijste titel terug (geen uitleg).\n\n'
+    'Huidige titel: "{ai_h1}"\n'
+    'Facetwaarden die intact moeten blijven: {facet_values_str}\n'
+    '{met_section}\n'
+    'Regels:\n'
+    '1. Voeg geen woorden toe en verwijder geen woorden behalve dubbelingen.\n'
+    '2. Mag wel woordvolgorde aanpassen voor natuurlijk Nederlands.\n'
+    '3. Verbuig bijvoeglijke naamwoorden ("Nieuw"→"Nieuwe", "Vrijstaand"→"Vrijstaande", "Klein"→"Kleine") waar grammaticaal nodig.\n'
+    '4. Eerste woord met hoofdletter; daarna kleine letters behalve eigennamen/merken.\n'
+    '5. Bijvoeglijke naamwoorden (kleur/materiaal/stijl/formaat/conditie) VOOR de productnaam, doelgroep direct VOOR de productnaam.\n'
+    '6. NOOIT "in", "van" of "voor" toevoegen.\n'
+    '7. Als er een "met X" / "zonder X" clause is: NA de productnaam, niet ervoor.\n'
+    '8. Maten ("Maat L", "40 cm", "128 GB") en kleurcombinaties helemaal achteraan.'
+)
+
+
+def _build_polish_prompt(ai_h1: str, facet_info: str, facet_values_str: str,
+                         met_section: str, met_rule: str, mode: str = 'v1') -> str:
+    if mode == 'v2':
+        return _POLISH_PROMPT_V2_TEMPLATE.format(
+            ai_h1=ai_h1, facet_values_str=facet_values_str, met_section=met_section
+        )
+    # v1 (default) — long detailed prompt
+    return f"""Je bent een SEO-expert. Verbeter deze titel tot een goedlopende en grammaticaal correcte H1 zonder "-".
+
+Huidige titel van API: "{ai_h1}"
+
+Facetten (naam: waarde): {facet_info}
+
+BELANGRIJK - Facetwaarden die INTACT moeten blijven (niet splitsen of herschikken):
+{facet_values_str}
+{met_section}
+Regels:
+1. ALLERBELANGRIJKSTE REGEL: Gebruik UITSLUITEND woorden die voorkomen in de titel OF in de facetten hierboven. Voeg ABSOLUUT GEEN nieuwe woorden toe. Geen "Nieuwe", geen extra bijvoeglijke naamwoorden, geen woorden die niet letterlijk in de input staan.
+2. Facetwaarden zijn vaste combinaties en mogen NIET opgesplitst worden.
+3. Merk ALTIJD vooraan (bijv. "Apple iPhones" niet "iPhones van Apple").
+4. Kleuren, materialen en stijlen (bv. "Industriële", "Moderne", "Scandinavische") als bijvoeglijk naamwoord VOOR de doelgroep en VOOR de productnaam, NOOIT aan het einde van de titel (bijv. "blauwe Heren hoodies", "Industriële Zwarte tafels", NIET "Heren blauwe hoodies" of "tafels Industriële").
+5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan direct VOOR de productnaam maar NA kleuren/materialen, NOOIT met "voor" ervoor.
+6. NOOIT "in", "van" of "voor" toevoegen (doelgroep-achtervoegsel wordt automatisch toegevoegd).
+{met_rule}8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
+9. ALLE bijvoeglijke naamwoorden uit de facetten moeten VOOR de productnaam staan, NOOIT erna. Dit geldt niet alleen voor formaat ("Klein"/"Kleine", "Groot"/"Grote", "Middel", "Mini", "Maxi") en conditie ("Nieuw"/"Nieuwe"), maar ook voor kenmerken zoals "Waterdicht"/"Waterdichte", "Vrijstaand"/"Vrijstaande", "Luxe", "Modern"/"Moderne", "Klassiek"/"Klassieke", "Inbouw", "Hangend", "Opvouwbaar". Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
+   - FOUT: "Rubberen Butterfly Kiss vibrators Kleine"
+   - GOED: "Kleine rubberen Butterfly Kiss vibrators"
+   - FOUT: "Dames kunststof sporttassen Waterdichte"  (Waterdichte staat na de productnaam)
+   - GOED: "Dames kunststof waterdichte sporttassen"
+   - FOUT: "Inductie kookplaten Vrijstaande"
+   - GOED: "Vrijstaande inductie kookplaten"
+   - FOUT: "Houten salontafels Grote"
+   - GOED: "Grote houten salontafels"
+10. Verbuig bijvoeglijke naamwoorden correct (bijv. "Nieuw" → "Nieuwe" voor de-woorden, "Vrijstaand" → "Vrijstaande").
+11. Maak de titel natuurlijk lopend Nederlands.
+
+Geef ALLEEN de verbeterde titel terug, geen uitleg."""
+
+
+# --- Hallucination-guard variants ---
+
+_HALLUC_V1_CHECKS = ['Heren', 'Dames', 'Kinderen', 'Jongens', 'Meisjes', 'Baby', 'Nieuwe', 'Nieuw']
+
+
+def _apply_hallucination_guard(improved_h1: str, ai_h1: str,
+                                non_size_facets: list, mode: str = 'v1') -> str:
+    """Strip hallucinated words from improved_h1.
+
+    v1: only checks 8 hardcoded common-hallucination words.
+    v2: prefix-match against the entire input vocabulary; any output word
+        that doesn't share a 5+ char prefix with some allowed word
+        (length differs by ≤3) is dropped.
+    """
+    all_input_words = set(w.lower() for w in ai_h1.split())
+    for f in non_size_facets:
+        all_input_words.update(w.lower() for w in f['detail_value'].split())
+    inflected = set()
+    for w in all_input_words:
+        inflected.add(w + 'e')
+        inflected.add(w + 'en')
+        if w.endswith('e'):
+            inflected.add(w[:-1])
+    all_input_words.update(inflected)
+
+    if mode == 'v2':
+        # Generic prefix-match: drop any output word that doesn't share a 5+ char
+        # prefix with any allowed word, when length differs by ≤3.
+        kept_words = []
+        for word in improved_h1.split():
+            wl = re.sub(r'[^a-zA-Zà-ÿ]', '', word).lower()
+            if not wl or len(wl) < 4:
+                kept_words.append(word)
+                continue
+            if wl in all_input_words:
+                kept_words.append(word)
+                continue
+            ok = False
+            for aw in all_input_words:
+                if len(aw) < 4:
+                    continue
+                common = 0
+                for a, b in zip(wl, aw):
+                    if a == b:
+                        common += 1
+                    else:
+                        break
+                if common >= 5 and abs(len(wl) - len(aw)) <= 3 and common >= max(len(wl), len(aw)) - 3:
+                    ok = True
+                    break
+            if ok:
+                kept_words.append(word)
+            # else: dropped
+        return ' '.join(kept_words)
+
+    # v1 (default): drop only the 8 known offender words when not in input
+    for word in _HALLUC_V1_CHECKS:
+        if word.lower() not in all_input_words and word in improved_h1.split():
+            improved_h1 = ' '.join(w for w in improved_h1.split() if w != word)
+    return improved_h1
+
+
 def format_dimensions(text: str) -> str:
     """
     Format dimension patterns to include 'x' between measurements.
@@ -605,7 +726,8 @@ Geef ALLEEN de JSON terug, geen andere tekst."""
         return None
 
 
-def generate_title_from_api(url: str) -> Optional[Dict]:
+def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
+                             halluc_mode: str = 'v1') -> Optional[Dict]:
     """
     Generate title using productsearch API + OpenAI improvement.
 
@@ -614,10 +736,19 @@ def generate_title_from_api(url: str) -> Optional[Dict]:
     2. Uses OpenAI to improve the H1 while keeping facet values intact
     3. Returns the improved H1 and original H1
 
+    Args:
+        url: Page URL.
+        prompt_mode: 'v1' (long detailed prompt) or 'v2' (short polish prompt).
+        halluc_mode: 'v1' (hardcoded 8-word check) or 'v2' (prefix-match guard).
+
     Returns dict with h1_title, original_h1, or None on failure.
     """
-    # Step 1: Fetch from productsearch API
-    page_data = fetch_products_api(url)
+    # Step 1: Fetch from productsearch API. Skip the FAQ-only post-fetch work
+    # (extract_related_plp_urls + the 30-product loop) since the titles flow
+    # only consumes h1_title / selected_facets / category_name.
+    _t_fetch_start = time.time()
+    page_data = fetch_products_api(url, include_related=False)
+    _t_fetch_ms = (time.time() - _t_fetch_start) * 1000
 
     if not page_data:
         print(f"[AI_TITLES] API fetch failed for {url}")
@@ -935,44 +1066,24 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         met_rule = """7. Voeg NOOIT het woord "met" toe aan de titel.
 """
 
-    prompt = f"""Je bent een SEO-expert. Verbeter deze titel tot een goedlopende en grammaticaal correcte H1 zonder "-".
-
-Huidige titel van API: "{ai_h1}"
-
-Facetten (naam: waarde): {facet_info}
-
-BELANGRIJK - Facetwaarden die INTACT moeten blijven (niet splitsen of herschikken):
-{facet_values_str}
-{met_section}
-Regels:
-1. ALLERBELANGRIJKSTE REGEL: Gebruik UITSLUITEND woorden die voorkomen in de titel OF in de facetten hierboven. Voeg ABSOLUUT GEEN nieuwe woorden toe. Geen "Nieuwe", geen extra bijvoeglijke naamwoorden, geen woorden die niet letterlijk in de input staan.
-2. Facetwaarden zijn vaste combinaties en mogen NIET opgesplitst worden.
-3. Merk ALTIJD vooraan (bijv. "Apple iPhones" niet "iPhones van Apple").
-4. Kleuren, materialen en stijlen (bv. "Industriële", "Moderne", "Scandinavische") als bijvoeglijk naamwoord VOOR de doelgroep en VOOR de productnaam, NOOIT aan het einde van de titel (bijv. "blauwe Heren hoodies", "Industriële Zwarte tafels", NIET "Heren blauwe hoodies" of "tafels Industriële").
-5. Doelgroepen (Heren, Dames, Kinderen, Jongens, Meisjes, Baby) staan direct VOOR de productnaam maar NA kleuren/materialen, NOOIT met "voor" ervoor.
-6. NOOIT "in", "van" of "voor" toevoegen (doelgroep-achtervoegsel wordt automatisch toegevoegd).
-{met_rule}8. Als een serie/productlijn de merknaam al bevat, noem het merk NIET apart.
-9. ALLE bijvoeglijke naamwoorden uit de facetten moeten VOOR de productnaam staan, NOOIT erna. Dit geldt niet alleen voor formaat ("Klein"/"Kleine", "Groot"/"Grote", "Middel", "Mini", "Maxi") en conditie ("Nieuw"/"Nieuwe"), maar ook voor kenmerken zoals "Waterdicht"/"Waterdichte", "Vrijstaand"/"Vrijstaande", "Luxe", "Modern"/"Moderne", "Klassiek"/"Klassieke", "Inbouw", "Hangend", "Opvouwbaar". Voeg deze woorden NOOIT zelf toe als ze niet in de facetten staan.
-   - FOUT: "Rubberen Butterfly Kiss vibrators Kleine"
-   - GOED: "Kleine rubberen Butterfly Kiss vibrators"
-   - FOUT: "Dames kunststof sporttassen Waterdichte"  (Waterdichte staat na de productnaam)
-   - GOED: "Dames kunststof waterdichte sporttassen"
-   - FOUT: "Inductie kookplaten Vrijstaande"
-   - GOED: "Vrijstaande inductie kookplaten"
-   - FOUT: "Houten salontafels Grote"
-   - GOED: "Grote houten salontafels"
-10. Verbuig bijvoeglijke naamwoorden correct (bijv. "Nieuw" → "Nieuwe" voor de-woorden, "Vrijstaand" → "Vrijstaande").
-11. Maak de titel natuurlijk lopend Nederlands.
-
-Geef ALLEEN de verbeterde titel terug, geen uitleg."""
+    prompt = _build_polish_prompt(
+        ai_h1=ai_h1,
+        facet_info=facet_info,
+        facet_values_str=facet_values_str,
+        met_section=met_section,
+        met_rule=met_rule,
+        mode=prompt_mode,
+    )
 
     try:
+        _t_polish_start = time.time()
         response = client.chat.completions.create(
             model=AI_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=100,
             temperature=0.3
         )
+        _t_polish_ms = (time.time() - _t_polish_start) * 1000
 
         improved_h1 = response.choices[0].message.content.strip().strip('"')
 
@@ -981,23 +1092,9 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
             improved_h1 = improved_h1[:-4]
 
         # Remove hallucinated words that aren't in the input
-        all_input_words = set(w.lower() for w in ai_h1.split())
-        for f in non_size_facets:
-            all_input_words.update(w.lower() for w in f['detail_value'].split())
-        # Also add common inflected forms so valid adjective inflections aren't stripped
-        # e.g., input "Nieuw" → allow "Nieuwe" in output
-        inflected = set()
-        for w in all_input_words:
-            inflected.add(w + 'e')    # Nieuw → Nieuwe
-            inflected.add(w + 'en')   # Kind → Kinderen
-            if w.endswith('e'):
-                inflected.add(w[:-1])  # Nieuwe → Nieuw
-        all_input_words.update(inflected)
-        # Check for common hallucinated words
-        hallucination_checks = ['Heren', 'Dames', 'Kinderen', 'Jongens', 'Meisjes', 'Baby', 'Nieuwe', 'Nieuw']
-        for word in hallucination_checks:
-            if word.lower() not in all_input_words and word in improved_h1.split():
-                improved_h1 = ' '.join(w for w in improved_h1.split() if w != word)
+        improved_h1 = _apply_hallucination_guard(
+            improved_h1, ai_h1, non_size_facets, mode=halluc_mode
+        )
 
         # Prepend brand/productlijn (stripped before AI, prepended in code).
         # When a populaire_serie+type_productlijn combo was detected, append the
@@ -1047,6 +1144,7 @@ Geef ALLEEN de verbeterde titel terug, geen uitleg."""
             if not is_lowercase_brand:
                 improved_h1 = improved_h1[0].upper() + improved_h1[1:]
 
+        print(f"[AI_TITLES] timings url={url} fetch={_t_fetch_ms:.0f}ms polish={_t_polish_ms:.0f}ms")
         return {
             "h1_title": _dedupe_compound_category(_strip_pre_clause_duplicates(improved_h1), canonical_category),
             "original_h1": api_h1,
