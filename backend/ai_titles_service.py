@@ -195,9 +195,18 @@ def _dedupe_facet_values(h1: str, selected_facets: list) -> str:
         if len(matches) < 2:
             continue
         drop = set()
+        connectors = {'en', '&', 'and', 'of', 'or'}
         for s, e in matches[:-1]:
             for k in range(s, e):
                 drop.add(k)
+            # Drop a connector immediately AFTER the span ("X en X" → drop
+            # "X en", keep last "X"). Falls back to dropping a connector
+            # BEFORE the span when it's a list-tail repeat ("with X, Y, X"
+            # though we mostly just see the suffix case in practice).
+            if e < len(words) and words[e].lower().strip('.,!?;:') in connectors:
+                drop.add(e)
+            elif s - 1 >= 0 and words[s - 1].lower().strip('.,!?;:') in connectors:
+                drop.add(s - 1)
         h1 = ' '.join(w for idx, w in enumerate(words) if idx not in drop)
     return h1
 
