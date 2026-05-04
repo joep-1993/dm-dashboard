@@ -1,0 +1,323 @@
+{
+  "kwargs": {
+    "prompt_mode": "v1",
+    "halluc_mode": "v1"
+  },
+  "results": {
+    "/products/gezond_mooi/gezond_mooi_562520/c/d_condoom~20127064~~k_drogisterij~23563207~~t_condoom~20115360": {
+      "h1_title": "Natuurlijke extra dunne anaalkondooms",
+      "elapsed_ms": 1853,
+      "error": null,
+      "facet_values": [
+        "Anaal condooms",
+        "Extra dunne",
+        "Natuurlijke"
+      ]
+    },
+    "/products/gezond_mooi/gezond_mooi_560598/c/merk~82689~~soort_zelftest~23595856~~type_suikermeter~23577707": {
+      "h1_title": "Bayer Glucose teststrips bloedsuikermeters",
+      "elapsed_ms": 3571,
+      "error": null,
+      "facet_values": [
+        "Bloedsuikermeters",
+        "Glucose teststrips",
+        "Bayer"
+      ]
+    },
+    "/products/gezond_mooi/gezond_mooi_563201_563267/c/aandoeningen~1579814~~merk~266560~~t_toediening~23583460": {
+      "h1_title": "New Care Zwangerschap zuigtabletten foliumzuur",
+      "elapsed_ms": 714,
+      "error": null,
+      "facet_values": [
+        "New Care",
+        "Zwangerschap",
+        "Zuigtabletten"
+      ]
+    },
+    "/products/elektronica/elektronica_19875535_19934727/c/kleur~19958441~~merk~100853~~pl_tand~11131445~~type_tand~104474": {
+      "h1_title": "Kruidvat Witte opzetborstels Philips Sonicare Flexcare",
+      "elapsed_ms": 1188,
+      "error": null,
+      "facet_values": [
+        "Opzetborstels",
+        "Kruidvat",
+        "Philips Sonicare Flexcare",
+        "Witte"
+      ]
+    },
+    "/products/elektronica/elektronica_19875536_19934132/c/mobiel_k~19954294~~modelnaam_mob~23811507~~opslagcap_mob~10974069": {
+      "h1_title": "Samsung Galaxy S24 FE 256 GB touchscreen mobiele telefoons",
+      "elapsed_ms": 838,
+      "error": null,
+      "facet_values": [
+        "Samsung Galaxy S24 FE",
+        "256 GB",
+        "Touchscreen"
+      ]
+    },
+    "/products/elektronica/elektronica_19875536_19934132/c/kleur~19958429~~modelnaam_mob~20098814~~schermdia_mob~17012636": {
+      "h1_title": "Blauwe iPhone 12 mobiele telefoons 5 inch",
+      "elapsed_ms": 722,
+      "error": null,
+      "facet_values": [
+        "iPhone 12",
+        "5 inch",
+        "Blauwe"
+      ]
+    },
+    "/products/huis_tuin/huis_tuin_505129_3541055/c/kleur~400992~~materiaal~505047~~opties_pan~23742188": {
+      "h1_title": "Zilverkleurige glazen pannensets met schenktuit",
+      "elapsed_ms": 785,
+      "error": null,
+      "facet_values": [
+        "Met schenktuit",
+        "Glazen",
+        "Zilverkleurige"
+      ]
+    },
+    "/products/huis_tuin/huis_tuin_505071_505297/c/f_woonacc~19949336~~kleur~400993~~merk~23593296~~o_dienblad~23796262": {
+      "h1_title": "Richmond Interiors Goudkleurige hoge decoratieve dienbladen",
+      "elapsed_ms": 950,
+      "error": null,
+      "facet_values": [
+        "Goudkleurige",
+        "Richmond Interiors",
+        "Hoge",
+        "Decoratief"
+      ]
+    },
+    "/products/huis_tuin/huis_tuin_505071_557600/c/kleur~400987~~materiaal~4779089~~stijl_woonaccessoires~20139367": {
+      "h1_title": "Witte zilveren kerst servetten",
+      "elapsed_ms": 683,
+      "error": null,
+      "facet_values": [
+        "Zilveren",
+        "Witte",
+        "Kerst"
+      ]
+    },
+    "/products/speelgoed_spelletjes/speelgoed_spelletjes_395613/c/a_bouwstenen~20079740~~geschikte_leeftijd~11019947~~levensfase~396061~~type_bouwblok~23800788": {
+      "h1_title": "Peuter magnetisch bouwspeelgoed 100 stuks Vanaf 5 jaar",
+      "elapsed_ms": 753,
+      "error": null,
+      "facet_values": [
+        "Magnetisch bouwspeelgoed",
+        "Peuter",
+        "Vanaf 5 jaar",
+        "100 stuks"
+      ]
+    },
+    "/products/speelgoed_spelletjes/speelgoed_spelletjes_395614/c/kleur~23805164~~materiaal~401167~~personage~9236280": {
+      "h1_title": "Multicolor plastic Superman poppen",
+      "elapsed_ms": 685,
+      "error": null,
+      "facet_values": [
+        "Superman",
+        "Plastic",
+        "Multicolor"
+      ]
+    },
+    "/products/speelgoed_spelletjes/c/geschikte_leeftijd~424709~~merk~6820151~~personage~23600617": {
+      "h1_title": "NICOTOY Simba personages Vanaf 6 maanden",
+      "elapsed_ms": 613,
+      "error": null,
+      "facet_values": [
+        "Vanaf 6 maanden",
+        "NICOTOY",
+        "Simba"
+      ]
+    },
+    "/products/huishoudelijke_apparatuur/huishoudelijke_apparatuur_19968036_19970680/c/conditie_koelen~23597870~~energieklasse_diepv~106849~~opties_diepvries~19973744~~pl_koelen~23757966": {
+      "h1_title": "Siemens IQ500 Nieuwe No-Frost systeem E vriezers",
+      "elapsed_ms": 823,
+      "error": null,
+      "facet_values": [
+        "No-Frost systeem",
+        "E",
+        "Siemens IQ500",
+        "Nieuw"
+      ]
+    },
+    "/products/huishoudelijke_apparatuur/huishoudelijke_apparatuur_23795091/c/multifunctie_stofzuiger~107390~~type_stofopvang_stofzuiger~107405~~type_stofzuiger~16963047": {
+      "h1_title": "Industriële zakloze nat en droog zuigen stofzuigers",
+      "elapsed_ms": 1205,
+      "error": null,
+      "facet_values": [
+        "Industriële stofzuiger",
+        "Zakloos",
+        "Nat en droog zuigen"
+      ]
+    },
+    "/products/huishoudelijke_apparatuur/huishoudelijke_apparatuur_19968038_19970695/c/bouw_vaatwasser~106310~~energie_efficientieklasse~23741634~~pl_wassenendrogen~18571337": {
+      "h1_title": "Bosch Silence Plus Inbouw Energieklasse B vaatwassers",
+      "elapsed_ms": 566,
+      "error": null,
+      "facet_values": [
+        "Bosch Silence Plus",
+        "Inbouw",
+        "Energieklasse B"
+      ]
+    },
+    "/products/sieraden_horloges/sieraden_horloges_424884/c/doelgroep_sieraad~424922~~merk~23593899~~siering_sieraad~424942": {
+      "h1_title": "Dottilove Dames schelpen",
+      "elapsed_ms": 635,
+      "error": null,
+      "facet_values": [
+        "Dames",
+        "Dottilove",
+        "Schelpen"
+      ]
+    },
+    "/products/sieraden_horloges/sieraden_horloges_424881/c/doelgroep_sieraad~424922~~goudkleur~20127043~~type_ketting~23593941": {
+      "h1_title": "Rosegouden Dames ketting met hanger",
+      "elapsed_ms": 588,
+      "error": null,
+      "facet_values": [
+        "Ketting met hanger",
+        "Dames",
+        "Rosegouden"
+      ]
+    },
+    "/products/sieraden_horloges/sieraden_horloges_424881/c/doelgroep_sieraad~424923~~kleur~401045~~materiaal_sieraad~424930~~siering_sieraad~5079002": {
+      "h1_title": "Goudkleurige gouden heren kruizen",
+      "elapsed_ms": 682,
+      "error": null,
+      "facet_values": [
+        "Heren",
+        "Gouden",
+        "Goudkleurige",
+        "Kruizen"
+      ]
+    },
+    "/products/meubilair/meubilair_389373_389403/c/b_meubels~9272490~~ruimte~389395~~vorm_tafel~1339756": {
+      "h1_title": "Ovale houten salontafels woonkamer 100 cm breed",
+      "elapsed_ms": 782,
+      "error": null,
+      "facet_values": [
+        "Ovale",
+        "100 cm brede",
+        "Woonkamer"
+      ]
+    },
+    "/products/meubilair/meubilair_389371_389473/c/kleurtint~23601225~~opties_kast~23746053~~ruimte~389394~~soort_deur_kast~394476~~stijl_test~393716": {
+      "h1_title": "Eikenbruine design schuifdeur kledingkasten met kapstok slaapkamer",
+      "elapsed_ms": 1180,
+      "error": null,
+      "facet_values": [
+        "Met kapstok",
+        "Schuifdeur",
+        "Design",
+        "Eikenbruine",
+        "Slaapkamer"
+      ]
+    },
+    "/products/meubilair/meubilair_389374/c/afmeting_bedbodem_bed_matras~4312348~~l_bed~16908179~~stijl_test~19259110~~winkel~23757321": {
+      "h1_title": "Luxe 140 x 200 bedden 200 cm",
+      "elapsed_ms": 1009,
+      "error": null,
+      "facet_values": [
+        "140 x 200",
+        "200 cm",
+        "Luxe"
+      ]
+    },
+    "/products/schoenen/schoenen_430884/c/doelgroep_schoenen~430828~~kleur~430773~~maat~23800385~~merk~431117": {
+      "h1_title": "Skechers Blauwe Dames sneakers Maat 39 1/3",
+      "elapsed_ms": 581,
+      "error": null,
+      "facet_values": [
+        "Skechers",
+        "Dames",
+        "Maat 39 1/3",
+        "Blauwe"
+      ]
+    },
+    "/products/schoenen/schoenen_430874/c/kleur~430779~~kleurtint_bruin~6974247~~maat~430807~~o_schoenen~10994651~~sluiting_schoen~431494~~type_pump~6755940": {
+      "h1_title": "Kastanjebruine pumps met bandje gevoerde met gesp Maat 39",
+      "elapsed_ms": 966,
+      "error": null,
+      "facet_values": [
+        "Pumps met bandje",
+        "Kastanjebruine",
+        "Maat 39",
+        "Bruine",
+        "Gevoerde",
+        "Met gesp"
+      ]
+    },
+    "/products/schoenen/schoenen_430884/c/doelgroep_schoenen~430828~~maat~430808~~materiaal~430843~~sluiting_schoen~431495~~stijl_schoenen~23580857~~w_schoenen~16475783": {
+      "h1_title": "Leren Dames modieuze sneakers met rits Maat 40 Wijdte H",
+      "elapsed_ms": 629,
+      "error": null,
+      "facet_values": [
+        "Dames",
+        "Maat 40",
+        "Leren",
+        "Wijdte H",
+        "Met rits",
+        "Modieuze"
+      ]
+    },
+    "/products/mode_accessoires/mode_accessoires_457563_2140627/c/f_koffers~15706724~~f_tas~15805295~~s_koffer~6997359": {
+      "h1_title": "Kleine trolley 40 x 30 x 20 cm reiskoffers",
+      "elapsed_ms": 1328,
+      "error": null,
+      "facet_values": [
+        "Trolley",
+        "40 x 30 x 20 cm",
+        "Kleine"
+      ]
+    },
+    "/products/mode_accessoires/mode_accessoires_457573/c/doelgroep_mode_accessoires~23583370~~gelegenheid_tas~23544099~~materiaal_mode_accessoires~468347": {
+      "h1_title": "Polyester unisex festival tassen",
+      "elapsed_ms": 901,
+      "error": null,
+      "facet_values": [
+        "Polyester",
+        "Unisex",
+        "Festival"
+      ]
+    },
+    "/products/mode_accessoires/mode_accessoires_457573_457622/c/doelgroep_mode_accessoires~457525~~f_tas~15805296~~mod_toilettas~16029156~~o_tassen~15975733~~t_sluiting~23558181": {
+      "h1_title": "Kinder medium make-up tasjes met haak en ritssluiting",
+      "elapsed_ms": 779,
+      "error": null,
+      "facet_values": [
+        "Kinder",
+        "Met haak",
+        "Medium",
+        "Make-up tasjes",
+        "met ritssluiting"
+      ]
+    },
+    "/products/klussen/klussen_486178/c/kleur~486516~~materiaal~486522~~opties_raamaccessoires~19663773": {
+      "h1_title": "Zilveren houten draaikiepraam raamaccessoires",
+      "elapsed_ms": 1156,
+      "error": null,
+      "facet_values": [
+        "Draaikiepraam",
+        "Houten",
+        "Zilveren"
+      ]
+    },
+    "/products/klussen/klussen_486171_486136/c/merk~23804682~~soort_lampfitting~7224062~~w_lamp~7063576": {
+      "h1_title": "Gloeilampgoedkoop E27 5W lampen",
+      "elapsed_ms": 868,
+      "error": null,
+      "facet_values": [
+        "E27",
+        "5W",
+        "Gloeilampgoedkoop"
+      ]
+    },
+    "/products/klussen/klussen_486170/c/kleur~486508~~kleurtint~23756301~~materiaal~19244293": {
+      "h1_title": "Antraciet deuraccessoires",
+      "elapsed_ms": 751,
+      "error": null,
+      "facet_values": [
+        "Grijze",
+        "Antraciet"
+      ]
+    }
+  }
+}
