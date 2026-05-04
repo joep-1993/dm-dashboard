@@ -356,6 +356,7 @@ def build_product_subject(selected_facets: List[Dict[str, str]], category_name: 
 
     for facet in selected_facets:
         facet_name_lower = facet["facet_name"].lower()
+        url_name_lower = (facet.get("url_name") or "").lower()
         detail_value = facet["detail_value"]
 
         if any(c in facet_name_lower for c in color_facets):
@@ -366,8 +367,12 @@ def build_product_subject(selected_facets: List[Dict[str, str]], category_name: 
             product_names.append(detail_value)
             has_specific_product = True
         elif any(t in facet_name_lower for t in product_type_facets):
+            # Policy override: type_productlijn (URL slug) is a brand-line
+            # variant, not a product type. Keep the value but don't let it
+            # suppress the category from being appended.
             product_names.append(detail_value)
-            has_specific_product = True
+            if url_name_lower != "type_productlijn":
+                has_specific_product = True
         elif any(t in facet_name_lower for t in target_group_facets):
             target_groups.append(detail_value)
         elif any(b in facet_name_lower for b in brand_facets):
