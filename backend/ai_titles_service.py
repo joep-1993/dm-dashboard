@@ -221,17 +221,38 @@ def _dedupe_prefix_overlap(h1: str) -> str:
     words = h1.split()
     n = len(words)
     drop: set = set()
+    # Plural/derivation suffixes: when `b == a + suf`, the two tokens are the
+    # same root word repeated (e.g. "Sweat sweaters" via 'ers',
+    # "Plant planten" via 'en', "Color Colors" via 's"). Lets us catch
+    # short-prefix repeats that the 6-char/+3-diff rule below skips on purpose.
+    PLURAL_SUFFIXES = ('s', 'en', 'ers')
     for i in range(n):
         if i in drop:
             continue
         a = words[i].lower().strip('.,!?;:')
-        if len(a) < 6:
+        if len(a) < 4:
             continue
-        for j in range(i + 1, min(i + 3, n)):
+        # Lookahead extended from 2 to 4 positions so cases like
+        # "instap … Heren schoenen Instappers" (3 tokens between prefix and
+        # full form, often inserted by the AI) still trigger.
+        for j in range(i + 1, min(i + 5, n)):
             if j in drop:
                 continue
             b = words[j].lower().strip('.,!?;:')
-            if len(b) >= len(a) + 3 and b.startswith(a):
+            # Skip hyphenated targets: "Fisher" is a prefix of "Fisher-Price",
+            # but the real duplication is the multi-token "Fisher Price" form
+            # earlier in the H1. Dropping just "Fisher" here would leave
+            # "Price" orphaned. Let _dedupe_internal_compounds handle it via
+            # _norm_for_dedupe (which strips hyphens and spaces uniformly).
+            if '-' in b:
+                continue
+            # Targeted plural rule: b is a + known plural suffix.
+            if any(b == a + suf for suf in PLURAL_SUFFIXES):
+                drop.add(i)
+                break
+            # Generic prefix rule: 6-char floor + ≥3 diff (avoids false drops
+            # like "Aqua" → "Aquariums" where the prefix is a separate signal).
+            if len(a) >= 6 and len(b) >= len(a) + 3 and b.startswith(a):
                 drop.add(i)
                 break
     if not drop:
@@ -887,7 +908,7 @@ Geef ALLEEN de JSON terug, geen andere tekst."""
 
 
 def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
-                             halluc_mode: str = 'v1') -> Optional[Dict]:
+                             halluc_mode: str = 'v2') -> Optional[Dict]:
     """
     Generate title using productsearch API + OpenAI improvement.
 
