@@ -92,8 +92,19 @@
             <div class="card-body">
                 <div class="d-flex gap-3 align-items-end mb-3">
                     <div style="flex: 1;">
-                        <label for="shopNames" class="form-label small">Shop Names</label>
-                        <textarea class="form-control" id="shopNames" rows="3" placeholder="one shop per line"></textarea>
+                        <label class="form-label small d-block">Search by</label>
+                        <div class="d-flex gap-3 mb-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="searchMode" id="modeName" value="name" checked onchange="updateInputLabel()">
+                                <label class="form-check-label" for="modeName">Shop Name</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="searchMode" id="modeId" value="id" onchange="updateInputLabel()">
+                                <label class="form-check-label" for="modeId">Shop ID</label>
+                            </div>
+                        </div>
+                        <label for="shopInput" class="form-label small" id="shopInputLabel">Shop Names</label>
+                        <textarea class="form-control" id="shopInput" rows="3" placeholder="one shop per line"></textarea>
                     </div>
                     <div class="d-flex gap-2">
                         <button class="btn btn-primary" onclick="doSearch()" id="searchBtn">Search</button>
@@ -107,8 +118,11 @@
         <div id="resultsSection" style="display: none;">
             <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Results <span class="badge bg-secondary ms-2" id="resultCount">0</span></h5>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="exportCsv()">Export CSV</button>
+                    <h5 class="mb-0">Results</h5>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm" style="border: 1px solid #8b7bb5; color: #8b7bb5; background: transparent;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyAllToClipboard()">Copy for Excel</button>
+                        <button class="btn btn-sm" style="border: 1px solid #CC5500; color: #CC5500; background: transparent;" onmouseover="this.style.backgroundColor='#CC5500';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#CC5500'" onclick="exportExcel()">Export Excel</button>
+                    </div>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
@@ -151,10 +165,12 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script>
         const API_BASE = window.location.origin;
-        const COLUMNS = [
-            { key: 'shop_name',           label: 'Shop Name',     type: 'text' },
+        // Leading column adapts to search mode: input by name → show shop_id;
+        // input by id → show shop_name. Other columns are constant.
+        const TAIL_COLUMNS = [
             { key: 'is_gsd_nl_shop',      label: 'GSD NL',        type: 'flag' },
             { key: 'is_gsd_be_shop',      label: 'GSD BE',        type: 'flag' },
             { key: 'is_gsd_de_shop',      label: 'GSD DE',        type: 'flag' },
@@ -168,13 +184,58 @@
         let currentPage = 1;
         let sortColumn = null;
         let sortDirection = 'asc';
+        let lastMode = 'name';
+        let lastInputCount = 0;
+        let lastInputItems = [];
+
+        function getMode() {
+            return document.querySelector('input[name="searchMode"]:checked').value;
+        }
+
+        function currentColumns() {
+            // When searching by name, display shop_name first then add shop_id as the
+            // second column (the "extra output"). Symmetric for shop_id mode.
+            if (lastMode === 'id') {
+                return [
+                    { key: 'shop_id',   label: 'Shop ID',   type: 'text' },
+                    { key: 'shop_name', label: 'Shop Name', type: 'text' },
+                    ...TAIL_COLUMNS,
+                ];
+            }
+            return [
+                { key: 'shop_name', label: 'Shop Name', type: 'text' },
+                { key: 'shop_id',   label: 'Shop ID',   type: 'text' },
+                ...TAIL_COLUMNS,
+            ];
+        }
+
+        function updateInputLabel() {
+            const m = getMode();
+            const lbl = document.getElementById('shopInputLabel');
+            const input = document.getElementById('shopInput');
+            if (m === 'id') {
+                lbl.textContent = 'Shop IDs';
+                input.placeholder = 'one shop_id per line';
+            } else {
+                lbl.textContent = 'Shop Names';
+                input.placeholder = 'one shop per line';
+            }
+        }
 
         async function doSearch() {
-            const shopText = document.getElementById('shopNames').value.trim();
-            const shopNames = shopText ? shopText.split('\n').map(s => s.trim()).filter(Boolean) : [];
+            const mode = getMode();
+            const text = document.getElementById('shopInput').value.trim();
+            const items = text ? text.split('\n').map(s => s.trim()).filter(Boolean) : [];
 
             const params = new URLSearchParams();
-            if (shopNames.length) params.append('shop_names', shopNames.join(','));
+            if (mode === 'id') {
+                if (items.length) params.append('shop_ids', items.join(','));
+            } else {
+                if (items.length) params.append('shop_names', items.join(','));
+            }
+            lastMode = mode;
+            lastInputItems = items;
+            lastInputCount = items.length;
 
             document.getElementById('loadingArea').style.display = 'block';
             document.getElementById('resultsSection').style.display = 'none';
@@ -189,6 +250,29 @@
                 }
                 const data = await res.json();
                 allResults = data.results || [];
+                // Append synthetic rows for inputs that didn't match anything,
+                // so the user can see exactly which entries had no result.
+                // Marked with _unmatched so we can style/count them separately.
+                if (lastInputCount > 0) {
+                    if (lastMode === 'id') {
+                        const idsInResults = new Set(allResults.map(r => String(r.shop_id)));
+                        lastInputItems.forEach(item => {
+                            const key = String(item).trim();
+                            if (!idsInResults.has(key)) {
+                                allResults.push({ shop_id: key, shop_name: null, _unmatched: true });
+                            }
+                        });
+                    } else {
+                        const namesLower = allResults.map(r => (r.shop_name || '').toLowerCase());
+                        lastInputItems.forEach(item => {
+                            const needle = String(item).trim().toLowerCase();
+                            if (!needle) return;
+                            if (!namesLower.some(n => n.includes(needle))) {
+                                allResults.push({ shop_name: item, shop_id: null, _unmatched: true });
+                            }
+                        });
+                    }
+                }
                 sortColumn = null;
                 sortDirection = 'asc';
                 currentPage = 1;
@@ -206,7 +290,7 @@
 
         function buildHeader() {
             const thead = document.getElementById('resultsHead');
-            const cells = COLUMNS.map(c =>
+            const cells = currentColumns().map(c =>
                 `<th class="sortable" data-sort="${c.key}" onclick="sortBy('${c.key}')">${c.label}</th>`
             ).join('');
             thead.innerHTML = `<tr>${cells}</tr>`;
@@ -256,7 +340,6 @@
             const end = perPage === Infinity ? total : start + perPage;
             const pageItems = allResults.slice(start, end);
 
-            document.getElementById('resultCount').textContent = total;
             renderTable(pageItems);
 
             document.getElementById('prevBtn').disabled = currentPage <= 1;
@@ -280,12 +363,13 @@
 
         function renderTable(results) {
             const tbody = document.getElementById('resultsBody');
+            const cols = currentColumns();
             if (results.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="${COLUMNS.length}" class="text-center text-muted py-4">No results found</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="${cols.length}" class="text-center text-muted py-4">No results found</td></tr>`;
                 return;
             }
             tbody.innerHTML = results.map(r => {
-                const cells = COLUMNS.map(col => {
+                const cells = cols.map(col => {
                     const v = r[col.key];
                     if (col.type === 'flag') return `<td>${fmtFlag(v)}</td>`;
                     if (col.key === 'shop_name') return `<td><strong>${escHtml(v ?? '')}</strong></td>`;
@@ -296,28 +380,45 @@
         }
 
         function clearForm() {
-            document.getElementById('shopNames').value = '';
+            document.getElementById('shopInput').value = '';
             document.getElementById('resultsSection').style.display = 'none';
             document.getElementById('errorArea').style.display = 'none';
             allResults = [];
         }
 
-        function exportCsv() {
+        function flagValue(v) {
+            if (v === null || v === undefined || v === '') return '';
+            const truthy = v === 1 || v === '1' || v === true || v === 'true';
+            return truthy ? 'Yes' : 'No';
+        }
+
+        function buildAoa() {
+            const cols = currentColumns();
+            const header = cols.map(c => c.key);
+            const rows = allResults.map(r => cols.map(c => {
+                const v = r[c.key];
+                if (c.type === 'flag') return flagValue(v);
+                return v === null || v === undefined ? '' : v;
+            }));
+            return [header, ...rows];
+        }
+
+        function copyAllToClipboard() {
             if (!allResults.length) return;
-            const header = COLUMNS.map(c => c.key).join(',') + '\n';
-            const rows = allResults.map(r =>
-                COLUMNS.map(c => {
-                    const v = r[c.key];
-                    if (v === null || v === undefined) return '';
-                    const s = String(v);
-                    return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
-                }).join(',')
-            ).join('\n');
-            const blob = new Blob([header + rows], { type: 'text/csv' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'gsd_check_export.csv';
-            a.click();
+            const tsv = buildAoa().map(row => row.join('\t')).join('\n');
+            navigator.clipboard.writeText(tsv).then(() => {
+                alert('Copied to clipboard! Paste directly into Excel.');
+            });
+        }
+
+        function exportExcel() {
+            if (!allResults.length) return;
+            const aoa = buildAoa();
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = aoa[0].map(() => ({ wch: 22 }));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'GSD Check');
+            XLSX.writeFile(wb, 'gsd_check_export.xlsx');
         }
 
         function escHtml(str) {
