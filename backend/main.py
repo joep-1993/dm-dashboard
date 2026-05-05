@@ -49,6 +49,7 @@ from backend.gsd_campaigns_router import router as gsd_campaigns_router
 from backend.dma_bidding_router import router as dma_bidding_router
 from backend.gsd_budgets_router import router as gsd_budgets_router
 from backend.mc_id_finder_router import router as mc_id_finder_router
+from backend.gsd_check_router import router as gsd_check_router
 from backend.redshift_upload_router import router as redshift_upload_router
 from backend.task_scheduler_router import router as task_scheduler_router
 from backend.url_validator_router import router as url_validator_router
@@ -150,6 +151,9 @@ app.include_router(gsd_budgets_router)
 
 # Include mc_id_finder router
 app.include_router(mc_id_finder_router)
+
+# Include gsd_check router
+app.include_router(gsd_check_router)
 
 # Include redshift_upload router
 app.include_router(redshift_upload_router)

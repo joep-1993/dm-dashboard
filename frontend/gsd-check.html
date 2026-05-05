@@ -3,22 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MC ID Finder</title>
+    <title>GSD Check</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        .stat-card {
-            border-radius: 12px;
-            background: white;
-            color: #2d3436;
-            padding: 1.25rem;
-            text-align: center;
-            min-width: 140px;
-            box-shadow: 0 4px 16px rgba(94, 74, 144, 0.14);
-        }
-        .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; }
-        .stat-card .label { font-size: 0.85rem; color: #636e72; }
-
         .result-table { font-size: 0.9rem; }
         .result-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
         .result-table td { vertical-align: middle; }
@@ -27,8 +15,8 @@
         .result-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .result-table th.sortable.sort-asc::after { content: '↑'; opacity: 0.9; }
         .result-table th.sortable.sort-desc::after { content: '↓'; opacity: 0.9; }
-        .mc-id-cell { font-family: monospace; font-size: 0.95rem; }
-        .mc-id-empty { color: #b2bec3; }
+        .flag-yes { color: #00b894; font-weight: 600; }
+        .flag-no  { color: #b2bec3; }
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
         .pagination-controls select { font-size: 0.85rem; width: auto; }
         .pagination-controls .page-info { color: #636e72; }
@@ -38,7 +26,7 @@
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
         <div class="container d-flex flex-nowrap align-items-center gap-2">
-            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">MC ID Finder</span>
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">GSD Check</span>
             <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
                 <div class="nav-dropdown">
                     <button class="nav-dropdown-toggle">Generators</button>
@@ -72,8 +60,8 @@
                         <a href="/static/dma-plus.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="10"/></svg> DMA+</a>
                         <a href="/static/gsd-budgets.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C9.5 4 6 7.5 6 12s3.5 8 7.8 8c2 0 3.8-.8 5.2-2"/></svg> GSD Budgets</a>
                         <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
-                        <a href="/static/gsd-check.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> GSD Check</a>
-                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                        <a href="/static/gsd-check.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> GSD Check</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
                         <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
                     </div>
                 </div>
@@ -99,30 +87,13 @@
         <!-- Search Section -->
         <div class="card mb-4">
             <div class="card-header">
-                <h5 class="mb-0">Search Merchant Center IDs</h5>
+                <h5 class="mb-0">Check GSD flags &amp; shop status</h5>
             </div>
             <div class="card-body">
                 <div class="d-flex gap-3 align-items-end mb-3">
                     <div style="flex: 1;">
                         <label for="shopNames" class="form-label small">Shop Names</label>
                         <textarea class="form-control" id="shopNames" rows="3" placeholder="one shop per line"></textarea>
-                    </div>
-                    <div>
-                        <label class="form-label small">Countries</label>
-                        <div class="d-flex gap-3 mt-1">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="chkNl" checked>
-                                <label class="form-check-label" for="chkNl">NL</label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="chkBe">
-                                <label class="form-check-label" for="chkBe">BE</label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="chkDe">
-                                <label class="form-check-label" for="chkDe">DE</label>
-                            </div>
-                        </div>
                     </div>
                     <div class="d-flex gap-2">
                         <button class="btn btn-primary" onclick="doSearch()" id="searchBtn">Search</button>
@@ -142,10 +113,8 @@
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-hover result-table mb-0">
-                            <thead id="resultsHead">
-                            </thead>
-                            <tbody id="resultsBody">
-                            </tbody>
+                            <thead id="resultsHead"></thead>
+                            <tbody id="resultsBody"></tbody>
                         </table>
                     </div>
                     <div class="pagination-controls" id="paginationControls">
@@ -184,37 +153,28 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const API_BASE = window.location.origin;
-        const countryLabels = { nl: 'MC ID NL', be: 'MC ID BE', de: 'MC ID DE' };
-        const countryKeys = { nl: 'mc_id_nl', be: 'mc_id_be', de: 'mc_id_de' };
+        const COLUMNS = [
+            { key: 'shop_name',           label: 'Shop Name',     type: 'text' },
+            { key: 'is_gsd_nl_shop',      label: 'GSD NL',        type: 'flag' },
+            { key: 'is_gsd_be_shop',      label: 'GSD BE',        type: 'flag' },
+            { key: 'is_gsd_de_shop',      label: 'GSD DE',        type: 'flag' },
+            { key: 'shop_phase',          label: 'Shop Phase',    type: 'text' },
+            { key: 'hide_online',         label: 'Hide Online',   type: 'flag' },
+            { key: 'is_disabled',         label: 'Is Disabled',   type: 'flag' },
+            { key: 'accountmanager_name', label: 'Account Manager', type: 'text' },
+        ];
 
         let allResults = [];
-        let lastCountries = [];
         let currentPage = 1;
         let sortColumn = null;
         let sortDirection = 'asc';
 
-        function getCheckedCountries() {
-            const countries = [];
-            if (document.getElementById('chkNl').checked) countries.push('nl');
-            if (document.getElementById('chkBe').checked) countries.push('be');
-            if (document.getElementById('chkDe').checked) countries.push('de');
-            return countries;
-        }
-
         async function doSearch() {
-            const countries = getCheckedCountries();
-            if (countries.length === 0) {
-                document.getElementById('errorArea').textContent = 'Please select at least one country.';
-                document.getElementById('errorArea').style.display = 'block';
-                return;
-            }
-
             const shopText = document.getElementById('shopNames').value.trim();
             const shopNames = shopText ? shopText.split('\n').map(s => s.trim()).filter(Boolean) : [];
 
             const params = new URLSearchParams();
             if (shopNames.length) params.append('shop_names', shopNames.join(','));
-            params.append('countries', countries.join(','));
 
             document.getElementById('loadingArea').style.display = 'block';
             document.getElementById('resultsSection').style.display = 'none';
@@ -222,14 +182,13 @@
             document.getElementById('searchBtn').disabled = true;
 
             try {
-                const res = await fetch(`${API_BASE}/api/mc-id-finder/search?${params}`);
+                const res = await fetch(`${API_BASE}/api/gsd-check/search?${params}`);
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}));
                     throw new Error(err.detail || `HTTP ${res.status}`);
                 }
                 const data = await res.json();
                 allResults = data.results || [];
-                lastCountries = countries;
                 sortColumn = null;
                 sortDirection = 'asc';
                 currentPage = 1;
@@ -247,14 +206,10 @@
 
         function buildHeader() {
             const thead = document.getElementById('resultsHead');
-            let html = '<tr>';
-            html += '<th class="sortable" data-sort="shop_name" onclick="sortBy(\'shop_name\')">Shop Name</th>';
-            ['nl', 'be', 'de'].forEach(c => {
-                html += `<th class="sortable" data-sort="${countryKeys[c]}" onclick="sortBy('${countryKeys[c]}')">${countryLabels[c]}</th>`;
-            });
-            html += '<th class="sortable" data-sort="last_changed" onclick="sortBy(\'last_changed\')">Last Changed</th>';
-            html += '</tr>';
-            thead.innerHTML = html;
+            const cells = COLUMNS.map(c =>
+                `<th class="sortable" data-sort="${c.key}" onclick="sortBy('${c.key}')">${c.label}</th>`
+            ).join('');
+            thead.innerHTML = `<tr>${cells}</tr>`;
         }
 
         function sortBy(column) {
@@ -315,24 +270,28 @@
             renderPage();
         }
 
+        function fmtFlag(v) {
+            if (v === null || v === undefined || v === '') return '<span class="flag-no">-</span>';
+            const truthy = v === 1 || v === '1' || v === true || v === 'true';
+            return truthy
+                ? '<span class="flag-yes">Yes</span>'
+                : '<span class="flag-no">No</span>';
+        }
+
         function renderTable(results) {
             const tbody = document.getElementById('resultsBody');
-            const colCount = 5; // shop_name + 3 countries + last_changed
-
             if (results.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="${colCount}" class="text-center text-muted py-4">No results found</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="${COLUMNS.length}" class="text-center text-muted py-4">No results found</td></tr>`;
                 return;
             }
-
             tbody.innerHTML = results.map(r => {
-                let row = `<tr><td><strong>${escHtml(r.shop_name || '')}</strong></td>`;
-                ['nl', 'be', 'de'].forEach(c => {
-                    const val = r[countryKeys[c]];
-                    const hasVal = val && val !== '' && val !== '0' && val !== '1';
-                    row += `<td class="mc-id-cell ${hasVal ? '' : 'mc-id-empty'}">${hasVal ? val : '-'}</td>`;
-                });
-                row += `<td class="text-muted" style="font-size:0.85rem">${r.last_changed || '-'}</td>`;
-                return row + '</tr>';
+                const cells = COLUMNS.map(col => {
+                    const v = r[col.key];
+                    if (col.type === 'flag') return `<td>${fmtFlag(v)}</td>`;
+                    if (col.key === 'shop_name') return `<td><strong>${escHtml(v ?? '')}</strong></td>`;
+                    return `<td>${v === null || v === undefined ? '<span class="flag-no">-</span>' : escHtml(String(v))}</td>`;
+                }).join('');
+                return `<tr>${cells}</tr>`;
             }).join('');
         }
 
@@ -341,20 +300,23 @@
             document.getElementById('resultsSection').style.display = 'none';
             document.getElementById('errorArea').style.display = 'none';
             allResults = [];
-            lastCountries = [];
         }
 
         function exportCsv() {
             if (!allResults.length) return;
-            const header = ['shop_name', 'mc_id_nl', 'mc_id_be', 'mc_id_de', 'last_changed'].join(',') + '\n';
-            const rows = allResults.map(r => {
-                const vals = ['nl', 'be', 'de'].map(c => r[countryKeys[c]] || '');
-                return `"${(r.shop_name || '').replace(/"/g, '""')}",${vals.join(',')},${r.last_changed || ''}`;
-            }).join('\n');
+            const header = COLUMNS.map(c => c.key).join(',') + '\n';
+            const rows = allResults.map(r =>
+                COLUMNS.map(c => {
+                    const v = r[c.key];
+                    if (v === null || v === undefined) return '';
+                    const s = String(v);
+                    return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+                }).join(',')
+            ).join('\n');
             const blob = new Blob([header + rows], { type: 'text/csv' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = 'mc_ids_export.csv';
+            a.download = 'gsd_check_export.csv';
             a.click();
         }
 
