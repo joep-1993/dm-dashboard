@@ -408,7 +408,8 @@
                 lastRunResult = data;
 
                 if (data.status === 'cancelled') {
-                    progressContent.innerHTML = `<span class="text-warning"><strong>Cancelled</strong> after ${data.duration_seconds}s — evaluated ${data.shops_evaluated} of the planned ${data.results ? data.results.length : 0} shops before stop.</span>`;
+                    const evaluated = data.results ? data.results.length : 0;
+                    progressContent.innerHTML = `<strong>Cancelled</strong> after ${data.duration_seconds}s — evaluated ${evaluated} of the planned ${data.shops_evaluated} shops before stop.`;
                 } else if (data.status === 'aborted') {
                     progressContent.innerHTML = `<span class="text-danger"><strong>Aborted</strong> — ${escHtml(data.error || 'unknown error')}</span>`;
                 } else {
@@ -465,7 +466,7 @@
             meta.innerHTML = `
                 <small class="text-muted">
                     Run #${data.run_id} | <strong>${data.country || 'NL'}</strong>
-                    | ${data.dry_run ? '<span class="badge bg-info">DRY RUN</span>' : '<span class="badge bg-danger">LIVE</span>'}
+                    | ${data.dry_run ? '<span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent;">DRY RUN</span>' : '<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">LIVE</span>'}
                     | Shops: ${data.shops_evaluated}
                     | SA360 window: ${window}
                     | Duration: ${data.duration_seconds}s
@@ -480,9 +481,9 @@
                 <span class="badge badge-decrease">verlagen-20: ${s['verlagen-20'] || 0}</span>
                 <span class="badge badge-decrease">verlagen-25: ${s['verlagen-25'] || 0}</span>
                 <span class="badge badge-stuck">c-verlagen-20: ${s['c-verlagen-20'] || 0}</span>
-                <span class="badge bg-secondary">missed: ${s.missed || 0}</span>
-                <span class="badge bg-secondary">no action: ${s.no_action || 0}</span>
-                <span class="badge bg-secondary">budget mutations: ${s.budget_changed || 0}</span>
+                <span class="badge" style="border: 1px solid #2d3436; color: #2d3436; background: transparent;">missed: ${s.missed || 0}</span>
+                <span class="badge" style="border: 1px solid #2d3436; color: #2d3436; background: transparent;">no action: ${s.no_action || 0}</span>
+                <span class="badge" style="border: 1px solid #2d3436; color: #2d3436; background: transparent;">budget mutations: ${s.budget_changed || 0}</span>
             `;
 
             const tables = document.getElementById('resultTables');
