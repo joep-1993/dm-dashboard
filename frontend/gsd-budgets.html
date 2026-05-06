@@ -177,6 +177,9 @@
                             <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2.5rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runBudgets()" id="runBtn">
                                 Run
                             </button>
+                            <button class="btn btn-danger" id="cancelBtn" onclick="cancelRun()" style="display: none; padding: 0.4rem 1.5rem;">
+                                Cancel
+                            </button>
                         </div>
 
                         <div class="progress-area mt-3" id="progressArea" style="display: none;">
@@ -377,6 +380,10 @@
             if (!dryRun && !confirm('LIVE MODE: this will mutate Google Ads campaign budgets and (unless skipped) write to pa.jvs_gsd_missed_shops. Continue?')) return;
 
             btn.disabled = true;
+            const cancelBtn = document.getElementById('cancelBtn');
+            cancelBtn.style.display = 'inline-block';
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel';
             progressArea.style.display = 'block';
             progressContent.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Running GSD Budgets analysis... this can take several minutes for a full country.</div>';
 
@@ -400,7 +407,13 @@
                 const data = await res.json();
                 lastRunResult = data;
 
-                progressContent.innerHTML = `<span class="text-success">Completed in ${data.duration_seconds}s — evaluated ${data.shops_evaluated} shops.</span>`;
+                if (data.status === 'cancelled') {
+                    progressContent.innerHTML = `<span class="text-warning"><strong>Cancelled</strong> after ${data.duration_seconds}s — evaluated ${data.shops_evaluated} of the planned ${data.results ? data.results.length : 0} shops before stop.</span>`;
+                } else if (data.status === 'aborted') {
+                    progressContent.innerHTML = `<span class="text-danger"><strong>Aborted</strong> — ${escHtml(data.error || 'unknown error')}</span>`;
+                } else {
+                    progressContent.innerHTML = `<span class="text-success">Completed in ${data.duration_seconds}s — evaluated ${data.shops_evaluated} shops.</span>`;
+                }
                 renderResults(data);
                 loadHistory();
                 loadStats();
@@ -408,6 +421,25 @@
                 progressContent.innerHTML = `<span class="text-danger">Error: ${escHtml(err.message)}</span>`;
             } finally {
                 btn.disabled = false;
+                document.getElementById('cancelBtn').style.display = 'none';
+            }
+        }
+
+        async function cancelRun() {
+            const cancelBtn = document.getElementById('cancelBtn');
+            if (!confirm('Cancel the running GSD Budgets analysis?\n\nMutations already applied to Google Ads will NOT be rolled back; only pending shops/campaigns are skipped.')) return;
+            cancelBtn.disabled = true;
+            cancelBtn.textContent = 'Cancelling…';
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-budgets/cancel`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const progressContent = document.getElementById('progressContent');
+                progressContent.innerHTML = `<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-warning"></div> Cancel signalled (${data.count} run${data.count === 1 ? '' : 's'} marked) — waiting for the worker to stop at the next checkpoint…</div>`;
+            } catch (err) {
+                cancelBtn.disabled = false;
+                cancelBtn.textContent = 'Cancel';
+                alert(`Cancel failed: ${err.message}`);
             }
         }
 

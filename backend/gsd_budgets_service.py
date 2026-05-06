@@ -111,6 +111,70 @@ _history_lock = threading.Lock()
 # Serialize full runs across HTTP requests so two clicks can't race on budget mutations.
 _run_lock = threading.Lock()
 
+# Active-run registry: run_id -> {"country": str, "cancel": bool, "started": datetime}.
+# Lets POST /cancel flip the cancel flag from another request while the run loop
+# checks it at safe points between shops / before each campaign mutation.
+_active_runs: Dict[int, Dict[str, Any]] = {}
+_active_lock = threading.Lock()
+
+
+class RunCancelled(Exception):
+    """Raised inside the run loop when a cancel was requested via POST /cancel.
+    Bubbles up to the run_gsd_budgets handler which returns status='cancelled'
+    with whatever partial results were already collected."""
+
+
+def _register_active(run_id: int, country: str) -> None:
+    with _active_lock:
+        _active_runs[run_id] = {
+            "country": country,
+            "cancel": False,
+            "started": datetime.now(),
+        }
+
+
+def _unregister_active(run_id: int) -> None:
+    with _active_lock:
+        _active_runs.pop(run_id, None)
+
+
+def _is_cancelled(run_id: int) -> bool:
+    """Non-raising cancel check. The run loop breaks out gracefully so we can
+    still build a partial run_result with whatever was collected."""
+    with _active_lock:
+        return bool(_active_runs.get(run_id, {}).get("cancel"))
+
+
+def cancel_active_runs(country: Optional[str] = None) -> List[int]:
+    """Flip the cancel flag on every currently active run (optionally filtered
+    to a single country). Returns the list of run_ids that were marked.
+
+    The actual cancellation happens at the next `_check_cancel` checkpoint
+    inside the run loop — between shops or before each campaign mutation.
+    """
+    cancelled: List[int] = []
+    with _active_lock:
+        for rid, info in _active_runs.items():
+            if country and (info.get("country") or "").upper() != country.upper():
+                continue
+            info["cancel"] = True
+            cancelled.append(rid)
+    return cancelled
+
+
+def get_active_runs() -> List[Dict[str, Any]]:
+    """Snapshot of active runs for the UI's polling endpoint."""
+    with _active_lock:
+        return [
+            {
+                "run_id": rid,
+                "country": info.get("country"),
+                "cancel_requested": info.get("cancel", False),
+                "started": info.get("started").isoformat() if info.get("started") else None,
+            }
+            for rid, info in _active_runs.items()
+        ]
+
 
 def _load_run_history_from_disk() -> List[Dict[str, Any]]:
     if _HISTORY_FILE.exists():
@@ -905,6 +969,7 @@ def run_gsd_budgets(
             f"GSD Budgets run #{run_id} start (country={country} dry_run={dry_run} "
             f"start={start_days_ago} end={end_days_ago} limit={limit_shops})"
         )
+        _register_active(run_id, country)
 
         exclusions_synced = 0
         exclusions_sync_status = "synced"
@@ -968,6 +1033,7 @@ def run_gsd_budgets(
                 ),
             }
             _history_prepend(run_result)
+            _unregister_active(run_id)
             return run_result
 
         shop_rows = get_redshift_shop_data(
@@ -993,7 +1059,11 @@ def run_gsd_budgets(
             "shops_over_loss_25": 0,
         }
 
+        was_cancelled = False
         for margin_data in shop_rows:
+            if _is_cancelled(run_id):
+                was_cancelled = True
+                break
             shop_name = margin_data.get("shop_name")
             shop_id = margin_data.get("shop_id")
             marge = margin_data.get("marge")
@@ -1085,6 +1155,9 @@ def run_gsd_budgets(
             )
 
             for campaign_resource_name, campaign_name in zip(campaign_resource_names, campaign_names):
+                if _is_cancelled(run_id):
+                    was_cancelled = True
+                    break
                 try:
                     campaign_marge = get_total_marge_sa360(
                         country,
@@ -1128,6 +1201,8 @@ def run_gsd_budgets(
                 shop_record["campaigns"].append(campaign_record)
 
             results.append(shop_record)
+            if was_cancelled:
+                break
 
         missed_uploaded = 0
         missed_upload_status = "skipped"
@@ -1172,12 +1247,20 @@ def run_gsd_budgets(
             "missed_shops": missed_shops,
             "missed_shops_uploaded": missed_uploaded,
             "missed_upload_status": missed_upload_status,
-            "status": "completed",
+            "status": "cancelled" if was_cancelled else "completed",
         }
+        if was_cancelled:
+            run_result["error"] = (
+                f"Run #{run_id} cancelled by user after evaluating "
+                f"{len(results)}/{len(shop_rows)} shops. Mutations completed before "
+                "cancel are NOT rolled back."
+            )
 
         _history_prepend(run_result)
+        _unregister_active(run_id)
 
         logger.info(
-            f"GSD Budgets run #{run_id} done in {duration:.1f}s summary={summary_counts}"
+            f"GSD Budgets run #{run_id} {'cancelled' if was_cancelled else 'done'} "
+            f"in {duration:.1f}s summary={summary_counts}"
         )
         return run_result

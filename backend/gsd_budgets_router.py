@@ -13,6 +13,8 @@ from fastapi import APIRouter, HTTPException, Query
 
 from backend.gsd_budgets_service import (
     _run_history,
+    cancel_active_runs,
+    get_active_runs,
     get_stats,
     run_gsd_budgets,
 )
@@ -94,3 +96,19 @@ async def clear_history():
 
     count = _history_clear()
     return {"cleared": count}
+
+
+@router.get("/active")
+async def active():
+    """Currently running runs (drives the Cancel button visibility)."""
+    return {"active": get_active_runs()}
+
+
+@router.post("/cancel")
+async def cancel(country: Optional[str] = Query(None, description="Optional country filter; cancels all active runs if omitted")):
+    """Mark active runs for cancellation. The actual stop happens at the next
+    safe checkpoint inside the run loop (between shops or before each
+    campaign mutation). Mutations already committed are NOT rolled back.
+    """
+    cancelled_ids = cancel_active_runs(country=country)
+    return {"cancelled": cancelled_ids, "count": len(cancelled_ids)}
