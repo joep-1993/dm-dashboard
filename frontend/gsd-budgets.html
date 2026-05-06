@@ -460,12 +460,14 @@
             }
 
             const meta = document.getElementById('resultMeta');
+            const dr = data.date_range || {};
+            const window = (dr.start && dr.end) ? `${dr.start} → ${dr.end}` : 'n/a';
             meta.innerHTML = `
                 <small class="text-muted">
                     Run #${data.run_id} | <strong>${data.country || 'NL'}</strong>
                     | ${data.dry_run ? '<span class="badge bg-info">DRY RUN</span>' : '<span class="badge bg-danger">LIVE</span>'}
                     | Shops: ${data.shops_evaluated}
-                    | SA360 window: ${data.date_range.start} → ${data.date_range.end}
+                    | SA360 window: ${window}
                     | Duration: ${data.duration_seconds}s
                     | Missed upload: ${escHtml(data.missed_upload_status || 'n/a')}
                 </small>
@@ -597,6 +599,21 @@
             XLSX.writeFile(wb, `gsd-budgets-${country}-${mode}-${date}-run${runData.run_id}.xlsx`);
         }
 
+        async function removeHistoryRun(event, runId) {
+            if (event) event.stopPropagation();
+            if (!confirm(`Remove run #${runId} from history? This only deletes the local history record — already-applied budget mutations are NOT rolled back.`)) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-budgets/history/${runId}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(`HTTP ${res.status}: ${text}`);
+                }
+                loadHistory();
+            } catch (err) {
+                alert(`Remove failed: ${err.message}`);
+            }
+        }
+
         async function downloadHistoryRun(event, runId) {
             event.stopPropagation();
             try {
@@ -625,11 +642,14 @@
 
                 tbody.innerHTML = runs.map(r => {
                     const ts = new Date(r.timestamp).toLocaleString('nl-NL');
-                    const range = `${r.date_range.start} → ${r.date_range.end}`;
+                    // Some legacy / mid-failure history entries lack date_range.
+                    // Tolerate missing field instead of taking down the whole render.
+                    const dr = r.date_range || {};
+                    const range = (dr.start && dr.end) ? `${dr.start} → ${dr.end}` : '–';
                     const changes = (r.summary && r.summary.budget_changed) || 0;
                     const statusBadge = r.status === 'completed' || r.status === 'success'
-                        ? '<span class="badge" style="border: 1px solid #00b894; color: #00b894; background: transparent;">completed</span>'
-                        : `<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">${escHtml(r.status || 'failed')}</span>`;
+                        ? '<span class="badge" style="border: 1px solid #00b894; color: #00b894; background: transparent;">COMPLETED</span>'
+                        : `<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">${escHtml((r.status || 'failed').toUpperCase())}</span>`;
                     const dryRunBadge = r.dry_run
                         ? ' <span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent; margin-left: 4px;">DRY RUN</span>'
                         : '';
@@ -641,13 +661,14 @@
                         <td style="padding: 6px 12px;">${statusBadge}${dryRunBadge}</td>
                         <td style="padding: 6px 12px; text-align: center; white-space: nowrap;">
                             <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="downloadHistoryRun(event, ${r.run_id})">Export</button>
+                            <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; margin-left: 4px;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="removeHistoryRun(event, ${r.run_id})">Remove</button>
                         </td>
                     </tr>`;
                 }).join('');
             } catch (err) {
                 console.error('Failed to load history:', err);
                 document.getElementById('historyTableBody').innerHTML =
-                    '<tr><td colspan="6" class="text-center text-danger py-4">Failed to load history.</td></tr>';
+                    `<tr><td colspan="6" class="text-center text-danger py-4">Failed to load history: ${escHtml(err.message || String(err))}</td></tr>`;
             }
         }
 

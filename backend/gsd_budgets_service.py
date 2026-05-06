@@ -217,6 +217,17 @@ def _history_clear():
         return n
 
 
+def _history_remove(run_id: int) -> bool:
+    """Remove a single run from the history. Returns True if removed."""
+    with _history_lock:
+        before = len(_run_history)
+        _run_history[:] = [r for r in _run_history if r.get("run_id") != run_id]
+        if len(_run_history) == before:
+            return False
+        _save_run_history_to_disk()
+        return True
+
+
 # ---------------------------------------------------------------------------
 # Config helpers
 # ---------------------------------------------------------------------------

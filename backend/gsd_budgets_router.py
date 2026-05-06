@@ -98,6 +98,15 @@ async def clear_history():
     return {"cleared": count}
 
 
+@router.delete("/history/{run_id}")
+async def remove_history(run_id: int):
+    from backend.gsd_budgets_service import _history_remove
+
+    if not _history_remove(run_id):
+        raise HTTPException(status_code=404, detail=f"Run #{run_id} not found")
+    return {"removed": run_id}
+
+
 @router.get("/active")
 async def active():
     """Currently running runs (drives the Cancel button visibility)."""
