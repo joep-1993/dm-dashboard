@@ -936,6 +936,10 @@ def run_gsd_budgets(
                 "dry_run": dry_run,
                 "start_days_ago": start_days_ago,
                 "end_days_ago": end_days_ago,
+                "date_range": {
+                    "start": (datetime.now() - timedelta(days=start_days_ago)).strftime("%Y-%m-%d"),
+                    "end": (datetime.now() - timedelta(days=end_days_ago)).strftime("%Y-%m-%d"),
+                },
                 "limit_shops": limit_shops,
                 "shop_names_filter": shop_names,
                 "shop_names_excluded": shop_names_excluded,

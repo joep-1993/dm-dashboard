@@ -200,6 +200,7 @@
                             </h5>
                         </div>
                         <div class="card-body">
+                            <div class="alert alert-danger" id="abortBanner" style="display: none;"></div>
                             <div class="mb-2" id="resultMeta"></div>
                             <div class="summary-badges" id="summaryBadges"></div>
                             <div id="resultTables"></div>
@@ -417,6 +418,19 @@
 
         function renderResults(data) {
             document.getElementById('resultsSection').style.display = 'block';
+
+            // Aborted runs (e.g. BUDGET_CONSTRAINED sheet failed both load attempts)
+            // surface up here with status: "aborted" + an `error` message.
+            // Show a prominent banner so it's not mistaken for a "no work to do" run.
+            const abortBanner = document.getElementById('abortBanner');
+            if (data && data.status === 'aborted') {
+                if (abortBanner) {
+                    abortBanner.style.display = 'block';
+                    abortBanner.innerHTML = `<strong>Run aborted</strong> — ${escHtml(data.error || 'unknown error')}`;
+                }
+            } else if (abortBanner) {
+                abortBanner.style.display = 'none';
+            }
 
             const meta = document.getElementById('resultMeta');
             meta.innerHTML = `
