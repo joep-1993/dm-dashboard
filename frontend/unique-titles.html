@@ -922,7 +922,7 @@
                 resultsDiv.innerHTML = data.results.map(item => `
                     <div class="card mb-2">
                         <div class="card-body py-2">
-                            <p class="mb-1 small"><strong>URL:</strong> <code>${item.url}</code></p>
+                            <p class="mb-1 small"><strong>URL:</strong> <a href="https://www.beslist.nl${item.url}" target="_blank" rel="noopener" class="text-decoration-none"><code style="word-break: break-all; user-select: all;">${item.url}</code></a></p>
                             <p class="mb-1 small"><strong>Title:</strong> ${item.title}</p>
                             <p class="mb-1 small"><strong>H1:</strong> ${item.h1_title}</p>
                             <button class="btn btn-sm btn-outline-primary" onclick="editTitle('${encodeURIComponent(JSON.stringify(item)).replace(/'/g, '%27')}')">Edit</button>

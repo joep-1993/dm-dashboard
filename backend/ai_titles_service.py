@@ -966,9 +966,23 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
     # (e.g. "type") which may serve double duty across URL slugs (e.g.
     # "type_productlijn" vs "type"); the URL slug is the more reliable signal
     # for the policy.
-    _NEVER_URL_SLUGS = {'type_productlijn'}
+    # URL slugs whose facets must NEVER act as type-facets, regardless of
+    # what the (facet_name, category) classifier says. `personage` covers
+    # characters / franchises (Super Mario, Dragon Ball, Frozen, Anna ...)
+    # which are NOT product types — they're attributes; the category name
+    # ("Speelgoed", "Kleding", ...) still has to appear in the H1 to make
+    # the page subject clear.
+    _NEVER_URL_SLUGS = {'type_productlijn', 'personage'}
+    # URL slugs that ALWAYS act as type-facets, regardless of what the
+    # per-(facet_name, category) classifier in pa.facet_type_classifications
+    # decided. Use this when the classifier's mixed-verdict tiebreak rule
+    # produces a False that the slug's actual values contradict — e.g. t_stoel
+    # values like "Relax tuinstoel" carry the singular of the category in
+    # every value, so appending "Tuinstoelen" always duplicates.
+    _ALWAYS_TYPE_URL_SLUGS = {'t_stoel'}
     has_category_override = any(
-        type_class.get((f.get('facet_name') or '').lower().strip(), False)
+        (f.get('url_name') or '').lower() in _ALWAYS_TYPE_URL_SLUGS
+        or type_class.get((f.get('facet_name') or '').lower().strip(), False)
         for f in selected_facets
         if (f.get('url_name') or '').lower() not in _NEVER_URL_SLUGS
     )
