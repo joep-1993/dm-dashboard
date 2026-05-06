@@ -253,22 +253,39 @@ def preload_budget_constrained_cache() -> Dict[str, Dict[str, str]]:
     can look up each campaign in O(1) instead of hitting the Sheets API per hit.
     Matches the source script's `preload_campaign_limited_data`.
     Returns {country_code: {campaign_name: column_d_value}}.
+
+    Raises on any per-country fetch failure so the caller can decide whether
+    to retry or abort. The previous per-country swallow-to-empty behaviour
+    silently turned every verhogen-20 candidate into `not_budget_constrained`,
+    which manifested as "the dashboard finds no campaigns to increase budget
+    for" with no visible error.
     """
     client = _gspread_client()
     cache: Dict[str, Dict[str, str]] = {}
     for country, cfg in COUNTRY_CONFIG.items():
-        try:
-            sheet = client.open_by_key(cfg["campaign_limited_sheet"]).sheet1
-            data = sheet.get_all_values()
-            if data and len(data) >= 2:
-                records = data[1:]
-                cache[country] = {row[1]: row[3] for row in records if len(row) >= 4}
-            else:
-                cache[country] = {}
-        except Exception as e:
-            logger.error(f"Failed to read BUDGET_CONSTRAINED sheet for {country}: {e}")
+        sheet = client.open_by_key(cfg["campaign_limited_sheet"]).sheet1
+        data = sheet.get_all_values()
+        if data and len(data) >= 2:
+            records = data[1:]
+            cache[country] = {row[1]: row[3] for row in records if len(row) >= 4}
+        else:
             cache[country] = {}
     return cache
+
+
+def preload_budget_constrained_cache_with_retry() -> Dict[str, Dict[str, str]]:
+    """Try `preload_budget_constrained_cache` once; on failure rebuild the
+    gspread client and try again. Raises the second exception if both fail,
+    so the caller can abort the run instead of silently zeroing out the
+    BUDGET_CONSTRAINED flag (which would suppress every verhogen-20 mutation).
+    """
+    try:
+        return preload_budget_constrained_cache()
+    except Exception as e:
+        logger.warning(
+            f"preload_budget_constrained_cache failed on first attempt: {e!r} — retrying once with a fresh gspread client"
+        )
+        return preload_budget_constrained_cache()
 
 
 def _is_budget_constrained(campaign_name: str, country: str, cache: Dict[str, Dict[str, str]]) -> int:
@@ -902,10 +919,52 @@ def run_gsd_budgets(
                 exclusions_sync_status = f"failed: {e}"
 
         try:
-            limited_cache = preload_budget_constrained_cache()
+            limited_cache = preload_budget_constrained_cache_with_retry()
+            limited_cache_status = "loaded"
         except Exception as e:
-            logger.warning(f"preload_budget_constrained_cache failed: {e}")
-            limited_cache = {}
+            # Both attempts failed. Abort the entire run — no increases AND
+            # no decreases. A silent fallback to an empty cache here previously
+            # made every verhogen-20 candidate look "not_budget_constrained"
+            # which in turn made it look like the dashboard had nothing to do.
+            logger.error(
+                f"preload_budget_constrained_cache failed twice: {e!r} — aborting run, no mutations performed"
+            )
+            duration = (datetime.now() - start_time).total_seconds()
+            run_result = {
+                "run_id": run_id,
+                "country": country,
+                "dry_run": dry_run,
+                "start_days_ago": start_days_ago,
+                "end_days_ago": end_days_ago,
+                "limit_shops": limit_shops,
+                "shop_names_filter": shop_names,
+                "shop_names_excluded": shop_names_excluded,
+                "skip_missed_upload": skip_missed_upload,
+                "timestamp": start_time.isoformat(),
+                "duration_seconds": round(duration, 1),
+                "exclusions_synced": exclusions_synced,
+                "exclusions_sync_status": exclusions_sync_status,
+                "summary": {
+                    "verlagen-25": 0, "verlagen-20": 0, "c-verlagen-20": 0,
+                    "verhogen-20": 0, "no_action": 0, "missed": 0,
+                    "budget_changed": 0, "shops_over_loss_25": 0,
+                },
+                "shops_evaluated": 0,
+                "results": [],
+                "over_loss_25": [],
+                "missed_shops": [],
+                "missed_shops_uploaded": 0,
+                "missed_upload_status": "skipped",
+                "budget_constrained_load_status": f"failed: {e}",
+                "status": "aborted",
+                "error": (
+                    "Failed to load BUDGET_CONSTRAINED Google Sheet (after 1 retry). "
+                    "Aborted before any budget mutations to avoid suppressing all "
+                    "verhogen-20 actions. Re-run after the Sheets API recovers."
+                ),
+            }
+            _history_prepend(run_result)
+            return run_result
 
         shop_rows = get_redshift_shop_data(
             country=country,
@@ -1101,6 +1160,7 @@ def run_gsd_budgets(
             "duration_seconds": round(duration, 1),
             "exclusions_synced": exclusions_synced,
             "exclusions_sync_status": exclusions_sync_status,
+            "budget_constrained_load_status": limited_cache_status,
             "summary": summary_counts,
             "shops_evaluated": len(shop_rows),
             "results": results,
