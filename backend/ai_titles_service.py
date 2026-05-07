@@ -1985,6 +1985,8 @@ def get_recent_results(limit: int = 20) -> List[Dict]:
     cur = conn.cursor()
 
     try:
+        # LIMIT before JOIN — sort the jobs table first, then look up
+        # urls + content via primary keys.
         cur.execute("""
             SELECT u.url,
                    c.title,
@@ -1992,12 +1994,16 @@ def get_recent_results(limit: int = 20) -> List[Dict]:
                    c.original_h1,
                    j.updated_at AS ai_processed_at,
                    j.last_error AS ai_error
-            FROM pa.unique_titles_jobs j
+            FROM (
+                SELECT url_id, updated_at, last_error
+                FROM pa.unique_titles_jobs
+                WHERE status IN ('success', 'failed')
+                ORDER BY updated_at DESC
+                LIMIT %s
+            ) j
             JOIN pa.urls u ON j.url_id = u.url_id
             LEFT JOIN pa.unique_titles_content c ON c.url_id = j.url_id
-            WHERE j.status IN ('success', 'failed')
             ORDER BY j.updated_at DESC
-            LIMIT %s
         """, (limit,))
         return [dict(row) for row in cur.fetchall()]
     finally:
