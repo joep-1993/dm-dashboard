@@ -1,7 +1,7 @@
 """
 Score unique titles on grammatical correctness and readability (1-10).
 Uses OpenAI GPT-4o-mini with 20 concurrent workers, batching 25 titles per request.
-Saves scores + issues back to pa.unique_titles.
+Saves scores + issues back to pa.unique_titles_content (title_score / title_score_issue).
 """
 import os
 import sys
@@ -90,17 +90,33 @@ def score_batch(titles: list[dict], retries: int = 2) -> list[dict]:
 
 
 def save_scores(scores: list[dict]):
-    """Save scores back to the database."""
+    """Save scores back to pa.unique_titles_content."""
     if not scores:
         return
+    from backend.url_catalog import canonicalize_url, bulk_upsert_urls
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        from psycopg2.extras import execute_batch
-        execute_batch(cur,
-            "UPDATE pa.unique_titles SET title_score = %(score)s, title_score_issue = %(issue)s WHERE url = %(url)s",
-            [{"score": s["score"], "issue": s["issue"] if s["issue"] else None, "url": s["url"]} for s in scores]
-        )
+        url_id_map = bulk_upsert_urls(cur, [s["url"] for s in scores])
+        rows = []
+        for s in scores:
+            canon = canonicalize_url(s["url"])
+            uid = url_id_map.get(canon) if canon else None
+            if uid is not None:
+                rows.append({
+                    "score": s["score"],
+                    "issue": s["issue"] if s["issue"] else None,
+                    "url_id": uid,
+                })
+        if rows:
+            from psycopg2.extras import execute_batch
+            execute_batch(cur,
+                "UPDATE pa.unique_titles_content "
+                "   SET title_score = %(score)s, title_score_issue = %(issue)s, "
+                "       updated_at = CURRENT_TIMESTAMP "
+                " WHERE url_id = %(url_id)s",
+                rows
+            )
         conn.commit()
     finally:
         cur.close()
@@ -126,9 +142,12 @@ def fetch_unscored(limit: int) -> list[dict]:
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT url, title FROM pa.unique_titles
-            WHERE title_score IS NULL AND title IS NOT NULL AND title != ''
-            ORDER BY url
+            SELECT u.url, c.title
+            FROM pa.unique_titles_content c
+            JOIN pa.urls u ON c.url_id = u.url_id
+            WHERE c.title_score IS NULL
+              AND c.title IS NOT NULL AND c.title != ''
+            ORDER BY u.url
             LIMIT %s
         """, (limit,))
         return [{"url": r["url"], "title": r["title"]} for r in cur.fetchall()]
@@ -141,7 +160,12 @@ def get_remaining_count() -> int:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT count(*) as cnt FROM pa.unique_titles WHERE title_score IS NULL AND title IS NOT NULL AND title != ''")
+        cur.execute("""
+            SELECT count(*) AS cnt
+            FROM pa.unique_titles_content
+            WHERE title_score IS NULL
+              AND title IS NOT NULL AND title != ''
+        """)
         return cur.fetchone()["cnt"]
     finally:
         cur.close()

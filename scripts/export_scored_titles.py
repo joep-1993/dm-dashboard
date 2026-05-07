@@ -22,10 +22,11 @@ def export():
 
     print("Fetching all titles with scores...")
     cur.execute("""
-        SELECT url, title, h1_title, title_score, title_score_issue
-        FROM pa.unique_titles
-        WHERE title IS NOT NULL AND title != ''
-        ORDER BY title_score ASC NULLS LAST, url
+        SELECT u.url, c.title, c.h1_title, c.title_score, c.title_score_issue
+        FROM pa.unique_titles_content c
+        JOIN pa.urls u ON c.url_id = u.url_id
+        WHERE c.title IS NOT NULL AND c.title != ''
+        ORDER BY c.title_score ASC NULLS LAST, u.url
     """)
     rows = cur.fetchall()
     cur.close()

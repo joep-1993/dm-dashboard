@@ -3,11 +3,12 @@
 Sync Redshift kopteksten flags based on local content table.
 
 This script ensures data consistency between:
-- Local pa.content_urls_joep (URLs with generated content)
+- Local pa.kopteksten_content (URLs with generated content; new-schema table
+  joined to pa.urls for the URL string)
 - Redshift pa.jvs_seo_werkvoorraad_shopping_season (kopteksten flags)
 
 It will:
-1. Find all URLs in local pa.content_urls_joep
+1. Find all URLs in local pa.kopteksten_content
 2. Update Redshift to set kopteksten=1 for those URLs
 """
 
@@ -26,7 +27,11 @@ def sync_redshift_flags():
     local_conn = get_db_connection()
     local_cur = local_conn.cursor()
 
-    local_cur.execute("SELECT url FROM pa.content_urls_joep")
+    local_cur.execute("""
+        SELECT u.url
+        FROM pa.kopteksten_content c
+        JOIN pa.urls u ON c.url_id = u.url_id
+    """)
     urls_with_content = [row['url'] for row in local_cur.fetchall()]
 
     local_cur.close()

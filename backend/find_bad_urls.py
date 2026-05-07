@@ -57,11 +57,13 @@ def main():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     cur = conn.cursor()
 
-    # Count total
+    # Count total — pending unique_titles jobs whose URL is a faceted /products/.../c/... path
     cur.execute("""
-        SELECT count(*) as cnt FROM pa.unique_titles
-        WHERE (ai_processed = false OR ai_processed IS NULL)
-          AND url LIKE '/products/%%/c/%%'
+        SELECT count(*) AS cnt
+        FROM pa.unique_titles_jobs j
+        JOIN pa.urls u ON j.url_id = u.url_id
+        WHERE j.status = 'pending'
+          AND u.url LIKE '/products/%%/c/%%'
     """)
     total = cur.fetchone()['cnt']
     print(f"Total pending URLs to check: {total}")
@@ -72,10 +74,12 @@ def main():
 
     while offset < total:
         cur.execute("""
-            SELECT url FROM pa.unique_titles
-            WHERE (ai_processed = false OR ai_processed IS NULL)
-              AND url LIKE '/products/%%/c/%%'
-            ORDER BY url
+            SELECT u.url
+            FROM pa.unique_titles_jobs j
+            JOIN pa.urls u ON j.url_id = u.url_id
+            WHERE j.status = 'pending'
+              AND u.url LIKE '/products/%%/c/%%'
+            ORDER BY u.url
             LIMIT %s OFFSET %s
         """, (BATCH_SIZE, offset))
 

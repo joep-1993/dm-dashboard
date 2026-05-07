@@ -25,60 +25,36 @@ BASE_URL = "https://www.beslist.nl"
 
 
 def add_status_columns():
-    """Add status_code and final_url columns if they don't exist."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    try:
-        # Add status_code column
-        cur.execute("""
-            ALTER TABLE pa.unique_titles
-            ADD COLUMN IF NOT EXISTS status_code INTEGER
-        """)
-
-        # Add final_url column (for redirects)
-        cur.execute("""
-            ALTER TABLE pa.unique_titles
-            ADD COLUMN IF NOT EXISTS final_url VARCHAR(2000)
-        """)
-
-        # Add checked_at column
-        cur.execute("""
-            ALTER TABLE pa.unique_titles
-            ADD COLUMN IF NOT EXISTS checked_at TIMESTAMP
-        """)
-
-        conn.commit()
-        log("[URL_CHECK] Added status_code, final_url, and checked_at columns")
-    except Exception as e:
-        log(f"[URL_CHECK] Error adding columns: {e}")
-        conn.rollback()
-    finally:
-        cur.close()
-        return_db_connection(conn)
+    """No-op after Big Bang. http_status / final_url / last_checked_at live
+    on pa.unique_titles_jobs (created via migration step 1).
+    """
+    log("[URL_CHECK] Columns live on pa.unique_titles_jobs; no-op")
 
 
 def get_unchecked_urls(limit: int = None):
-    """Get URLs that haven't been checked yet."""
+    """Get URLs whose http_status hasn't been recorded yet."""
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
         if limit:
             cur.execute("""
-                SELECT url FROM pa.unique_titles
-                WHERE status_code IS NULL
-                ORDER BY url
+                SELECT u.url
+                FROM pa.unique_titles_jobs j
+                JOIN pa.urls u ON j.url_id = u.url_id
+                WHERE j.http_status IS NULL
+                ORDER BY u.url
                 LIMIT %s
             """, (limit,))
         else:
             cur.execute("""
-                SELECT url FROM pa.unique_titles
-                WHERE status_code IS NULL
-                ORDER BY url
+                SELECT u.url
+                FROM pa.unique_titles_jobs j
+                JOIN pa.urls u ON j.url_id = u.url_id
+                WHERE j.http_status IS NULL
+                ORDER BY u.url
             """)
-        rows = cur.fetchall()
-        return [row['url'] for row in rows]
+        return [row['url'] for row in cur.fetchall()]
     finally:
         cur.close()
         return_db_connection(conn)
@@ -90,7 +66,7 @@ def get_total_url_count():
     cur = conn.cursor()
 
     try:
-        cur.execute("SELECT COUNT(*) as count FROM pa.unique_titles")
+        cur.execute("SELECT COUNT(*) AS count FROM pa.unique_titles_jobs")
         return cur.fetchone()['count']
     finally:
         cur.close()
@@ -98,16 +74,22 @@ def get_total_url_count():
 
 
 def update_url_status(url: str, status_code: int, final_url: str = None):
-    """Update the status code and final URL for a given URL."""
+    """Record the HTTP probe result on pa.unique_titles_jobs."""
+    from backend.url_catalog import get_url_id
     conn = get_db_connection()
     cur = conn.cursor()
-
     try:
+        url_id = get_url_id(cur, url)
+        if url_id is None:
+            return
         cur.execute("""
-            UPDATE pa.unique_titles
-            SET status_code = %s, final_url = %s, checked_at = CURRENT_TIMESTAMP
-            WHERE url = %s
-        """, (status_code, final_url, url))
+            UPDATE pa.unique_titles_jobs
+               SET http_status = %s,
+                   final_url = %s,
+                   last_checked_at = CURRENT_TIMESTAMP,
+                   updated_at = CURRENT_TIMESTAMP
+             WHERE url_id = %s
+        """, (status_code, final_url, url_id))
         conn.commit()
     except Exception as e:
         log(f"[URL_CHECK] Error updating {url}: {e}")
@@ -119,16 +101,22 @@ def update_url_status(url: str, status_code: int, final_url: str = None):
 
 def batch_update_url_status(results: list):
     """Batch update status codes for multiple URLs."""
+    from backend.url_catalog import get_url_id
     conn = get_db_connection()
     cur = conn.cursor()
-
     try:
         for url, status_code, final_url in results:
+            url_id = get_url_id(cur, url)
+            if url_id is None:
+                continue
             cur.execute("""
-                UPDATE pa.unique_titles
-                SET status_code = %s, final_url = %s, checked_at = CURRENT_TIMESTAMP
-                WHERE url = %s
-            """, (status_code, final_url, url))
+                UPDATE pa.unique_titles_jobs
+                   SET http_status = %s,
+                       final_url = %s,
+                       last_checked_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE url_id = %s
+            """, (status_code, final_url, url_id))
         conn.commit()
     except Exception as e:
         log(f"[URL_CHECK] Batch update error: {e}")
@@ -272,13 +260,12 @@ def get_status_summary():
 
     try:
         cur.execute("""
-            SELECT status_code, COUNT(*) as count
-            FROM pa.unique_titles
-            GROUP BY status_code
-            ORDER BY status_code
+            SELECT http_status AS status_code, COUNT(*) AS count
+            FROM pa.unique_titles_jobs
+            GROUP BY http_status
+            ORDER BY http_status
         """)
-        rows = cur.fetchall()
-        return {row['status_code']: row['count'] for row in rows}
+        return {row['status_code']: row['count'] for row in cur.fetchall()}
     finally:
         cur.close()
         return_db_connection(conn)

@@ -73,34 +73,10 @@ def init_db():
         CREATE SCHEMA IF NOT EXISTS pa;
     """)
 
-    # Create work queue table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pa.jvs_seo_werkvoorraad (
-            id SERIAL PRIMARY KEY,
-            url TEXT NOT NULL UNIQUE,
-            kopteksten INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # Create tracking table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pa.jvs_seo_werkvoorraad_kopteksten_check (
-            id SERIAL PRIMARY KEY,
-            url TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # Create output table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pa.content_urls_joep (
-            id SERIAL PRIMARY KEY,
-            url TEXT NOT NULL,
-            content TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    # NOTE: this script used to also create the legacy pa.jvs_seo_werkvoorraad,
+    # pa.jvs_seo_werkvoorraad_kopteksten_check, pa.content_urls_joep tables —
+    # those are gone post Big Bang refactor (2026-05-07). The new SEO content
+    # schema is created via migrations/2026-05-07-bigbang-step1-create-new-tables.sql.
 
     # Thema Ads tables
     cur.execute("""

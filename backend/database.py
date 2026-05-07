@@ -129,59 +129,22 @@ def _init_db_body(conn):
         CREATE SCHEMA IF NOT EXISTS pa;
     """)
 
-    # Create work queue table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pa.jvs_seo_werkvoorraad (
-            id SERIAL PRIMARY KEY,
-            url TEXT NOT NULL UNIQUE,
-            kopteksten INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    # NOTE (2026-05-07 Big Bang refactor): the old per-tool URL tables
+    # (jvs_seo_werkvoorraad, jvs_seo_werkvoorraad_kopteksten_check,
+    # content_urls_joep, url_validation_tracking, link_validation_results,
+    # faq_tracking, faq_content, faq_validation_results, unique_titles)
+    # are no longer created by init_db(). The new schema lives in
+    # migrations/2026-05-07-bigbang-step1-create-new-tables.sql:
+    #   pa.urls (catalog)
+    #   pa.kopteksten_jobs / pa.kopteksten_content / pa.kopteksten_link_validation
+    #   pa.faq_jobs        / pa.faq_content_v2     / pa.faq_link_validation
+    #   pa.unique_titles_jobs / pa.unique_titles_content
+    #   pa.url_validation
+    # Run that SQL once on a fresh DB before starting the app.
 
-    # Create tracking table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pa.jvs_seo_werkvoorraad_kopteksten_check (
-            id SERIAL PRIMARY KEY,
-            url TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # Create output table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pa.content_urls_joep (
-            id SERIAL PRIMARY KEY,
-            url TEXT NOT NULL,
-            content TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # Shared URL validation tracking (skipped URLs across kopteksten + FAQ)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pa.url_validation_tracking (
-            url VARCHAR(500) PRIMARY KEY,
-            status VARCHAR(50) DEFAULT 'skipped',
-            skip_reason VARCHAR(255),
-            checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # Create link validation tracking table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS pa.link_validation_results (
-            id SERIAL PRIMARY KEY,
-            content_url TEXT NOT NULL,
-            total_links INTEGER DEFAULT 0,
-            broken_links INTEGER DEFAULT 0,
-            valid_links INTEGER DEFAULT 0,
-            broken_link_details JSONB,
-            validated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # Create content history/backup table (stores content before reset/deletion)
+    # Content history/backup table (audit log of content resets — still
+    # keyed on URL string for now; not migrated to url_id since it's
+    # append-only and not joined cross-tool).
     cur.execute("""
         CREATE TABLE IF NOT EXISTS pa.content_history (
             id SERIAL PRIMARY KEY,
@@ -288,14 +251,9 @@ def _init_db_body(conn):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_input_data_job_id ON thema_ads_input_data(job_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON thema_ads_jobs(status)")
 
-    # Create indexes for SEO content tables (performance optimization)
-    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_content_urls_url ON pa.content_urls_joep(url)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_werkvoorraad_check_url ON pa.jvs_seo_werkvoorraad_kopteksten_check(url)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_werkvoorraad_check_status ON pa.jvs_seo_werkvoorraad_kopteksten_check(status)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_link_validation_content_url ON pa.link_validation_results(content_url)")
+    # Indexes for content_history (still in this schema)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_content_history_url ON pa.content_history(url)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_content_history_reset_at ON pa.content_history(reset_at)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_url_validation_status ON pa.url_validation_tracking(status)")
 
     # Scheduled tasks configuration (used only when ENABLE_TASK_SCHEDULER=true)
     cur.execute("""
