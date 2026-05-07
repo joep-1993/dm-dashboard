@@ -30,6 +30,17 @@ BASE_URL = "https://www.beslist.nl"
 # Words that should be lowercase unless at start of sentence
 LOWERCASE_WORDS = {"met", "in", "zonder", "van", "voor", "tot", "op", "aan", "uit", "bij", "naar", "over", "onder", "tegen", "tussen", "door", "om", "en", "of"}
 
+# Reverted v3.2: the unconditional pre-AI SOD→SIC swap for materials was wrong
+# in direction. The correct rule (per design) is positional:
+#   - facet BEFORE category → SOD (adjective form: "Katoenen pyjama's")
+#   - facet AFTER category  → SIC (noun form: "pyjama's van Katoen")
+# A blanket swap stripped SOD's -en adjective ending unconditionally, producing
+# "Katoen Dames pyjama's" instead of "Katoenen Dames pyjama's". The future
+# implementation should be position-aware (either feed both forms with a
+# position rule into the AI prompt, or split before/after based on api_h1
+# position).
+_PREFER_SIC_URL_SLUGS: set = set()
+
 
 def _norm_for_dedupe(s: str) -> str:
     """Normalize a span for compound-category dedupe.
@@ -326,6 +337,23 @@ def _dedupe_facet_values(h1: str, selected_facets: list) -> str:
     return h1
 
 
+_REDUNDANT_MET_RE = re.compile(r'\bmet\s+(met|zonder)\b', re.IGNORECASE)
+
+
+def fix_redundant_met(text: str) -> str:
+    """Collapse 'met met X' / 'met zonder X' into 'met X' / 'zonder X'.
+
+    Rule 8 of the LLM prompt asks the model to prefix product-feature facet
+    values with "met". When the facet value itself already starts with
+    "Met" or "Zonder" (e.g. soort_hak value 'Zonder hakken'), the LLM
+    dutifully prepends "met" anyway, producing nonsense like
+    "schoenen met zonder hakken". Strip the redundant prefix here.
+    """
+    if not text:
+        return text
+    return _REDUNDANT_MET_RE.sub(lambda m: m.group(1), text)
+
+
 def normalize_preposition_case(text: str) -> str:
     """
     Ensure prepositions like 'met', 'in', 'zonder' are lowercase,
@@ -618,52 +646,10 @@ _http_session = create_http_session()
 
 
 def init_ai_titles_columns():
-    """Add AI processing columns to unique_titles if they don't exist."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    try:
-        # Add ai_processed column if it doesn't exist
-        cur.execute("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'pa' AND table_name = 'unique_titles' AND column_name = 'ai_processed'
-                ) THEN
-                    ALTER TABLE pa.unique_titles ADD COLUMN ai_processed BOOLEAN DEFAULT FALSE;
-                END IF;
-
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'pa' AND table_name = 'unique_titles' AND column_name = 'ai_processed_at'
-                ) THEN
-                    ALTER TABLE pa.unique_titles ADD COLUMN ai_processed_at TIMESTAMP;
-                END IF;
-
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'pa' AND table_name = 'unique_titles' AND column_name = 'ai_error'
-                ) THEN
-                    ALTER TABLE pa.unique_titles ADD COLUMN ai_error TEXT;
-                END IF;
-
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'pa' AND table_name = 'unique_titles' AND column_name = 'original_h1'
-                ) THEN
-                    ALTER TABLE pa.unique_titles ADD COLUMN original_h1 TEXT;
-                END IF;
-            END $$;
-        """)
-        conn.commit()
-        print("[AI_TITLES] Columns initialized")
-    except Exception as e:
-        print(f"[AI_TITLES] Error initializing columns: {e}")
-        conn.rollback()
-    finally:
-        cur.close()
-        return_db_connection(conn)
+    """No-op after Big Bang — columns live on pa.unique_titles_jobs/_content
+    via migration step 1.
+    """
+    print("[AI_TITLES] Columns live on new tables; init_ai_titles_columns() is a no-op")
 
 
 def get_processing_status() -> Dict:
@@ -683,54 +669,44 @@ def get_processing_status() -> Dict:
 
 
 def get_unprocessed_urls(limit: int = 100) -> List[Dict]:
-    """Get URLs that need AI title processing.
+    """Get URLs that need AI title processing (job pending OR content missing).
 
     Args:
         limit: Maximum URLs to return. If 0, returns all pending URLs.
     """
     conn = get_db_connection()
     cur = conn.cursor()
-
     try:
-        # Get URLs where:
-        # - ai_processed is FALSE or NULL
-        # - AND (title is empty/null OR h1_title is empty/null)
+        query = """
+            SELECT u.url, c.title, c.description, c.h1_title
+            FROM pa.unique_titles_jobs j
+            JOIN pa.urls u ON j.url_id = u.url_id
+            LEFT JOIN pa.unique_titles_content c ON c.url_id = j.url_id
+            WHERE j.status = 'pending'
+              AND (c.title IS NULL OR c.title = '' OR c.h1_title IS NULL OR c.h1_title = '')
+            ORDER BY j.created_at DESC
+        """
         if limit > 0:
-            cur.execute("""
-                SELECT url, title, description, h1_title
-                FROM pa.unique_titles
-                WHERE (ai_processed IS NULL OR ai_processed = FALSE)
-                AND (title IS NULL OR title = '' OR h1_title IS NULL OR h1_title = '')
-                ORDER BY created_at DESC
-                LIMIT %s
-            """, (limit,))
+            cur.execute(query + " LIMIT %s", (limit,))
         else:
-            # limit=0 means get all pending URLs
-            cur.execute("""
-                SELECT url, title, description, h1_title
-                FROM pa.unique_titles
-                WHERE (ai_processed IS NULL OR ai_processed = FALSE)
-                AND (title IS NULL OR title = '' OR h1_title IS NULL OR h1_title = '')
-                ORDER BY created_at DESC
-            """)
-        rows = cur.fetchall()
-        return [dict(row) for row in rows]
+            cur.execute(query)
+        return [dict(row) for row in cur.fetchall()]
     finally:
         cur.close()
         return_db_connection(conn)
 
 
 def get_unprocessed_count() -> int:
-    """Get count of URLs needing processing."""
+    """Count URLs with status='pending' jobs and no usable content yet."""
     conn = get_db_connection()
     cur = conn.cursor()
-
     try:
         cur.execute("""
-            SELECT COUNT(*) as count
-            FROM pa.unique_titles
-            WHERE (ai_processed IS NULL OR ai_processed = FALSE)
-            AND (title IS NULL OR title = '' OR h1_title IS NULL OR h1_title = '')
+            SELECT COUNT(*) AS count
+            FROM pa.unique_titles_jobs j
+            LEFT JOIN pa.unique_titles_content c ON c.url_id = j.url_id
+            WHERE j.status = 'pending'
+              AND (c.title IS NULL OR c.title = '' OR c.h1_title IS NULL OR c.h1_title = '')
         """)
         return cur.fetchone()['count']
     finally:
@@ -967,12 +943,16 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
     # "type_productlijn" vs "type"); the URL slug is the more reliable signal
     # for the policy.
     # URL slugs whose facets must NEVER act as type-facets, regardless of
-    # what the (facet_name, category) classifier says. `personage` covers
-    # characters / franchises (Super Mario, Dragon Ball, Frozen, Anna ...)
-    # which are NOT product types — they're attributes; the category name
-    # ("Speelgoed", "Kleding", ...) still has to appear in the H1 to make
-    # the page subject clear.
-    _NEVER_URL_SLUGS = {'type_productlijn', 'personage'}
+    # what the (facet_name, category) classifier says. Common shape: facet
+    # values that LOOK like product types because they happen to contain
+    # the category-noun ("Winterschoenen", "Dragon Ball") but are
+    # semantically attributes (character, season) — the category itself
+    # still has to appear in the H1 to make the page subject clear.
+    #   - personage: characters/franchises (Super Mario, Frozen, Anna ...)
+    #   - seizoen_schoenen: seasons (Winter, Zomer, Lente, Herfst); some
+    #     values store the category-bearing form (e.g. "Winterschoenen")
+    #     which trips the LLM classifier, but it's still a season facet.
+    _NEVER_URL_SLUGS = {'type_productlijn', 'personage', 'seizoen_schoenen'}
     # URL slugs that ALWAYS act as type-facets, regardless of what the
     # per-(facet_name, category) classifier in pa.facet_type_classifications
     # decided. Use this when the classifier's mixed-verdict tiebreak rule
@@ -1396,33 +1376,351 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         }
 
 
+# ---------------------------------------------------------------------------
+# Pipeline v3 — deterministic builder + AI polish (EXPERIMENTAL — IN FRIDGE)
+# ---------------------------------------------------------------------------
+#
+# STATUS: NOT default. Opt-in via AI_TITLES_PIPELINE=v3 env var. Built and
+# tuned to ~76% acceptable on a 100-URL sample (vs 85% threshold target).
+# Shelved 2026-05-06 with two known regression classes still open:
+#   1. Composed-builder semantic redundancy
+#      (e.g. "Ventilatieventielen Ventilatiematerialen" — facet value's noun
+#       is a near-synonym of the canonical category, but our dedup passes
+#       only catch identical/inflected matches, not semantic relatedness).
+#   2. AI brand-swallowing into agglutinations (caught by `_v3_preserves_brands`
+#      via fallback, but means the polish AI's contribution is lost — we
+#      ship the un-polished composed h1 in those cases).
+# See cc1/LEARNINGS.md for the full A/B journey and design rationale.
+#
+# Replaces the v1 pipeline's strip-and-prepend dance + full AI rewrite with:
+#   1. Compose H1 deterministically from facets (no api_h1).
+#   2. Hand to AI for polish only (inflection, agglutination, lowercasing).
+#   3. Content-preservation guard (token-set, allows agglutination/inflection).
+#   4. Brand-preservation guard (no brand may be swallowed into a compound).
+#   5. Casing restoration from composed_h1 (overrides AI's case decisions).
+#   6. Same 5 dedup safety nets (cheap insurance).
+#
+# Public entry point: generate_title_v3(url). Same return shape as
+# generate_title_from_api.
+
+_POLISH_PROMPT_V3_TEMPLATE = """Je krijgt een Nederlandse SEO-titel waarvan de woorden en hun volgorde correct zijn. Polijst alleen de Nederlandse grammatica.
+
+Regels:
+1. Pas adjectiefverbuigingen toe waar nodig (Klein → Kleine, Diep → Diepe, Dimbaar → Dimbare, Modern → Moderne, Rond → Ronde, Waterdicht → Waterdichte).
+2. Maak Nederlandse samenstellingen waar dat de standaard is (Kinder Jurken → Kinderjurken, Heren Schoenen → Herenschoenen, Dames Tassen → Damestassen).
+3. Zet niet-eigennamen NÁ het eerste woord in kleine letters; eigennamen, merken en afkortingen behouden hoofdletters (LED, RVS, USB, Apple, Samsung).
+4. Voeg GEEN woorden toe en verwijder GEEN woorden — ook geen "in", "van", "voor", "met".
+5. Verander de woordvolgorde NIET.
+
+Titel: "{composed_h1}"
+
+Geef ALLEEN de gepolijste titel terug, geen uitleg."""
+
+
+def _build_v3_h1(selected_facets: list, category_name: str) -> str:
+    """Compose an H1 from the facets without using Beslist's api_h1 or the AI.
+
+    Slot order:
+        <colour> <merk> <populaire_serie> <type_productlijn> <productlijn>
+        <materials> <other adjectives> <doelgroep> <category>
+        <met-clauses> <voor-clauses> <color-combos> <size>
+
+    Uses detail_value (SOD) — Beslist's prefix-friendly form. Same dedup
+    safety nets the v1 pipeline runs are applied at the end.
+    """
+    if not category_name:
+        return ''
+    brand = ''; populaire_serie = ''; type_productlijn = ''; productlijn = ''
+    colors: List[str] = []
+    color_combos: List[str] = []
+    materials: List[str] = []
+    other_adj: List[str] = []
+    doelgroep: List[str] = []
+    met_clauses: List[str] = []
+    voor_values: List[str] = []
+    sizes: List[str] = []
+    for f in selected_facets or []:
+        sod = (f.get('detail_value') or '').strip()
+        if not sod:
+            continue
+        url_slug = (f.get('url_name') or '').lower()
+        fname = (f.get('facet_name') or '').lower()
+        if is_spec_value(sod, fname):
+            sizes.append(sod); continue
+        if fname == 'merk':
+            brand = sod; continue
+        if url_slug == 'populaire_serie':
+            populaire_serie = sod; continue
+        if url_slug == 'type_productlijn':
+            type_productlijn = sod; continue
+        if fname == 'productlijn':
+            productlijn = sod; continue
+        if url_slug.startswith('kleurcombi'):
+            color_combos.append(sod); continue
+        if url_slug.startswith('kleur'):
+            colors.append(sod); continue
+        if fname == 'materiaal' or url_slug == 'materials':
+            materials.append(sod); continue
+        if fname.startswith('doelgroep'):
+            doelgroep.append(sod); continue
+        low = sod.lower()
+        if low.startswith('met ') or low.startswith('zonder '):
+            met_clauses.append(sod); continue
+        if low.startswith('voor ') or low.startswith('vanaf '):
+            voor_values.append(sod); continue
+        other_adj.append(sod)
+
+    parts: List[str] = []
+    parts.extend(colors)
+    if brand:
+        parts.append(brand)
+    if populaire_serie:
+        parts.append(populaire_serie)
+    if type_productlijn:
+        parts.append(type_productlijn)
+    if productlijn and productlijn.lower() != brand.lower():
+        parts.append(productlijn)
+    parts.extend(materials)
+    parts.extend(other_adj)
+    parts.extend(doelgroep)
+    parts.append(category_name)
+    parts.extend(met_clauses)
+    parts.extend(voor_values)
+    parts.extend(color_combos)
+    parts.extend(sizes)
+
+    h1 = ' '.join(p for p in parts if p)
+    h1 = _strip_pre_clause_duplicates(h1)
+    h1 = _dedupe_compound_category(h1, category_name)
+    h1 = _dedupe_prefix_overlap(h1)
+    h1 = _dedupe_internal_compounds(h1)
+    h1 = _dedupe_facet_values(h1, selected_facets or [])
+    if h1 and h1[0].islower():
+        h1 = h1[0].upper() + h1[1:]
+    return h1
+
+
+_V3_STOPWORDS = {
+    'en', 'of', 'met', 'voor', 'in', 'op', 'aan', 'bij', 'tot', 'van',
+    'om', 'door', 'over', 'onder', 'naar', 'tussen', 'uit', 'tegen',
+    'a', 'the', 'de', 'het', 'een', 'zonder',
+}
+
+
+def _v3_preserves_brands(composed: str, polished: str, selected_facets: list) -> bool:
+    """Verify every brand-class token from selected_facets appears as a
+    standalone token in `polished` (case-insensitive). Catches the AI
+    swallowing brands into agglutinated compounds — e.g. "Ara Pumps" →
+    "arapumps" (Ara lost). Common-noun agglutinations like "Heren Schoenen"
+    → "herenschoenen" pass through because Heren is a doelgroep facet,
+    not a brand-class facet.
+    """
+    brand_tokens: set = set()
+    for f in selected_facets or []:
+        url_slug = (f.get('url_name') or '').lower()
+        fname = (f.get('facet_name') or '').lower()
+        if fname == 'merk' or url_slug in ('merk', 'populaire_serie',
+                                            'type_productlijn', 'productlijn'):
+            for t in re.findall(r"[\w\-]+", f.get('detail_value') or ''):
+                if len(t) >= 2:
+                    brand_tokens.add(t.lower())
+    if not brand_tokens:
+        return True
+    polished_lower = {t.lower() for t in re.findall(r"[\w\-]+", polished)}
+    for bt in brand_tokens:
+        if bt not in polished_lower:
+            return False
+    return True
+
+
+def _v3_restore_casing(composed: str, polished: str) -> str:
+    """Replace each polished token with its original casing from `composed`
+    (case-insensitive token match). Skips tokens that aren't in `composed`
+    (e.g. agglutinated forms, AI-applied inflections) — those keep the
+    polish output's casing.
+
+    This sidesteps the polish AI's tendency to lowercase brands and acronyms
+    (`Mercedes` → `mercedes`, `RVS` → `rvs`, `LCD-scherm` → `lcd-scherm`).
+    Original casing comes deterministically from the composed builder
+    (which uses Beslist's facet detail_value casing).
+    """
+    if not composed or not polished:
+        return polished
+    case_map: Dict[str, str] = {}
+    for tok in re.findall(r"[\w\-]+", composed):
+        case_map[tok.lower()] = tok
+    def _swap(m):
+        tok = m.group(0)
+        return case_map.get(tok.lower(), tok)
+    return re.sub(r"[\w\-]+", _swap, polished)
+
+
+def _v3_preserves_content(composed: str, polished: str) -> bool:
+    """Return True iff every meaningful token from `composed` still appears
+    in `polished` (possibly agglutinated, case-insensitive). Used as a
+    deterministic guard so the polish AI cannot silently drop brand names,
+    model numbers, or facet values. If False the caller falls back to the
+    composed h1 unmodified.
+
+    "Meaningful" = ≥2 chars, not a stopword. Substring containment handles
+    Dutch agglutination ("kinder" + "jurken" → "kinderjurken" passes since
+    both substrings remain in the polished output).
+    """
+    if not composed:
+        return True
+    polished_lower = polished.lower()
+    for tok in re.findall(r"[\w\-]+", composed):
+        tl = tok.lower()
+        if tl in _V3_STOPWORDS:
+            continue
+        if len(tl) < 2:
+            continue
+        if tl in polished_lower:
+            continue
+        # Allow plural-strip variations: -s, -en, -e (Dutch inflection)
+        if len(tl) > 4 and tl[:-1] in polished_lower:
+            continue
+        if len(tl) > 5 and tl[:-2] in polished_lower:
+            continue
+        # Token genuinely missing from polished output.
+        return False
+    return True
+
+
+def generate_title_v3(url: str) -> Optional[Dict]:
+    """v3 pipeline: deterministic compose + AI polish.
+
+    Same return shape as generate_title_from_api so callers can swap.
+    Adds `composed_h1` to the result for diagnostics.
+    """
+    page_data = fetch_products_api(url, include_related=False)
+    if not page_data:
+        print(f"[AI_TITLES_V3] API fetch failed for {url}")
+        return None
+    if page_data.get("error"):
+        print(f"[AI_TITLES_V3] API error for {url}: {page_data.get('error')}")
+        return None
+
+    selected_facets = page_data.get("selected_facets") or []
+    category_name = page_data.get("category_name") or ""
+    api_h1 = page_data.get("h1_title") or ""
+
+    composed_h1 = _build_v3_h1(selected_facets, category_name)
+    if not composed_h1:
+        print(f"[AI_TITLES_V3] empty composed h1 for {url} — falling back to api_h1")
+        return {"h1_title": api_h1, "original_h1": api_h1, "composed_h1": ""}
+
+    client = get_openai_client()
+    if not client:
+        # No OpenAI configured — return the composed H1 as-is.
+        return {"h1_title": composed_h1, "original_h1": api_h1, "composed_h1": composed_h1}
+
+    prompt = _POLISH_PROMPT_V3_TEMPLATE.format(composed_h1=composed_h1)
+    polished = composed_h1
+    try:
+        response = client.chat.completions.create(
+            model=AI_MODEL,
+            messages=[
+                {"role": "system", "content": "Je bent een Nederlandse taalexpert. Polijst alleen grammatica zonder woorden toe te voegen, te verwijderen of te herordenen."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=200,
+        )
+        polished = (response.choices[0].message.content or '').strip().strip('"').strip("'")
+        if not polished:
+            polished = composed_h1
+    except Exception as e:
+        print(f"[AI_TITLES_V3] polish failed for {url}: {e} — using composed h1")
+        polished = composed_h1
+
+    # Content-preservation guard: if the polish dropped a meaningful token
+    # (brand, model number, etc.) fall back to the composed h1 unmodified.
+    # Catches cases like "Sony WH-1000XM3 Koptelefoons" → "Sony koptelefoons"
+    # where the AI silently rewrites instead of polishing.
+    if not _v3_preserves_content(composed_h1, polished):
+        print(f"[AI_TITLES_V3] polish dropped content for {url}; falling back to composed_h1")
+        polished = composed_h1
+    elif not _v3_preserves_brands(composed_h1, polished, selected_facets):
+        print(f"[AI_TITLES_V3] polish swallowed a brand into a compound for {url}; falling back to composed_h1")
+        polished = composed_h1
+
+    # NOTE: v3 deliberately does NOT run _apply_hallucination_guard. The
+    # hallucination guard's prefix-match (length-diff ≤3) wrongly rejects
+    # legitimate Dutch agglutination — e.g. polished "koraaltops" (10 chars)
+    # would not match input "koraal" (6 chars) or "tops" (4 chars) closely
+    # enough and gets stripped. The content-preservation guard above already
+    # verifies that no meaningful token was dropped, which is what the
+    # hallucination guard was protecting against in v1.
+
+    # Restore original casing from composed_h1 — overrides any case the
+    # polish AI applied. Agglutinated tokens / inflected forms not in the
+    # composed map keep the polish casing.
+    polished = _v3_restore_casing(composed_h1, polished)
+
+    # Cheap insurance — run the same dedup passes the v1 pipeline runs.
+    polished = _strip_pre_clause_duplicates(polished)
+    polished = _dedupe_compound_category(polished, category_name)
+    polished = _dedupe_prefix_overlap(polished)
+    polished = _dedupe_internal_compounds(polished)
+    polished = _dedupe_facet_values(polished, selected_facets)
+
+    # Ensure first character is uppercase (composed builder already does
+    # this; case-restoration may revert it if first token was lowercase
+    # in the composed source — uncommon).
+    if polished and polished[0].islower():
+        polished = polished[0].upper() + polished[1:]
+
+    return {
+        "h1_title": polished,
+        "original_h1": api_h1,
+        "composed_h1": composed_h1,
+    }
+
+
 def update_title_record(url: str, h1_title: str, title: str, description: str, original_h1: str = None, error: str = None):
-    """Update a unique_titles record with AI-generated content."""
+    """Persist an AI title-generation outcome for `url`.
+
+    On error: bumps unique_titles_jobs.status='failed', records last_error.
+    On success: writes/updates unique_titles_content + sets job status='success'.
+    """
+    from backend.url_catalog import get_url_id  # local import to avoid cycles
     conn = get_db_connection()
     cur = conn.cursor()
-
     try:
+        url_id = get_url_id(cur, url)
+        if url_id is None:
+            print(f"[AI_TITLES] Cannot canonicalize URL: {url!r}")
+            return False
         if error:
             cur.execute("""
-                UPDATE pa.unique_titles
-                SET ai_processed = TRUE,
-                    ai_processed_at = CURRENT_TIMESTAMP,
-                    ai_error = %s
-                WHERE url = %s
-            """, (error, url))
+                INSERT INTO pa.unique_titles_jobs (url_id, status, last_error, created_at, updated_at)
+                VALUES (%s, 'failed', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (url_id) DO UPDATE SET
+                    status = 'failed',
+                    last_error = EXCLUDED.last_error,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (url_id, error))
         else:
             cur.execute("""
-                UPDATE pa.unique_titles
-                SET h1_title = %s,
-                    title = %s,
-                    description = %s,
-                    original_h1 = %s,
-                    ai_processed = TRUE,
-                    ai_processed_at = CURRENT_TIMESTAMP,
-                    ai_error = NULL
-                WHERE url = %s
-            """, (h1_title, title, description, original_h1, url))
-
+                INSERT INTO pa.unique_titles_content
+                    (url_id, h1_title, title, description, original_h1, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (url_id) DO UPDATE SET
+                    h1_title = EXCLUDED.h1_title,
+                    title = EXCLUDED.title,
+                    description = EXCLUDED.description,
+                    original_h1 = EXCLUDED.original_h1,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (url_id, h1_title, title, description, original_h1))
+            cur.execute("""
+                INSERT INTO pa.unique_titles_jobs (url_id, status, last_error, created_at, updated_at)
+                VALUES (%s, 'success', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (url_id) DO UPDATE SET
+                    status = 'success',
+                    last_error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (url_id,))
         conn.commit()
         return True
     except Exception as e:
@@ -1448,8 +1746,14 @@ def process_single_url(url: str, use_api: bool = True) -> Dict:
         # Check if URL has facets (contains "~~" or "/c/")
         has_facets = "~~" in url or "/c/" in url
 
-        # Use productsearch API + OpenAI method
-        ai_result = generate_title_from_api(url)
+        # Pipeline switch: AI_TITLES_PIPELINE=v3 enables the deterministic
+        # builder + AI polish path. Default 'v1' = current full-rewrite pipeline.
+        # Set to 'v3' via env var or per-batch override to A/B compare.
+        _pipeline = os.getenv("AI_TITLES_PIPELINE", "v1").lower()
+        if _pipeline == "v3":
+            ai_result = generate_title_v3(url)
+        else:
+            ai_result = generate_title_from_api(url)
 
         if not ai_result:
             result["status"] = "failed"
@@ -1466,6 +1770,8 @@ def process_single_url(url: str, use_api: bool = True) -> Dict:
         new_h1 = format_dimensions(new_h1)
         # Normalize preposition case (e.g., "Met glitter" -> "met glitter" unless at start)
         new_h1 = normalize_preposition_case(new_h1)
+        # Strip "met met X" / "met zonder X" -> "met X" / "zonder X"
+        new_h1 = fix_redundant_met(new_h1)
 
         # Step 4: Create SEO title
         # Format: "{h1} kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl"
@@ -1649,20 +1955,22 @@ def get_ai_titles_stats() -> Dict:
     try:
         stats = {}
 
-        cur.execute("SELECT COUNT(*) as count FROM pa.unique_titles")
+        cur.execute("SELECT COUNT(*) AS count FROM pa.unique_titles_jobs")
         stats["total_urls"] = cur.fetchone()["count"]
 
-        cur.execute("SELECT COUNT(*) as count FROM pa.unique_titles WHERE ai_processed = TRUE")
+        cur.execute("SELECT COUNT(*) AS count FROM pa.unique_titles_jobs WHERE status IN ('success', 'failed')")
         stats["ai_processed"] = cur.fetchone()["count"]
 
         cur.execute("""
-            SELECT COUNT(*) as count FROM pa.unique_titles
-            WHERE (ai_processed IS NULL OR ai_processed = FALSE)
-            AND (title IS NULL OR title = '' OR h1_title IS NULL OR h1_title = '')
+            SELECT COUNT(*) AS count
+            FROM pa.unique_titles_jobs j
+            LEFT JOIN pa.unique_titles_content c ON c.url_id = j.url_id
+            WHERE j.status = 'pending'
+              AND (c.title IS NULL OR c.title = '' OR c.h1_title IS NULL OR c.h1_title = '')
         """)
         stats["pending"] = cur.fetchone()["count"]
 
-        cur.execute("SELECT COUNT(*) as count FROM pa.unique_titles WHERE ai_error IS NOT NULL")
+        cur.execute("SELECT COUNT(*) AS count FROM pa.unique_titles_jobs WHERE last_error IS NOT NULL")
         stats["with_errors"] = cur.fetchone()["count"]
 
         return stats
@@ -1678,14 +1986,20 @@ def get_recent_results(limit: int = 20) -> List[Dict]:
 
     try:
         cur.execute("""
-            SELECT url, title, h1_title, original_h1, ai_processed_at, ai_error
-            FROM pa.unique_titles
-            WHERE ai_processed = TRUE
-            ORDER BY ai_processed_at DESC
+            SELECT u.url,
+                   c.title,
+                   c.h1_title,
+                   c.original_h1,
+                   j.updated_at AS ai_processed_at,
+                   j.last_error AS ai_error
+            FROM pa.unique_titles_jobs j
+            JOIN pa.urls u ON j.url_id = u.url_id
+            LEFT JOIN pa.unique_titles_content c ON c.url_id = j.url_id
+            WHERE j.status IN ('success', 'failed')
+            ORDER BY j.updated_at DESC
             LIMIT %s
         """, (limit,))
-        rows = cur.fetchall()
-        return [dict(row) for row in rows]
+        return [dict(row) for row in cur.fetchall()]
     finally:
         cur.close()
         return_db_connection(conn)
@@ -1725,22 +2039,27 @@ def analyze_and_flag_failures(dry_run: bool = True, min_fail_rate: float = 80, m
         ]
 
         for pattern_name, where_clause in structural_patterns:
+            # Adjust the URL filter to reference pa.urls.url
+            url_filter = where_clause.replace("url ", "u.url ")
             cur.execute(f"""
-                SELECT COUNT(*) as cnt FROM pa.unique_titles
-                WHERE (ai_processed IS NULL OR ai_processed = FALSE)
-                AND ({where_clause})
+                SELECT COUNT(*) AS cnt
+                FROM pa.unique_titles_jobs j
+                JOIN pa.urls u ON j.url_id = u.url_id
+                WHERE j.status = 'pending' AND ({url_filter})
             """)
             count = cur.fetchone()["cnt"]
 
             if count > 0:
                 if not dry_run:
                     cur.execute(f"""
-                        UPDATE pa.unique_titles
-                        SET ai_processed = TRUE,
-                            ai_error = 'predicted_fail:structural:{pattern_name}',
-                            ai_processed_at = CURRENT_TIMESTAMP
-                        WHERE (ai_processed IS NULL OR ai_processed = FALSE)
-                        AND ({where_clause})
+                        UPDATE pa.unique_titles_jobs j
+                           SET status = 'failed',
+                               last_error = 'predicted_fail:structural:{pattern_name}',
+                               updated_at = CURRENT_TIMESTAMP
+                          FROM pa.urls u
+                         WHERE j.url_id = u.url_id
+                           AND j.status = 'pending'
+                           AND ({url_filter})
                     """)
 
                 results["structural"].append({
@@ -1753,18 +2072,19 @@ def analyze_and_flag_failures(dry_run: bool = True, min_fail_rate: float = 80, m
         cur.execute("""
             WITH subcat_stats AS (
                 SELECT
-                    SUBSTRING(url FROM '^(/products/[^/]+/[^/]+)') as subcat_path,
-                    SUM(CASE WHEN ai_error = 'api_failed' THEN 1 ELSE 0 END) as failed,
-                    SUM(CASE WHEN ai_processed = TRUE AND ai_error IS NULL THEN 1 ELSE 0 END) as succeeded
-                FROM pa.unique_titles
-                WHERE url LIKE '/products/%%/c/%%'
+                    SUBSTRING(u.url FROM '^(/products/[^/]+/[^/]+)') AS subcat_path,
+                    SUM(CASE WHEN j.last_error = 'api_failed' THEN 1 ELSE 0 END) AS failed,
+                    SUM(CASE WHEN j.status = 'success' AND j.last_error IS NULL THEN 1 ELSE 0 END) AS succeeded
+                FROM pa.unique_titles_jobs j
+                JOIN pa.urls u ON j.url_id = u.url_id
+                WHERE u.url LIKE '/products/%%/c/%%'
                 GROUP BY 1
             )
             SELECT subcat_path, failed, succeeded,
-                ROUND(100.0 * failed / NULLIF(failed + succeeded, 0), 1) as fail_rate
+                ROUND(100.0 * failed / NULLIF(failed + succeeded, 0), 1) AS fail_rate
             FROM subcat_stats
             WHERE failed >= %s
-            AND 100.0 * failed / NULLIF(failed + succeeded, 0) >= %s
+              AND 100.0 * failed / NULLIF(failed + succeeded, 0) >= %s
             ORDER BY fail_rate DESC, failed DESC
         """, (min_failures, min_fail_rate))
 
@@ -1772,23 +2092,26 @@ def analyze_and_flag_failures(dry_run: bool = True, min_fail_rate: float = 80, m
 
         for row in high_risk_paths:
             subcat_path = row["subcat_path"]
-            # Count pending URLs in this subcategory
             cur.execute("""
-                SELECT COUNT(*) as cnt FROM pa.unique_titles
-                WHERE (ai_processed IS NULL OR ai_processed = FALSE)
-                AND url LIKE %s
+                SELECT COUNT(*) AS cnt
+                FROM pa.unique_titles_jobs j
+                JOIN pa.urls u ON j.url_id = u.url_id
+                WHERE j.status = 'pending'
+                  AND u.url LIKE %s
             """, (subcat_path + '%',))
             pending_count = cur.fetchone()["cnt"]
 
             if pending_count > 0:
                 if not dry_run:
                     cur.execute("""
-                        UPDATE pa.unique_titles
-                        SET ai_processed = TRUE,
-                            ai_error = %s,
-                            ai_processed_at = CURRENT_TIMESTAMP
-                        WHERE (ai_processed IS NULL OR ai_processed = FALSE)
-                        AND url LIKE %s
+                        UPDATE pa.unique_titles_jobs j
+                           SET status = 'failed',
+                               last_error = %s,
+                               updated_at = CURRENT_TIMESTAMP
+                          FROM pa.urls u
+                         WHERE j.url_id = u.url_id
+                           AND j.status = 'pending'
+                           AND u.url LIKE %s
                     """, (f"predicted_fail:subcat:{subcat_path}:{row['fail_rate']}%", subcat_path + '%'))
 
                 results["subcategory"].append({

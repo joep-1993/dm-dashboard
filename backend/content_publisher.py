@@ -141,16 +141,18 @@ def get_all_content_for_publishing() -> List[Dict]:
     cur = conn.cursor()
 
     try:
-        # Get all unique URLs with their content
-        # LEFT JOIN to get both content_top (from content_urls_joep) and FAQ content
+        # Pull content_top (kopteksten) + faq_json from the new schema, joined
+        # through the URL catalog. LEFT JOINs from pa.urls so a row appears as
+        # long as either content table has data.
         cur.execute("""
             SELECT
-                COALESCE(c.url, f.url) as url,
-                c.content as content_top,
-                f.faq_json as faq_json
-            FROM pa.content_urls_joep c
-            FULL OUTER JOIN pa.faq_content f ON c.url = f.url
-            WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
+                u.url AS url,
+                k.content AS content_top,
+                f.faq_json AS faq_json
+            FROM pa.urls u
+            LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
+            LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
+            WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL
         """)
 
         rows = cur.fetchall()
@@ -194,14 +196,15 @@ def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
     try:
         cur.execute("""
             SELECT
-                COALESCE(c.url, f.url) as url,
-                c.content as content_top,
-                f.faq_json as faq_json,
-                f.schema_org as schema_org
-            FROM pa.content_urls_joep c
-            FULL OUTER JOIN pa.faq_content f ON c.url = f.url
-            WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
-            ORDER BY COALESCE(c.url, f.url)
+                u.url AS url,
+                k.content AS content_top,
+                f.faq_json AS faq_json,
+                f.schema_org AS schema_org
+            FROM pa.urls u
+            LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
+            LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
+            WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL
+            ORDER BY u.url
             LIMIT %s OFFSET %s
         """, (limit, offset))
 
@@ -247,10 +250,11 @@ def get_total_content_count() -> int:
 
     try:
         cur.execute("""
-            SELECT COUNT(DISTINCT COALESCE(c.url, f.url)) as count
-            FROM pa.content_urls_joep c
-            FULL OUTER JOIN pa.faq_content f ON c.url = f.url
-            WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
+            SELECT COUNT(*) AS count
+            FROM pa.urls u
+            LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
+            LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
+            WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL
         """)
         return cur.fetchone()['count']
     finally:
@@ -305,14 +309,15 @@ def get_all_content_items() -> List[Dict]:
         # Get all unique URLs with their content in a single query
         cur.execute("""
             SELECT
-                COALESCE(c.url, f.url) as url,
-                c.content as content_top,
-                f.faq_json as faq_json,
-                f.schema_org as schema_org
-            FROM pa.content_urls_joep c
-            FULL OUTER JOIN pa.faq_content f ON c.url = f.url
-            WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL
-            ORDER BY COALESCE(c.url, f.url)
+                u.url AS url,
+                k.content AS content_top,
+                f.faq_json AS faq_json,
+                f.schema_org AS schema_org
+            FROM pa.urls u
+            LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
+            LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
+            WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL
+            ORDER BY u.url
         """)
 
         rows = cur.fetchall()

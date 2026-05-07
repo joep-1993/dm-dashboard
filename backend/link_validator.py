@@ -405,22 +405,24 @@ def validate_and_fix_content_links(content: str, content_url: str) -> Dict:
 
 
 def update_content_in_redshift(content_url: str, new_content: str) -> bool:
+    """Update kopteksten content for a URL in pa.kopteksten_content.
+    Function name kept for backwards compatibility.
     """
-    Update content in local PostgreSQL pa.content_urls_joep table.
-    Returns True if successful.
-    Note: Function name kept for backwards compatibility.
-    """
+    from backend.url_catalog import get_url_id
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-
+        url_id = get_url_id(cur, content_url)
+        if url_id is None:
+            print(f"[LINK_VALIDATOR] Cannot canonicalize URL: {content_url!r}")
+            return False
         cur.execute("""
-            UPDATE pa.content_urls_joep
-            SET content = %s
-            WHERE url = %s
-        """, (new_content, content_url))
-
+            UPDATE pa.kopteksten_content
+               SET content = %s,
+                   updated_at = CURRENT_TIMESTAMP
+             WHERE url_id = %s
+        """, (new_content, url_id))
         conn.commit()
         print(f"[LINK_VALIDATOR] Updated content for URL: {content_url}")
         return True
@@ -435,32 +437,33 @@ def update_content_in_redshift(content_url: str, new_content: str) -> bool:
 
 
 def add_urls_to_werkvoorraad(urls: List[str]) -> int:
-    """
-    Add URLs to werkvoorraad table for reprocessing.
-    Inserts into pa.jvs_seo_werkvoorraad with kopteksten=0.
-    Returns number of URLs added.
+    """Add URLs to the kopteksten queue for reprocessing.
+    Marks pa.kopteksten_jobs.status = 'pending' (creates the URL in the catalog
+    if missing). Returns number of URLs touched.
     """
     if not urls:
         return 0
-
+    from backend.url_catalog import get_url_id
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-
         added_count = 0
         for url in urls:
             try:
-                # PostgreSQL supports ON CONFLICT
+                url_id = get_url_id(cur, url)
+                if url_id is None:
+                    continue
                 cur.execute("""
-                    INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
-                    VALUES (%s, 0)
-                    ON CONFLICT (url) DO UPDATE SET kopteksten = 0
-                """, (url,))
+                    INSERT INTO pa.kopteksten_jobs (url_id, status, created_at, updated_at)
+                    VALUES (%s, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (url_id) DO UPDATE SET
+                        status = 'pending',
+                        updated_at = CURRENT_TIMESTAMP
+                """, (url_id,))
                 added_count += cur.rowcount
             except Exception as e:
                 print(f"[LINK_VALIDATOR] Error adding URL {url} to werkvoorraad: {e}")
-
         conn.commit()
         print(f"[LINK_VALIDATOR] Added {added_count} URLs to werkvoorraad for reprocessing")
         return added_count
@@ -699,44 +702,34 @@ def validate_faq_batch(faqs: List[Tuple[str, str]]) -> Dict:
 
 
 def reset_faq_to_pending(urls: List[str]) -> int:
-    """
-    Reset FAQ URLs to pending status for regeneration.
-    - Updates pa.faq_tracking to 'pending'
-    - Deletes from pa.faq_content
-
+    """Reset FAQ URLs to pending so they get regenerated.
+    - pa.faq_jobs → status='pending', skip_reason=NULL
+    - pa.faq_content_v2 → row deleted
+    - pa.url_validation → row deleted (so URL gets re-scraped)
     Returns number of URLs reset.
     """
     if not urls:
         return 0
-
+    from backend.url_catalog import get_url_id
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-
         reset_count = 0
         for url in urls:
-            # Update tracking to pending
+            url_id = get_url_id(cur, url)
+            if url_id is None:
+                continue
             cur.execute("""
-                UPDATE pa.faq_tracking
-                SET status = 'pending', skip_reason = NULL
-                WHERE url = %s
-            """, (url,))
-
-            # Delete existing FAQ content
-            cur.execute("""
-                DELETE FROM pa.faq_content
-                WHERE url = %s
-            """, (url,))
-
-            # Also remove from shared validation table so URL gets re-scraped
-            cur.execute("""
-                DELETE FROM pa.url_validation_tracking
-                WHERE url = %s
-            """, (url,))
-
+                UPDATE pa.faq_jobs
+                   SET status = 'pending',
+                       skip_reason = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE url_id = %s
+            """, (url_id,))
+            cur.execute("DELETE FROM pa.faq_content_v2 WHERE url_id = %s", (url_id,))
+            cur.execute("DELETE FROM pa.url_validation   WHERE url_id = %s", (url_id,))
             reset_count += 1
-
         conn.commit()
         print(f"[FAQ_VALIDATOR] Reset {reset_count} FAQ URLs to pending")
         return reset_count

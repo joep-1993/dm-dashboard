@@ -111,15 +111,17 @@ def _reset_state(batch_type: str):
 
 
 def _fetch_pending_faq_urls(limit: int = 50000) -> List[str]:
-    """Fetch all pending FAQ URLs."""
+    """Fetch URLs with pending FAQ jobs that haven't been validation-skipped."""
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT w.url
-            FROM pa.jvs_seo_werkvoorraad w
-            WHERE NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
-              AND NOT EXISTS (SELECT 1 FROM pa.faq_tracking t WHERE t.url = w.url AND t.status != 'pending')
+            SELECT u.url
+            FROM pa.faq_jobs j
+            JOIN pa.urls u ON j.url_id = u.url_id
+            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+            WHERE j.status = 'pending'
+              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
             LIMIT %s
         """, (limit,))
         return [row['url'] for row in cur.fetchall()]
@@ -129,15 +131,17 @@ def _fetch_pending_faq_urls(limit: int = 50000) -> List[str]:
 
 
 def _fetch_pending_kopteksten_urls(limit: int = 50000) -> List[str]:
-    """Fetch all pending kopteksten URLs."""
+    """Fetch URLs with pending kopteksten jobs that haven't been validation-skipped."""
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT w.url
-            FROM pa.jvs_seo_werkvoorraad w
-            WHERE NOT EXISTS (SELECT 1 FROM pa.jvs_seo_werkvoorraad_kopteksten_check t WHERE t.url = w.url)
-              AND NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
+            SELECT u.url
+            FROM pa.kopteksten_jobs j
+            JOIN pa.urls u ON j.url_id = u.url_id
+            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+            WHERE j.status = 'pending'
+              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
             LIMIT %s
         """, (limit,))
         return [row['url'] for row in cur.fetchall()]
@@ -332,21 +336,50 @@ def _run_faq_batch(num_faqs: int = 6):
 
         # Save skip/failed results to DB immediately
         if skip_data or failed_urls:
+            from backend.url_catalog import bulk_upsert_urls
             conn = get_db_connection()
             cur = conn.cursor()
             try:
+                # Resolve url_ids for everything we're about to write
+                all_urls = [t[0] for t in skip_data] + [t[0] for t in failed_urls]
+                from backend.url_catalog import canonicalize_url
+                url_id_map = bulk_upsert_urls(cur, all_urls)
                 if skip_data:
-                    from psycopg2.extras import execute_batch
-                    execute_batch(cur,
-                        "INSERT INTO pa.url_validation_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason, checked_at = CURRENT_TIMESTAMP",
-                        skip_data
-                    )
+                    rows = []
+                    for url, _status, reason in skip_data:
+                        canon = canonicalize_url(url)
+                        uid = url_id_map.get(canon) if canon else None
+                        if uid is not None:
+                            rows.append((uid, False, reason))
+                    if rows:
+                        from psycopg2.extras import execute_batch
+                        execute_batch(cur,
+                            "INSERT INTO pa.url_validation (url_id, last_checked_at, is_valid, reason) "
+                            "VALUES (%s, CURRENT_TIMESTAMP, %s, %s) "
+                            "ON CONFLICT (url_id) DO UPDATE SET "
+                            "    is_valid = EXCLUDED.is_valid, "
+                            "    reason = EXCLUDED.reason, "
+                            "    last_checked_at = CURRENT_TIMESTAMP",
+                            rows
+                        )
                 if failed_urls:
-                    from psycopg2.extras import execute_batch
-                    execute_batch(cur,
-                        "INSERT INTO pa.faq_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
-                        failed_urls
-                    )
+                    rows = []
+                    for url, status, reason in failed_urls:
+                        canon = canonicalize_url(url)
+                        uid = url_id_map.get(canon) if canon else None
+                        if uid is not None:
+                            rows.append((uid, status, reason))
+                    if rows:
+                        from psycopg2.extras import execute_batch
+                        execute_batch(cur,
+                            "INSERT INTO pa.faq_jobs (url_id, status, skip_reason, created_at, updated_at) "
+                            "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                            "ON CONFLICT (url_id) DO UPDATE SET "
+                            "    status = EXCLUDED.status, "
+                            "    skip_reason = EXCLUDED.skip_reason, "
+                            "    updated_at = CURRENT_TIMESTAMP",
+                            rows
+                        )
                 conn.commit()
             finally:
                 cur.close()
@@ -466,21 +499,49 @@ def _run_faq_batch(num_faqs: int = 6):
                     save_failed += 1
 
             # Save chunk results to DB
+            from backend.url_catalog import bulk_upsert_urls, canonicalize_url
             conn = get_db_connection()
             cur = conn.cursor()
             try:
+                all_urls = [t[0] for t in tracking_data] + [c[0] for c in content_data]
+                url_id_map = bulk_upsert_urls(cur, all_urls)
                 if tracking_data:
-                    from psycopg2.extras import execute_batch
-                    execute_batch(cur,
-                        "INSERT INTO pa.faq_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
-                        tracking_data, page_size=1000
-                    )
+                    rows = []
+                    for url, status, reason in tracking_data:
+                        canon = canonicalize_url(url)
+                        uid = url_id_map.get(canon) if canon else None
+                        if uid is not None:
+                            rows.append((uid, status, reason))
+                    if rows:
+                        from psycopg2.extras import execute_batch
+                        execute_batch(cur,
+                            "INSERT INTO pa.faq_jobs (url_id, status, skip_reason, created_at, updated_at) "
+                            "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                            "ON CONFLICT (url_id) DO UPDATE SET "
+                            "    status = EXCLUDED.status, "
+                            "    skip_reason = EXCLUDED.skip_reason, "
+                            "    updated_at = CURRENT_TIMESTAMP",
+                            rows, page_size=1000
+                        )
                 if content_data:
-                    from psycopg2.extras import execute_batch
-                    execute_batch(cur,
-                        "INSERT INTO pa.faq_content (url, page_title, faq_json, schema_org) VALUES (%s, %s, %s, %s) ON CONFLICT (url) DO UPDATE SET page_title = EXCLUDED.page_title, faq_json = EXCLUDED.faq_json, schema_org = EXCLUDED.schema_org",
-                        content_data, page_size=1000
-                    )
+                    rows = []
+                    for url, page_title, faq_json, schema_org in content_data:
+                        canon = canonicalize_url(url)
+                        uid = url_id_map.get(canon) if canon else None
+                        if uid is not None:
+                            rows.append((uid, page_title, faq_json, schema_org))
+                    if rows:
+                        from psycopg2.extras import execute_batch
+                        execute_batch(cur,
+                            "INSERT INTO pa.faq_content_v2 (url_id, page_title, faq_json, schema_org, created_at, updated_at) "
+                            "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                            "ON CONFLICT (url_id) DO UPDATE SET "
+                            "    page_title = EXCLUDED.page_title, "
+                            "    faq_json = EXCLUDED.faq_json, "
+                            "    schema_org = EXCLUDED.schema_org, "
+                            "    updated_at = CURRENT_TIMESTAMP",
+                            rows, page_size=1000
+                        )
                 conn.commit()
             finally:
                 cur.close()
@@ -568,19 +629,42 @@ def _run_kopteksten_batch():
 
         # Save skip/failed to DB
         if skip_data or failed_urls:
+            from backend.url_catalog import bulk_upsert_urls, canonicalize_url
             conn = get_db_connection()
             cur = conn.cursor()
             try:
+                all_urls = [t[0] for t in skip_data] + [t[0] for t in failed_urls]
+                url_id_map = bulk_upsert_urls(cur, all_urls)
                 if skip_data:
-                    from psycopg2.extras import execute_batch
-                    execute_batch(cur,
-                        "INSERT INTO pa.url_validation_tracking (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason, checked_at = CURRENT_TIMESTAMP",
-                        skip_data
-                    )
+                    rows = [(url_id_map[c], False, reason)
+                            for url, _s, reason in skip_data
+                            for c in [canonicalize_url(url)]
+                            if c and url_id_map.get(c) is not None]
+                    if rows:
+                        from psycopg2.extras import execute_batch
+                        execute_batch(cur,
+                            "INSERT INTO pa.url_validation (url_id, last_checked_at, is_valid, reason) "
+                            "VALUES (%s, CURRENT_TIMESTAMP, %s, %s) "
+                            "ON CONFLICT (url_id) DO UPDATE SET "
+                            "    is_valid = EXCLUDED.is_valid, "
+                            "    reason = EXCLUDED.reason, "
+                            "    last_checked_at = CURRENT_TIMESTAMP",
+                            rows
+                        )
                 if failed_urls:
-                    from psycopg2.extras import execute_batch
-                    execute_batch(cur,
-                        "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
+                    rows = [(url_id_map[c], status, reason)
+                            for url, status, reason in failed_urls
+                            for c in [canonicalize_url(url)]
+                            if c and url_id_map.get(c) is not None]
+                    if rows:
+                        from psycopg2.extras import execute_batch
+                        execute_batch(cur,
+                            "INSERT INTO pa.kopteksten_jobs (url_id, status, last_error, created_at, updated_at) "
+                            "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                            "ON CONFLICT (url_id) DO UPDATE SET "
+                            "    status = EXCLUDED.status, "
+                            "    last_error = EXCLUDED.last_error, "
+                            "    updated_at = CURRENT_TIMESTAMP",
                         failed_urls
                     )
                 conn.commit()
@@ -667,21 +751,47 @@ def _run_kopteksten_batch():
                     tracking_data.append((url, "failed", f"parse_error: {str(e)[:200]}"))
                     save_failed += 1
 
+            from backend.url_catalog import bulk_upsert_urls, canonicalize_url
             conn = get_db_connection()
             cur = conn.cursor()
             try:
+                all_urls = [t[0] for t in tracking_data] + [c[0] for c in content_data]
+                url_id_map = bulk_upsert_urls(cur, all_urls)
                 if tracking_data:
-                    from psycopg2.extras import execute_batch
-                    execute_batch(cur,
-                        "INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason) VALUES (%s, %s, %s) ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason",
-                        tracking_data, page_size=1000
-                    )
+                    rows = []
+                    for url, status, reason in tracking_data:
+                        canon = canonicalize_url(url)
+                        uid = url_id_map.get(canon) if canon else None
+                        if uid is not None:
+                            rows.append((uid, status, reason))
+                    if rows:
+                        from psycopg2.extras import execute_batch
+                        execute_batch(cur,
+                            "INSERT INTO pa.kopteksten_jobs (url_id, status, last_error, created_at, updated_at) "
+                            "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                            "ON CONFLICT (url_id) DO UPDATE SET "
+                            "    status = EXCLUDED.status, "
+                            "    last_error = EXCLUDED.last_error, "
+                            "    updated_at = CURRENT_TIMESTAMP",
+                            rows, page_size=1000
+                        )
                 if content_data:
-                    from psycopg2.extras import execute_batch
-                    execute_batch(cur,
-                        "INSERT INTO pa.content_urls_joep (url, content) VALUES (%s, %s) ON CONFLICT (url) DO UPDATE SET content = EXCLUDED.content",
-                        content_data, page_size=1000
-                    )
+                    rows = []
+                    for url, content in content_data:
+                        canon = canonicalize_url(url)
+                        uid = url_id_map.get(canon) if canon else None
+                        if uid is not None:
+                            rows.append((uid, content))
+                    if rows:
+                        from psycopg2.extras import execute_batch
+                        execute_batch(cur,
+                            "INSERT INTO pa.kopteksten_content (url_id, content, created_at, updated_at) "
+                            "VALUES (%s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                            "ON CONFLICT (url_id) DO UPDATE SET "
+                            "    content = EXCLUDED.content, "
+                            "    updated_at = CURRENT_TIMESTAMP",
+                            rows, page_size=1000
+                        )
                 conn.commit()
             finally:
                 cur.close()
