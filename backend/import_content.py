@@ -9,9 +9,14 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from backend.database import get_db_connection
+from backend.url_catalog import get_url_id
 
 def import_content_from_csv(csv_path):
-    """Import content from CSV file into database"""
+    """Import content from CSV file into the new schema:
+      - pa.urls (catalog)
+      - pa.kopteksten_content (the imported content)
+      - pa.kopteksten_jobs (status='success')
+    """
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -24,43 +29,40 @@ def import_content_from_csv(csv_path):
 
     try:
         with open(csv_path, 'r', encoding='utf-8-sig') as f:
-            # Use semicolon as delimiter based on the CSV structure
             reader = csv.DictReader(f, delimiter=';')
 
-            for row_num, row in enumerate(reader, start=2):  # start=2 because line 1 is header
+            for row_num, row in enumerate(reader, start=2):
                 try:
                     url = row.get('url', '').strip()
                     content_top = row.get('content_top', '').strip()
 
-                    # Skip if URL or content is empty
                     if not url or not content_top:
                         skipped_count += 1
                         continue
 
-                    # Insert into pa.jvs_seo_werkvoorraad if not exists
-                    cur.execute("""
-                        INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
-                        VALUES (%s, 1)
-                        ON CONFLICT (url) DO UPDATE SET kopteksten = 1
-                    """, (url,))
+                    url_id = get_url_id(cur, url)
+                    if url_id is None:
+                        skipped_count += 1
+                        continue
 
-                    # Insert into pa.content_urls_joep
+                    # Upsert content; only count as "added" if a new content row was created
                     cur.execute("""
-                        INSERT INTO pa.content_urls_joep (url, content)
-                        VALUES (%s, %s)
-                        ON CONFLICT DO NOTHING
-                    """, (url, content_top))
+                        INSERT INTO pa.kopteksten_content (url_id, content, created_at, updated_at)
+                        VALUES (%s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (url_id) DO NOTHING
+                    """, (url_id, content_top))
 
                     if cur.rowcount > 0:
-                        # Insert into tracking table
                         cur.execute("""
-                            INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status)
-                            VALUES (%s, 'success')
-                            ON CONFLICT DO NOTHING
-                        """, (url,))
+                            INSERT INTO pa.kopteksten_jobs (url_id, status, created_at, updated_at)
+                            VALUES (%s, 'success', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (url_id) DO UPDATE SET
+                                status = 'success',
+                                last_error = NULL,
+                                updated_at = CURRENT_TIMESTAMP
+                        """, (url_id,))
 
                         added_count += 1
-
                         if added_count % 100 == 0:
                             print(f"Progress: {added_count} items imported...")
                             conn.commit()
