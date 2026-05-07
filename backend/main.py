@@ -374,14 +374,20 @@ def process_single_url(url: str, conservative_mode: bool = False):
                     result["reason"] = "no_valid_links"
                 else:
                     # Save content to local PostgreSQL immediately
+                    from backend.url_catalog import get_url_id
                     content_conn = None
                     try:
                         content_conn = get_db_connection()
                         content_cur = content_conn.cursor()
-                        content_cur.execute("""
-                            INSERT INTO pa.content_urls_joep (url, content)
-                            VALUES (%s, %s)
-                        """, (url, sanitized))
+                        content_url_id = get_url_id(content_cur, url)
+                        if content_url_id is not None:
+                            content_cur.execute("""
+                                INSERT INTO pa.kopteksten_content (url_id, content, created_at, updated_at)
+                                VALUES (%s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                ON CONFLICT (url_id) DO UPDATE SET
+                                    content = EXCLUDED.content,
+                                    updated_at = CURRENT_TIMESTAMP
+                            """, (content_url_id, sanitized))
                         content_conn.commit()
                         content_cur.close()
                     finally:
@@ -406,25 +412,39 @@ def process_single_url(url: str, conservative_mode: bool = False):
 
         truncated_reason = final_reason[:255] if final_reason and len(final_reason) > 255 else final_reason
 
+        from backend.url_catalog import get_url_id
+        status_url_id = get_url_id(cur, url)
+        if status_url_id is None:
+            print(f"[PROCESSING] {url} - status not persisted (cannot canonicalize)")
+            return result
         if final_status == 'skipped' and final_reason and 'no_products_found' in final_reason:
-            # Write to shared validation table (applies to both kopteksten and FAQ)
+            # Skip is shared validation (applies to both kopteksten and FAQ)
             cur.execute("""
-                INSERT INTO pa.url_validation_tracking (url, status, skip_reason)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason, checked_at = CURRENT_TIMESTAMP
-            """, (url, final_status, truncated_reason))
+                INSERT INTO pa.url_validation (url_id, last_checked_at, is_valid, reason)
+                VALUES (%s, CURRENT_TIMESTAMP, FALSE, %s)
+                ON CONFLICT (url_id) DO UPDATE SET
+                    is_valid = FALSE,
+                    reason = EXCLUDED.reason,
+                    last_checked_at = CURRENT_TIMESTAMP
+            """, (status_url_id, truncated_reason))
         elif final_reason:
             cur.execute("""
-                INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason
-            """, (url, final_status, truncated_reason))
+                INSERT INTO pa.kopteksten_jobs (url_id, status, last_error, created_at, updated_at)
+                VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (url_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    last_error = EXCLUDED.last_error,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (status_url_id, final_status, truncated_reason))
         else:
             cur.execute("""
-                INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status)
-                VALUES (%s, %s)
-                ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = NULL
-            """, (url, final_status))
+                INSERT INTO pa.kopteksten_jobs (url_id, status, last_error, created_at, updated_at)
+                VALUES (%s, %s, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (url_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    last_error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (status_url_id, final_status))
 
         conn.commit()
         print(f"[PROCESSING] {url} - Status: {final_status}" + (f" - Reason: {final_reason}" if final_reason else ""))
@@ -440,11 +460,17 @@ def process_single_url(url: str, conservative_mode: bool = False):
                 cur = conn.cursor()
             # Truncate error message to 255 characters to fit VARCHAR(255) column
             error_msg = f"error: {str(e)}"[:255]
-            cur.execute("""
-                INSERT INTO pa.jvs_seo_werkvoorraad_kopteksten_check (url, status, skip_reason)
-                VALUES (%s, 'failed', %s)
-                ON CONFLICT (url) DO UPDATE SET status = 'failed', skip_reason = EXCLUDED.skip_reason
-            """, (url, error_msg))
+            from backend.url_catalog import get_url_id
+            err_url_id = get_url_id(cur, url)
+            if err_url_id is not None:
+                cur.execute("""
+                    INSERT INTO pa.kopteksten_jobs (url_id, status, last_error, created_at, updated_at)
+                    VALUES (%s, 'failed', %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (url_id) DO UPDATE SET
+                        status = 'failed',
+                        last_error = EXCLUDED.last_error,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (err_url_id, error_msg))
             conn.commit()
         except (psycopg2.DatabaseError, psycopg2.Error) as db_err:
             print(f"[process_single_url] Failed to persist error status for {url}: {db_err}")
@@ -490,10 +516,12 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
         try:
             print(f"[ENDPOINT] Querying for {batch_size} pending URLs...")
             local_cur.execute("""
-                SELECT w.url
-                FROM pa.jvs_seo_werkvoorraad w
-                WHERE NOT EXISTS (SELECT 1 FROM pa.jvs_seo_werkvoorraad_kopteksten_check t WHERE t.url = w.url)
-                  AND NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
+                SELECT u.url
+                FROM pa.kopteksten_jobs j
+                JOIN pa.urls u ON j.url_id = u.url_id
+                LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+                WHERE j.status = 'pending'
+                  AND (v.is_valid IS NULL OR v.is_valid = TRUE)
                 LIMIT %s
             """, (batch_size,))
 
@@ -561,13 +589,15 @@ def get_status():
         # Count pending directly (same logic as process_urls query)
         cur.execute("""
             SELECT
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad) as total,
-                (SELECT COUNT(DISTINCT url) FROM pa.content_urls_joep WHERE content IS NOT NULL) as processed,
-                (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE status = 'failed') as failed,
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
-                 WHERE NOT EXISTS (SELECT 1 FROM pa.jvs_seo_werkvoorraad_kopteksten_check t WHERE t.url = w.url)
-                   AND NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)) as pending
+                (SELECT COUNT(*) FROM pa.kopteksten_jobs) AS total,
+                (SELECT COUNT(*) FROM pa.kopteksten_content WHERE content IS NOT NULL) AS processed,
+                (SELECT COUNT(*) FROM pa.url_validation WHERE is_valid = FALSE) AS skipped,
+                (SELECT COUNT(*) FROM pa.kopteksten_jobs WHERE status = 'failed') AS failed,
+                (SELECT COUNT(*)
+                 FROM pa.kopteksten_jobs j
+                 LEFT JOIN pa.url_validation v ON v.url_id = j.url_id
+                 WHERE j.status = 'pending'
+                   AND (v.is_valid IS NULL OR v.is_valid = TRUE)) AS pending
         """)
         counts = cur.fetchone()
         total = counts['total']
@@ -579,9 +609,10 @@ def get_status():
         # Get recent results from local PostgreSQL
         try:
             cur.execute("""
-                SELECT url, content, created_at
-                FROM pa.content_urls_joep
-                ORDER BY created_at DESC NULLS LAST
+                SELECT u.url, c.content, c.created_at
+                FROM pa.kopteksten_content c
+                JOIN pa.urls u ON c.url_id = u.url_id
+                ORDER BY c.created_at DESC NULLS LAST
                 LIMIT 5
             """)
             recent_rows = cur.fetchall()
@@ -613,11 +644,13 @@ def get_failure_reasons():
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT status, skip_reason, COUNT(*) as count
+            SELECT status, skip_reason, COUNT(*) AS count
             FROM (
-                SELECT status, skip_reason FROM pa.jvs_seo_werkvoorraad_kopteksten_check
+                SELECT status, last_error AS skip_reason FROM pa.kopteksten_jobs
                 UNION ALL
-                SELECT status, skip_reason FROM pa.url_validation_tracking
+                SELECT CASE WHEN is_valid = FALSE THEN 'skipped' ELSE 'valid' END AS status,
+                       reason AS skip_reason
+                FROM pa.url_validation
             ) combined
             GROUP BY status, skip_reason
             ORDER BY count DESC
@@ -644,8 +677,9 @@ async def export_xlsx():
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT url, content
-            FROM pa.content_urls_joep
+            SELECT u.url, c.content
+            FROM pa.kopteksten_content c
+            JOIN pa.urls u ON c.url_id = u.url_id
         """)
         rows = cur.fetchall()
 
@@ -693,8 +727,9 @@ async def export_json():
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT url, content
-            FROM pa.content_urls_joep
+            SELECT u.url, c.content
+            FROM pa.kopteksten_content c
+            JOIN pa.urls u ON c.url_id = u.url_id
         """)
         rows = cur.fetchall()
 
@@ -850,11 +885,14 @@ async def lookup_content(url: str):
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Look up in content table - try both full URL and relative path
+        # Look up in content table — try both full URL and relative path
+        # (canonicalize_url() in pa.urls already strips host and trailing-slash quirks)
         cur.execute("""
-            SELECT url, content, created_at
-            FROM pa.content_urls_joep
-            WHERE url = %s OR url = %s
+            SELECT u.url, c.content, c.created_at
+            FROM pa.kopteksten_content c
+            JOIN pa.urls u ON c.url_id = u.url_id
+            WHERE u.url = pa.canonicalize_url(%s)
+               OR u.url = pa.canonicalize_url(%s)
             LIMIT 1
         """, (full_url, path_url))
         row = cur.fetchone()
@@ -885,27 +923,21 @@ async def delete_result(url: str):
     """Delete a result and reset the URL back to pending state"""
     try:
         use_redshift = os.getenv("USE_REDSHIFT_OUTPUT", "false").lower() == "true"
-        werkvoorraad_table = "pa.jvs_seo_werkvoorraad_shopping_season" if use_redshift else "pa.jvs_seo_werkvoorraad"
+        # Redshift werkvoorraad_shopping_season is a separate Redshift table,
+        # NOT migrated as part of the Big Bang refactor.
+        werkvoorraad_table = "pa.jvs_seo_werkvoorraad_shopping_season"
 
-        # Delete from output table and update werkvoorraad - with retry on serialization conflicts
+        # If using Redshift output, also reset the kopteksten flag in Redshift
         @retry_on_redshift_serialization_error(max_retries=5, initial_delay=0.2)
-        def delete_from_output():
+        def reset_redshift_flag():
             output_conn = get_output_connection()
             output_cur = output_conn.cursor()
             try:
-                # Delete content
-                output_cur.execute("""
-                    DELETE FROM pa.content_urls_joep
-                    WHERE url = %s
-                """, (url,))
-
-                # Reset kopteksten flag in werkvoorraad
                 output_cur.execute(f"""
                     UPDATE {werkvoorraad_table}
                     SET kopteksten = 0
                     WHERE url = %s
                 """, (url,))
-
                 output_conn.commit()
             except Exception as e:
                 output_conn.rollback()
@@ -914,19 +946,22 @@ async def delete_result(url: str):
                 output_cur.close()
                 return_output_connection(output_conn)
 
-        delete_from_output()
+        if use_redshift:
+            reset_redshift_flag()
 
-        # Delete from local tracking table and shared validation table
+        # Delete from new schema: kopteksten content + jobs + url_validation
+        from backend.url_catalog import canonicalize_url
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("""
-            DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
-            WHERE url = %s
-        """, (url,))
-        cur.execute("""
-            DELETE FROM pa.url_validation_tracking
-            WHERE url = %s
-        """, (url,))
+        canon = canonicalize_url(url)
+        if canon is not None:
+            cur.execute("SELECT url_id FROM pa.urls WHERE url = %s", (canon,))
+            row = cur.fetchone()
+            if row:
+                uid = row['url_id']
+                cur.execute("DELETE FROM pa.kopteksten_content WHERE url_id = %s", (uid,))
+                cur.execute("DELETE FROM pa.kopteksten_jobs WHERE url_id = %s", (uid,))
+                cur.execute("DELETE FROM pa.url_validation WHERE url_id = %s", (uid,))
         conn.commit()
         cur.close()
         return_db_connection(conn)
@@ -986,10 +1021,11 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
 
         # Fetch unvalidated content URLs using LEFT JOIN for efficiency
         cur.execute("""
-            SELECT c.url, c.content
-            FROM pa.content_urls_joep c
-            LEFT JOIN pa.link_validation_results v ON c.url = v.content_url
-            WHERE v.content_url IS NULL
+            SELECT u.url, c.content
+            FROM pa.kopteksten_content c
+            JOIN pa.urls u ON c.url_id = u.url_id
+            LEFT JOIN pa.kopteksten_link_validation v ON v.url_id = c.url_id
+            WHERE v.url_id IS NULL
             LIMIT %s
         """, (batch_size,))
 
@@ -1031,20 +1067,29 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
             total_links = len(validation_result['valid_urls']) + len(validation_result['replaced_urls']) + len(validation_result['gone_urls'])
 
             # Save validation results to local tracking table
-            cur.execute("""
-                INSERT INTO pa.link_validation_results
-                (content_url, total_links, broken_links, valid_links, broken_link_details)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (
-                content_url,
-                total_links,
-                len(validation_result['gone_urls']),  # Only GONE URLs are truly broken
-                len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),  # Replaced URLs are now valid
-                json.dumps({
-                    'gone_urls': validation_result['gone_urls'],
-                    'replaced_urls': validation_result['replaced_urls']
-                })
-            ))
+            from backend.url_catalog import get_url_id
+            content_url_id = get_url_id(cur, content_url)
+            if content_url_id is not None:
+                cur.execute("""
+                    INSERT INTO pa.kopteksten_link_validation
+                        (url_id, total_links, broken_links, valid_links, broken_link_details, validated_at)
+                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (url_id) DO UPDATE SET
+                        total_links = EXCLUDED.total_links,
+                        broken_links = EXCLUDED.broken_links,
+                        valid_links = EXCLUDED.valid_links,
+                        broken_link_details = EXCLUDED.broken_link_details,
+                        validated_at = CURRENT_TIMESTAMP
+                """, (
+                    content_url_id,
+                    total_links,
+                    len(validation_result['gone_urls']),  # Only GONE URLs are truly broken
+                    len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),
+                    json.dumps({
+                        'gone_urls': validation_result['gone_urls'],
+                        'replaced_urls': validation_result['replaced_urls']
+                    })
+                ))
 
             # Handle URL replacements - update content in local database
             if has_replaced and not has_gone:
@@ -1069,60 +1114,68 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
                 'moved_to_pending': has_gone
             })
 
-        # Update corrected content in local database (batched for performance)
+        # Update corrected content in local database
         if urls_to_update_content:
-            cur.executemany("""
-                UPDATE pa.content_urls_joep
-                SET content = %s
-                WHERE url = %s
-            """, urls_to_update_content)
+            from backend.url_catalog import get_url_id
+            for new_content, the_url in urls_to_update_content:
+                uid = get_url_id(cur, the_url)
+                if uid is not None:
+                    cur.execute("""
+                        UPDATE pa.kopteksten_content
+                           SET content = %s, updated_at = CURRENT_TIMESTAMP
+                         WHERE url_id = %s
+                    """, (new_content, uid))
             print(f"[VALIDATE-LINKS] Updated content for {len(urls_to_update_content)} URLs with corrected links")
 
         # Delete/reset operations for gone products only
         if urls_with_gone_products:
-            placeholders = ','.join(['%s'] * len(urls_with_gone_products))
+            from backend.url_catalog import get_url_id
+            url_id_map = {}
+            for url in urls_with_gone_products:
+                uid = get_url_id(cur, url)
+                if uid is not None:
+                    url_id_map[url] = uid
+            uids = list(url_id_map.values())
 
-            # Backup content to history table before deletion
-            cur.execute(f"""
-                SELECT url, content, created_at FROM pa.content_urls_joep
-                WHERE url IN ({placeholders})
-            """, urls_with_gone_products)
-            content_to_backup = cur.fetchall()
+            if uids:
+                # Backup content to history table before deletion
+                placeholders = ','.join(['%s'] * len(uids))
+                cur.execute(f"""
+                    SELECT u.url, c.content, c.created_at
+                    FROM pa.kopteksten_content c
+                    JOIN pa.urls u ON c.url_id = u.url_id
+                    WHERE c.url_id IN ({placeholders})
+                """, uids)
+                content_to_backup = cur.fetchall()
 
-            for row in content_to_backup:
-                url = row['url']
-                gone_urls = url_to_gone_details.get(url, [])
-                cur.execute("""
-                    INSERT INTO pa.content_history (url, content, reset_reason, reset_details, original_created_at)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (url, row['content'], 'gone_products', json.dumps({'gone_urls': gone_urls}), row['created_at']))
+                for row in content_to_backup:
+                    the_url = row['url']
+                    gone_urls = url_to_gone_details.get(the_url, [])
+                    cur.execute("""
+                        INSERT INTO pa.content_history
+                            (url, content, reset_reason, reset_details, original_created_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (the_url, row['content'], 'gone_products',
+                          json.dumps({'gone_urls': gone_urls}), row['created_at']))
 
-            print(f"[VALIDATE-LINKS] Backed up {len(content_to_backup)} URLs to content_history")
+                print(f"[VALIDATE-LINKS] Backed up {len(content_to_backup)} URLs to content_history")
 
-            # Delete from content table (local PostgreSQL)
-            cur.execute(f"""
-                DELETE FROM pa.content_urls_joep
-                WHERE url IN ({placeholders})
-            """, urls_with_gone_products)
+                cur.execute(f"DELETE FROM pa.kopteksten_content WHERE url_id IN ({placeholders})", uids)
+                # Reset jobs to 'pending' so they get reprocessed; clear url_validation
+                cur.execute(f"""
+                    UPDATE pa.kopteksten_jobs
+                       SET status = 'pending', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+                     WHERE url_id IN ({placeholders})
+                """, uids)
+                cur.execute(f"DELETE FROM pa.url_validation WHERE url_id IN ({placeholders})", uids)
+                # Ensure a job row exists for any URL not yet tracked (in case it was content-only)
+                cur.executemany("""
+                    INSERT INTO pa.kopteksten_jobs (url_id, status, created_at, updated_at)
+                    VALUES (%s, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (url_id) DO NOTHING
+                """, [(uid,) for uid in uids])
 
-            # Delete from tracking tables (local PostgreSQL)
-            cur.execute(f"""
-                DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
-                WHERE url IN ({placeholders})
-            """, urls_with_gone_products)
-            cur.execute(f"""
-                DELETE FROM pa.url_validation_tracking
-                WHERE url IN ({placeholders})
-            """, urls_with_gone_products)
-
-            # Add URLs to werkvoorraad for reprocessing (batched for performance)
-            cur.executemany("""
-                INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
-                VALUES (%s, 0)
-                ON CONFLICT (url) DO UPDATE SET kopteksten = 0
-            """, [(url,) for url in urls_with_gone_products])
-
-            print(f"[VALIDATE-LINKS] Deleted content for {len(urls_with_gone_products)} URLs with gone products")
+                print(f"[VALIDATE-LINKS] Deleted content for {len(uids)} URLs with gone products")
 
         conn.commit()
         cur.close()
@@ -1179,9 +1232,12 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("""SELECT COUNT(*) as cnt FROM pa.content_urls_joep c
-            LEFT JOIN pa.link_validation_results v ON c.url = v.content_url
-            WHERE v.content_url IS NULL""")
+        cur.execute("""
+            SELECT COUNT(*) AS cnt
+            FROM pa.kopteksten_content c
+            LEFT JOIN pa.kopteksten_link_validation v ON v.url_id = c.url_id
+            WHERE v.url_id IS NULL
+        """)
         total_to_validate = cur.fetchone()['cnt']
         cur.close()
         return_db_connection(conn)
@@ -1208,10 +1264,11 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                 cur = conn.cursor()
 
                 cur.execute("""
-                    SELECT c.url, c.content
-                    FROM pa.content_urls_joep c
-                    LEFT JOIN pa.link_validation_results v ON c.url = v.content_url
-                    WHERE v.content_url IS NULL
+                    SELECT u.url, c.content
+                    FROM pa.kopteksten_content c
+                    JOIN pa.urls u ON c.url_id = u.url_id
+                    LEFT JOIN pa.kopteksten_link_validation v ON v.url_id = c.url_id
+                    WHERE v.url_id IS NULL
                     LIMIT %s
                 """, (batch_size,))
 
@@ -1239,16 +1296,25 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                     has_gone = len(validation_result['gone_urls']) > 0
                     total_links = len(validation_result['valid_urls']) + len(validation_result['replaced_urls']) + len(validation_result['gone_urls'])
 
-                    cur.execute("""
-                        INSERT INTO pa.link_validation_results
-                        (content_url, total_links, broken_links, valid_links, broken_link_details)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (
-                        content_url, total_links,
-                        len(validation_result['gone_urls']),
-                        len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),
-                        json.dumps({'gone_urls': validation_result['gone_urls'], 'replaced_urls': validation_result['replaced_urls']})
-                    ))
+                    from backend.url_catalog import get_url_id
+                    content_url_id = get_url_id(cur, content_url)
+                    if content_url_id is not None:
+                        cur.execute("""
+                            INSERT INTO pa.kopteksten_link_validation
+                                (url_id, total_links, broken_links, valid_links, broken_link_details, validated_at)
+                            VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                            ON CONFLICT (url_id) DO UPDATE SET
+                                total_links = EXCLUDED.total_links,
+                                broken_links = EXCLUDED.broken_links,
+                                valid_links = EXCLUDED.valid_links,
+                                broken_link_details = EXCLUDED.broken_link_details,
+                                validated_at = CURRENT_TIMESTAMP
+                        """, (
+                            content_url_id, total_links,
+                            len(validation_result['gone_urls']),
+                            len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),
+                            json.dumps({'gone_urls': validation_result['gone_urls'], 'replaced_urls': validation_result['replaced_urls']})
+                        ))
 
                     if has_replaced and not has_gone:
                         # Order matches `UPDATE ... SET content = %s WHERE url = %s` below.
@@ -1261,22 +1327,51 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                         moved_to_pending += 1
 
                 if urls_to_update_content:
-                    cur.executemany("""
-                        UPDATE pa.content_urls_joep SET content = %s WHERE url = %s
-                    """, urls_to_update_content)
+                    from backend.url_catalog import get_url_id
+                    for new_content, the_url in urls_to_update_content:
+                        uid = get_url_id(cur, the_url)
+                        if uid is not None:
+                            cur.execute("""
+                                UPDATE pa.kopteksten_content
+                                   SET content = %s, updated_at = CURRENT_TIMESTAMP
+                                 WHERE url_id = %s
+                            """, (new_content, uid))
 
                 if urls_with_gone_products:
-                    placeholders = ','.join(['%s'] * len(urls_with_gone_products))
-                    cur.execute(f"SELECT url, content, created_at FROM pa.content_urls_joep WHERE url IN ({placeholders})", urls_with_gone_products)
-                    for row in cur.fetchall():
-                        gone_urls = url_to_gone_details.get(row['url'], [])
-                        cur.execute("INSERT INTO pa.content_history (url, content, reset_reason, reset_details, original_created_at) VALUES (%s, %s, %s, %s, %s)",
-                            (row['url'], row['content'], 'gone_products', json.dumps({'gone_urls': gone_urls}), row['created_at']))
-                    cur.execute(f"DELETE FROM pa.content_urls_joep WHERE url IN ({placeholders})", urls_with_gone_products)
-                    cur.execute(f"DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check WHERE url IN ({placeholders})", urls_with_gone_products)
-                    cur.execute(f"DELETE FROM pa.url_validation_tracking WHERE url IN ({placeholders})", urls_with_gone_products)
-                    cur.executemany("INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten) VALUES (%s, 0) ON CONFLICT (url) DO UPDATE SET kopteksten = 0",
-                        [(url,) for url in urls_with_gone_products])
+                    from backend.url_catalog import get_url_id
+                    uids = []
+                    for url in urls_with_gone_products:
+                        u = get_url_id(cur, url)
+                        if u is not None:
+                            uids.append(u)
+                    if uids:
+                        placeholders = ','.join(['%s'] * len(uids))
+                        cur.execute(f"""
+                            SELECT u.url, c.content, c.created_at
+                            FROM pa.kopteksten_content c
+                            JOIN pa.urls u ON c.url_id = u.url_id
+                            WHERE c.url_id IN ({placeholders})
+                        """, uids)
+                        for row in cur.fetchall():
+                            gone_urls = url_to_gone_details.get(row['url'], [])
+                            cur.execute(
+                                "INSERT INTO pa.content_history "
+                                "(url, content, reset_reason, reset_details, original_created_at) "
+                                "VALUES (%s, %s, %s, %s, %s)",
+                                (row['url'], row['content'], 'gone_products',
+                                 json.dumps({'gone_urls': gone_urls}), row['created_at']))
+                        cur.execute(f"DELETE FROM pa.kopteksten_content WHERE url_id IN ({placeholders})", uids)
+                        cur.execute(f"""
+                            UPDATE pa.kopteksten_jobs
+                               SET status = 'pending', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+                             WHERE url_id IN ({placeholders})
+                        """, uids)
+                        cur.execute(f"DELETE FROM pa.url_validation WHERE url_id IN ({placeholders})", uids)
+                        cur.executemany("""
+                            INSERT INTO pa.kopteksten_jobs (url_id, status, created_at, updated_at)
+                            VALUES (%s, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (url_id) DO NOTHING
+                        """, [(uid,) for uid in uids])
 
                 conn.commit()
                 cur.close()
@@ -1309,14 +1404,15 @@ async def get_validation_history(limit: int = 20):
 
         cur.execute("""
             SELECT
-                content_url,
-                total_links,
-                broken_links,
-                valid_links,
-                broken_link_details,
-                validated_at
-            FROM pa.link_validation_results
-            ORDER BY validated_at DESC
+                u.url AS content_url,
+                v.total_links,
+                v.broken_links,
+                v.valid_links,
+                v.broken_link_details,
+                v.validated_at
+            FROM pa.kopteksten_link_validation v
+            JOIN pa.urls u ON v.url_id = u.url_id
+            ORDER BY v.validated_at DESC
             LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
@@ -1340,11 +1436,11 @@ async def reset_validation_history():
         cur = conn.cursor()
 
         # Get count before deletion
-        cur.execute("SELECT COUNT(*) as count FROM pa.link_validation_results")
+        cur.execute("SELECT COUNT(*) AS count FROM pa.kopteksten_link_validation")
         count = cur.fetchone()['count']
 
         # Delete all validation history
-        cur.execute("DELETE FROM pa.link_validation_results")
+        cur.execute("DELETE FROM pa.kopteksten_link_validation")
         conn.commit()
 
         cur.close()
@@ -1402,8 +1498,11 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("""SELECT COUNT(*) as cnt FROM pa.url_validation_tracking
-            WHERE status = 'skipped' AND (skip_reason IS NULL OR skip_reason NOT LIKE '%%(rechecked)%%')""")
+        cur.execute("""
+            SELECT COUNT(*) AS cnt FROM pa.url_validation
+            WHERE is_valid = FALSE
+              AND (reason IS NULL OR reason NOT LIKE '%%(rechecked)%%')
+        """)
         total_to_recheck = cur.fetchone()['cnt']
         cur.close()
         return_db_connection(conn)
@@ -1428,11 +1527,13 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
             conn = get_db_connection()
             cur = conn.cursor()
 
-            # Get batch of skipped URLs from shared table (only those not yet rechecked)
+            # Get batch of skipped URLs from shared validation (not yet rechecked)
             cur.execute("""
-                SELECT url FROM pa.url_validation_tracking
-                WHERE status = 'skipped'
-                  AND (skip_reason IS NULL OR skip_reason NOT LIKE '%%(rechecked)%%')
+                SELECT u.url
+                FROM pa.url_validation v
+                JOIN pa.urls u ON v.url_id = u.url_id
+                WHERE v.is_valid = FALSE
+                  AND (v.reason IS NULL OR v.reason NOT LIKE '%%(rechecked)%%')
                 LIMIT %s
             """, (batch_size,))
             skipped_rows = cur.fetchall()
@@ -1461,38 +1562,56 @@ def recheck_skipped_urls(parallel_workers: int = 3, batch_size: int = 50):
             now_eligible = [r['url'] for r in results if r['has_products']]
             still_skipped = [r['url'] for r in results if not r['has_products']]
 
-            # Remove eligible URLs from shared table + both feature tables so they can be reprocessed
+            from backend.url_catalog import bulk_upsert_urls, canonicalize_url
+
+            # Remove eligible URLs from shared validation + both job tables so they can be reprocessed
             if now_eligible:
-                placeholders = ','.join(['%s'] * len(now_eligible))
-                cur.execute(f"""
-                    DELETE FROM pa.url_validation_tracking
-                    WHERE url IN ({placeholders})
-                """, now_eligible)
-                cur.execute(f"""
-                    DELETE FROM pa.jvs_seo_werkvoorraad_kopteksten_check
-                    WHERE url IN ({placeholders})
-                """, now_eligible)
-                cur.execute(f"""
-                    DELETE FROM pa.faq_tracking
-                    WHERE url IN ({placeholders})
-                      AND (skip_reason IS NULL OR skip_reason != 'main_category_url')
-                """, now_eligible)
-                # Make sure they're in werkvoorraad for reprocessing
-                cur.executemany("""
-                    INSERT INTO pa.jvs_seo_werkvoorraad (url, kopteksten)
-                    VALUES (%s, 0)
-                    ON CONFLICT (url) DO NOTHING
-                """, [(url,) for url in now_eligible])
+                url_id_map = bulk_upsert_urls(cur, now_eligible)
+                eligible_uids = [url_id_map[c] for u in now_eligible
+                                 for c in [canonicalize_url(u)]
+                                 if c and url_id_map.get(c) is not None]
+                if eligible_uids:
+                    placeholders = ','.join(['%s'] * len(eligible_uids))
+                    cur.execute(f"DELETE FROM pa.url_validation WHERE url_id IN ({placeholders})", eligible_uids)
+                    # Reset both jobs back to pending so the URL is re-evaluated
+                    cur.execute(f"""
+                        UPDATE pa.kopteksten_jobs
+                           SET status = 'pending', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+                         WHERE url_id IN ({placeholders})
+                    """, eligible_uids)
+                    cur.execute(f"""
+                        UPDATE pa.faq_jobs
+                           SET status = 'pending', skip_reason = NULL, updated_at = CURRENT_TIMESTAMP
+                         WHERE url_id IN ({placeholders})
+                           AND (skip_reason IS NULL OR skip_reason != 'main_category_url')
+                    """, eligible_uids)
+                    # Ensure rows exist in case the URL was never queued before
+                    cur.executemany("""
+                        INSERT INTO pa.kopteksten_jobs (url_id, status, created_at, updated_at)
+                        VALUES (%s, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (url_id) DO NOTHING
+                    """, [(uid,) for uid in eligible_uids])
+                    cur.executemany("""
+                        INSERT INTO pa.faq_jobs (url_id, status, created_at, updated_at)
+                        VALUES (%s, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT (url_id) DO NOTHING
+                    """, [(uid,) for uid in eligible_uids])
                 total_now_eligible += len(now_eligible)
 
-            # Mark remaining as rechecked in shared table to avoid infinite loop
+            # Mark remaining as rechecked so we don't re-process them
             if still_skipped:
-                placeholders = ','.join(['%s'] * len(still_skipped))
-                cur.execute(f"""
-                    UPDATE pa.url_validation_tracking
-                    SET skip_reason = 'no_products_found (rechecked)'
-                    WHERE url IN ({placeholders})
-                """, still_skipped)
+                still_url_id_map = bulk_upsert_urls(cur, still_skipped)
+                still_uids = [still_url_id_map[c] for u in still_skipped
+                              for c in [canonicalize_url(u)]
+                              if c and still_url_id_map.get(c) is not None]
+                if still_uids:
+                    placeholders = ','.join(['%s'] * len(still_uids))
+                    cur.execute(f"""
+                        UPDATE pa.url_validation
+                           SET reason = 'no_products_found (rechecked)',
+                               last_checked_at = CURRENT_TIMESTAMP
+                         WHERE url_id IN ({placeholders})
+                    """, still_uids)
 
             conn.commit()
             cur.close()
@@ -1521,9 +1640,10 @@ def reset_skipped_recheck():
         cur = conn.cursor()
 
         cur.execute("""
-            UPDATE pa.url_validation_tracking
-            SET skip_reason = 'no_products_found'
-            WHERE status = 'skipped' AND skip_reason LIKE '%%(rechecked)%%'
+            UPDATE pa.url_validation
+               SET reason = 'no_products_found'
+             WHERE is_valid = FALSE
+               AND reason LIKE '%%(rechecked)%%'
         """)
         count = cur.rowcount
 
@@ -1561,13 +1681,15 @@ def get_faq_status():
         # Count pending directly (same logic as process_faq_urls query)
         cur.execute("""
             SELECT
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad) as total,
-                (SELECT COUNT(*) FROM pa.faq_content) as processed,
-                (SELECT COUNT(*) FROM pa.url_validation_tracking WHERE status = 'skipped') as skipped,
-                (SELECT COUNT(*) FROM pa.faq_tracking WHERE status = 'failed') as failed,
-                (SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
-                 WHERE NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
-                   AND NOT EXISTS (SELECT 1 FROM pa.faq_tracking t WHERE t.url = w.url AND t.status != 'pending')) as pending
+                (SELECT COUNT(*) FROM pa.faq_jobs) AS total,
+                (SELECT COUNT(*) FROM pa.faq_content_v2) AS processed,
+                (SELECT COUNT(*) FROM pa.url_validation WHERE is_valid = FALSE) AS skipped,
+                (SELECT COUNT(*) FROM pa.faq_jobs WHERE status = 'failed') AS failed,
+                (SELECT COUNT(*)
+                 FROM pa.faq_jobs j
+                 LEFT JOIN pa.url_validation v ON v.url_id = j.url_id
+                 WHERE j.status = 'pending'
+                   AND (v.is_valid IS NULL OR v.is_valid = TRUE)) AS pending
         """)
         counts = cur.fetchone()
         total = counts['total']
@@ -1579,9 +1701,10 @@ def get_faq_status():
         # Get recent FAQ results
         try:
             cur.execute("""
-                SELECT url, page_title, faq_json, schema_org, created_at
-                FROM pa.faq_content
-                ORDER BY created_at DESC NULLS LAST
+                SELECT u.url, c.page_title, c.faq_json, c.schema_org, c.created_at
+                FROM pa.faq_content_v2 c
+                JOIN pa.urls u ON c.url_id = u.url_id
+                ORDER BY c.created_at DESC NULLS LAST
                 LIMIT 5
             """)
             recent_rows = cur.fetchall()
@@ -1659,12 +1782,14 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Fetch unprocessed URLs (not in FAQ tracking, not in shared validation, or pending)
+        # Fetch URLs with pending FAQ jobs that aren't validation-skipped
         cur.execute("""
-            SELECT w.url
-            FROM pa.jvs_seo_werkvoorraad w
-            WHERE NOT EXISTS (SELECT 1 FROM pa.url_validation_tracking v WHERE v.url = w.url)
-              AND NOT EXISTS (SELECT 1 FROM pa.faq_tracking t WHERE t.url = w.url AND t.status != 'pending')
+            SELECT u.url
+            FROM pa.faq_jobs j
+            JOIN pa.urls u ON j.url_id = u.url_id
+            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+            WHERE j.status = 'pending'
+              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
             LIMIT %s
         """, (batch_size,))
 
@@ -1716,29 +1841,58 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
 
             print(f"[FAQ] {url} - Status: {status}" + (f" - Reason: {reason}" if reason else f" - {result.get('faq_count', 0)} FAQs"))
 
+        from backend.url_catalog import bulk_upsert_urls, canonicalize_url
+        all_urls = ([t[0] for t in shared_skip_data]
+                    + [t[0] for t in tracking_data]
+                    + [c[0] for c in content_data])
+        url_id_map = bulk_upsert_urls(cur, all_urls)
+
+        def _resolve(u):
+            c = canonicalize_url(u)
+            return url_id_map.get(c) if c else None
+
         # Batch insert shared skip data (no_products_found)
         if shared_skip_data:
-            cur.executemany("""
-                INSERT INTO pa.url_validation_tracking (url, status, skip_reason)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason, checked_at = CURRENT_TIMESTAMP
-            """, shared_skip_data)
+            rows = [(uid, False, reason) for url, _s, reason in shared_skip_data
+                    for uid in [_resolve(url)] if uid is not None]
+            if rows:
+                cur.executemany("""
+                    INSERT INTO pa.url_validation (url_id, last_checked_at, is_valid, reason)
+                    VALUES (%s, CURRENT_TIMESTAMP, %s, %s)
+                    ON CONFLICT (url_id) DO UPDATE SET
+                        is_valid = EXCLUDED.is_valid,
+                        reason = EXCLUDED.reason,
+                        last_checked_at = CURRENT_TIMESTAMP
+                """, rows)
 
-        # Batch insert feature-specific tracking data (success, failed)
+        # Batch insert FAQ job state (success / failed)
         if tracking_data:
-            cur.executemany("""
-                INSERT INTO pa.faq_tracking (url, status, skip_reason)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (url) DO UPDATE SET status = EXCLUDED.status, skip_reason = EXCLUDED.skip_reason
-            """, tracking_data)
+            rows = [(uid, status, reason) for url, status, reason in tracking_data
+                    for uid in [_resolve(url)] if uid is not None]
+            if rows:
+                cur.executemany("""
+                    INSERT INTO pa.faq_jobs (url_id, status, skip_reason, created_at, updated_at)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (url_id) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        skip_reason = EXCLUDED.skip_reason,
+                        updated_at = CURRENT_TIMESTAMP
+                """, rows)
 
-        # Batch insert content data
+        # Batch insert FAQ content
         if content_data:
-            cur.executemany("""
-                INSERT INTO pa.faq_content (url, page_title, faq_json, schema_org)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (url) DO UPDATE SET page_title = EXCLUDED.page_title, faq_json = EXCLUDED.faq_json, schema_org = EXCLUDED.schema_org
-            """, content_data)
+            rows = [(uid, pt, fj, so) for url, pt, fj, so in content_data
+                    for uid in [_resolve(url)] if uid is not None]
+            if rows:
+                cur.executemany("""
+                    INSERT INTO pa.faq_content_v2 (url_id, page_title, faq_json, schema_org, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (url_id) DO UPDATE SET
+                        page_title = EXCLUDED.page_title,
+                        faq_json = EXCLUDED.faq_json,
+                        schema_org = EXCLUDED.schema_org,
+                        updated_at = CURRENT_TIMESTAMP
+                """, rows)
 
         conn.commit()
         cur.close()
@@ -1791,8 +1945,9 @@ async def export_faq_xlsx():
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT url, page_title, faq_json, schema_org
-            FROM pa.faq_content
+            SELECT u.url, c.page_title, c.faq_json, c.schema_org
+            FROM pa.faq_content_v2 c
+            JOIN pa.urls u ON c.url_id = u.url_id
         """)
         rows = cur.fetchall()
 
@@ -1851,8 +2006,9 @@ async def export_faq_json():
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT url, page_title, faq_json, schema_org
-            FROM pa.faq_content
+            SELECT u.url, c.page_title, c.faq_json, c.schema_org
+            FROM pa.faq_content_v2 c
+            JOIN pa.urls u ON c.url_id = u.url_id
         """)
         rows = cur.fetchall()
 
@@ -1902,13 +2058,14 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Get FAQs that haven't been validated yet (LEFT JOIN)
+        # Get FAQs that haven't been validated yet
         cur.execute("""
-            SELECT c.url, c.faq_json
-            FROM pa.faq_content c
-            LEFT JOIN pa.faq_validation_results v ON c.url = v.url
+            SELECT u.url, c.faq_json
+            FROM pa.faq_content_v2 c
+            JOIN pa.urls u ON c.url_id = u.url_id
+            LEFT JOIN pa.faq_link_validation v ON v.url_id = c.url_id
             WHERE c.faq_json IS NOT NULL
-              AND v.url IS NULL
+              AND v.url_id IS NULL
             LIMIT %s
         """, (batch_size,))
         rows = cur.fetchall()
@@ -1959,19 +2116,23 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
                     all_urls_with_gone.append(result['url'])
 
         # Record validation results (for URLs that passed - no gone products)
+        from backend.url_catalog import get_url_id
         conn = get_db_connection()
         cur = conn.cursor()
         for record in validation_records:
-            if not record['has_gone']:  # Only record if no gone products
-                cur.execute("""
-                    INSERT INTO pa.faq_validation_results (url, total_links, valid_links, gone_links)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (url) DO UPDATE SET
-                        total_links = EXCLUDED.total_links,
-                        valid_links = EXCLUDED.valid_links,
-                        gone_links = EXCLUDED.gone_links,
-                        validated_at = CURRENT_TIMESTAMP
-                """, (record['url'], record['total_links'], record['valid_links'], 0))
+            if not record['has_gone']:
+                uid = get_url_id(cur, record['url'])
+                if uid is not None:
+                    cur.execute("""
+                        INSERT INTO pa.faq_link_validation
+                            (url_id, total_links, valid_links, gone_links, validated_at)
+                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (url_id) DO UPDATE SET
+                            total_links = EXCLUDED.total_links,
+                            valid_links = EXCLUDED.valid_links,
+                            gone_links = EXCLUDED.gone_links,
+                            validated_at = CURRENT_TIMESTAMP
+                    """, (uid, record['total_links'], record['valid_links'], 0))
         conn.commit()
         cur.close()
         return_db_connection(conn)
@@ -2038,9 +2199,13 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("""SELECT COUNT(*) as cnt FROM pa.faq_content c
-            LEFT JOIN pa.faq_validation_results v ON c.url = v.url
-            WHERE c.faq_json IS NOT NULL AND v.url IS NULL""")
+        cur.execute("""
+            SELECT COUNT(*) AS cnt
+            FROM pa.faq_content_v2 c
+            LEFT JOIN pa.faq_link_validation v ON v.url_id = c.url_id
+            WHERE c.faq_json IS NOT NULL
+              AND v.url_id IS NULL
+        """)
         total_to_validate = cur.fetchone()['cnt']
         cur.close()
         return_db_connection(conn)
@@ -2068,11 +2233,12 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
             cur = conn.cursor()
 
             cur.execute("""
-                SELECT c.url, c.faq_json
-                FROM pa.faq_content c
-                LEFT JOIN pa.faq_validation_results v ON c.url = v.url
+                SELECT u.url, c.faq_json
+                FROM pa.faq_content_v2 c
+                JOIN pa.urls u ON c.url_id = u.url_id
+                LEFT JOIN pa.faq_link_validation v ON v.url_id = c.url_id
                 WHERE c.faq_json IS NOT NULL
-                  AND v.url IS NULL
+                  AND v.url_id IS NULL
                 LIMIT %s
             """, (batch_size,))
             rows = cur.fetchall()
@@ -2114,19 +2280,23 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
                         batch_urls_with_gone.append(result['url'])
 
             # Record validation results (for URLs that passed)
+            from backend.url_catalog import get_url_id
             conn = get_db_connection()
             cur = conn.cursor()
             for record in validation_records:
                 if not record['has_gone']:
-                    cur.execute("""
-                        INSERT INTO pa.faq_validation_results (url, total_links, valid_links, gone_links)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (url) DO UPDATE SET
-                            total_links = EXCLUDED.total_links,
-                            valid_links = EXCLUDED.valid_links,
-                            gone_links = EXCLUDED.gone_links,
-                            validated_at = CURRENT_TIMESTAMP
-                    """, (record['url'], record['total_links'], record['valid_links'], 0))
+                    uid = get_url_id(cur, record['url'])
+                    if uid is not None:
+                        cur.execute("""
+                            INSERT INTO pa.faq_link_validation
+                                (url_id, total_links, valid_links, gone_links, validated_at)
+                            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                            ON CONFLICT (url_id) DO UPDATE SET
+                                total_links = EXCLUDED.total_links,
+                                valid_links = EXCLUDED.valid_links,
+                                gone_links = EXCLUDED.gone_links,
+                                validated_at = CURRENT_TIMESTAMP
+                        """, (uid, record['total_links'], record['valid_links'], 0))
             conn.commit()
             cur.close()
             return_db_connection(conn)
@@ -2173,9 +2343,11 @@ async def lookup_faq(url: str):
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
-            SELECT url, page_title, faq_json, schema_org, created_at
-            FROM pa.faq_content
-            WHERE url = %s OR url = %s
+            SELECT u.url, c.page_title, c.faq_json, c.schema_org, c.created_at
+            FROM pa.faq_content_v2 c
+            JOIN pa.urls u ON c.url_id = u.url_id
+            WHERE u.url = pa.canonicalize_url(%s)
+               OR u.url = pa.canonicalize_url(%s)
             LIMIT 1
         """, (base_url + path_url, path_url))
         row = cur.fetchone()
@@ -2201,12 +2373,20 @@ async def lookup_faq(url: str):
 async def delete_faq_result(url: str):
     """Delete FAQ content and reset URL to pending."""
     try:
+        from backend.url_catalog import canonicalize_url
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("DELETE FROM pa.faq_content WHERE url = %s", (url,))
-        cur.execute("DELETE FROM pa.faq_tracking WHERE url = %s", (url,))
-        cur.execute("DELETE FROM pa.faq_validation_results WHERE url = %s", (url,))
-        deleted = cur.rowcount
+        canon = canonicalize_url(url)
+        deleted = 0
+        if canon is not None:
+            cur.execute("SELECT url_id FROM pa.urls WHERE url = %s", (canon,))
+            row = cur.fetchone()
+            if row:
+                uid = row['url_id']
+                cur.execute("DELETE FROM pa.faq_content_v2 WHERE url_id = %s", (uid,))
+                deleted = cur.rowcount
+                cur.execute("DELETE FROM pa.faq_jobs WHERE url_id = %s", (uid,))
+                cur.execute("DELETE FROM pa.faq_link_validation WHERE url_id = %s", (uid,))
         conn.commit()
         cur.close()
         return_db_connection(conn)
@@ -2224,7 +2404,7 @@ def reset_faq_validation_history():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        cur.execute("DELETE FROM pa.faq_validation_results")
+        cur.execute("DELETE FROM pa.faq_link_validation")
         deleted = cur.rowcount
 
         conn.commit()
@@ -2272,16 +2452,18 @@ async def export_combined_xlsx():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Full outer join to get ALL URLs from both tables
+        # All URLs from both content tables, joined through pa.urls
         cur.execute("""
             SELECT
-                COALESCE(f.url, c.url) as url,
-                f.schema_org as content_faq,
+                u.url AS url,
+                f.schema_org AS content_faq,
                 f.faq_json,
-                c.content as content_top
-            FROM pa.faq_content f
-            FULL OUTER JOIN pa.content_urls_joep c ON f.url = c.url
-            ORDER BY COALESCE(f.url, c.url)
+                k.content AS content_top
+            FROM pa.urls u
+            LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
+            LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
+            WHERE f.url_id IS NOT NULL OR k.url_id IS NOT NULL
+            ORDER BY u.url
         """)
         rows = cur.fetchall()
 
@@ -2348,21 +2530,17 @@ async def delete_faq_result(url: str):
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Delete from FAQ content table
-        cur.execute("""
-            DELETE FROM pa.faq_content
-            WHERE url = %s
-        """, (url,))
-
-        # Delete from FAQ tracking table and shared validation table
-        cur.execute("""
-            DELETE FROM pa.faq_tracking
-            WHERE url = %s
-        """, (url,))
-        cur.execute("""
-            DELETE FROM pa.url_validation_tracking
-            WHERE url = %s
-        """, (url,))
+        # Delete from FAQ tables + shared validation, all keyed on url_id
+        from backend.url_catalog import canonicalize_url
+        canon = canonicalize_url(url)
+        if canon is not None:
+            cur.execute("SELECT url_id FROM pa.urls WHERE url = %s", (canon,))
+            row = cur.fetchone()
+            if row:
+                uid = row['url_id']
+                cur.execute("DELETE FROM pa.faq_content_v2 WHERE url_id = %s", (uid,))
+                cur.execute("DELETE FROM pa.faq_jobs WHERE url_id = %s", (uid,))
+                cur.execute("DELETE FROM pa.url_validation WHERE url_id = %s", (uid,))
 
         conn.commit()
         cur.close()
@@ -2392,12 +2570,13 @@ async def get_content_publish_stats():
         # Get counts
         cur.execute("""
             SELECT
-                (SELECT COUNT(*) FROM pa.content_urls_joep WHERE content IS NOT NULL) as content_top_count,
-                (SELECT COUNT(*) FROM pa.faq_content WHERE faq_json IS NOT NULL) as faq_count,
-                (SELECT COUNT(DISTINCT COALESCE(c.url, f.url))
-                 FROM pa.content_urls_joep c
-                 FULL OUTER JOIN pa.faq_content f ON c.url = f.url
-                 WHERE c.content IS NOT NULL OR f.faq_json IS NOT NULL) as total_unique_urls
+                (SELECT COUNT(*) FROM pa.kopteksten_content WHERE content IS NOT NULL) AS content_top_count,
+                (SELECT COUNT(*) FROM pa.faq_content_v2 WHERE faq_json IS NOT NULL) AS faq_count,
+                (SELECT COUNT(*)
+                 FROM pa.urls u
+                 LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
+                 LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
+                 WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL) AS total_unique_urls
         """)
         row = cur.fetchone()
 
