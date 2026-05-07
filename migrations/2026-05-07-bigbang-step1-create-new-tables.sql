@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS pa.unique_titles_content (
     updated_at         TIMESTAMP NOT NULL DEFAULT now()
 );
 
--- Shared URL validation (replaces pa.url_validation_tracking + pa.link_validation_results).
+-- Shared URL validation (the URL itself is reachable / has products).
 CREATE TABLE IF NOT EXISTS pa.url_validation (
     url_id           BIGINT PRIMARY KEY REFERENCES pa.urls(url_id) ON DELETE CASCADE,
     last_checked_at  TIMESTAMP NOT NULL DEFAULT now(),
@@ -98,12 +98,36 @@ CREATE TABLE IF NOT EXISTS pa.url_validation (
 );
 CREATE INDEX IF NOT EXISTS idx_url_validation_is_valid ON pa.url_validation (is_valid);
 
+-- Per-tool LINK validation (links INSIDE the generated content). These were
+-- pa.link_validation_results (kopteksten) and pa.faq_validation_results.
+-- They are conceptually different from pa.url_validation and stay separate.
+CREATE TABLE IF NOT EXISTS pa.kopteksten_link_validation (
+    url_id              BIGINT PRIMARY KEY REFERENCES pa.urls(url_id) ON DELETE CASCADE,
+    total_links         INTEGER,
+    valid_links         INTEGER,
+    broken_links        INTEGER,
+    broken_link_details JSONB,
+    validated_at        TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_kopt_link_val_validated ON pa.kopteksten_link_validation(validated_at);
+
+CREATE TABLE IF NOT EXISTS pa.faq_link_validation (
+    url_id        BIGINT PRIMARY KEY REFERENCES pa.urls(url_id) ON DELETE CASCADE,
+    total_links   INTEGER,
+    valid_links   INTEGER,
+    gone_links    INTEGER,
+    validated_at  TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_faq_link_val_validated ON pa.faq_link_validation(validated_at);
+
 COMMIT;
 
 -- ============================================================================
 -- Rollback (run individually if step 1 needs to be undone, before any data
 -- has moved):
 -- ============================================================================
+-- DROP TABLE IF EXISTS pa.faq_link_validation;
+-- DROP TABLE IF EXISTS pa.kopteksten_link_validation;
 -- DROP TABLE IF EXISTS pa.url_validation;
 -- DROP TABLE IF EXISTS pa.unique_titles_content;
 -- DROP TABLE IF EXISTS pa.faq_content_v2;
