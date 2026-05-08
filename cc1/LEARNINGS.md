@@ -1,6 +1,123 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Unique-titles v3 thaw-and-update pass — still in fridge (2026-05-08)
+- **Status**: opt-in via `AI_TITLES_PIPELINE=v3`. Default remains `v1`. Pulled out of the fridge for an iteration, pushed back with several regressions addressed but three new ones discovered. Commit: `84e410c`. See the previous shelving section ("Unique-titles v3 pipeline experiment — shelved at ~76% acceptable") for the original A/B journey.
+- **What changed in this pass** (all in `dm-tools/backend/ai_titles_service.py`):
+  - **Category-override** lifted from v1 (`batch_classify_facets` + `_NEVER_URL_SLUGS` / `_ALWAYS_TYPE_URL_SLUGS`). Computed inside `generate_title_v3` BEFORE calling `_build_v3_h1`; passes `effective_category=''` when override fires. Required relaxing the `_build_v3_h1` early-return: `if not category_name and not selected_facets` instead of `if not category_name`. **Fixes the `Wanten Handschoenen` / `Ventilatieventielen Ventilatiematerialen` / `Kandelaars Kaarsenhouders` redundancy class** flagged at original shelving — verified on 15 type-facet URLs.
+  - **`generate_title_v3(polish=False)` codepath** added. Skips OpenAI entirely; deterministic `composed_h1` is the final output. A/B (500 random URLs) showed polish only changed output in 12-17% of cases — most polish responses are identical to composed after `_v3_restore_casing` strips polish-applied case changes. **User signal 2026-05-08**: "looks fine without polishing" → no-polish is the favored path now. The polish-on regression class (non-brand agglutinations like `damedeodorant`, `herenspolshorloges`) doesn't apply on the no-polish path — it resurfaces if polish is re-enabled.
+  - **Conditie facet → end of H1**: new `conditions: List[str]` bucket detected via `fname=='conditie' or 'conditie' in url_slug or 'condition' in url_slug`. Slot order: ... → sizes → conditions (last). Verified on 8 URLs: `Apple iPad 2019 Tablets 10 inch Nieuw`.
+  - **Standalone `Met`/`Zonder` lowercased mid-title**: final-pass regex `(?<=\S)\s+(Met|Zonder)\b` runs after dedup. Brings v3 in line with v1's polish rule 3 ("non-eigennamen NÁ het eerste woord in kleine letters") even when polish is off.
+  - **Color precedence** (kleurtint / kleurcombi over generic kleur): new `kleurtint: List[str]` bucket. Generalized kleurcombi match from `url_slug.startswith('kleurcombi')` to `'kleur' in slug AND 'combi' in slug` (plus `fname` check) so `kleur_combinatie`, `kleurcombinaties_schoenen`, `kleurcombinaties_woonacc` all hit. After loop: `if kleurtint or color_combos: colors = []`. Front color slot uses `kleurtint or colors` (specific overrides generic); kleurcombi keeps post-category position. Effect: `Wit en groen Textiel Adidas Court Sneakers Maat 40` → `Adidas Court Textiel Sneakers Wit/groen Maat 40`.
+- **Final slot order** (Option A from user 2026-05-08): `front_colors` (kleurtint OR generic colors) → brand → populaire_serie → type_productlijn → productlijn → materials → other_adj → doelgroep → CATEGORY → met_clauses → voor_values → color_combos → sizes → conditions.
+- **A/B numbers** at end of session (500 URLs, polish=False): v1 differs from v3 in 340/496 (~69%, down from 73% pre-color-precedence). xlsx at `~/v1_vs_v3_500_2026-05-08.xlsx`.
+- **New regressions surfaced during scoring** (also in EXPERIMENTAL header in source — keep header + LEARNINGS in sync):
+  1. **Brand acronym lowercasing in builder** — `HEMA Uitnodigingen` → `Hema Uitnodigingen`. Beslist's facet detail_value capitalizes brands by default; something in the dedup/casing path is title-casing the all-caps form. Reproduces on every HEMA URL. Investigate `_dedupe_facet_values` first; the final `if h1[0].islower()` block shouldn't touch interior tokens, so the culprit is one of the dedup passes normalising casing.
+  2. **Brand mangling on `&`** — `Heckett & Lane` brand produces `Bruine & Lane Stoffen Moderne Dekbedovertrekken …`. The brand string with embedded `&` interacts badly with one of the dedup passes, dropping the first token. Reproducible on Heckett & Lane URLs. Possibly `_dedupe_prefix_overlap` or `_strip_pre_clause_duplicates` treating `&` as a clause boundary.
+  3. **Attributive vs predicate inflection on measurements** — `20 cm diep 73 cm hoog` → `20 cm diepe 73 cm hoge`. Persists with polish off, so it's the builder, not the AI. Would need a measurement-noun proximity rule (don't inflect adjective when a measurement immediately precedes).
+- **What to do when picking this up again**:
+  - **A/B harness** is committed at `dm-tools/scripts/v3_ab_100.py`. Run as `python3 scripts/v3_ab_100.py 500`. Outputs `~/v1_vs_v3_<N>_<date>.xlsx` with columns `url, v1_h1, v3_h1, error, verdict`. Currently calls `polish=False`; if revisiting polish, swap the `run_one` call to also call `polish=True` and add columns.
+  - **Targeted spot-check** for type-facet override at `scripts/v3_verify_override.py`. Run after any change to category-override logic.
+  - The 3 new regressions above are independent and triagable in any order. (1) and (2) feel like one investigation: trace what mutates `brand` after it's appended to parts. (3) is its own thing — the lowercase regex that runs late doesn't seem to be the cause.
+  - The original 2026-05-06 pickup notes mention "consider dropping the AI polish step entirely" — that has effectively happened on the recommended path (polish=False is now favored). The polish=True codepath is still there for A/B but is no longer the target.
+- **Files**: `dm-tools/backend/ai_titles_service.py` (header rewritten + ~80 net new lines under EXPERIMENTAL header), `dm-tools/scripts/v3_ab_100.py` (new), `dm-tools/scripts/v3_verify_override.py` (new). Commit `84e410c` pushed to dm-dashboard.
+
+## Big Bang DB refactor: collapsed per-tool tables into one URL catalog (2026-05-07)
+**TL;DR for future-you debugging anything table-related**: the SEO content tools (Kopteksten, FAQ, Unique Titles) used to each have their own URL-keyed tables. As of 2026-05-07 they share `pa.urls` (single canonicalized URL catalog, ~980k rows) plus per-tool `*_jobs` / `*_content` tables keyed on `url_id` (BIGSERIAL FK). If a query mentions an old table name, it's stale code. Old tables still exist as `*_old_2026_05_07` snapshots until ~2026-05-14, then get dropped.
+
+**Old → new table mapping** (this is the lookup table when something breaks):
+- `pa.jvs_seo_werkvoorraad` → gone. The "URL universe" concept is now `pa.urls`. Per-tool eligibility = "row exists in pa.kopteksten_jobs / pa.faq_jobs / pa.unique_titles_jobs" (see eligibility-backfill note below)
+- `pa.jvs_seo_werkvoorraad_kopteksten_check` → `pa.kopteksten_jobs(url_id, status, last_error, attempts, created_at, updated_at)`
+- `pa.content_urls_joep` → `pa.kopteksten_content(url_id, content, created_at, updated_at)`
+- `pa.faq_tracking` → `pa.faq_jobs(url_id, status, skip_reason, last_error, attempts, created_at, updated_at)`
+- `pa.faq_content` → `pa.faq_content_v2(url_id, page_title, faq_json TEXT, schema_org TEXT, created_at, updated_at)` — the `_v2` suffix is temporary; rename to `pa.faq_content` after step 5 drops the old one. faq_json stored as TEXT (not JSONB) because some legacy rows have literal newlines that break strict JSONB parsing
+- `pa.unique_titles` (the wide table) → split across:
+  - `pa.unique_titles_jobs(url_id, status, last_error, http_status, final_url, last_checked_at, attempts, created_at, updated_at)` — the URL-probe columns (status_code/final_url/checked_at) live here, not on a separate table
+  - `pa.unique_titles_content(url_id, h1_title, title, description, original_h1, title_score, title_score_issue, created_at, updated_at)`
+- `pa.url_validation_tracking` → `pa.url_validation(url_id, last_checked_at, http_status, is_valid, reason)` — `is_valid=FALSE` means "skipped" (URL has no products / not reachable)
+- `pa.link_validation_results` (kopteksten broken-link results) → `pa.kopteksten_link_validation(url_id, total_links, valid_links, broken_links, broken_link_details JSONB, validated_at)`
+- `pa.faq_validation_results` (FAQ broken-link results) → `pa.faq_link_validation(url_id, total_links, valid_links, gone_links, validated_at)`
+- `pa.content_history` — UNCHANGED, still keyed on URL string (append-only audit log; not joined cross-tool)
+- `pa.publish_log` — UNCHANGED (no URL column)
+- `pa.jvs_seo_werkvoorraad_shopping_season` — UNCHANGED (lives in Redshift, separate concern)
+
+**Where the new code lives** (when you're debugging "why is X broken"):
+- `dm-tools/backend/url_catalog.py` — the URL→url_id helper. THREE functions: `canonicalize_url(s)` (Python implementation of the same rules as the SQL `pa.canonicalize_url()` function), `get_url_id(cur, url, *, create=True)` (single-URL upsert+lookup), `bulk_upsert_urls(cur, urls)` (returns `{canonical_url: url_id}` for batch ops). Use these everywhere — never write raw URL strings to the new tables, the FK only takes url_id
+- `pa.canonicalize_url(text)` — PL/pgSQL function that lives in the DB. Same rules as the Python helper. Used in WHERE clauses (e.g. lookup endpoints accept "user-supplied URL" and call canonicalize_url to find the catalog row)
+- Migration files: `dm-tools/migrations/2026-05-07-bigbang-step{1,2,3a,3a-fix,3b,3c,4}-*.{sql,md}` — read these in order to understand the migration's full story. step 1 = create new tables; step 2 = backfill; step 3a/3b = code refactor docs; step 3c = perf indexes + ANALYZE; step 4 = rename old tables
+- Touched code (every file that now uses the new schema):
+  - `backend/main.py` — all FAQ + Kopteksten endpoints (~100 references migrated)
+  - `backend/unique_titles.py` — full rewrite of the DAO
+  - `backend/ai_titles_service.py` — DB-touching functions (init_ai_titles_columns is now a no-op; get_unprocessed_urls / update_title_record / get_ai_titles_stats / get_recent_results / analyze_and_flag_failures all switched)
+  - `backend/content_publisher.py` — the `FULL OUTER JOIN content_urls_joep + faq_content` queries became `LEFT JOIN`-from-`pa.urls` over the new content tables
+  - `backend/link_validator.py` — `update_content_in_redshift`, `add_urls_to_werkvoorraad`, `reset_faq_to_pending`
+  - `backend/batch_api_service.py` — FAQ + Kopteksten batch worker writes
+  - `backend/import_content.py`, `import_missing_content.py`, `find_bad_urls.py`, `check_unique_titles_urls.py`, `compare_prompts.py`, `sync_werkvoorraad.py`, `sync_redshift_flags.py`, `scripts/score_titles.py`, `scripts/export_scored_titles.py` — admin scripts migrated
+  - `backend/database.py::init_db()` — old per-tool CREATE TABLE blocks removed; only `pa.content_history` and the thema_ads tables stay
+  - Stubs for one-shot scripts that have already run and now refer to gone tables: `backend/migrate_shared_validation.py`, `backend/deduplicate_content.py`, `backend/fix_faq_*.py`, `scripts/csv_utils/import_content.py`, `scripts/fix_faq_item_names.py` — these print an "OBSOLETE" message instead of erroring
+
+**Eligibility-backfill subtlety** — if you're debugging "why isn't my URL being picked up by the FAQ/Kopteksten worker":
+- Old model: `pa.jvs_seo_werkvoorraad` (390k rows) was the universe of URLs eligible for BOTH tools; per-tool tracking was sparser (only URLs that had been processed)
+- New model: per-tool eligibility = "row exists in `pa.kopteksten_jobs` / `pa.faq_jobs`". So adding a URL to one tool's queue doesn't add it to the other's
+- During step 2, I ran a one-shot eligibility backfill: for every werkvoorraad URL not already in faq_jobs/kopteksten_jobs, insert a `status='pending'` row. Result: both job tables have exactly 390,022 rows — the canonical werkvoorraad universe preserved
+- Going forward, `link_validator.add_urls_to_werkvoorraad(urls)` writes ONLY to `pa.kopteksten_jobs` (was previously the implicit "shared" eligibility marker via werkvoorraad). If FAQ should also pick up those URLs, the caller has to explicitly INSERT into `pa.faq_jobs` too
+
+**FAQ pending=0 is correct, not a bug** — the dashboard shows pending=0 for FAQ even though there are 117k status='pending' jobs. Reason: those 117k URLs all have an `is_valid=FALSE` row in `pa.url_validation` (they were marked skipped in past `no_products_found` runs). The new query correctly excludes validation-skipped URLs from the work queue, and the OLD query had the same semantics (excluded URLs in `url_validation_tracking`). Don't "fix" this thinking it's a bug.
+
+**Rollback path** (if everything goes sideways):
+- Step 4's SQL has a commented-out reverse: `ALTER TABLE pa.X_old_2026_05_07 RENAME TO X` (×9). This restores the old tables in place
+- The new tables stay populated independently — NO data is lost on rollback. Both schemas are current up to the cutover point
+- Step 5 (drop old tables for real) hasn't run yet at time of writing. Do NOT run it until the app has been verified end-to-end for at least a week
+
+**Performance gotchas caught during the migration**:
+- `ORDER BY ... DESC LIMIT N` queries: writing them as `JOIN pa.urls THEN ORDER+LIMIT` is the slow plan (parallel hash join + top-N heapsort over 980k urls). Always rewrite as subquery-LIMIT-then-JOIN: do the order+limit on the smaller table first, then join via PK lookup. ~25× speedup on the recent-results panels in `/api/status`, `/api/faq/status`, `get_recent_results`, `/api/validation-history`. See migrations/step3c doc + commit `d5c8739`
+- `COUNT(*) FROM pa.urls LEFT JOIN content tables WHERE content IS NOT NULL` was 5.9s. UNION-ALL of the two content tables → 0.5s. ~12× speedup on `/api/content-publish/stats`. Commit `4ac8808`
+- After backfill, ALWAYS run ANALYZE on the new tables — the planner had stale row-count estimates and was picking bad plans. Done as part of `migrations/step3c`. If the dashboard suddenly slows down post-cutover, ANALYZE first, EXPLAIN second
+- The dashboards used to take 2+ minutes to load before the perf fix; they're now sub-second. If they're slow again, check `ORDER BY ... LIMIT` queries first
+
+**Subtle data-quality fix during cutover** — `bigbang fix: backfill content for CSV-imported (ai_processed=FALSE) rows` (commit `6bbdc0e`): the step 2 backfill of `pa.unique_titles_content` only copied rows with `ai_processed=TRUE`. ~400k OLD rows had `ai_processed=FALSE` AND title/h1 populated (CSV imports via `bulk_upsert_titles` writes content but never flips ai_processed). The OLD eligibility query treated them as done because the content was present; the NEW `get_unprocessed_count` thought they were pending. Fix: backfilled the 399,906 missing content rows + flipped status='pending' → 'success'. Now `bulk_upsert_titles` always sets status='success' on every upsert, so this can't recur
+
+**The cutover process in practice** — this took one focused day, in this order:
+1. Create new tables (step 1) — additive, zero-risk
+2. Backfill data (step 2) — additive, zero-risk; ANALYZE after
+3. Refactor code one tool at a time (step 3a unique titles → 3b/c FAQ + Kopteksten bundled because content_publisher joins both)
+4. Restart uvicorn — that was the actual cutover moment; everything kept writing to OLD tables until then
+5. Watch for stale-data symptoms (e.g. dashboard pending count off) and run targeted backfills (step 3a-fix)
+6. Add perf indexes + rewrite hot queries (step 3c)
+7. Rename old tables (step 4) — forcing function: anything I missed now fails LOUDLY with "relation does not exist"
+8. After 1 week of green: drop the old tables (step 5, not yet run)
+
+If you need to repeat this on another data domain, that ordering is what worked.
+
+**Files I should look at first if something breaks**:
+- "URL X isn't being processed" → `backend/url_catalog.py::canonicalize_url` (does it canonicalize cleanly?), then check membership in `pa.kopteksten_jobs` / `pa.faq_jobs` (does it have an eligibility row?), then `pa.url_validation` (is it `is_valid=FALSE`?)
+- "Dashboard shows wrong count" → look at the SQL in `backend/main.py` for the relevant endpoint; common bug = forgetting the `LEFT JOIN pa.url_validation v ... WHERE v.is_valid IS NULL OR v.is_valid = TRUE` filter on pending counts
+- "Recent results panel is slow" → make sure the query is subquery-LIMIT-then-JOIN, not the other way
+- "Foreign-key violation on insert" → caller is writing a url_id that doesn't exist in `pa.urls`. Use `get_url_id(cur, url)` instead of writing raw url_ids
+- "Why does my old script error with 'relation does not exist'" → the table got renamed in step 4. Either migrate the script (look at the OLD→NEW mapping at the top) or run it against the `*_old_2026_05_07` snapshot
+
+## Unique-titles v3 pipeline experiment — shelved at ~76% acceptable (2026-05-06)
+- **What we built**: an alternative `generate_title_v3()` in `ai_titles_service.py` that replaces the current `generate_title_from_api()` flow. v1 fetches Beslist's api_h1, runs ~5 dedup passes, strips brand/color/size to set them aside, sends the cleaned remainder + a 11-rule prompt to gpt-4o-mini for a full rewrite, then reassembles. v3 skips api_h1 entirely: composes the H1 deterministically from the facets in fixed slots (`<colour> <merk> <populaire_serie> <type_productlijn> <productlijn> <materials> <other adjectives> <doelgroep> <category> <met-clauses> <voor-clauses> <color-combos> <size>`), hands it to gpt-4o-mini with a much shorter polish-only prompt (5 rules: inflect, agglutinate, lowercase, no add/remove, no reorder), then runs three guards plus the same dedup passes. ~600 lines of strip-and-prepend gone, ~120 lines of compose+polish added.
+- **Why we explored it**: the user observed that `generate_title_from_api`'s pre-AI cleanup + post-AI dedup + post-AI hallucination guard collectively form an unwieldy "the AI did something weird, scrub the output" loop. The composed builder skips that — the AI never sees an unsanitised input.
+- **Results on the 100-URL A/B sample** (sample baseline = stored v1 outputs):
+  - Round 1 (no guards): ~30% acceptable. AI dropped content, lowercased brands, agglutinated wildly.
+  - Round 2 (added `_v3_preserves_content` token-set guard): ~70% acceptable. Content drops caught and fall back to composed.
+  - Round 3 (removed `_apply_hallucination_guard` because its prefix-match length-diff ≤3 was rejecting legitimate Dutch agglutination — `koraaltops` failed against `koraal`+`tops` since 10−6=4>3): same ~70%.
+  - Round 4 (added `_v3_restore_casing` to copy original casing token-by-token from composed): ~76%. Brand-lowercasing class fixed.
+  - Round 5 (added `_v3_preserves_brands` to detect brand-swallowing): ~76% (same — brand swallowing now triggers fallback rather than shipping `arapumps`).
+- **Why we shelved at 76% vs the 85% threshold**: two regression classes remain that need real work, not another guard:
+  1. **Composed-builder semantic redundancy** — `Ventilatieventielen Ventilatiematerialen`, `Kandelaars Drijfhout Hoge Kaarsenhouders`, `Wanten Handschoenen`. The facet value and the canonical category are near-synonyms, but `_dedupe_facet_values` only catches identical/inflected matches. Needs a synonym table or a "category implied by this facet value" classifier.
+  2. **AI agglutination errors that aren't brand-swallowing** — `damestmultivitaminen` (extra `t`), `schuifdekselkoelkasten` (compound that doesn't exist in Dutch). Brand guard doesn't catch these because no brand was lost; content guard doesn't catch them because all source tokens are still substrings.
+- **What stays from this experiment** (kept in code as opt-in):
+  - `AI_TITLES_PIPELINE` env var: `v1` (default) or `v3`. Lets you flip per-deployment to A/B test. Set in `start_processing()` worker.
+  - `_build_v3_h1`, `generate_title_v3`, `_v3_preserves_content`, `_v3_preserves_brands`, `_v3_restore_casing`, `_POLISH_PROMPT_V3_TEMPLATE` — all in `ai_titles_service.py` under a clear "EXPERIMENTAL — IN FRIDGE" header so future-you knows the status.
+- **What to revisit when picking this up again**:
+  - The 100-URL A/B xlsx files at `/tmp/v1_vs_v3_100_*.xlsx` are gone (tmpfs). Re-generate with the snippets from the conversation history.
+  - The semantic redundancy class is the bigger blocker — without a synonym map we'd need a lookup against `pa.facet_type_classifications` plus a category-stem comparison.
+  - Consider whether to drop the AI polish step entirely: round 4 was already 68/100 fellback (= composed h1 unchanged after casing-restore). If the deterministic builder + casing-restore is accepted often enough on its own, the AI polish step adds cost for marginal value.
+  - Cost: v3's polish prompt is ~5x shorter than v1's rewrite prompt, so per-call cost is lower; but if the polish output is rejected by guards in 30%+ of cases, the AI spend becomes pure waste.
+- **Files**: `dm-tools/backend/ai_titles_service.py` (~250 lines added under the EXPERIMENTAL header), no schema changes, no DB writes by the experiment. Can be ripped out cleanly by deleting the EXPERIMENTAL section + reverting the `_pipeline = os.getenv` switch in `start_processing`.
+
 ## Redshift type traps: `date` is DATE, `dim_date_key` is BIGINT (2026-05-05)
 - **The trap**: `bt.shop_main_attributes_by_day.date` is a real `DATE` column. The queries.txt sample compared it to a `'YYYYMMDD'` string literal which works by Redshift's implicit cast on bare literals — but `TO_CHAR(CURRENT_DATE - 1, 'YYYYMMDD')` evaluates to a string at runtime and the implicit cast silently fails to match (no error, just zero rows). Use `date = CURRENT_DATE - 1` directly, or compare against a properly cast `DATE` value
 - **The companion trap**: `bt.shop_list.dim_date_key` is `BIGINT` (YYYYMMDD packed as integer). For an upper-bound filter against today/yesterday you have to write `dim_date_key <= CAST(TO_CHAR(CURRENT_DATE - 1, 'YYYYMMDD') AS BIGINT)` — TO_CHAR returns text and the Redshift planner won't auto-coerce text-to-bigint comparisons silently
