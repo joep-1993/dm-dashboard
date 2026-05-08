@@ -1380,28 +1380,39 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
 # Pipeline v3 — deterministic builder + AI polish (EXPERIMENTAL — IN FRIDGE)
 # ---------------------------------------------------------------------------
 #
-# STATUS: NOT default. Opt-in via AI_TITLES_PIPELINE=v3 env var. Built and
-# tuned to ~76% acceptable on a 100-URL sample (vs 85% threshold target).
-# Shelved 2026-05-06 with two known regression classes still open:
-#   1. Composed-builder semantic redundancy
-#      (e.g. "Ventilatieventielen Ventilatiematerialen" — facet value's noun
-#       is a near-synonym of the canonical category, but our dedup passes
-#       only catch identical/inflected matches, not semantic relatedness).
-#   2. AI brand-swallowing into agglutinations (caught by `_v3_preserves_brands`
-#      via fallback, but means the polish AI's contribution is lost — we
-#      ship the un-polished composed h1 in those cases).
+# STATUS: NOT default. Opt-in via AI_TITLES_PIPELINE=v3 env var.
+# Originally shelved 2026-05-06 at ~76% acceptable. Thawed 2026-05-08 for an
+# update pass — still in the fridge but with several regressions addressed:
+#   - Category-override reused from v1 (batch_classify_facets +
+#     _NEVER_/_ALWAYS_TYPE_URL_SLUGS): a t-facet whose value carries the
+#     product noun ("wandplaten" in Wanddecoratie) suppresses the canonical
+#     category_name, fixing the "Wanten Handschoenen" redundancy class.
+#   - generate_title_v3(polish=False) codepath added — A/B showed polish
+#     changed output in only 12-17/100 cases. User signal 2026-05-08:
+#     "looks fine without polishing" → polish=False is the favored path.
+#   - Standalone "Met"/"Zonder" lowercased mid-title.
+#   - Conditie facet detected (fname=='conditie' or 'conditie' in slug) and
+#     placed at the END of the H1 (Nieuw/Gebruikt/Refurbished after size).
+#   - Color precedence: kleurtint and kleur*combi* are more specific than
+#     generic kleur. When either is present, generic kleur is suppressed.
+#     kleurtint takes the front color slot; kleurcombi keeps post-category.
+# Open regressions still blocking promotion:
+#   1. Non-brand agglutination errors when polish=True ("damedeodorant",
+#      "herenspolshorloges"). Doesn't apply on the polish=False path.
+#   2. Brand acronym lowercasing in builder ("HEMA" → "Hema").
+#   3. Brand mangling on "&" ("Heckett & Lane" → "Bruine & Lane …").
 # See cc1/LEARNINGS.md for the full A/B journey and design rationale.
 #
 # Replaces the v1 pipeline's strip-and-prepend dance + full AI rewrite with:
 #   1. Compose H1 deterministically from facets (no api_h1).
-#   2. Hand to AI for polish only (inflection, agglutination, lowercasing).
+#   2. (Optional) hand to AI for polish only (inflection, agglutination).
 #   3. Content-preservation guard (token-set, allows agglutination/inflection).
 #   4. Brand-preservation guard (no brand may be swallowed into a compound).
 #   5. Casing restoration from composed_h1 (overrides AI's case decisions).
 #   6. Same 5 dedup safety nets (cheap insurance).
 #
-# Public entry point: generate_title_v3(url). Same return shape as
-# generate_title_from_api.
+# Public entry point: generate_title_v3(url, polish=True). Same return shape as
+# generate_title_from_api. polish=False skips OpenAI entirely.
 
 _POLISH_PROMPT_V3_TEMPLATE = """Je krijgt een Nederlandse SEO-titel waarvan de woorden en hun volgorde correct zijn. Polijst alleen de Nederlandse grammatica.
 
@@ -1428,10 +1439,14 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
     Uses detail_value (SOD) — Beslist's prefix-friendly form. Same dedup
     safety nets the v1 pipeline runs are applied at the end.
     """
-    if not category_name:
+    # Empty category_name is allowed (caller passes '' when category-override
+    # is active — a type-facet's value carries the product noun). Only bail
+    # if we have nothing to compose at all.
+    if not category_name and not selected_facets:
         return ''
     brand = ''; populaire_serie = ''; type_productlijn = ''; productlijn = ''
     colors: List[str] = []
+    kleurtint: List[str] = []  # specific hue facet — supersedes generic kleur
     color_combos: List[str] = []
     materials: List[str] = []
     other_adj: List[str] = []
@@ -1439,6 +1454,7 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
     met_clauses: List[str] = []
     voor_values: List[str] = []
     sizes: List[str] = []
+    conditions: List[str] = []
     for f in selected_facets or []:
         sod = (f.get('detail_value') or '').strip()
         if not sod:
@@ -1447,6 +1463,10 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
         fname = (f.get('facet_name') or '').lower()
         if is_spec_value(sod, fname):
             sizes.append(sod); continue
+        # Condition facet (Dutch: 'conditie' — values like Nieuw / Gebruikt /
+        # Refurbished). Goes at the END of the H1.
+        if fname == 'conditie' or 'conditie' in url_slug or 'condition' in url_slug:
+            conditions.append(sod); continue
         if fname == 'merk':
             brand = sod; continue
         if url_slug == 'populaire_serie':
@@ -1455,9 +1475,16 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
             type_productlijn = sod; continue
         if fname == 'productlijn':
             productlijn = sod; continue
-        if url_slug.startswith('kleurcombi'):
+        # Color precedence: kleurtint (specific hue) and kleur*combi*
+        # (combination) are more specific than generic kleur. Detect on either
+        # url_slug or facet_name. Both checked BEFORE the generic kleur match
+        # below; if a specific bucket fires, the generic colors[] is wiped
+        # after the loop.
+        if url_slug.startswith('kleurtint') or 'kleurtint' in fname:
+            kleurtint.append(sod); continue
+        if ('kleur' in url_slug and 'combi' in url_slug) or ('kleur' in fname and 'combi' in fname):
             color_combos.append(sod); continue
-        if url_slug.startswith('kleur'):
+        if url_slug.startswith('kleur') or fname.startswith('kleur'):
             colors.append(sod); continue
         if fname == 'materiaal' or url_slug == 'materials':
             materials.append(sod); continue
@@ -1470,8 +1497,16 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
             voor_values.append(sod); continue
         other_adj.append(sod)
 
+    # If a more specific color facet (kleurtint or kleur*combi*) is present,
+    # drop the generic kleur bucket — the user-facing rule is "use the more
+    # specific one only". kleurtint takes the front color slot in place of
+    # kleur; kleurcombi keeps its post-category slot below.
+    if kleurtint or color_combos:
+        colors = []
+    front_colors = kleurtint if kleurtint else colors
+
     parts: List[str] = []
-    parts.extend(colors)
+    parts.extend(front_colors)
     if brand:
         parts.append(brand)
     if populaire_serie:
@@ -1488,6 +1523,7 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
     parts.extend(voor_values)
     parts.extend(color_combos)
     parts.extend(sizes)
+    parts.extend(conditions)
 
     h1 = ' '.join(p for p in parts if p)
     h1 = _strip_pre_clause_duplicates(h1)
@@ -1495,6 +1531,9 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
     h1 = _dedupe_prefix_overlap(h1)
     h1 = _dedupe_internal_compounds(h1)
     h1 = _dedupe_facet_values(h1, selected_facets or [])
+    # Lowercase standalone "Met"/"Zonder" when not the first word — Dutch
+    # connector words inside an H1 read better lowercase.
+    h1 = re.sub(r'(?<=\S)\s+(Met|Zonder)\b', lambda m: ' ' + m.group(1).lower(), h1)
     if h1 and h1[0].islower():
         h1 = h1[0].upper() + h1[1:]
     return h1
@@ -1587,11 +1626,15 @@ def _v3_preserves_content(composed: str, polished: str) -> bool:
     return True
 
 
-def generate_title_v3(url: str) -> Optional[Dict]:
-    """v3 pipeline: deterministic compose + AI polish.
+def generate_title_v3(url: str, polish: bool = True) -> Optional[Dict]:
+    """v3 pipeline: deterministic compose + (optional) AI polish.
 
     Same return shape as generate_title_from_api so callers can swap.
     Adds `composed_h1` to the result for diagnostics.
+
+    When polish=False, skips the OpenAI polish call entirely and returns the
+    deterministic composed_h1 as h1_title. Used for A/B testing whether the
+    polish step is worth its cost.
     """
     page_data = fetch_products_api(url, include_related=False)
     if not page_data:
@@ -1605,10 +1648,31 @@ def generate_title_v3(url: str) -> Optional[Dict]:
     category_name = page_data.get("category_name") or ""
     api_h1 = page_data.get("h1_title") or ""
 
-    composed_h1 = _build_v3_h1(selected_facets, category_name)
+    # Reuse v1's category-override mechanism (lines ~938-968): if any selected
+    # facet is a "type-facet" (its values inherently carry the product noun,
+    # e.g. t_wanddeco→"wandplaten" in Wanddecoratie), suppress category_name so
+    # the composed H1 doesn't redundantly append it ("Wandplaten Wanddecoratie",
+    # "Wanten Handschoenen", "Ventilatieventielen Ventilatiematerialen").
+    from backend.facet_classifier import batch_classify_facets
+    type_class = batch_classify_facets(selected_facets, category_name)
+    _NEVER_URL_SLUGS = {'type_productlijn', 'personage', 'seizoen_schoenen'}
+    _ALWAYS_TYPE_URL_SLUGS = {'t_stoel'}
+    has_category_override = any(
+        (f.get('url_name') or '').lower() in _ALWAYS_TYPE_URL_SLUGS
+        or type_class.get((f.get('facet_name') or '').lower().strip(), False)
+        for f in selected_facets
+        if (f.get('url_name') or '').lower() not in _NEVER_URL_SLUGS
+    )
+    effective_category = '' if has_category_override else category_name
+
+    composed_h1 = _build_v3_h1(selected_facets, effective_category)
     if not composed_h1:
         print(f"[AI_TITLES_V3] empty composed h1 for {url} — falling back to api_h1")
         return {"h1_title": api_h1, "original_h1": api_h1, "composed_h1": ""}
+
+    if not polish:
+        # Explicit no-polish path: deterministic builder output is final.
+        return {"h1_title": composed_h1, "original_h1": api_h1, "composed_h1": composed_h1}
 
     client = get_openai_client()
     if not client:
