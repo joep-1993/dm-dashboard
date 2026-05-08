@@ -55,6 +55,7 @@ PROCESS_TIMEOUT = 28800       # 8 hours max for processing loops
 PROCESS_MAX_RETRIES = 3       # retry timed-out processing steps up to N times
 PUBLISH_TIMEOUT = 3600        # 1 hour max for publish
 POLL_MAX_ERRORS = 10          # consecutive poll failures before aborting a task
+POLL_MAX_RESTARTS = 3         # max task restarts after detected server restart
 CONNECT_TIMEOUT = 10          # seconds to wait for TCP connect
 READ_TIMEOUT = 60             # seconds to wait for HTTP response body
 LONG_READ_TIMEOUT = 300       # seconds for slow endpoints (process-urls)
@@ -148,23 +149,45 @@ def _reauth_on_401(resp):
         return False
 
 
-def poll_task(status_url, timeout):
+def poll_task(status_url, timeout, restart_fn=None):
     """Poll a background task until completed/failed.
 
     Tolerates up to POLL_MAX_ERRORS consecutive connection/timeout failures
     before aborting — a single flaky request no longer kills the whole run.
+
+    If *restart_fn* is provided and a server restart is detected (404 after
+    at least one successful poll), the function calls restart_fn() to start a
+    new task and continues polling with the returned status URL.
     """
     log = logging.getLogger("automation")
     start = time.time()
     consecutive_errors = 0
+    had_success = False           # True once at least one poll returned OK
+    restarts = 0
     while time.time() - start < timeout:
         try:
             resp = SESSION.get(status_url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
             if resp.status_code == 401 and _reauth_on_401(resp):
                 resp = SESSION.get(status_url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+
+            # Detect server restart: 404 after we previously polled OK
+            if (resp.status_code == 404 and had_success
+                    and restart_fn and restarts < POLL_MAX_RESTARTS):
+                restarts += 1
+                log.warning(
+                    f"  Server restart detected (404 after successful poll)"
+                    f" — restarting task ({restarts}/{POLL_MAX_RESTARTS})"
+                )
+                status_url = restart_fn()
+                consecutive_errors = 0
+                had_success = False
+                time.sleep(POLL_INTERVAL)
+                continue
+
             resp.raise_for_status()
             data = resp.json()
             consecutive_errors = 0  # reset on success
+            had_success = True
         except Exception as e:
             consecutive_errors += 1
             log.warning(f"  Poll error ({consecutive_errors}/{POLL_MAX_ERRORS}): {e}")
@@ -256,28 +279,50 @@ def step_reset_kopteksten_validation():
 
 def step_validate_faq_links():
     log = logging.getLogger("automation")
-    resp = SESSION.post(
-        f"{BASE_URL}/api/faq/validate-all-links",
-        params={"parallel_workers": 20, "batch_size": 500},
-        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
-    )
-    resp.raise_for_status()
-    task_id = resp.json().get("task_id")
-    log.info(f"  FAQ validate-all started, task_id={task_id}")
-    poll_task(f"{BASE_URL}/api/faq/validate-all-links/status/{task_id}", VALIDATION_TIMEOUT)
+
+    def _start():
+        resp = SESSION.post(
+            f"{BASE_URL}/api/faq/validate-all-links",
+            params={"parallel_workers": 20, "batch_size": 500},
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        )
+        if resp.status_code == 401 and _reauth_on_401(resp):
+            resp = SESSION.post(
+                f"{BASE_URL}/api/faq/validate-all-links",
+                params={"parallel_workers": 20, "batch_size": 500},
+                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+            )
+        resp.raise_for_status()
+        task_id = resp.json().get("task_id")
+        log.info(f"  FAQ validate-all started, task_id={task_id}")
+        return f"{BASE_URL}/api/faq/validate-all-links/status/{task_id}"
+
+    status_url = _start()
+    poll_task(status_url, VALIDATION_TIMEOUT, restart_fn=_start)
 
 
 def step_validate_kopteksten_links():
     log = logging.getLogger("automation")
-    resp = SESSION.post(
-        f"{BASE_URL}/api/validate-all-links",
-        params={"parallel_workers": 20, "batch_size": 500},
-        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
-    )
-    resp.raise_for_status()
-    task_id = resp.json().get("task_id")
-    log.info(f"  Kopteksten validate-all started, task_id={task_id}")
-    poll_task(f"{BASE_URL}/api/validate-all-links/status/{task_id}", VALIDATION_TIMEOUT)
+
+    def _start():
+        resp = SESSION.post(
+            f"{BASE_URL}/api/validate-all-links",
+            params={"parallel_workers": 20, "batch_size": 500},
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        )
+        if resp.status_code == 401 and _reauth_on_401(resp):
+            resp = SESSION.post(
+                f"{BASE_URL}/api/validate-all-links",
+                params={"parallel_workers": 20, "batch_size": 500},
+                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+            )
+        resp.raise_for_status()
+        task_id = resp.json().get("task_id")
+        log.info(f"  Kopteksten validate-all started, task_id={task_id}")
+        return f"{BASE_URL}/api/validate-all-links/status/{task_id}"
+
+    status_url = _start()
+    poll_task(status_url, VALIDATION_TIMEOUT, restart_fn=_start)
 
 
 def step_validate_parallel():
@@ -303,15 +348,26 @@ def step_recheck_skipped_urls():
     """
     log = logging.getLogger("automation")
     SESSION.delete(f"{BASE_URL}/api/recheck-skipped-urls/reset", timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
-    resp = SESSION.post(
-        f"{BASE_URL}/api/recheck-skipped-urls",
-        params={"parallel_workers": 20, "batch_size": 50},
-        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
-    )
-    resp.raise_for_status()
-    task_id = resp.json().get("task_id")
-    log.info(f"  Recheck skipped URLs started, task_id={task_id}")
-    poll_task(f"{BASE_URL}/api/recheck-skipped-urls/status/{task_id}", VALIDATION_TIMEOUT)
+
+    def _start():
+        resp = SESSION.post(
+            f"{BASE_URL}/api/recheck-skipped-urls",
+            params={"parallel_workers": 20, "batch_size": 50},
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        )
+        if resp.status_code == 401 and _reauth_on_401(resp):
+            resp = SESSION.post(
+                f"{BASE_URL}/api/recheck-skipped-urls",
+                params={"parallel_workers": 20, "batch_size": 50},
+                timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+            )
+        resp.raise_for_status()
+        task_id = resp.json().get("task_id")
+        log.info(f"  Recheck skipped URLs started, task_id={task_id}")
+        return f"{BASE_URL}/api/recheck-skipped-urls/status/{task_id}"
+
+    status_url = _start()
+    poll_task(status_url, VALIDATION_TIMEOUT, restart_fn=_start)
 
 
 PROCESS_WORKERS = 20          # parallel workers for content generation
