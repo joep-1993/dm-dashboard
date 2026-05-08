@@ -518,13 +518,14 @@ async function refreshStatus() {
 
     try {
         const response = await fetch(`${API_BASE}/api/status`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
-        totalUrlsEl.textContent = data.total_urls;
-        document.getElementById('processedUrls').textContent = data.processed;
-        document.getElementById('skippedUrls').textContent = data.skipped || 0;
-        document.getElementById('failedUrls').textContent = data.failed || 0;
-        document.getElementById('pendingUrls').textContent = data.pending;
+        totalUrlsEl.textContent = data.total_urls ?? 0;
+        document.getElementById('processedUrls').textContent = data.processed ?? 0;
+        document.getElementById('skippedUrls').textContent = data.skipped ?? 0;
+        document.getElementById('failedUrls').textContent = data.failed ?? 0;
+        document.getElementById('pendingUrls').textContent = data.pending ?? 0;
 
         // Display recent results
         const recentDiv = document.getElementById('recentResults');

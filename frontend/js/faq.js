@@ -171,13 +171,14 @@ setInterval(refreshFaqStatus, 30000);
 async function refreshFaqStatus() {
     try {
         const response = await fetch(`${API_BASE}/api/faq/status`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
-        document.getElementById('totalUrls').textContent = data.total_urls;
-        document.getElementById('processedUrls').textContent = data.processed;
-        document.getElementById('skippedUrls').textContent = data.skipped || 0;
-        document.getElementById('failedUrls').textContent = data.failed || 0;
-        document.getElementById('pendingUrls').textContent = data.pending;
+        document.getElementById('totalUrls').textContent = data.total_urls ?? 0;
+        document.getElementById('processedUrls').textContent = data.processed ?? 0;
+        document.getElementById('skippedUrls').textContent = data.skipped ?? 0;
+        document.getElementById('failedUrls').textContent = data.failed ?? 0;
+        document.getElementById('pendingUrls').textContent = data.pending ?? 0;
 
         // Display recent results
         const recentDiv = document.getElementById('recentResults');
