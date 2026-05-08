@@ -2582,16 +2582,19 @@ async def get_content_publish_stats():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Get counts
+        # Get counts. The total_unique_urls subquery used to scan pa.urls
+        # (980k rows) and double-LEFT-JOIN both content tables — 5.9s.
+        # COUNT(DISTINCT) over UNION ALL of the two content tables hits
+        # only the relevant rows: ~0.5s.
         cur.execute("""
             SELECT
                 (SELECT COUNT(*) FROM pa.kopteksten_content WHERE content IS NOT NULL) AS content_top_count,
                 (SELECT COUNT(*) FROM pa.faq_content_v2 WHERE faq_json IS NOT NULL) AS faq_count,
-                (SELECT COUNT(*)
-                 FROM pa.urls u
-                 LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
-                 LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
-                 WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL) AS total_unique_urls
+                (SELECT COUNT(DISTINCT url_id) FROM (
+                    SELECT url_id FROM pa.kopteksten_content WHERE content IS NOT NULL
+                    UNION ALL
+                    SELECT url_id FROM pa.faq_content_v2 WHERE faq_json IS NOT NULL
+                ) x) AS total_unique_urls
         """)
         row = cur.fetchone()
 
