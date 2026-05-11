@@ -152,7 +152,9 @@ def get_all_content_for_publishing() -> List[Dict]:
             FROM pa.urls u
             LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
             LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
-            WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL
+            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+            WHERE (k.content IS NOT NULL OR f.faq_json IS NOT NULL)
+              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
         """)
 
         rows = cur.fetchall()
@@ -203,7 +205,9 @@ def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
             FROM pa.urls u
             LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
             LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
-            WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL
+            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+            WHERE (k.content IS NOT NULL OR f.faq_json IS NOT NULL)
+              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
             ORDER BY u.url
             LIMIT %s OFFSET %s
         """, (limit, offset))
@@ -254,7 +258,9 @@ def get_total_content_count() -> int:
             FROM pa.urls u
             LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
             LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
-            WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL
+            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+            WHERE (k.content IS NOT NULL OR f.faq_json IS NOT NULL)
+              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
         """)
         return cur.fetchone()['count']
     finally:
@@ -316,7 +322,9 @@ def get_all_content_items() -> List[Dict]:
             FROM pa.urls u
             LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
             LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
-            WHERE k.content IS NOT NULL OR f.faq_json IS NOT NULL
+            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+            WHERE (k.content IS NOT NULL OR f.faq_json IS NOT NULL)
+              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
             ORDER BY u.url
         """)
 

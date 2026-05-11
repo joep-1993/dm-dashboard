@@ -217,7 +217,7 @@ async function refreshFaqStatus() {
                             <div class="d-flex justify-content-between align-items-start">
                                 <div style="min-width: 0; flex: 1;">
                                     <h6 class="mb-1 text-truncate">${item.page_title || 'Untitled'}</h6>
-                                    <small class="text-muted d-block text-truncate">${item.url}</small>
+                                    <small class="text-muted d-block text-truncate"><a href="https://www.beslist.nl${item.url}" target="_blank" rel="noopener" class="text-decoration-none">${item.url}</a></small>
                                 </div>
                                 ${dateText ? `<small class="text-muted text-nowrap ms-2">${dateText}</small>` : ''}
                             </div>

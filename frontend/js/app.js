@@ -550,7 +550,7 @@ async function refreshStatus() {
                     <div class="d-flex w-100 justify-content-between align-items-start">
                         <div style="flex: 1;">
                             <div class="d-flex justify-content-between align-items-start">
-                                <h6 class="mb-1" style="word-break: break-all; ${dateText ? 'max-width: 85%;' : ''}">${item.url}</h6>
+                                <h6 class="mb-1" style="word-break: break-all; ${dateText ? 'max-width: 85%;' : ''}"><a href="https://www.beslist.nl${item.url}" target="_blank" rel="noopener" class="text-decoration-none">${item.url}</a></h6>
                                 ${dateText ? `<small class="text-muted text-nowrap ms-2">${dateText}</small>` : ''}
                             </div>
                             <div class="content-preview">

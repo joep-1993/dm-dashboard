@@ -586,12 +586,15 @@ def get_status():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Count pending directly (same logic as process_urls query)
+        # Buckets are job-scoped so processed + skipped + failed + pending = total.
         cur.execute("""
             SELECT
                 (SELECT COUNT(*) FROM pa.kopteksten_jobs) AS total,
-                (SELECT COUNT(*) FROM pa.kopteksten_content WHERE content IS NOT NULL) AS processed,
-                (SELECT COUNT(*) FROM pa.url_validation WHERE is_valid = FALSE) AS skipped,
+                (SELECT COUNT(*) FROM pa.kopteksten_jobs WHERE status = 'success') AS processed,
+                (SELECT COUNT(*)
+                 FROM pa.kopteksten_jobs j
+                 JOIN pa.url_validation v ON v.url_id = j.url_id
+                 WHERE j.status = 'pending' AND v.is_valid = FALSE) AS skipped,
                 (SELECT COUNT(*) FROM pa.kopteksten_jobs WHERE status = 'failed') AS failed,
                 (SELECT COUNT(*)
                  FROM pa.kopteksten_jobs j
@@ -1689,12 +1692,15 @@ def get_faq_status():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Count pending directly (same logic as process_faq_urls query)
+        # Buckets are job-scoped so processed + skipped + failed + pending = total.
         cur.execute("""
             SELECT
                 (SELECT COUNT(*) FROM pa.faq_jobs) AS total,
-                (SELECT COUNT(*) FROM pa.faq_content_v2) AS processed,
-                (SELECT COUNT(*) FROM pa.url_validation WHERE is_valid = FALSE) AS skipped,
+                (SELECT COUNT(*) FROM pa.faq_jobs WHERE status = 'success') AS processed,
+                (SELECT COUNT(*)
+                 FROM pa.faq_jobs j
+                 JOIN pa.url_validation v ON v.url_id = j.url_id
+                 WHERE j.status = 'pending' AND v.is_valid = FALSE) AS skipped,
                 (SELECT COUNT(*) FROM pa.faq_jobs WHERE status = 'failed') AS failed,
                 (SELECT COUNT(*)
                  FROM pa.faq_jobs j
@@ -1839,12 +1845,16 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
             url = result['url']
             status = result['status']
             reason = result.get('reason')
+            # Full untruncated error message for pa.faq_jobs.last_error — falls
+            # back to `reason` when no separate detail was captured so the
+            # column is always populated for failed rows.
+            error_detail = result.get('error_detail') or reason
             truncated_reason = reason[:255] if reason and len(reason) > 255 else reason
 
             if status == 'skipped' and reason and 'no_products_found' in reason:
                 shared_skip_data.append((url, status, truncated_reason))
             else:
-                tracking_data.append((url, status, truncated_reason))
+                tracking_data.append((url, status, truncated_reason, error_detail))
 
             if status == 'success':
                 content_data.append((
@@ -1882,15 +1892,17 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: 
 
         # Batch insert FAQ job state (success / failed)
         if tracking_data:
-            rows = [(uid, status, reason) for url, status, reason in tracking_data
+            rows = [(uid, status, reason, last_err if status == 'failed' else None)
+                    for url, status, reason, last_err in tracking_data
                     for uid in [_resolve(url)] if uid is not None]
             if rows:
                 cur.executemany("""
-                    INSERT INTO pa.faq_jobs (url_id, status, skip_reason, created_at, updated_at)
-                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    INSERT INTO pa.faq_jobs (url_id, status, skip_reason, last_error, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     ON CONFLICT (url_id) DO UPDATE SET
                         status = EXCLUDED.status,
                         skip_reason = EXCLUDED.skip_reason,
+                        last_error = EXCLUDED.last_error,
                         updated_at = CURRENT_TIMESTAMP
                 """, rows)
 

@@ -426,14 +426,14 @@ def fetch_products_api(url: str, include_related: bool = True) -> Optional[Dict]
 
         if not main_category:
             print(f"[FAQ-API] Could not parse URL: {clean}")
-            return None
+            return {"error": "api_failed", "error_detail": f"could not parse URL: {clean}"}
 
         # Build API parameters
         params = build_api_params(main_category, category, filters)
 
         if not params:
             print(f"[FAQ-API] Unknown main category: {main_category}")
-            return None
+            return {"error": "api_failed", "error_detail": f"unknown main category: {main_category}"}
 
         # Removed artificial delay for faster processing
         # (connection pooling and retry logic handle rate limiting)
@@ -461,10 +461,11 @@ def fetch_products_api(url: str, include_related: bool = True) -> Optional[Dict]
                                 context = err.get("context", "unknown")
                                 value = err.get("value", "unknown")
                                 print(f"[FAQ-API] Invalid facet/value: context='{context}', value='{value}' for {clean}")
-                                return {"error": "facet_not_available", "invalid_facet": f"{context}:{value}"}
+                                return {"error": "facet_not_available", "invalid_facet": f"{context}:{value}",
+                                        "error_detail": f"invalid facet: context={context}, value={value}"}
                 except Exception:
                     pass
-            return {"error": "api_failed"}
+            return {"error": "api_failed", "error_detail": f"HTTP {response.status_code}"}
 
         data = response.json()
 
@@ -544,29 +545,26 @@ def fetch_products_api(url: str, include_related: bool = True) -> Optional[Dict]
 
     except requests.RequestException as e:
         print(f"[FAQ-API] Request error for {url}: {str(e)}")
-        return None
+        return {"error": "api_failed", "error_detail": f"requests.{type(e).__name__}: {e}"}
     except Exception as e:
         print(f"[FAQ-API] Error for {url}: {str(e)}")
-        return None
+        return {"error": "api_failed", "error_detail": f"{type(e).__name__}: {e}"}
 
 
 # --- FAQ Generation ---
 
-def generate_faqs_for_page(page_data: Dict, num_faqs: int = 5) -> Optional[FAQPage]:
+def generate_faqs_for_page(page_data: Dict, num_faqs: int = 5):
     """
     Generate FAQ content for a page using AI.
 
-    Args:
-        page_data: Dict from fetch_products_api()
-        num_faqs: Number of FAQ items to generate
-
-    Returns:
-        FAQPage object with structured FAQ data
+    Returns a tuple (faq_page, error_detail). On success, error_detail is None.
+    On any failure path, faq_page is None and error_detail describes the cause —
+    that string is what the persistence layer writes into pa.faq_jobs.last_error.
     """
     client = get_openai_client()
     if not client:
         print("[FAQ] Error: OPENAI_API_KEY environment variable not set")
-        return None
+        return None, "OPENAI_API_KEY not set"
 
     # Build context from products
     products_context = ""
@@ -716,14 +714,14 @@ Voorbeeld formaat (let op: URLs moeten EXACT uit de lijst komen, formaat /p/prod
             url=page_data["url"],
             page_title=page_data["h1_title"],
             faqs=faq_items
-        )
+        ), None
 
     except json.JSONDecodeError as e:
         print(f"[FAQ] Failed to parse AI response as JSON: {e}")
-        return None
+        return None, f"JSONDecodeError: {e}"
     except Exception as e:
         print(f"[FAQ] AI generation error: {e}")
-        return None
+        return None, f"{type(e).__name__}: {e}"
 
 
 def process_single_url_faq(url: str, num_faqs: int = 5) -> Dict:
@@ -750,6 +748,8 @@ def process_single_url_faq(url: str, num_faqs: int = 5) -> Dict:
             result["reason"] = page_data["error"]
             if page_data.get("invalid_facet"):
                 result["invalid_facet"] = page_data["invalid_facet"]
+            if page_data.get("error_detail"):
+                result["error_detail"] = page_data["error_detail"]
             return result
 
         if not page_data.get("products") or len(page_data["products"]) == 0:
@@ -758,11 +758,13 @@ def process_single_url_faq(url: str, num_faqs: int = 5) -> Dict:
             return result
 
         # Generate FAQs
-        faq_page = generate_faqs_for_page(page_data, num_faqs)
+        faq_page, gen_err = generate_faqs_for_page(page_data, num_faqs)
 
         if not faq_page or not faq_page.faqs:
             result["status"] = "failed"
             result["reason"] = "faq_generation_failed"
+            if gen_err:
+                result["error_detail"] = gen_err
             return result
 
         result["status"] = "success"
@@ -776,4 +778,5 @@ def process_single_url_faq(url: str, num_faqs: int = 5) -> Dict:
     except Exception as e:
         result["status"] = "failed"
         result["reason"] = f"error: {str(e)}"
+        result["error_detail"] = f"{type(e).__name__}: {e}"
         return result

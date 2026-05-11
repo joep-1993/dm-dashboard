@@ -368,15 +368,19 @@ def _run_faq_batch(num_faqs: int = 6):
                         canon = canonicalize_url(url)
                         uid = url_id_map.get(canon) if canon else None
                         if uid is not None:
-                            rows.append((uid, status, reason))
+                            # No richer detail is available at this batch-prep
+                            # site, so mirror `reason` into last_error for
+                            # forensic visibility.
+                            rows.append((uid, status, reason, reason if status == 'failed' else None))
                     if rows:
                         from psycopg2.extras import execute_batch
                         execute_batch(cur,
-                            "INSERT INTO pa.faq_jobs (url_id, status, skip_reason, created_at, updated_at) "
-                            "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                            "INSERT INTO pa.faq_jobs (url_id, status, skip_reason, last_error, created_at, updated_at) "
+                            "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
                             "ON CONFLICT (url_id) DO UPDATE SET "
                             "    status = EXCLUDED.status, "
                             "    skip_reason = EXCLUDED.skip_reason, "
+                            "    last_error = EXCLUDED.last_error, "
                             "    updated_at = CURRENT_TIMESTAMP",
                             rows
                         )
@@ -511,15 +515,16 @@ def _run_faq_batch(num_faqs: int = 6):
                         canon = canonicalize_url(url)
                         uid = url_id_map.get(canon) if canon else None
                         if uid is not None:
-                            rows.append((uid, status, reason))
+                            rows.append((uid, status, reason, reason if status == 'failed' else None))
                     if rows:
                         from psycopg2.extras import execute_batch
                         execute_batch(cur,
-                            "INSERT INTO pa.faq_jobs (url_id, status, skip_reason, created_at, updated_at) "
-                            "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
+                            "INSERT INTO pa.faq_jobs (url_id, status, skip_reason, last_error, created_at, updated_at) "
+                            "VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) "
                             "ON CONFLICT (url_id) DO UPDATE SET "
                             "    status = EXCLUDED.status, "
                             "    skip_reason = EXCLUDED.skip_reason, "
+                            "    last_error = EXCLUDED.last_error, "
                             "    updated_at = CURRENT_TIMESTAMP",
                             rows, page_size=1000
                         )
