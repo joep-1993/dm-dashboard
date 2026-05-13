@@ -475,12 +475,19 @@
         function copyAllToClipboard() {
             if (results.length === 0) return;
             const headers = ['input_url', 'status_code', 'redirect_url', 'canonical_url', 'self_canonical', 'meta_title', 'meta_description', 'h1', 'product_count'];
+            // Embedded tab/newline in scraped meta fields breaks Excel's TSV
+            // parser mid-row — collapse all whitespace runs to a single space
+            // so each result stays on its own line.
+            const sanitize = v => v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' ');
             const tsv = [headers.join('\t')];
             results.map(stripResult).forEach(r => {
-                tsv.push(headers.map(h => r[h] != null ? String(r[h]) : '').join('\t'));
+                tsv.push(headers.map(h => sanitize(r[h])).join('\t'));
             });
             navigator.clipboard.writeText(tsv.join('\n')).then(() => {
                 alert('Copied to clipboard! Paste directly into Excel.');
+            }).catch(err => {
+                console.error('Copy for Excel failed:', err);
+                alert('Failed to copy to clipboard: ' + (err && err.message ? err.message : err));
             });
         }
 
