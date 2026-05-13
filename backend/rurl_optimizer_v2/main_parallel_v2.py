@@ -142,6 +142,180 @@ def extract_subcategory_id_from_url(url):
     return ""
 
 
+def _maybe_promote_to_specific_subcat(
+    subcat_match, matched_word, parsed, categories_df, facet_filter, matcher
+):
+    """V14.1 specificity rescue. The per-word loop in step 3 picks the highest-
+    scoring single-word subcat match and breaks — e.g. "gereedschap trolley"
+    → "Gereedschap" (klussen_486173, exact 100), missing the deeper sibling
+    "Gereedschapskoffers" (klussen_486172_1348201) whose own facets carry the
+    matching "Trolley" type.
+
+    If the chosen subcat can't absorb any leftover keyword token via its
+    facets, scan deeper same-maincat siblings whose first display word shares
+    a 4+ char prefix with the matched word. If one of them DOES carry a
+    facet that absorbs a leftover token, swap to it. The downstream
+    _append_facet_to_subcat_redirect then attaches that facet to the URL.
+    """
+    from src.validation_rules import STOPWORDS, SHOP_NAMES
+
+    matched_lower = (matched_word or '').lower()
+    keyword_tokens = [
+        w for w in (parsed.keyword or '').lower().split()
+        if w not in STOPWORDS and w not in SHOP_NAMES and len(w) >= 3
+    ]
+    # A token is "leftover" if it isn't the matched word and isn't a substring
+    # of the matched word in either direction (covers "gereedschap" being
+    # absorbed by a candidate's "gereedschapskoffers").
+    leftover = [
+        w for w in keyword_tokens
+        if w != matched_lower
+        and w not in matched_lower
+        and matched_lower not in w
+    ]
+    if not leftover:
+        return subcat_match
+
+    main_cat = parsed.main_category or ''
+    cur_url = subcat_match.get('url_name', '') or ''
+
+    def _facet_hits(url_name):
+        target_id = ''
+        for part in reversed(url_name.split('_')):
+            if part.isdigit():
+                target_id = part
+                break
+        if not target_id:
+            return 0
+        fdf = facet_filter.filter_by_subcategory(target_id)
+        if fdf.empty:
+            return 0
+        fvs = facet_filter.get_facet_values(fdf)
+        hits = 0
+        for tok in leftover:
+            r = matcher.match_with_partial(tok, fvs, exclude_winkel=True)
+            if r.is_match:
+                hits += 1
+                continue
+            # Compound-suffix fallback. Dutch retail facets often glue the
+            # subcat noun onto the modifier ("trolley" → "Gereedschapstrolley"),
+            # and the matcher's MIN_LENGTH_RATIO guard blocks the short token
+            # against the long facet value. In this rescue we've already
+            # established the subcat-stem context, so a suffix-end match on
+            # a non-strict facet is a reliable extra signal.
+            if len(tok) < 4:
+                continue
+            for fv in fvs:
+                if fv.facet_name.lower() in ('winkel', 'merk'):
+                    continue
+                vname = fv.facet_value_name.lower()
+                if vname.endswith(tok) and len(vname) - len(tok) >= 3:
+                    hits += 1
+                    break
+        return hits
+
+    if _facet_hits(cur_url) > 0:
+        # Winner already covers a leftover token via its own facets — keep.
+        return subcat_match
+
+    cur_depth = cur_url.count('_')
+    best = None  # (facet_hits, depth, new_match_dict)
+    for _, row in categories_df.iterrows():
+        url_name = row.get('url_name', '') or ''
+        display = row.get('display_name', '') or ''
+        if not url_name.startswith(main_cat + '_'):
+            continue
+        if url_name == cur_url:
+            continue
+        # Must be strictly deeper than the current winner.
+        if url_name.count('_') <= cur_depth:
+            continue
+        first_word = display.split()[0].lower() if display else ''
+        if not first_word:
+            continue
+        # First display word shares a 4+ char prefix with the matched word.
+        common = 0
+        for a, b in zip(first_word, matched_lower):
+            if a == b:
+                common += 1
+            else:
+                break
+        if common < min(4, len(matched_lower), len(first_word)):
+            continue
+
+        hits = _facet_hits(url_name)
+        if hits == 0:
+            continue
+
+        key = (hits, url_name.count('_'))
+        if best is None or key > (best[0], best[1]):
+            new_match = {
+                'matched_category': display,
+                'url_name': url_name,
+                'category_path': f'/products/{main_cat}/{url_name}',
+                'score': subcat_match.get('score', 100),
+                'match_type': 'subcategory_name_specific',
+            }
+            best = (hits, url_name.count('_'), new_match)
+
+    if best is None:
+        return subcat_match
+    return best[2]
+
+
+def _leftover_token_matches_facet_token(kw_tok, fv_tok, matcher):
+    """A facet token counts as covered by a leftover token when they're
+    morphologically equivalent (Dutch plural/diminutive suffixes) OR the
+    facet token is a Dutch compound ending in the leftover token, e.g.
+    'gereedschapstrolley' ↔ 'trolley'. The compound-suffix arm requires a
+    ≥3-char prefix on the facet side so it doesn't false-positive on tiny
+    coincidental endings."""
+    if matcher._tokens_equal_modulo_morphology(kw_tok, fv_tok):
+        return True
+    if (len(kw_tok) >= 3
+            and fv_tok.endswith(kw_tok)
+            and len(fv_tok) - len(kw_tok) >= 3):
+        return True
+    return False
+
+
+def _collect_longest_per_axis_from_leftover(leftover_tokens, facet_values, matcher):
+    """For each non-strict facet axis (excluding winkel + merk), return the
+    facet value whose tokens are all covered by the leftover tokens,
+    preferring the LONGEST facet value name. Catches cases the joined-
+    leftover matcher misses due to MIN_LENGTH_RATIO ("Dames" vs
+    "pescara dames" trips length-ratio 5/13<0.4) and lets a multi-attribute
+    leftover ("rood dames") attach one facet per axis (kleur~Rood +
+    doelgroep_mode~Dames). Returns {axis_name: MatchResult}."""
+    from src.matcher import MatchResult
+    by_axis = {}
+    for fv in facet_values:
+        axis = fv.facet_name.lower()
+        if axis in ('winkel', 'merk'):
+            continue
+        fv_tokens = matcher._coverage_tokens(fv.facet_value_name)
+        if not fv_tokens:
+            continue
+        if not all(
+            any(_leftover_token_matches_facet_token(kt, ft, matcher)
+                for kt in leftover_tokens)
+            for ft in fv_tokens
+        ):
+            continue
+        existing = by_axis.get(axis)
+        if (existing is None
+                or len(fv.facet_value_name)
+                > len(existing.facet_value.facet_value_name)):
+            by_axis[axis] = MatchResult(
+                keyword=' '.join(leftover_tokens),
+                facet_value=fv,
+                match_type='leftover_longest_per_axis',
+                score=90,
+                matched_text=fv.facet_value_name,
+            )
+    return by_axis
+
+
 def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_filter, matcher):
     # When a subcat-name match wins (e.g. "tuinkast kunststof" → "Tuinkasten")
     # the leftover token ("kunststof") was previously thrown away. Match it
@@ -187,32 +361,86 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
     if not facet_values:
         return result
 
+    # Multi-axis longest-per-axis collector. For every non-strict facet axis
+    # (kleur, materiaal, doelgroep_mode, type_*, …) pick the facet value
+    # whose tokens are all covered by the leftover, preferring the LONGEST
+    # facet value name on ties ("Nike Air" over "Nike", "Lichtblauw met
+    # stippen" over "Blauw"). Replaces the legacy joined → compound-suffix
+    # → per-token-first-hit chain and gives multi-attribute leftovers like
+    # "rood dames" both kleur~Rood and doelgroep_mode~Dames.
+    matches_by_axis = _collect_longest_per_axis_from_leftover(
+        leftover_tokens, facet_values, matcher,
+    )
+
+    # Joined-leftover safety net. The token-equality scan above can miss
+    # typos or partial-substring matches that the matcher's fuzzy paths
+    # would catch (e.g. "scharniren" → "Scharnieren"). Run match_with_partial
+    # too and merge into the same axis dict, keeping the longer value on
+    # collision.
     fmatch = matcher.match_with_partial(leftover, facet_values, exclude_winkel=True)
-    if not fmatch.is_match or fmatch.facet_value is None:
-        return result
-    # merk facets from leftover tokens are too risky — a stray brand word
-    # next to a category name shouldn't deep-link into a brand page.
-    if fmatch.facet_value.facet_name.lower() == 'merk':
+    if (fmatch.is_match
+            and fmatch.facet_value is not None
+            and fmatch.facet_value.facet_name.lower() not in ('winkel', 'merk')):
+        axis = fmatch.facet_value.facet_name.lower()
+        existing = matches_by_axis.get(axis)
+        if (existing is None
+                or len(fmatch.facet_value.facet_value_name)
+                > len(existing.facet_value.facet_value_name)):
+            matches_by_axis[axis] = fmatch
+
+    # Per-token EXACT merk pass. The subcat-name match has already established
+    # product/category context, so a score=100 brand hit on a single leftover
+    # token is safe to attach (e.g. "bic" + subcat "Aanstekers" → merk~BIC).
+    # Mirrors STRICT_FACET_EXACT_THRESHOLD in matcher.match_multi_word.
+    from src.validation_rules import (
+        STRICT_FACET_EXACT_THRESHOLD,
+        STOPWORDS,
+        SHOP_NAMES,
+    )
+    merk_facets = [fv for fv in facet_values if fv.facet_name.lower() == 'merk']
+    merk_match = None
+    if merk_facets:
+        for tok in leftover_tokens:
+            if (len(tok) >= 3
+                    and tok not in STOPWORDS
+                    and tok not in SHOP_NAMES):
+                cand = matcher.match_with_partial(tok, merk_facets, exclude_winkel=False)
+                if cand.is_match and cand.score >= STRICT_FACET_EXACT_THRESHOLD:
+                    merk_match = cand
+                    break
+
+    # Order the non-merk axes by facet value length descending (most specific
+    # first, stable for stable output), then append merk last.
+    appends = sorted(
+        matches_by_axis.values(),
+        key=lambda m: -len(m.facet_value.facet_value_name),
+    )
+    if merk_match:
+        appends.append(merk_match)
+    if not appends:
         return result
 
-    fragment = fmatch.facet_value.url_fragment
-    if '/c/' in result.redirect_url:
-        result.redirect_url = result.redirect_url.rstrip('/') + '~~' + fragment
-        result.facet_fragment = (
-            result.facet_fragment + '~~' + fragment
-            if result.facet_fragment else fragment
-        )
-        result.facet_count = (result.facet_count or 0) + 1
-    else:
-        result.redirect_url = result.redirect_url.rstrip('/') + '/c/' + fragment
-        result.facet_fragment = fragment
-        result.facet_count = 1
+    for m in appends:
+        fragment = m.facet_value.url_fragment
+        if '/c/' in result.redirect_url:
+            result.redirect_url = result.redirect_url.rstrip('/') + '~~' + fragment
+            result.facet_fragment = (
+                result.facet_fragment + '~~' + fragment
+                if result.facet_fragment else fragment
+            )
+            result.facet_count = (result.facet_count or 0) + 1
+        else:
+            result.redirect_url = result.redirect_url.rstrip('/') + '/c/' + fragment
+            result.facet_fragment = fragment
+            result.facet_count = 1
 
-    result.facet_names = fmatch.facet_value.facet_name
-    result.facet_value_names = fmatch.matched_text or fmatch.facet_value.facet_value_name
+    result.facet_names = ', '.join(m.facet_value.facet_name for m in appends)
+    result.facet_value_names = ', '.join(
+        (m.matched_text or m.facet_value.facet_value_name) for m in appends
+    )
     result.reason = (
         (result.reason or '')
-        + f"; appended {fragment} ({result.facet_value_names!r}) from leftover '{leftover}'"
+        + f"; appended {result.facet_fragment} ({result.facet_value_names!r}) from leftover '{leftover}'"
     )
     return result
 
@@ -496,6 +724,7 @@ def process_url_v2(args):
             child_match = matcher.match_subcategory_name(
                 parsed.keyword, categories_df, main_category=parsed.subcategory_name
             )
+            matched_word = parsed.keyword  # default: full-keyword match path
             if not child_match or child_match.get('score', 0) < HIGH_SUBCAT_THRESHOLD:
                 for kw in parsed.keyword.lower().split():
                     if len(kw) < 4:
@@ -505,7 +734,15 @@ def process_url_v2(args):
                     )
                     if wm and wm.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
                         child_match = wm
+                        matched_word = kw
                         break
+            # Specificity rescue: prefer a deeper same-maincat sibling whose
+            # facets absorb a leftover keyword token.
+            if child_match and child_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
+                child_match = _maybe_promote_to_specific_subcat(
+                    child_match, matched_word, parsed, categories_df,
+                    facet_filter, matcher,
+                )
             if child_match and child_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
                 result = builder.build_subcategory_redirect(
                     original_url=url,
@@ -533,6 +770,7 @@ def process_url_v2(args):
                 categories_df,
                 main_category=parsed.main_category
             )
+            matched_word = parsed.keyword  # default: full-keyword match path
             # V28: Als full keyword niet matcht, probeer individuele woorden
             if not subcat_match or subcat_match.get('score', 0) < HIGH_SUBCAT_THRESHOLD:
                 keywords_to_try = parsed.keyword.lower().split()
@@ -544,7 +782,15 @@ def process_url_v2(args):
                     )
                     if word_match and word_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
                         subcat_match = word_match
+                        matched_word = kw
                         break
+            # Specificity rescue: if a deeper same-maincat sibling can absorb
+            # a leftover keyword token via its facets, prefer it.
+            if subcat_match and subcat_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
+                subcat_match = _maybe_promote_to_specific_subcat(
+                    subcat_match, matched_word, parsed, categories_df,
+                    facet_filter, matcher,
+                )
             # Alleen accepteren als score ≥ 95 (bijna exacte match)
             if subcat_match and subcat_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
                 result = builder.build_subcategory_redirect(
@@ -932,6 +1178,58 @@ def process_url_v2(args):
             flag_for_review = (
                 f"[V28] Legacy score {reliability_score}, but search "
                 f"({derived.get('total')} products) shows no dominant deepest_cat"
+            )
+
+    # Maincat-path sanity check. A correct redirect path looks like
+    # /products/{maincat}/{subcat}[/c/...] where {subcat} starts with
+    # {maincat}_. Older code paths can lose the {maincat} segment for
+    # hyphenated maincats (sport_outdoor_vrije-tijd, films-series, ...) and
+    # produce /products/{subcat}/ which 404s on the live site. Try to repair
+    # in-place by inserting the inferred maincat; if we can't, suppress the
+    # redirect and flag the row for review.
+    if final_redirect_url:
+        try:
+            from urllib.parse import urlparse, urlunparse
+            _p = urlparse(final_redirect_url)
+            if _p.path.startswith('/products/'):
+                _segs = [s for s in _p.path.split('/') if s]
+                # _segs = ['products', <maincat>, <subcat?>, 'c'?, <facet>?, ...]
+                if len(_segs) >= 2:
+                    _second = _segs[1]
+                    _second_parts = _second.split('_')
+                    # Malformed iff the segment right after 'products' looks
+                    # like a subcat slug (has a numeric id token).
+                    if any(p.isdigit() for p in _second_parts):
+                        _maincat_parts = []
+                        for _p2 in _second_parts:
+                            if _p2.isdigit():
+                                break
+                            _maincat_parts.append(_p2)
+                        if _maincat_parts and len(_maincat_parts) < len(_second_parts):
+                            _inferred = '_'.join(_maincat_parts)
+                            _repaired_path = '/products/' + _inferred + '/' + '/'.join(_segs[1:])
+                            if not _p.path.endswith('/'):
+                                pass
+                            else:
+                                _repaired_path += '/'
+                            final_redirect_url = urlunparse(
+                                _p._replace(path=_repaired_path)
+                            )
+                            final_reason = (
+                                (final_reason or '')
+                                + f"; repaired missing maincat segment '{_inferred}/'"
+                            )
+                        else:
+                            flag_for_review = (
+                                (flag_for_review + '; ' if flag_for_review else '')
+                                + f"malformed redirect: no maincat could be inferred from '{_second}'"
+                            )
+                            final_redirect_url = None
+                            final_match_type = 'malformed_redirect'
+        except Exception as _e:
+            flag_for_review = (
+                (flag_for_review + '; ' if flag_for_review else '')
+                + f"maincat validator error: {_e}"
             )
 
     return {

@@ -1170,14 +1170,18 @@ class KeywordMatcher:
             if should_update:
                 best_score = score
                 best_is_exact = is_exact
-                # Build category path
-                # url_name is like "klussen_486170_6356938" or "mode_accessoires_457573"
-                # We need to extract main_cat from it
-                # V17 fix: Use regex to find main_cat (everything before the first numeric ID)
-                import re
-                main_cat_match = re.match(r'^([a-z_]+?)_\d+', url_name)
-                if main_cat_match:
-                    main_cat = main_cat_match.group(1)
+                # Build category path. url_name is like "klussen_486170_6356938"
+                # or "sport_outdoor_vrije-tijd_484428". The maincat is every
+                # underscore-segment before the first numeric segment — split
+                # rather than regex so hyphenated maincats (sport_outdoor_vrije-tijd,
+                # films-series, boeken-19395973) survive.
+                main_cat_parts = []
+                for part in url_name.split('_'):
+                    if part.isdigit():
+                        break
+                    main_cat_parts.append(part)
+                if main_cat_parts and len(main_cat_parts) < len(url_name.split('_')):
+                    main_cat = '_'.join(main_cat_parts)
                     category_path = f"/products/{main_cat}/{url_name}"
                 else:
                     category_path = f"/products/{url_name}"

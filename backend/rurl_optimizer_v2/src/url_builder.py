@@ -534,26 +534,70 @@ class UrlBuilder:
                 )
 
             if category_path:
-                # Only use facets that are valid for this category
-                # For simplicity, just use the primary facet to ensure validity
-                facet_fragment = primary_match.facet_value.url_fragment
+                # Attach EVERY match whose own URL points to the same target
+                # category_path as the primary — they all live in the same
+                # subcat, so combining them with ~~ produces a valid Beslist
+                # filter URL. Example: "nike schoenen dames" → match_multi_word
+                # returns Dames (mode_432362) AND Nike (mode_432362). Old code
+                # kept only the primary "for simplicity" and dropped Nike,
+                # producing /mode_432362/c/doelgroep_mode~Dames without the
+                # brand. New code emits /mode_432362/c/doelgroep_mode~Dames~~merk~Nike.
+                same_target_matches = [primary_match]
+                for other in valid_matches:
+                    if other is primary_match:
+                        continue
+                    if not other.facet_value or not other.facet_value.url:
+                        continue
+                    other_path = self._extract_category_path_from_facet_url(
+                        other.facet_value.url
+                    )
+                    if other_path == category_path:
+                        same_target_matches.append(other)
 
-                redirect_url = f"{self.base_url}{category_path}/c/{facet_fragment}"
+                # Beslist URLs allow only one value per facet name — dedupe
+                # by axis, keeping the higher-scoring match on collision.
+                by_axis = {}
+                for m in same_target_matches:
+                    axis = m.facet_value.facet_name
+                    if axis not in by_axis or m.score > by_axis[axis].score:
+                        by_axis[axis] = m
+                # Stable URL order: alphabetical by facet name (mirrors same-
+                # category branch at line ~573).
+                final_matches = sorted(
+                    by_axis.values(),
+                    key=lambda m: m.facet_value.facet_name,
+                )
+
+                facet_fragments = [m.facet_value.url_fragment for m in final_matches]
+                combined_fragment = '~~'.join(facet_fragments)
+                matched_terms = [m.matched_text for m in final_matches]
+                facet_names_list = [m.facet_value.facet_name for m in final_matches]
+                avg_score = (
+                    sum(m.score for m in final_matches) // len(final_matches)
+                )
+
+                redirect_url = (
+                    f"{self.base_url}{category_path}/c/{combined_fragment}"
+                )
 
                 return RedirectResult(
                     original_url=parsed_url.original_url,
                     redirect_url=redirect_url,
-                    facet_fragment=facet_fragment,
-                    match_score=primary_match.score,
+                    facet_fragment=combined_fragment,
+                    match_score=avg_score,
                     match_type='multi',
                     success=True,
-                    reason=f"Matched '{primary_match.matched_text}' (redirected to valid category)",
+                    reason=(
+                        f"Matched {len(final_matches)} "
+                        f"facet{'s' if len(final_matches) > 1 else ''} "
+                        f"'{', '.join(matched_terms)}' (redirected to valid category)"
+                    ),
                     keyword=parsed_url.keyword,
-                    facet_count=1,
+                    facet_count=len(final_matches),
                     main_category=parsed_url.main_category,
                     subcategory_id=parsed_url.subcategory_id,
-                    facet_names=primary_match.facet_value.facet_name,
-                    facet_value_names=primary_match.matched_text
+                    facet_names=', '.join(facet_names_list),
+                    facet_value_names=', '.join(matched_terms),
                 )
 
         # V18: Only use facets that are valid for the R-URL's exact subcategory

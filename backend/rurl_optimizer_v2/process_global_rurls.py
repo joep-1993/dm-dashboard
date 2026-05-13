@@ -429,11 +429,23 @@ def process_global_url(args):
 
 
 def _extract_main_cat_from_url_name(url_name: str) -> str:
-    """Extract main_category from url_name like 'klussen_486170_6356938'."""
+    """Extract main_category from url_name like 'klussen_486170_6356938'.
+
+    Split on underscores up to the first numeric segment instead of the older
+    `[a-z_]+?` regex — hyphenated maincats like sport_outdoor_vrije-tijd or
+    films-series otherwise return as-is and produce broken redirect paths.
+    """
     if not url_name:
         return ''
-    m = re.match(r'^([a-z_]+?)_\d+', url_name)
-    return m.group(1) if m else url_name
+    parts = url_name.split('_')
+    main_cat_parts = []
+    for part in parts:
+        if part.isdigit():
+            break
+        main_cat_parts.append(part)
+    if main_cat_parts and len(main_cat_parts) < len(parts):
+        return '_'.join(main_cat_parts)
+    return url_name
 
 
 def _extract_last_id(url_name: str) -> str:
