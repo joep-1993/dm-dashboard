@@ -54,6 +54,25 @@ _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are 
 - **Sticky-thead inside `overflow:auto` container can break when the container doesn't actually scroll** (separate gotcha from this session): `frontend/url-checker.html` had `.results-table { max-height: 600px; overflow: auto }` with `<thead class="table-light sticky-top">`. With only a few result rows the container never establishes a scroll context, so `position: sticky` falls back to the page scroll context — the header rendered in the middle of the table rows instead of at the top. Three attempted CSS fixes (background-color, !important box-shadow override, CSS variables) all failed because the issue wasn't transparency — it was the sticky positioning context. Final fix: just dropped `sticky-top` from the thead. Can be re-added properly behind a "if rows > N" toggle later if needed. Commit `a39483f`.
 - **Files**: `backend/main.py` (both status endpoints), `backend/content_publisher.py` (4 publish queries), `backend/faq_service.py` (error capture), `backend/batch_api_service.py` (FAQ-jobs INSERTs ×2), `frontend/js/app.js`, `frontend/js/faq.js`, `frontend/url-checker.html`. Commits: `a39483f` (url-checker), `583cef7` (dashboard count fix + last_error + clickable URLs).
 
+## Per-main-category SEO-priority analysis — reusable script (2026-05-13)
+- **Goal**: data-driven keep_on / turn_off / turn_on / review recommendations per (category, facet) inside one main category, with judgment-based thresholds (no fixed %). Output is xlsx; **never** touches the API. First run was for Horloges (id 30000) at the user's request.
+- **Script**: `cc1/seo_prio_main_cat.py`. Run as `python3 cc1/seo_prio_main_cat.py <main_cat_taxv2_id> "<main_cat_name>"`. Self-contained, loads creds from `dm-tools/.env`. Examples: `30000 "Horloges"`, `32000 "Schoenen"`, `700 "Films & Series"`. Get the top-level taxv2 IDs via `GET {TAXV2}/api/Categories?locale=nl-NL` — there are 32 of them.
+- **Pipeline mirrors the dashboard's SEO Priority tool** (`dm-tools/backend/seo_prio_service.py`) but adds:
+  1. Single main-category scoping via `dv.main_cat_name = <name>` in the Redshift query (cuts work massively).
+  2. **Legacy_id → taxv2_id mapping** (this is the load-bearing bit — see gotcha below).
+  3. Inheritance-aware "currently true" detection via `GET /api/Categories/{id}?includeFacets=true` (the `seoPriority` field on each linked facet is already resolved across the inheritance chain — Direct/Inherited/Dependent).
+  4. Judgment-based `judge()` instead of fixed 10%/2% thresholds.
+- **CRITICAL gotcha — two ID spaces**: taxv2 uses small new IDs (Horloges=30000, Smartwatches=9004665) but live URLs still embed legacy IDs (`/products/horloge/horloge_649387/c/...` — 649387 is the legacy id for Smartwatches). My first run silently joined zero rows and flagged 100% of currently-true combos as `turn_off` because every URL got dropped at the URL→cat lookup. The fix: each category's nl-NL `urlSlug` carries its legacy id as a trailing `_<digits>` suffix, so a one-time `legacy_to_v2 = {legacy: v2_id}` lookup built from the sub-tree walk is enough to join. Root-level URLs like `/products/horloge/c/...` have no subcat segment — fallback is `slug_to_v2[root_slug]` (e.g. `horloge` → 30000). Symptom that exposed the bug: distribution `turn_off=127, keep_on=0` — if you see that on a rerun, the ID mapping is broken again.
+- **judge() anchors** (encoded in the script's reason strings; tweak in-place if a category needs different cutoffs — Beslist trade-off is crawl-budget vs ranking surface, so leave headroom for tail facets):
+  - `near-zero` = <50 visits AND <€1 over 2y → `turn_off` high
+  - `tiny`      = <0.3% visits AND <0.3% revenue AND <500 visits AND <€20 → `turn_off` medium
+  - `material`  = ≥1% visits OR ≥1% revenue OR ≥1000 visits OR ≥€100 → `keep_on` high
+  - Currently-off + ≥500 visits + material → `turn_on` high; ≥200 visits + ≥0.5% share → `turn_on` medium
+  - Everything in between currently-on → `review` (manual call)
+- **Horloges results 2026-05-12** (130 rows: 34 turn_off / 10 review / 83 keep_on / 3 turn_on). xlsx at `~/Downloads/claude/horloges_seo_prio.xlsx`. Reviewed manually, not pushed to taxv2.
+- **Related write helpers** documented elsewhere in this session: bulk `seoPriority=false` flips via `PUT /api/CategoryFacetSettings` (upsert, not partial-PUT — GET-merge-PUT to preserve `displayOrder`/others) with `X-User-Name: SEO_JOEP`. The Horloges run was read-only.
+- **Files**: `cc1/seo_prio_main_cat.py` (new, ~280 lines, parameterized). One-off Horloges variant lived at `/tmp/horloges_seo_prio.py` during development.
+
 ## Unique-titles v3 thaw-and-update pass — still in fridge (2026-05-08)
 - **Status**: opt-in via `AI_TITLES_PIPELINE=v3`. Default remains `v1`. Pulled out of the fridge for an iteration, pushed back with several regressions addressed but three new ones discovered. Commit: `84e410c`. See the previous shelving section ("Unique-titles v3 pipeline experiment — shelved at ~76% acceptable") for the original A/B journey.
 - **What changed in this pass** (all in `dm-tools/backend/ai_titles_service.py`):

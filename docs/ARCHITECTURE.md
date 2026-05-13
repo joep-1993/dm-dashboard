@@ -244,7 +244,17 @@ main.py (API Endpoints)
     │           (3) unparseable URL format, (4) V4 id miss
     │
     ├──▶ ai_titles_service.py (Unique Title Generation)
-    │       └──▶ Product Search API + OpenAI (facet classification, met-features, spec values)
+    │       ├──▶ DEFAULT pipeline (v1, generate_title_from_api):
+    │       │     Product Search API → 5 dedup passes → strip brand/color/size →
+    │       │     OpenAI full rewrite (11-rule prompt) → hallucination guard →
+    │       │     reassemble → 5 dedup passes → save
+    │       └──▶ EXPERIMENTAL (v3, generate_title_v3) — opt-in via
+    │             AI_TITLES_PIPELINE=v3, currently shelved at ~76% acceptable:
+    │             facets → deterministic builder (slot order: colour/merk/serie/
+    │             productlijn/materials/adj/doelgroep/category/met/voor/combo/size) →
+    │             OpenAI polish (5-rule prompt, no rewrite) → content+brand
+    │             preservation guards → casing restore from composed → save.
+    │             Pick-up notes in cc1/LEARNINGS.md.
     │
     ├──▶ indexnow_service.py (IndexNow URL Submission)
     │       └──▶ IndexNow API + local PostgreSQL dedup (10K daily limit)
