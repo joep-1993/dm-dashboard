@@ -22,6 +22,7 @@ import logging
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
+import re
 import sys
 import time
 import pickle
@@ -139,6 +140,81 @@ def extract_subcategory_id_from_url(url):
     except Exception:
         pass
     return ""
+
+
+def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_filter, matcher):
+    # When a subcat-name match wins (e.g. "tuinkast kunststof" → "Tuinkasten")
+    # the leftover token ("kunststof") was previously thrown away. Match it
+    # against the target subcat's own facet pool and tack the winning facet
+    # onto the redirect URL.
+    if not result or not getattr(result, 'success', False) or not result.redirect_url:
+        return result
+
+    url_name = (subcategory_match or {}).get('url_name', '')
+    target_subcat_id = ''
+    for part in reversed(url_name.split('_')):
+        if part.isdigit():
+            target_subcat_id = part
+            break
+    if not target_subcat_id:
+        return result
+
+    matched_name = (subcategory_match.get('matched_category', '') or '').lower()
+    matched_words = set(re.findall(r'\w+', matched_name))
+
+    def _absorbed_by_subcat(tok: str) -> bool:
+        # Treat the token as "already matched" if it's a substring of any
+        # matched-name word or vice versa — so "scharnieren" is absorbed by
+        # "deurscharnieren" and "tuinkast" by "tuinkasten", leaving only the
+        # truly leftover modifiers (e.g. "kunststof") for facet matching.
+        for mw in matched_words:
+            if tok == mw or tok in mw or mw in tok:
+                return True
+        return False
+
+    leftover_tokens = [
+        w for w in (parsed.keyword or '').lower().split()
+        if not _absorbed_by_subcat(w) and len(w) >= 3
+    ]
+    if not leftover_tokens:
+        return result
+    leftover = ' '.join(leftover_tokens)
+
+    facets_df = facet_filter.filter_by_subcategory(target_subcat_id)
+    if facets_df.empty:
+        return result
+    facet_values = facet_filter.get_facet_values(facets_df)
+    if not facet_values:
+        return result
+
+    fmatch = matcher.match_with_partial(leftover, facet_values, exclude_winkel=True)
+    if not fmatch.is_match or fmatch.facet_value is None:
+        return result
+    # merk facets from leftover tokens are too risky — a stray brand word
+    # next to a category name shouldn't deep-link into a brand page.
+    if fmatch.facet_value.facet_name.lower() == 'merk':
+        return result
+
+    fragment = fmatch.facet_value.url_fragment
+    if '/c/' in result.redirect_url:
+        result.redirect_url = result.redirect_url.rstrip('/') + '~~' + fragment
+        result.facet_fragment = (
+            result.facet_fragment + '~~' + fragment
+            if result.facet_fragment else fragment
+        )
+        result.facet_count = (result.facet_count or 0) + 1
+    else:
+        result.redirect_url = result.redirect_url.rstrip('/') + '/c/' + fragment
+        result.facet_fragment = fragment
+        result.facet_count = 1
+
+    result.facet_names = fmatch.facet_value.facet_name
+    result.facet_value_names = fmatch.matched_text or fmatch.facet_value.facet_value_name
+    result.reason = (
+        (result.reason or '')
+        + f"; appended {fragment} ({result.facet_value_names!r}) from leftover '{leftover}'"
+    )
+    return result
 
 
 def process_url_v2(args):
@@ -439,6 +515,9 @@ def process_url_v2(args):
                     existing_facet=parsed.existing_facet,
                 )
                 result.reason = f"[child_subcat] " + result.reason
+                result = _append_facet_to_subcat_redirect(
+                    result, parsed, child_match, facet_filter, matcher
+                )
 
     # 3. V14.1: SUBCATEGORIE NAAM MATCHING met HOGE SCORE (≥95) binnen maincat
     # Voor generieke termen: "scharnieren" -> subcategorie "Deurscharnieren"
@@ -476,6 +555,9 @@ def process_url_v2(args):
                     existing_facet=parsed.existing_facet  # V19: preserve existing facet
                 )
                 result.reason = f"[subcat_name_high] " + result.reason
+                result = _append_facet_to_subcat_redirect(
+                    result, parsed, subcat_match, facet_filter, matcher
+                )
 
     # 4. MAIN CATEGORY FACETS - Zoek in alle facets binnen maincat
     # Voor specifiekere termen: "onzichtbare scharnieren" -> facet "Onzichtbare scharnieren"
@@ -529,6 +611,9 @@ def process_url_v2(args):
                     subcategory_match=subcat_match,
                     main_category=parsed.main_category,
                     existing_facet=parsed.existing_facet  # V19: preserve existing facet
+                )
+                result = _append_facet_to_subcat_redirect(
+                    result, parsed, subcat_match, facet_filter, matcher
                 )
 
     # 6. V14: CROSS-CATEGORY SUBCATEGORIE NAAM MATCHING
