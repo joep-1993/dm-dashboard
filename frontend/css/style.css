@@ -424,3 +424,9 @@ thead.sticky-top {
     top: 80px !important;
     z-index: 1019 !important;
 }
+/* Tables inside a .results-table inner scroll container are sticky relative
+   to that container, not the page — the 80px navbar offset would push the
+   header 80px down into the rows. Reset to top: 0 for those. */
+.results-table thead.sticky-top {
+    top: 0 !important;
+}
