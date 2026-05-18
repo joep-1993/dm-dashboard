@@ -1,6 +1,11 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Conventions — file output location (2026-05-18)
+- **All deliverables (xlsx, csv, pdf, png, etc.) go to `C:\Users\JoepvanSchagen\Downloads\claude\`** (WSL path: `/mnt/c/Users/JoepvanSchagen/Downloads/claude/`).
+- Create the folder with `mkdir -p` if it doesn't already exist. Intermediate working files can stay in the Linux home dir; only the final artifact the user will open from Windows needs to land in `Downloads\claude`.
+- Mirrored in user memory at `feedback_downloads_folder.md` so the convention applies across all Claude sessions, not just dm-dashboard.
+
 ## R-URL optimizer: hyphenated maincats, leftover-token facet matching, build_multi_facet sibling-dropping (2026-05-13)
 - **Five connected fixes shipped together** in `backend/rurl_optimizer_v2/`. Commits `495a280` (rurl-optimizer) + `56ff81f` (url-checker copy fix), both pushed to dm-dashboard. Backend has `--reload` so all changes were live without manual restart.
 
