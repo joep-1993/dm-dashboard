@@ -17,6 +17,13 @@ INDEX_PREFIX = "product_search_v4_nl-nl_"
 # every query (measured: 3 500 ms -> 27 ms per query).
 _es_session = requests.Session()
 
+# Bare UUID (no V4_ prefix): 8-4-4-4-12 hex. Newer Beslist PLP URLs use this
+# format alongside the older V4_<uuid> form; ES stores both in the `id` field.
+_UUID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE,
+)
+
 # Maincat mapping file path (relative to this file)
 MAINCAT_MAPPING_FILE = Path(__file__).parent / "maincat_mapping.csv"
 
@@ -74,11 +81,10 @@ def extract_from_url(url: str, maincat_mapping: Dict[str, str]) -> Tuple[Optiona
         potential_pim_id = parts[-1]
 
         if potential_maincat.isdigit():
-            # Check for V4 UUID format: V4_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-            if potential_pim_id.startswith('V4_'):
-                # V4 UUID format - return the plpUrl path for plpUrl-based lookup
-                # The pimId in ES is different from the V4 UUID in the URL
-                # Find the /p/ part of the URL to get the plpUrl path
+            # UUID-based pimIds: legacy V4_<uuid> and newer bare <uuid>. Both
+            # are stored in ES `id` and resolved through the plpUrl path branch
+            # (see query_elasticsearch_by_plpurl).
+            if potential_pim_id.startswith('V4_') or _UUID_RE.match(potential_pim_id):
                 p_index = url.find('/p/')
                 if p_index != -1:
                     plp_path = url[p_index:] + '/'
@@ -164,13 +170,15 @@ def query_elasticsearch_by_plpurl(index: str, plp_urls: List[str], min_offers: i
     if not plp_urls:
         return {}
 
-    # Extract V4 UUID from each plpUrl
-    # plpUrl format: /p/product-name/maincat/V4_uuid/
+    # Extract UUID-style id from each plpUrl. Two valid formats:
+    #   /p/product-name/maincat/V4_<uuid>/   (legacy)
+    #   /p/product-name/maincat/<uuid>/       (newer, no V4_ prefix)
+    # Both resolve via ES `id` field — the last URL segment is the id.
     v4_to_original: Dict[str, str] = {}
     for plp_url in plp_urls:
         parts = plp_url.rstrip('/').split('/')
         v4_part = parts[-1] if parts else ''
-        if v4_part.startswith('V4_'):
+        if v4_part.startswith('V4_') or _UUID_RE.match(v4_part):
             v4_to_original[v4_part] = plp_url
 
     if not v4_to_original:
@@ -255,19 +263,23 @@ def extract_hyperlinks_from_content(content: str) -> List[str]:
     return links
 
 
-def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
+def lookup_plp_urls_for_content(content: str) -> Tuple[Dict[str, Optional[str]], List[str]]:
     """
     Look up correct plpUrls for all product links in content.
 
-    Returns dict mapping original URLs to their correct plpUrls:
-    - If plpUrl found: original_url -> correct_plpUrl
-    - If product gone: original_url -> None
+    Returns a tuple (lookup, unknown_format_links):
+    - lookup: dict mapping original URLs to their correct plpUrls
+      - If plpUrl found: original_url -> correct_plpUrl
+      - If product gone: original_url -> None
+    - unknown_format_links: URLs whose format extract_from_url could not
+      parse. These are NOT classified as gone — a new PLP format being
+      introduced should not silently delete content.
     """
     maincat_mapping = load_maincat_mapping()
     links = extract_hyperlinks_from_content(content)
 
     if not links:
-        return {}
+        return {}, []
 
     # Group links by maincat_id for batch ES queries
     # Separate V4 URLs (query by plpUrl) from regular URLs (query by pimId)
@@ -275,6 +287,7 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
     maincat_pimid_groups: Dict[str, Dict[str, str]] = {}  # For pimId lookups
     maincat_plpurl_groups: Dict[str, Dict[str, str]] = {}  # For V4 plpUrl lookups
     url_to_lookup: Dict[str, Tuple[str, bool]] = {}  # url -> (lookup_value, is_v4)
+    unknown_format_links: List[str] = []
 
     for link in set(links):  # deduplicate
         maincat_id, lookup_value, is_v4 = extract_from_url(link, maincat_mapping)
@@ -291,6 +304,8 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
                 if maincat_id not in maincat_pimid_groups:
                     maincat_pimid_groups[maincat_id] = {}
                 maincat_pimid_groups[maincat_id][lookup_value] = link
+        else:
+            unknown_format_links.append(link)
 
     # Results dict: lookup_value -> plpUrl (or None)
     lookup_to_plp_url: Dict[str, Optional[str]] = {}
@@ -321,8 +336,10 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
         except Exception as e:
             print(f"[LINK_VALIDATOR] Error querying ES index {index} by plpUrl: {e} - skipping batch (not marking as gone)")
 
-    # Build result: original_url -> correct_plpUrl (or None if GONE)
-    result = {}
+    # Build result: original_url -> correct_plpUrl (or None if GONE).
+    # Unknown-format URLs are returned in a separate list and are NOT
+    # treated as gone — see docstring.
+    result: Dict[str, Optional[str]] = {}
     for link in set(links):
         lookup_info = url_to_lookup.get(link)
         if lookup_info:
@@ -330,11 +347,9 @@ def lookup_plp_urls_for_content(content: str) -> Dict[str, Optional[str]]:
             if lookup_value in lookup_to_plp_url:
                 result[link] = lookup_to_plp_url[lookup_value]
             # else: ES query failed or URL not found - skip it entirely (don't mark as gone)
-        else:
-            # Could not extract lookup value from URL - treat as GONE
-            result[link] = None
+        # Unknown-format links are tracked separately in unknown_format_links.
 
-    return result
+    return result, unknown_format_links
 
 
 def replace_url_in_content(content: str, old_url: str, new_url: str) -> str:
@@ -361,6 +376,9 @@ def validate_and_fix_content_links(content: str, content_url: str) -> Dict:
         'replaced_urls': List[Dict],  # List of {old_url, new_url}
         'gone_urls': List[str],  # URLs where product is gone (need reprocessing)
         'valid_urls': List[str],  # URLs that were already correct
+        'unknown_format_urls': List[str],  # URLs whose format was not recognized
+                                            # (e.g. a new PLP format) — flagged but
+                                            # NOT treated as gone
     }
     """
     result = {
@@ -370,16 +388,18 @@ def validate_and_fix_content_links(content: str, content_url: str) -> Dict:
         'has_changes': False,
         'replaced_urls': [],
         'gone_urls': [],
-        'valid_urls': []
+        'valid_urls': [],
+        'unknown_format_urls': [],
     }
 
     if not content:
         return result
 
     # Look up correct plpUrls for all links
-    url_lookup = lookup_plp_urls_for_content(content)
+    url_lookup, unknown_format_links = lookup_plp_urls_for_content(content)
+    result['unknown_format_urls'] = unknown_format_links
 
-    if not url_lookup:
+    if not url_lookup and not unknown_format_links:
         return result
 
     corrected_content = content
@@ -562,8 +582,13 @@ def validate_faq_links(faq_json: str) -> Dict:
     {
         'total_links': int,
         'valid_links': int,
-        'gone_links': List[str],  # URLs where product is gone
+        'gone_links': List[str],            # URLs where ES says product is gone
         'has_gone_links': bool,
+        'unknown_format_links': List[str],  # URLs the validator couldn't parse —
+                                            # NOT treated as gone. A new PLP format
+                                            # being introduced should be surfaced
+                                            # for investigation, not silently reset.
+        'has_unknown_format_links': bool,
     }
     """
     links = extract_hyperlinks_from_faq_json(faq_json)
@@ -573,7 +598,9 @@ def validate_faq_links(faq_json: str) -> Dict:
             'total_links': 0,
             'valid_links': 0,
             'gone_links': [],
-            'has_gone_links': False
+            'has_gone_links': False,
+            'unknown_format_links': [],
+            'has_unknown_format_links': False,
         }
 
     # Look up all links
@@ -584,6 +611,7 @@ def validate_faq_links(faq_json: str) -> Dict:
     maincat_pimid_groups: Dict[str, Dict[str, str]] = {}
     maincat_plpurl_groups: Dict[str, Dict[str, str]] = {}
     url_to_lookup: Dict[str, Tuple[str, bool]] = {}  # url -> (lookup_value, is_v4)
+    unknown_format_links: List[str] = []
 
     unique_links = list(set(links))
 
@@ -605,6 +633,8 @@ def validate_faq_links(faq_json: str) -> Dict:
                 if maincat_id not in maincat_pimid_groups:
                     maincat_pimid_groups[maincat_id] = {}
                 maincat_pimid_groups[maincat_id][lookup_value] = link
+        else:
+            unknown_format_links.append(link)
 
     # Results dict
     lookup_to_plp_url: Dict[str, Optional[str]] = {}
@@ -635,7 +665,7 @@ def validate_faq_links(faq_json: str) -> Dict:
         except Exception as e:
             print(f"[FAQ_VALIDATOR] Error querying ES index {index} by plpUrl: {e} - skipping batch (not marking as gone)")
 
-    # Determine which links are gone
+    # Determine which links are gone vs. unknown-format vs. valid.
     gone_links = []
     valid_count = 0
     skipped_count = 0
@@ -652,15 +682,16 @@ def validate_faq_links(faq_json: str) -> Dict:
                 gone_links.append(link)
             else:
                 valid_count += 1
-        else:
-            # Could not extract pim_id - treat as gone
-            gone_links.append(link)
+        # Unknown-format links were already collected into unknown_format_links
+        # above; they are NOT counted as gone.
 
     return {
         'total_links': len(unique_links),
         'valid_links': valid_count,
         'gone_links': gone_links,
-        'has_gone_links': len(gone_links) > 0
+        'has_gone_links': len(gone_links) > 0,
+        'unknown_format_links': unknown_format_links,
+        'has_unknown_format_links': len(unknown_format_links) > 0,
     }
 
 
@@ -699,6 +730,61 @@ def validate_faq_batch(faqs: List[Tuple[str, str]]) -> Dict:
         'faqs_with_gone_products': len(urls_with_gone_products),
         'urls_with_gone_products': urls_with_gone_products
     }
+
+
+def mark_faq_failed_unknown_format(url_to_unknown: Dict[str, List[str]]) -> int:
+    """Mark FAQ URLs as failed because their content contains links the
+    validator could not parse (a new PLP URL format).
+
+    These URLs are NOT reset to pending — content is preserved so it can be
+    inspected and the validator's URL parser updated. The job row gets
+    `status='failed'` and `last_error='unknown_url_format: <sample>'` so the
+    failure surfaces in the dashboard and triggers a code update.
+
+    Args:
+        url_to_unknown: mapping of content URL to the list of unrecognized
+                        product URLs found in that content.
+
+    Returns:
+        Number of FAQ rows updated.
+    """
+    if not url_to_unknown:
+        return 0
+    from backend.url_catalog import get_url_id
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        updated = 0
+        for url, unknown_urls in url_to_unknown.items():
+            url_id = get_url_id(cur, url)
+            if url_id is None:
+                continue
+            sample = unknown_urls[0] if unknown_urls else ''
+            last_error = (
+                f"unknown_url_format: {len(unknown_urls)} link(s) not parseable "
+                f"by validator (e.g. {sample[:160]}). Update extract_from_url "
+                f"in link_validator.py and re-run validation."
+            )
+            cur.execute("""
+                UPDATE pa.faq_jobs
+                   SET status = 'failed',
+                       last_error = %s,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE url_id = %s
+            """, (last_error[:1000], url_id))
+            updated += 1
+        conn.commit()
+        print(f"[FAQ_VALIDATOR] Flagged {updated} FAQ URLs as failed (unknown URL format)")
+        return updated
+    except Exception as e:
+        print(f"[FAQ_VALIDATOR] Error flagging FAQ URLs as failed: {e}")
+        if conn:
+            conn.rollback()
+        return 0
+    finally:
+        if conn:
+            return_db_connection(conn)
 
 
 def reset_faq_to_pending(urls: List[str]) -> int:

@@ -51,11 +51,12 @@ LIMIT = 50
 TIMEOUT = 10
 
 # Tunables — adjust here if IT clears a different QPS or you want fresher data.
-# 30 QPS gets a 5k-keyword cold cache through in ~3 minutes. The prefetch is
-# parallelised across MAX_PREFETCH_WORKERS threads so we hit the rate cap
-# even when individual API calls are slow. The cap is enforced globally by
-# a token bucket — adding workers above the cap has no effect.
-SEARCH_QPS = 30.0
+# 20 QPS matches the process-global cap enforced by backend/beslist_rate_limit.py
+# for the FastAPI service. rurl_optimizer_v2 runs as a subprocess (no shared
+# in-memory bucket), so it mirrors the cap here. The prefetch is parallelised
+# across MAX_PREFETCH_WORKERS threads — adding workers above the cap has no
+# effect because the local _TokenBucket below paces all requests.
+SEARCH_QPS = 20.0
 MAX_PREFETCH_WORKERS = 20
 CACHE_TTL_DAYS = 7
 AND_MODE_TOTAL_THRESHOLD = 10000

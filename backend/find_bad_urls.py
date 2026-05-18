@@ -35,7 +35,7 @@ def check_url(url):
         main_category = segments[1]
         category = segments[2] if len(segments) > 2 else None
 
-        api_url = f"{API_BASE}?mainCategory={main_category}&countryLanguage=nl-nl&isBot=false&limit=1"
+        api_url = f"{API_BASE}?mainCategory={main_category}&countryLanguage=nl-nl&isBot=true&limit=1"
         if category and category != 'c':
             api_url += f"&category={category}"
 

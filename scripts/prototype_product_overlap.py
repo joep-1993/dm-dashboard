@@ -33,7 +33,7 @@ def fetch_products(category: str, query: Optional[str] = None,
     params = [
         ("category", category),
         ("countryLanguage", COUNTRY_LANG),
-        ("isBot", "false"),
+        ("isBot", "true"),
         ("limit", str(limit)),
     ]
     if query:

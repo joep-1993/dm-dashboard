@@ -39,11 +39,13 @@
 ```
 
 ### Core Workflow
-1. **Input**: URLs loaded from local PostgreSQL table (`pa.jvs_seo_werkvoorraad` in `seo_tools_db`)
+1. **Input**: URLs loaded from `pa.kopteksten_jobs` (status='pending'), joined to the URL catalog `pa.urls` for the actual URL string
 2. **Scraping**: Product Search API fetches product data (or web scraper with custom user agent)
 3. **AI Generation**: OpenAI generates SEO-optimized content (100 words)
-4. **Storage**: Content saved to local PostgreSQL (`pa.content_urls_joep`), tracking to `pa.jvs_seo_werkvoorraad_kopteksten_check`
-5. **Quality Control**: Link validation via Elasticsearch lookup (replaces HTTP checking)
+4. **Storage**: Content saved to `pa.kopteksten_content` (keyed on `url_id`), job state to `pa.kopteksten_jobs`
+5. **Quality Control**: Link validation via Elasticsearch lookup, results in `pa.kopteksten_link_validation`
+
+> **Schema note (2026-05-07)**: the per-tool URL-keyed tables (`pa.jvs_seo_werkvoorraad`, `pa.content_urls_joep`, `pa.faq_tracking`, etc.) were collapsed into a single `pa.urls` catalog plus per-tool `*_jobs` / `*_content` tables (FK on `url_id`). See [Database Architecture](#database-architecture) for the mapping and `cc1/LEARNINGS.md` ("Big Bang DB refactor") for the migration trail.
 
 ### Recent Fixes (2025-01-22)
 1. **Three-State URL Tracking**: Implemented kopteksten=0/1/2 system for better analytics and preventing infinite retry loops
@@ -462,36 +464,147 @@ docker exec seo_tools_db psql -U postgres -d seo_tools -c "SELECT ..."
 docker exec -it seo_tools_db psql -U postgres -d seo_tools
 ```
 
-### Table Allocation (all in `seo_tools_db`, schema `pa`)
+### Big Bang Refactor (2026-05-07) — single URL catalog
 
-**Work Queue & Content**:
-- `pa.jvs_seo_werkvoorraad` - URL work queue (~243K URLs), `kopteksten` flag (0=pending, 1=has content)
-- `pa.content_urls_joep` - Generated SEO content (~152K entries)
-- `pa.faq_content` - Generated FAQ content
-- `pa.unique_titles` - AI-generated titles (~1M entries)
+The SEO content tools used to each have their own URL-keyed tables. As of 2026-05-07 they share a single canonicalized URL catalog (`pa.urls`, ~980k rows) plus per-tool `*_jobs` / `*_content` tables that FK on `url_id` (BIGSERIAL). If you're debugging anything table-related, **start here** — see also `cc1/LEARNINGS.md` ("Big Bang DB refactor") for the full debugging guide.
 
-**Tracking**:
-- `pa.jvs_seo_werkvoorraad_kopteksten_check` - Processing status (success/skipped/failed/pending)
-- `pa.faq_tracking` - FAQ processing status
-- `pa.link_validation_results` - Link validation history
-- `pa.faq_validation_results` - FAQ link validation history
-- `pa.content_history` - Content backup before resets
+#### Old → new table mapping
 
-**Other**:
-- `thema_ads_jobs` / `thema_ads_job_items` / `thema_ads_input_data` - Google Ads job tracking
+| Old table (renamed to `*_old_2026_05_07`) | New table | Notes |
+|---|---|---|
+| `pa.jvs_seo_werkvoorraad` | gone — see `pa.urls` + per-tool `*_jobs` | Universe concept now lives in `pa.urls`; eligibility per tool = "row in pa.<tool>_jobs" |
+| `pa.jvs_seo_werkvoorraad_kopteksten_check` | `pa.kopteksten_jobs` | `(url_id, status, last_error, attempts, ...)` |
+| `pa.content_urls_joep` | `pa.kopteksten_content` | `(url_id, content, ...)` |
+| `pa.faq_tracking` | `pa.faq_jobs` | `(url_id, status, skip_reason, last_error, ...)` |
+| `pa.faq_content` | `pa.faq_content_v2` | `_v2` suffix temporary; rename in step 5. faq_json/schema_org are TEXT (legacy literal newlines break strict JSONB) |
+| `pa.unique_titles` (wide table) | `pa.unique_titles_jobs` + `pa.unique_titles_content` | URL-probe columns (status_code/final_url/checked_at) live on jobs as `http_status / final_url / last_checked_at`; `title_score` + `title_score_issue` on content |
+| `pa.url_validation_tracking` | `pa.url_validation` | `is_valid=FALSE` means "skipped" (no products found / unreachable) |
+| `pa.link_validation_results` | `pa.kopteksten_link_validation` | Same JSONB `broken_link_details`, now FK |
+| `pa.faq_validation_results` | `pa.faq_link_validation` | New per-tool table |
+| `pa.content_history` | UNCHANGED | Append-only audit log, still keyed on URL string |
+| `pa.publish_log` | UNCHANGED | No URL column |
+| `pa.jvs_seo_werkvoorraad_shopping_season` | UNCHANGED | Lives in Redshift, separate concern |
 
-### Pending URL Calculation (Kopteksten)
+#### Catalog and helpers
 
-The frontend's "pending" count uses this query:
 ```sql
-SELECT COUNT(*) FROM pa.jvs_seo_werkvoorraad w
-LEFT JOIN pa.jvs_seo_werkvoorraad_kopteksten_check t ON w.url = t.url
-WHERE t.url IS NULL
+-- Single source of truth, ~980k rows
+CREATE TABLE pa.urls (
+    url_id              BIGSERIAL PRIMARY KEY,
+    url                 TEXT NOT NULL UNIQUE,    -- already canonicalized
+    main_cat_name       TEXT,
+    deepest_subcat_name TEXT,
+    first_seen_at       TIMESTAMP NOT NULL DEFAULT now(),
+    last_seen_at        TIMESTAMP,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    notes               TEXT
+);
 ```
 
-**Pending = URLs in werkvoorraad that are NOT in the tracking table.**
+URLs are canonicalized at insert time using shared rules (strip protocol+host for Beslist, reject other hosts; strip query/fragment; trailing-slash rule by structure: `/c/` → no trailing slash, otherwise add one). Two implementations, both must agree:
+- **Python**: `backend/url_catalog.py::canonicalize_url(s)` — used by every write path. Plus `get_url_id(cur, url, *, create=True)` for single-URL lookup with auto-insert, and `bulk_upsert_urls(cur, urls)` for batch inserts (returns `{canonical_url: url_id}`).
+- **PL/pgSQL**: `pa.canonicalize_url(text)` — used in WHERE clauses (`WHERE u.url = pa.canonicalize_url(%s)` lookup pattern for endpoints that accept user-supplied URL variants).
 
-This means if ALL URLs end up in the tracking table (even with status='pending'), the frontend shows 0 pending. See LEARNINGS.md "Stuck Pending URLs" for the fix.
+#### Per-tool schema (typical shape)
+
+```sql
+CREATE TABLE pa.<tool>_jobs (
+    url_id     BIGINT PRIMARY KEY REFERENCES pa.urls(url_id) ON DELETE CASCADE,
+    status     TEXT NOT NULL,           -- 'pending' / 'success' / 'failed' / 'skipped'
+    last_error TEXT,
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    -- (FAQ adds skip_reason; unique_titles adds http_status/final_url/last_checked_at)
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE TABLE pa.<tool>_content (
+    url_id     BIGINT PRIMARY KEY REFERENCES pa.urls(url_id) ON DELETE CASCADE,
+    -- tool-specific columns (content / faq_json+schema_org / h1+title+description+...)
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE TABLE pa.url_validation (
+    url_id          BIGINT PRIMARY KEY REFERENCES pa.urls(url_id) ON DELETE CASCADE,
+    last_checked_at TIMESTAMP NOT NULL DEFAULT now(),
+    http_status     INTEGER,
+    is_valid        BOOLEAN,             -- FALSE = skipped/unreachable
+    reason          TEXT
+);
+```
+
+Indexes: status/skip_reason on jobs tables (frequent filter), `created_at DESC` and `updated_at DESC` on jobs + content (for "recent results" panels), `is_valid` on url_validation. Every URL FK is the PK — joins are PK→PK lookups, fast.
+
+#### Pending URL Calculation
+
+```sql
+-- Pending = "tool job is pending AND URL hasn't been validation-skipped"
+SELECT u.url
+FROM pa.kopteksten_jobs j
+JOIN pa.urls u ON j.url_id = u.url_id
+LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+WHERE j.status = 'pending'
+  AND (v.is_valid IS NULL OR v.is_valid = TRUE)
+LIMIT %s
+```
+
+The `LEFT JOIN url_validation … WHERE is_valid IS NULL OR is_valid = TRUE` filter is critical — without it the FAQ batch picks up URLs known to have no products. Same pattern used for `/api/status`, `/api/faq/status`, the batch worker's URL-fetch.
+
+**FAQ pending=0 quirk**: with this filter, FAQ commonly shows pending=0 even though `pa.faq_jobs` has many `status='pending'` rows. Reason: those URLs all have `is_valid=FALSE` rows from past `no_products_found` runs. This matches the OLD query's semantics (which excluded URLs in `url_validation_tracking`). Don't "fix" it.
+
+#### Eligibility-backfill subtlety
+
+The old `pa.jvs_seo_werkvoorraad` was the universe of URLs eligible for both Kopteksten AND FAQ. The new model requires explicit per-tool job rows. During step 2, every werkvoorraad URL not already in `pa.kopteksten_jobs` / `pa.faq_jobs` got a `status='pending'` row inserted — both job tables are exactly 390,022 rows after backfill (the canonical werkvoorraad universe preserved).
+
+Going forward:
+- `link_validator.add_urls_to_werkvoorraad(urls)` writes ONLY to `pa.kopteksten_jobs` (was previously the implicit shared eligibility marker via werkvoorraad).
+- If a URL should also be picked up by FAQ, the caller must explicitly insert into `pa.faq_jobs` too.
+
+#### Performance gotchas
+
+`ORDER BY ... DESC LIMIT N` queries that join to `pa.urls`: **always rewrite as subquery-LIMIT-then-JOIN**. Sort the smaller content/jobs table first, then PK-lookup against `pa.urls`. The naive plan does a parallel hash join + top-N heapsort over 980k rows. ~25× speedup on `/api/status`, `/api/faq/status`, `get_recent_results`, `/api/validation-history`.
+
+```sql
+-- Slow:  parallel hash join + sort over 980k rows
+SELECT u.url, c.content
+FROM pa.kopteksten_content c
+JOIN pa.urls u ON c.url_id = u.url_id
+ORDER BY c.created_at DESC LIMIT 5;
+
+-- Fast: sort 250k rows first, then 5 PK lookups
+SELECT u.url, c.content
+FROM (
+    SELECT url_id, content, created_at
+    FROM pa.kopteksten_content
+    ORDER BY created_at DESC LIMIT 5
+) c
+JOIN pa.urls u ON c.url_id = u.url_id;
+```
+
+Same lesson for cross-table COUNTs: `COUNT(*) FROM pa.urls LEFT JOIN both content tables WHERE content IS NOT NULL` was 5.9s; `COUNT(DISTINCT url_id) FROM (UNION ALL of two content tables)` is 0.5s. ~12× speedup on `/api/content-publish/stats`.
+
+After the migration always run `ANALYZE pa.<table>` on the new tables — without it the planner picks bad plans because it has no row-count statistics.
+
+#### Migration trail
+
+The full migration trail is in `dm-tools/migrations/2026-05-07-bigbang-step*.{sql,md}`:
+- `step1-create-new-tables.sql` — additive, zero-risk
+- `step2-backfill.sql` — UNION DISTINCT of all old URL columns into `pa.urls`, plus per-tool data backfill
+- `step3a-unique-titles.md` — Unique Titles code refactor
+- `step3a-fix-csv-imported-content.sql` — backfilled content for ~400k CSV-imported rows that had `ai_processed=FALSE` but content populated (legacy quirk)
+- `step3b-faq-kopteksten.md` — FAQ + Kopteksten + content_publisher (bundled because of the cross-tool join)
+- `step3c-perf-indexes.sql` — btree indexes on created_at/updated_at + ANALYZE
+- `step4-rename-old-tables.sql` — rename to `*_old_2026_05_07` (the forcing function)
+- step 5 (DROP TABLE) — not yet run, scheduled ~2026-05-14 after a one-week safety window
+
+Rollback: step 4's SQL has a commented reverse (rename `*_old_2026_05_07` back). New tables stay populated independently; no data is lost.
+
+### Other tables
+
+- `thema_ads_jobs` / `thema_ads_job_items` / `thema_ads_input_data` — Google Ads job tracking (untouched by Big Bang)
+- `pa.content_history` — content audit log (still URL-keyed; append-only)
+- `pa.publish_log` — environment / payload tracking for publishes
 
 ### Database Connection Strategy
 
@@ -502,109 +615,12 @@ def get_redshift_connection():    # Redshift (legacy, rarely used)
 def get_output_connection():      # Routes to Redshift or PostgreSQL based on USE_REDSHIFT_OUTPUT
 ```
 
-### Schema Design Decisions
-
-#### 1. Kopteksten URL Tracking
-**Pattern**: Flag-based tracking on werkvoorraad table
-```sql
-CREATE TABLE pa.jvs_seo_werkvoorraad (
-    id SERIAL PRIMARY KEY,
-    url TEXT NOT NULL UNIQUE,
-    kopteksten INTEGER DEFAULT 0,  -- 0=pending, 1=has content
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-**Rationale**:
-- **kopteksten = 0**: Not yet processed (pending)
-- **kopteksten = 1**: Successfully processed with content in `content_urls_joep`
-- **kopteksten = 2**: Processed but no usable content (skipped, failed non-503 errors)
-- **503 errors**: Kept at kopteksten=0 for retry, batch stops immediately
-- **Benefits**: Better analytics, can query problematic URLs, prevents re-processing empty pages
-
-**Implementation** (2025-10-22):
-- Success: `update_werkvoorraad_success` operation sets kopteksten=1
-- Processed without content: `update_werkvoorraad_processed` sets kopteksten=2
-- Rate limiting (503): No Redshift update, stays kopteksten=0
-
-#### 2. Status Tracking with Separate Table
-**Pattern**: Separate tracking table instead of status column
-```sql
-CREATE TABLE pa.jvs_seo_werkvoorraad_kopteksten_check (
-    url VARCHAR(500) PRIMARY KEY,
-    status VARCHAR(50) DEFAULT 'pending',  -- 'success', 'skipped', 'failed'
-    skip_reason VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-**Rationale**:
-- Work queue remains clean (minimal columns)
-- Tracking can be reset without affecting work queue
-- Allows multiple processing attempts with history
-
-#### 3. Link Validation with JSONB
-**Pattern**: Store validation details as JSONB for flexibility
-```sql
-CREATE TABLE pa.link_validation_results (
-    content_url TEXT NOT NULL,
-    broken_link_details JSONB,  -- Array of {url, status_code, status_text}
-    validated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-**Rationale**:
-- Variable number of broken links per URL
-- No need for separate broken_links table
-- Easy to query and display
-
 ### Database Maintenance Utilities
 
-#### Deduplication Strategy
-**Problem**: Bulk imports or interrupted processing can create duplicate content records
-
-**Solution**: `backend/deduplicate_content.py`
-```sql
-CREATE TEMP TABLE content_deduped AS
-SELECT url, content
-FROM (
-    SELECT url, content,
-           ROW_NUMBER() OVER (PARTITION BY url ORDER BY content) as rn
-    FROM pa.content_urls_joep
-)
-WHERE rn = 1;
-
-DELETE FROM pa.content_urls_joep;
-INSERT INTO pa.content_urls_joep (url, content)
-SELECT url, content FROM content_deduped;
-```
-
-**Results**: Removed 48,846 duplicates (108,722 → 59,876 unique URLs)
-
-#### Werkvoorraad Synchronization
-**Problem**: Content exists but werkvoorraad table not updated (URLs marked pending but have content)
-
-**Solution**: `backend/sync_werkvoorraad.py`
-```sql
-UPDATE pa.jvs_seo_werkvoorraad w
-SET kopteksten = 1
-FROM pa.content_urls_joep c
-WHERE w.url = c.url AND w.kopteksten = 0;
-```
-
-**Results**:
-- Initial sync: 17,672 URLs, 0 overlaps remaining
-- **2025-01-22 Fix**: Synced additional 20,560 URLs after discovering local tracking had 60,455 "success" entries but Redshift still showed `kopteksten=0`
-
-**Root Cause (2025-01-22)**:
-Local PostgreSQL tracking table marked URLs as "success", but Redshift `kopteksten` flag was never updated. This caused the API to filter out all fetched URLs, returning "No URLs to process" despite 55k pending URLs.
-
-**Use Cases**:
-- After bulk CSV imports
-- After manual content additions
-- After interrupted processing sessions
-- When content exists outside the work queue
-- **When local tracking and Redshift are out of sync**
+**After Big Bang** most legacy maintenance scripts are obsolete:
+- `backend/deduplicate_content.py` — no-op stub. New schema's `pa.kopteksten_content` is keyed on `url_id` (PK); duplicates are structurally impossible.
+- `backend/migrate_shared_validation.py` — no-op stub. Replaced by step 2's URL catalog.
+- `backend/sync_werkvoorraad.py` — still active, but for Redshift sync only. Local-side reads from `pa.kopteksten_content` and writes to `pa.kopteksten_jobs.status='success'`.
 
 ---
 
@@ -783,7 +799,7 @@ route add -p 65.9.0.0 mask 255.255.0.0 192.168.1.1 metric 1 if 10
 | `filters[{facet}][0]` | `filters[merk][0]=2829915` | Facet filters (URL encoded) |
 | `limit` | `76` | Max products to return |
 | `offset` | `0` | Pagination offset |
-| `isBot` | `false` | **REQUIRED** - API returns 400 without this |
+| `isBot` | `true` | **REQUIRED** - API returns 400 without this. Standardized to `true` across all callers to skip A/B experiments + personalisation for stable results. |
 | `countryLanguage` | `nl-nl` | **REQUIRED** - API returns 500 without this |
 
 #### Optional Parameters

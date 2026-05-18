@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from backend.category_lookup import lookup_category
+from backend.beslist_rate_limit import productsearch_bucket
 
 # User agent - Custom identifier for Beslist scraper
 USER_AGENT = "Beslist script voor SEO"
@@ -371,7 +372,7 @@ def build_api_params(main_category: str, category: Optional[str], filters: Dict[
         "sortDirection": "desc",
         "limit": 76,
         "offset": 0,
-        "isBot": "false",
+        "isBot": "true",
         "countryLanguage": "nl-nl",
         "experiment": "topProducts",
         "trackTotalHits": "false",
@@ -544,8 +545,8 @@ def scrape_product_page_api(url: str) -> Optional[Dict]:
             print(f"[API] Unknown main category: {main_category}")
             return None
 
-        # Minimal delay for API calls (internal API, less restrictive)
-        time.sleep(0.02 + random.uniform(0, 0.03))
+        # Throttle via the process-global productsearch bucket (20 QPS).
+        productsearch_bucket.acquire()
 
         # Make API request
         headers = {

@@ -1070,9 +1070,18 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
             content_url = validation_result['content_url']
             has_replaced = len(validation_result['replaced_urls']) > 0
             has_gone = len(validation_result['gone_urls']) > 0
+            unknown_format_urls = validation_result.get('unknown_format_urls', [])
 
-            # Calculate totals for tracking
-            total_links = len(validation_result['valid_urls']) + len(validation_result['replaced_urls']) + len(validation_result['gone_urls'])
+            # Calculate totals for tracking. Unknown-format URLs are surfaced
+            # in broken_link_details for visibility but NOT counted as broken
+            # or as reasons to delete content — a new PLP format should not
+            # trigger reset.
+            total_links = (
+                len(validation_result['valid_urls'])
+                + len(validation_result['replaced_urls'])
+                + len(validation_result['gone_urls'])
+                + len(unknown_format_urls)
+            )
 
             # Save validation results to local tracking table
             from backend.url_catalog import get_url_id
@@ -1095,7 +1104,8 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
                     len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),
                     json.dumps({
                         'gone_urls': validation_result['gone_urls'],
-                        'replaced_urls': validation_result['replaced_urls']
+                        'replaced_urls': validation_result['replaced_urls'],
+                        'unknown_format_urls': unknown_format_urls,
                     })
                 ))
 
@@ -1118,6 +1128,7 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
                 'valid_urls': len(validation_result['valid_urls']),
                 'replaced_urls': validation_result['replaced_urls'],
                 'gone_urls': validation_result['gone_urls'],
+                'unknown_format_urls': unknown_format_urls,
                 'content_corrected': has_replaced and not has_gone,
                 'moved_to_pending': has_gone
             })
@@ -1302,7 +1313,13 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                     content_url = validation_result['content_url']
                     has_replaced = len(validation_result['replaced_urls']) > 0
                     has_gone = len(validation_result['gone_urls']) > 0
-                    total_links = len(validation_result['valid_urls']) + len(validation_result['replaced_urls']) + len(validation_result['gone_urls'])
+                    unknown_format_urls = validation_result.get('unknown_format_urls', [])
+                    total_links = (
+                        len(validation_result['valid_urls'])
+                        + len(validation_result['replaced_urls'])
+                        + len(validation_result['gone_urls'])
+                        + len(unknown_format_urls)
+                    )
 
                     from backend.url_catalog import get_url_id
                     content_url_id = get_url_id(cur, content_url)
@@ -1321,7 +1338,11 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                             content_url_id, total_links,
                             len(validation_result['gone_urls']),
                             len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),
-                            json.dumps({'gone_urls': validation_result['gone_urls'], 'replaced_urls': validation_result['replaced_urls']})
+                            json.dumps({
+                                'gone_urls': validation_result['gone_urls'],
+                                'replaced_urls': validation_result['replaced_urls'],
+                                'unknown_format_urls': unknown_format_urls,
+                            })
                         ))
 
                     if has_replaced and not has_gone:
@@ -1777,7 +1798,7 @@ def get_kopteksten_batch_status():
     return get_batch_status("kopteksten")
 
 @app.post("/api/faq/process-urls")
-def process_faq_urls(batch_size: int = 10, parallel_workers: int = 3, num_faqs: int = 6):
+def process_faq_urls(batch_size: int = 10, parallel_workers: int = 1, num_faqs: int = 6):
     """
     Process batch of URLs for FAQ generation.
 
@@ -2078,7 +2099,9 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
         batch_size: Number of FAQs to validate per batch (default: 100)
         parallel_workers: Number of parallel workers (default: 3)
     """
-    from backend.link_validator import validate_faq_links, reset_faq_to_pending
+    from backend.link_validator import (
+        validate_faq_links, reset_faq_to_pending, mark_faq_failed_unknown_format,
+    )
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     try:
@@ -2110,6 +2133,7 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
 
         # Validate each FAQ and collect results
         all_urls_with_gone = []
+        url_to_unknown_format = {}
         total_links = 0
         total_valid = 0
         total_gone = 0
@@ -2124,7 +2148,9 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
                 'total_links': result['total_links'],
                 'valid_links': result['valid_links'],
                 'gone_links': result['gone_links'],
-                'has_gone': result['has_gone_links']
+                'has_gone': result['has_gone_links'],
+                'unknown_format_links': result.get('unknown_format_links', []),
+                'has_unknown_format': result.get('has_unknown_format_links', False),
             }
 
         # Process in parallel
@@ -2141,13 +2167,18 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
 
                 if result['has_gone']:
                     all_urls_with_gone.append(result['url'])
+                elif result['has_unknown_format']:
+                    # No real gone, but validator hit an unrecognized URL
+                    # format. Flag instead of reset so content is preserved
+                    # until extract_from_url is updated.
+                    url_to_unknown_format[result['url']] = result['unknown_format_links']
 
-        # Record validation results (for URLs that passed - no gone products)
+        # Record validation results (for URLs that passed - no gone, no unknown format)
         from backend.url_catalog import get_url_id
         conn = get_db_connection()
         cur = conn.cursor()
         for record in validation_records:
-            if not record['has_gone']:
+            if not record['has_gone'] and not record['has_unknown_format']:
                 uid = get_url_id(cur, record['url'])
                 if uid is not None:
                     cur.execute("""
@@ -2169,6 +2200,11 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
         if all_urls_with_gone:
             reset_count = reset_faq_to_pending(all_urls_with_gone)
 
+        # Flag FAQs whose only issue was an unrecognized URL format
+        unknown_format_count = 0
+        if url_to_unknown_format:
+            unknown_format_count = mark_faq_failed_unknown_format(url_to_unknown_format)
+
         return {
             "status": "success",
             "validated": len(rows),
@@ -2177,7 +2213,9 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
             "gone_links": total_gone,
             "faqs_with_gone_products": len(all_urls_with_gone),
             "reset_to_pending": reset_count,
-            "urls_reset": all_urls_with_gone[:20]  # Show first 20 for debugging
+            "faqs_with_unknown_format": unknown_format_count,
+            "urls_reset": all_urls_with_gone[:20],
+            "urls_flagged_unknown_format": list(url_to_unknown_format.keys())[:20],
         }
 
     except Exception as e:
@@ -2213,7 +2251,9 @@ def cancel_faq_validate_all(task_id: str):
 @app.post("/api/faq/validate-all-links")
 def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
     """Start background validation of ALL FAQ links. Returns task_id for polling."""
-    from backend.link_validator import validate_faq_links, reset_faq_to_pending
+    from backend.link_validator import (
+        validate_faq_links, reset_faq_to_pending, mark_faq_failed_unknown_format,
+    )
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     if parallel_workers < 1 or parallel_workers > 100:
@@ -2278,6 +2318,7 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
 
             # Validate each FAQ
             batch_urls_with_gone = []
+            batch_urls_unknown_format = {}
             validation_records = []
 
             def validate_single(row):
@@ -2289,7 +2330,9 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
                     'total_links': result['total_links'],
                     'valid_links': result['valid_links'],
                     'gone_links': result['gone_links'],
-                    'has_gone': result['has_gone_links']
+                    'has_gone': result['has_gone_links'],
+                    'unknown_format_links': result.get('unknown_format_links', []),
+                    'has_unknown_format': result.get('has_unknown_format_links', False),
                 }
 
             with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
@@ -2305,13 +2348,15 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
 
                     if result['has_gone']:
                         batch_urls_with_gone.append(result['url'])
+                    elif result['has_unknown_format']:
+                        batch_urls_unknown_format[result['url']] = result['unknown_format_links']
 
-            # Record validation results (for URLs that passed)
+            # Record validation results (for URLs that passed — no gone and no unknown format)
             from backend.url_catalog import get_url_id
             conn = get_db_connection()
             cur = conn.cursor()
             for record in validation_records:
-                if not record['has_gone']:
+                if not record['has_gone'] and not record['has_unknown_format']:
                     uid = get_url_id(cur, record['url'])
                     if uid is not None:
                         cur.execute("""
@@ -2328,13 +2373,17 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
             cur.close()
             return_db_connection(conn)
 
-            # Reset FAQs with gone products
+            # Reset FAQs with actual gone products
             if batch_urls_with_gone:
                 reset_count = reset_faq_to_pending(batch_urls_with_gone)
                 total_reset += reset_count
 
+            # Flag FAQs whose only issue was an unrecognized URL format
+            if batch_urls_unknown_format:
+                mark_faq_failed_unknown_format(batch_urls_unknown_format)
+
             total_validated += len(rows)
-            print(f"[FAQ-VALIDATE] Batch complete: {len(rows)} validated, {len(batch_urls_with_gone)} reset. Total: {total_validated}")
+            print(f"[FAQ-VALIDATE] Batch complete: {len(rows)} validated, {len(batch_urls_with_gone)} reset, {len(batch_urls_unknown_format)} flagged unknown_format. Total: {total_validated}")
             _set_validation_task(task_id, {"status": "running", "total_to_validate": total_to_validate, "validated": total_validated, "total_links_checked": total_links_checked, "gone_links": total_gone_links, "reset_to_pending": total_reset})
 
         _set_validation_task(task_id, {
@@ -3092,7 +3141,7 @@ def get_ai_titles_batch_status():
     return get_batch_status("titles")
 
 @app.post("/api/ai-titles/start")
-async def start_ai_titles_processing(batch_size: int = 100, num_workers: int = 50, use_api: bool = True):
+async def start_ai_titles_processing(batch_size: int = 100, num_workers: int = 20, use_api: bool = True):
     """Start AI title generation processing.
 
     Args:

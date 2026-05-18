@@ -255,7 +255,7 @@ async function processFaqUrls() {
     const btn = document.getElementById('processBtn');
     const resultDiv = document.getElementById('processResult');
     const batchSize = parseInt(document.getElementById('batchSizeInput').value) || 10;
-    const parallelWorkers = parseInt(document.getElementById('parallelWorkersInput').value) || 3;
+    const parallelWorkers = parseInt(document.getElementById('parallelWorkersInput').value) || 1;
     const numFaqs = parseInt(document.getElementById('numFaqsInput').value) || 5;
 
     if (batchSize < 1) {
@@ -341,7 +341,7 @@ async function processAllFaqUrls() {
     const progressPercent = document.getElementById('progressPercent');
     const resultDiv = document.getElementById('processResult');
     const batchSize = parseInt(document.getElementById('batchSizeInput').value) || 10;
-    const parallelWorkers = parseInt(document.getElementById('parallelWorkersInput').value) || 3;
+    const parallelWorkers = parseInt(document.getElementById('parallelWorkersInput').value) || 1;
     const numFaqs = parseInt(document.getElementById('numFaqsInput').value) || 5;
 
     // Disable buttons and show stop button

@@ -250,7 +250,7 @@ class DataLoader:
             url = (
                 f"{SEARCH_BASE_URL}/search/products"
                 f"?category={urllib.parse.quote(slug)}"
-                f"&countryLanguage={SEARCH_LOCALE}&isBot=false&limit=1"
+                f"&countryLanguage={SEARCH_LOCALE}&isBot=true&limit=1"
             )
             try:
                 data = _fetch_json(url)

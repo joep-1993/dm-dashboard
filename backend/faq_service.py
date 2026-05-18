@@ -17,6 +17,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from openai import OpenAI
 from backend.category_lookup import lookup_category
+from backend.beslist_rate_limit import productsearch_bucket
 
 # Configuration
 USER_AGENT = "Beslist script voor SEO"
@@ -216,7 +217,7 @@ def build_api_params(main_category: str, category: Optional[str], filters: Dict[
         "sortDirection": "desc",
         "limit": 76,
         "offset": 0,
-        "isBot": "false",
+        "isBot": "true",
         "countryLanguage": "nl-nl",
         "experiment": "topProducts",
         "trackTotalHits": "false",
@@ -435,8 +436,8 @@ def fetch_products_api(url: str, include_related: bool = True) -> Optional[Dict]
             print(f"[FAQ-API] Unknown main category: {main_category}")
             return {"error": "api_failed", "error_detail": f"unknown main category: {main_category}"}
 
-        # Removed artificial delay for faster processing
-        # (connection pooling and retry logic handle rate limiting)
+        # Throttle via the process-global productsearch bucket (20 QPS).
+        productsearch_bucket.acquire()
 
         # Make API request
         headers = {
