@@ -3347,7 +3347,8 @@ from backend.redirect_301_service import (
     generate_301_redirects,
     parse_facet_rules,
     parse_category_rules,
-    extract_patterns_from_rules
+    extract_patterns_from_rules,
+    extract_search_specs_from_rules,
 )
 
 
@@ -3382,20 +3383,20 @@ async def generate_301_urls(request: Redirect301Request):
         category_rules = parse_category_rules(request.category_rules) if request.category_rules else None
 
         if request.fetch_from_redshift:
-            # Extract patterns from rules to automatically filter Redshift query (if enabled)
-            rule_patterns = []
+            # Extract per-rule (pattern, category) specs so the Redshift query
+            # ANDs the Category filter alongside the facet pattern.
+            rule_specs = []
             if request.auto_filter:
-                rule_patterns = extract_patterns_from_rules(facet_rules, category_rules)
-                if rule_patterns:
-                    print(f"[301-GENERATOR] Auto-filter enabled: {len(rule_patterns)} unique patterns extracted")
+                rule_specs = extract_search_specs_from_rules(facet_rules, category_rules)
+                if rule_specs:
+                    print(f"[301-GENERATOR] Auto-filter enabled: {len(rule_specs)} unique specs extracted")
 
-            if rule_patterns:
-                # Use batched queries - one query per pattern (faster for many patterns)
+            if rule_specs:
                 url_data = fetch_urls_with_facets_batched(
-                    patterns=rule_patterns,
+                    specs=rule_specs,
                     start_date=request.start_date,
                     end_date=request.end_date,
-                    limit_per_pattern=request.limit // len(rule_patterns) if len(rule_patterns) > 1 else request.limit
+                    limit_per_pattern=request.limit // len(rule_specs) if len(rule_specs) > 1 else request.limit
                 )
             else:
                 # No patterns - use single query with optional contains filter

@@ -266,67 +266,91 @@ def fetch_urls_with_facets(
             return_redshift_connection(conn)
 
 
+def extract_search_specs_from_rules(
+    facet_rules: List[FacetRule] = None,
+    category_rules: List[CategoryRule] = None
+) -> List[Dict[str, Optional[str]]]:
+    """
+    Build per-rule {"pattern", "category"} search specs for the Redshift query.
+
+    Each spec becomes one SELECT; when `category` is set, the query ANDs a
+    second LIKE so a facet rule's Category filter acts as a hard scope (only
+    URLs matching pattern AND category are returned for that rule), not a
+    post-fetch no-op.
+    """
+    specs: List[Dict[str, Optional[str]]] = []
+    seen = set()
+
+    if facet_rules:
+        for rule in facet_rules:
+            if not rule.old_facet:
+                continue
+            pattern = rule.old_facet.split("~~")[0]
+            category = (rule.category or "").strip() or None
+            key = (pattern, category)
+            if key in seen:
+                continue
+            seen.add(key)
+            specs.append({"pattern": pattern, "category": category})
+
+    if category_rules:
+        for rule in category_rules:
+            if not rule.old_cat:
+                continue
+            old_cat = rule.old_cat.strip("/")
+            pattern = f"/{old_cat}/"
+            key = (pattern, None)
+            if key in seen:
+                continue
+            seen.add(key)
+            specs.append({"pattern": pattern, "category": None})
+
+    return specs
+
+
 def extract_patterns_from_rules(
     facet_rules: List[FacetRule] = None,
     category_rules: List[CategoryRule] = None
 ) -> List[str]:
     """
-    Extract SMART search patterns from rules for Redshift query.
-
-    Instead of using full facet strings (which could be 100+), this extracts
-    unique facet prefixes to minimize query complexity.
-
-    For example, from rules like:
-        - merk~83723~~model_lamp~23563209~~pl_lampen~6027486
-        - merk~83723~~model_lamp~23563210~~pl_lampen~6027486
-        - merk~484575~~pl_buitenband~9125091
-
-    It extracts unique first facets: ['merk~83723', 'merk~484575']
-
-    Returns list of unique patterns to search for.
+    Flat list of search pattern strings for UI feedback. For querying, prefer
+    `extract_search_specs_from_rules` which preserves per-rule category scope.
     """
-    patterns = set()  # Use set to deduplicate
-
-    if facet_rules:
-        for rule in facet_rules:
-            if rule.old_facet:
-                # Extract first facet from compound facets
-                # e.g., "merk~83723~~model_lamp~123" -> "merk~83723"
-                first_facet = rule.old_facet.split("~~")[0]
-                patterns.add(first_facet)
-
-    if category_rules:
-        for rule in category_rules:
-            if rule.old_cat:
-                # Normalize: ensure it has slashes for proper matching
-                old_cat = rule.old_cat.strip("/")
-                patterns.add(f"/{old_cat}/")
-
-    return list(patterns)
+    specs = extract_search_specs_from_rules(facet_rules, category_rules)
+    seen = set()
+    out = []
+    for s in specs:
+        label = s["pattern"] + (f" AND {s['category']}" if s.get("category") else "")
+        if label in seen:
+            continue
+        seen.add(label)
+        out.append(label)
+    return out
 
 
 def fetch_urls_with_facets_batched(
-    patterns: List[str],
+    specs: List[Dict[str, Optional[str]]],
     start_date: str = "20240101",
     end_date: str = "20261231",
     limit_per_pattern: int = 5000
 ) -> List[Dict]:
     """
-    Fetch URLs from Redshift by querying each pattern separately.
+    Fetch URLs from Redshift by running one SELECT per spec.
 
-    This is more efficient than combining many patterns with OR,
-    as each query is simple and fast.
+    Each spec is {"pattern": str, "category": Optional[str]}. When `category`
+    is set, an additional `dv.url LIKE %category%` is AND-ed in so a facet
+    rule's Category filter narrows the result set (not just rule scope).
 
     Args:
-        patterns: List of patterns to search for (one query per pattern)
+        specs: List of {pattern, category} dicts -- one query per spec
         start_date: Start date in YYYYMMDD format
         end_date: End date in YYYYMMDD format
-        limit_per_pattern: Max URLs per pattern query
+        limit_per_pattern: Max URLs per spec query
 
     Returns:
         Combined list of unique URLs with visits
     """
-    if not patterns:
+    if not specs:
         return []
 
     all_results = {}  # Use dict to deduplicate by URL, keeping highest visits
@@ -336,10 +360,14 @@ def fetch_urls_with_facets_batched(
         conn = get_redshift_connection()
         cur = conn.cursor()
 
-        for i, pattern in enumerate(patterns):
-            print(f"[301-GENERATOR] Querying pattern {i+1}/{len(patterns)}: {pattern}")
+        for i, spec in enumerate(specs):
+            pattern = spec["pattern"]
+            category = spec.get("category")
+            label = pattern + (f" AND {category}" if category else "")
+            print(f"[301-GENERATOR] Querying spec {i+1}/{len(specs)}: {label}")
 
-            query = """
+            category_clause = "                  AND dv.url LIKE %s\n" if category else ""
+            query = f"""
                 SELECT
                     SPLIT_PART(dv.url, '?', 1) as url,
                     COUNT(*) as visits
@@ -361,12 +389,15 @@ def fetch_urls_with_facets_batched(
                   AND dv.url NOT LIKE '%%/sitemap/%%'
                   AND dv.url NOT LIKE '%%/filters/%%'
                   AND dv.url LIKE %s
-                GROUP BY 1
+{category_clause}                GROUP BY 1
                 ORDER BY 2 DESC
                 LIMIT %s
             """
 
-            params = [int(start_date), int(end_date), f"%{pattern}%", limit_per_pattern]
+            params = [int(start_date), int(end_date), f"%{pattern}%"]
+            if category:
+                params.append(f"%{category}%")
+            params.append(limit_per_pattern)
             cur.execute(query, params)
             rows = cur.fetchall()
 
@@ -378,7 +409,7 @@ def fetch_urls_with_facets_batched(
                 if url not in all_results or all_results[url] < visits:
                     all_results[url] = visits
 
-            print(f"[301-GENERATOR]   Found {len(rows)} URLs for pattern '{pattern}'")
+            print(f"[301-GENERATOR]   Found {len(rows)} URLs for spec '{label}'")
 
         # Convert to list format
         results = [{"url": url, "visits": visits} for url, visits in all_results.items()]
@@ -413,6 +444,20 @@ def generate_301_redirects(
     Returns:
         List of dicts with 'original' and 'redirect' keys (only for URLs that need redirects)
     """
+    # Mirror the Redshift query's pattern AND category filter for the manual-URL
+    # path: when any facet rule has a Category filter set, restrict the working
+    # set to URLs that match at least one rule's (pattern AND category).
+    if not sort_only and facet_rules:
+        specs = extract_search_specs_from_rules(facet_rules=facet_rules, category_rules=None)
+        if any(s.get("category") for s in specs):
+            urls = [
+                u for u in urls
+                if any(
+                    s["pattern"] in u and (not s.get("category") or s["category"] in u)
+                    for s in specs
+                )
+            ]
+
     results = []
 
     for url in urls:
