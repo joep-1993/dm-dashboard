@@ -62,6 +62,13 @@ CACHE_TTL_DAYS = 7
 AND_MODE_TOTAL_THRESHOLD = 10000
 DOMINANCE_THRESHOLD = 0.60
 
+# V31: bump when _classify's output shape changes. Cached payloads with a
+# missing or older schema_version are ignored by _cache_get so the next run
+# re-fetches them with the new classifier. Previously, fallback-mode rows
+# stored only {"mode": "fallback", "total": N} and never produced a dom_cat,
+# which blocked the facet-probe pipeline for niche queries.
+SCHEMA_VERSION = 2
+
 _CACHE_DB_PATH = Path(__file__).parent.parent / "data" / "cache" / "search_derived.sqlite"
 _CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -129,17 +136,27 @@ def _classify(api_resp: Optional[dict]) -> dict:
     top-N products. Top-N sampling can mislead when the API ranks broader
     cats first (e.g. "senioren huistelefoon" returned 7/10 Mobiele telefoons
     in the sample but the true split is 139 Huistelefoons / 3 Mobiele).
+
+    V31: never short-circuit on `total >= AND_MODE_TOTAL_THRESHOLD`. The
+    search API switches to OR-fallback when AND-matching produces fewer
+    products than `limit`, and in that mode `total` becomes the whole-cat
+    OR count (millions). But the `categories[]` array still reports the
+    true AND-match counts per category, so we can recover a usable dom_cat
+    for niche queries like "hoesloze dekbedden" (17 AND-matches, 6.9M OR
+    total). Mode is reported as "fallback_with_dom_cat" when that recovery
+    path fires, so downstream callers can tell the two apart.
     """
     if api_resp is None:
-        return {"mode": "error", "total": None}
+        return {"schema_version": SCHEMA_VERSION, "mode": "error", "total": None}
     total = api_resp.get("total") or 0
     products = api_resp.get("products") or []
     if not products:
-        return {"mode": "empty", "total": total}
-    if total >= AND_MODE_TOTAL_THRESHOLD:
-        return {"mode": "fallback", "total": total}
+        return {"schema_version": SCHEMA_VERSION, "mode": "empty", "total": total}
 
-    out = {"mode": "and", "total": total}
+    is_fallback = total >= AND_MODE_TOTAL_THRESHOLD
+    out = {"schema_version": SCHEMA_VERSION,
+           "mode": "fallback" if is_fallback else "and",
+           "total": total}
 
     # V29: Capture surfaced facets[] so the facet_probe layer can read
     # value counts directly from this response without extra API calls.
@@ -218,7 +235,14 @@ def _cache_get(maincat_norm: str, keyword_norm: str) -> Optional[dict]:
         row = cur.fetchone()
         if not row or not _is_fresh(row[1]):
             return None
-        return json.loads(row[0])
+        payload = json.loads(row[0])
+        # V31: ignore entries written under an older classifier schema so
+        # the next run re-fetches them with the new logic (e.g. old rows
+        # cached `{mode: fallback, total: N}` with no dom_cat — those need
+        # re-classifying via categories[]).
+        if payload.get("schema_version") != SCHEMA_VERSION:
+            return None
+        return payload
     finally:
         conn.close()
 
@@ -238,7 +262,11 @@ def _cache_put(maincat_norm: str, keyword_norm: str, payload: dict) -> None:
 
 
 def _build_redirect_url(maincat: str, classified: dict) -> Optional[str]:
-    if classified.get("mode") != "and":
+    # V31: also build a redirect URL for fallback responses where the
+    # categories[] breakdown recovered a dominant cat. That's the niche-
+    # query case (e.g. "hoesloze dekbedden" — total reads 6.9M in OR-mode,
+    # but only 17 products genuinely match and they all sit in one cat).
+    if classified.get("mode") not in ("and", "fallback"):
         return None
     share = classified.get("dom_cat_share")
     slug = classified.get("dom_cat_url_slug")

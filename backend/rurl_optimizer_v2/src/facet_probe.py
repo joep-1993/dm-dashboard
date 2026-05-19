@@ -37,7 +37,12 @@ logger = logging.getLogger(__name__)
 # Tunables
 MIN_FACET_COVERAGE = 0.6       # winning value must cover this fraction of base T
 MIN_VALUE_PRODUCTS = 5          # skip facet values with fewer products subcat-wide
-MAX_CANDIDATES_PER_PAIR = 15    # hard cap on probes per pair → bounds API cost
+# V31: raised from 15 to 50. The candidates list is sorted by raw subcat-wide
+# count desc, but niche-specific facet values often sit deep in the tail
+# (e.g. "Zonder overtrek" ranks ~#32 of 190 in huis_tuin_505062_505149).
+# Early-stop below caps the cost when an obvious winner shows up early.
+MAX_CANDIDATES_PER_PAIR = 50
+EARLY_STOP_COVERAGE = 0.9       # stop probing once a value covers ≥ this
 
 # Facet names that aren't useful for routing — operational / commercial
 # attributes that don't help the user pick a category-narrowed page.
@@ -149,7 +154,16 @@ def _probe_one(category_slug: str, keyword: str, base_total: int,
         r.raise_for_status()
         data = r.json()
         c = data.get("total") or 0
-        return (c / base_total) if base_total else 0.0
+        cov = (c / base_total) if base_total else 0.0
+        # V31: when the AND-match for (keyword × filter) is small, the search
+        # API switches to OR-fallback and returns an inflated `total` (often
+        # millions). Coverage > 1.0 is impossible in a real AND-restricted
+        # subset, so treat that as the OR-fallback signal and reject the
+        # candidate. Without this, non-covering facets like materiaal=Katoen
+        # come back with bogus coverage like 1345.3 and beat the real winner.
+        if cov > 1.0:
+            return None
+        return cov
     except Exception as e:
         logger.debug(f"probe failed for {facet_name}={value_id}: {e}")
         return None
@@ -201,10 +215,14 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
     Returns the dict to cache. mode ∈ {match, match_from_response,
     no_match, no_candidates, no_probe, error}.
     """
-    if v28_payload.get("mode") != "and":
-        return {"mode": "no_probe", "reason": "v28_not_and"}
-    base_total = v28_payload.get("total") or 0
+    if v28_payload.get("mode") not in ("and", "fallback"):
+        return {"mode": "no_probe", "reason": "v28_not_and_or_fallback"}
     dom_slug = v28_payload.get("dom_cat_url_slug")
+    # V31: in fallback mode, `total` is the OR-mode whole-cat count (millions);
+    # the real AND-match count is `dom_cat_count`. In AND mode they're roughly
+    # equal for narrow queries, but `dom_cat_count` is the strictly correct
+    # base for facet-coverage math either way, since we filter within dom_cat.
+    base_total = v28_payload.get("dom_cat_count") or v28_payload.get("total") or 0
     if not dom_slug or base_total <= 0:
         return {"mode": "no_probe", "reason": "no_dom_cat"}
 
@@ -254,6 +272,11 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
                 row["facet_value_name"])
         if best is None or cand > best:
             best = cand
+        # V31: early-stop on a very confident match to keep the per-pair
+        # API cost low. Without this, raising MAX_CANDIDATES to 50 would
+        # be 3× slower for the easy cases too.
+        if cov >= EARLY_STOP_COVERAGE:
+            break
 
     if best is None:
         return {"mode": "no_match", "candidates_probed": n_probes,
@@ -306,7 +329,11 @@ def prefetch_facet_probes(pairs: Iterable[tuple[str, str]],
         if v28 is None:
             skipped_no_v28 += 1
             continue
-        if v28.get("mode") != "and" or not v28.get("dom_cat_url_slug"):
+        # V31: also probe `fallback` rows when V28 recovered a dom_cat from
+        # the categories[] breakdown. Without this, niche queries (where the
+        # search API switches to OR-fallback at limit=50) never trigger the
+        # facet-coverage path even though the dom_cat itself is reliable.
+        if v28.get("mode") not in ("and", "fallback") or not v28.get("dom_cat_url_slug"):
             skipped_no_dom += 1
             # Cache "no probe needed" so future runs skip it for free.
             _probe_put(mn, kn, {"mode": "no_probe"})

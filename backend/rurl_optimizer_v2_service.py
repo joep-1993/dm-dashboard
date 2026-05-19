@@ -567,6 +567,11 @@ def start_optimize(
         argv += ["-w", str(workers)]
     if multi_facet:
         argv.append("--multi-facet")
+    # V31: populate the facet-probe cache during the run so the engine's
+    # leftover-token consumer can append covering facets (e.g.
+    # "hoesloze dekbedden" → /c/eigenschap_beddengoed~23812125 "Zonder overtrek",
+    # which has no lexical bridge from the keyword).
+    argv.append("--enable-facet-probe")
 
     _set(task_id, {
         "status": "queued",

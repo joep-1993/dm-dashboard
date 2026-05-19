@@ -1174,11 +1174,85 @@ def process_url_v2(args):
                 + final_reason_extra
             )
             reject_reason = ''
-        elif reliability_score >= 70 and derived.get('mode') == 'and' and not derived.get('redirect_url'):
+        elif reliability_score >= 70 and derived.get('mode') in ('and', 'fallback') and not derived.get('redirect_url'):
             flag_for_review = (
                 f"[V28] Legacy score {reliability_score}, but search "
                 f"({derived.get('total')} products) shows no dominant deepest_cat"
             )
+
+        # V31: leftover-token facet append on high-score rows.
+        # The rescue path above only runs when the matcher failed (score<50).
+        # When the matcher succeeded but left some keyword tokens lexically
+        # unrepresented in the chosen target (e.g. "hoesloze" in
+        # "hoesloze_dekbedden" — no overlap with subcat "Dekbedden" or any
+        # local facet, no synonym bridge to facet value "Zonder overtrek"),
+        # the facet-probe coverage signal can still narrow the page.
+        # We compute leftover tokens locally — `unmatched_keywords` above
+        # is unreliable here because the matched_keywords logic marks every
+        # token as matched whenever match_type is in TRUSTED_MATCH_TYPES
+        # (including subcategory_name), even when the keyword token has
+        # zero lexical or semantic representation in the target.
+        local_leftover_tokens = []
+        if has_matchable and reliability_score >= 50 and final_redirect_url:
+            target_text = ' '.join(filter(None, [
+                redirect_cat_name or '',
+                r.facet_value_names or '',
+                final_redirect_url or '',
+            ])).lower()
+            for w in keyword_words:
+                if w in STOPWORDS or w in SHOP_NAMES:
+                    continue
+                # match if literal substring OR stem-stripped match
+                stem = w.rstrip('e').rstrip('s')
+                if w in target_text or (stem and stem in target_text):
+                    continue
+                local_leftover_tokens.append(w)
+
+        if (
+            reliability_score >= 50
+            and final_redirect_url
+            and local_leftover_tokens
+            and derived.get('dom_cat_url_slug')
+            and final_match_type not in (
+                'search_derived_subcat',
+                'search_derived_subcat_with_facet',
+            )
+        ):
+            base_path = final_redirect_url.split('/c/', 1)[0].rstrip('/')
+            matcher_subcat = base_path.rsplit('/', 1)[-1]
+            if matcher_subcat == derived['dom_cat_url_slug']:
+                probe = derive_search_facet(parsed.main_category, parsed.keyword)
+                if probe and probe.get('mode') in ('match', 'match_from_response'):
+                    pf_name = probe.get('facet_name')
+                    pf_vid = probe.get('value_id')
+                    pf_value_name = probe.get('value_name', '')
+                    pf_cov = probe.get('coverage', 0)
+                    fragment = f"{pf_name}~{pf_vid}"
+                    existing_facet_part = ''
+                    if '/c/' in final_redirect_url:
+                        existing_facet_part = (
+                            final_redirect_url.split('/c/', 1)[1].rstrip('/')
+                        )
+                    existing_names = {
+                        p.split('~', 1)[0]
+                        for p in (existing_facet_part or '').split('~~')
+                        if '~' in p
+                    }
+                    if pf_name and pf_name not in existing_names:
+                        if existing_facet_part:
+                            final_redirect_url = (
+                                f"{base_path}/c/{existing_facet_part}~~{fragment}"
+                            )
+                        else:
+                            final_redirect_url = f"{base_path}/c/{fragment}"
+                        final_match_type = f"{final_match_type}_with_probe_facet"
+                        final_reason = (
+                            (final_reason or '')
+                            + f"; [V31] appended {pf_name}~{pf_vid} "
+                            + f"({pf_value_name!r}, coverage {int(100*pf_cov)}%) "
+                            + f"for leftover token(s): "
+                            + ", ".join(local_leftover_tokens)
+                        )
 
     # Maincat-path sanity check. A correct redirect path looks like
     # /products/{maincat}/{subcat}[/c/...] where {subcat} starts with
