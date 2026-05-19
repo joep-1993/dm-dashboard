@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirect Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .stat-box { text-align: center; padding: 12px; border-radius: 8px; background: #f8f9fa; border: 1px solid #e9ecef; }
+        .stat-box .num { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+        .stat-box .label { font-size: 0.75rem; text-transform: uppercase; color: #6c757d; margin-top: 4px; }
+        .stat-box.accent { background: #fff3cd; border-color: #ffeeba; }
+        .stat-box.success { background: #d1e7dd; border-color: #badbcc; }
+        .stat-box.danger { background: #f8d7da; border-color: #f5c2c7; }
+
+        .url-cell { font-family: monospace; font-size: 0.8rem; word-break: break-all; max-width: 380px; }
+        .flatten-cell { background-color: #fff3cd !important; }
+        .skip-cell { background-color: #f8d7da !important; }
+
+        .preview-table thead th { background: #f1f3f5; font-size: 0.8rem; }
+        .preview-table td { font-size: 0.82rem; vertical-align: middle; padding: 6px 10px; }
+
+        .runs-table thead th { background: #f1f3f5; font-size: 0.8rem; }
+        .runs-table td { font-size: 0.85rem; vertical-align: middle; }
+        .runs-table .actions { white-space: nowrap; }
+
+        .check-result { background: #f8f9fa; padding: 12px 16px; border-radius: 6px; border-left: 4px solid #0d6efd; margin-top: 12px; }
+        .check-result.empty { border-left-color: #6c757d; }
+        .check-result.is-homepage { border-left-color: #dc3545; }
+        .check-result .pair { font-family: monospace; font-size: 0.85rem; }
+
+        .history-row { font-size: 0.85rem; }
+        .btn-purple-outline { border: 1px solid #5e4a90; color: #5e4a90; background: transparent; }
+        .btn-purple-outline:hover { background: #5e4a90; color: #fff; }
+        .btn-red-outline { border: 1px solid #d63031; color: #d63031; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; }
+        .btn-red-outline:hover { background: #d63031; color: #fff; }
+        .btn-purple-action { border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; }
+        .btn-purple-action:hover { background: #5e4a90; color: #fff; }
+
+        .small-muted { font-size: 0.8rem; color: #6c757d; }
+        .badge-flatten { background-color: #ffc107; color: #000; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Redirect Tool</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">Redirects</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rurl-optimizer.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Auto-Redirects</a>
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirect Generator</a>
+                        <a href="/static/redirect-tool.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 17V7a2 2 0 0 1 2-2h9"/><path d="M15 2l4 3-4 3"/><path d="M20 7v10a2 2 0 0 1-2 2H9"/><path d="M9 22l-4-3 4-3"/></svg> Redirect Tool</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/dma-plus.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="10"/></svg> DMA+</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C9.5 4 6 7.5 6 12s3.5 8 7.8 8c2 0 3.8-.8 5.2-2"/></svg> GSD Budgets</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/gsd-check.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> GSD Check</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                        <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 mb-5">
+        <div class="row">
+            <div class="col-lg-11 mx-auto">
+
+                <!-- ============================================================ -->
+                <!-- CREATE REDIRECTS                                              -->
+                <!-- ============================================================ -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5 class="mb-0" style="white-space: nowrap;">Create redirects
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px; margin-left: 4px;">
+                                <title>Expected columns: old, new, statuscode, country, label</title>
+                                <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
+                                <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                                <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                            </svg>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label">Input source</label>
+                                <div>
+                                    <div class="form-check form-check-inline">
+                                        <input type="radio" class="form-check-input" name="srcMethod" id="srcUpload" value="upload" checked>
+                                        <label for="srcUpload" class="form-check-label">File upload</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input type="radio" class="form-check-input" name="srcMethod" id="srcManual" value="manual">
+                                        <label for="srcManual" class="form-check-label">Manual input</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6" id="paneFile">
+                                <label for="fileInput" class="form-label">Input file</label>
+                                <input type="file" class="form-control" id="fileInput" accept=".csv,.tsv,.xlsx,.xls,.txt">
+                            </div>
+                            <div class="col-12 d-none" id="paneText">
+                                <label for="textInput" class="form-label">Manual input</label>
+                                <textarea id="textInput" class="form-control" rows="6"
+                                    placeholder="old, new, statuscode, country, label"
+                                    style="font-family: monospace; font-size: 0.85rem;"></textarea>
+                            </div>
+                            <div class="col-12 d-flex align-items-center">
+                                <span id="parseStatus" class="small-muted me-auto"></span>
+                                <button class="btn btn-primary" id="btnPreview">Upload</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Preview -->
+                <div id="previewCard" class="card mb-3" style="display:none;">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Preview</h5>
+                        <button class="btn btn-sm btn-outline-secondary" id="btnClearPreview">Clear</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-2 mb-3">
+                            <div class="col"><div class="stat-box"><div class="num" id="statTotal">0</div><div class="label">Total rows</div></div></div>
+                            <div class="col"><div class="stat-box accent"><div class="num" id="statFlattened">0</div><div class="label">"new" rewritten (already in DB)</div></div></div>
+                            <div class="col"><div class="stat-box danger"><div class="num" id="statSkipped">0</div><div class="label">Skipped</div></div></div>
+                            <div class="col"><div class="stat-box success"><div class="num" id="statSubmittable">0</div><div class="label">Ready to submit</div></div></div>
+                        </div>
+
+                        <div class="table-responsive" style="max-height: 480px; overflow-y:auto;">
+                            <table class="table table-sm preview-table">
+                                <thead class="sticky-top">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>From</th>
+                                        <th>To (after flatten)</th>
+                                        <th>Country</th>
+                                        <th>Code</th>
+                                        <th>Label</th>
+                                        <th>Note</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="previewBody"></tbody>
+                            </table>
+                        </div>
+
+                        <div class="row g-2 align-items-end mt-3">
+                            <div class="col-md-6">
+                                <label class="form-label small-muted mb-1">Run label (optional, shown in Recent results)</label>
+                                <input type="text" id="runLabel" class="form-control" placeholder="e.g. migration-batch-2026-05">
+                            </div>
+                            <div class="col-md-6 d-flex justify-content-end">
+                                <button class="btn btn-success" id="btnSubmit">
+                                    <span id="submitLabel">Submit to redirect.api.beslist.nl</span>
+                                    <span id="submitSpinner" class="spinner-border spinner-border-sm ms-2" style="display:none;"></span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="submitResult" class="mt-3"></div>
+                    </div>
+                </div>
+
+                <!-- ============================================================ -->
+                <!-- CHECK SINGLE URL                                              -->
+                <!-- ============================================================ -->
+                <div class="card mb-3">
+                    <div class="card-header"><h5 class="mb-0">Check redirect</h5></div>
+                    <div class="card-body">
+                        <div class="row g-2 align-items-end">
+                            <div class="col">
+                                <label class="form-label small-muted mb-1">URL (full URL or path)</label>
+                                <input type="text" id="checkUrlInput" class="form-control" placeholder="https://www.beslist.nl/products/r/...">
+                            </div>
+                            <div class="col-auto d-flex align-items-end ms-auto">
+                                <button class="btn btn-primary" id="btnCheck">Check</button>
+                            </div>
+                        </div>
+                        <div id="checkResult"></div>
+                    </div>
+                </div>
+
+                <!-- ============================================================ -->
+                <!-- RECENT RESULTS                                                -->
+                <!-- ============================================================ -->
+                <div class="card mb-3" id="runsCard">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Recent results</h5>
+                        <button class="btn btn-sm btn-purple-outline" id="btnRefreshRuns">Refresh</button>
+                    </div>
+                    <div class="card-body p-0">
+                        <table class="table mb-0" id="runsTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="padding: 8px 12px;">When</th>
+                                    <th style="padding: 8px 12px;">Label</th>
+                                    <th style="padding: 8px 12px;">Source</th>
+                                    <th style="padding: 8px 12px; text-align: end;">Total</th>
+                                    <th style="padding: 8px 12px; text-align: end;">Flattened</th>
+                                    <th style="padding: 8px 12px; text-align: end;">Skipped</th>
+                                    <th style="padding: 8px 12px; text-align: end;">Success</th>
+                                    <th style="padding: 8px 12px; text-align: end;">Failed</th>
+                                    <th style="padding: 8px 12px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="runsBody"><tr><td colspan="9" class="text-muted text-center p-3">No runs yet</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="runDetail"></div>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API = '/api/redirect-tool';
+        let parsedRows = [];
+        let preflight = null;
+
+        // ---------------------- Input method toggle (radio) ----------------------
+        const cbManual = document.getElementById('srcManual');
+        function applyInputMode() {
+            const manual = cbManual.checked;
+            document.getElementById('paneFile').classList.toggle('d-none', manual);
+            document.getElementById('paneText').classList.toggle('d-none', !manual);
+        }
+        document.querySelectorAll('input[name="srcMethod"]').forEach(el =>
+            el.addEventListener('change', applyInputMode));
+
+        // ---------------------- Parse + preview ----------------------
+        async function parseInput() {
+            const paste = cbManual.checked;
+            if (!paste) {
+                const f = document.getElementById('fileInput').files[0];
+                if (!f) throw new Error('Please choose a file');
+                const fd = new FormData();
+                fd.append('file', f);
+                const r = await fetch(`${API}/parse-file`, { method: 'POST', body: fd });
+                if (!r.ok) throw new Error((await r.json()).detail || 'Parse failed');
+                return await r.json();
+            } else {
+                const text = document.getElementById('textInput').value;
+                if (!text.trim()) throw new Error('Paste some rows first');
+                const r = await fetch(`${API}/parse-text`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text }),
+                });
+                if (!r.ok) throw new Error((await r.json()).detail || 'Parse failed');
+                return await r.json();
+            }
+        }
+
+        async function runPreview() {
+            const status = document.getElementById('parseStatus');
+            const btn = document.getElementById('btnPreview');
+            btn.disabled = true;
+            status.textContent = 'Parsing input…';
+            try {
+                const parsed = await parseInput();
+                parsedRows = parsed.rows;
+                if (!parsedRows.length) throw new Error('No usable rows found');
+                status.textContent = `Parsed ${parsedRows.length} row(s). Running preflight against redirect.api.beslist.nl…`;
+                const r = await fetch(`${API}/preview`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rows: parsedRows }),
+                });
+                if (!r.ok) throw new Error((await r.json()).detail || 'Preview failed');
+                preflight = await r.json();
+                renderPreview(preflight);
+                status.textContent = `Preflight done — ${preflight.stats.submittable} of ${preflight.stats.total} ready to submit.`;
+            } catch (e) {
+                status.textContent = '';
+                alert(e.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function renderPreview(p) {
+            document.getElementById('previewCard').style.display = '';
+            document.getElementById('statTotal').textContent = p.stats.total;
+            document.getElementById('statFlattened').textContent = p.stats.flattened;
+            document.getElementById('statSkipped').textContent = p.stats.total - p.stats.submittable;
+            document.getElementById('statSubmittable').textContent = p.stats.submittable;
+
+            const body = document.getElementById('previewBody');
+            body.innerHTML = '';
+            p.processed.forEach((row, i) => {
+                const tr = document.createElement('tr');
+                const cellClass = row.skip_reason ? 'skip-cell' : (row.flatten_from ? 'flatten-cell' : '');
+                const flattenBadge = row.flatten_from
+                    ? `<br><span class="badge badge-flatten">flattened from <code>${escapeHtml(row.flatten_from)}</code></span>`
+                    : '';
+                const note = row.skip_reason
+                    ? `<span class="text-danger">${escapeHtml(row.skip_reason)}</span>`
+                    : (row.flatten_from ? '<span class="text-warning">Chain flattened</span>' : '');
+                tr.innerHTML = `
+                    <td>${i + 1}</td>
+                    <td class="url-cell ${cellClass}">${escapeHtml(row.input_old || '')}</td>
+                    <td class="url-cell ${cellClass}">${escapeHtml(row.final_new || row.input_new || '')}${flattenBadge}</td>
+                    <td>${escapeHtml(row.country || '')}</td>
+                    <td>${escapeHtml(String(row.statusCode || ''))}</td>
+                    <td>${escapeHtml(row.label || '')}</td>
+                    <td>${note}</td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        // ---------------------- Submit ----------------------
+        async function submitRun() {
+            if (!preflight) return;
+            const btn = document.getElementById('btnSubmit');
+            const lbl = document.getElementById('submitLabel');
+            const spin = document.getElementById('submitSpinner');
+            btn.disabled = true;
+            lbl.textContent = 'Submitting…';
+            spin.style.display = '';
+            try {
+                const payload = {
+                    processed: preflight.processed,
+                    label: document.getElementById('runLabel').value.trim(),
+                    input_method: cbManual.checked ? 'text' : 'file',
+                };
+                const r = await fetch(`${API}/submit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
+                const result = await r.json();
+                renderSubmitResult(result);
+                loadRuns();
+            } catch (e) {
+                alert(e.message);
+            } finally {
+                btn.disabled = false;
+                lbl.textContent = 'Submit to redirect.api.beslist.nl';
+                spin.style.display = 'none';
+            }
+        }
+
+        function renderSubmitResult(result) {
+            const ok = result.success;
+            const fail = result.failed;
+            const stats = result.stats || {};
+            const skipped = (stats.total || 0) - (stats.submittable || 0);
+            const html = `
+                <div class="alert alert-${fail > 0 ? 'warning' : 'success'} mb-0">
+                    <strong>Run #${result.run_id} saved.</strong>
+                    ${ok} succeeded, ${fail} failed, ${skipped} skipped, ${stats.flattened || 0} flattened.
+                    See <a href="#runsCard">Recent results</a> below.
+                </div>`;
+            document.getElementById('submitResult').innerHTML = html;
+        }
+
+        // ---------------------- Individual URL check ----------------------
+        async function checkSingleUrl() {
+            const url = document.getElementById('checkUrlInput').value.trim();
+            const out = document.getElementById('checkResult');
+            if (!url) { out.innerHTML = ''; return; }
+            out.innerHTML = '<div class="check-result"><em>Checking…</em></div>';
+            try {
+                const r = await fetch(`${API}/check-url?url=${encodeURIComponent(url)}`);
+                if (!r.ok) throw new Error((await r.json()).detail || 'Check failed');
+                const data = await r.json();
+                renderCheckResult(data);
+            } catch (e) {
+                out.innerHTML = `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function renderCheckResult(d) {
+            const out = document.getElementById('checkResult');
+            const homepageWarn = d.is_homepage
+                ? `<div class="alert alert-danger mb-2"><strong>This is the homepage.</strong> The Redirect Tool will never accept this as a source URL.</div>`
+                : '';
+            let outgoing = '';
+            if (d.outgoing) {
+                outgoing = `<div class="check-result">
+                    <strong>Outgoing redirect found:</strong><br>
+                    <span class="pair">${escapeHtml(d.normalized_path)} → ${escapeHtml(d.outgoing.url)}</span>
+                    <span class="badge bg-secondary ms-2">${d.outgoing.statusCode}</span>
+                    ${d.outgoing.matched_variant && d.outgoing.matched_variant !== d.normalized_path
+                        ? `<br><span class="small-muted">Matched via variant: <code>${escapeHtml(d.outgoing.matched_variant)}</code></span>`
+                        : ''}
+                </div>`;
+            } else {
+                outgoing = `<div class="check-result empty"><strong>No outgoing redirect.</strong> This URL is not a <code>fromUrl</code> in the database (checked ${d.variants_checked.length} variant(s)).</div>`;
+            }
+
+            let incoming = '';
+            if (d.incoming_count > 0) {
+                const rows = d.incoming.map(r =>
+                    `<tr><td class="url-cell">${escapeHtml(r.fromUrl)}</td><td class="text-center">${r.statusCode}</td><td>${escapeHtml(r.country || '')}</td><td>${r.id}</td></tr>`).join('');
+                incoming = `<div class="check-result">
+                    <strong>${d.incoming_count} URL(s) point at this URL (incoming):</strong>
+                    <table class="table table-sm mt-2 mb-0">
+                        <thead><tr><th>From</th><th class="text-center">Code</th><th>Country</th><th>ID</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                    <div class="small-muted mt-2">Heads up: because of the redirect API's unique-URL constraint, this URL cannot be added as a <code>fromUrl</code> in a new redirect until these rows are removed or rewritten.</div>
+                </div>`;
+            } else {
+                incoming = `<div class="check-result empty">No URLs point at this one.</div>`;
+            }
+            out.innerHTML = homepageWarn + outgoing + incoming;
+        }
+
+        // ---------------------- Recent runs ----------------------
+        async function loadRuns() {
+            const body = document.getElementById('runsBody');
+            body.innerHTML = '<tr><td colspan="9" class="text-center text-muted p-3">Loading…</td></tr>';
+            try {
+                const r = await fetch(`${API}/runs`);
+                const data = await r.json();
+                if (!data.runs.length) {
+                    body.innerHTML = '<tr><td colspan="9" class="text-center text-muted p-3">No runs yet.</td></tr>';
+                    return;
+                }
+                body.innerHTML = '';
+                data.runs.forEach(run => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'history-row';
+                    const when = new Date(run.created_at).toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' });
+                    tr.innerHTML = `
+                        <td style="padding: 6px 12px;">${escapeHtml(when)}</td>
+                        <td style="padding: 6px 12px;">${escapeHtml(run.label || '')}</td>
+                        <td style="padding: 6px 12px;"><span class="badge bg-secondary">${escapeHtml(run.input_method)}</span></td>
+                        <td style="padding: 6px 12px; text-align: end;">${run.total_rows}</td>
+                        <td style="padding: 6px 12px; text-align: end;">${run.flattened}</td>
+                        <td style="padding: 6px 12px; text-align: end;">${run.skipped_home}</td>
+                        <td style="padding: 6px 12px; text-align: end; color: #198754;">${run.success}</td>
+                        <td style="padding: 6px 12px; text-align: end; ${run.failed > 0 ? 'color: #dc3545;' : ''}">${run.failed}</td>
+                        <td style="padding: 6px 12px;">
+                            <div style="display: inline-flex; gap: 4px; align-items: center;">
+                                <button class="btn btn-sm btn-purple-action" onclick="viewRun(${run.id})">View</button>
+                                <a class="btn btn-sm btn-purple-action" href="${API}/runs/${run.id}/export">Export</a>
+                                <button class="btn btn-sm btn-red-outline" onclick="deleteRun(${run.id})">Delete</button>
+                            </div>
+                        </td>`;
+                    body.appendChild(tr);
+                });
+            } catch (e) {
+                body.innerHTML = `<tr><td colspan="9" class="text-danger p-3">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
+            }
+        }
+
+        async function viewRun(id) {
+            const out = document.getElementById('runDetail');
+            out.innerHTML = '<div class="text-muted">Loading…</div>';
+            try {
+                const r = await fetch(`${API}/runs/${id}`);
+                const run = await r.json();
+                const rows = (run.results || []).map(r => {
+                    const api = r.api_response || {};
+                    const msg = api.message || api.error || '';
+                    const cls = r.status === 'ok' ? 'table-success' : (r.status === 'fail' ? 'table-danger' : 'table-warning');
+                    return `<tr class="${cls}">
+                        <td>${escapeHtml(r.status)}</td>
+                        <td class="url-cell">${escapeHtml(r.input_old || '')}</td>
+                        <td class="url-cell">${escapeHtml(r.final_new || '')}${r.flatten_from ? `<br><span class="small-muted">was: ${escapeHtml(r.flatten_from)}</span>` : ''}</td>
+                        <td>${escapeHtml(r.country || '')}</td>
+                        <td>${escapeHtml(String(r.statusCode || ''))}</td>
+                        <td class="small-muted">${escapeHtml(r.skip_reason || msg)}</td>
+                    </tr>`;
+                }).join('');
+                out.innerHTML = `
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <strong>Run #${run.id}${run.label ? ' — ' + escapeHtml(run.label) : ''}</strong>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('runDetail').innerHTML=''">Close</button>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead><tr><th>Status</th><th>From</th><th>To</th><th>Country</th><th>Code</th><th>Note</th></tr></thead>
+                                    <tbody>${rows}</tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>`;
+            } catch (e) {
+                out.innerHTML = `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        async function deleteRun(id) {
+            if (!confirm(`Delete run #${id}? This only removes it from the Recent results table — the redirects themselves stay in the API.`)) return;
+            const r = await fetch(`${API}/runs/${id}`, { method: 'DELETE' });
+            if (!r.ok) { alert('Delete failed'); return; }
+            loadRuns();
+            document.getElementById('runDetail').innerHTML = '';
+        }
+
+        // ---------------------- Helpers ----------------------
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // ---------------------- Bindings + tooltip init ----------------------
+        document.getElementById('btnPreview').addEventListener('click', runPreview);
+        document.getElementById('btnSubmit').addEventListener('click', submitRun);
+        document.getElementById('btnClearPreview').addEventListener('click', () => {
+            preflight = null; parsedRows = [];
+            document.getElementById('previewCard').style.display = 'none';
+            document.getElementById('submitResult').innerHTML = '';
+            document.getElementById('parseStatus').textContent = '';
+        });
+        document.getElementById('btnCheck').addEventListener('click', checkSingleUrl);
+        document.getElementById('checkUrlInput').addEventListener('keypress', e => { if (e.key === 'Enter') checkSingleUrl(); });
+        document.getElementById('btnRefreshRuns').addEventListener('click', loadRuns);
+
+        loadRuns();
+    </script>
+</body>
+</html>
