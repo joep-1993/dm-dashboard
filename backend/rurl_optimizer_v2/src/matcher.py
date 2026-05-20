@@ -187,17 +187,30 @@ class KeywordMatcher:
             facet_values = [fv for fv in facet_values if fv.facet_name.lower() not in STRICT_FACETS]
 
         # Build lookup dict: normalized_name -> FacetValue
+        # V31: When the same facet value name occurs across multiple subcats
+        # (e.g. brand "Ferrero Rocher" present in Brood, Chocolade, Bonbons,
+        # Snoep, Broodbeleg under Eten & drinken) the previous last-wins
+        # dict-comprehension dedup silently dropped all but one — by
+        # iteration order, ignoring product count entirely. That sent the
+        # /r/ferrero_rocher/ R-URL to Brood (4 products) instead of Bonbons
+        # (11) or Chocolade (10). Keep the highest-count instance so
+        # downstream tie-break has the most useful pool to work with.
         facet_lookup = {}
         # V23.2: Also build measurement-normalized lookup for O(1) matching
         facet_lookup_measurement = {}
         for fv in facet_values:
             normalized = self._normalize(fv.facet_value_name)
-            facet_lookup[normalized] = fv
+            fv_count = getattr(fv, "count", 0) or 0
+            existing = facet_lookup.get(normalized)
+            if existing is None or fv_count > (getattr(existing, "count", 0) or 0):
+                facet_lookup[normalized] = fv
             # V23.2: Pre-compute measurement-normalized version
             if re.search(r'\d', normalized):
                 measurement_normalized = self._normalize_measurement_in_text(normalized)
                 if measurement_normalized != normalized:
-                    facet_lookup_measurement[measurement_normalized] = fv
+                    existing_m = facet_lookup_measurement.get(measurement_normalized)
+                    if existing_m is None or fv_count > (getattr(existing_m, "count", 0) or 0):
+                        facet_lookup_measurement[measurement_normalized] = fv
 
         if not facet_lookup:
             return MatchResult(
@@ -484,7 +497,14 @@ class KeywordMatcher:
             facet_values = [fv for fv in facet_values if fv.facet_name.lower() not in STRICT_FACETS]
 
         keyword_normalized = self._normalize(keyword)
-        facet_lookup = {self._normalize(fv.facet_value_name): fv for fv in facet_values}
+        # V31: same highest-count dedup as match() — see comment there.
+        facet_lookup = {}
+        for fv in facet_values:
+            key = self._normalize(fv.facet_value_name)
+            fv_count = getattr(fv, "count", 0) or 0
+            existing = facet_lookup.get(key)
+            if existing is None or fv_count > (getattr(existing, "count", 0) or 0):
+                facet_lookup[key] = fv
 
         if not facet_lookup:
             return result
@@ -998,9 +1018,15 @@ class KeywordMatcher:
         return self.match_with_partial(keyword, facet_values, exclude_winkel=False)
 
     def _normalize(self, text: str) -> str:
-        """Normalize text for comparison."""
+        """Normalize text for comparison.
+
+        V31: preserve hyphens — compound nouns and hyphenated brand names
+        (tv-meubel, TP-Link, A-DATA, Bébé-jou) live as single tokens in
+        facet values; splitting on '-' would let 'meubel' fuzzy-match
+        'Kapstokmeubels' across categories.
+        """
         text = text.lower()
-        text = text.replace('-', ' ').replace('_', ' ')
+        text = text.replace('_', ' ')
         text = ' '.join(text.split())
         return text
 

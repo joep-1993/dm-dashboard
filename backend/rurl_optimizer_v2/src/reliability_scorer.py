@@ -94,6 +94,7 @@ def _v27_reject_reason(
     matched_keywords: Optional[list],
     unmatched_keywords: Optional[list],
     long_token_threshold: int = 8,
+    match_type: Optional[str] = None,
 ) -> Optional[str]:
     """V27: Decide whether a match should be hard-rejected (score → 0).
 
@@ -104,18 +105,31 @@ def _v27_reject_reason(
     Rules:
     1. Generic-only: every matched token is a generic size/color/shape
        adjective (e.g. "Creme" carrying a "tretinoine creme" query).
+    1b. (V31) Cross-category match where every matched token is a generic
+        adjective OR a generic noun (e.g. "meubel" matching
+        "Kapstokmeubels" for keyword "tv-meubel set"). In-subcat matches
+        on generic nouns are fine; the bug is only when those weak signals
+        justify a jump to a different category.
     2. Long unmatched token: any unmatched non-stopword token of length
        >= long_token_threshold. Long tokens are almost always brands,
        ingredients or product types — losing them in the match means the
        redirect is missing the user's actual intent.
     """
-    from src.validation_rules import GENERIC_ADJECTIVES
+    from src.validation_rules import GENERIC_ADJECTIVES, GENERIC_NOUNS
 
     matched = [w.lower().strip() for w in (matched_keywords or []) if w and w.strip()]
     unmatched = [w.lower().strip() for w in (unmatched_keywords or []) if w and w.strip()]
 
     if matched and all(w in GENERIC_ADJECTIVES for w in matched):
         return f"V27: only generic adjective(s) matched: {', '.join(matched)}"
+
+    # V31: cross-category jumps justified by generic words only are
+    # almost always wrong — "meubel" alone shouldn't move you from
+    # Sfeerhaarden to Kapstokken just because "Kapstokmeubels" exists.
+    if (match_type == 'cross_category_type'
+            and matched
+            and all(w in GENERIC_ADJECTIVES or w in GENERIC_NOUNS for w in matched)):
+        return f"V31: cross-category match on generic word(s) only: {', '.join(matched)}"
 
     long_unmatched = [w for w in unmatched if len(w) >= long_token_threshold]
     if long_unmatched:
@@ -304,7 +318,7 @@ def calculate_reliability_score(
     # V27: Hard-rejection rules — generic-only matches and long unmatched
     # tokens. Reasons are computed by _v27_reject_reason so the export
     # pipeline can surface them in the same wording.
-    if _v27_reject_reason(matched_keywords, unmatched_keywords) is not None:
+    if _v27_reject_reason(matched_keywords, unmatched_keywords, match_type=match_type) is not None:
         return 0
 
     # V28: When the URL builder dropped a duplicate facet name (Beslist

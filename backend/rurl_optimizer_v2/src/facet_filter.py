@@ -27,6 +27,15 @@ class FacetValue:
 class FacetFilter:
     """Filters facets based on subcategory."""
 
+    # V31: When the same facet value appears at multiple category depths
+    # (e.g. brand "Ferrero Rocher" present in parent "Snoep" and in its
+    # children "Bonbons" + "Chocolade"), prefer the deepest descendant if
+    # it concentrates at least this share of the parent's product count.
+    # Bonbons=10 / Snoep=11 → 91% → pick Bonbons.
+    # Bonbons=11 / Snoep=22 with Chocolade=10 also under Snoep → 50% →
+    # stay at Snoep (split is too even to confidently go deeper).
+    CHILD_DOMINANCE_THRESHOLD = 0.7
+
     def __init__(self, facets_df: pd.DataFrame):
         """
         Initialize with facets DataFrame.
@@ -276,22 +285,41 @@ class FacetFilter:
 
     def _deduplicate_to_highest_level(self, facet_values: list[FacetValue]) -> list[FacetValue]:
         """
-        V16: Deduplicate facet values by facet_value_id, keeping the one at the highest
-        (least specific) category level.
+        V16: Deduplicate facet values by facet_value_id.
 
-        The "highest level" is determined by the number of underscores in the subcategory
-        part of the URL. Fewer underscores = higher/broader level.
+        V31 rewrite (after V31-rev1 failed in production for Ferrero Rocher):
+        The Search API doesn't always emit a row for the parent category — for
+        Ferrero Rocher under Eten & drinken there's NO Snoep row, only the
+        children Bonbons (count=14) and Chocolade (count=10), plus the
+        unrelated Brood (count=3) at depth 1. The earlier "pick shallowest
+        then check descendants" heuristic locked onto Brood (count-leader
+        among depth-1 entries) and never reached Bonbons.
 
-        Example:
-            /products/gezond_mooi/gezond_mooi_560760/c/...           -> 1 underscore (highest)
-            /products/gezond_mooi/gezond_mooi_560760_570196/c/...    -> 2 underscores
-            /products/gezond_mooi/gezond_mooi_560760_6911749/c/...   -> 2 underscores
+        New algorithm:
+          1. Pick the entry with the highest product count globally
+             (ties broken by shallower depth). This naturally lands on
+             Bonbons (14) for the Ferrero Rocher case.
+          2. If the leader has an *ancestor* in the data and the leader's
+             count is below ``CHILD_DOMINANCE_THRESHOLD`` of that
+             ancestor's count, fall back to the ancestor. This preserves
+             the original "prefer broader when no clear winner" intent
+             for the case where the parent IS in the data: Snoep=22 with
+             Bonbons=11 + Chocolade=10 → leader Snoep wins outright;
+             Snoep=11 with Bonbons=10 + Chocolade=1 → leader Snoep, but
+             Bonbons would have promoted (10/11=91%) under the old
+             descendant-promotion direction — handled by step 1b below.
+
+          1b. After picking the count-leader, ALSO scan its descendants:
+              if any descendant of the leader has count >=
+              threshold * leader.count, promote to that descendant
+              (handles the lopsided "Bonbons concentrates most of Snoep"
+              case where Snoep itself was the count-leader).
 
         Args:
             facet_values: List of FacetValue objects (may contain duplicates)
 
         Returns:
-            Deduplicated list with highest level URLs preserved
+            Deduplicated list with one representative per facet_value_id
         """
         # Group by facet_value_id
         by_value_id = {}
@@ -301,17 +329,64 @@ class FacetFilter:
                 by_value_id[key] = []
             by_value_id[key].append(fv)
 
-        # For each group, keep the one with the shortest subcategory path
         result = []
         for value_id, fvs in by_value_id.items():
             if len(fvs) == 1:
                 result.append(fvs[0])
-            else:
-                # Find the one with fewest underscores in subcategory (= highest level)
-                best = min(fvs, key=lambda fv: self._count_subcategory_depth(fv.url))
-                result.append(best)
+                continue
+
+            # Step 1: highest count wins, ties broken by shallower depth.
+            #         Sort key: (count desc, depth asc).
+            def _rank(fv):
+                c = getattr(fv, 'count', 0) or 0
+                d = self._count_subcategory_depth(fv.url)
+                return (-c, d)
+            leader = sorted(fvs, key=_rank)[0]
+            leader_count = getattr(leader, 'count', 0) or 0
+
+            # Step 1b: if a descendant of the leader concentrates most of
+            # the leader's products, promote to that descendant.
+            descendants = [fv for fv in fvs
+                           if fv is not leader
+                           and self._is_strict_descendant(fv.url, leader.url)]
+            if descendants and leader_count > 0:
+                best_desc = max(descendants,
+                                key=lambda fv: getattr(fv, 'count', 0) or 0)
+                bd_count = getattr(best_desc, 'count', 0) or 0
+                if bd_count >= self.CHILD_DOMINANCE_THRESHOLD * leader_count:
+                    result.append(best_desc)
+                    continue
+
+            # Step 2: if the leader has an ancestor in the data and the leader
+            # is NOT dominant enough on its own, fall back to that ancestor.
+            ancestors = [fv for fv in fvs
+                         if fv is not leader
+                         and self._is_strict_descendant(leader.url, fv.url)]
+            if ancestors:
+                # Closest ancestor = deepest ancestor (most specific shared parent)
+                closest = max(ancestors, key=lambda fv: self._count_subcategory_depth(fv.url))
+                anc_count = getattr(closest, 'count', 0) or 0
+                if anc_count > 0 and leader_count < self.CHILD_DOMINANCE_THRESHOLD * anc_count:
+                    result.append(closest)
+                    continue
+
+            result.append(leader)
 
         return result
+
+    def _is_strict_descendant(self, child_url: str, parent_url: str) -> bool:
+        """V31: True if child_url is a deeper category beneath parent_url.
+
+        Uses the URL stem (everything before the optional ``/c/`` facet
+        suffix) and requires the parent stem followed by ``_`` to avoid
+        false positives where one numeric ID is a prefix of another
+        (e.g. ``574519`` vs ``5745190``).
+        """
+        if not child_url or not parent_url:
+            return False
+        parent_stem = parent_url.split('/c/')[0].rstrip('/')
+        child_stem = child_url.split('/c/')[0].rstrip('/')
+        return child_stem != parent_stem and child_stem.startswith(parent_stem + '_')
 
     def _count_subcategory_depth(self, url: str) -> int:
         """

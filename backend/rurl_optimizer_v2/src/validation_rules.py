@@ -98,6 +98,28 @@ STOPWORDS = {
     'prijs', 'prijzen',
     'alternatief', 'alternatieven',
 
+    # --- Review/award labels (V31) — catch "beste koop consumentenbond" et al. ---
+    # These keywords are marketing badges, not product attributes. Without them
+    # being stopwords the engine falls through to search_derived, which queries
+    # the Search API and finds that 100% of products carrying the label happen
+    # to be one specific brand (the brand that put the badge in its product
+    # copy) — so it spuriously appends merk~<that-brand>. Treating the label
+    # tokens as stopwords routes these R-URLs to the clean category page via
+    # the V27 short-circuit.
+    'consumentenbond', 'koop',
+
+    # --- Product-type modifiers (V31) — "combi-wasmachine", "multi-tool", etc. ---
+    # These are noise tokens for the matcher: they qualify a product type
+    # without being product types themselves. Without this, the matcher's
+    # token-coverage scorer drops when one of these is unmatched, and we
+    # miss otherwise-good matches. Concrete case: /r/combi_wasmachine/wasdroger/
+    # produced no in-subcat match because 'combi' was unmatched; treating it
+    # as a stopword lets 'wasmachine droger' match t_badkast~"Wasmachine en
+    # droger kasten". The 7 facet values that contain "combi" verbatim
+    # (Combi-asbakken, Combi stoomoven, Combi as o_schaats value) still match
+    # via their non-combi tokens.
+    'combi', 'combo', 'multi',
+
     # --- Winkel gerelateerd (V5, V27 uitgebreid) ---
     'kopen', 'bestellen', 'online', 'shop', 'store', 'winkel',
     'webshop', 'webwinkel',
@@ -190,6 +212,40 @@ GENERIC_ADJECTIVES = {
     'metalen', 'houten', 'plastic', 'rubber', 'rubberen',
     # Opmerkelijke generieke kwalificaties
     'basic', 'standaard', 'algemeen', 'algemene',
+}
+
+
+# ==============================================================================
+# GENERIC NOUNS (V31) — sibling of GENERIC_ADJECTIVES for cross-category jumps.
+# ==============================================================================
+# These nouns appear inside many compound category names ("Kapstokmeubels",
+# "TV-meubels", "Wandkasten", ...). A keyword token that only matches via this
+# generic part isn't strong enough to justify jumping to a different category.
+#
+# Concrete failure case: keyword "tv-meubel set" with original URL in
+# Sfeerhaarden (huis_tuin_505317). The cross-category matcher saw 'meubel'
+# inside 'Kapstokmeubels' (Kapstokken cat) and emitted a wildly wrong
+# redirect. With this list, a cross-cat match where the ONLY matched
+# keyword token sits in GENERIC_NOUNS (∪ GENERIC_ADJECTIVES) is rejected
+# by the reliability scorer's V27 path.
+#
+# Tokens here must be common household-category roots that appear as
+# substrings of many distinct category names. They are NOT global
+# stopwords — the in-subcat matcher still treats them as valid (e.g.
+# a search inside category "Meubels" can legitimately match "meubel").
+GENERIC_NOUNS = {
+    'meubel', 'meubels', 'meubilair',
+    'set', 'sets',
+    'kast', 'kasten',
+    'huis', 'huisje', 'huisjes',
+    'tafel', 'tafels',
+    'stoel', 'stoelen',
+    'lamp', 'lampen',
+    'accessoire', 'accessoires',
+    'onderdeel', 'onderdelen',
+    'systeem', 'systemen',
+    'unit', 'units',
+    'pakket', 'pakketten',
 }
 
 

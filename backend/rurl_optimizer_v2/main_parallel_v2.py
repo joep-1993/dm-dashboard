@@ -686,6 +686,25 @@ def process_url_v2(args):
         for variant in variants[1:]:   # skip the original (already tried)
             v_match = None
             v_facets = facet_values
+            # V31: try multi-word against subcat facets FIRST when the
+            # variant has multiple tokens — match_with_partial treats the
+            # variant as one phrase and misses cases like
+            # 'combi wasmachine droger' → 'Wasmachine en droger kasten'
+            # (token coverage 2/2 after stopword filter = score ~90).
+            if v_facets and ' ' in variant:
+                multi_in_sub = matcher.match_multi_word(
+                    variant, v_facets,
+                    all_type_facets=all_type_facets,
+                    require_type_for_merk=True,
+                    current_main_category=parsed.main_category,
+                )
+                # Strip cross-maincat hits — V28 retry targets within-subcat decomposition.
+                multi_in_sub = [mr for mr in (multi_in_sub or [])
+                                if not getattr(mr, 'cross_category_path', None)]
+                if multi_in_sub:
+                    result = builder.build_multi_facet(parsed, multi_in_sub)
+                    result.reason = f"[V28 compound:{variant!r}][subcat-multi] " + result.reason
+                    break
             if v_facets:
                 v_match = matcher.match_with_partial(variant, v_facets)
                 if v_match.is_match:
@@ -702,13 +721,18 @@ def process_url_v2(args):
                         require_type_for_merk=True,
                         current_main_category=parsed.main_category,
                     )
+                    # V31: drop cross-maincat hits — keep going so a same-maincat
+                    # variant later in the loop still has a chance.
+                    mc_results = [mr for mr in (mc_results or [])
+                                  if not getattr(mr, 'cross_category_path', None)]
                     if mc_results:
                         result = builder.build_multi_facet(parsed, mc_results)
                         result.reason = f"[V28 compound:{variant!r}][maincat] " + result.reason
                         break
                 else:
                     mc_match = matcher.match_with_partial(variant, mc_facets)
-                    if mc_match.is_match:
+                    if (mc_match.is_match
+                            and not getattr(mc_match, 'cross_category_path', None)):
                         result = builder.build(parsed, mc_match)
                         result.reason = f"[V28 compound:{variant!r}][maincat] " + result.reason
                         break
@@ -808,6 +832,26 @@ def process_url_v2(args):
     # 4. MAIN CATEGORY FACETS - Zoek in alle facets binnen maincat
     # Voor specifiekere termen: "onzichtbare scharnieren" -> facet "Onzichtbare scharnieren"
     if not result:
+        from src.validation_rules import GENERIC_ADJECTIVES, GENERIC_NOUNS
+
+        def _maincat_match_is_generic_only(match_results_):
+            """V31: True iff every kept facet matches a keyword TOKEN that is
+            generic. Without this guard, /r/tv-meubel_set/ matches 'set'
+            (a generic noun) to facet 'Set' in an unrelated subcat
+            (servies/tableware) and we accept the cross-subcat jump. The
+            in-subcat case is still fine because pass 1 handles those."""
+            if not match_results_:
+                return False
+            for mr in match_results_:
+                tok = (getattr(mr, 'keyword', '') or '').lower().strip()
+                if not tok:
+                    continue
+                if (tok in GENERIC_ADJECTIVES or tok in GENERIC_NOUNS
+                        or tok in STOPWORDS or tok in SHOP_NAMES):
+                    continue
+                return False
+            return True
+
         maincat_facets_df = facet_filter.filter_by_main_category(parsed.main_category)
         if not maincat_facets_df.empty:
             maincat_facets = facet_filter.get_facet_values(maincat_facets_df)
@@ -818,14 +862,17 @@ def process_url_v2(args):
                         all_type_facets=None, require_type_for_merk=True,
                         current_main_category=parsed.main_category
                     )
-                    if match_results:
+                    if match_results and not _maincat_match_is_generic_only(match_results):
                         result = builder.build_multi_facet(parsed, match_results)
                         result.reason = f"[maincat] " + result.reason
                 else:
                     maincat_match = matcher.match_with_partial(parsed.keyword, maincat_facets)
                     if maincat_match.is_match:
-                        result = builder.build(parsed, maincat_match)
-                        result.reason = f"[maincat] " + result.reason
+                        kw_tok = (maincat_match.keyword or '').lower().strip()
+                        if not (kw_tok in GENERIC_ADJECTIVES or kw_tok in GENERIC_NOUNS
+                                or kw_tok in STOPWORDS or kw_tok in SHOP_NAMES):
+                            result = builder.build(parsed, maincat_match)
+                            result.reason = f"[maincat] " + result.reason
 
     # 5. V14: SUBCATEGORIE NAAM MATCHING (lagere scores) binnen same main_category
     # Fallback voor wanneer geen facet match maar wel subcategorie naam match
@@ -864,18 +911,55 @@ def process_url_v2(args):
 
     # 6. V14: CROSS-CATEGORY SUBCATEGORIE NAAM MATCHING
     # Alleen als geen match binnen maincat - zoek in alle categorieën
-    # V30: Geen per-woord fallback (te veel valse positieven bij cross-category)
-    # V30: Vereist score=100 (exacte match op categorienaam) om verkeerde maincat redirects te voorkomen
+    # V30: full-keyword path vereist score=100 (exacte match) om foute jumps te voorkomen.
+    # V31: per-word fallback re-enabled, maar STRIKT begrensd: alleen
+    # tokens die niet generic zijn (GENERIC_ADJECTIVES/NOUNS/STOPWORDS/SHOPS)
+    # en >= 6 chars lang, met score >= 95. Pakt /r/tv-meubel_set/ → TV-meubels
+    # (token 'tv-meubel' scoort 99 cross-maincat) zonder de V30 false-positives
+    # terug te brengen — 'meubel' alleen wordt nu gefilterd door GENERIC_NOUNS.
     if not result:
         categories_df = d.get('categories_df')
         if categories_df is not None:
+            from src.validation_rules import GENERIC_ADJECTIVES, GENERIC_NOUNS
             subcat_match = matcher.match_subcategory_name(
                 parsed.keyword,
                 categories_df,
                 main_category=None  # Search across ALL categories
             )
-            # V30: Alleen accepteren bij score=100 (exacte match), geen fuzzy cross-category
+            # V30: full keyword vereist score=100
             if subcat_match and subcat_match.get('score', 0) == 100:
+                pass  # accept as-is
+            else:
+                # V31: try non-generic individual tokens
+                CROSS_CAT_TOKEN_MIN_LEN = 6
+                CROSS_CAT_TOKEN_MIN_SCORE = 95
+                best_per_word = None
+                # Sort tokens longest-first — longer tokens are more
+                # discriminating, so we accept the first valid hit.
+                tokens = sorted(
+                    (t for t in parsed.keyword.lower().split()
+                     if len(t) >= CROSS_CAT_TOKEN_MIN_LEN
+                     and t not in STOPWORDS
+                     and t not in SHOP_NAMES
+                     and t not in GENERIC_ADJECTIVES
+                     and t not in GENERIC_NOUNS),
+                    key=len, reverse=True,
+                )
+                for tok in tokens:
+                    cand = matcher.match_subcategory_name(
+                        tok, categories_df, main_category=None,
+                    )
+                    if cand and cand.get('score', 0) >= CROSS_CAT_TOKEN_MIN_SCORE:
+                        best_per_word = cand
+                        best_per_word['_matched_token'] = tok
+                        break
+                if best_per_word:
+                    subcat_match = best_per_word
+
+            if subcat_match and (
+                subcat_match.get('score', 0) == 100
+                or subcat_match.get('_matched_token')
+            ):
                 result = builder.build_subcategory_redirect(
                     original_url=url,
                     keyword=parsed.keyword,
@@ -1038,7 +1122,7 @@ def process_url_v2(args):
     # returns early before V27 runs, so without this gate the export would
     # show a "rejected" reason on rows whose score was never reduced.
     reject_reason = (
-        _v27_reject_reason(matched_keywords, unmatched_keywords) or ''
+        _v27_reject_reason(matched_keywords, unmatched_keywords, match_type=r.match_type) or ''
         if reliability_score == 0 else ''
     )
 
@@ -1063,7 +1147,38 @@ def process_url_v2(args):
         search_derived_dom_cat = derived.get('dom_cat_name', '') or ''
         search_derived_dom_share = derived.get('dom_cat_share')
 
-        if reliability_score < 50 and derived.get('redirect_url'):
+        # V31 guard: when the matcher already produced a clean facet match in
+        # the URL's own subcategory, do NOT let search-derived override it
+        # with a different subcategory's guess. V27 routinely zeros the
+        # reliability score whenever any long unmatched token is present
+        # (e.g. "verrijdbare" in "zweefparasol met verrijdbare voet"), which
+        # then triggers the rescue path below — but the matcher's anchored
+        # multi-facet result is more trustworthy than search-derived's
+        # different-subcat guess. Restore a tier-C score so the row isn't
+        # rescued out from under the user.
+        _skip_rescue_override = False
+        if (
+            r.success
+            and getattr(r, 'facet_count', 0) >= 1
+            and r.subcategory_id
+            and r.subcategory_id == parsed.subcategory_id
+        ):
+            _derived_subcat_id = ''
+            for _part in reversed((derived.get('dom_cat_url_slug') or '').split('_')):
+                if _part.isdigit():
+                    _derived_subcat_id = _part
+                    break
+            if _derived_subcat_id and _derived_subcat_id != parsed.subcategory_id:
+                _skip_rescue_override = True
+                if reliability_score < 50:
+                    final_score = 60
+                    final_tier = get_reliability_tier(final_score)
+                    final_reason = (r.reason or '') + (
+                        ' [V31: kept matcher result; search-derived suggested '
+                        f"different subcat '{derived.get('dom_cat_name','')}']"
+                    )
+
+        if reliability_score < 50 and derived.get('redirect_url') and not _skip_rescue_override:
             # Preserve any /c/<facet> the original URL carried — search-derived
             # rescue should never silently strip an existing facet selection.
             base_redirect = derived['redirect_url'].rstrip('/')
@@ -1194,13 +1309,20 @@ def process_url_v2(args):
         # zero lexical or semantic representation in the target.
         local_leftover_tokens = []
         if has_matchable and reliability_score >= 50 and final_redirect_url:
+            from src.validation_rules import GENERIC_ADJECTIVES
             target_text = ' '.join(filter(None, [
                 redirect_cat_name or '',
                 r.facet_value_names or '',
                 final_redirect_url or '',
             ])).lower()
             for w in keyword_words:
-                if w in STOPWORDS or w in SHOP_NAMES:
+                # V31: also skip GENERIC_ADJECTIVES — tokens like 'mini', 'klein',
+                # 'rood' are size/color descriptors, not brand evidence. Without
+                # this skip the leftover-merk path appends a brand whenever such
+                # a token correlates with one brand by chance (e.g.
+                # /r/mini_airco_voor_caravan/ → Evolar at 80% because Evolar
+                # uses 'mini' in its Caravan-airco product titles).
+                if w in STOPWORDS or w in SHOP_NAMES or w in GENERIC_ADJECTIVES:
                     continue
                 # match if literal substring OR stem-stripped match
                 stem = w.rstrip('e').rstrip('s')

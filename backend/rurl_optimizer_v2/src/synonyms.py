@@ -5,6 +5,8 @@ Maps common search terms to facet values.
 V27: Uitgebreid van 16 naar 80+ entries met 9 categorieën.
 """
 
+from typing import Optional
+
 # Synonyms: search term -> facet value(s) that should match
 # V27: Uitgebreid van 16 naar 80+ entries
 SYNONYMS = {
@@ -229,10 +231,69 @@ COMPOUND_DECOMPOSITIONS = {
 }
 
 
+# V31: Dutch compound suffix decomposer. When a keyword token doesn't have
+# an explicit entry in COMPOUND_DECOMPOSITIONS but ends with one of these
+# common Beslist-category noun suffixes (length >= 4) and has a prefix of
+# >= 3 chars, expand_compounds() also yields the split form. Concrete case:
+# `wasdroger` is not in COMPOUND_DECOMPOSITIONS, but ends with `droger`,
+# prefix `was` (3 chars) → split to `was droger`. The matcher then matches
+# the `droger` token to facet value 'Wasmachine en droger kasten'.
+#
+# Ordered longest-first when iterated (sorting happens at use site) so
+# longer overlaps win — e.g. 'wasmachine' is preferred over 'machine' if
+# both ever apply to the same token.
+DUTCH_COMPOUND_SUFFIXES = (
+    # Appliances
+    'wasmachine', 'droger', 'machine', 'apparaat', 'ketel', 'oven',
+    'koelkast', 'vriezer',
+    # Furniture
+    'meubels', 'meubel', 'kast', 'stoel', 'tafel', 'bank',
+    'fauteuil', 'commode', 'dressoir', 'plank',
+    # Outdoor / garden
+    'huisje', 'huis', 'schuur', 'tent', 'parasol', 'haard',
+    # Bedding / soft furnishing
+    'dekbed', 'kussen', 'deken', 'plaid',
+    # Lighting
+    'lampen', 'lamp', 'spot',
+    # Kitchen
+    'pannen', 'pan', 'mes',
+)
+
+_MIN_COMPOUND_PREFIX_LEN = 3
+_MIN_COMPOUND_SUFFIX_LEN = 4
+
+
+def _suffix_split(token: str) -> Optional[str]:
+    """Return 'prefix suffix' if `token` ends with a known Dutch noun
+    suffix and the remaining prefix is long enough; otherwise None.
+
+    Skipped when:
+      - token is already in COMPOUND_DECOMPOSITIONS (handled there)
+      - token contains a hyphen: the hyphen is the publisher-intended
+        compound boundary (tv-meubel, e-bike, TP-Link). Further splitting
+        produces fragments like 'tv-' that lead to bad matches; the
+        cross-maincat subcat-name matcher already handles hyphenated forms.
+    """
+    t = (token or '').lower()
+    if not t or '-' in t or t in COMPOUND_DECOMPOSITIONS:
+        return None
+    # Sort longest-first so we don't split 'wasmachine' on 'machine'
+    # when 'wasmachine' itself is the right suffix.
+    for suf in sorted(DUTCH_COMPOUND_SUFFIXES, key=len, reverse=True):
+        if len(suf) < _MIN_COMPOUND_SUFFIX_LEN:
+            continue
+        if t.endswith(suf) and len(t) - len(suf) >= _MIN_COMPOUND_PREFIX_LEN:
+            prefix = t[:-len(suf)]
+            return f"{prefix} {suf}"
+    return None
+
+
 def expand_compounds(keyword: str) -> list[str]:
     """V28: Generate variants of `keyword` where each compound token is
-    replaced by its base noun (per COMPOUND_DECOMPOSITIONS). Returns the
-    original keyword first, followed by deduplicated decomposed variants.
+    replaced by its base noun (per COMPOUND_DECOMPOSITIONS). V31 also tries
+    a Dutch noun-suffix split for tokens not in the explicit map
+    (e.g. 'wasdroger' → 'was droger'). Returns the original keyword first,
+    followed by deduplicated decomposed variants.
     """
     if not keyword:
         return [keyword]
@@ -249,6 +310,7 @@ def expand_compounds(keyword: str) -> list[str]:
 
     tokens = keyword.split()
     for i, t in enumerate(tokens):
+        # 1. explicit COMPOUND_DECOMPOSITIONS entry (e.g. tuinslang → slang)
         base = COMPOUND_DECOMPOSITIONS.get(t.lower())
         if base:
             new_tokens = list(tokens)
@@ -257,6 +319,27 @@ def expand_compounds(keyword: str) -> list[str]:
             if variant.lower() not in seen:
                 variants.append(variant)
                 seen.add(variant.lower())
+
+        # 2. V31: suffix-based split for unknown compounds.
+        #    Emit TWO variants:
+        #      (a) 'prefix suffix' — full split (e.g. wasdroger → was droger).
+        #      (b) suffix-only — drops the prefix (e.g. wasdroger → droger).
+        #    The suffix-only variant exists because the token-coverage scorer
+        #    drops sharply when extra prefix fragments appear: for
+        #    'combi wasmachine wasdroger' the split form
+        #    'combi wasmachine was droger' has 2/4 = 50% coverage against
+        #    facet 'Wasmachine en droger kasten' (below threshold), but the
+        #    suffix-only form 'combi wasmachine droger' has 2/3 = 67% and
+        #    matches at ~85.
+        suffix_form = _suffix_split(t)
+        if suffix_form:
+            for replacement in (suffix_form, suffix_form.split(' ', 1)[1]):
+                new_tokens = list(tokens)
+                new_tokens[i] = replacement
+                variant = " ".join(new_tokens)
+                if variant.lower() not in seen:
+                    variants.append(variant)
+                    seen.add(variant.lower())
     return variants
 
 

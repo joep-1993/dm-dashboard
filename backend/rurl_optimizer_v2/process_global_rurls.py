@@ -392,7 +392,7 @@ def process_global_url(args):
     # (score=0). Subcategory-name matches return early in the scorer and
     # would otherwise carry a misleading flag.
     reject_reason = (
-        _v27_reject_reason(matched_keywords, unmatched_keywords) or ''
+        _v27_reject_reason(matched_keywords, unmatched_keywords, match_type=r.match_type) or ''
         if reliability_score == 0 else ''
     )
 

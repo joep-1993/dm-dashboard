@@ -60,7 +60,11 @@ SEARCH_QPS = 20.0
 MAX_PREFETCH_WORKERS = 20
 CACHE_TTL_DAYS = 7
 AND_MODE_TOTAL_THRESHOLD = 10000
-DOMINANCE_THRESHOLD = 0.60
+# V31: raised from 0.60 to 0.75. At 60% dominance the "dominant category" is
+# often noise — e.g. /r/elektrische_sigaretten/ landed on Kapperstassen at
+# 60% via incidental product-description hits. Above 75% the signal is
+# strong enough that the guess is usually right.
+DOMINANCE_THRESHOLD = 0.75
 
 # V31: bump when _classify's output shape changes. Cached payloads with a
 # missing or older schema_version are ignored by _cache_get so the next run

@@ -277,15 +277,20 @@ class RUrlParser:
 
         - Decode URL encoding
         - Lowercase
-        - Replace hyphens/underscores with spaces
-        - Replace + with spaces
-        - Replace slashes with spaces (v5: for multi-part keywords like "balkon_bloembakken/reling")
+        - Replace underscores/+/slashes with spaces (token separators in
+          R-URL paths)
+        - PRESERVE hyphens — they're part of compound nouns (tv-meubel,
+          e-bike, TP-Link) and brand names that exist as single tokens
+          in facet values. Splitting on '-' makes "tv-meubel set" tokenise
+          to ['tv','meubel','set'] which then fuzzy-matches the substring
+          'meubel' inside unrelated category names like 'Kapstokmeubels'.
         - Strip whitespace
         """
         keyword = unquote(keyword)
         keyword = keyword.lower()
         # v5: Also replace / with space for multi-part keywords
-        keyword = keyword.replace('-', ' ').replace('_', ' ').replace('+', ' ').replace('/', ' ')
+        # V31: hyphens are NOT separators (see docstring).
+        keyword = keyword.replace('_', ' ').replace('+', ' ').replace('/', ' ')
         keyword = ' '.join(keyword.split())  # Normalize whitespace
         return keyword
 
