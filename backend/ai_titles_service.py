@@ -20,7 +20,7 @@ from urllib3.util.retry import Retry
 from openai import OpenAI
 
 from backend.database import get_db_connection, return_db_connection
-from backend.faq_service import fetch_products_api
+from backend.faq_service import fetch_products_api, parse_beslist_url
 
 # Configuration
 USER_AGENT = "Beslist script voor SEO"
@@ -40,6 +40,341 @@ LOWERCASE_WORDS = {"met", "in", "zonder", "van", "voor", "tot", "op", "aan", "ui
 # position rule into the AI prompt, or split before/after based on api_h1
 # position).
 _PREFER_SIC_URL_SLUGS: set = set()
+
+
+# --- Per-facet position rules (pa.facet_position_rules) -------------------
+#
+# Single source of truth for two related signals, both keyed on the facet's
+# URL slug (e.g. 'thema_speelgoed'):
+#   * order_index   — global ordering (lower = earlier in the H1). Seeded from
+#                     facet_order.xlsx on 2026-05-19. Used to produce a
+#                     per-URL "Volgorde:" clause in the prompt.
+#   * is_type_facet — true means the facet's value substitutes for the
+#                     category noun (consumed by has_category_override logic).
+#   * position      — legacy 'start'/'end' pin; still honoured if set, but
+#                     order_index is now the primary mechanism.
+#
+# Empty table -> behaviour identical to pre-2026-05-19.
+# Set env var DISABLE_FACET_POSITION_RULES=1 for a hard kill switch.
+# Hard revert path: restore backend/ai_titles_service.py from
+# .bak.2026-05-19_pre_facet_position_rules.
+_FACET_POSITION_RULES_CACHE: Optional[Dict[str, Dict]] = None
+_FACET_POSITION_RULES_CACHE_TS: float = 0.0
+_FACET_POSITION_RULES_TTL_SEC = 60.0  # short — operators iterate fast on rules
+
+
+def _load_facet_position_rules() -> Dict[str, Dict]:
+    """Return {facet_slug: {order_index, is_type_facet, position}} from DB.
+
+    Cached for _FACET_POSITION_RULES_TTL_SEC. Only the unscoped (global) row
+    per slug is loaded; scoped rules would belong to a future feature.
+    """
+    global _FACET_POSITION_RULES_CACHE, _FACET_POSITION_RULES_CACHE_TS
+    if os.getenv("DISABLE_FACET_POSITION_RULES") == "1":
+        return {}
+    now = time.time()
+    if _FACET_POSITION_RULES_CACHE is not None and (now - _FACET_POSITION_RULES_CACHE_TS) < _FACET_POSITION_RULES_TTL_SEC:
+        return _FACET_POSITION_RULES_CACHE
+    rules: Dict[str, Dict] = {}
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT facet_slug, order_index, is_type_facet, position
+                FROM pa.facet_position_rules
+                WHERE scope_category IS NULL
+            """)
+            # The shared connection pool uses RealDictCursor, so each row is a
+            # dict — access by column name, not positional unpack.
+            for row in cur.fetchall():
+                if hasattr(row, 'get'):
+                    slug = (row.get('facet_slug') or '').lower()
+                    order_index = row.get('order_index')
+                    is_type = row.get('is_type_facet')
+                    position = row.get('position')
+                else:
+                    slug, order_index, is_type, position = row
+                    slug = (slug or '').lower()
+                rules[slug] = {
+                    'order_index': order_index,
+                    'is_type_facet': bool(is_type) if is_type is not None else None,
+                    'position': position,
+                }
+    except Exception as e:
+        print(f"[AI_TITLES] facet_position_rules load failed ({e}); proceeding with no per-facet rules")
+        rules = {}
+    finally:
+        if conn is not None:
+            return_db_connection(conn)
+    _FACET_POSITION_RULES_CACHE = rules
+    _FACET_POSITION_RULES_CACHE_TS = now
+    return rules
+
+
+def _type_facet_override_by_slug(slug: str) -> Optional[bool]:
+    """Return True/False/None for a slug's global type-facet flag.
+
+    None means "no opinion" -> caller should fall back to facet_classifier.
+    """
+    rules = _load_facet_position_rules()
+    rec = rules.get((slug or '').lower())
+    if not rec:
+        return None
+    return rec.get('is_type_facet')
+
+
+# Sentinel used to push slugs with no order_index past all known orders.
+_FACET_ORDER_FALLBACK = 10_000_000
+
+
+def _ordered_facet_values(selected_facets: list) -> List[str]:
+    """Return facet detail_values sorted by global order_index.
+
+    Slugs without a rule keep their input order at the end (stable sort).
+    """
+    rules = _load_facet_position_rules()
+    if not rules or not selected_facets:
+        return [f.get('detail_value') or '' for f in selected_facets if f.get('detail_value')]
+    # decorate-sort-undecorate; preserve input order for ties / missing rules
+    indexed = [
+        (rules.get((f.get('url_name') or '').lower(), {}).get('order_index') or _FACET_ORDER_FALLBACK, i, f)
+        for i, f in enumerate(selected_facets)
+    ]
+    indexed.sort(key=lambda t: (t[0], t[1]))
+    return [f.get('detail_value') for _, _, f in indexed if f.get('detail_value')]
+
+
+_POSITION_LABEL_NL = {
+    'start': 'helemaal vooraan',
+    'end': 'helemaal achteraan',
+    'start_or_end': 'OF helemaal vooraan OF helemaal achteraan (niet ergens in het midden)',
+}
+
+
+# --- Inline classifier for unrulled facet slugs ---------------------------
+#
+# When a title generation request involves a facet whose URL slug isn't in
+# pa.facet_position_rules, ask the LLM to assign a position + type-facet flag
+# in one shot, persist with source='llm_suggested', and merge into the local
+# cache so the rest of THIS generation uses the result. Subsequent generations
+# (this process or others) read the table.
+#
+# Best-effort: any LLM/DB error → fall through to the existing fallback (slug
+# ends up at FALLBACK position, is_type_facet stays None). Set env var
+# DISABLE_FACET_INLINE_CLASSIFY=1 to skip the classifier entirely.
+
+# Anchor positions for the LLM prompt. Picked from the imported Excel order;
+# kept tight so the LLM doesn't have to internalise the whole 1..2284 range.
+_INLINE_CLASSIFY_ANCHORS = (
+    "merk=3, kleur=22, doelgroep_mode=400, materiaal=600, stijl=900, "
+    "vorm=1200, eigenschappen=1500, thema=1900, formaat=2145, "
+    "maat=2300, conditie=2400"
+)
+
+
+def _classify_unrulled_facets_inline(facets_to_classify: list, category_name: str) -> Dict[str, Dict]:
+    """Ask the LLM to assign (order, is_type_facet) for every slug in the input.
+
+    `facets_to_classify` is a list of selected_facets dicts (only slugs without
+    an existing rule). Returns {slug: {order, is_type_facet, reasoning}} for
+    each slug the LLM produced a verdict for. Returns {} on any error.
+    """
+    if not facets_to_classify:
+        return {}
+    if os.getenv("DISABLE_FACET_INLINE_CLASSIFY") == "1":
+        return {}
+    client = get_openai_client()
+    if not client:
+        return {}
+
+    # Build a per-slug payload — slug + sample value(s) from THIS URL.
+    by_slug: Dict[str, list] = {}
+    for f in facets_to_classify:
+        slug = (f.get('url_name') or '').lower().strip()
+        if not slug:
+            continue
+        val = (f.get('detail_value') or '').strip()
+        if val:
+            by_slug.setdefault(slug, []).append(val)
+    if not by_slug:
+        return {}
+
+    lines = []
+    for slug, vals in by_slug.items():
+        sample = ", ".join(vals[:3])
+        lines.append(f'- slug="{slug}", voorbeeld-waarde(n)=[{sample}]')
+
+    prompt = (
+        "Je bepaalt waar facet-waarden in een Nederlandse SEO-titel horen. "
+        "Geef voor elk facet hieronder:\n"
+        f"  - order: int 1-2400 (anker-volgorde: {_INLINE_CLASSIFY_ANCHORS}). "
+        "Lager = eerder in de titel.\n"
+        "  - is_type_facet: true als de facet-waarde een producttype is dat de categorienaam "
+        "kan vervangen (bv. waarde='Wandplaten' in categorie 'Wanddecoratie' → true), "
+        "false als het een attribuut/eigenschap/kleur/maat is.\n"
+        "  - reasoning: 1 korte Nederlandse zin.\n\n"
+        f"Categorie: {category_name or '(onbekend)'}\n"
+        "Te classificeren facetten:\n"
+        + "\n".join(lines)
+        + "\n\nAntwoord ALLEEN met een JSON-object van de vorm:\n"
+        '{"<slug>": {"order": <int>, "is_type_facet": <bool>, "reasoning": "<zin>"}, ...}'
+    )
+
+    try:
+        import json as _json
+        resp = client.chat.completions.create(
+            model=AI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+        data = _json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        print(f"[AI_TITLES] inline facet classify failed: {e}")
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    out: Dict[str, Dict] = {}
+    for slug, rec in data.items():
+        if not isinstance(rec, dict):
+            continue
+        try:
+            order = int(rec.get('order'))
+        except (TypeError, ValueError):
+            continue
+        if order < 1 or order > 2400:
+            order = max(1, min(2400, order))
+        out[slug.lower()] = {
+            'order_index': order,
+            'is_type_facet': bool(rec.get('is_type_facet', False)),
+            'reasoning': str(rec.get('reasoning', ''))[:500],
+        }
+    return out
+
+
+def _persist_classified_facets(classifications: Dict[str, Dict]) -> None:
+    """Insert LLM verdicts into pa.facet_position_rules and refresh the cache.
+
+    Uses INSERT ... ON CONFLICT DO NOTHING so concurrent workers don't fight
+    over the same slug. Cache is merged in-process so the active generation
+    sees the new rules immediately.
+    """
+    if not classifications:
+        return
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            for slug, rec in classifications.items():
+                cur.execute(
+                    """
+                    INSERT INTO pa.facet_position_rules
+                        (facet_slug, scope_category, order_index, is_type_facet, reasoning, source)
+                    VALUES (%s, NULL, %s, %s, %s, 'llm_suggested')
+                    ON CONFLICT (facet_slug, COALESCE(scope_category,'')) DO NOTHING
+                    """,
+                    (slug, rec['order_index'], rec['is_type_facet'],
+                     'Inline LLM classification: ' + rec.get('reasoning', '')),
+                )
+        conn.commit()
+    except Exception as e:
+        print(f"[AI_TITLES] persist of llm_suggested rules failed: {e}")
+        return
+    finally:
+        if conn is not None:
+            return_db_connection(conn)
+    # Merge into the in-memory cache so this generation can use the new values.
+    global _FACET_POSITION_RULES_CACHE
+    if _FACET_POSITION_RULES_CACHE is None:
+        _FACET_POSITION_RULES_CACHE = {}
+    for slug, rec in classifications.items():
+        # Only fill cache slots that genuinely didn't have a value; if a
+        # concurrent worker beat us to ON CONFLICT DO NOTHING the DB value
+        # wins and we'll pick it up on next TTL flush. Our in-memory record
+        # is safe to use for this URL either way.
+        _FACET_POSITION_RULES_CACHE.setdefault(slug, {
+            'order_index': rec['order_index'],
+            'is_type_facet': rec['is_type_facet'],
+            'position': None,
+        })
+
+
+def _classify_and_persist_unrulled(selected_facets: list, category_name: str) -> None:
+    """Find slugs with no rule, classify them via LLM, persist, refresh cache.
+
+    Safe to call unconditionally — does nothing when every slug is already
+    rulled, when the kill switch is set, or when the LLM is unavailable.
+    """
+    if not selected_facets:
+        return
+    if os.getenv("DISABLE_FACET_INLINE_CLASSIFY") == "1":
+        return
+    rules = _load_facet_position_rules()
+    missing = []
+    seen_slugs: set = set()
+    for f in selected_facets:
+        slug = (f.get('url_name') or '').lower().strip()
+        if not slug or slug in seen_slugs:
+            continue
+        seen_slugs.add(slug)
+        if slug not in rules:
+            missing.append(f)
+    if not missing:
+        return
+    print(f"[AI_TITLES] inline-classifying {len(missing)} unrulled slug(s): "
+          + ", ".join(sorted({(f.get('url_name') or '').lower() for f in missing})))
+    verdicts = _classify_unrulled_facets_inline(missing, category_name)
+    if verdicts:
+        _persist_classified_facets(verdicts)
+
+
+def _facet_position_clause(selected_facets: list) -> str:
+    """Build the Dutch ordering + pinning clause appended to a polish prompt.
+
+    Returns "" when nothing applies. Two sections may appear:
+      1. "Volgorde:" — explicit ordered list of facet values for THIS URL,
+         derived from pa.facet_position_rules.order_index.
+      2. "Pin-regels:" — any slug with a non-NULL `position` ('start','end',
+         'start_or_end'). Acts as a hard override on top of the order list.
+    """
+    if not selected_facets:
+        return ""
+    rules = _load_facet_position_rules()
+    if not rules:
+        return ""
+
+    ordered = _ordered_facet_values(selected_facets)
+    pins: List[str] = []
+    for f in selected_facets:
+        slug = (f.get('url_name') or '').lower()
+        rec = rules.get(slug)
+        if not rec:
+            continue
+        pos = rec.get('position')
+        if not pos:
+            continue
+        label = _POSITION_LABEL_NL.get(pos, pos)
+        val = f.get('detail_value') or slug
+        pins.append(f'   - "{val}" (facet {slug}) → zet {label}.')
+
+    sections: List[str] = []
+    # Only emit the ordering instruction if there are >=2 facets — a single
+    # facet has nothing to order.
+    if len(ordered) >= 2:
+        listed = ', '.join(f'"{v}"' for v in ordered)
+        sections.append(
+            "VOLGORDE VAN FACETTEN (gebruik deze volgorde voor de facetwaarden in de H1, "
+            "verbuig waar grammaticaal nodig; eindgrammatica gaat voor exacte volgorde):\n"
+            f"   {listed}"
+        )
+    if pins:
+        sections.append("PIN-REGELS (deze gaan vóór de volgorde-instructie):\n" + "\n".join(pins))
+    if not sections:
+        return ""
+    return "\n\n" + "\n\n".join(sections)
 
 
 def _norm_for_dedupe(s: str) -> str:
@@ -472,11 +807,12 @@ _POLISH_PROMPT_V2_TEMPLATE = (
 
 
 def _build_polish_prompt(ai_h1: str, facet_info: str, facet_values_str: str,
-                         met_section: str, met_rule: str, mode: str = 'v1') -> str:
+                         met_section: str, met_rule: str, mode: str = 'v1',
+                         position_rules_clause: str = "") -> str:
     if mode == 'v2':
         return _POLISH_PROMPT_V2_TEMPLATE.format(
             ai_h1=ai_h1, facet_values_str=facet_values_str, met_section=met_section
-        )
+        ) + position_rules_clause
     # v1 (default) — long detailed prompt
     return f"""Je bent een SEO-expert. Verbeter deze titel tot een goedlopende en grammaticaal correcte H1 zonder "-".
 
@@ -486,7 +822,7 @@ Facetten (naam: waarde): {facet_info}
 
 BELANGRIJK - Facetwaarden die INTACT moeten blijven (niet splitsen of herschikken):
 {facet_values_str}
-{met_section}
+{met_section}{position_rules_clause}
 Regels:
 1. ALLERBELANGRIJKSTE REGEL: Gebruik UITSLUITEND woorden die voorkomen in de titel OF in de facetten hierboven. Voeg ABSOLUUT GEEN nieuwe woorden toe. Geen "Nieuwe", geen extra bijvoeglijke naamwoorden, geen woorden die niet letterlijk in de input staan.
 2. Facetwaarden zijn vaste combinaties en mogen NIET opgesplitst worden.
@@ -936,6 +1272,11 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
     # one per facet (the per-facet path opens a fresh DB connection each call).
     from backend.facet_classifier import batch_classify_facets, _NEVER_TYPE_FACETS
     type_class = batch_classify_facets(selected_facets, category_name)
+    # Best-effort inline classification of any URL slug not yet in
+    # pa.facet_position_rules. Persists with source='llm_suggested' so the
+    # downstream calls in THIS generation already see the new order/type-facet
+    # values via the merged in-memory cache.
+    _classify_and_persist_unrulled(selected_facets, category_name)
     # Treat any facet whose URL slug (url_name) is in the policy never-list as
     # NOT a type-facet, regardless of whether the per-(facet_name, category)
     # classification says True. The classifier is keyed on the API facet_name
@@ -960,12 +1301,30 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
     # values like "Relax tuinstoel" carry the singular of the category in
     # every value, so appending "Tuinstoelen" always duplicates.
     _ALWAYS_TYPE_URL_SLUGS = {'t_stoel'}
-    has_category_override = any(
-        (f.get('url_name') or '').lower() in _ALWAYS_TYPE_URL_SLUGS
-        or type_class.get((f.get('facet_name') or '').lower().strip(), False)
-        for f in selected_facets
-        if (f.get('url_name') or '').lower() not in _NEVER_URL_SLUGS
-    )
+    # Same idea as _ALWAYS_TYPE_URL_SLUGS, but the override only kicks in on
+    # the maincat overview page (no subcategory in the URL). Maps url_slug ->
+    # required maincat slug. Use for facets whose values are product nouns at
+    # the top-level overview but become attributes inside a subcategory (where
+    # the category-noun then has to reappear in the H1).
+    _ALWAYS_TYPE_URL_SLUGS_MAINCAT_ONLY = {'t_meubelset': 'meubilair'}
+    _url_maincat, _url_category, _ = parse_beslist_url(url)
+    _is_maincat_level = _url_category is None
+
+    def _is_type_facet_for(f) -> bool:
+        slug = (f.get('url_name') or '').lower()
+        if slug in _NEVER_URL_SLUGS:
+            return False
+        # pa.facet_position_rules is the new single source of truth, when set.
+        override = _type_facet_override_by_slug(slug)
+        if override is not None:
+            return override
+        if slug in _ALWAYS_TYPE_URL_SLUGS:
+            return True
+        if _is_maincat_level and _ALWAYS_TYPE_URL_SLUGS_MAINCAT_ONLY.get(slug) == _url_maincat:
+            return True
+        return bool(type_class.get((f.get('facet_name') or '').lower().strip(), False))
+
+    has_category_override = any(_is_type_facet_for(f) for f in selected_facets)
     if has_category_override and category_name:
         # Strip category_name from end or start of the API H1 if it's already there
         cat_suffix = re.compile(r'\s+' + re.escape(category_name) + r'\s*$', re.IGNORECASE)
@@ -1270,6 +1629,10 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         met_rule = """7. Voeg NOOIT het woord "met" toe aan de titel.
 """
 
+    # Only facets the AI actually rewrites are eligible for position ordering.
+    # Size/suffix/voor/met values are appended POST-AI by the code below, so
+    # including them in the position clause would double-emit them (the AI
+    # inserts "Maat 34", then size_values appends "Maat 34" again).
     prompt = _build_polish_prompt(
         ai_h1=ai_h1,
         facet_info=facet_info,
@@ -1277,6 +1640,7 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         met_section=met_section,
         met_rule=met_rule,
         mode=prompt_mode,
+        position_rules_clause=_facet_position_clause(non_size_facets),
     )
 
     try:
@@ -1449,18 +1813,26 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
     kleurtint: List[str] = []  # specific hue facet — supersedes generic kleur
     color_combos: List[str] = []
     materials: List[str] = []
-    other_adj: List[str] = []
+    other_adj: List[tuple] = []   # (order_index, value) — sorted by Excel order after loop
+    post_category: List[str] = [] # facets with position='end' rule — placed AFTER category
     doelgroep: List[str] = []
     met_clauses: List[str] = []
     voor_values: List[str] = []
     sizes: List[str] = []
     conditions: List[str] = []
+    _pos_rules = _load_facet_position_rules()
     for f in selected_facets or []:
         sod = (f.get('detail_value') or '').strip()
         if not sod:
             continue
         url_slug = (f.get('url_name') or '').lower()
         fname = (f.get('facet_name') or '').lower()
+        rule = _pos_rules.get(url_slug, {}) if _pos_rules else {}
+        # Hard pin to post-category: position='end' wins over all other bucket
+        # routing (the slug-author has explicitly said "this value reads after
+        # the productnoun, not in front of it").
+        if rule.get('position') == 'end':
+            post_category.append(sod); continue
         if is_spec_value(sod, fname):
             sizes.append(sod); continue
         # Condition facet (Dutch: 'conditie' — values like Nieuw / Gebruikt /
@@ -1495,7 +1867,13 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
             met_clauses.append(sod); continue
         if low.startswith('voor ') or low.startswith('vanaf '):
             voor_values.append(sod); continue
-        other_adj.append(sod)
+        other_adj.append((rule.get('order_index') or _FACET_ORDER_FALLBACK, sod))
+
+    # Sort the catch-all bucket by Excel global order so high-order facets
+    # (e.g. style/theme words) end up adjacent to the productnoun, not flung
+    # to the front. Stable sort preserves input order on ties.
+    other_adj.sort(key=lambda t: t[0])
+    other_adj_values: List[str] = [v for _, v in other_adj]
 
     # If a more specific color facet (kleurtint or kleur*combi*) is present,
     # drop the generic kleur bucket — the user-facing rule is "use the more
@@ -1516,9 +1894,10 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
     if productlijn and productlijn.lower() != brand.lower():
         parts.append(productlijn)
     parts.extend(materials)
-    parts.extend(other_adj)
+    parts.extend(other_adj_values)
     parts.extend(doelgroep)
     parts.append(category_name)
+    parts.extend(post_category)
     parts.extend(met_clauses)
     parts.extend(voor_values)
     parts.extend(color_combos)
@@ -1655,14 +2034,31 @@ def generate_title_v3(url: str, polish: bool = True) -> Optional[Dict]:
     # "Wanten Handschoenen", "Ventilatieventielen Ventilatiematerialen").
     from backend.facet_classifier import batch_classify_facets
     type_class = batch_classify_facets(selected_facets, category_name)
+    # Same inline-classify hook as the v1 path — slugs missing from
+    # pa.facet_position_rules get an LLM verdict, persisted as 'llm_suggested'.
+    _classify_and_persist_unrulled(selected_facets, category_name)
     _NEVER_URL_SLUGS = {'type_productlijn', 'personage', 'seizoen_schoenen'}
     _ALWAYS_TYPE_URL_SLUGS = {'t_stoel'}
-    has_category_override = any(
-        (f.get('url_name') or '').lower() in _ALWAYS_TYPE_URL_SLUGS
-        or type_class.get((f.get('facet_name') or '').lower().strip(), False)
-        for f in selected_facets
-        if (f.get('url_name') or '').lower() not in _NEVER_URL_SLUGS
-    )
+    # Mirrors the v1 path (see generate_title_from_api): facets that only act
+    # as type-facets on the maincat overview, keyed url_slug -> maincat slug.
+    _ALWAYS_TYPE_URL_SLUGS_MAINCAT_ONLY = {'t_meubelset': 'meubilair'}
+    _url_maincat, _url_category, _ = parse_beslist_url(url)
+    _is_maincat_level = _url_category is None
+
+    def _is_type_facet_for(f) -> bool:
+        slug = (f.get('url_name') or '').lower()
+        if slug in _NEVER_URL_SLUGS:
+            return False
+        override = _type_facet_override_by_slug(slug)
+        if override is not None:
+            return override
+        if slug in _ALWAYS_TYPE_URL_SLUGS:
+            return True
+        if _is_maincat_level and _ALWAYS_TYPE_URL_SLUGS_MAINCAT_ONLY.get(slug) == _url_maincat:
+            return True
+        return bool(type_class.get((f.get('facet_name') or '').lower().strip(), False))
+
+    has_category_override = any(_is_type_facet_for(f) for f in selected_facets)
     effective_category = '' if has_category_override else category_name
 
     composed_h1 = _build_v3_h1(selected_facets, effective_category)
@@ -1878,12 +2274,12 @@ def _process_url_with_delay(url: str, use_api: bool = True) -> Dict:
     return result
 
 
-def _run_processing(max_urls: int = 100, num_workers: int = 50, use_api: bool = True):
+def _run_processing(max_urls: int = 100, num_workers: int = 20, use_api: bool = True):
     """Background thread for processing URLs with multiple workers.
 
     Args:
         max_urls: Maximum number of URLs to process in this batch. If 0, process all pending.
-        num_workers: Number of parallel workers (default 50).
+        num_workers: Number of parallel workers (default 20).
         use_api: If True, use productsearch API for faceted URLs. If False, use scraping.
     """
     global _processing_state
@@ -1980,12 +2376,12 @@ def _run_processing(max_urls: int = 100, num_workers: int = 50, use_api: bool = 
         print("[AI_TITLES] Processing complete")
 
 
-def start_processing(batch_size: int = 100, num_workers: int = 50, use_api: bool = True) -> Dict:
+def start_processing(batch_size: int = 100, num_workers: int = 20, use_api: bool = True) -> Dict:
     """Start AI title processing in background.
 
     Args:
         batch_size: Number of URLs to process in this batch. If 0, process all pending.
-        num_workers: Number of parallel workers (default 50).
+        num_workers: Number of parallel workers (default 20).
         use_api: If True, use productsearch API for faceted URLs. If False, use scraping.
     """
     with _state_lock:
