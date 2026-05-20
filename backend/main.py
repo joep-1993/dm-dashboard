@@ -1287,7 +1287,7 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                 cur = conn.cursor()
 
                 cur.execute("""
-                    SELECT u.url, c.content
+                    SELECT u.url, c.content, c.url_id
                     FROM pa.kopteksten_content c
                     JOIN pa.urls u ON c.url_id = u.url_id
                     LEFT JOIN pa.kopteksten_link_validation v ON v.url_id = c.url_id
@@ -1302,6 +1302,7 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                     return_db_connection(conn)
                     break
 
+                url_to_uid = {row['url']: row['url_id'] for row in rows}
                 content_items = [(row['url'], row['content']) for row in rows]
 
                 with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
@@ -1325,8 +1326,7 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                         + len(unknown_format_urls)
                     )
 
-                    from backend.url_catalog import get_url_id
-                    content_url_id = get_url_id(cur, content_url)
+                    content_url_id = url_to_uid.get(content_url)
                     if content_url_id is not None:
                         cur.execute("""
                             INSERT INTO pa.kopteksten_link_validation
@@ -2304,7 +2304,7 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
             cur = conn.cursor()
 
             cur.execute("""
-                SELECT u.url, c.faq_json
+                SELECT u.url, c.faq_json, c.url_id
                 FROM pa.faq_content_v2 c
                 JOIN pa.urls u ON c.url_id = u.url_id
                 LEFT JOIN pa.faq_link_validation v ON v.url_id = c.url_id
@@ -2313,6 +2313,7 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
                 LIMIT %s
             """, (batch_size,))
             rows = cur.fetchall()
+            url_to_uid = {row['url']: row['url_id'] for row in rows}
 
             cur.close()
             return_db_connection(conn)
@@ -2355,24 +2356,24 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
                     elif result['has_unknown_format']:
                         batch_urls_unknown_format[result['url']] = result['unknown_format_links']
 
-            # Record validation results (for URLs that passed — no gone and no unknown format)
-            from backend.url_catalog import get_url_id
+            # Record validation results for ALL URLs (prevents infinite re-fetch
+            # of URLs with unknown_format or gone links that aren't deleted yet)
             conn = get_db_connection()
             cur = conn.cursor()
             for record in validation_records:
-                if not record['has_gone'] and not record['has_unknown_format']:
-                    uid = get_url_id(cur, record['url'])
-                    if uid is not None:
-                        cur.execute("""
-                            INSERT INTO pa.faq_link_validation
-                                (url_id, total_links, valid_links, gone_links, validated_at)
-                            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                            ON CONFLICT (url_id) DO UPDATE SET
-                                total_links = EXCLUDED.total_links,
-                                valid_links = EXCLUDED.valid_links,
-                                gone_links = EXCLUDED.gone_links,
-                                validated_at = CURRENT_TIMESTAMP
-                        """, (uid, record['total_links'], record['valid_links'], 0))
+                uid = url_to_uid.get(record['url'])
+                if uid is not None:
+                    gone_count = len(record['gone_links']) if isinstance(record['gone_links'], list) else record['gone_links']
+                    cur.execute("""
+                        INSERT INTO pa.faq_link_validation
+                            (url_id, total_links, valid_links, gone_links, validated_at)
+                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (url_id) DO UPDATE SET
+                            total_links = EXCLUDED.total_links,
+                            valid_links = EXCLUDED.valid_links,
+                            gone_links = EXCLUDED.gone_links,
+                            validated_at = CURRENT_TIMESTAMP
+                    """, (uid, record['total_links'], record['valid_links'], gone_count))
             conn.commit()
             cur.close()
             return_db_connection(conn)
