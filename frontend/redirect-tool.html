@@ -17,9 +17,22 @@
         .url-cell { font-family: monospace; font-size: 0.8rem; word-break: break-all; max-width: 380px; }
         .flatten-cell { background-color: #fff3cd !important; }
         .skip-cell { background-color: #f8d7da !important; }
+        .ok-cell { background-color: #d1e7dd !important; }
+        .stat-box.info { background: #cff4fc; border-color: #b6effb; }
 
-        .preview-table thead th { background: #f1f3f5; font-size: 0.8rem; }
+        .preview-table { min-width: 1500px; }
+        .preview-table thead th {
+            background: #f1f3f5; font-size: 0.8rem;
+            position: sticky; top: 0; z-index: 1;
+        }
+        .preview-table thead th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+        .preview-table thead th.sortable:hover { background: #e9ecef; }
+        .preview-table thead th .sort-arrow { color: #adb5bd; font-size: 0.75rem; margin-left: 4px; }
+        .preview-table thead th.sort-active .sort-arrow { color: #5e4a90; }
         .preview-table td { font-size: 0.82rem; vertical-align: middle; padding: 6px 10px; }
+        .stat-box[data-filter] { cursor: pointer; transition: box-shadow 0.15s, transform 0.05s; }
+        .stat-box[data-filter]:hover { box-shadow: 0 0 0 2px rgba(94, 74, 144, 0.25); }
+        .stat-box[data-filter].active { box-shadow: 0 0 0 2px #5e4a90; transform: translateY(-1px); }
 
         .runs-table thead th { background: #f1f3f5; font-size: 0.8rem; }
         .runs-table td { font-size: 0.85rem; vertical-align: middle; }
@@ -37,6 +50,14 @@
         .btn-red-outline:hover { background: #d63031; color: #fff; }
         .btn-purple-action { border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; }
         .btn-purple-action:hover { background: #5e4a90; color: #fff; }
+        .btn-orange-action { border: 1px solid #CC5500; color: #CC5500; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; }
+        .btn-orange-action:hover { background: #CC5500; color: #fff; }
+        /* Pagination — matches gsd-check / other dm-tools tables.
+           btn-outline-secondary is restyled to burnt-orange in css/style.css. */
+        .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0; margin-top: 0.5rem; font-size: 0.85rem; }
+        .pagination-controls select { font-size: 0.85rem; width: auto; }
+        .pagination-controls .page-info { color: #636e72; }
+        .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
 
         .small-muted { font-size: 0.8rem; color: #6c757d; }
         .badge-flatten { background-color: #ffc107; color: #000; }
@@ -89,6 +110,7 @@
                     <button class="nav-dropdown-toggle">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
                         <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
                         <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
@@ -147,6 +169,20 @@
                                 <span id="parseStatus" class="small-muted me-auto"></span>
                                 <button class="btn btn-primary" id="btnPreview">Upload</button>
                             </div>
+                            <!-- Progress bar (mirrors FAQ pattern) -->
+                            <div class="col-12 d-none" id="previewProgressContainer">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span id="previewProgressText">Preflighting…</span>
+                                    <span id="previewProgressPercent">0%</span>
+                                </div>
+                                <div class="progress" style="height: 25px;">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                         role="progressbar"
+                                         id="previewProgressBar"
+                                         style="width: 0%">
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -155,45 +191,69 @@
                 <div id="previewCard" class="card mb-3" style="display:none;">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Preview</h5>
-                        <button class="btn btn-sm btn-outline-secondary" id="btnClearPreview">Clear</button>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-purple-outline" id="btnCopyPreview">Copy for Excel</button>
+                            <button class="btn btn-sm btn-purple-outline" id="btnClearPreview">Clear</button>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div class="row g-2 mb-3">
-                            <div class="col"><div class="stat-box"><div class="num" id="statTotal">0</div><div class="label">Total rows</div></div></div>
-                            <div class="col"><div class="stat-box accent"><div class="num" id="statFlattened">0</div><div class="label">"new" rewritten (already in DB)</div></div></div>
-                            <div class="col"><div class="stat-box danger"><div class="num" id="statSkipped">0</div><div class="label">Skipped</div></div></div>
-                            <div class="col"><div class="stat-box success"><div class="num" id="statSubmittable">0</div><div class="label">Ready to submit</div></div></div>
+                            <div class="col"><div class="stat-box" data-filter="all"><div class="num" id="statTotal">0</div><div class="label">Total rows</div></div></div>
+                            <div class="col"><div class="stat-box accent" data-filter="flattened"><div class="num" id="statFlattened">0</div><div class="label">"new" rewritten</div></div></div>
+                            <div class="col"><div class="stat-box info" data-filter="already"><div class="num" id="statAlready">0</div><div class="label">Already redirected</div></div></div>
+                            <div class="col"><div class="stat-box danger" data-filter="skipped"><div class="num" id="statSkipped">0</div><div class="label">Skipped</div></div></div>
+                            <div class="col"><div class="stat-box success" data-filter="ready"><div class="num" id="statSubmittable">0</div><div class="label">Ready to submit</div></div></div>
                         </div>
 
                         <div class="table-responsive" style="max-height: 480px; overflow-y:auto;">
                             <table class="table table-sm preview-table">
-                                <thead class="sticky-top">
+                                <thead>
                                     <tr>
-                                        <th>#</th>
-                                        <th>From</th>
-                                        <th>To (after flatten)</th>
-                                        <th>Country</th>
-                                        <th>Code</th>
-                                        <th>Label</th>
-                                        <th>Note</th>
+                                        <th class="sortable" data-sort="index">#<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="from">From<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="to">To<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="country">Country<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="code">Code<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="label">Label<span class="sort-arrow">↕</span></th>
                                     </tr>
                                 </thead>
                                 <tbody id="previewBody"></tbody>
                             </table>
                         </div>
 
-                        <div class="row g-2 align-items-end mt-3">
+                        <div class="row g-2 align-items-end mt-4">
                             <div class="col-md-6">
-                                <label class="form-label small-muted mb-1">Run label (optional, shown in Recent results)</label>
+                                <label class="form-label small-muted mb-1">Label (optional)</label>
                                 <input type="text" id="runLabel" class="form-control" placeholder="e.g. migration-batch-2026-05">
                             </div>
-                            <div class="col-md-6 d-flex justify-content-end">
+                            <div class="col-md-6 d-flex justify-content-end align-items-end gap-3">
+                                <div class="form-check" title="When checked, rows whose old URL already has a redirect rule will have the existing rule deleted before the new rule is posted.">
+                                    <input class="form-check-input" type="checkbox" id="cbReplaceExisting">
+                                    <label class="form-check-label small-muted" for="cbReplaceExisting">
+                                        Replace existing redirects
+                                    </label>
+                                </div>
                                 <button class="btn btn-success" id="btnSubmit">
-                                    <span id="submitLabel">Submit to redirect.api.beslist.nl</span>
+                                    <span id="submitLabel">Submit</span>
                                     <span id="submitSpinner" class="spinner-border spinner-border-sm ms-2" style="display:none;"></span>
                                 </button>
                             </div>
                         </div>
+                        <!-- Progress bar (mirrors FAQ pattern) -->
+                        <div id="submitProgressContainer" class="d-none mt-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span id="submitProgressText">Submitting…</span>
+                                <span id="submitProgressPercent">0%</span>
+                            </div>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar"
+                                     id="submitProgressBar"
+                                     style="width: 0%">
+                                </div>
+                            </div>
+                        </div>
+
                         <div id="submitResult" class="mt-3"></div>
                     </div>
                 </div>
@@ -229,15 +289,15 @@
                         <table class="table mb-0" id="runsTable">
                             <thead class="table-light">
                                 <tr>
-                                    <th style="padding: 8px 12px;">When</th>
-                                    <th style="padding: 8px 12px;">Label</th>
-                                    <th style="padding: 8px 12px;">Source</th>
-                                    <th style="padding: 8px 12px; text-align: end;">Total</th>
-                                    <th style="padding: 8px 12px; text-align: end;">Flattened</th>
-                                    <th style="padding: 8px 12px; text-align: end;">Skipped</th>
-                                    <th style="padding: 8px 12px; text-align: end;">Success</th>
-                                    <th style="padding: 8px 12px; text-align: end;">Failed</th>
-                                    <th style="padding: 8px 12px;">Actions</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Timestamp</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Label</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Source</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Total</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Flattened</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Skipped</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Success</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Failed</th>
+                                    <th style="padding: 8px 12px; text-align: center;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="runsBody"><tr><td colspan="9" class="text-muted text-center p-3">No runs yet</td></tr></tbody>
@@ -293,20 +353,67 @@
         async function runPreview() {
             const status = document.getElementById('parseStatus');
             const btn = document.getElementById('btnPreview');
+            const progBox = document.getElementById('previewProgressContainer');
+            const progBar = document.getElementById('previewProgressBar');
+            const progText = document.getElementById('previewProgressText');
+            const progPct = document.getElementById('previewProgressPercent');
+
             btn.disabled = true;
             status.textContent = 'Parsing input…';
+            progBox.classList.add('d-none');
+            progBar.style.width = '0%';
+            progPct.textContent = '0%';
+
             try {
                 const parsed = await parseInput();
                 parsedRows = parsed.rows;
                 if (!parsedRows.length) throw new Error('No usable rows found');
-                status.textContent = `Parsed ${parsedRows.length} row(s). Running preflight against redirect.api.beslist.nl…`;
-                const r = await fetch(`${API}/preview`, {
+                status.textContent = `Parsed ${parsedRows.length} row(s). Running...`;
+
+                const startResp = await fetch(`${API}/preview`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ rows: parsedRows }),
                 });
-                if (!r.ok) throw new Error((await r.json()).detail || 'Preview failed');
-                preflight = await r.json();
+                if (!startResp.ok) throw new Error((await startResp.json()).detail || 'Preview failed');
+                const { task_id } = await startResp.json();
+
+                progBox.classList.remove('d-none');
+                progText.textContent = 'Preflighting…';
+
+                const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+                let task = null;
+                while (true) {
+                    const s = await fetch(`${API}/preview-status/${task_id}`);
+                    if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
+                    task = await s.json();
+                    if (task.phase === 'prefetch') {
+                        // Large-batch path: backend is loading the full
+                        // redirect table into memory so per-row checks
+                        // become O(1) instead of O(HTTP-call). Total
+                        // table size is unknown ahead of time, so show
+                        // an indeterminate counter rather than a %.
+                        const loaded = task.prefetch_rows || 0;
+                        progBar.style.width = '100%';
+                        progPct.textContent = '';
+                        progText.textContent = `Prefetching redirect table… ${loaded.toLocaleString()} rules loaded`;
+                    } else {
+                        const total = task.total || 1;
+                        const done = task.processed || 0;
+                        const pct = Math.min(100, Math.round((done / total) * 100));
+                        progBar.style.width = pct + '%';
+                        progPct.textContent = pct + '%';
+                        progText.textContent = `Preflighted ${done.toLocaleString()} / ${total.toLocaleString()}`
+                            + ` (${task.flattened || 0} flattened, ${task.skipped || 0} skipped)`;
+                    }
+                    if (task.status === 'completed' || task.status === 'failed') break;
+                    await sleep(500);
+                }
+
+                if (task.status === 'failed') {
+                    throw new Error(task.error || 'Preflight task failed');
+                }
+                preflight = task.result;
                 renderPreview(preflight);
                 status.textContent = `Preflight done — ${preflight.stats.submittable} of ${preflight.stats.total} ready to submit.`;
             } catch (e) {
@@ -314,37 +421,240 @@
                 alert(e.message);
             } finally {
                 btn.disabled = false;
+                progBox.classList.add('d-none');
             }
         }
 
+        // View state for the preview table (filter + sort).
+        // Persisted across re-renders; reset on each new preflight.
+        let previewView = { filter: 'all', sortCol: null, sortDir: 'asc' };
+
         function renderPreview(p) {
             document.getElementById('previewCard').style.display = '';
-            document.getElementById('statTotal').textContent = p.stats.total;
-            document.getElementById('statFlattened').textContent = p.stats.flattened;
-            document.getElementById('statSkipped').textContent = p.stats.total - p.stats.submittable;
-            document.getElementById('statSubmittable').textContent = p.stats.submittable;
+            recomputeStats();
+            // Reset filter+sort to defaults whenever a fresh preflight lands.
+            previewView = { filter: 'all', sortCol: null, sortDir: 'asc' };
+            renderPreviewTable();
+        }
 
+        // "Replace existing" toggle reclassifies replaceable rows as ready
+        // (they'll be DELETE+POST'd at submit). Stats + filter outcomes
+        // need to react to it without re-running preflight.
+        function isReplaceableRow(row) {
+            return row && row.existing_id
+                && row.skip_reason === 'old URL already has a redirect rule';
+        }
+        function replaceExistingOn() {
+            return !!document.getElementById('cbReplaceExisting')?.checked;
+        }
+        // Effective skip state — used by filter + ready-tile + per-row
+        // styling. When the toggle is on, replaceable rows are NOT skipped.
+        function effectiveSkipReason(row) {
+            if (!row.skip_reason) return null;
+            if (replaceExistingOn() && isReplaceableRow(row)) return null;
+            return row.skip_reason;
+        }
+        function recomputeStats() {
+            if (!preflight) return;
+            const rows = preflight.processed;
+            const alreadyCount = rows.filter(r => r.already_correct).length;
+            // Skipped excludes already-correct rows since those are green,
+            // not red. Ready excludes them too — there's no API call to make.
+            const skipped = rows.filter(r => !r.already_correct && !!effectiveSkipReason(r)).length;
+            const ready = rows.length - skipped - alreadyCount;
+            document.getElementById('statTotal').textContent = rows.length;
+            document.getElementById('statFlattened').textContent = preflight.stats.flattened;
+            document.getElementById('statAlready').textContent = alreadyCount;
+            document.getElementById('statSkipped').textContent = skipped;
+            document.getElementById('statSubmittable').textContent = ready;
+        }
+
+        // Re-renders the preview <tbody> using the current filter+sort against
+        // preflight.processed. The row index shown is the *original* position
+        // so users can correlate filtered rows back to the input order.
+        function renderPreviewTable() {
+            if (!preflight) return;
             const body = document.getElementById('previewBody');
             body.innerHTML = '';
-            p.processed.forEach((row, i) => {
+
+            // Tag each row with its original index, then filter.
+            const filtered = preflight.processed
+                .map((row, origIndex) => ({ row, origIndex }))
+                .filter(({ row }) => previewFilterMatch(row, previewView.filter));
+
+            // Sort if requested. We sort a shallow copy so the underlying
+            // preflight.processed (used by Submit) stays in original order.
+            if (previewView.sortCol) {
+                const dir = previewView.sortDir === 'desc' ? -1 : 1;
+                filtered.sort((a, b) => dir * compareForSort(a, b, previewView.sortCol));
+            }
+
+            filtered.forEach(({ row, origIndex }) => {
                 const tr = document.createElement('tr');
-                const cellClass = row.skip_reason ? 'skip-cell' : (row.flatten_from ? 'flatten-cell' : '');
+                const effSkip = effectiveSkipReason(row);
+                const willReplace = !effSkip && isReplaceableRow(row);
+                const incomingCount = (row.incoming_rules || []).length;
+                const willRewire = !effSkip && incomingCount > 0;
+                let cellClass = '';
+                if (row.already_correct) cellClass = 'ok-cell';
+                else if (effSkip)        cellClass = 'skip-cell';
+                else if (row.flatten_from || willReplace || willRewire) cellClass = 'flatten-cell';
                 const flattenBadge = row.flatten_from
                     ? `<br><span class="badge badge-flatten">flattened from <code>${escapeHtml(row.flatten_from)}</code></span>`
                     : '';
-                const note = row.skip_reason
-                    ? `<span class="text-danger">${escapeHtml(row.skip_reason)}</span>`
-                    : (row.flatten_from ? '<span class="text-warning">Chain flattened</span>' : '');
+                // Status badge under the From cell:
+                //   - already_correct → green "URL already redirected"
+                //   - replaceable (toggle on) → yellow "will replace …"
+                //   - other skip → red with the reason and current target
+                let skipBadge = '';
+                if (row.already_correct) {
+                    skipBadge = `<br><span class="badge bg-success">URL already redirected</span>`;
+                } else if (effSkip) {
+                    const target = row.existing_target
+                        ? `<span class="small-muted ms-1"> → <code>${escapeHtml(row.existing_target)}</code></span>`
+                        : '';
+                    skipBadge = `<br><span class="badge bg-danger">${escapeHtml(effSkip)}</span>${target}`;
+                } else if (willReplace) {
+                    const target = row.existing_target
+                        ? `<span class="small-muted ms-1">replaces → <code>${escapeHtml(row.existing_target)}</code></span>`
+                        : '';
+                    skipBadge = `<br><span class="badge badge-flatten">will replace existing rule</span>${target}`;
+                }
+                if (willRewire) {
+                    // Append (don't replace) since a row could conceivably
+                    // have both a flatten_from on its toUrl AND incoming
+                    // rules on its fromUrl.
+                    skipBadge += `<br><span class="badge badge-flatten">will rewire ${incomingCount} incoming rule${incomingCount === 1 ? '' : 's'} to → <code>${escapeHtml(row.final_new || row.input_new || '')}</code></span>`;
+                }
+                if (row.country_upgraded_from && !effSkip) {
+                    skipBadge += `<br><span class="badge badge-flatten">country: <code>${escapeHtml(row.country_upgraded_from)}</code> → <code>${escapeHtml(row.country || '')}</code></span>`;
+                }
                 tr.innerHTML = `
-                    <td>${i + 1}</td>
-                    <td class="url-cell ${cellClass}">${escapeHtml(row.input_old || '')}</td>
+                    <td>${origIndex + 1}</td>
+                    <td class="url-cell ${cellClass}">${escapeHtml(row.input_old || '')}${skipBadge}</td>
                     <td class="url-cell ${cellClass}">${escapeHtml(row.final_new || row.input_new || '')}${flattenBadge}</td>
                     <td>${escapeHtml(row.country || '')}</td>
                     <td>${escapeHtml(String(row.statusCode || ''))}</td>
                     <td>${escapeHtml(row.label || '')}</td>
-                    <td>${note}</td>
                 `;
                 body.appendChild(tr);
+            });
+
+            updateFilterTileActiveState();
+            updateSortHeaderActiveState();
+        }
+
+        function previewFilterMatch(row, filter) {
+            const effSkip = effectiveSkipReason(row);
+            switch (filter) {
+                case 'flattened': return !!row.flatten_from;
+                case 'already':   return !!row.already_correct;
+                case 'skipped':   return !row.already_correct && !!effSkip;
+                case 'ready':     return !row.already_correct && !effSkip;
+                default:          return true; // 'all'
+            }
+        }
+
+        function compareForSort(a, b, col) {
+            const ra = a.row, rb = b.row;
+            const va = sortValue(ra, col, a.origIndex);
+            const vb = sortValue(rb, col, b.origIndex);
+            if (typeof va === 'number' && typeof vb === 'number') return va - vb;
+            return String(va).localeCompare(String(vb), undefined, { sensitivity: 'base', numeric: true });
+        }
+
+        function sortValue(row, col, origIndex) {
+            switch (col) {
+                case 'index':   return origIndex;
+                case 'from':    return row.input_old || '';
+                case 'to':      return row.final_new || row.input_new || '';
+                case 'country': return row.country || '';
+                case 'code':    return Number(row.statusCode) || 0;
+                case 'label':   return row.label || '';
+                default:        return '';
+            }
+        }
+
+        function updateFilterTileActiveState() {
+            document.querySelectorAll('.stat-box[data-filter]').forEach((el) => {
+                el.classList.toggle('active', el.getAttribute('data-filter') === previewView.filter);
+            });
+        }
+
+        function updateSortHeaderActiveState() {
+            document.querySelectorAll('.preview-table thead th.sortable').forEach((th) => {
+                const col = th.getAttribute('data-sort');
+                const arrow = th.querySelector('.sort-arrow');
+                if (col === previewView.sortCol) {
+                    th.classList.add('sort-active');
+                    if (arrow) arrow.textContent = previewView.sortDir === 'desc' ? '↓' : '↑';
+                } else {
+                    th.classList.remove('sort-active');
+                    if (arrow) arrow.textContent = '↕';
+                }
+            });
+        }
+
+        // Copy the currently-visible preview rows (current filter + sort
+        // applied) as TSV so it pastes straight into Excel. Sanitize cells
+        // per the LEARNINGS note: embedded tab/newline anywhere in cell
+        // data breaks Excel's TSV parser mid-row.
+        function copyPreviewForExcel() {
+            if (!preflight) return;
+            const filtered = preflight.processed
+                .map((row, origIndex) => ({ row, origIndex }))
+                .filter(({ row }) => previewFilterMatch(row, previewView.filter));
+            if (previewView.sortCol) {
+                const dir = previewView.sortDir === 'desc' ? -1 : 1;
+                filtered.sort((a, b) => dir * compareForSort(a, b, previewView.sortCol));
+            }
+            const sanitize = v => v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' ');
+            const headers = ['#', 'from', 'to', 'flattened_from', 'country', 'statusCode', 'label', 'skip_reason'];
+            const tsv = [headers.join('\t')];
+            filtered.forEach(({ row, origIndex }) => {
+                tsv.push([
+                    origIndex + 1,
+                    sanitize(row.input_old),
+                    sanitize(row.final_new || row.input_new),
+                    sanitize(row.flatten_from),
+                    sanitize(row.country),
+                    sanitize(row.statusCode),
+                    sanitize(row.label),
+                    sanitize(row.skip_reason),
+                ].join('\t'));
+            });
+            navigator.clipboard.writeText(tsv.join('\n')).then(() => {
+                alert(`Copied ${filtered.length} row(s). Paste directly into Excel.`);
+            }).catch(err => {
+                console.error('Copy for Excel failed:', err);
+                alert('Failed to copy to clipboard: ' + (err && err.message ? err.message : err));
+            });
+        }
+
+        // Click handlers — attached once at load (the cells/headers exist
+        // permanently; only their content gets re-rendered).
+        function wirePreviewInteractions() {
+            document.querySelectorAll('.stat-box[data-filter]').forEach((el) => {
+                el.addEventListener('click', () => {
+                    const name = el.getAttribute('data-filter');
+                    // Re-clicking the active filter clears back to 'all'.
+                    previewView.filter = (previewView.filter === name && name !== 'all') ? 'all' : name;
+                    renderPreviewTable();
+                });
+            });
+            document.querySelectorAll('.preview-table thead th.sortable').forEach((th) => {
+                th.addEventListener('click', () => {
+                    const col = th.getAttribute('data-sort');
+                    if (previewView.sortCol === col) {
+                        // asc → desc → unsorted
+                        if (previewView.sortDir === 'asc') previewView.sortDir = 'desc';
+                        else { previewView.sortCol = null; previewView.sortDir = 'asc'; }
+                    } else {
+                        previewView.sortCol = col;
+                        previewView.sortDir = 'asc';
+                    }
+                    renderPreviewTable();
+                });
             });
         }
 
@@ -354,30 +664,65 @@
             const btn = document.getElementById('btnSubmit');
             const lbl = document.getElementById('submitLabel');
             const spin = document.getElementById('submitSpinner');
+            const progBox = document.getElementById('submitProgressContainer');
+            const progBar = document.getElementById('submitProgressBar');
+            const progText = document.getElementById('submitProgressText');
+            const progPct = document.getElementById('submitProgressPercent');
+
             btn.disabled = true;
             lbl.textContent = 'Submitting…';
             spin.style.display = '';
+            document.getElementById('submitResult').innerHTML = '';
+            progBox.classList.remove('d-none');
+            progBar.style.width = '0%';
+            progText.textContent = 'Starting…';
+            progPct.textContent = '0%';
+
             try {
                 const payload = {
                     processed: preflight.processed,
                     label: document.getElementById('runLabel').value.trim(),
                     input_method: cbManual.checked ? 'text' : 'file',
+                    replace_existing: replaceExistingOn(),
                 };
-                const r = await fetch(`${API}/submit`, {
+                const startResp = await fetch(`${API}/submit`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),
                 });
-                if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
-                const result = await r.json();
-                renderSubmitResult(result);
+                if (!startResp.ok) throw new Error((await startResp.json()).detail || 'Submit failed');
+                const { task_id } = await startResp.json();
+
+                // Poll until completed/failed.
+                const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+                let task = null;
+                while (true) {
+                    const s = await fetch(`${API}/submit-status/${task_id}`);
+                    if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
+                    task = await s.json();
+                    const total = task.total || 1;
+                    const done = task.processed || 0;
+                    const pct = Math.min(100, Math.round((done / total) * 100));
+                    progBar.style.width = pct + '%';
+                    progPct.textContent = pct + '%';
+                    progText.textContent = `Submitted ${done.toLocaleString()} / ${total.toLocaleString()}`
+                        + ` (${task.success || 0} ok, ${task.failed || 0} failed, ${task.skipped || 0} skipped)`;
+                    if (task.status === 'completed' || task.status === 'failed') break;
+                    await sleep(500);
+                }
+
+                if (task.status === 'failed') {
+                    throw new Error(task.error || 'Submit task failed');
+                }
+                renderSubmitResult(task.result);
                 loadRuns();
             } catch (e) {
                 alert(e.message);
             } finally {
                 btn.disabled = false;
-                lbl.textContent = 'Submit to redirect.api.beslist.nl';
+                lbl.textContent = 'Submit';
                 spin.style.display = 'none';
+                progBox.classList.add('d-none');
             }
         }
 
@@ -390,7 +735,6 @@
                 <div class="alert alert-${fail > 0 ? 'warning' : 'success'} mb-0">
                     <strong>Run #${result.run_id} saved.</strong>
                     ${ok} succeeded, ${fail} failed, ${skipped} skipped, ${stats.flattened || 0} flattened.
-                    See <a href="#runsCard">Recent results</a> below.
                 </div>`;
             document.getElementById('submitResult').innerHTML = html;
         }
@@ -465,17 +809,17 @@
                     tr.className = 'history-row';
                     const when = new Date(run.created_at).toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' });
                     tr.innerHTML = `
-                        <td style="padding: 6px 12px;">${escapeHtml(when)}</td>
-                        <td style="padding: 6px 12px;">${escapeHtml(run.label || '')}</td>
-                        <td style="padding: 6px 12px;"><span class="badge bg-secondary">${escapeHtml(run.input_method)}</span></td>
-                        <td style="padding: 6px 12px; text-align: end;">${run.total_rows}</td>
-                        <td style="padding: 6px 12px; text-align: end;">${run.flattened}</td>
-                        <td style="padding: 6px 12px; text-align: end;">${run.skipped_home}</td>
-                        <td style="padding: 6px 12px; text-align: end; color: #198754;">${run.success}</td>
-                        <td style="padding: 6px 12px; text-align: end; ${run.failed > 0 ? 'color: #dc3545;' : ''}">${run.failed}</td>
-                        <td style="padding: 6px 12px;">
+                        <td style="padding: 6px 12px; text-align: center;">${escapeHtml(when)}</td>
+                        <td style="padding: 6px 12px; text-align: center;">${escapeHtml(run.label || '')}</td>
+                        <td style="padding: 6px 12px; text-align: center;"><span class="badge" style="background-color: #5e4a90; color: #fff;">${escapeHtml(run.input_method)}</span></td>
+                        <td style="padding: 6px 12px; text-align: center;">${run.total_rows}</td>
+                        <td style="padding: 6px 12px; text-align: center;">${run.flattened}</td>
+                        <td style="padding: 6px 12px; text-align: center;">${run.skipped_home}</td>
+                        <td style="padding: 6px 12px; text-align: center; color: #198754;">${run.success}</td>
+                        <td style="padding: 6px 12px; text-align: center; ${run.failed > 0 ? 'color: #dc3545;' : ''}">${run.failed}</td>
+                        <td style="padding: 6px 12px; text-align: center;">
                             <div style="display: inline-flex; gap: 4px; align-items: center;">
-                                <button class="btn btn-sm btn-purple-action" onclick="viewRun(${run.id})">View</button>
+                                <button class="btn btn-sm btn-orange-action" onclick="viewRun(${run.id})">View</button>
                                 <a class="btn btn-sm btn-purple-action" href="${API}/runs/${run.id}/export">Export</a>
                                 <button class="btn btn-sm btn-red-outline" onclick="deleteRun(${run.id})">Delete</button>
                             </div>
@@ -487,42 +831,194 @@
             }
         }
 
+        // View state for the run-detail table. Mirrors Preview's pattern
+        // (sort + filter) but adds pagination since runs can be large.
+        let runDetailRows = [];
+        let runDetailMeta = null;
+        let runDetailView = { sortCol: null, sortDir: 'asc', page: 1, perPage: 25 };
+
         async function viewRun(id) {
             const out = document.getElementById('runDetail');
             out.innerHTML = '<div class="text-muted">Loading…</div>';
             try {
                 const r = await fetch(`${API}/runs/${id}`);
                 const run = await r.json();
-                const rows = (run.results || []).map(r => {
-                    const api = r.api_response || {};
-                    const msg = api.message || api.error || '';
-                    const cls = r.status === 'ok' ? 'table-success' : (r.status === 'fail' ? 'table-danger' : 'table-warning');
-                    return `<tr class="${cls}">
-                        <td>${escapeHtml(r.status)}</td>
-                        <td class="url-cell">${escapeHtml(r.input_old || '')}</td>
-                        <td class="url-cell">${escapeHtml(r.final_new || '')}${r.flatten_from ? `<br><span class="small-muted">was: ${escapeHtml(r.flatten_from)}</span>` : ''}</td>
-                        <td>${escapeHtml(r.country || '')}</td>
-                        <td>${escapeHtml(String(r.statusCode || ''))}</td>
-                        <td class="small-muted">${escapeHtml(r.skip_reason || msg)}</td>
-                    </tr>`;
-                }).join('');
+                runDetailRows = run.results || [];
+                runDetailMeta = run;
+                runDetailView = { sortCol: null, sortDir: 'asc', page: 1, perPage: 25 };
+
+                // Shell — table rows + pagination are populated by renderRunDetailTable.
                 out.innerHTML = `
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <strong>Run #${run.id}${run.label ? ' — ' + escapeHtml(run.label) : ''}</strong>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('runDetail').innerHTML=''">Close</button>
+                            <button class="btn btn-sm btn-purple-outline" onclick="document.getElementById('runDetail').innerHTML=''">Close</button>
                         </div>
-                        <div class="card-body p-0">
-                            <div class="table-responsive">
-                                <table class="table table-sm mb-0">
-                                    <thead><tr><th>Status</th><th>From</th><th>To</th><th>Country</th><th>Code</th><th>Note</th></tr></thead>
-                                    <tbody>${rows}</tbody>
+                        <div class="card-body">
+                            <div class="table-responsive" style="max-height: 480px; overflow-y:auto;">
+                                <table class="table table-sm preview-table">
+                                    <thead>
+                                        <tr>
+                                            <th class="sortable" data-sort="status">Status<span class="sort-arrow">↕</span></th>
+                                            <th class="sortable" data-sort="from">From<span class="sort-arrow">↕</span></th>
+                                            <th class="sortable" data-sort="to">To<span class="sort-arrow">↕</span></th>
+                                            <th class="sortable" data-sort="country">Country<span class="sort-arrow">↕</span></th>
+                                            <th class="sortable" data-sort="code">Code<span class="sort-arrow">↕</span></th>
+                                            <th class="sortable" data-sort="note">Note<span class="sort-arrow">↕</span></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="runDetailBody"></tbody>
                                 </table>
+                            </div>
+                            <div class="pagination-controls">
+                                <span>Per page:</span>
+                                <select id="runDetailPerPage" class="form-select form-select-sm">
+                                    <option value="10">10</option>
+                                    <option value="25" selected>25</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                    <option value="all">Show all</option>
+                                </select>
+                                <button class="btn btn-outline-secondary btn-page" id="runDetailPrev" title="Previous page">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+                                </button>
+                                <span class="page-info" id="runDetailPageInfo">-</span>
+                                <button class="btn btn-outline-secondary btn-page" id="runDetailNext" title="Next page">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                                </button>
                             </div>
                         </div>
                     </div>`;
+
+                // Wire interactions inside the freshly-rendered shell.
+                document.querySelectorAll('#runDetail .preview-table thead th.sortable').forEach((th) => {
+                    th.addEventListener('click', () => {
+                        const col = th.getAttribute('data-sort');
+                        if (runDetailView.sortCol === col) {
+                            if (runDetailView.sortDir === 'asc') runDetailView.sortDir = 'desc';
+                            else { runDetailView.sortCol = null; runDetailView.sortDir = 'asc'; }
+                        } else {
+                            runDetailView.sortCol = col;
+                            runDetailView.sortDir = 'asc';
+                        }
+                        runDetailView.page = 1;
+                        renderRunDetailTable();
+                    });
+                });
+                document.getElementById('runDetailPerPage').addEventListener('change', (e) => {
+                    runDetailView.perPage = e.target.value === 'all' ? 'all' : Number(e.target.value);
+                    runDetailView.page = 1;
+                    renderRunDetailTable();
+                });
+                document.getElementById('runDetailPrev').addEventListener('click', () => {
+                    if (runDetailView.page > 1) { runDetailView.page--; renderRunDetailTable(); }
+                });
+                document.getElementById('runDetailNext').addEventListener('click', () => {
+                    const total = runDetailRows.length;
+                    const pp = runDetailView.perPage === 'all' ? total : runDetailView.perPage;
+                    const maxPage = Math.max(1, Math.ceil(total / pp));
+                    if (runDetailView.page < maxPage) { runDetailView.page++; renderRunDetailTable(); }
+                });
+
+                renderRunDetailTable();
             } catch (e) {
                 out.innerHTML = `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function renderRunDetailTable() {
+            const body = document.getElementById('runDetailBody');
+            if (!body) return;
+
+            // Sort a shallow copy so the underlying runDetailRows stays in
+            // insertion order for stable pagination + the original-index
+            // arrow keeps meaning.
+            let rows = runDetailRows.map((row, origIndex) => ({ row, origIndex }));
+            if (runDetailView.sortCol) {
+                const dir = runDetailView.sortDir === 'desc' ? -1 : 1;
+                rows.sort((a, b) => dir * compareRunDetailRows(a, b, runDetailView.sortCol));
+            }
+
+            const total = rows.length;
+            const pp = runDetailView.perPage === 'all' ? total : runDetailView.perPage;
+            const maxPage = Math.max(1, Math.ceil(total / pp));
+            if (runDetailView.page > maxPage) runDetailView.page = maxPage;
+            const start = (runDetailView.page - 1) * pp;
+            const pageRows = runDetailView.perPage === 'all' ? rows : rows.slice(start, start + pp);
+
+            body.innerHTML = '';
+            pageRows.forEach(({ row: r }) => {
+                const api = r.api_response || {};
+                // Prefer the backend's friendly_message for failed rows.
+                // Fall back to the raw API message. Keep the raw SQL error
+                // available on hover via the title attribute so power
+                // users can still see SQLSTATE etc.
+                const rawMsg = r.raw_message || api.message || api.error || '';
+                const noteText = r.skip_reason || r.friendly_message || rawMsg;
+                const noteTitle = r.friendly_message && rawMsg ? rawMsg : '';
+                const cls = r.status === 'ok' ? 'table-success' : (r.status === 'fail' ? 'table-danger' : 'table-warning');
+                const tr = document.createElement('tr');
+                tr.className = cls;
+                tr.innerHTML = `
+                    <td>${escapeHtml(r.status)}</td>
+                    <td class="url-cell">${escapeHtml(r.input_old || '')}</td>
+                    <td class="url-cell">${escapeHtml(r.final_new || '')}${r.flatten_from ? `<br><span class="small-muted">was: ${escapeHtml(r.flatten_from)}</span>` : ''}</td>
+                    <td>${escapeHtml(r.country || '')}</td>
+                    <td>${escapeHtml(String(r.statusCode || ''))}</td>
+                    <td class="small-muted"${noteTitle ? ` title="${escapeHtml(noteTitle)}"` : ''}>${escapeHtml(noteText)}</td>
+                `;
+                body.appendChild(tr);
+            });
+
+            // Sort-header arrow refresh.
+            document.querySelectorAll('#runDetail .preview-table thead th.sortable').forEach((th) => {
+                const col = th.getAttribute('data-sort');
+                const arrow = th.querySelector('.sort-arrow');
+                if (col === runDetailView.sortCol) {
+                    th.classList.add('sort-active');
+                    if (arrow) arrow.textContent = runDetailView.sortDir === 'desc' ? '↓' : '↑';
+                } else {
+                    th.classList.remove('sort-active');
+                    if (arrow) arrow.textContent = '↕';
+                }
+            });
+
+            // Page info + Prev/Next disabled state.
+            const info = document.getElementById('runDetailPageInfo');
+            if (info) {
+                if (total === 0) {
+                    info.textContent = 'No rows';
+                } else if (runDetailView.perPage === 'all') {
+                    info.textContent = `Showing all ${total.toLocaleString()} rows`;
+                } else {
+                    const end = Math.min(start + pp, total);
+                    info.textContent = `${start + 1}–${end} of ${total.toLocaleString()}`;
+                }
+            }
+            const prev = document.getElementById('runDetailPrev');
+            const next = document.getElementById('runDetailNext');
+            if (prev) prev.disabled = runDetailView.page <= 1 || runDetailView.perPage === 'all';
+            if (next) next.disabled = runDetailView.page >= maxPage || runDetailView.perPage === 'all';
+        }
+
+        function compareRunDetailRows(a, b, col) {
+            const va = runDetailSortValue(a.row, col, a.origIndex);
+            const vb = runDetailSortValue(b.row, col, b.origIndex);
+            if (typeof va === 'number' && typeof vb === 'number') return va - vb;
+            return String(va).localeCompare(String(vb), undefined, { sensitivity: 'base', numeric: true });
+        }
+
+        function runDetailSortValue(r, col, origIndex) {
+            const api = r.api_response || {};
+            const rawMsg = r.raw_message || api.message || api.error || '';
+            switch (col) {
+                case 'status':  return r.status || '';
+                case 'from':    return r.input_old || '';
+                case 'to':      return r.final_new || '';
+                case 'country': return r.country || '';
+                case 'code':    return Number(r.statusCode) || 0;
+                case 'note':    return r.skip_reason || r.friendly_message || rawMsg || '';
+                default:        return origIndex;
             }
         }
 
@@ -544,6 +1040,11 @@
         // ---------------------- Bindings + tooltip init ----------------------
         document.getElementById('btnPreview').addEventListener('click', runPreview);
         document.getElementById('btnSubmit').addEventListener('click', submitRun);
+        document.getElementById('btnCopyPreview').addEventListener('click', copyPreviewForExcel);
+        document.getElementById('cbReplaceExisting').addEventListener('change', () => {
+            recomputeStats();
+            renderPreviewTable();
+        });
         document.getElementById('btnClearPreview').addEventListener('click', () => {
             preflight = null; parsedRows = [];
             document.getElementById('previewCard').style.display = 'none';
@@ -554,6 +1055,7 @@
         document.getElementById('checkUrlInput').addEventListener('keypress', e => { if (e.key === 'Enter') checkSingleUrl(); });
         document.getElementById('btnRefreshRuns').addEventListener('click', loadRuns);
 
+        wirePreviewInteractions();
         loadRuns();
     </script>
 </body>
