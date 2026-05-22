@@ -122,11 +122,21 @@ class PreviewRequest(BaseModel):
 
 @router.post("/preview")
 def preview(req: PreviewRequest) -> dict:
+    """Start preflight in the background; the client polls
+    /preview-status/{task_id} to drive the Upload progress bar and pick
+    up the final preflight result on completion."""
     if not req.rows:
         raise HTTPException(400, "No rows provided")
-    if len(req.rows) > 5000:
-        raise HTTPException(400, "Maximum 5,000 rows per batch")
-    return svc.preflight_rows(req.rows)
+    task_id = svc.start_preflight(req.rows)
+    return {"task_id": task_id, "status": "started"}
+
+
+@router.get("/preview-status/{task_id}")
+def preview_status(task_id: str) -> dict:
+    task = svc.get_preflight_status(task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    return task
 
 
 # ---------------------------------------------------------------------------
@@ -137,27 +147,29 @@ class SubmitRequest(BaseModel):
     processed: list[dict]
     label: str = ""
     input_method: str = "file"
+    replace_existing: bool = False
 
 
 @router.post("/submit")
 def submit(req: SubmitRequest) -> dict:
+    """Kick off the submission in the background; the client polls
+    /submit-status/{task_id} to drive a progress bar and pick up the final
+    run_id + counts on completion."""
     if not req.processed:
         raise HTTPException(400, "Nothing to submit")
-    # Re-derive preflight stats from the processed payload so the saved totals
-    # match what was actually submitted.
-    preflight = {
-        "stats": {
-            "total": len(req.processed),
-            "flattened": sum(1 for p in req.processed if p.get("flatten_from")),
-            "skipped_home": sum(
-                1 for p in req.processed if p.get("skip_reason") == "old URL is the homepage (safety block)"
-            ),
-            "submittable": sum(1 for p in req.processed if not p.get("skip_reason")),
-        }
-    }
-    result = svc.submit_rows(req.processed)
-    run_id = svc.save_run(req.label, req.input_method, preflight, result)
-    return {"run_id": run_id, **result, "stats": preflight["stats"]}
+    task_id = svc.start_submit(
+        req.processed, req.label, req.input_method,
+        replace_existing=req.replace_existing,
+    )
+    return {"task_id": task_id, "status": "started"}
+
+
+@router.get("/submit-status/{task_id}")
+def submit_status(task_id: str) -> dict:
+    task = svc.get_submit_status(task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    return task
 
 
 # ---------------------------------------------------------------------------
