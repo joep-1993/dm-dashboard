@@ -124,7 +124,7 @@
 
     <div class="container mt-4 mb-5">
         <div class="row">
-            <div class="col-lg-11 mx-auto">
+            <div class="col-md-10 mx-auto">
 
                 <!-- ============================================================ -->
                 <!-- CREATE REDIRECTS                                              -->
@@ -525,9 +525,6 @@
                     // have both a flatten_from on its toUrl AND incoming
                     // rules on its fromUrl.
                     skipBadge += `<br><span class="badge badge-flatten">will rewire ${incomingCount} incoming rule${incomingCount === 1 ? '' : 's'} to → <code>${escapeHtml(row.final_new || row.input_new || '')}</code></span>`;
-                }
-                if (row.country_upgraded_from && !effSkip) {
-                    skipBadge += `<br><span class="badge badge-flatten">country: <code>${escapeHtml(row.country_upgraded_from)}</code> → <code>${escapeHtml(row.country || '')}</code></span>`;
                 }
                 tr.innerHTML = `
                     <td>${origIndex + 1}</td>
@@ -956,6 +953,12 @@
                 const rawMsg = r.raw_message || api.message || api.error || '';
                 const noteText = r.skip_reason || r.friendly_message || rawMsg;
                 const noteTitle = r.friendly_message && rawMsg ? rawMsg : '';
+                // Mirror the Preview's "→ <existing target>" affordance so
+                // preflight-skipped and submit-failed rows that hit the
+                // same existing-rule condition render identically here.
+                const targetHtml = r.existing_target
+                    ? ` <span class="small-muted">→ <code>${escapeHtml(r.existing_target)}</code></span>`
+                    : '';
                 const cls = r.status === 'ok' ? 'table-success' : (r.status === 'fail' ? 'table-danger' : 'table-warning');
                 const tr = document.createElement('tr');
                 tr.className = cls;
@@ -965,7 +968,7 @@
                     <td class="url-cell">${escapeHtml(r.final_new || '')}${r.flatten_from ? `<br><span class="small-muted">was: ${escapeHtml(r.flatten_from)}</span>` : ''}</td>
                     <td>${escapeHtml(r.country || '')}</td>
                     <td>${escapeHtml(String(r.statusCode || ''))}</td>
-                    <td class="small-muted"${noteTitle ? ` title="${escapeHtml(noteTitle)}"` : ''}>${escapeHtml(noteText)}</td>
+                    <td class="small-muted"${noteTitle ? ` title="${escapeHtml(noteTitle)}"` : ''}>${escapeHtml(noteText)}${targetHtml}</td>
                 `;
                 body.appendChild(tr);
             });

@@ -769,10 +769,11 @@ def explain_submit_failure(item: dict, body: Any) -> dict:
     out["existing_target"] = existing_target
 
     if equiv_key(offending) == equiv_key(item.get("input_old") or ""):
-        msg = (
-            "source has existing rule"
-            + (f" → {existing_target}" if existing_target else "")
-        )
+        # Keep the message a short tag; the frontend appends the target
+        # separately from `existing_target` so the Run detail Note column
+        # renders this row the same as preflight-skipped rows with the
+        # same condition.
+        msg = "source has existing rule"
     elif equiv_key(offending) == equiv_key(item.get("final_new") or ""):
         msg = f"duplicate URL: {offending}"
     else:
