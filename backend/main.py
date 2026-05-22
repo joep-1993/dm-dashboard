@@ -57,6 +57,7 @@ from backend.dma_plus_router import router as dma_plus_router
 from backend.rurl_optimizer_router import router as rurl_optimizer_router
 from backend.rurl_optimizer_v2_router import router as rurl_optimizer_v2_router
 from backend.redirect_tool_router import router as redirect_tool_router
+from backend.performance_standup_router import router as performance_standup_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.content_publisher import (
@@ -171,6 +172,9 @@ app.include_router(rurl_optimizer_v2_router)
 
 # Include redirect_tool router (talks to redirect.api.beslist.nl)
 app.include_router(redirect_tool_router)
+
+# Include performance_standup router (writes to SharePoint-synced standup xlsx)
+app.include_router(performance_standup_router)
 
 # Include task_scheduler router (env-gated — Windows-only, depends on schtasks)
 TASK_SCHEDULER_ENABLED = os.getenv("ENABLE_TASK_SCHEDULER", "false").lower() == "true"

@@ -1,40 +1,26 @@
 <!DOCTYPE html>
-<html lang="nl">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Taakplanner</title>
+    <title>Performance Standup</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        .stat-card {
-            border-radius: 12px;
-            background: white;
-            color: #2d3436;
-            padding: 1.25rem;
-            text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        }
-        .stat-card .stat-value { font-size: 2rem; font-weight: 700; }
-        .stat-card .stat-label { font-size: 0.85rem; color: #636e72; }
-        .badge-enabled { background: #00b894; }
-        .badge-disabled { background: #b2bec3; }
-        .badge-running { background: #0984e3; }
-        .badge-completed { background: #00b894; }
-        .badge-failed { background: #d63031; }
-        .task-table th { font-size: 0.85rem; color: #636e72; text-transform: uppercase; }
-        .task-table td { vertical-align: middle; }
-        .btn-action { padding: 0.25rem 0.5rem; font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; }
-        .btn-action svg { vertical-align: middle; }
-        .log-output { max-height: 500px; overflow-y: auto; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; background: #2d3436; color: #dfe6e9; padding: 1rem; border-radius: 8px; }
-        .schedule-text { font-size: 0.85rem; color: #636e72; }
-        .import-banner { background: #ffeaa7; border-left: 4px solid #fdcb6e; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
+        .result-card { border-left: 4px solid #27ae60; }
+        .result-card.error { border-left-color: #e74c3c; }
+        .result-card.warning { border-left-color: #f39c12; }
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+        .stat { background: #f7f5fb; padding: 0.6rem 0.8rem; border-radius: 8px; }
+        .stat .label { font-size: 0.75rem; color: #636e72; text-transform: uppercase; letter-spacing: 0.05em; }
+        .stat .value { font-size: 1.2rem; font-weight: 600; color: #3a3a3a; }
+        ul.warn-list { font-size: 0.85rem; max-height: 200px; overflow-y: auto; }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
         <div class="container d-flex flex-nowrap align-items-center gap-2">
-            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Taakplanner</span>
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Performance Standup</span>
             <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
                 <div class="nav-dropdown">
                     <button class="nav-dropdown-toggle">Generators</button>
@@ -75,10 +61,10 @@
                     </div>
                 </div>
                 <div class="nav-dropdown">
-                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
-                        <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
+                        <a href="/static/performance-standup.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
                         <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
                         <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
@@ -91,169 +77,162 @@
     </nav>
 
     <div class="container mt-4 pb-5">
-        <!-- Import banner (hidden by default) -->
-        <div id="importBanner" class="import-banner d-none">
-            <strong>Windows-taken gevonden!</strong> Er zijn taken in Windows Task Scheduler die nog niet in het dashboard staan.
-            <button class="btn btn-sm btn-warning ms-2" onclick="importExisting()">Importeren</button>
-        </div>
-
-        <!-- Summary stats -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value" id="statTotal">-</div>
-                    <div class="stat-label">Totaal taken</div>
-                </div>
+        <div class="card mb-4">
+            <div class="card-header" style="background: #5e4a90; color: white;">
+                <h5 class="mb-0">Run Settings</h5>
             </div>
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value text-success" id="statActive">-</div>
-                    <div class="stat-label">Actief</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value text-secondary" id="statDisabled">-</div>
-                    <div class="stat-label">Uitgeschakeld</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value" id="statLastRun">-</div>
-                    <div class="stat-label">Laatste uitvoering</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="mb-0">Geplande taken</h5>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#taskModal" onclick="openCreateModal()">
-                + Nieuwe taak
-            </button>
-        </div>
-
-        <!-- Task table -->
-        <div class="card">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover task-table mb-0">
-                        <thead>
-                            <tr>
-                                <th>Naam</th>
-                                <th>Schema</th>
-                                <th>Status</th>
-                                <th>Volgende uitvoering</th>
-                                <th>Laatste uitvoering</th>
-                                <th class="text-center">Acties</th>
-                            </tr>
-                        </thead>
-                        <tbody id="taskTableBody">
-                            <tr><td colspan="6" class="text-center text-muted py-4">Laden...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Task history -->
-        <div id="historySection" class="mt-4 d-none">
-            <h5 id="historyTitle">Uitvoeringsgeschiedenis</h5>
-            <div class="card">
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-sm mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Gestart</th>
-                                    <th>Duur</th>
-                                    <th>Status</th>
-                                    <th>Trigger</th>
-                                    <th class="text-end">Log</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyTableBody"></tbody>
-                        </table>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    The daterange controls which dates get filled on the per-day tabs ("SEO only" cols D-M and "GSaaS" col C).
+                    The comparison sheets always compare the latest date in range against that day a week earlier
+                    (visits: end vs end-7d; omzet: end-1 vs end-8d).
+                </p>
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-5">
+                        <label for="startDate" class="form-label">Start date</label>
+                        <input type="date" id="startDate" class="form-control">
+                    </div>
+                    <div class="col-md-5">
+                        <label for="endDate" class="form-label">End date</label>
+                        <input type="date" id="endDate" class="form-control">
+                    </div>
+                    <div class="col-md-2">
+                        <button id="runBtn" class="btn w-100" style="background:#CC5500;color:white;border:none;"
+                                onmouseover="this.style.backgroundColor='#E97451'"
+                                onmouseout="this.style.backgroundColor='#CC5500'">Run</button>
                     </div>
                 </div>
+                <div id="datePreview" class="text-muted small mt-3"></div>
             </div>
         </div>
+
+        <div id="loadingArea" style="display:none;" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status"></div>
+            <div class="mt-2 text-muted">Querying Redshift and writing Excel…</div>
+        </div>
+
+        <div id="resultArea" style="display:none;"></div>
+
+        <footer class="text-center py-4">
+            <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+        </footer>
     </div>
 
-    <!-- Create/Edit Modal -->
-    <div class="modal fade" id="taskModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalTitle">Nieuwe taak</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <input type="hidden" id="editTaskId">
-                    <div class="mb-3">
-                        <label class="form-label">Taaknaam (slug)</label>
-                        <input type="text" class="form-control" id="inputTaskName" placeholder="bijv. daily-automation">
-                        <small class="text-muted">Wordt gebruikt als Windows-taaknaam: DM-Dashboard-{naam}</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Weergavenaam</label>
-                        <input type="text" class="form-control" id="inputDisplayName" placeholder="bijv. Dagelijkse Automatisering">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Beschrijving</label>
-                        <textarea class="form-control" id="inputDescription" rows="2"></textarea>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Commando</label>
-                        <input type="text" class="form-control" id="inputCommand" placeholder="bijv. venv\Scripts\python.exe backend\daily_automation.py">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Werkmap</label>
-                        <input type="text" class="form-control" id="inputWorkDir" value="C:\Users\l.davidowski\dm-dashboard">
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-4">
-                            <label class="form-label">Schema</label>
-                            <select class="form-select" id="inputScheduleType" onchange="toggleDaysInput()">
-                                <option value="DAILY">Dagelijks</option>
-                                <option value="WEEKLY">Wekelijks</option>
-                                <option value="HOURLY">Per uur</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Tijd</label>
-                            <input type="time" class="form-control" id="inputScheduleTime" value="07:00">
-                        </div>
-                        <div class="col-md-4 d-none" id="daysGroup">
-                            <label class="form-label">Dagen</label>
-                            <input type="text" class="form-control" id="inputScheduleDays" placeholder="MON,WED,FRI">
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuleren</button>
-                    <button type="button" class="btn btn-primary" onclick="saveTask()">Opslaan</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    <script>
+    (function() {
+        const startEl = document.getElementById('startDate');
+        const endEl = document.getElementById('endDate');
+        const runBtn = document.getElementById('runBtn');
+        const preview = document.getElementById('datePreview');
+        const loading = document.getElementById('loadingArea');
+        const result = document.getElementById('resultArea');
 
-    <!-- Log Modal -->
-    <div class="modal fade" id="logModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Uitvoeringslog</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div id="logOutput" class="log-output">Laden...</div>
-                </div>
-            </div>
-        </div>
-    </div>
+        // Default: end = yesterday, start = 7 days ago
+        const today = new Date();
+        const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+        const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7);
+        endEl.value = yesterday.toISOString().slice(0, 10);
+        startEl.value = weekAgo.toISOString().slice(0, 10);
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/js/task-scheduler.js"></script>
+        function addDays(iso, d) {
+            const dt = new Date(iso);
+            dt.setDate(dt.getDate() + d);
+            return dt.toISOString().slice(0, 10);
+        }
+
+        function updatePreview() {
+            const e = endEl.value;
+            if (!e) { preview.textContent = ''; return; }
+            preview.innerHTML =
+                `Comparison sheets will compare <b>${addDays(e, -7)}</b> vs <b>${e}</b> (visits) ` +
+                `and <b>${addDays(e, -8)}</b> vs <b>${addDays(e, -1)}</b> (omzet).`;
+        }
+        startEl.addEventListener('change', updatePreview);
+        endEl.addEventListener('change', updatePreview);
+        updatePreview();
+
+        runBtn.addEventListener('click', async () => {
+            if (!startEl.value || !endEl.value) {
+                alert('Please pick both dates.');
+                return;
+            }
+            if (startEl.value > endEl.value) {
+                alert('Start date must be on or before end date.');
+                return;
+            }
+            runBtn.disabled = true;
+            loading.style.display = '';
+            result.style.display = 'none';
+            try {
+                const r = await fetch('/api/performance-standup/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({start_date: startEl.value, end_date: endEl.value}),
+                });
+                const data = await r.json();
+                if (!r.ok) {
+                    renderError(data.detail || 'Unknown error');
+                } else {
+                    renderSuccess(data);
+                }
+            } catch (e) {
+                renderError(e.message);
+            } finally {
+                loading.style.display = 'none';
+                runBtn.disabled = false;
+            }
+        });
+
+        function renderError(msg) {
+            result.innerHTML =
+                `<div class="card result-card error mb-4">
+                    <div class="card-body">
+                        <h6 class="mb-2">Failed</h6>
+                        <pre class="mb-0" style="white-space:pre-wrap;">${escapeHtml(msg)}</pre>
+                    </div>
+                </div>`;
+            result.style.display = '';
+        }
+
+        function renderSuccess(d) {
+            const w = d.warnings || [];
+            const cls = w.length ? 'warning' : '';
+            const rw = d.rows_written;
+            const cmp = d.comparison;
+            const warnHtml = w.length
+                ? `<h6 class="mt-3 mb-2 text-warning">Warnings</h6>
+                   <ul class="warn-list">${w.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`
+                : '';
+            result.innerHTML =
+                `<div class="card result-card ${cls} mb-4">
+                    <div class="card-body">
+                        <h6 class="mb-3">Done</h6>
+                        <p class="small text-muted mb-3">
+                            Range ${d.date_range.start} → ${d.date_range.end}.
+                            Comparison visits: ${cmp.visits_p1} vs ${cmp.visits_p2}.
+                            Comparison omzet: ${cmp.omzet_p1} vs ${cmp.omzet_p2}.
+                        </p>
+                        <div class="stat-grid">
+                            <div class="stat"><div class="label">Days in range</div><div class="value">${rw.seo_dates_in_range}</div></div>
+                            <div class="stat"><div class="label">SEO days found</div><div class="value">${rw.seo_dates_found_in_data}</div></div>
+                            <div class="stat"><div class="label">DMA organic days</div><div class="value">${rw.dma_dates_found_in_data}</div></div>
+                            <div class="stat"><div class="label">GSAAS days</div><div class="value">${rw.gsaas_dates_found_in_data}</div></div>
+                            <div class="stat"><div class="label">Bidcat visit rows</div><div class="value">${rw.bidcat_visits}</div></div>
+                            <div class="stat"><div class="label">Bidcat omzet rows</div><div class="value">${rw.bidcat_omzet}</div></div>
+                            <div class="stat"><div class="label">Maincat visit rows</div><div class="value">${rw.maincat_visits}</div></div>
+                        </div>
+                        ${warnHtml}
+                    </div>
+                </div>`;
+            result.style.display = '';
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({
+                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+            }[c]));
+        }
+    })();
+    </script>
 </body>
 </html>
