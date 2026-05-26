@@ -1,40 +1,39 @@
 <!DOCTYPE html>
-<html lang="nl">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Taakplanner</title>
+    <title>SEO Rulings</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        .stat-card {
-            border-radius: 12px;
-            background: white;
-            color: #2d3436;
-            padding: 1.25rem;
-            text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        .check-row { padding: 0.75rem 1rem; border-bottom: 1px solid #eee; }
+        .check-row:last-child { border-bottom: 0; }
+        .check-status { font-size: 0.8rem; font-weight: 600; padding: 0.25rem 0.55rem; border-radius: 999px; }
+        .check-status.pass { background: #d4edda; color: #155724; }
+        .check-status.fail { background: #f8d7da; color: #721c24; }
+        .check-status.pending { background: #e2e3e5; color: #383d41; }
+        .detail-pre { background: #f6f8fa; border: 1px solid #eee; border-radius: 6px; padding: 0.6rem 0.85rem; font-size: 0.78rem; max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+        .check-title { font-size: 1rem; font-weight: 600; color: #2d3436; }
+        .check-sub { font-size: 0.82rem; color: #636e72; }
+        .btn-outline-purple {
+            color: #5e4a90; border-color: #5e4a90; background: transparent;
         }
-        .stat-card .stat-value { font-size: 2rem; font-weight: 700; }
-        .stat-card .stat-label { font-size: 0.85rem; color: #636e72; }
-        .badge-enabled { background: #00b894; }
-        .badge-disabled { background: #b2bec3; }
-        .badge-running { background: #0984e3; }
-        .badge-completed { background: #00b894; }
-        .badge-failed { background: #d63031; }
-        .task-table th { font-size: 0.85rem; color: #636e72; text-transform: uppercase; }
-        .task-table td { vertical-align: middle; }
-        .btn-action { padding: 0.25rem 0.5rem; font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; }
-        .btn-action svg { vertical-align: middle; }
-        .log-output { max-height: 500px; overflow-y: auto; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; background: #2d3436; color: #dfe6e9; padding: 1rem; border-radius: 8px; }
-        .schedule-text { font-size: 0.85rem; color: #636e72; }
-        .import-banner { background: #ffeaa7; border-left: 4px solid #fdcb6e; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
+        .btn-outline-purple:hover {
+            color: #fff; background: #5e4a90; border-color: #5e4a90;
+        }
+        .info-bar { font-size: 0.85rem; color: #555; }
+        .pill {
+            display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
+            background: #efeaf7; color: #5e4a90; font-size: 0.72rem; font-weight: 600;
+            margin-right: 0.25rem;
+        }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
         <div class="container d-flex flex-nowrap align-items-center gap-2">
-            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Taakplanner</span>
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">SEO Rulings</span>
             <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
                 <div class="nav-dropdown">
                     <button class="nav-dropdown-toggle">Generators</button>
@@ -75,13 +74,13 @@
                     </div>
                 </div>
                 <div class="nav-dropdown">
-                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
                         <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
                         <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
-                        <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><path d="M3 7h6"/></svg> SEO Rulings</a>
+                        <a href="/static/seo-rulings.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><path d="M3 7h6"/></svg> SEO Rulings</a>
                         <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
                         <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
                     </div>
@@ -92,169 +91,213 @@
     </nav>
 
     <div class="container mt-4 pb-5">
-        <!-- Import banner (hidden by default) -->
-        <div id="importBanner" class="import-banner d-none">
-            <strong>Windows-taken gevonden!</strong> Er zijn taken in Windows Task Scheduler die nog niet in het dashboard staan.
-            <button class="btn btn-sm btn-warning ms-2" onclick="importExisting()">Importeren</button>
-        </div>
+        <div class="row">
+            <div class="col-md-10 mx-auto">
 
-        <!-- Summary stats -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value" id="statTotal">-</div>
-                    <div class="stat-label">Totaal taken</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value text-success" id="statActive">-</div>
-                    <div class="stat-label">Actief</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value text-secondary" id="statDisabled">-</div>
-                    <div class="stat-label">Uitgeschakeld</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value" id="statLastRun">-</div>
-                    <div class="stat-label">Laatste uitvoering</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="mb-0">Geplande taken</h5>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#taskModal" onclick="openCreateModal()">
-                + Nieuwe taak
-            </button>
-        </div>
-
-        <!-- Task table -->
-        <div class="card">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover task-table mb-0">
-                        <thead>
-                            <tr>
-                                <th>Naam</th>
-                                <th>Schema</th>
-                                <th>Status</th>
-                                <th>Volgende uitvoering</th>
-                                <th>Laatste uitvoering</th>
-                                <th class="text-center">Acties</th>
-                            </tr>
-                        </thead>
-                        <tbody id="taskTableBody">
-                            <tr><td colspan="6" class="text-center text-muted py-4">Laden...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Task history -->
-        <div id="historySection" class="mt-4 d-none">
-            <h5 id="historyTitle">Uitvoeringsgeschiedenis</h5>
-            <div class="card">
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-sm mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Gestart</th>
-                                    <th>Duur</th>
-                                    <th>Status</th>
-                                    <th>Trigger</th>
-                                    <th class="text-end">Log</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyTableBody"></tbody>
-                        </table>
+                <div class="card mb-4">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0">SEO Rulings</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted mb-3">
+                            Runs four live sanity checks against beslist.nl:
+                            <span class="pill">No-script categories</span>
+                            <span class="pill">No-script facet-links</span>
+                            <span class="pill">Basement links</span>
+                            <span class="pill">Title variables</span>
+                        </p>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="info-bar">
+                                <span id="lastRun">Not run yet</span>
+                            </div>
+                            <button class="btn btn-success" id="runBtn" onclick="runChecks()">Run checks</button>
+                        </div>
                     </div>
                 </div>
+
+                <div id="loadingPanel" class="card mb-4 d-none">
+                    <div class="card-body text-center py-4">
+                        <div class="spinner-border text-success" role="status" style="width: 2rem; height: 2rem;"></div>
+                        <div class="mt-3 text-muted" id="loadingText">Crawling beslist.nl and querying taxv2...</div>
+                    </div>
+                </div>
+
+                <div id="summaryPanel" class="card mb-4 d-none">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Summary</h5>
+                        <span id="overallBadge" class="check-status pending">pending</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="summaryRows"></div>
+                    </div>
+                </div>
+
+                <div id="slackPanel" class="card mb-4 d-none">
+                    <div class="card-header">
+                        <h5 class="mb-0">Slack notification</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="slackStatus" class="info-bar"></div>
+                        <pre class="detail-pre mt-2" id="slackText"></pre>
+                    </div>
+                </div>
+
+                <div id="detailsPanel" class="card mb-4 d-none">
+                    <div class="card-header">
+                        <h5 class="mb-0">Details</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="detailsBody"></div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
 
-    <!-- Create/Edit Modal -->
-    <div class="modal fade" id="taskModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalTitle">Nieuwe taak</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <input type="hidden" id="editTaskId">
-                    <div class="mb-3">
-                        <label class="form-label">Taaknaam (slug)</label>
-                        <input type="text" class="form-control" id="inputTaskName" placeholder="bijv. daily-automation">
-                        <small class="text-muted">Wordt gebruikt als Windows-taaknaam: DM-Dashboard-{naam}</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Weergavenaam</label>
-                        <input type="text" class="form-control" id="inputDisplayName" placeholder="bijv. Dagelijkse Automatisering">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Beschrijving</label>
-                        <textarea class="form-control" id="inputDescription" rows="2"></textarea>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Commando</label>
-                        <input type="text" class="form-control" id="inputCommand" placeholder="bijv. venv\Scripts\python.exe backend\daily_automation.py">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Werkmap</label>
-                        <input type="text" class="form-control" id="inputWorkDir" value="C:\Users\l.davidowski\dm-dashboard">
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-4">
-                            <label class="form-label">Schema</label>
-                            <select class="form-select" id="inputScheduleType" onchange="toggleDaysInput()">
-                                <option value="DAILY">Dagelijks</option>
-                                <option value="WEEKLY">Wekelijks</option>
-                                <option value="HOURLY">Per uur</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Tijd</label>
-                            <input type="time" class="form-control" id="inputScheduleTime" value="07:00">
-                        </div>
-                        <div class="col-md-4 d-none" id="daysGroup">
-                            <label class="form-label">Dagen</label>
-                            <input type="text" class="form-control" id="inputScheduleDays" placeholder="MON,WED,FRI">
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuleren</button>
-                    <button type="button" class="btn btn-primary" onclick="saveTask()">Opslaan</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Log Modal -->
-    <div class="modal fade" id="logModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Uitvoeringslog</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div id="logOutput" class="log-output">Laden...</div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <footer class="text-center py-4 text-muted">
+        <small>Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/js/task-scheduler.js"></script>
+    <script>
+        const CHECK_LABELS = {
+            no_script_categories: "No-script categories",
+            no_script_facet_links: "No-script facet-links",
+            basement_links: "Basement links",
+            title_variables: "Title variables",
+        };
+
+        function escapeHtml(s) {
+            if (s == null) return "";
+            return String(s)
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;");
+        }
+
+        async function runChecks() {
+            const btn = document.getElementById("runBtn");
+            btn.disabled = true;
+            btn.textContent = "Running...";
+
+            document.getElementById("loadingPanel").classList.remove("d-none");
+            document.getElementById("summaryPanel").classList.add("d-none");
+            document.getElementById("slackPanel").classList.add("d-none");
+            document.getElementById("detailsPanel").classList.add("d-none");
+
+            try {
+                const resp = await fetch("/api/seo-rulings/run", { method: "POST" });
+                if (!resp.ok) {
+                    throw new Error(`HTTP ${resp.status}`);
+                }
+                const data = await resp.json();
+                renderResult(data);
+            } catch (err) {
+                document.getElementById("loadingPanel").classList.add("d-none");
+                alert("Run failed: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Run checks";
+            }
+        }
+
+        function renderResult(data) {
+            document.getElementById("loadingPanel").classList.add("d-none");
+
+            const summary = data.summary || {};
+            const checks = data.checks || {};
+            const details = data.details || {};
+
+            // Last-run timestamp
+            const now = new Date();
+            document.getElementById("lastRun").textContent =
+                `Last run: ${now.toLocaleString()}`;
+
+            // Overall badge
+            const overall = document.getElementById("overallBadge");
+            const failedKeys = summary.failed || [];
+            const passedKeys = summary.passed || [];
+            if (failedKeys.length) {
+                overall.className = "check-status fail";
+                overall.textContent = `${failedKeys.length} failed`;
+            } else {
+                overall.className = "check-status pass";
+                overall.textContent = "All passed";
+            }
+
+            // Summary rows
+            const rowsDiv = document.getElementById("summaryRows");
+            rowsDiv.innerHTML = "";
+            Object.keys(CHECK_LABELS).forEach((key) => {
+                const status = checks[key] || "pending";
+                const ok = status === "passed";
+                const row = document.createElement("div");
+                row.className = "check-row d-flex justify-content-between align-items-center";
+                row.innerHTML = `
+                    <div>
+                        <div class="check-title">${CHECK_LABELS[key]}</div>
+                        <div class="check-sub">${describeCheck(key, details[key])}</div>
+                    </div>
+                    <span class="check-status ${ok ? "pass" : "fail"}">${ok ? "passed" : "failed"}</span>
+                `;
+                rowsDiv.appendChild(row);
+            });
+            document.getElementById("summaryPanel").classList.remove("d-none");
+
+            // Slack panel
+            const slackPanel = document.getElementById("slackPanel");
+            const slackStatus = document.getElementById("slackStatus");
+            const slackText = document.getElementById("slackText");
+            const slack = summary.slack || { sent: false };
+            if (slack.sent) {
+                slackStatus.innerHTML = '<span class="check-status pass">sent</span> &nbsp;Posted to Slack.';
+            } else {
+                const reason = slack.reason || "unknown";
+                slackStatus.innerHTML =
+                    `<span class="check-status fail">not sent</span> &nbsp;Reason: ${escapeHtml(reason)}`;
+            }
+            slackText.textContent = summary.slack_text || "";
+            slackPanel.classList.remove("d-none");
+
+            // Details
+            const detailsBody = document.getElementById("detailsBody");
+            detailsBody.innerHTML = "";
+            Object.keys(CHECK_LABELS).forEach((key) => {
+                const section = document.createElement("div");
+                section.className = "mb-4";
+                section.innerHTML = `
+                    <h6 class="mb-2">${CHECK_LABELS[key]}</h6>
+                    <pre class="detail-pre">${escapeHtml(JSON.stringify(details[key] || [], null, 2))}</pre>
+                `;
+                detailsBody.appendChild(section);
+            });
+
+            const sampleSection = document.createElement("div");
+            sampleSection.className = "mb-2";
+            sampleSection.innerHTML = `
+                <h6 class="mb-2">Sampled categories</h6>
+                <pre class="detail-pre">${escapeHtml(JSON.stringify(details.sampled_categories || [], null, 2))}</pre>
+            `;
+            detailsBody.appendChild(sampleSection);
+
+            document.getElementById("detailsPanel").classList.remove("d-none");
+        }
+
+        function describeCheck(key, detail) {
+            if (!detail) return "";
+            if (!Array.isArray(detail)) return "";
+            const n = detail.length;
+            if (key === "title_variables") {
+                const fail = detail.filter(d => d.status === "failed").length;
+                const fetchErr = detail.filter(d => d.status === "fetch_error").length;
+                const norows = detail.filter(d => d.status === "no_rows").length;
+                return `${n} probes — ${fail} failed, ${fetchErr} fetch errors, ${norows} no-rows`;
+            }
+            const failed = detail.filter(d => d.present === false || d.status === "fetch_error").length;
+            return `${n} probes — ${failed} failed`;
+        }
+    </script>
 </body>
 </html>
