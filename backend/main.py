@@ -2840,6 +2840,16 @@ try:
 except Exception as e:
     print(f"[STARTUP] Could not initialize seo_prio tables: {e}")
 
+# ============================================================================
+# SEO Rulings tool
+# ============================================================================
+from backend import seo_rulings_service
+
+try:
+    seo_rulings_service.init_seo_rulings_tables()
+except Exception as e:
+    print(f"[STARTUP] Could not initialize seo_rulings tables: {e}")
+
 
 @app.get("/api/seo-prio/defaults")
 async def seo_prio_defaults():

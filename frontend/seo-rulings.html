@@ -80,7 +80,7 @@
                         <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
                         <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
-                        <a href="/static/seo-rulings.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><path d="M3 7h6"/></svg> SEO Rulings</a>
+                        <a href="/static/seo-rulings.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
                         <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
                         <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
                     </div>
@@ -90,7 +90,7 @@
         </div>
     </nav>
 
-    <div class="container mt-4 pb-5">
+    <div class="container mt-5 pb-5">
         <div class="row">
             <div class="col-md-10 mx-auto">
 
@@ -100,7 +100,7 @@
                     </div>
                     <div class="card-body">
                         <p class="text-muted mb-3">
-                            Runs four live sanity checks against beslist.nl:
+                            Checks:
                             <span class="pill">No-script categories</span>
                             <span class="pill">No-script facet-links</span>
                             <span class="pill">Basement links</span>
@@ -177,6 +177,19 @@
                 .replaceAll('"', "&quot;");
         }
 
+        async function loadLastRun() {
+            try {
+                const resp = await fetch("/api/seo-rulings/last");
+                if (!resp.ok) return;
+                const data = await resp.json();
+                if (data && data.has_run && data.run && data.run.result) {
+                    renderResult(data.run.result, data.run.finished_at);
+                }
+            } catch (err) {
+                console.warn("Failed to load last run:", err);
+            }
+        }
+
         async function runChecks() {
             const btn = document.getElementById("runBtn");
             btn.disabled = true;
@@ -193,7 +206,7 @@
                     throw new Error(`HTTP ${resp.status}`);
                 }
                 const data = await resp.json();
-                renderResult(data);
+                renderResult(data, data.finished_at);
             } catch (err) {
                 document.getElementById("loadingPanel").classList.add("d-none");
                 alert("Run failed: " + err.message);
@@ -203,17 +216,17 @@
             }
         }
 
-        function renderResult(data) {
+        function renderResult(data, finishedAtIso) {
             document.getElementById("loadingPanel").classList.add("d-none");
 
             const summary = data.summary || {};
             const checks = data.checks || {};
             const details = data.details || {};
 
-            // Last-run timestamp
-            const now = new Date();
+            // Last-run timestamp (from server when available, else now)
+            const ts = finishedAtIso ? new Date(finishedAtIso) : new Date();
             document.getElementById("lastRun").textContent =
-                `Last run: ${now.toLocaleString()}`;
+                `Last run: ${ts.toLocaleString()}`;
 
             // Overall badge
             const overall = document.getElementById("overallBadge");
@@ -264,25 +277,155 @@
             // Details
             const detailsBody = document.getElementById("detailsBody");
             detailsBody.innerHTML = "";
-            Object.keys(CHECK_LABELS).forEach((key) => {
-                const section = document.createElement("div");
-                section.className = "mb-4";
-                section.innerHTML = `
-                    <h6 class="mb-2">${CHECK_LABELS[key]}</h6>
-                    <pre class="detail-pre">${escapeHtml(JSON.stringify(details[key] || [], null, 2))}</pre>
-                `;
-                detailsBody.appendChild(section);
-            });
 
-            const sampleSection = document.createElement("div");
-            sampleSection.className = "mb-2";
-            sampleSection.innerHTML = `
-                <h6 class="mb-2">Sampled categories</h6>
-                <pre class="detail-pre">${escapeHtml(JSON.stringify(details.sampled_categories || [], null, 2))}</pre>
-            `;
-            detailsBody.appendChild(sampleSection);
+            // Sampled categories first so users see what was tested
+            detailsBody.appendChild(buildSection(
+                "Sampled categories",
+                buildTable(details.sampled_categories || [], [
+                    { label: "Level",    get: r => r.label },
+                    { label: "Name",     get: r => r.name },
+                    { label: "Depth",    get: r => r.depth, align: "center" },
+                    { label: "Cat ID",   get: r => r.cat_id, align: "center" },
+                    { label: "URL",      get: r => linkCell(r.url) },
+                ])
+            ));
+
+            // Check 1 — No-script categories
+            detailsBody.appendChild(buildSection(
+                CHECK_LABELS.no_script_categories,
+                buildTable(details.no_script_categories || [], [
+                    { label: "Level",    get: r => r.label || "—" },
+                    { label: "Name",     get: r => r.name || "—" },
+                    { label: "URL",      get: r => linkCell(r.url) },
+                    { label: "HTTP",     get: r => httpCell(r.http_status), align: "center" },
+                    { label: "Element",  get: r => presenceCell(r.present, r.status), align: "center" },
+                ])
+            ));
+
+            // Check 2 — No-script facet-links
+            detailsBody.appendChild(buildSection(
+                CHECK_LABELS.no_script_facet_links,
+                buildTable(details.no_script_facet_links || [], [
+                    { label: "Category",   get: r => r.cat_name || "—" },
+                    { label: "Cat ID",     get: r => r.cat_id || "—", align: "center" },
+                    { label: "Facet",      get: r => r.facet_name || "—" },
+                    { label: "URL",        get: r => linkCell(r.cat_url) },
+                    { label: "HTTP",       get: r => httpCell(r.http_status), align: "center" },
+                    { label: "Element",    get: r => presenceCell(r.present, r.status), align: "center" },
+                ])
+            ));
+
+            // Check 3 — Basement links
+            detailsBody.appendChild(buildSection(
+                CHECK_LABELS.basement_links,
+                buildTable(details.basement_links || [], [
+                    { label: "Level",   get: r => r.label || "—" },
+                    { label: "Name",    get: r => r.name || "—" },
+                    { label: "URL",     get: r => linkCell(r.url) },
+                    { label: "HTTP",    get: r => httpCell(r.http_status), align: "center" },
+                    { label: "Group",   get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "Detail",  get: r => r.detail ? escapeHtml(r.detail) : "" },
+                ])
+            ));
+
+            // Check 4 — Title variables
+            detailsBody.appendChild(buildSection(
+                CHECK_LABELS.title_variables,
+                buildTable(details.title_variables || [], [
+                    { label: "Variable", get: r => `<code>${escapeHtml(r.variable || "")}</code>` },
+                    { label: "URL",      get: r => linkCell(r.url) },
+                    { label: "Status",   get: r => statusCell(r.status), align: "center" },
+                    { label: "Rendered", get: r => r.rendered ? `<span class="text-muted">${escapeHtml(r.rendered)}</span>` : "" },
+                    { label: "Template", get: r => r.template ? `<span class="text-muted">${escapeHtml(r.template)}</span>` : "" },
+                ])
+            ));
 
             document.getElementById("detailsPanel").classList.remove("d-none");
+        }
+
+        // --- Renderers ------------------------------------------------------
+        function buildSection(title, bodyEl) {
+            const section = document.createElement("div");
+            section.className = "mb-4";
+            const h = document.createElement("h6");
+            h.className = "mb-2";
+            h.textContent = title;
+            section.appendChild(h);
+            section.appendChild(bodyEl);
+            return section;
+        }
+
+        function buildTable(rows, columns) {
+            if (!Array.isArray(rows) || rows.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "text-muted small";
+                empty.textContent = "No rows.";
+                return empty;
+            }
+            const wrap = document.createElement("div");
+            wrap.className = "table-responsive";
+            const table = document.createElement("table");
+            table.className = "table table-sm table-striped align-middle small mb-0";
+            const thead = document.createElement("thead");
+            const trh = document.createElement("tr");
+            columns.forEach(c => {
+                const th = document.createElement("th");
+                th.textContent = c.label;
+                if (c.align) th.style.textAlign = c.align;
+                trh.appendChild(th);
+            });
+            thead.appendChild(trh);
+            table.appendChild(thead);
+
+            const tbody = document.createElement("tbody");
+            rows.forEach(r => {
+                const tr = document.createElement("tr");
+                columns.forEach(c => {
+                    const td = document.createElement("td");
+                    if (c.align) td.style.textAlign = c.align;
+                    const val = c.get(r);
+                    td.innerHTML = (val == null) ? "" : String(val);
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+            wrap.appendChild(table);
+            return wrap;
+        }
+
+        function linkCell(url) {
+            if (!url) return '<span class="text-muted">—</span>';
+            const safe = escapeHtml(url);
+            return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${safe}</a>`;
+        }
+
+        function httpCell(status) {
+            if (status === undefined || status === null || status === "") return "";
+            const n = Number(status);
+            if (!n) return `<span class="check-status fail">err</span>`;
+            const cls = (n >= 200 && n < 400) ? "pass" : "fail";
+            return `<span class="check-status ${cls}">${n}</span>`;
+        }
+
+        function presenceCell(present, status) {
+            if (status === "fetch_error") return `<span class="check-status fail">fetch err</span>`;
+            if (status === "no_priority_facets_found") return `<span class="check-status fail">no facets</span>`;
+            if (status === "no_sample") return `<span class="check-status fail">no sample</span>`;
+            if (present === true) return `<span class="check-status pass">present</span>`;
+            if (present === false) return `<span class="check-status fail">missing</span>`;
+            return `<span class="text-muted">—</span>`;
+        }
+
+        function statusCell(status) {
+            const map = {
+                ok: "pass",
+                failed: "fail",
+                fetch_error: "fail",
+                no_rows: "pending",
+            };
+            const cls = map[status] || "pending";
+            return `<span class="check-status ${cls}">${escapeHtml(status || "—")}</span>`;
         }
 
         function describeCheck(key, detail) {
@@ -298,6 +441,9 @@
             const failed = detail.filter(d => d.present === false || d.status === "fetch_error").length;
             return `${n} probes — ${failed} failed`;
         }
+
+        // Hydrate from the last persisted run on page load.
+        document.addEventListener("DOMContentLoaded", loadLastRun);
     </script>
 </body>
 </html>

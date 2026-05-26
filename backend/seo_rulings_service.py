@@ -17,10 +17,12 @@ Checks:
                                  properly substituted on the rendered page
 """
 import csv
+import json
 import logging
 import os
 import random
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -46,11 +48,51 @@ BASEMENT_LINK_CLASS = "basementlinks__link--2awhY"
 
 _SESSION = requests.Session()
 
+# Per-run cache of taxv2 /api/Categories/{id}.isEnabled lookups.
+_ACTIVE_CACHE: Dict[str, bool] = {}
+
+# Per-run cache of (html, status) for category URLs so the sampler's 404 check
+# and the check phase don't refetch the same page twice.
+_HTML_CACHE: Dict[str, Tuple[Optional[str], int]] = {}
+
+
+def _clear_run_caches() -> None:
+    _ACTIVE_CACHE.clear()
+    _HTML_CACHE.clear()
+
+
+def _is_category_active(cat_id: str) -> bool:
+    """Return True when taxv2 reports isEnabled=true for this category id.
+
+    Cached per-process; cache miss costs one HTTP roundtrip. On any error
+    (404, network blip, malformed response) returns False so the caller
+    skips this category rather than crashing the run.
+    """
+    if cat_id in _ACTIVE_CACHE:
+        return _ACTIVE_CACHE[cat_id]
+    try:
+        r = _SESSION.get(
+            f"{TAX_BASE}/api/Categories/{cat_id}",
+            params={"locale": "nl-NL", "includeSubCategories": "false", "includeFacets": "false"},
+            headers=TAX_HEADERS,
+            timeout=TIMEOUT,
+        )
+        if r.status_code != 200:
+            _ACTIVE_CACHE[cat_id] = False
+            return False
+        active = bool(r.json().get("isEnabled", False))
+    except Exception as e:
+        logger.warning(f"[SEO_RULINGS] isEnabled lookup failed for cat {cat_id}: {e}")
+        active = False
+    _ACTIVE_CACHE[cat_id] = active
+    return active
+
 
 # ---------------------------------------------------------------------------
 # Category sampling — uses the pre-built taxv2 snapshots in
 # backend/maincat_mapping.csv + backend/data/cat_urls.csv (kept in sync with
-# the Taxonomy API).
+# the Taxonomy API). Each candidate is verified live against the taxv2
+# isEnabled flag so disabled / disabled-pending categories are skipped.
 # ---------------------------------------------------------------------------
 def _load_maincats() -> List[Dict]:
     rows: List[Dict] = []
@@ -92,51 +134,100 @@ def _load_cat_urls() -> List[Dict]:
     return rows
 
 
+SAMPLE_MAX_TRIES = 50
+
+
+def _pick_one_live(
+    pool: List[Dict],
+    build_url,
+    cat_id_key: str = "cat_id",
+) -> Optional[Tuple[Dict, str]]:
+    """Shuffle the pool and return the first (row, url) where the category
+    is isEnabled=true in taxv2 AND the URL doesn't return 404. Caches the
+    fetched HTML so the check phase doesn't refetch. Tries up to
+    SAMPLE_MAX_TRIES candidates from the shuffled pool before giving up."""
+    if not pool:
+        return None
+    shuffled = list(pool)
+    random.shuffle(shuffled)
+    for row in shuffled[:SAMPLE_MAX_TRIES]:
+        cat_id = str(row[cat_id_key])
+        if not _is_category_active(cat_id):
+            continue
+        url = build_url(row)
+        _, status = _fetch(url)
+        if status == 404 or status == 0:
+            logger.info(f"[SEO_RULINGS] skipping cat {cat_id} ({url}) — status {status}")
+            continue
+        return row, url
+    return None
+
+
 def _pick_sample_categories() -> List[Dict]:
-    """Pick 1 main, 1 subcat (depth=1) and 1 deepest (max depth)."""
+    """Pick 1 main, 1 subcat (depth=1) and 1 deepest (max depth), each one
+    verified isEnabled=true in taxv2 AND returning a non-404 status."""
     maincats = _load_maincats()
     cat_urls = _load_cat_urls()
     if not maincats:
         return []
     maincat_by_name = {m["name"]: m for m in maincats}
 
-    main = random.choice(maincats)
-    out: List[Dict] = [{
-        "label": "Main category",
-        "name": main["name"],
-        "url": f"{SITE_BASE}/products{main['maincat_url']}",
-        "depth": 0,
-        "cat_id": main["cat_id"],
-    }]
+    out: List[Dict] = []
 
-    subs = [r for r in cat_urls if r["depth"] == 1 and r["maincat"] in maincat_by_name]
-    if subs:
-        sub = random.choice(subs)
-        root_slug = maincat_by_name[sub["maincat"]]["slug"]
+    main_pick = _pick_one_live(
+        maincats,
+        build_url=lambda r: f"{SITE_BASE}/products{r['maincat_url']}",
+    )
+    if main_pick:
+        row, url = main_pick
         out.append({
-            "label": "Subcategory",
-            "name": sub["deepest_cat"],
-            "url": f"{SITE_BASE}/products/{root_slug}{sub['url_name']}",
-            "depth": sub["depth"],
-            "cat_id": sub["cat_id"],
+            "label": "Main category",
+            "name": row["name"],
+            "url": url,
+            "depth": 0,
+            "cat_id": row["cat_id"],
         })
 
+    subs = [r for r in cat_urls if r["depth"] == 1 and r["maincat"] in maincat_by_name]
+    sub_pick = _pick_one_live(
+        subs,
+        build_url=lambda r: f"{SITE_BASE}/products/{maincat_by_name[r['maincat']]['slug']}{r['url_name']}",
+    )
+    if sub_pick:
+        row, url = sub_pick
+        out.append({
+            "label": "Subcategory",
+            "name": row["deepest_cat"],
+            "url": url,
+            "depth": row["depth"],
+            "cat_id": row["cat_id"],
+        })
+
+    # Walk depths from deepest down to 2, taking the first level that yields
+    # a live (isEnabled + non-404) candidate. Whole-pool stale slugs at the
+    # max depth (e.g. when a leaf branch got pruned from the live site but
+    # the CSV snapshot still lists it) then fall through to a shallower —
+    # but still "deeper than the subcategory" — pick.
     max_depth = max((r["depth"] for r in cat_urls), default=1)
-    if max_depth > 1:
+    for d in range(max_depth, 1, -1):
         deepest_pool = [
             r for r in cat_urls
-            if r["depth"] == max_depth and r["maincat"] in maincat_by_name
+            if r["depth"] == d and r["maincat"] in maincat_by_name
         ]
-        if deepest_pool:
-            deepest = random.choice(deepest_pool)
-            root_slug = maincat_by_name[deepest["maincat"]]["slug"]
+        deepest_pick = _pick_one_live(
+            deepest_pool,
+            build_url=lambda r: f"{SITE_BASE}/products/{maincat_by_name[r['maincat']]['slug']}{r['url_name']}",
+        )
+        if deepest_pick:
+            row, url = deepest_pick
             out.append({
                 "label": "Deepest category",
-                "name": deepest["deepest_cat"],
-                "url": f"{SITE_BASE}/products/{root_slug}{deepest['url_name']}",
-                "depth": deepest["depth"],
-                "cat_id": deepest["cat_id"],
+                "name": row["deepest_cat"],
+                "url": url,
+                "depth": row["depth"],
+                "cat_id": row["cat_id"],
             })
+            break
     return out
 
 
@@ -144,6 +235,8 @@ def _pick_sample_categories() -> List[Dict]:
 # HTTP fetch (SEO user-agent)
 # ---------------------------------------------------------------------------
 def _fetch(url: str) -> Tuple[Optional[str], int]:
+    if url in _HTML_CACHE:
+        return _HTML_CACHE[url]
     try:
         r = _SESSION.get(
             url,
@@ -151,10 +244,12 @@ def _fetch(url: str) -> Tuple[Optional[str], int]:
             timeout=TIMEOUT,
             allow_redirects=True,
         )
-        return r.text, r.status_code
+        result = (r.text, r.status_code)
     except Exception as e:
         logger.warning(f"[SEO_RULINGS] fetch failed {url}: {e}")
-        return None, 0
+        result = (None, 0)
+    _HTML_CACHE[url] = result
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +288,8 @@ def _get_priority_facet_combos(n: int = 3) -> List[Dict]:
             break
         tries += 1
         cat_id = row["cat_id"]
+        if not _is_category_active(str(cat_id)):
+            continue
         try:
             settings_resp = _SESSION.get(
                 f"{TAX_BASE}/api/CategoryFacetSettings",
@@ -235,6 +332,10 @@ def _get_priority_facet_combos(n: int = 3) -> List[Dict]:
                     continue
                 root_slug = maincat_by_name[row["maincat"]]["slug"]
                 cat_url = f"{SITE_BASE}/products/{root_slug}{row['url_name']}"
+                _, cat_status = _fetch(cat_url)
+                if cat_status == 404 or cat_status == 0:
+                    logger.info(f"[SEO_RULINGS] skipping facet-combo cat {cat_id} ({cat_url}) — status {cat_status}")
+                    break
                 found.append({
                     "cat_id": cat_id,
                     "cat_name": row["deepest_cat"],
@@ -306,7 +407,10 @@ def _check_variable(
         return findings
 
     for row in rows:
-        url = row["url"]
+        # Unique-titles DB stores paths as `/products/...`; absolutize before
+        # fetching and before returning so the frontend can link to them.
+        raw_url = row["url"]
+        url = raw_url if raw_url.startswith("http") else f"{SITE_BASE}{raw_url}"
         html, http_status = _fetch(url)
         if not html:
             findings.append({
@@ -393,6 +497,8 @@ CHECK_LABELS = {
 
 def run_all_checks() -> Dict:
     """Run every SEO check and return the full summary."""
+    _clear_run_caches()
+    started_at = datetime.utcnow()
     results: Dict = {"checks": {}, "details": {}}
 
     cats = _pick_sample_categories()
@@ -471,10 +577,100 @@ def run_all_checks() -> Dict:
     )
     slack_result = _send_slack(slack_text)
 
+    finished_at = datetime.utcnow()
     results["summary"] = {
         "passed": passed,
         "failed": failed,
         "slack": slack_result,
         "slack_text": slack_text,
     }
+    results["started_at"] = started_at.isoformat() + "Z"
+    results["finished_at"] = finished_at.isoformat() + "Z"
+
+    try:
+        run_id = _persist_run(started_at, finished_at, results)
+        if run_id is not None:
+            results["run_id"] = run_id
+    except Exception as e:
+        logger.warning(f"[SEO_RULINGS] persist failed: {e}")
+
     return results
+
+
+# ---------------------------------------------------------------------------
+# Persistence — pa.seo_rulings_runs stores every completed run so the page
+# can rehydrate the last result on refresh.
+# ---------------------------------------------------------------------------
+def init_seo_rulings_tables() -> None:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pa.seo_rulings_runs (
+                run_id        SERIAL PRIMARY KEY,
+                started_at    TIMESTAMP NOT NULL,
+                finished_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+                passed_count  INT       NOT NULL,
+                failed_count  INT       NOT NULL,
+                result        JSONB     NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS seo_rulings_runs_finished_at_idx
+            ON pa.seo_rulings_runs (finished_at DESC)
+        """)
+        conn.commit()
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def _persist_run(started_at: datetime, finished_at: datetime, result: Dict) -> Optional[int]:
+    summary = result.get("summary") or {}
+    passed = len(summary.get("passed") or [])
+    failed = len(summary.get("failed") or [])
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO pa.seo_rulings_runs
+                (started_at, finished_at, passed_count, failed_count, result)
+            VALUES (%s, %s, %s, %s, %s::jsonb)
+            RETURNING run_id
+            """,
+            (started_at, finished_at, passed, failed, json.dumps(result)),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return row["run_id"] if row else None
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def get_last_run() -> Optional[Dict]:
+    """Return the most-recently-completed run, or None if none exists yet."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT run_id, started_at, finished_at, passed_count, failed_count, result
+            FROM pa.seo_rulings_runs
+            ORDER BY finished_at DESC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "run_id": row["run_id"],
+            "started_at": row["started_at"].isoformat() + "Z",
+            "finished_at": row["finished_at"].isoformat() + "Z",
+            "passed_count": row["passed_count"],
+            "failed_count": row["failed_count"],
+            "result": row["result"],
+        }
+    finally:
+        cur.close()
+        return_db_connection(conn)
