@@ -271,6 +271,15 @@ main.py (API Endpoints)
     ├──▶ redirect_checker (in main.py)
     │       └──▶ HTTP status codes, redirects, canonical URLs
     │
+    ├──▶ seo_rulings_service.py (SEO Sanity Checks)
+    │       ├──▶ taxv2 isEnabled + 404 filter → cat sampler (main / sub / deepest)
+    │       ├──▶ taxv2 CategoryFacetSettings/CategoryFacets → priority-facet probe
+    │       ├──▶ pa.unique_titles_content → !!DISCOUNT!! / !!NR!! / !!JAAR!!
+    │       │     placeholder-substitution probe (paths absolutized to www.beslist.nl)
+    │       ├──▶ Slack chat.postMessage DM (reuses SLACK_BOT_TOKEN / SLACK_USER_ID)
+    │       └──▶ Persists every run to pa.seo_rulings_runs (JSONB result) for
+    │             page-load rehydration via GET /api/seo-rulings/last
+    │
     └──▶ database.py (Data Access Layer)
             ├──▶ PostgreSQL (local tracking + IndexNow dedup)
             └──▶ Redshift (persistent storage)

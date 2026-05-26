@@ -33,6 +33,14 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── redshift_upload_service.py # Redshift Upload: upload xlsx/pasted data to pa.* tables
 │   ├── url_validator_router.py  # URL Validator APIRouter
 │   ├── url_validator_service.py # URL Validator: validates category/facet URLs against Taxonomy API v2
+│   ├── seo_rulings_router.py    # SEO Rulings APIRouter (run / last / health)
+│   ├── seo_rulings_service.py   # SEO Rulings: live sanity checks against beslist.nl
+│   │                            #   (no-script categories, no-script facet-links,
+│   │                            #    basement links, title-variable substitution).
+│   │                            #   Picks 1 main / 1 sub / 1 deepest category filtered
+│   │                            #   by taxv2 isEnabled + non-404 URL status; persists
+│   │                            #   every run to pa.seo_rulings_runs (JSONB); posts
+│   │                            #   a summary DM via Slack chat.postMessage.
 │   ├── dma_plus_router.py       # DMA+ APIRouter
 │   ├── dma_plus_service.py      # DMA+ service: wrapper for campaign_processor with progress + history
 │   ├── campaign_processor.py    # DMA campaign processor (8.5K lines, copied from dma_script)
@@ -66,6 +74,9 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── redshift-upload.html # Redshift Upload (xlsx upload or paste data to pa.* tables)
 │   ├── url-checker.html   # URL Checker (status, title, description, H1, product count)
 │   ├── url-validator.html # URL Validator (validate URLs against Taxonomy API v2)
+│   ├── seo-rulings.html   # SEO Rulings (live 4-check sanity sweep of beslist.nl
+│   │                      #   with Slack DM + per-check tables, run-history hydrated
+│   │                      #   from GET /api/seo-rulings/last on page load)
 │   ├── dma-plus.html      # DMA+ (include/exclude shops, validate CL1/ads/trees)
 │   ├── css/style.css     # Custom theme (#059CDF blue, #9C3095 purple, #A0D168 green)
 │   └── js/
@@ -203,6 +214,7 @@ SERVICE_ACCOUNT_FILE=C:\Users\YourName\Downloads\Python\service-account.json
 All data lives in the local PostgreSQL container. See LEARNINGS.md for connection details.
 
 **Primary tables (schema `pa`)**:
+- `pa.seo_rulings_runs` - One row per SEO Rulings run (run_id, started_at, finished_at, passed_count, failed_count, result JSONB). Created on startup via `seo_rulings_service.init_seo_rulings_tables()`. `GET /api/seo-rulings/last` returns the most-recent row for page-load rehydration.
 - `pa.jvs_seo_werkvoorraad` - URL work queue (~243K URLs, kopteksten: 0=pending, 1=has content)
 - `pa.jvs_seo_werkvoorraad_kopteksten_check` - Processing status tracking (success/skipped/failed)
 - `pa.content_urls_joep` - Generated SEO content (~152K entries)
@@ -428,6 +440,11 @@ python-dotenv==1.0.0      # Environment variable management
 - `GET /api/url-validator/cache-status` - Taxonomy cache stats
 - `POST /api/url-validator/cache-refresh` - Force cache reload
 
+### SEO Rulings
+- `GET /api/seo-rulings/health` - Health check
+- `POST /api/seo-rulings/run` - Run all four checks synchronously (~10–20s; ~12 HTTP fetches + a handful of taxv2 calls) and return the structured per-check payload. Picks 1 main / 1 sub / 1 deepest category (verified `isEnabled=true` in taxv2 + non-404 URL status; depth fallback walks max_depth → 2 when all max-depth leaves 404); samples 3 priority-facet combos from `CategoryFacetSettings`; samples `pa.unique_titles_content` for `!!DISCOUNT!!` / `!!NR!!` / `!!JAAR!!` placeholders and confirms substitution on the live page; posts a summary DM via Slack `chat.postMessage` (uses `SLACK_BOT_TOKEN` + `SLACK_USER_ID` env vars; missing env returns `{sent: false, reason: "missing_env"}`); persists the result to `pa.seo_rulings_runs`.
+- `GET /api/seo-rulings/last` - Return the most-recently-completed run, shape `{has_run: bool, run: {run_id, started_at, finished_at, passed_count, failed_count, result}}`. Used by the frontend's `loadLastRun()` on `DOMContentLoaded` to rehydrate the page without re-running the checks.
+
 ### GSD Budgets (dm-dashboard)
 - `GET /api/gsd-budgets/health` - Health check
 - `GET /api/gsd-budgets/stats?country=NL|BE` - Cheap shop + campaign counts for UI stat cards
@@ -544,4 +561,4 @@ Frontend has two tabs:
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-04-16_
+_Last updated: 2026-05-26_

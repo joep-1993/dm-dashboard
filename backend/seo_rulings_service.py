@@ -244,6 +244,10 @@ def _fetch(url: str) -> Tuple[Optional[str], int]:
             timeout=TIMEOUT,
             allow_redirects=True,
         )
+        # beslist.nl serves UTF-8 but doesn't always set the charset in the
+        # Content-Type header, so requests falls back to ISO-8859-1 and
+        # mangles characters like the warning emoji (⚠️ → â ï¸). Force UTF-8.
+        r.encoding = "utf-8"
         result = (r.text, r.status_code)
     except Exception as e:
         logger.warning(f"[SEO_RULINGS] fetch failed {url}: {e}")

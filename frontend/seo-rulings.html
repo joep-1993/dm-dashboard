@@ -28,6 +28,14 @@
             background: #efeaf7; color: #5e4a90; font-size: 0.72rem; font-weight: 600;
             margin-right: 0.25rem;
         }
+        /* Fixed-layout tables so URL columns line up vertically across the
+           four per-check tables and long URLs wrap instead of pushing other
+           columns out of position. */
+        table.rulings-table { table-layout: fixed; width: 100%; }
+        table.rulings-table th, table.rulings-table td {
+            word-break: break-word; overflow-wrap: anywhere; vertical-align: top;
+        }
+        table.rulings-table td a { word-break: break-all; }
     </style>
 </head>
 <body>
@@ -278,15 +286,18 @@
             const detailsBody = document.getElementById("detailsBody");
             detailsBody.innerHTML = "";
 
-            // Sampled categories first so users see what was tested
+            // Sampled categories first so users see what was tested.
+            // Column widths are chosen so the URL column starts at the same
+            // horizontal position across every table (12%+18%+8%+12% = 50%
+            // before URL).
             detailsBody.appendChild(buildSection(
                 "Sampled categories",
                 buildTable(details.sampled_categories || [], [
-                    { label: "Level",    get: r => r.label },
-                    { label: "Name",     get: r => r.name },
-                    { label: "Depth",    get: r => r.depth, align: "center" },
-                    { label: "Cat ID",   get: r => r.cat_id, align: "center" },
-                    { label: "URL",      get: r => linkCell(r.url) },
+                    { label: "Level",    width: "12%", get: r => r.label },
+                    { label: "Name",     width: "18%", get: r => r.name },
+                    { label: "Depth",    width: "8%",  get: r => r.depth, align: "center" },
+                    { label: "Cat ID",   width: "12%", get: r => r.cat_id, align: "center" },
+                    { label: "URL",      width: "50%", get: r => linkCell(r.url) },
                 ])
             ));
 
@@ -294,11 +305,13 @@
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.no_script_categories,
                 buildTable(details.no_script_categories || [], [
-                    { label: "Level",    get: r => r.label || "—" },
-                    { label: "Name",     get: r => r.name || "—" },
-                    { label: "URL",      get: r => linkCell(r.url) },
-                    { label: "HTTP",     get: r => httpCell(r.http_status), align: "center" },
-                    { label: "Element",  get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "Level",    width: "12%", get: r => r.label || "—" },
+                    { label: "Name",     width: "14%", get: r => r.name || "—" },
+                    { label: "Depth",    width: "6%",  get: r => (r.depth ?? "—"), align: "center" },
+                    { label: "Cat ID",   width: "10%", get: r => r.cat_id || "—", align: "center" },
+                    { label: "URL",      width: "38%", get: r => linkCell(r.url) },
+                    { label: "HTTP",     width: "8%",  get: r => httpCell(r.http_status), align: "center" },
+                    { label: "Element",  width: "12%", get: r => presenceCell(r.present, r.status), align: "center" },
                 ])
             ));
 
@@ -306,37 +319,43 @@
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.no_script_facet_links,
                 buildTable(details.no_script_facet_links || [], [
-                    { label: "Category",   get: r => r.cat_name || "—" },
-                    { label: "Cat ID",     get: r => r.cat_id || "—", align: "center" },
-                    { label: "Facet",      get: r => r.facet_name || "—" },
-                    { label: "URL",        get: r => linkCell(r.cat_url) },
-                    { label: "HTTP",       get: r => httpCell(r.http_status), align: "center" },
-                    { label: "Element",    get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "Category",   width: "14%", get: r => r.cat_name || "—" },
+                    { label: "Cat ID",     width: "10%", get: r => r.cat_id || "—", align: "center" },
+                    { label: "Facet",      width: "16%", get: r => r.facet_name || "—" },
+                    { label: "URL",        width: "40%", get: r => linkCell(r.cat_url) },
+                    { label: "HTTP",       width: "8%",  get: r => httpCell(r.http_status), align: "center" },
+                    { label: "Element",    width: "12%", get: r => presenceCell(r.present, r.status), align: "center" },
                 ])
             ));
 
-            // Check 3 — Basement links
+            // Check 3 — Basement links. The reason a basement-link probe
+            // failed (group missing vs. group present but empty) is logged
+            // server-side; surfacing it as a column here added noise without
+            // helping debug, so it's dropped from the UI.
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.basement_links,
                 buildTable(details.basement_links || [], [
-                    { label: "Level",   get: r => r.label || "—" },
-                    { label: "Name",    get: r => r.name || "—" },
-                    { label: "URL",     get: r => linkCell(r.url) },
-                    { label: "HTTP",    get: r => httpCell(r.http_status), align: "center" },
-                    { label: "Group",   get: r => presenceCell(r.present, r.status), align: "center" },
-                    { label: "Detail",  get: r => r.detail ? escapeHtml(r.detail) : "" },
+                    { label: "Level",   width: "12%", get: r => r.label || "—" },
+                    { label: "Name",    width: "18%", get: r => r.name || "—" },
+                    { label: "URL",     width: "50%", get: r => linkCell(r.url) },
+                    { label: "HTTP",    width: "8%",  get: r => httpCell(r.http_status), align: "center" },
+                    { label: "Group",   width: "12%", get: r => presenceCell(r.present, r.status), align: "center" },
                 ])
             ));
 
-            // Check 4 — Title variables
+            // Check 4 — Title variables. "Rendered on page" is what the live
+            // <title> or <meta description> showed after the placeholder was
+            // substituted; the DB template (with the placeholder still in it)
+            // is logged server-side if you need it for debugging. URL is last
+            // so the wide column doesn't push the smaller comparison columns
+            // off-screen.
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.title_variables,
                 buildTable(details.title_variables || [], [
-                    { label: "Variable", get: r => `<code>${escapeHtml(r.variable || "")}</code>` },
-                    { label: "URL",      get: r => linkCell(r.url) },
-                    { label: "Status",   get: r => statusCell(r.status), align: "center" },
-                    { label: "Rendered", get: r => r.rendered ? `<span class="text-muted">${escapeHtml(r.rendered)}</span>` : "" },
-                    { label: "Template", get: r => r.template ? `<span class="text-muted">${escapeHtml(r.template)}</span>` : "" },
+                    { label: "Variable",         width: "12%", get: r => `<code>${escapeHtml(r.variable || "")}</code>` },
+                    { label: "Status",           width: "10%", get: r => statusCell(r.status), align: "center" },
+                    { label: "Rendered on page", width: "38%", get: r => r.rendered ? `<span class="text-muted">${escapeHtml(r.rendered)}</span>` : "" },
+                    { label: "URL",              width: "40%", get: r => linkCell(r.url) },
                 ])
             ));
 
@@ -346,9 +365,9 @@
         // --- Renderers ------------------------------------------------------
         function buildSection(title, bodyEl) {
             const section = document.createElement("div");
-            section.className = "mb-4";
+            section.className = "mb-5";
             const h = document.createElement("h6");
-            h.className = "mb-2";
+            h.className = "mb-3";
             h.textContent = title;
             section.appendChild(h);
             section.appendChild(bodyEl);
@@ -365,7 +384,20 @@
             const wrap = document.createElement("div");
             wrap.className = "table-responsive";
             const table = document.createElement("table");
-            table.className = "table table-sm table-striped align-middle small mb-0";
+            table.className = "table table-sm table-striped align-middle small mb-0 rulings-table";
+
+            // <colgroup> so the URL column lines up vertically across all
+            // four per-check tables. Columns without an explicit width fall
+            // back to <col> with no width, letting the browser distribute the
+            // remaining space.
+            const colgroup = document.createElement("colgroup");
+            columns.forEach(c => {
+                const col = document.createElement("col");
+                if (c.width) col.style.width = c.width;
+                colgroup.appendChild(col);
+            });
+            table.appendChild(colgroup);
+
             const thead = document.createElement("thead");
             const trh = document.createElement("tr");
             columns.forEach(c => {
