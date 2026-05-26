@@ -130,6 +130,20 @@ def is_homepage(path: str) -> bool:
     return p in HOMEPAGE_PATHS or p.rstrip("/") == ""
 
 
+def _has_multivalue_facet(url: str) -> bool:
+    # `+` is the multi-value separator inside a facet segment, which lives
+    # after `/c/` in the path. Before `/c/` (search query in `/products/r/…`
+    # or `/products/k/…`) `+` is a normal character and must not trigger the
+    # multi-value skip.
+    if not url or "+" not in url:
+        return False
+    p = normalize_path(strip_domain(url))
+    idx = p.find("/c/")
+    if idx == -1:
+        return False
+    return "+" in p[idx + 3:]
+
+
 # ---------------------------------------------------------------------------
 # Redirect API client
 # ---------------------------------------------------------------------------
@@ -367,10 +381,10 @@ def preflight_rows(
             stats["skipped_home"] = 1
             return item, stats
         # Multi-value facet URLs (e.g. `kleur~504026+504028`) are no-indexed
-        # on Beslist, so submitting redirects involving them is pointless.
-        # The `+` is the multi-value separator within a facet — it never
-        # appears in single-value URLs.
-        if "+" in old or "+" in new:
+        # on Beslist. `+` is the multi-value separator within a facet, but
+        # only inside the facet segment (after `/c/`). Before `/c/` (e.g. a
+        # search query like `/products/r/test_1+test_2/`) `+` is allowed.
+        if _has_multivalue_facet(old) or _has_multivalue_facet(new):
             item["skip_reason"] = "multi-value facet (no-index)"
             return item, stats
 
