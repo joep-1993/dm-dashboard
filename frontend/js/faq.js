@@ -221,16 +221,13 @@ async function refreshFaqStatus() {
                                 </div>
                                 ${dateText ? `<small class="text-muted text-nowrap ms-2">${dateText}</small>` : ''}
                             </div>
-                            <div class="mt-2">
-                                <span class="badge" style="background-color: #CC5500; color: white;">${faqCount} FAQs</span>
-                            </div>
                             <div class="content-preview mt-2">
                                 <div class="mb-1" style="font-size: 0.875rem;" id="faq-preview-${index}">${faqPreview}</div>
                                 <div class="full-content d-none" id="faq-full-${index}">
                                     <div class="mb-1" style="font-size: 0.875rem;"></div>
                                 </div>
                                 <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="toggleFaqContent(${index})">
-                                    <span id="faq-toggle-text-${index}">View All FAQs</span>
+                                    <span id="faq-toggle-text-${index}" data-faq-count="${faqCount}">Show ${faqCount} FAQs</span>
                                 </button>
                             </div>
                         </div>
@@ -515,7 +512,8 @@ function toggleFaqContent(index) {
     } else {
         preview.classList.remove('d-none');
         full.classList.add('d-none');
-        toggleText.textContent = 'View All FAQs';
+        const count = toggleText.dataset.faqCount;
+        toggleText.textContent = count ? `Show ${count} FAQs` : 'Show FAQs';
     }
 }
 
