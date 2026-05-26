@@ -13,6 +13,7 @@ Channels:
 
 import os
 import logging
+from copy import copy
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
@@ -89,6 +90,7 @@ def _fetch_daily_channel(conn, dates: List[date], channel: str) -> Dict[date, Di
           ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
         WHERE fv.dim_date_key IN ({placeholders})
           AND c.marketing_channel = %s
+          AND dv.is_real_visit = 1
         GROUP BY fv.dim_date_key
     """
     with conn.cursor() as cur:
@@ -192,6 +194,21 @@ def _check_file_lock() -> Optional[str]:
     return None
 
 
+def _write_cell(sheet, row: int, col: int, value):
+    """Write a value and copy formatting from the cell directly above (so new rows
+    inherit number format / font / fill / border / alignment from older rows)."""
+    cell = sheet.cell(row=row, column=col, value=value)
+    if row > 1:
+        src = sheet.cell(row=row - 1, column=col)
+        if src.has_style:
+            cell.font = copy(src.font)
+            cell.fill = copy(src.fill)
+            cell.border = copy(src.border)
+            cell.alignment = copy(src.alignment)
+            cell.protection = copy(src.protection)
+            cell.number_format = src.number_format
+
+
 def _build_date_row_map(sheet, date_col: int) -> Dict[date, int]:
     """Scan a column for datetime values and return date->row map."""
     m: Dict[date, int] = {}
@@ -222,10 +239,10 @@ def _verify_and_write_seo_only(sheet, daily_seo: Dict[date, Dict], daily_dma_org
         seo_data = daily_seo.get(d)
         if seo_data:
             for col, field in SEO_WRITE_COLS.items():
-                sheet.cell(row=row, column=col, value=seo_data.get(field))
+                _write_cell(sheet, row, col, seo_data.get(field))
         dma_data = daily_dma_org.get(d)
         if dma_data:
-            sheet.cell(row=row, column=SEO_DMA_ORG_COL, value=dma_data.get("visits"))
+            _write_cell(sheet, row, SEO_DMA_ORG_COL, dma_data.get("visits"))
     return errors
 
 
@@ -245,7 +262,7 @@ def _verify_and_write_gsaas(sheet, daily_gsaas: Dict[date, Dict], dates: List[da
             continue
         gsaas_data = daily_gsaas.get(d)
         if gsaas_data:
-            sheet.cell(row=row, column=GSAAS_VISITS_COL, value=gsaas_data.get("visits"))
+            _write_cell(sheet, row, GSAAS_VISITS_COL, gsaas_data.get("visits"))
     return errors
 
 
@@ -265,13 +282,13 @@ def _write_bidcat_visits(sheet, rows: List[Dict]):
         p1, p2 = int(r["p1"] or 0), int(r["p2"] or 0)
         delta_abs = p2 - p1
         delta_rel = (delta_abs / p1) if p1 else None
-        sheet.cell(row=rn, column=1, value=f"=C{rn}")
-        sheet.cell(row=rn, column=2, value=r["maincat"])
-        sheet.cell(row=rn, column=3, value=r["bidcat"])
-        sheet.cell(row=rn, column=4, value=p1)
-        sheet.cell(row=rn, column=5, value=p2)
-        sheet.cell(row=rn, column=6, value=delta_abs)
-        sheet.cell(row=rn, column=7, value=delta_rel)
+        _write_cell(sheet, rn, 1, f"=C{rn}")
+        _write_cell(sheet, rn, 2, r["maincat"])
+        _write_cell(sheet, rn, 3, r["bidcat"])
+        _write_cell(sheet, rn, 4, p1)
+        _write_cell(sheet, rn, 5, p2)
+        _write_cell(sheet, rn, 6, delta_abs)
+        _write_cell(sheet, rn, 7, delta_rel)
 
 
 def _write_bidcat_omzet(sheet, rows: List[Dict]):
@@ -283,13 +300,13 @@ def _write_bidcat_omzet(sheet, rows: List[Dict]):
         p1, p2 = float(r["p1"] or 0), float(r["p2"] or 0)
         delta_abs = p2 - p1
         delta_rel = (delta_abs / p1) if p1 else None
-        sheet.cell(row=rn, column=1, value=f"=C{rn}")
-        sheet.cell(row=rn, column=2, value=r["maincat"])
-        sheet.cell(row=rn, column=3, value=r["bidcat"])
-        sheet.cell(row=rn, column=4, value=p1)
-        sheet.cell(row=rn, column=5, value=p2)
-        sheet.cell(row=rn, column=6, value=delta_abs)
-        sheet.cell(row=rn, column=7, value=delta_rel)
+        _write_cell(sheet, rn, 1, f"=C{rn}")
+        _write_cell(sheet, rn, 2, r["maincat"])
+        _write_cell(sheet, rn, 3, r["bidcat"])
+        _write_cell(sheet, rn, 4, p1)
+        _write_cell(sheet, rn, 5, p2)
+        _write_cell(sheet, rn, 6, delta_abs)
+        _write_cell(sheet, rn, 7, delta_rel)
 
 
 def _write_maincat_visits(sheet, rows: List[Dict]):
@@ -301,11 +318,11 @@ def _write_maincat_visits(sheet, rows: List[Dict]):
         p1, p2 = int(r["p1"] or 0), int(r["p2"] or 0)
         delta_abs = p2 - p1
         delta_rel = (delta_abs / p1) if p1 else None
-        sheet.cell(row=rn, column=1, value=r["maincat"])
-        sheet.cell(row=rn, column=2, value=p1)
-        sheet.cell(row=rn, column=3, value=p2)
-        sheet.cell(row=rn, column=4, value=delta_abs)
-        sheet.cell(row=rn, column=5, value=delta_rel)
+        _write_cell(sheet, rn, 1, r["maincat"])
+        _write_cell(sheet, rn, 2, p1)
+        _write_cell(sheet, rn, 3, p2)
+        _write_cell(sheet, rn, 4, delta_abs)
+        _write_cell(sheet, rn, 5, delta_rel)
 
 
 # ---------------------------------------------------------------------------
