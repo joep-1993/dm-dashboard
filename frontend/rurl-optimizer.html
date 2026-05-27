@@ -126,7 +126,7 @@
                             </div>
 
                             <div class="col-12">
-                                <div class="form-check form-check-inline">
+                                <div class="form-check form-check-inline d-none" id="alsoGlobalWrap" title="Redshift only: also pull and process maincat-less /products/r/ (mainpage) R-URLs from the warehouse query. Manual input and file upload auto-detect and process global R-URLs regardless.">
                                     <input type="checkbox" class="form-check-input" id="alsoGlobal">
                                     <label for="alsoGlobal" class="form-check-label">Mainpage R-urls</label>
                                 </div>
@@ -240,6 +240,9 @@
                 document.getElementById('manualField').classList.toggle('d-none', !isManual);
                 document.getElementById('lookbackField').classList.toggle('d-none', !isRedshift);
                 document.getElementById('limitField').classList.toggle('d-none', !isRedshift);
+                // "Mainpage R-urls" only governs Redshift. Manual/upload auto-
+                // detect + process global R-URLs, so the toggle is hidden there.
+                document.getElementById('alsoGlobalWrap').classList.toggle('d-none', !isRedshift);
                 document.getElementById('csvFile').required = isUpload;
             });
         });
@@ -277,7 +280,11 @@
             const w = document.getElementById('workers').value;
             if (w && Number(w) > 0) fd.append('workers', w);
             fd.append('threshold', document.getElementById('threshold').value || '80');
-            fd.append('also_global', document.getElementById('alsoGlobal').checked);
+            // Mainpage R-urls toggle applies to Redshift only; manual + upload
+            // always process global R-URLs they're fed (backend also enforces this).
+            fd.append('also_global', source === 'redshift'
+                ? document.getElementById('alsoGlobal').checked
+                : true);
             fd.append('force_reprocess', document.getElementById('forceReprocess').checked);
             fd.append('exclude_shopnames', document.getElementById('excludeShopnames').checked);
 

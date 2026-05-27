@@ -543,6 +543,14 @@ def start_optimize(
     task_id = uuid.uuid4().hex[:8]
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    # Global R-URLs (maincat-less /products/r/<keyword>/) are auto-detected
+    # and routed to the global pipeline. For manual input and file upload we
+    # always process whatever is fed, so the global pass runs unconditionally
+    # — the "Mainpage R-urls" toggle only governs the Redshift source (whether
+    # to also pull + process global URLs from the warehouse query).
+    if source != "redshift":
+        also_global = True
+
     if source == "redshift":
         filename = f"redshift_{lookback_days}d.csv"
         # Defer the fetch to the worker thread — it can take 30-60s.
