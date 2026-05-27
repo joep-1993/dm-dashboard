@@ -445,6 +445,44 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
     return result
 
 
+def _rescue_long_unmatched_token(keyword, target_text, threshold=8):
+    """Hard-reject guard for the V28 search-derived rescue path.
+
+    Returns the first non-stopword, non-generic-adjective query token of
+    length >= threshold whose stem is NOT present as a token of target_text
+    (the rescued dom_cat name + appended facet value name), else None.
+
+    Used only on the rescue path — where the matcher FAILED and search
+    guessed a category — so a long product-type token the guess dropped
+    (e.g. 'inductiekookplaat', 'bewegingssensor', 'waterfilter') yields no
+    redirect instead of a confident-but-wrong one. Stem-equality (not
+    substring) is deliberate: 'filter' is a token of 'waterfilter' but a
+    'Filter' attribute is a different product than a water filter.
+    Legitimate subcategory_name matches (e.g. 'hoesloze dekbedden') never
+    reach this path, so their semantic-coverage facets are unaffected.
+    """
+    import re as _re
+    from src.validation_rules import STOPWORDS, SHOP_NAMES, GENERIC_ADJECTIVES
+
+    def _stem(t):
+        t = t.lower()
+        if len(t) > 3 and t.endswith('s'):
+            t = t[:-1]
+        if len(t) > 3 and t.endswith('e'):
+            t = t[:-1]
+        return t
+
+    target_toks = {_stem(t) for t in _re.findall(r'[a-z0-9]+', (target_text or '').lower())}
+    for w in (keyword or '').lower().split():
+        if len(w) < threshold:
+            continue
+        if w in STOPWORDS or w in SHOP_NAMES or w in GENERIC_ADJECTIVES:
+            continue
+        if _stem(w) not in target_toks:
+            return w
+    return None
+
+
 def process_url_v2(args):
     """Process single URL in worker."""
     global _worker_data
@@ -1197,6 +1235,7 @@ def process_url_v2(args):
             # facet via the senioren_telefoon ↔ senioren_mobiel synonym.
             dom_slug = derived.get('dom_cat_url_slug')
             local_match = None
+            appended_value_name = ''  # facet value name appended below, if any
             if dom_slug:
                 # Extract subcat_id from slug (last numeric segment).
                 dom_subcat_id = ''
@@ -1230,6 +1269,7 @@ def process_url_v2(args):
                     else:
                         final_redirect_url = f"{base_redirect}/c/{fragment}"
                     final_match_type = 'search_derived_subcat_with_facet'
+                    appended_value_name = pf_value_name
                     final_reason_extra = (
                         f"; appended {pf_name}~{pf_vid} ({pf_value_name!r}, "
                         f"matcher score {local_match.score})"
@@ -1267,6 +1307,7 @@ def process_url_v2(args):
                     else:
                         final_redirect_url = f"{base_redirect}/c/{fragment}"
                     final_match_type = 'search_derived_subcat_with_facet'
+                    appended_value_name = pf_value_name
                     final_reason_extra = (
                         f"; appended {pf_name}~{pf_vid} ({pf_value_name!r}, "
                         f"coverage {int(100*pf_cov)}%)"
@@ -1277,6 +1318,68 @@ def process_url_v2(args):
             else:
                 final_match_type = 'search_derived_subcat'
                 final_reason_extra = ''
+
+            # Hard-reject (user decision 2026-05-27): the search-derived guess
+            # is only trustworthy if it didn't silently drop a long product-
+            # type token from the query. If a >=8-char non-stopword token is
+            # absent from both the rescued dom_cat name and the appended facet
+            # value, the redirect points at the wrong product (Q4
+            # 'bewegingssensor', Q7 'waterfilter', Q9 'inductiekookplaat') —
+            # emit no redirect instead.
+            _reject_tok = _rescue_long_unmatched_token(
+                parsed.keyword,
+                ' '.join(filter(None, [derived.get('dom_cat_name', ''), appended_value_name])),
+            )
+            if _reject_tok:
+                final_redirect_url = None
+                final_redirect_cat_name = ''
+                final_match_type = 'rejected_long_unmatched'
+                final_score = 0
+                final_tier = 'D'
+                reject_reason = (
+                    f"V28-rescue rejected: long unmatched product token "
+                    f"'{_reject_tok}' not represented in dom_cat "
+                    f"'{derived.get('dom_cat_name','')}'"
+                    + (f" or facet '{appended_value_name}'" if appended_value_name else "")
+                )
+                final_reason = reject_reason
+                flag_for_review = ''
+                # Fall through to the return; the V31 leftover block (score>=50)
+                # and the maincat validator (needs a redirect URL) both no-op.
+                return {
+                    'original_url': r.original_url,
+                    'main_category': r.main_category,
+                    'original_category': original_cat_name,
+                    'keyword': r.keyword,
+                    'redirect_url': None,
+                    'redirect_category': '',
+                    'is_cross_category': is_cross_category,
+                    'facet_fragment': '',
+                    'facet_names': '',
+                    'facet_value_names': '',
+                    'facet_count': 0,
+                    'match_score': r.match_score,
+                    'match_type': final_match_type,
+                    'reliability_score': 0,
+                    'reliability_tier': 'D',
+                    'h1_similarity': 0,
+                    'reject_reason': reject_reason,
+                    'flag_for_review': '',
+                    'search_derived_total': search_derived_total,
+                    'search_derived_dom_cat': search_derived_dom_cat,
+                    'search_derived_dom_share': search_derived_dom_share,
+                    'matched_keywords': matched_keywords_str,
+                    'unmatched_keywords': unmatched_keywords_str,
+                    'match_coverage': match_coverage,
+                    'has_stopwords': has_stopwords,
+                    'stopwords_found': stopwords_found,
+                    'shop_in_keyword': shop_in_keyword,
+                    'keyword_type': keyword_type,
+                    'has_dimensions': has_dims,
+                    'merk_of_shop_missing': getattr(r, 'merk_of_shop_missing', ''),
+                    'success': False,
+                    'reason': final_reason,
+                }
 
             final_redirect_cat_name = derived['dom_cat_name']
             final_score = 75
