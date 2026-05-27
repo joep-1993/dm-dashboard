@@ -72,6 +72,44 @@ FACET_BLACKLIST = {
 
 _FACETS_CACHE: Optional[pd.DataFrame] = None
 
+# ── Keyword ↔ facet-value-name matching ──────────────────────────────────
+# When the search query literally names a facet value (e.g. query
+# "ketoconazol shampoo" → value "Ketoconazol"), that value should win
+# regardless of product coverage — the user explicitly asked for it. The
+# old behaviour ranked purely by coverage, so a lexically-unrelated but
+# higher-coverage value ("Anti-roos", 4/4) beat the exact keyword match
+# ("Ketoconazol", 2/4, below the 0.6 floor) and the match was discarded.
+import re as _re
+
+_TOKEN_RE = _re.compile(r"[a-z0-9]+")
+
+
+def _stem(tok: str) -> str:
+    """Light Dutch-plural stem: drop a trailing 's' then a trailing 'e'
+    (e.g. 'shampoos' → 'shampoo', 'kleuren' stays). Mirrors the leftover-
+    token stemming used by the V31 consumer in main_parallel_v2."""
+    tok = tok.lower()
+    if len(tok) > 3 and tok.endswith("s"):
+        tok = tok[:-1]
+    if len(tok) > 3 and tok.endswith("e"):
+        tok = tok[:-1]
+    return tok
+
+
+def _tokens(text: str) -> set:
+    return {_stem(t) for t in _TOKEN_RE.findall((text or "").lower())}
+
+
+def _value_matches_keyword(keyword: str, value_name: str) -> bool:
+    """True when every (stemmed) token of the facet value name is present in
+    the (stemmed) keyword tokens — i.e. the query explicitly mentions this
+    value. 'Ketoconazol' ⊆ {'ketoconazol','shampoo'} → True;
+    'Anti roos' ⊄ {'ketoconazol','shampoo'} → False."""
+    vtoks = _tokens(value_name)
+    if not vtoks:
+        return False
+    return vtoks <= _tokens(keyword)
+
 
 def _facets_df() -> pd.DataFrame:
     global _FACETS_CACHE
@@ -176,14 +214,23 @@ def _facet_id_to_name() -> dict:
 
 
 def _check_surfaced(v28_payload: dict, base_total: int,
-                    id_to_name: dict) -> Optional[tuple]:
-    """V29 step 1: see if the V28 base call already surfaced a dominant
-    facet value (≥ MIN_FACET_COVERAGE). If yes, no probe API calls
-    needed — return the winner directly. Returns (cov, count, name, vid,
-    vname) or None.
+                    id_to_name: dict, keyword: str = "") -> Optional[tuple]:
+    """V29 step 1: see if the V28 base call already surfaced a usable facet
+    value, without any probe API calls. Returns (cov, count, name, vid,
+    vname, is_keyword_match) or None.
+
+    Two priorities:
+      1. Keyword match — a surfaced value whose NAME the query literally
+         mentions (e.g. 'ketoconazol shampoo' → 'Ketoconazol') wins outright,
+         regardless of coverage, as long as it has ≥1 product (so the target
+         page isn't empty). Among several keyword matches, the highest
+         coverage/count wins.
+      2. Coverage — otherwise the highest-coverage value that clears
+         MIN_FACET_COVERAGE, as before.
     """
     surfaced = v28_payload.get("surfaced_facets") or []
-    best = None
+    kw_best = None     # keyword-name match (any coverage > 0)
+    cov_best = None    # coverage winner (≥ MIN_FACET_COVERAGE)
     for f in surfaced:
         fid = f.get("facet_id")
         facet_name = id_to_name.get(fid)
@@ -193,12 +240,15 @@ def _check_surfaced(v28_payload: dict, base_total: int,
             if count is None or count <= 0:
                 continue
             cov = count / base_total if base_total else 0
-            if cov < MIN_FACET_COVERAGE:
-                continue
-            cand = (round(cov, 3), int(count), facet_name, int(vid), vname or "")
-            if best is None or cand > best:
-                best = cand
-    return best
+            if keyword and _value_matches_keyword(keyword, vname or ""):
+                cand = (round(cov, 3), int(count), facet_name, int(vid), vname or "", True)
+                if kw_best is None or cand > kw_best:
+                    kw_best = cand
+            if cov >= MIN_FACET_COVERAGE:
+                cand = (round(cov, 3), int(count), facet_name, int(vid), vname or "", False)
+                if cov_best is None or cand > cov_best:
+                    cov_best = cand
+    return kw_best or cov_best
 
 
 def _do_probe(maincat: str, keyword: str, v28_payload: dict,
@@ -229,9 +279,9 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
     id_to_name = _facet_id_to_name()
 
     # Stage 1: free win from already-surfaced facets in the base response.
-    surfaced_best = _check_surfaced(v28_payload, base_total, id_to_name)
+    surfaced_best = _check_surfaced(v28_payload, base_total, id_to_name, keyword)
     if surfaced_best is not None:
-        coverage, value_count, facet_name, value_id, value_name = surfaced_best
+        coverage, value_count, facet_name, value_id, value_name, is_kw = surfaced_best
         return {
             "mode": "match_from_response",
             "facet_name": facet_name,
@@ -239,6 +289,7 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
             "value_name": value_name,
             "coverage": coverage,
             "value_count": value_count,
+            "keyword_match": bool(is_kw),
             "candidates_probed": 0,
         }
 
@@ -250,34 +301,52 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
     min_count = max(MIN_VALUE_PRODUCTS, int(base_total * MIN_FACET_COVERAGE))
     cands = cands[
         (cands["facet_id"] != 1)
-        & (cands["count"] >= min_count)
         & (~cands["facet_name"].str.lower().isin(FACET_BLACKLIST))
-    ]
-    cands = cands.sort_values("count", ascending=False).head(MAX_CANDIDATES_PER_PAIR)
+    ].copy()
+    # Flag candidates whose value name the query literally mentions. These
+    # keyword matches bypass the subcat-wide count floor (a niche value like
+    # "Ketoconazol" can be rare subcat-wide yet be exactly what was searched)
+    # and sort to the front so they're probed first.
+    cands["_kwmatch"] = cands["facet_value_name"].apply(
+        lambda n: _value_matches_keyword(keyword, str(n)))
+    cands = cands[cands["_kwmatch"] | (cands["count"] >= min_count)]
+    cands = cands.sort_values(["_kwmatch", "count"], ascending=[False, False]) \
+                 .head(MAX_CANDIDATES_PER_PAIR)
     if cands.empty:
         return {"mode": "no_candidates", "reason": "filter_empty",
                 "min_count_required": min_count}
 
-    best = None  # (coverage, value_count, facet_name, value_id, value_name)
+    kw_best = None   # keyword-name match with live coverage > 0
+    cov_best = None  # coverage winner (≥ MIN_FACET_COVERAGE)
     n_probes = 0
     for _, row in cands.iterrows():
+        is_kw = bool(row["_kwmatch"])
         bucket.acquire()
         cov = _probe_one(dom_slug, keyword, base_total,
                          row["facet_name"], int(row["facet_value_id"]))
         n_probes += 1
-        if cov is None or cov < MIN_FACET_COVERAGE:
+        if cov is None or cov <= 0:
             continue
         cand = (round(cov, 3), int(row["count"]),
                 row["facet_name"], int(row["facet_value_id"]),
                 row["facet_value_name"])
-        if best is None or cand > best:
-            best = cand
+        if is_kw:
+            # A keyword match only needs ≥1 matching product, not the 0.6
+            # coverage floor — the user explicitly searched for this value.
+            if kw_best is None or cand > kw_best:
+                kw_best = cand
+            break  # candidates are sorted kw-first; first live kw match wins
+        if cov < MIN_FACET_COVERAGE:
+            continue
+        if cov_best is None or cand > cov_best:
+            cov_best = cand
         # V31: early-stop on a very confident match to keep the per-pair
         # API cost low. Without this, raising MAX_CANDIDATES to 50 would
         # be 3× slower for the easy cases too.
         if cov >= EARLY_STOP_COVERAGE:
             break
 
+    best = kw_best or cov_best
     if best is None:
         return {"mode": "no_match", "candidates_probed": n_probes,
                 "candidates_considered": int(len(cands))}
@@ -290,6 +359,7 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
         "value_name": value_name,
         "coverage": coverage,
         "value_count": value_count,
+        "keyword_match": best is kw_best,
         "candidates_probed": n_probes,
     }
 
