@@ -228,6 +228,54 @@ def process_global_url(args):
             )
             result.reason = f"[global_subcat_high] {result.reason}"
 
+    # --- 1.5b. Type-facet subcategory discovery ---
+    # When no subcategory NAME matched (section 1), a type-facet value still
+    # pinpoints a real subcategory (e.g. "trainingsshirt" -> type_sportshirts,
+    # which lives in mode_432360_469350 "Sportshirts"). Use that subcat as the
+    # discovered category and run a FULL in-subcat multi-facet match — so we
+    # also pick up fanshop/merk/doelgroep values that only exist inside that
+    # subcat and can be combined into one URL. Without this, section 2 below
+    # only ever emits the single type facet (and wrongly prefers a cross-maincat
+    # type like type_landen). Prefer the highest-scoring type match.
+    if not result and all_type_facets:
+        type_matches = matcher.match_multi_word(
+            keyword, all_type_facets,
+            all_type_facets=None,
+            require_type_for_merk=True,
+            current_main_category=None,
+        )
+        if type_matches:
+            best_type = max(type_matches, key=lambda m: m.score)
+            ft_url = best_type.facet_value.url if best_type.facet_value else ''
+            cat_parts = _extract_category_from_facet_url(ft_url)
+            if cat_parts and cat_parts.get('subcategory_id'):
+                disc_main = cat_parts['main_category']
+                disc_subcat_id = cat_parts['subcategory_id']
+                disc_subcat_name = cat_parts['subcategory_name']
+                filtered_facets = facet_filter.filter_by_subcategory(disc_subcat_id)
+                facet_values = facet_filter.get_facet_values(filtered_facets)
+                if facet_values:
+                    in_subcat = matcher.match_multi_word(
+                        keyword, facet_values,
+                        all_type_facets=None,
+                        require_type_for_merk=True,
+                        current_main_category=disc_main,
+                    )
+                    if in_subcat:
+                        from src.parser import ParsedRUrl
+                        pseudo_parsed = ParsedRUrl(
+                            original_url=url,
+                            category_path=f"{disc_main}/{disc_subcat_name}",
+                            full_category_path=f"/products/{disc_main}/{disc_subcat_name}",
+                            main_category=disc_main,
+                            subcategory_id=disc_subcat_id,
+                            subcategory_name=disc_subcat_name,
+                            keyword=keyword,
+                            existing_facet='',
+                        )
+                        result = builder.build_multi_facet(pseudo_parsed, in_subcat)
+                        result.reason = f"[global_type_subcat] {result.reason}"
+
     # --- 2. Cross-category type facet matching ---
     if not result and all_type_facets:
         match_results = matcher.match_multi_word(

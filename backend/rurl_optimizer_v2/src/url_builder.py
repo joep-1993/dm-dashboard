@@ -484,8 +484,12 @@ class UrlBuilder:
         # v9: If we have facets from different categories, use the first one's category
         # and only include facets valid for that category
         if facets_from_different_category:
-            # Use the first different-category facet's path
-            primary_match = facets_from_different_category[0]
+            # Pick the highest-scoring different-category facet as the primary
+            # (its subcat defines the redirect target). Picking by list order
+            # let a spurious low-score match (e.g. "shirts"->"Skishirts" 80)
+            # win over a strong one (fanshop "Nederlands Elftal" 100) and drop
+            # the good facet. max() keeps the first on ties (stable).
+            primary_match = max(facets_from_different_category, key=lambda m: m.score)
             category_path = self._extract_category_path_from_facet_url(primary_match.facet_value.url)
 
             # V16: Check if this is a merk/winkel facet from a different main category
