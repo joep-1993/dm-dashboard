@@ -125,6 +125,22 @@ class RUrlParser:
             error_message=f"URL does not match expected R-URL pattern: {url}"
         )
 
+    def _invalid_global(self, url: str) -> ParsedRUrl:
+        """Return an invalid parse for a maincat-less global "/products/r/<kw>/"
+        URL so the main pipeline skips it and the global pass handles it."""
+        return ParsedRUrl(
+            original_url=url,
+            category_path="",
+            full_category_path="",
+            main_category="",
+            subcategory_id="",
+            subcategory_name="",
+            keyword="",
+            existing_facet="",
+            is_valid=False,
+            error_message=f"URL does not match expected R-URL pattern: {url}"
+        )
+
     def _extract_from_full_match(self, url: str, match: re.Match) -> ParsedRUrl:
         """Extract components from a full URL match."""
         full_path = match.group(1)      # /products/tuin.../r/keyword
@@ -195,6 +211,13 @@ class RUrlParser:
         keyword = match.group(2)        # scharnieren
         existing_facet = match.group(3) or ""
 
+        # Guard: "/products/r/<kw>/" is a global, maincat-less R-URL. The
+        # relative pattern can backtrack and capture the literal "products"
+        # segment as the main_category, which would build "/products/products/".
+        # Treat it as invalid so it routes to the global pipeline instead.
+        if main_category == "products":
+            return self._invalid_global(url)
+
         # For main-cat-only URLs, category_path is just the main category
         category_path = main_category
 
@@ -219,6 +242,11 @@ class RUrlParser:
         main_category = match.group(1)  # klussen
         keyword = match.group(2)        # scharnieren
         existing_facet = match.group(3) or ""
+
+        # See _extract_from_main_cat_only_match: a captured "products" means
+        # this is really a global "/products/r/<kw>/" URL.
+        if main_category == "products":
+            return self._invalid_global(url)
 
         category_path = main_category
 

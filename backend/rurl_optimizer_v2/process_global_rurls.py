@@ -40,7 +40,7 @@ OUTPUT_FILE = 'data/output/redirects_v29_250k.csv'
 # /products/r/vacuumzakken_action/ → "vacuumzakken_action"
 # /products/r/hobby_horse_goedkoop/page_2 → "hobby_horse_goedkoop"
 GLOBAL_RURL_PATTERN = re.compile(
-    r'(?:https?://)?(?:www\.)?beslist\.nl/products/r/(.+?)(?:/page_\d+)?/?$'
+    r'(?:(?:https?://)?(?:www\.)?beslist\.nl)?/products/r/(.+?)(?:/page_\d+)?/?$'
 )
 
 
