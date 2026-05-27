@@ -44,6 +44,13 @@ MIN_VALUE_PRODUCTS = 5          # skip facet values with fewer products subcat-w
 MAX_CANDIDATES_PER_PAIR = 50
 EARLY_STOP_COVERAGE = 0.9       # stop probing once a value covers ≥ this
 
+# Bump when the probe SELECTION logic changes so cached picks from older
+# logic are ignored and re-derived. v2: keyword↔value-name match priority,
+# generic-attribute coverage suppression, and the Stage 1.5 live subcat
+# keyword probe. Without this, stale picks (e.g. type_shampoos 'Anti-roos'
+# for "ketoconazol shampoo") would linger in the cache indefinitely.
+PROBE_SCHEMA_VERSION = 2
+
 # Facet names that aren't useful for routing — operational / commercial
 # attributes that don't help the user pick a category-narrowed page.
 # Blacklist (rather than whitelist) so new facet names introduced by the
@@ -171,7 +178,11 @@ def _probe_get(mn: str, kn: str) -> Optional[dict]:
         row = cur.fetchone()
         if not row or not _is_fresh(row[1]):
             return None
-        return json.loads(row[0])
+        payload = json.loads(row[0])
+        # Ignore picks cached under older selection logic so they re-derive.
+        if payload.get("probe_schema") != PROBE_SCHEMA_VERSION:
+            return None
+        return payload
     except sqlite3.OperationalError:
         return None
     finally:
@@ -179,6 +190,7 @@ def _probe_get(mn: str, kn: str) -> Optional[dict]:
 
 
 def _probe_put(mn: str, kn: str, payload: dict) -> None:
+    payload = {**payload, "probe_schema": PROBE_SCHEMA_VERSION}
     c = _connect(readonly=False)
     try:
         c.execute(
@@ -269,6 +281,52 @@ def _check_surfaced(v28_payload: dict, base_total: int,
     return kw_best or cov_best
 
 
+def _subcat_keyword_facet(dom_slug: str, keyword: str, bucket: _TokenBucket) -> Optional[tuple]:
+    """Live subcat-level facet lookup for a keyword match.
+
+    The maincat-level V28 query frequently OR-fallbacks (total in the
+    millions) and surfaces only merk/winkel, hiding niche facet values that
+    ARE present at the subcategory level — e.g. ingr_shamp 'Ketoconazol'
+    (added 2026-04-20, also missing from the facets.csv snapshot). A single
+    subcat-level query surfaces them. Returns (facet_name, value_id,
+    value_name, count) for the best keyword-matching surfaced value, or None.
+    One throttled API call.
+    """
+    bucket.acquire()
+    try:
+        params = {
+            "category": dom_slug, "query": keyword,
+            "countryLanguage": COUNTRY_LANG, "isBot": "true", "limit": "1",
+        }
+        url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
+        r = requests.get(url, timeout=TIMEOUT)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+    except Exception as e:
+        logger.debug(f"subcat keyword probe failed ({dom_slug}, {keyword!r}): {e}")
+        return None
+    best = None  # (count, facet_name, value_id, value_name)
+    for f in (data.get("facets") or []):
+        fname = (f.get("urlName") or "").lower()
+        if not fname or fname == "winkel" or fname in FACET_BLACKLIST:
+            continue
+        for v in (f.get("values") or []):
+            vid = v.get("id")
+            vname = v.get("facetValue") or ""
+            cnt = int(v.get("count") or 0)
+            if vid is None or cnt <= 0:
+                continue
+            if _value_matches_keyword(keyword, vname):
+                cand = (cnt, fname, int(vid), vname)
+                if best is None or cand > best:
+                    best = cand
+    if best:
+        cnt, fname, vid, vname = best
+        return fname, vid, vname, cnt
+    return None
+
+
 def _do_probe(maincat: str, keyword: str, v28_payload: dict,
               bucket: _TokenBucket) -> dict:
     """Find the best facet value for this (maincat, keyword) pair.
@@ -310,6 +368,32 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
             "keyword_match": bool(is_kw),
             "candidates_probed": 0,
         }
+
+    # Stage 1.5: live subcat-level keyword probe. Stage 1 only sees the
+    # maincat-level surfaced facets (often just merk/winkel after an
+    # OR-fallback) and Stage 2 only sees the facets.csv snapshot — so a
+    # niche value the user literally searched for (e.g. ingr_shamp
+    # 'Ketoconazol') is invisible to both. One subcat-level query surfaces
+    # it. Gated on a leftover query token (>=4 chars, not in the dom_cat
+    # name) so we don't add an API call for queries the category already
+    # covers, and only runs because Stage 1 returned nothing above.
+    dom_name = v28_payload.get("dom_cat_name", "")
+    dom_toks = _tokens(dom_name)
+    leftover = [w for w in _tokens(keyword) if len(w) >= 4 and w not in dom_toks]
+    if leftover:
+        kw_hit = _subcat_keyword_facet(dom_slug, keyword, bucket)
+        if kw_hit:
+            fname, vid, vname, cnt = kw_hit
+            return {
+                "mode": "match_from_response",
+                "facet_name": fname,
+                "value_id": vid,
+                "value_name": vname,
+                "coverage": round((cnt / base_total) if base_total else 0, 3),
+                "value_count": cnt,
+                "keyword_match": True,
+                "candidates_probed": 0,
+            }
 
     # Stage 2: candidates from cached facets.csv, then API probes.
     fdf = _facets_df()
