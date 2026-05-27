@@ -561,9 +561,18 @@ Frontend has two tabs:
 
 ---
 
+## Auto-Redirects (rurl_optimizer_v2)
+
+Maps dead `/r/` search URLs to the best facet-filtered category page. Two pipelines for two URL shapes:
+- **`backend/rurl_optimizer_v2/main_parallel_v2.py`** — category-scoped R-URLs (`/products/{maincat}[/{subcat}]/r/{kw}/`). Pipeline: matcher (`src/matcher.py`) → V28 search-derived rescue (`src/search_derived.py`) → V29/V31 facet-probe (`src/facet_probe.py`) → reliability scorer (`src/reliability_scorer.py`) → `src/url_builder.py`. CLI: `python main_parallel_v2.py input.csv -o out.csv -c r_url --threshold 80 --multi-facet --enable-facet-probe` (run from the `rurl_optimizer_v2/` dir).
+- **`backend/rurl_optimizer_v2/process_global_rurls.py`** — maincat-less "mainpage" R-URLs (`/products/r/{kw}/`, ~10.5k) that the category parser rejects. Matches the keyword across all categories; patches results back into the full dataframe so category rows are preserved.
+- **Service**: `backend/rurl_optimizer_v2_service.py` runs both as subprocesses. Source=Redshift → "Mainpage R-urls" checkbox controls the global pass; manual + file upload → global pass always runs (auto-detects global URLs).
+- **Caches** (`backend/rurl_optimizer_v2/data/cache/search_derived.sqlite`): `search_cache` (V28, `SCHEMA_VERSION`) + `facet_probe_cache` (`PROBE_SCHEMA_VERSION`) — both version-stamped so logic changes auto-re-derive. `facets.csv` is a taxonomy snapshot and can be stale (miss newly-added facet values); niche values are recovered via a live subcat-level probe. Regression corpus: `data/output/e2e.csv` + `data/input/sample.csv`.
+- Deep design notes + gotchas: see cc1/LEARNINGS.md (2026-05-19 "V31 facet-probe", 2026-05-27 "facet-probe reachability / dom_cat semantics / two-pipeline routing").
+
 ## Additional Documentation
 
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-05-26_
+_Last updated: 2026-05-27_
