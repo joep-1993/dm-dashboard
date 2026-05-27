@@ -444,6 +444,11 @@ python-dotenv==1.0.0      # Environment variable management
 - `GET /api/seo-rulings/health` - Health check
 - `POST /api/seo-rulings/run` - Run all four checks synchronously (~10–20s; ~12 HTTP fetches + a handful of taxv2 calls) and return the structured per-check payload. Picks 1 main / 1 sub / 1 deepest category (verified `isEnabled=true` in taxv2 + non-404 URL status; depth fallback walks max_depth → 2 when all max-depth leaves 404); samples 3 priority-facet combos from `CategoryFacetSettings`; samples `pa.unique_titles_content` for `!!DISCOUNT!!` / `!!NR!!` / `!!JAAR!!` placeholders and confirms substitution on the live page; posts a summary DM via Slack `chat.postMessage` (uses `SLACK_BOT_TOKEN` + `SLACK_USER_ID` env vars; missing env returns `{sent: false, reason: "missing_env"}`); persists the result to `pa.seo_rulings_runs`.
 - `GET /api/seo-rulings/last` - Return the most-recently-completed run, shape `{has_run: bool, run: {run_id, started_at, finished_at, passed_count, failed_count, result}}`. Used by the frontend's `loadLastRun()` on `DOMContentLoaded` to rehydrate the page without re-running the checks.
+- `GET /api/seo-rulings/runs?limit=20` - List recent runs (newest first), each `{run_id, started_at, finished_at, passed_count, failed_count}` (no result payload). Limit clamped 1..200. Drives the "Recent runs" history table.
+- `GET /api/seo-rulings/runs/{run_id}` - One run including the full `result` payload (404 if missing). Used by the Recent-runs View + Export buttons.
+- `DELETE /api/seo-rulings/runs/{run_id}` - Delete a run from history (404 if nothing deleted). Used by the Recent-runs Remove button.
+
+Check 4 (title variables) now samples 3 URLs each for `!!DISCOUNT!!`, `!!NR!!`, `!!JAAR!!` (9 URLs total). The "Rendered on page" cell decodes HTML entities (looped, max 4 passes, since beslist double-encodes glyphs like `&amp;#10062;` → `❎`) then re-escapes for XSS safety. Details tables use `table-layout: fixed; width: max-content` with pixel column widths; the 3 category tables share a 1200px layout, Title variables uses 1700px; URLs never wrap and the horizontal scrollbar is hover-only.
 
 ### GSD Budgets (dm-dashboard)
 - `GET /api/gsd-budgets/health` - Health check
