@@ -2,6 +2,8 @@ import csv
 import os
 import re
 import requests
+from requests.adapters import HTTPAdapter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Tuple, Optional
 from bs4 import BeautifulSoup
 from pathlib import Path
@@ -12,10 +14,18 @@ from backend.database import get_db_connection, return_db_connection
 ES_URL = "https://elasticsearch-job-cluster-eck-v9.beslist.nl"
 INDEX_PREFIX = "product_search_v4_nl-nl_"
 
+# Max concurrent ES connections.  Validation runs 2×50 worker threads that all
+# share this session.  pool_block=True ensures we never exceed the limit — extra
+# threads wait for a free connection instead of opening unbounded sockets.
+_ES_POOL_SIZE = 50
+
 # Reuse a single HTTP session for all ES queries.  This keeps the TCP+TLS
 # connection alive between requests, avoiding a ~3.5 s TLS handshake on
 # every query (measured: 3 500 ms -> 27 ms per query).
 _es_session = requests.Session()
+_es_session.mount("https://", HTTPAdapter(
+    pool_connections=1, pool_maxsize=_ES_POOL_SIZE, pool_block=True,
+))
 
 # Bare UUID (no V4_ prefix): 8-4-4-4-12 hex. Newer Beslist PLP URLs use this
 # format alongside the older V4_<uuid> form; ES stores both in the `id` field.
@@ -310,31 +320,45 @@ def lookup_plp_urls_for_content(content: str) -> Tuple[Dict[str, Optional[str]],
     # Results dict: lookup_value -> plpUrl (or None)
     lookup_to_plp_url: Dict[str, Optional[str]] = {}
 
-    # Query by pimId for regular URLs
-    for maincat_id, pim_id_map in maincat_pimid_groups.items():
+    # Query all maincat indices in parallel (pimId + V4 plpUrl lookups).
+    # The _es_session connection pool (pool_block=True) throttles actual
+    # network concurrency to _ES_POOL_SIZE, so this is safe for the cluster.
+    def _query_pimid(maincat_id, pim_id_map):
         index = f"{INDEX_PREFIX}{maincat_id}"
         pim_ids = list(pim_id_map.keys())
-
         try:
-            result = query_elasticsearch(index, pim_ids)
-            for pim_id in pim_ids:
-                lookup_to_plp_url[pim_id] = result.get(pim_id)
+            res = query_elasticsearch(index, pim_ids)
+            return {pid: res.get(pid) for pid in pim_ids}
         except Exception as e:
             print(f"[LINK_VALIDATOR] Error querying ES index {index} by pimId: {e} - skipping batch (not marking as gone)")
+            return {}
 
-    # Query by plpUrl for V4 URLs
-    for maincat_id, plp_url_map in maincat_plpurl_groups.items():
+    def _query_plpurl(maincat_id, plp_url_map):
         index = f"{INDEX_PREFIX}{maincat_id}"
         plp_urls = list(plp_url_map.keys())
-
         try:
-            result = query_elasticsearch_by_plpurl(index, plp_urls)
-            for plp_url in plp_urls:
-                if plp_url in result:
-                    lookup_to_plp_url[plp_url] = result[plp_url]
-                # else: URL not found (e.g. V4 pimId lookup miss) - skip, don't mark as gone
+            res = query_elasticsearch_by_plpurl(index, plp_urls)
+            return {u: res[u] for u in plp_urls if u in res}
         except Exception as e:
             print(f"[LINK_VALIDATOR] Error querying ES index {index} by plpUrl: {e} - skipping batch (not marking as gone)")
+            return {}
+
+    total_queries = len(maincat_pimid_groups) + len(maincat_plpurl_groups)
+    if total_queries <= 1:
+        # Single query — no threading overhead needed
+        for maincat_id, pim_id_map in maincat_pimid_groups.items():
+            lookup_to_plp_url.update(_query_pimid(maincat_id, pim_id_map))
+        for maincat_id, plp_url_map in maincat_plpurl_groups.items():
+            lookup_to_plp_url.update(_query_plpurl(maincat_id, plp_url_map))
+    else:
+        with ThreadPoolExecutor(max_workers=min(total_queries, 10)) as pool:
+            futures = []
+            for maincat_id, pim_id_map in maincat_pimid_groups.items():
+                futures.append(pool.submit(_query_pimid, maincat_id, pim_id_map))
+            for maincat_id, plp_url_map in maincat_plpurl_groups.items():
+                futures.append(pool.submit(_query_plpurl, maincat_id, plp_url_map))
+            for future in as_completed(futures):
+                lookup_to_plp_url.update(future.result())
 
     # Build result: original_url -> correct_plpUrl (or None if GONE).
     # Unknown-format URLs are returned in a separate list and are NOT

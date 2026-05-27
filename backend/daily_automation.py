@@ -23,7 +23,7 @@ import time
 import socket
 import logging
 from logging.handlers import RotatingFileHandler
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from datetime import datetime
 
 import requests
@@ -59,6 +59,7 @@ POLL_MAX_RESTARTS = 3         # max task restarts after detected server restart
 CONNECT_TIMEOUT = 10          # seconds to wait for TCP connect
 READ_TIMEOUT = 60             # seconds to wait for HTTP response body
 LONG_READ_TIMEOUT = 300       # seconds for slow endpoints (process-urls)
+REQUEST_DEADLINE = 90         # hard wall-clock cap per HTTP request (Windows SSL hang guard)
 
 # Reusable session — SSL verify can be disabled for self-signed certs
 SESSION = requests.Session()
@@ -108,6 +109,32 @@ def setup_logging():
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# Single-thread executor kept alive for the process — avoids creating (and
+# tearing down) a new thread per request while still giving us a hard
+# wall-clock deadline that fires even when SSL hangs on Windows.
+_deadline_executor = ThreadPoolExecutor(max_workers=2)
+
+
+def _get_with_deadline(url, deadline=REQUEST_DEADLINE):
+    """SESSION.get with a hard wall-clock deadline.
+
+    On Windows, requests' (connect, read) timeout does not cover the SSL
+    handshake — it can hang indefinitely.  Running the call in a thread and
+    using Future.result(timeout=) guarantees we regain control.
+    """
+    future = _deadline_executor.submit(
+        SESSION.get, url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+    )
+    try:
+        return future.result(timeout=deadline)
+    except FuturesTimeoutError:
+        future.cancel()
+        raise requests.exceptions.Timeout(
+            f"Request to {url} exceeded hard deadline of {deadline}s"
+        )
+
+
 def cancel_running_tasks():
     """Cancel any stale validation tasks left over from previous runs.
 
@@ -166,9 +193,9 @@ def poll_task(status_url, timeout, restart_fn=None):
     restarts = 0
     while time.time() - start < timeout:
         try:
-            resp = SESSION.get(status_url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+            resp = _get_with_deadline(status_url)
             if resp.status_code == 401 and _reauth_on_401(resp):
-                resp = SESSION.get(status_url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+                resp = _get_with_deadline(status_url)
 
             # Detect server restart: 404 after we previously polled OK
             if (resp.status_code == 404 and had_success
@@ -283,13 +310,13 @@ def step_validate_faq_links():
     def _start():
         resp = SESSION.post(
             f"{BASE_URL}/api/faq/validate-all-links",
-            params={"parallel_workers": 20, "batch_size": 500},
+            params={"parallel_workers": 50, "batch_size": 500},
             timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
         )
         if resp.status_code == 401 and _reauth_on_401(resp):
             resp = SESSION.post(
                 f"{BASE_URL}/api/faq/validate-all-links",
-                params={"parallel_workers": 20, "batch_size": 500},
+                params={"parallel_workers": 50, "batch_size": 500},
                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
             )
         resp.raise_for_status()
@@ -307,13 +334,13 @@ def step_validate_kopteksten_links():
     def _start():
         resp = SESSION.post(
             f"{BASE_URL}/api/validate-all-links",
-            params={"parallel_workers": 20, "batch_size": 500},
+            params={"parallel_workers": 50, "batch_size": 500},
             timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
         )
         if resp.status_code == 401 and _reauth_on_401(resp):
             resp = SESSION.post(
                 f"{BASE_URL}/api/validate-all-links",
-                params={"parallel_workers": 20, "batch_size": 500},
+                params={"parallel_workers": 50, "batch_size": 500},
                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
             )
         resp.raise_for_status()
@@ -352,13 +379,13 @@ def step_recheck_skipped_urls():
     def _start():
         resp = SESSION.post(
             f"{BASE_URL}/api/recheck-skipped-urls",
-            params={"parallel_workers": 20, "batch_size": 50},
+            params={"parallel_workers": 50, "batch_size": 500},
             timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
         )
         if resp.status_code == 401 and _reauth_on_401(resp):
             resp = SESSION.post(
                 f"{BASE_URL}/api/recheck-skipped-urls",
-                params={"parallel_workers": 20, "batch_size": 50},
+                params={"parallel_workers": 50, "batch_size": 500},
                 timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
             )
         resp.raise_for_status()

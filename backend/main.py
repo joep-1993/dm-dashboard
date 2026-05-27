@@ -1321,6 +1321,7 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                 urls_with_gone_products = []
                 urls_to_update_content = []
                 url_to_gone_details = {}
+                validation_inserts = []
 
                 for validation_result in validation_results:
                     content_url = validation_result['content_url']
@@ -1336,17 +1337,7 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
 
                     content_url_id = url_to_uid.get(content_url)
                     if content_url_id is not None:
-                        cur.execute("""
-                            INSERT INTO pa.kopteksten_link_validation
-                                (url_id, total_links, broken_links, valid_links, broken_link_details, validated_at)
-                            VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                            ON CONFLICT (url_id) DO UPDATE SET
-                                total_links = EXCLUDED.total_links,
-                                broken_links = EXCLUDED.broken_links,
-                                valid_links = EXCLUDED.valid_links,
-                                broken_link_details = EXCLUDED.broken_link_details,
-                                validated_at = CURRENT_TIMESTAMP
-                        """, (
+                        validation_inserts.append((
                             content_url_id, total_links,
                             len(validation_result['gone_urls']),
                             len(validation_result['valid_urls']) + len(validation_result['replaced_urls']),
@@ -1366,6 +1357,19 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                         urls_with_gone_products.append(content_url)
                         url_to_gone_details[content_url] = validation_result['gone_urls']
                         moved_to_pending += 1
+
+                if validation_inserts:
+                    cur.executemany("""
+                        INSERT INTO pa.kopteksten_link_validation
+                            (url_id, total_links, broken_links, valid_links, broken_link_details, validated_at)
+                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (url_id) DO UPDATE SET
+                            total_links = EXCLUDED.total_links,
+                            broken_links = EXCLUDED.broken_links,
+                            valid_links = EXCLUDED.valid_links,
+                            broken_link_details = EXCLUDED.broken_link_details,
+                            validated_at = CURRENT_TIMESTAMP
+                    """, validation_inserts)
 
                 if urls_to_update_content:
                     from backend.url_catalog import get_url_id
@@ -2368,20 +2372,23 @@ def validate_all_faq_links(parallel_workers: int = 3, batch_size: int = 500):
             # of URLs with unknown_format or gone links that aren't deleted yet)
             conn = get_db_connection()
             cur = conn.cursor()
+            faq_validation_inserts = []
             for record in validation_records:
                 uid = url_to_uid.get(record['url'])
                 if uid is not None:
                     gone_count = len(record['gone_links']) if isinstance(record['gone_links'], list) else record['gone_links']
-                    cur.execute("""
-                        INSERT INTO pa.faq_link_validation
-                            (url_id, total_links, valid_links, gone_links, validated_at)
-                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        ON CONFLICT (url_id) DO UPDATE SET
-                            total_links = EXCLUDED.total_links,
-                            valid_links = EXCLUDED.valid_links,
-                            gone_links = EXCLUDED.gone_links,
-                            validated_at = CURRENT_TIMESTAMP
-                    """, (uid, record['total_links'], record['valid_links'], gone_count))
+                    faq_validation_inserts.append((uid, record['total_links'], record['valid_links'], gone_count))
+            if faq_validation_inserts:
+                cur.executemany("""
+                    INSERT INTO pa.faq_link_validation
+                        (url_id, total_links, valid_links, gone_links, validated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (url_id) DO UPDATE SET
+                        total_links = EXCLUDED.total_links,
+                        valid_links = EXCLUDED.valid_links,
+                        gone_links = EXCLUDED.gone_links,
+                        validated_at = CURRENT_TIMESTAMP
+                """, faq_validation_inserts)
             conn.commit()
             cur.close()
             return_db_connection(conn)
