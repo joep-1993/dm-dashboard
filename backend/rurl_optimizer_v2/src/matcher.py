@@ -637,6 +637,27 @@ class KeywordMatcher:
             for i in range(len(words) - 1):
                 word_pair = f"{words[i]} {words[i+1]}"
                 pair_result = self._match_with_synonyms(word_pair, facet_values)
+                # Also try a DIRECT match of the adjacent pair against facet
+                # values — catches multi-word value names like "Nederlands
+                # Elftal" (fanshop) that no single token matches well. Without
+                # this, "nederlands elftal voetbalshirt land" lets the stray
+                # token "land" substring-hit "Duitsland" and claim the fanshop
+                # axis before the correct two-word value is ever tried. Only
+                # accept a strong (>=90) pair match so we don't manufacture
+                # weak two-word hits.
+                if not (pair_result and pair_result.is_match):
+                    direct = self.match_with_partial(word_pair, facet_values, exclude_winkel=True)
+                    if direct.is_match and direct.score >= 90:
+                        import re as _re_pp
+                        _vt = {t for t in _re_pp.findall(r'[a-z0-9]+', (direct.matched_text or '').lower())}
+                        _pt = {t for t in _re_pp.findall(r'[a-z0-9]+', word_pair.lower())}
+                        # Accept only when the pair covers the WHOLE value name
+                        # (>=2 value tokens, all present in the pair). So
+                        # "nederlands elftal" → "Nederlands Elftal" wins, but
+                        # "anti snurk" does NOT grab the longer "Anti-snurk
+                        # Pleisters" (extra token 'pleisters' over-narrows).
+                        if len(_vt) >= 2 and _vt <= _pt:
+                            pair_result = direct
                 if pair_result and pair_result.is_match:
                     results.append(pair_result)
                     has_type_match = has_type_match or pair_result.is_priority_facet

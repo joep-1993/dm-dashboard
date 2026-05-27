@@ -615,6 +615,62 @@ def process_url_v2(args):
             'reason': 'V27: keyword is stopwords-only — redirected to clean category URL',
         }
 
+    # V32: "redundant keyword" short-circuit. When every meaningful keyword
+    # token is just the head noun of the subcategory the URL is ALREADY in
+    # (e.g. /products/mode/mode_432360/r/shirt/ — "shirt" == the "Shirts"
+    # subcat), there's nothing left to match on a facet. Matching it anyway
+    # lets the category noun fuzzy-hit an unrelated sub-type value
+    # ("shirt" → type_sportshirts "Fitness-shirts") and, worse, DROP a facet
+    # the URL already carried. Keep the category page and preserve any
+    # existing /c/ facet instead.
+    _sub_name = category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else ''
+    if parsed.subcategory_id and _sub_name and _non_stop_non_shop and not _shops_in_kw:
+        _cat_l = _sub_name.lower()
+        _cat_stem = _cat_l.rstrip('s').rstrip('en')
+
+        def _is_cat_noun(w):
+            ws = w.rstrip('s').rstrip('en')
+            return (w in _cat_l or _cat_l in w or ws in _cat_l
+                    or _cat_stem in w or ws in _cat_stem or _cat_stem in ws)
+
+        _residual = [w for w in _non_stop_non_shop if not _is_cat_noun(w)]
+        if not _residual:
+            _base = f"https://www.beslist.nl{parsed.full_category_path}"
+            _ef = getattr(parsed, 'existing_facet', '') or ''
+            _clean_url = f"{_base}/c/{_ef}" if _ef else f"{_base}/"
+            return {
+                'original_url': url,
+                'main_category': parsed.main_category or '',
+                'original_category': _sub_name,
+                'keyword': parsed.keyword,
+                'redirect_url': _clean_url,
+                'redirect_category': _sub_name,
+                'is_cross_category': False,
+                'facet_fragment': _ef,
+                'facet_names': _ef.split('~', 1)[0] if _ef else '',
+                'facet_value_names': '',
+                'facet_count': 1 if _ef else 0,
+                'match_score': 0,
+                'match_type': 'category_noun_only_clean_category',
+                'reliability_score': 80,
+                'reliability_tier': 'B',
+                'h1_similarity': 0,
+                'reject_reason': '',
+                'matched_keywords': '',
+                'unmatched_keywords': ', '.join(_non_stop_non_shop),
+                'match_coverage': 0.0,
+                'has_stopwords': False,
+                'stopwords_found': '',
+                'shop_in_keyword': '',
+                'keyword_type': 'category_noun_only',
+                'has_dimensions': False,
+                'merk_of_shop_missing': '',
+                'success': True,
+                'reason': (f"V32: keyword '{parsed.keyword}' is just the '{_sub_name}' category "
+                           "noun — kept category"
+                           + (f" + existing facet '{_ef}'" if _ef else " page")),
+            }
+
     # V30: Shop-name short-circuit — if the keyword contains any SHOP_NAME
     # word, skip matching entirely. Row stays in the output for visibility
     # but without a redirect URL.
