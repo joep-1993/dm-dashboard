@@ -3,9 +3,15 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from backend.seo_rulings_service import get_last_run, run_all_checks
+from backend.seo_rulings_service import (
+    delete_run,
+    get_last_run,
+    get_recent_runs,
+    get_run_by_id,
+    run_all_checks,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/seo-rulings", tags=["seo-rulings"])
@@ -32,3 +38,26 @@ def last():
     refresh. Shape: {has_run: bool, run: {...} | null}."""
     row = get_last_run()
     return {"has_run": row is not None, "run": row}
+
+
+@router.get("/runs")
+def runs(limit: int = 20):
+    """List recent runs (newest first), without the full result payload."""
+    return {"runs": get_recent_runs(limit=limit)}
+
+
+@router.get("/runs/{run_id}")
+def run_detail(run_id: int):
+    """Return one run including the full result payload (for export / view)."""
+    row = get_run_by_id(run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return row
+
+
+@router.delete("/runs/{run_id}")
+def remove_run(run_id: int):
+    """Delete a run from history."""
+    if not delete_run(run_id):
+        raise HTTPException(status_code=404, detail="Run not found")
+    return {"deleted": True, "run_id": run_id}

@@ -450,11 +450,11 @@ def _check_title_variables() -> Dict:
         extract="title", success_pattern=re.compile(r"\d+\s*%"),
     )
     findings += _check_variable(
-        column="description", placeholder="!!NR!!", limit=1,
+        column="description", placeholder="!!NR!!", limit=3,
         extract="description", success_pattern=re.compile(r"\d"),
     )
     findings += _check_variable(
-        column="title", placeholder="!!JAAR!!", limit=1,
+        column="title", placeholder="!!JAAR!!", limit=3,
         extract="title", success_pattern=re.compile(r"(?:19|20)\d{2}"),
     )
 
@@ -653,6 +653,19 @@ def _persist_run(started_at: datetime, finished_at: datetime, result: Dict) -> O
         return_db_connection(conn)
 
 
+def _row_to_run(row: Dict, include_result: bool = True) -> Dict:
+    out = {
+        "run_id": row["run_id"],
+        "started_at": row["started_at"].isoformat() + "Z",
+        "finished_at": row["finished_at"].isoformat() + "Z",
+        "passed_count": row["passed_count"],
+        "failed_count": row["failed_count"],
+    }
+    if include_result:
+        out["result"] = row["result"]
+    return out
+
+
 def get_last_run() -> Optional[Dict]:
     """Return the most-recently-completed run, or None if none exists yet."""
     conn = get_db_connection()
@@ -665,16 +678,60 @@ def get_last_run() -> Optional[Dict]:
             LIMIT 1
         """)
         row = cur.fetchone()
-        if not row:
-            return None
-        return {
-            "run_id": row["run_id"],
-            "started_at": row["started_at"].isoformat() + "Z",
-            "finished_at": row["finished_at"].isoformat() + "Z",
-            "passed_count": row["passed_count"],
-            "failed_count": row["failed_count"],
-            "result": row["result"],
-        }
+        return _row_to_run(row) if row else None
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def get_recent_runs(limit: int = 20) -> List[Dict]:
+    """Return up to `limit` recent runs (newest first), without the full
+    result JSONB so the list response stays small."""
+    limit = max(1, min(int(limit), 200))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT run_id, started_at, finished_at, passed_count, failed_count
+            FROM pa.seo_rulings_runs
+            ORDER BY finished_at DESC
+            LIMIT %s
+        """, (limit,))
+        return [_row_to_run(r, include_result=False) for r in cur.fetchall()]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def get_run_by_id(run_id: int) -> Optional[Dict]:
+    """Return one run with full result payload, for export / re-render."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT run_id, started_at, finished_at, passed_count, failed_count, result
+            FROM pa.seo_rulings_runs
+            WHERE run_id = %s
+        """, (int(run_id),))
+        row = cur.fetchone()
+        return _row_to_run(row) if row else None
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def delete_run(run_id: int) -> bool:
+    """Delete one run. Returns True if a row was deleted, False otherwise."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM pa.seo_rulings_runs WHERE run_id = %s",
+            (int(run_id),),
+        )
+        deleted = cur.rowcount > 0
+        conn.commit()
+        return deleted
     finally:
         cur.close()
         return_db_connection(conn)

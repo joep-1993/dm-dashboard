@@ -22,20 +22,61 @@
         .btn-outline-purple:hover {
             color: #fff; background: #5e4a90; border-color: #5e4a90;
         }
+        .btn-outline-orange {
+            color: #CC5500; border-color: #CC5500; background: transparent;
+        }
+        .btn-outline-orange:hover {
+            color: #fff; background: #CC5500; border-color: #CC5500;
+        }
+        .btn-outline-red {
+            color: #c0392b; border-color: #c0392b; background: transparent;
+        }
+        .btn-outline-red:hover {
+            color: #fff; background: #c0392b; border-color: #c0392b;
+        }
         .info-bar { font-size: 0.85rem; color: #555; }
         .pill {
             display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
             background: #efeaf7; color: #5e4a90; font-size: 0.72rem; font-weight: 600;
             margin-right: 0.25rem;
         }
-        /* Fixed-layout tables so URL columns line up vertically across the
-           four per-check tables and long URLs wrap instead of pushing other
-           columns out of position. */
-        table.rulings-table { table-layout: fixed; width: 100%; }
+        /* Fixed-layout tables. Columns use pixel widths so they line up
+           vertically across all four per-check tables; the table itself
+           is wider than the viewport on most screens, which triggers
+           horizontal scroll on the .table-responsive wrapper. URLs never
+           wrap (white-space: nowrap on the <a>) so the whole URL stays
+           on one line and the user scrolls right to read the tail. */
+        table.rulings-table { table-layout: fixed; width: max-content; min-width: 1200px; }
         table.rulings-table th, table.rulings-table td {
-            word-break: break-word; overflow-wrap: anywhere; vertical-align: top;
+            vertical-align: top; overflow-wrap: anywhere;
         }
-        table.rulings-table td a { word-break: break-all; }
+        table.rulings-table td a {
+            white-space: nowrap;
+        }
+        /* Hide the horizontal scrollbar on rulings tables by default; only
+           reveal it while the user hovers over the table. Keeps the Details
+           panel visually quiet when at-a-glance scanning, but exposes the
+           scroll affordance the moment the user goes to interact. */
+        .table-responsive:has(table.rulings-table) {
+            scrollbar-width: none;
+        }
+        .table-responsive:has(table.rulings-table)::-webkit-scrollbar {
+            height: 0;
+            width: 0;
+        }
+        .table-responsive:has(table.rulings-table):hover {
+            scrollbar-width: thin;
+        }
+        .table-responsive:has(table.rulings-table):hover::-webkit-scrollbar {
+            height: 8px;
+        }
+        .table-responsive:has(table.rulings-table):hover::-webkit-scrollbar-thumb {
+            background: #c0c0c0;
+            border-radius: 4px;
+        }
+        .table-responsive:has(table.rulings-table):hover::-webkit-scrollbar-track {
+            background: transparent;
+        }
     </style>
 </head>
 <body>
@@ -140,22 +181,22 @@
                     </div>
                 </div>
 
-                <div id="slackPanel" class="card mb-4 d-none">
-                    <div class="card-header">
-                        <h5 class="mb-0">Slack notification</h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="slackStatus" class="info-bar"></div>
-                        <pre class="detail-pre mt-2" id="slackText"></pre>
-                    </div>
-                </div>
-
                 <div id="detailsPanel" class="card mb-4 d-none">
                     <div class="card-header">
                         <h5 class="mb-0">Details</h5>
                     </div>
                     <div class="card-body">
                         <div id="detailsBody"></div>
+                    </div>
+                </div>
+
+                <div id="recentRunsPanel" class="card mb-4 d-none">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Recent runs</h5>
+                        <button class="btn btn-sm btn-outline-purple" onclick="loadRecentRuns()">Refresh</button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="recentRunsBody" class="p-3"></div>
                     </div>
                 </div>
 
@@ -185,6 +226,27 @@
                 .replaceAll('"', "&quot;");
         }
 
+        // Decode HTML entities (e.g. &#10062; → ❎) so beslist's title/
+        // description glyphs render as the icon they show in search results
+        // rather than the raw entity text. Beslist double-encodes these in
+        // the meta description (&amp;#10062;), so a single decode only gets
+        // to &#10062; — loop until the string stops changing (bounded to a
+        // few passes). textarea parses entities but never executes markup,
+        // so the result is plain text; escapeHtml is still applied before
+        // the value goes into the cell.
+        function decodeEntities(s) {
+            if (s == null) return "";
+            let str = String(s);
+            const ta = document.createElement("textarea");
+            for (let i = 0; i < 4; i++) {
+                ta.innerHTML = str;
+                const decoded = ta.value;
+                if (decoded === str) break;
+                str = decoded;
+            }
+            return str;
+        }
+
         async function loadLastRun() {
             try {
                 const resp = await fetch("/api/seo-rulings/last");
@@ -205,7 +267,6 @@
 
             document.getElementById("loadingPanel").classList.remove("d-none");
             document.getElementById("summaryPanel").classList.add("d-none");
-            document.getElementById("slackPanel").classList.add("d-none");
             document.getElementById("detailsPanel").classList.add("d-none");
 
             try {
@@ -215,12 +276,120 @@
                 }
                 const data = await resp.json();
                 renderResult(data, data.finished_at);
+                loadRecentRuns();
             } catch (err) {
                 document.getElementById("loadingPanel").classList.add("d-none");
                 alert("Run failed: " + err.message);
             } finally {
                 btn.disabled = false;
                 btn.textContent = "Run checks";
+            }
+        }
+
+        // --- Recent runs ----------------------------------------------------
+        async function loadRecentRuns() {
+            try {
+                const resp = await fetch("/api/seo-rulings/runs?limit=20");
+                if (!resp.ok) return;
+                const data = await resp.json();
+                renderRecentRuns(data.runs || []);
+            } catch (err) {
+                console.warn("Failed to load recent runs:", err);
+            }
+        }
+
+        function renderRecentRuns(runs) {
+            const panel = document.getElementById("recentRunsPanel");
+            const body = document.getElementById("recentRunsBody");
+            if (!runs.length) {
+                body.innerHTML = '<div class="text-muted small">No runs yet.</div>';
+                panel.classList.remove("d-none");
+                return;
+            }
+            const wrap = document.createElement("div");
+            wrap.className = "table-responsive";
+            const table = document.createElement("table");
+            table.className = "table table-sm align-middle small mb-0";
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th style="width: 25%; text-align: center;">Finished at</th>
+                        <th style="width: 25%; text-align: center;">Result</th>
+                        <th style="width: 25%; text-align: center;">Run ID</th>
+                        <th style="width: 25%; text-align: center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            `;
+            const tbody = table.querySelector("tbody");
+            runs.forEach(r => {
+                const finished = r.finished_at ? new Date(r.finished_at).toLocaleString() : "—";
+                const passed = r.passed_count ?? 0;
+                const failed = r.failed_count ?? 0;
+                const resultPill = failed
+                    ? `<span class="check-status fail">${failed} failed</span>`
+                    : `<span class="check-status pass">all passed</span>`;
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td style="text-align: center;">${escapeHtml(finished)}</td>
+                    <td style="text-align: center;">${resultPill} <span class="text-muted small">${passed}/${passed+failed} ok</span></td>
+                    <td style="text-align: center;"><code>${r.run_id}</code></td>
+                    <td style="text-align: center;">
+                        <button class="btn btn-sm btn-outline-orange me-1" onclick="viewRun(${r.run_id})">View</button>
+                        <button class="btn btn-sm btn-outline-purple me-1" onclick="exportRun(${r.run_id})">Export</button>
+                        <button class="btn btn-sm btn-outline-red" onclick="removeRun(${r.run_id})">Remove</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+            wrap.appendChild(table);
+            body.innerHTML = "";
+            body.appendChild(wrap);
+            panel.classList.remove("d-none");
+        }
+
+        async function viewRun(runId) {
+            try {
+                const resp = await fetch(`/api/seo-rulings/runs/${runId}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const run = await resp.json();
+                if (run && run.result) {
+                    renderResult(run.result, run.finished_at);
+                    window.scrollTo({ top: document.getElementById("summaryPanel").offsetTop - 20, behavior: "smooth" });
+                }
+            } catch (err) {
+                alert("Failed to load run: " + err.message);
+            }
+        }
+
+        async function exportRun(runId) {
+            try {
+                const resp = await fetch(`/api/seo-rulings/runs/${runId}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const run = await resp.json();
+                const blob = new Blob([JSON.stringify(run, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                const ts = run.finished_at ? run.finished_at.replace(/[:.]/g, "-") : Date.now();
+                a.href = url;
+                a.download = `seo-rulings-run-${runId}-${ts}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                alert("Failed to export run: " + err.message);
+            }
+        }
+
+        async function removeRun(runId) {
+            if (!confirm(`Delete run #${runId} from history? This can't be undone.`)) return;
+            try {
+                const resp = await fetch(`/api/seo-rulings/runs/${runId}`, { method: "DELETE" });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                loadRecentRuns();
+            } catch (err) {
+                alert("Failed to delete run: " + err.message);
             }
         }
 
@@ -267,95 +436,85 @@
             });
             document.getElementById("summaryPanel").classList.remove("d-none");
 
-            // Slack panel
-            const slackPanel = document.getElementById("slackPanel");
-            const slackStatus = document.getElementById("slackStatus");
-            const slackText = document.getElementById("slackText");
-            const slack = summary.slack || { sent: false };
-            if (slack.sent) {
-                slackStatus.innerHTML = '<span class="check-status pass">sent</span> &nbsp;Posted to Slack.';
-            } else {
-                const reason = slack.reason || "unknown";
-                slackStatus.innerHTML =
-                    `<span class="check-status fail">not sent</span> &nbsp;Reason: ${escapeHtml(reason)}`;
-            }
-            slackText.textContent = summary.slack_text || "";
-            slackPanel.classList.remove("d-none");
-
             // Details
             const detailsBody = document.getElementById("detailsBody");
             detailsBody.innerHTML = "";
 
-            // Sampled categories first so users see what was tested.
-            // Column widths are chosen so the URL column starts at the same
-            // horizontal position across every table (12%+18%+8%+12% = 50%
-            // before URL).
-            detailsBody.appendChild(buildSection(
-                "Sampled categories",
-                buildTable(details.sampled_categories || [], [
-                    { label: "Level",    width: "12%", get: r => r.label },
-                    { label: "Name",     width: "18%", get: r => r.name },
-                    { label: "Depth",    width: "8%",  get: r => r.depth, align: "center" },
-                    { label: "Cat ID",   width: "12%", get: r => r.cat_id, align: "center" },
-                    { label: "URL",      width: "50%", get: r => linkCell(r.url) },
-                ])
-            ));
+            // All five tables put URL as the LAST column at 50% width so the
+            // URL columns line up vertically across the Details panel. The
+            // non-URL columns share the remaining 50%; per-table widths are
+            // tuned so the URL's left-edge sits at the 50% mark.
+
+            // (Sampled categories table omitted — the same 3 rows appear in
+            // No-script categories + Basement links with identical Level /
+            // Name / Cat ID identifiers, so the standalone summary was
+            // redundant.)
+
+            // HTTP column is dropped from the per-check tables — the sampler
+            // already filters out non-200 URLs upstream, so every row that
+            // reaches the table is guaranteed to be 200. "Element" / "Group"
+            // collapse to a single "Status" column with "ok" / "missing"
+            // pills for visual consistency with Check 4's Status pill.
+
+            // The three category-based tables share one compact layout:
+            // Category 400px + Cat ID 100px + Status 100px + URL 600px =
+            // 1200px, so Cat ID / Status / URL all sit at x=400 / 500 / 600
+            // (pulled left from the previous 700/800/900). No-script
+            // facet-links merges Category + Facet into a single
+            // "Category/Facet" column of the same 400px so it lines up with
+            // the plain Category columns in the other two tables.
+            // Title variables keeps its own wider layout (Rendered needs the
+            // room) and is intentionally not width-matched here.
 
             // Check 1 — No-script categories
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.no_script_categories,
                 buildTable(details.no_script_categories || [], [
-                    { label: "Level",    width: "12%", get: r => r.label || "—" },
-                    { label: "Name",     width: "14%", get: r => r.name || "—" },
-                    { label: "Depth",    width: "6%",  get: r => (r.depth ?? "—"), align: "center" },
-                    { label: "Cat ID",   width: "10%", get: r => r.cat_id || "—", align: "center" },
-                    { label: "URL",      width: "38%", get: r => linkCell(r.url) },
-                    { label: "HTTP",     width: "8%",  get: r => httpCell(r.http_status), align: "center" },
-                    { label: "Element",  width: "12%", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "Category", width: "400px", get: r => r.name || "—" },
+                    { label: "Cat ID",   width: "100px", get: r => r.cat_id || "—", align: "center" },
+                    { label: "Status",   width: "100px", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "URL",      width: "600px", get: r => linkCell(r.url) },
                 ])
             ));
 
-            // Check 2 — No-script facet-links
+            // Check 2 — No-script facet-links. Category + Facet merged into
+            // one "Category/Facet" column (400px) so it aligns with the
+            // Category columns in the other two tables; the facet name is
+            // shown muted after a slash.
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.no_script_facet_links,
                 buildTable(details.no_script_facet_links || [], [
-                    { label: "Category",   width: "14%", get: r => r.cat_name || "—" },
-                    { label: "Cat ID",     width: "10%", get: r => r.cat_id || "—", align: "center" },
-                    { label: "Facet",      width: "16%", get: r => r.facet_name || "—" },
-                    { label: "URL",        width: "40%", get: r => linkCell(r.cat_url) },
-                    { label: "HTTP",       width: "8%",  get: r => httpCell(r.http_status), align: "center" },
-                    { label: "Element",    width: "12%", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "Category/Facet", width: "400px", get: r => `${escapeHtml(r.cat_name || "—")} <span class="text-muted">/ ${escapeHtml(r.facet_name || "—")}</span>` },
+                    { label: "Cat ID",         width: "100px", get: r => r.cat_id || "—", align: "center" },
+                    { label: "Status",         width: "100px", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "URL",            width: "600px", get: r => linkCell(r.cat_url) },
                 ])
             ));
 
-            // Check 3 — Basement links. The reason a basement-link probe
-            // failed (group missing vs. group present but empty) is logged
-            // server-side; surfacing it as a column here added noise without
-            // helping debug, so it's dropped from the UI.
+            // Check 3 — Basement links
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.basement_links,
                 buildTable(details.basement_links || [], [
-                    { label: "Level",   width: "12%", get: r => r.label || "—" },
-                    { label: "Name",    width: "18%", get: r => r.name || "—" },
-                    { label: "URL",     width: "50%", get: r => linkCell(r.url) },
-                    { label: "HTTP",    width: "8%",  get: r => httpCell(r.http_status), align: "center" },
-                    { label: "Group",   width: "12%", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "Category", width: "400px", get: r => r.name || "—" },
+                    { label: "Cat ID",   width: "100px", get: r => r.cat_id || "—", align: "center" },
+                    { label: "Status",   width: "100px", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "URL",      width: "600px", get: r => linkCell(r.url) },
                 ])
             ));
 
-            // Check 4 — Title variables. "Rendered on page" is what the live
-            // <title> or <meta description> showed after the placeholder was
-            // substituted; the DB template (with the placeholder still in it)
-            // is logged server-side if you need it for debugging. URL is last
-            // so the wide column doesn't push the smaller comparison columns
-            // off-screen.
+            // Check 4 — Title variables. Its own wider layout (total
+            // 1700px): Variable 120 + Status 180 + Rendered 800 + URL 600.
+            // Status at 180px gives the pills extra breathing room; Rendered
+            // at 800px comfortably holds long live-page titles on one row.
+            // Intentionally NOT width-matched to the three category tables
+            // above (those use the compact 400px layout).
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.title_variables,
                 buildTable(details.title_variables || [], [
-                    { label: "Variable",         width: "12%", get: r => `<code>${escapeHtml(r.variable || "")}</code>` },
-                    { label: "Status",           width: "10%", get: r => statusCell(r.status), align: "center" },
-                    { label: "Rendered on page", width: "38%", get: r => r.rendered ? `<span class="text-muted">${escapeHtml(r.rendered)}</span>` : "" },
-                    { label: "URL",              width: "40%", get: r => linkCell(r.url) },
+                    { label: "Variable",         width: "120px", get: r => `<code>${escapeHtml(r.variable || "")}</code>` },
+                    { label: "Status",           width: "180px", get: r => statusCell(r.status), align: "center" },
+                    { label: "Rendered on page", width: "800px", get: r => r.rendered ? `<span class="text-muted">${escapeHtml(decodeEntities(r.rendered))}</span>` : "" },
+                    { label: "URL",              width: "600px", get: r => linkCell(r.url) },
                 ])
             ));
 
@@ -444,9 +603,20 @@
             if (status === "fetch_error") return `<span class="check-status fail">fetch err</span>`;
             if (status === "no_priority_facets_found") return `<span class="check-status fail">no facets</span>`;
             if (status === "no_sample") return `<span class="check-status fail">no sample</span>`;
-            if (present === true) return `<span class="check-status pass">present</span>`;
+            if (present === true) return `<span class="check-status pass">ok</span>`;
             if (present === false) return `<span class="check-status fail">missing</span>`;
             return `<span class="text-muted">—</span>`;
+        }
+
+        // Sampled-category labels map to a fixed depth ordinal so the Level
+        // column shows just 1 / 2 / 3 instead of the full label.
+        const LEVEL_NUMBER = {
+            "Main category": 1,
+            "Subcategory": 2,
+            "Deepest category": 3,
+        };
+        function levelNumber(label) {
+            return LEVEL_NUMBER[label] ?? (label || "—");
         }
 
         function statusCell(status) {
@@ -475,7 +645,10 @@
         }
 
         // Hydrate from the last persisted run on page load.
-        document.addEventListener("DOMContentLoaded", loadLastRun);
+        document.addEventListener("DOMContentLoaded", () => {
+            loadLastRun();
+            loadRecentRuns();
+        });
     </script>
 </body>
 </html>
