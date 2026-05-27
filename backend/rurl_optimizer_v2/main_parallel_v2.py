@@ -675,11 +675,19 @@ def process_url_v2(args):
     # 1. SUBCATEGORY FACETS - Multi-facet matching
     if not result and facet_values:
         if multi_facet or ' ' in parsed.keyword:
+            # Q10: pass the subcategory's display name so its head noun (e.g.
+            # "partytent" when already in the Partytenten subcat) is skipped
+            # during facet matching — otherwise the category noun matches a
+            # sub-type value like t_partytent "Zijwanden partytent", a false
+            # positive that over-narrows the redirect.
+            _sub_cat_name = (category_lookup.get(str(parsed.subcategory_id), '')
+                             if parsed.subcategory_id else '')
             match_results = matcher.match_multi_word(
                 parsed.keyword, facet_values,
                 all_type_facets=all_type_facets,
                 require_type_for_merk=True,
-                current_main_category=parsed.main_category
+                current_main_category=parsed.main_category,
+                category_name=_sub_cat_name,
             )
             if match_results:
                 result = builder.build_multi_facet(parsed, match_results)

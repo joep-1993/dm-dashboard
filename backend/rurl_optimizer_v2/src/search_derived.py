@@ -71,7 +71,7 @@ DOMINANCE_THRESHOLD = 0.75
 # re-fetches them with the new classifier. Previously, fallback-mode rows
 # stored only {"mode": "fallback", "total": N} and never produced a dom_cat,
 # which blocked the facet-probe pipeline for niche queries.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3  # Q8: semantic dom_cat override + dominance-gate bypass
 
 _CACHE_DB_PATH = Path(__file__).parent.parent / "data" / "cache" / "search_derived.sqlite"
 _CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -132,7 +132,25 @@ def _fetch_live(maincat: str, keyword: str) -> Optional[dict]:
         return None
 
 
-def _classify(api_resp: Optional[dict]) -> dict:
+_SEM_STOPWORDS = {'de', 'het', 'een', 'en', 'met', 'voor', 'van', 'op', 'in', 'te', 'of'}
+
+
+def _sem_tokens(s):
+    """Stemmed, stopword-filtered token set for semantic dom_cat matching."""
+    import re as _re
+    out = set()
+    for t in _re.findall(r'[a-z0-9]+', (s or '').lower()):
+        if t in _SEM_STOPWORDS or len(t) < 2:
+            continue
+        if len(t) > 3 and t.endswith('s'):
+            t = t[:-1]
+        if len(t) > 3 and t.endswith('e'):
+            t = t[:-1]
+        out.add(t)
+    return out
+
+
+def _classify(api_resp: Optional[dict], keyword: str = "") -> dict:
     """Boil an API response down to the small dict we cache.
 
     V28: uses the response's `categories` array — which carries per-category
@@ -192,6 +210,29 @@ def _classify(api_resp: Optional[dict]) -> dict:
         leaf_cats.sort(key=lambda c: -(c.get("count") or 0))
         sum_at_leaf = sum((c.get("count") or 0) for c in leaf_cats) or 1
         top = leaf_cats[0]
+
+        # Q8: semantic dom_cat override. The volume leader is usually right,
+        # but when a DIFFERENT leaf category's NAME matches MORE of the query's
+        # distinctive tokens, prefer it — e.g. "anti snurk kussen" →
+        # 'Anti-snurk' (matches {anti,snurk}) over 'Massagekussens' (whose
+        # single compound token shares nothing with the query). Gated so a
+        # tiny semantic match never unseats a dominant volume category:
+        # strictly more matched tokens + a non-trivial product count. The
+        # winning semantic score is stored so _build_redirect_url can bypass
+        # the volume-dominance gate when the name match is strong (>=2 tokens).
+        SEM_OVERRIDE_MIN_COUNT = 10
+        sem_score = 0
+        q_toks = _sem_tokens(keyword)
+        if q_toks and len(leaf_cats) > 1:
+            for c in leaf_cats:
+                c['_sem'] = len(q_toks & _sem_tokens(c.get('name', '')))
+            sem_best = max(leaf_cats, key=lambda c: (c.get('_sem', 0), c.get('count') or 0))
+            if (sem_best is not top
+                    and sem_best.get('_sem', 0) > top.get('_sem', 0)
+                    and (sem_best.get('count') or 0) >= SEM_OVERRIDE_MIN_COUNT):
+                top = sem_best
+                sem_score = sem_best.get('_sem', 0)
+
         share = (top.get("count") or 0) / sum_at_leaf
         out.update({
             "dom_cat_id": top.get("id"),
@@ -200,6 +241,7 @@ def _classify(api_resp: Optional[dict]) -> dict:
             "dom_cat_share": round(share, 2),
             "dom_cat_count": top.get("count") or 0,
             "dom_cat_depth": max_depth,
+            "dom_cat_semantic_score": sem_score,
         })
         return out
 
@@ -274,7 +316,14 @@ def _build_redirect_url(maincat: str, classified: dict) -> Optional[str]:
         return None
     share = classified.get("dom_cat_share")
     slug = classified.get("dom_cat_url_slug")
-    if share is None or slug is None or share < DOMINANCE_THRESHOLD:
+    if share is None or slug is None:
+        return None
+    # Q8: a strong semantic name match (>=2 distinctive query tokens, e.g.
+    # 'Anti-snurk' for "anti snurk kussen") is independent evidence the cat
+    # is correct, so it bypasses the volume-dominance gate — that gate exists
+    # only to suppress noisy low-share VOLUME picks, not name matches.
+    sem_score = classified.get("dom_cat_semantic_score") or 0
+    if share < DOMINANCE_THRESHOLD and sem_score < 2:
         return None
     return f"https://www.beslist.nl/products/{maincat}/{slug}/"
 
@@ -367,7 +416,7 @@ def prefetch_pairs(pairs: Iterable[tuple[str, str]],
         maincat, keyword, mn, kn = item
         bucket.acquire()
         api = _fetch_live(maincat, keyword)
-        classified = _classify(api)
+        classified = _classify(api, keyword)
         _cache_put(mn, kn, classified)
         return api is not None
 

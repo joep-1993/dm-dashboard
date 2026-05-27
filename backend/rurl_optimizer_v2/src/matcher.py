@@ -734,6 +734,34 @@ class KeywordMatcher:
                     if result.score >= STRICT_FACET_EXACT_THRESHOLD:
                         results.append(result)
 
+        # Q10: dimension-token facet match. A size token in the query
+        # ("3x3", "200cm", "120x80") should match a facet value whose name
+        # carries that exact dimension (e.g. partytent_afmetingen "3x3 meter")
+        # — the lexical matcher misses it because of the trailing unit word.
+        # Additive and tightly gated: only fires when the query has a
+        # dimension token AND a facet value name contains it AND that facet
+        # axis isn't already matched. Score 100 so it survives dedup/sort.
+        import re as _re_dim
+        _dim_tokens = _re_dim.findall(
+            r'\d+\s*x\s*\d+|\d+\s*(?:cm|mm|meter)\b', keyword.lower()
+        )
+        if _dim_tokens:
+            def _norm_dim(s):
+                return _re_dim.sub(r'\s+', '', (s or '').lower())
+            _matched_axes = {r.facet_value.facet_name.lower()
+                             for r in results if r.facet_value}
+            for fv in facet_values:
+                if fv.facet_name.lower() in _matched_axes:
+                    continue
+                fv_norm = _norm_dim(fv.facet_value_name)
+                if any(_norm_dim(dt) and _norm_dim(dt) in fv_norm for dt in _dim_tokens):
+                    results.append(MatchResult(
+                        keyword=keyword, facet_value=fv,
+                        match_type='exact', score=100,
+                        matched_text=fv.facet_value_name,
+                    ))
+                    _matched_axes.add(fv.facet_name.lower())
+
         # Deduplicate by facet name (keep best score per facet)
         seen_facets = {}
         for r in results:
