@@ -753,7 +753,29 @@ class KeywordMatcher:
             key=lambda r: (not r.is_priority_facet, r.is_strict_facet, -r.score)
         )
 
-        return sorted_results
+        # Q3: cross-axis dedup by matched VALUE text. If one concept matched
+        # facets on multiple axes — e.g. token "pokemon" → merk "Pokemon" AND
+        # personage "Pokémon" — keep only the best (already first after the
+        # sort) so the URL doesn't carry two redundant facets for the same
+        # concept. Distinct value texts (e.g. "Waterdicht" + "3x3 meter") are
+        # unaffected, so genuine multi-attribute matches still combine.
+        import unicodedata as _ud
+
+        def _norm_val(s):
+            s = _ud.normalize('NFKD', (s or '')).encode('ascii', 'ignore').decode().lower().strip()
+            return s[:-1] if s.endswith('s') else s
+
+        _seen_vals = set()
+        deduped = []
+        for r in sorted_results:
+            key = _norm_val(getattr(r, 'matched_text', ''))
+            if key and key in _seen_vals:
+                continue
+            if key:
+                _seen_vals.add(key)
+            deduped.append(r)
+
+        return deduped
 
     @staticmethod
     def _collapse_double_vowels(s: str) -> str:

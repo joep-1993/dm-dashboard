@@ -72,6 +72,24 @@ FACET_BLACKLIST = {
 
 _FACETS_CACHE: Optional[pd.DataFrame] = None
 
+# Generic ATTRIBUTE facets carry little navigational intent when the user
+# didn't actually search for the value. A material/colour/size/weight value
+# that wins purely on coverage is usually noise (e.g. "fontein wc" →
+# materiaal~Keramiek). Such facets are appended ONLY when they're a keyword
+# match (the kw_best branch); as a pure coverage winner they're skipped so
+# the redirect stays at the bare dom_cat. Deliberately EXCLUDES type_* /
+# eigenschap_* / o_* facets — those carry intent even via coverage (e.g.
+# "hoesloze dekbedden" → eigenschap_beddengoed "Zonder overtrek"). Matched
+# on the facet slug (id_to_name) and a few common slug prefixes.
+GENERIC_ATTRIBUTE_FACETS = {
+    "kleur", "materiaal", "maat", "gewicht", "formaat",
+}
+
+
+def _is_generic_attribute_facet(facet_name: str) -> bool:
+    return (facet_name or "").lower() in GENERIC_ATTRIBUTE_FACETS
+
+
 # ── Keyword ↔ facet-value-name matching ──────────────────────────────────
 # When the search query literally names a facet value (e.g. query
 # "ketoconazol shampoo" → value "Ketoconazol"), that value should win
@@ -244,7 +262,7 @@ def _check_surfaced(v28_payload: dict, base_total: int,
                 cand = (round(cov, 3), int(count), facet_name, int(vid), vname or "", True)
                 if kw_best is None or cand > kw_best:
                     kw_best = cand
-            if cov >= MIN_FACET_COVERAGE:
+            if cov >= MIN_FACET_COVERAGE and not _is_generic_attribute_facet(facet_name):
                 cand = (round(cov, 3), int(count), facet_name, int(vid), vname or "", False)
                 if cov_best is None or cand > cov_best:
                     cov_best = cand
@@ -337,6 +355,11 @@ def _do_probe(maincat: str, keyword: str, v28_payload: dict,
                 kw_best = cand
             break  # candidates are sorted kw-first; first live kw match wins
         if cov < MIN_FACET_COVERAGE:
+            continue
+        # Skip generic-attribute facets (kleur/materiaal/maat/…) that win
+        # purely on coverage — appending them to a non-keyword-matched query
+        # is noise (e.g. "fontein wc" → materiaal~Keramiek).
+        if _is_generic_attribute_facet(row["facet_name"]):
             continue
         if cov_best is None or cand > cov_best:
             cov_best = cand
