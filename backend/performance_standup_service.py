@@ -23,7 +23,10 @@ from backend.database import get_redshift_connection, return_redshift_connection
 
 logger = logging.getLogger(__name__)
 
-EXCEL_PATH = "/mnt/c/Users/JoepvanSchagen/Beslist.nl BV/SEO - Documenten/2025 Dagstats SEO-Overig-GSaaS omzet stand up.xlsx"
+EXCEL_PATH = os.getenv(
+    "STANDUP_EXCEL_PATH",
+    r"C:\Users\l.davidowski\OneDrive - Beslist.nl BV\SEO - Documenten\2025 Dagstats SEO-Overig-GSaaS omzet stand up.xlsx",
+)
 
 SHEET_SEO_ONLY = "SEO only"
 SHEET_GSAAS = "GSaaS"
