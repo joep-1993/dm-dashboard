@@ -45,6 +45,7 @@ _What are we building and why?_
 ## Ideas Parking Lot
 _Capture ideas for future consideration_
 
+- **DM Review tool — slide 3 (Werkvoorraad) refresh**: deferred from the 2026-05-28 session. Slide 3 of `DM review_NEW.pptx` shows content coverage (FAQ%, Kopteksten%, AI-titles%, etc.) + URL counts (e.g. "389,994 URLs (+33%)"). User said "for sheet 3 I need to provide some extra context", and we shipped slide 2 only. Excel feed tabs for slide 3 are likely `new_visits`, `ut`, `canon`, `red`, `t&d`, `open_facets`, `werkvoorraad`, possibly `top_3_10_*` — see preview output in 2026-05-28 LEARNINGS.
 - **Bulk CSV validation endpoint**: Pre-validate large CSVs before job creation (check customer IDs exist, ad groups are valid) - could save time by catching errors before job execution
 - **Automated secret scanning in pre-commit hooks**: Prevent accidental commits of secrets with local validation before push (e.g., detect-secrets, git-secrets, or custom regex patterns)
 - **Improve 202 retry logic for Cloudflare queuing**: Consider exponential backoff for HTTP 202 responses (2s, 5s, 10s) instead of single 2s retry - may reduce failure rate during high-load periods

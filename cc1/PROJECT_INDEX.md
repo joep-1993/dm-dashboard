@@ -406,6 +406,10 @@ python-dotenv==1.0.0      # Environment variable management
 - `GET /api/content-publish/status/{task_id}` - Poll background task status (pending/running/completed/failed)
 - `GET /api/content-publish/last-push` - Get last successful production publish timestamp
 
+### DM Review (slide 2 refresh)
+- `GET /api/dm-review/health` - Health check
+- `POST /api/dm-review/run` - One-click refresh: UPSERTs last 3 months monthly + last 60d daily visits/omzet (SEO + DMA organic, `fct_visits`) and SERP rankings per URL type + device (`bt.search_console` country=nld, impression-weighted) into `review_dm_seo.xlsx`; extends pivot source ranges + sets `refreshOnLoad=True`; slides each rolling-window pivot forward so newest item is visible / oldest drops off; updates slide-2 pptx tables (SERP rankings, Visits target/behaald from `seo_targets.xlsx` row 8, Revenue target/behaald from row 6). Backend: `backend/dm_review_service.py`, `backend/dm_review_pptx_tables.py`, `backend/dm_review_router.py`. Frontend: `frontend/dm-review.html`.
+
 ### Keyword Planner
 - `POST /api/keyword-planner/search-volumes` - Get search volumes for keyword list (JSON: `{"keywords": [...]}`, max 50,000)
 - `POST /api/keyword-planner/upload-excel` - Upload Excel with keywords in first column
@@ -565,14 +569,14 @@ Frontend has two tabs:
 
 Maps dead `/r/` search URLs to the best facet-filtered category page. Two pipelines for two URL shapes:
 - **`backend/rurl_optimizer_v2/main_parallel_v2.py`** — category-scoped R-URLs (`/products/{maincat}[/{subcat}]/r/{kw}/`). Pipeline: matcher (`src/matcher.py`) → V28 search-derived rescue (`src/search_derived.py`) → V29/V31 facet-probe (`src/facet_probe.py`) → reliability scorer (`src/reliability_scorer.py`) → `src/url_builder.py`. CLI: `python main_parallel_v2.py input.csv -o out.csv -c r_url --threshold 80 --multi-facet --enable-facet-probe` (run from the `rurl_optimizer_v2/` dir).
-- **`backend/rurl_optimizer_v2/process_global_rurls.py`** — maincat-less "mainpage" R-URLs (`/products/r/{kw}/`, ~10.5k) that the category parser rejects. Matches the keyword across all categories; patches results back into the full dataframe so category rows are preserved.
+- **`backend/rurl_optimizer_v2/process_global_rurls.py`** — maincat-less "mainpage" R-URLs (`/products/r/{kw}/`, ~10.5k) that the category parser rejects. Matches the keyword across all categories; patches results back into the full dataframe so category rows are preserved. Discovery order: (1) subcat-NAME match ≥95 → full in-subcat facet match; (1.5b) `[global_type_subcat]` — best-scoring type-facet value pinpoints a subcat, then full in-subcat match; (2) cross-type fallback; (3) low-threshold subcat name. Accepts both relative and absolute URL shapes (parser `_invalid_global` + domain-optional `GLOBAL_RURL_PATTERN`).
 - **Service**: `backend/rurl_optimizer_v2_service.py` runs both as subprocesses. Source=Redshift → "Mainpage R-urls" checkbox controls the global pass; manual + file upload → global pass always runs (auto-detects global URLs).
 - **Caches** (`backend/rurl_optimizer_v2/data/cache/search_derived.sqlite`): `search_cache` (V28, `SCHEMA_VERSION`) + `facet_probe_cache` (`PROBE_SCHEMA_VERSION`) — both version-stamped so logic changes auto-re-derive. `facets.csv` is a taxonomy snapshot and can be stale (miss newly-added facet values); niche values are recovered via a live subcat-level probe. Regression corpus: `data/output/e2e.csv` + `data/input/sample.csv`.
-- Deep design notes + gotchas: see cc1/LEARNINGS.md (2026-05-19 "V31 facet-probe", 2026-05-27 "facet-probe reachability / dom_cat semantics / two-pipeline routing").
+- Deep design notes + gotchas: see cc1/LEARNINGS.md (2026-05-19 "V31 facet-probe", 2026-05-27 "facet-probe reachability / dom_cat semantics / two-pipeline routing", 2026-05-27 session 2 "global R-URL routing + facet-selection quality").
 
 ## Additional Documentation
 
 For detailed architectural decisions, design patterns, and technology rationales, see **ARCHITECTURE.md** in the project root.
 
 ---
-_Last updated: 2026-05-27_
+_Last updated: 2026-05-27 (session 2)_
