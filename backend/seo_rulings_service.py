@@ -396,7 +396,8 @@ def _check_variable(
             ORDER BY random()
             LIMIT %s
         """
-        cur.execute(sql, (f"%{placeholder}%", limit))
+        # Fetch extra rows so we can skip 404s and still have enough results
+        cur.execute(sql, (f"%{placeholder}%", limit * 3))
         rows = cur.fetchall()
     finally:
         cur.close()
@@ -410,7 +411,10 @@ def _check_variable(
         })
         return findings
 
+    checked = 0
     for row in rows:
+        if checked >= limit:
+            break
         # Unique-titles DB stores paths as `/products/...`; absolutize before
         # fetching and before returning so the frontend can link to them.
         raw_url = row["url"]
@@ -424,6 +428,17 @@ def _check_variable(
                 "detail": f"HTTP {http_status}",
             })
             continue
+        # Skip non-200 pages (404, 503, etc.) — the URL is dead, not a
+        # variable-substitution failure.  Try the next candidate instead.
+        if http_status != 200:
+            findings.append({
+                "variable": placeholder,
+                "url": url,
+                "status": "skipped",
+                "detail": f"HTTP {http_status}",
+            })
+            continue
+        checked += 1
         rendered = _extract_title(html) if extract == "title" else _extract_description(html)
         if placeholder in rendered or not success_pattern.search(rendered):
             findings.append({
@@ -458,7 +473,7 @@ def _check_title_variables() -> Dict:
         extract="title", success_pattern=re.compile(r"(?:19|20)\d{2}"),
     )
 
-    failed = any(f["status"] in ("failed", "fetch_error", "no_rows") for f in findings)
+    failed = any(f["status"] in ("failed", "no_rows") for f in findings)
     return {"findings": findings, "failed": failed}
 
 
