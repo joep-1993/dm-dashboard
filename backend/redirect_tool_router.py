@@ -81,17 +81,55 @@ def _parse_text(text: str) -> list[dict]:
     return rows
 
 
+def _read_csv_any_encoding(content: bytes, **kwargs) -> tuple[pd.DataFrame, str]:
+    """pd.read_csv with encoding fallback. Returns (df, encoding_used).
+
+    Windows exports are commonly cp1252. utf-8 is tried first so well-formed
+    files take the fast path.
+    """
+    for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            df = pd.read_csv(io.BytesIO(content), encoding=encoding, **kwargs)
+            return df, encoding
+        except UnicodeDecodeError:
+            continue
+    df = pd.read_csv(io.BytesIO(content), encoding="utf-8", encoding_errors="replace", **kwargs)
+    return df, "utf-8-replace"
+
+
+def _encoding_warning(encoding: str, df: pd.DataFrame) -> str | None:
+    """Build a human warning if the file wasn't clean utf-8."""
+    if encoding == "utf-8-sig":
+        return None
+    has_replacement = any(
+        "�" in str(v)
+        for v in df.astype(str).values.ravel()
+    )
+    if encoding == "utf-8-replace" or has_replacement:
+        return (
+            "File contained bytes that could not be decoded — some characters "
+            "were replaced with \"?\". Check non-ASCII URLs carefully before uploading."
+        )
+    return (
+        f"File was not utf-8 — decoded as {encoding} (typical for Windows-exported CSVs). "
+        "Double-check any rows with non-ASCII characters (é, ë, etc.) in the preview."
+    )
+
+
 @router.post("/parse-file")
 async def parse_file(file: UploadFile = File(...)) -> dict:
     content = await file.read()
     filename = (file.filename or "").lower()
+    warning: str | None = None
     try:
         if filename.endswith((".xlsx", ".xls")):
             df = pd.read_excel(io.BytesIO(content))
         elif filename.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content), sep=None, engine="python", dtype=str, keep_default_na=False)
+            df, enc = _read_csv_any_encoding(content, sep=None, engine="python", dtype=str, keep_default_na=False)
+            warning = _encoding_warning(enc, df)
         elif filename.endswith(".tsv"):
-            df = pd.read_csv(io.BytesIO(content), sep="\t", dtype=str, keep_default_na=False)
+            df, enc = _read_csv_any_encoding(content, sep="\t", dtype=str, keep_default_na=False)
+            warning = _encoding_warning(enc, df)
         else:
             text = content.decode("utf-8", errors="replace")
             rows = _parse_text(text)
@@ -99,7 +137,10 @@ async def parse_file(file: UploadFile = File(...)) -> dict:
     except Exception as exc:
         raise HTTPException(400, f"Could not parse file: {exc}") from exc
     rows = _df_to_rows(df)
-    return {"rows": rows, "count": len(rows)}
+    payload: dict[str, Any] = {"rows": rows, "count": len(rows)}
+    if warning:
+        payload["warning"] = warning
+    return payload
 
 
 class ParseTextRequest(BaseModel):

@@ -58,6 +58,7 @@ from backend.rurl_optimizer_router import router as rurl_optimizer_router
 from backend.rurl_optimizer_v2_router import router as rurl_optimizer_v2_router
 from backend.redirect_tool_router import router as redirect_tool_router
 from backend.performance_standup_router import router as performance_standup_router
+from backend.dm_review_router import router as dm_review_router
 from backend.seo_rulings_router import router as seo_rulings_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
@@ -176,6 +177,9 @@ app.include_router(redirect_tool_router)
 
 # Include performance_standup router (writes to SharePoint-synced standup xlsx)
 app.include_router(performance_standup_router)
+
+# Include dm_review router (writes to SharePoint-synced review_dm_seo.xlsx, slide 2 feeds)
+app.include_router(dm_review_router)
 
 # Include seo_rulings router (live sanity checks against beslist.nl)
 app.include_router(seo_rulings_router)

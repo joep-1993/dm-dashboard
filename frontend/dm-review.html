@@ -1,40 +1,26 @@
 <!DOCTYPE html>
-<html lang="nl">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Taakplanner</title>
+    <title>DM Review</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        .stat-card {
-            border-radius: 12px;
-            background: white;
-            color: #2d3436;
-            padding: 1.25rem;
-            text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        }
-        .stat-card .stat-value { font-size: 2rem; font-weight: 700; }
-        .stat-card .stat-label { font-size: 0.85rem; color: #636e72; }
-        .badge-enabled { background: #00b894; }
-        .badge-disabled { background: #b2bec3; }
-        .badge-running { background: #0984e3; }
-        .badge-completed { background: #00b894; }
-        .badge-failed { background: #d63031; }
-        .task-table th { font-size: 0.85rem; color: #636e72; text-transform: uppercase; }
-        .task-table td { vertical-align: middle; }
-        .btn-action { padding: 0.25rem 0.5rem; font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; }
-        .btn-action svg { vertical-align: middle; }
-        .log-output { max-height: 500px; overflow-y: auto; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; background: #2d3436; color: #dfe6e9; padding: 1rem; border-radius: 8px; }
-        .schedule-text { font-size: 0.85rem; color: #636e72; }
-        .import-banner { background: #ffeaa7; border-left: 4px solid #fdcb6e; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
+        .result-card { border-left: 4px solid #27ae60; }
+        .result-card.error { border-left-color: #e74c3c; }
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+        .stat { background: #f7f5fb; padding: 0.6rem 0.8rem; border-radius: 8px; }
+        .stat .label { font-size: 0.75rem; color: #636e72; text-transform: uppercase; letter-spacing: 0.05em; }
+        .stat .value { font-size: 1.2rem; font-weight: 600; color: #3a3a3a; }
+        .feed-table th { font-size: 0.8rem; color: #636e72; text-transform: uppercase; }
+        .feed-table td { font-size: 0.9rem; }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
         <div class="container d-flex flex-nowrap align-items-center gap-2">
-            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Taakplanner</span>
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">DM Review</span>
             <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
                 <div class="nav-dropdown">
                     <button class="nav-dropdown-toggle">Generators</button>
@@ -75,10 +61,10 @@
                     </div>
                 </div>
                 <div class="nav-dropdown">
-                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         
-                        <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a><a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/dm-review.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a><a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
                         <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
                         <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
@@ -93,169 +79,122 @@
     </nav>
 
     <div class="container mt-5 pb-5">
-        <!-- Import banner (hidden by default) -->
-        <div id="importBanner" class="import-banner d-none">
-            <strong>Windows-taken gevonden!</strong> Er zijn taken in Windows Task Scheduler die nog niet in het dashboard staan.
-            <button class="btn btn-sm btn-warning ms-2" onclick="importExisting()">Importeren</button>
-        </div>
-
-        <!-- Summary stats -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value" id="statTotal">-</div>
-                    <div class="stat-label">Totaal taken</div>
-                </div>
+        <div class="card mb-4">
+            <div class="card-header d-flex align-items-center" style="background: #5e4a90; color: white;">
+                <h5 class="mb-0">Slide 2 - SEO cijfers <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px; margin-left: 0.4rem;"><title>Close review_dm_seo.xlsx in Excel before running, otherwise the save will fail. After the run, the pivot tables in the workbook are flagged refresh-on-open, so the charts in DM review_NEW.pptx will show fresh values the next time you open it in PowerPoint and click Update Links.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg></h5>
             </div>
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value text-success" id="statActive">-</div>
-                    <div class="stat-label">Actief</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value text-secondary" id="statDisabled">-</div>
-                    <div class="stat-label">Uitgeschakeld</div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="stat-card">
-                    <div class="stat-value" id="statLastRun">-</div>
-                    <div class="stat-label">Laatste uitvoering</div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Refreshes the source workbook
+                    <code>review_dm_seo.xlsx</code> (OneDrive)
+                    by appending everything newer than the latest date already in each tab.
+                    Four feeds are updated:
+                </p>
+                <ul class="small text-muted">
+                    <li><b>visits_omzet</b> — monthly SEO + DMA organic visits + omzet (Redshift)</li>
+                    <li><b>visits_omzet_dag</b> — daily SEO + DMA organic visits + omzet (Redshift)</li>
+                    <li><b>serp</b> — monthly avg position per URL type, impression-weighted (bt.search_console, country=nld)</li>
+                    <li><b>serp_device</b> — daily avg position by DESKTOP / MOBILE (bt.search_console, country=nld)</li>
+                </ul>
+                <div class="d-flex justify-content-end">
+                    <button id="runBtn" class="btn" style="background:#CC5500;color:white;border:none;"
+                            onmouseover="this.style.backgroundColor='#E97451'"
+                            onmouseout="this.style.backgroundColor='#CC5500'">
+                        Run
+                    </button>
                 </div>
             </div>
         </div>
 
-        <!-- Actions -->
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="mb-0">Geplande taken</h5>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#taskModal" onclick="openCreateModal()">
-                + Nieuwe taak
-            </button>
+        <div id="loadingArea" style="display:none;" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status"></div>
+            <div class="mt-2 text-muted">Querying Redshift and writing Excel…</div>
         </div>
 
-        <!-- Task table -->
-        <div class="card">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover task-table mb-0">
-                        <thead>
-                            <tr>
-                                <th>Naam</th>
-                                <th>Schema</th>
-                                <th>Status</th>
-                                <th>Volgende uitvoering</th>
-                                <th>Laatste uitvoering</th>
-                                <th class="text-center">Acties</th>
-                            </tr>
-                        </thead>
-                        <tbody id="taskTableBody">
-                            <tr><td colspan="6" class="text-center text-muted py-4">Laden...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
+        <div id="resultArea" style="display:none;"></div>
 
-        <!-- Task history -->
-        <div id="historySection" class="mt-4 d-none">
-            <h5 id="historyTitle">Uitvoeringsgeschiedenis</h5>
-            <div class="card">
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-sm mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Gestart</th>
-                                    <th>Duur</th>
-                                    <th>Status</th>
-                                    <th>Trigger</th>
-                                    <th class="text-end">Log</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyTableBody"></tbody>
+        <footer class="text-center py-4">
+            <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+        </footer>
+    </div>
+
+    <script>
+    (function() {
+        const runBtn = document.getElementById('runBtn');
+        const loading = document.getElementById('loadingArea');
+        const result = document.getElementById('resultArea');
+
+        runBtn.addEventListener('click', async () => {
+            runBtn.disabled = true;
+            loading.style.display = '';
+            result.style.display = 'none';
+            try {
+                const r = await fetch('/api/dm-review/run', { method: 'POST' });
+                const data = await r.json();
+                if (!r.ok) {
+                    renderError(data.detail || 'Unknown error');
+                } else {
+                    renderSuccess(data);
+                }
+            } catch (e) {
+                renderError(e.message);
+            } finally {
+                loading.style.display = 'none';
+                runBtn.disabled = false;
+            }
+        });
+
+        function renderError(msg) {
+            result.innerHTML =
+                `<div class="card result-card error mb-4">
+                    <div class="card-body">
+                        <h6 class="mb-2">Failed</h6>
+                        <pre class="mb-0" style="white-space:pre-wrap;">${escapeHtml(msg)}</pre>
+                    </div>
+                </div>`;
+            result.style.display = '';
+        }
+
+        function renderSuccess(d) {
+            const rw = d.rows_written;
+            const w = d.refresh_window;
+            const pivots = d.pivot_sources_updated || [];
+            function fmt(o) { return `${o.updated} updated / ${o.appended} appended`; }
+            const pivotHtml = pivots.length
+                ? `<h6 class="mt-3 mb-2 small">Pivot source ranges extended</h6>
+                   <ul class="small text-muted">${pivots.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>
+                   <p class="small text-muted mb-0">All pivots flagged <code>refreshOnLoad = True</code>, so the charts in the pptx will reflect fresh data on the next Update-Links in PowerPoint.</p>`
+                : '';
+            result.innerHTML =
+                `<div class="card result-card mb-4">
+                    <div class="card-body">
+                        <h6 class="mb-3">Done</h6>
+                        <p class="text-muted small mb-3">
+                            Refresh windows — monthly: from ${w.monthly_start_yyyymm};
+                            daily: from ${w.daily_start_date};
+                            serp target month: ${w.serp_target_yyyymm}.
+                        </p>
+                        <table class="table table-sm feed-table">
+                            <thead><tr><th>Tab</th><th>Result</th></tr></thead>
+                            <tbody>
+                              <tr><td>visits_omzet</td><td>${fmt(rw.visits_omzet)}</td></tr>
+                              <tr><td>visits_omzet_dag</td><td>${fmt(rw.visits_omzet_dag)}</td></tr>
+                              <tr><td>serp_device</td><td>${fmt(rw.serp_device)}</td></tr>
+                              <tr><td>serp (wide)</td><td>${rw.serp.cells_written} cells written</td></tr>
+                            </tbody>
                         </table>
+                        ${pivotHtml}
                     </div>
-                </div>
-            </div>
-        </div>
-    </div>
+                </div>`;
+            result.style.display = '';
+        }
 
-    <!-- Create/Edit Modal -->
-    <div class="modal fade" id="taskModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalTitle">Nieuwe taak</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <input type="hidden" id="editTaskId">
-                    <div class="mb-3">
-                        <label class="form-label">Taaknaam (slug)</label>
-                        <input type="text" class="form-control" id="inputTaskName" placeholder="bijv. daily-automation">
-                        <small class="text-muted">Wordt gebruikt als Windows-taaknaam: DM-Dashboard-{naam}</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Weergavenaam</label>
-                        <input type="text" class="form-control" id="inputDisplayName" placeholder="bijv. Dagelijkse Automatisering">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Beschrijving</label>
-                        <textarea class="form-control" id="inputDescription" rows="2"></textarea>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Commando</label>
-                        <input type="text" class="form-control" id="inputCommand" placeholder="bijv. venv\Scripts\python.exe backend\daily_automation.py">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Werkmap</label>
-                        <input type="text" class="form-control" id="inputWorkDir" value="C:\Users\l.davidowski\dm-dashboard">
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-4">
-                            <label class="form-label">Schema</label>
-                            <select class="form-select" id="inputScheduleType" onchange="toggleDaysInput()">
-                                <option value="DAILY">Dagelijks</option>
-                                <option value="WEEKLY">Wekelijks</option>
-                                <option value="HOURLY">Per uur</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Tijd</label>
-                            <input type="time" class="form-control" id="inputScheduleTime" value="07:00">
-                        </div>
-                        <div class="col-md-4 d-none" id="daysGroup">
-                            <label class="form-label">Dagen</label>
-                            <input type="text" class="form-control" id="inputScheduleDays" placeholder="MON,WED,FRI">
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuleren</button>
-                    <button type="button" class="btn btn-primary" onclick="saveTask()">Opslaan</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Log Modal -->
-    <div class="modal fade" id="logModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Uitvoeringslog</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div id="logOutput" class="log-output">Laden...</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/js/task-scheduler.js"></script>
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({
+                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+            }[c]));
+        }
+    })();
+    </script>
 </body>
 </html>
