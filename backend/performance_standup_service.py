@@ -8,7 +8,7 @@ and writes everything into the shared SharePoint-synced Excel file
 
 Channels:
   - SEO only / DMA organic / GSAAS rows  -> single chan_deriv.marketing_channel
-  - Comparison sheets                     -> SEO + Overig Kanaal, is_real_visit=1
+  - Comparison sheets                     -> SEO only, is_real_visit=1
 """
 
 import os
@@ -123,7 +123,7 @@ def _fetch_comparison_visits(conn, p1: date, p2: date) -> Tuple[List[Dict], List
           ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
         JOIN datamart.dim_category cat ON fv.dim_category_key = cat.dim_category_key
         WHERE fv.dim_date_key IN (%s, %s)
-          AND c.marketing_channel IN ('SEO','Overig Kanaal')
+          AND c.marketing_channel = 'SEO'
           AND dv.is_real_visit = 1
         GROUP BY 1, 2
         HAVING SUM(CASE WHEN fv.dim_date_key=%s THEN 1 ELSE 0 END) > 0
@@ -140,7 +140,7 @@ def _fetch_comparison_visits(conn, p1: date, p2: date) -> Tuple[List[Dict], List
           ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
         JOIN datamart.dim_category cat ON fv.dim_category_key = cat.dim_category_key
         WHERE fv.dim_date_key IN (%s, %s)
-          AND c.marketing_channel IN ('SEO','Overig Kanaal')
+          AND c.marketing_channel = 'SEO'
           AND dv.is_real_visit = 1
         GROUP BY cat.main_category_name
         HAVING SUM(CASE WHEN fv.dim_date_key=%s THEN 1 ELSE 0 END) > 0
@@ -169,7 +169,7 @@ def _fetch_comparison_omzet(conn, p1: date, p2: date) -> List[Dict]:
           ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
         JOIN datamart.dim_category cat ON fv.dim_category_key = cat.dim_category_key
         WHERE fv.dim_date_key IN (%s, %s)
-          AND c.marketing_channel IN ('SEO','Overig Kanaal')
+          AND c.marketing_channel = 'SEO'
           AND dv.is_real_visit = 1
         GROUP BY 1, 2
         HAVING SUM(CASE WHEN fv.dim_date_key=%s THEN fv.cpc_revenue + fv.ww_revenue ELSE 0 END) > 0
