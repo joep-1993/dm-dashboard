@@ -347,6 +347,18 @@ def _facet_position_clause(selected_facets: list) -> str:
         return ""
 
     ordered = _ordered_facet_values(selected_facets)
+    # Split into pre-productnoun adjectives vs post-productnoun clauses.
+    # "Met …", "Zonder …", "Voor …", "Vanaf …" always read AFTER the
+    # productnoun; everything else is an adjective that must precede it.
+    pre_noun: List[str] = []
+    post_noun: List[str] = []
+    for v in ordered:
+        low = (v or "").lower()
+        if low.startswith(("met ", "zonder ", "voor ", "vanaf ")):
+            post_noun.append(v)
+        else:
+            pre_noun.append(v)
+
     pins: List[str] = []
     for f in selected_facets:
         slug = (f.get('url_name') or '').lower()
@@ -361,15 +373,27 @@ def _facet_position_clause(selected_facets: list) -> str:
         pins.append(f'   - "{val}" (facet {slug}) → zet {label}.')
 
     sections: List[str] = []
-    # Only emit the ordering instruction if there are >=2 facets — a single
-    # facet has nothing to order.
-    if len(ordered) >= 2:
-        listed = ', '.join(f'"{v}"' for v in ordered)
-        sections.append(
-            "VOLGORDE VAN FACETTEN (gebruik deze volgorde voor de facetwaarden in de H1, "
-            "verbuig waar grammaticaal nodig; eindgrammatica gaat voor exacte volgorde):\n"
-            f"   {listed}"
+    # Only emit the ordering instruction if there's something meaningful to
+    # order — at least 2 pre-noun adjectives, or any combination of pre + post.
+    if len(pre_noun) >= 2 or (pre_noun and post_noun):
+        lines = [
+            "VOLGORDE VAN FACETWAARDEN (LEES ZORGVULDIG):",
+            "Deze volgorde gaat over de positie t.o.v. de productnaam, NIET een vrije lijst.",
+        ]
+        if pre_noun:
+            listed = ', '.join(f'"{v}"' for v in pre_noun)
+            lines.append(
+                f"   VÓÓR de productnaam, in deze volgorde: {listed}"
+            )
+        if post_noun:
+            listed_post = ', '.join(f'"{v}"' for v in post_noun)
+            lines.append(
+                f"   NÁ de productnaam (deze blijven achter): {listed_post}"
+            )
+        lines.append(
+            "   Plaats GEEN bijvoeglijk naamwoord uit de pre-lijst na de productnaam."
         )
+        sections.append("\n".join(lines))
     if pins:
         sections.append("PIN-REGELS (deze gaan vóór de volgorde-instructie):\n" + "\n".join(pins))
     if not sections:
