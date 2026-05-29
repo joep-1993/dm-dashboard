@@ -155,6 +155,10 @@
                                         <input type="radio" class="form-check-input" name="srcMethod" id="srcManual" value="manual">
                                         <label for="srcManual" class="form-check-label">Manual input</label>
                                     </div>
+                                    <div class="form-check form-check-inline">
+                                        <input type="radio" class="form-check-input" name="srcMethod" id="srcForm" value="form">
+                                        <label for="srcForm" class="form-check-label">Add redirect</label>
+                                    </div>
                                 </div>
                             </div>
                             <div class="col-md-6" id="paneFile">
@@ -166,6 +170,38 @@
                                 <textarea id="textInput" class="form-control" rows="6"
                                     placeholder="old, new, statuscode, country, label"
                                     style="font-family: monospace; font-size: 0.85rem;"></textarea>
+                            </div>
+                            <div class="col-12 d-none" id="paneForm">
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <label for="formOld" class="form-label small mb-1">Old URL</label>
+                                        <input type="text" class="form-control" id="formOld" placeholder="/products/...">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="formNew" class="form-label small mb-1">New URL</label>
+                                        <input type="text" class="form-control" id="formNew" placeholder="/products/...">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="formStatus" class="form-label small mb-1">Status code</label>
+                                        <select class="form-select" id="formStatus">
+                                            <option value="301" selected>301</option>
+                                            <option value="302">302</option>
+                                            <option value="200">200 (canonical)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="formCountry" class="form-label small mb-1">Country</label>
+                                        <select class="form-select" id="formCountry">
+                                            <option value="NL+BE" selected>NL+BE</option>
+                                            <option value="NL">NL</option>
+                                            <option value="BE">BE</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="formLabel" class="form-label small mb-1">Label</label>
+                                        <input type="text" class="form-control" id="formLabel" placeholder="e.g. JVS Redirects 29-5-2026">
+                                    </div>
+                                </div>
                             </div>
                             <div class="col-12 d-flex align-items-center">
                                 <span id="parseStatus" class="small-muted me-auto"></span>
@@ -323,26 +359,34 @@
 
         // ---------------------- Input method toggle (radio) ----------------------
         const cbManual = document.getElementById('srcManual');
+        const cbForm = document.getElementById('srcForm');
         function applyInputMode() {
             const manual = cbManual.checked;
-            document.getElementById('paneFile').classList.toggle('d-none', manual);
+            const form = cbForm.checked;
+            const upload = !manual && !form;
+            document.getElementById('paneFile').classList.toggle('d-none', !upload);
             document.getElementById('paneText').classList.toggle('d-none', !manual);
+            document.getElementById('paneForm').classList.toggle('d-none', !form);
         }
         document.querySelectorAll('input[name="srcMethod"]').forEach(el =>
             el.addEventListener('change', applyInputMode));
 
         // ---------------------- Parse + preview ----------------------
         async function parseInput() {
-            const paste = cbManual.checked;
-            if (!paste) {
-                const f = document.getElementById('fileInput').files[0];
-                if (!f) throw new Error('Please choose a file');
-                const fd = new FormData();
-                fd.append('file', f);
-                const r = await fetch(`${API}/parse-file`, { method: 'POST', body: fd });
-                if (!r.ok) throw new Error((await r.json()).detail || 'Parse failed');
-                return await r.json();
-            } else {
+            if (cbForm.checked) {
+                const old_ = document.getElementById('formOld').value.trim();
+                const new_ = document.getElementById('formNew').value.trim();
+                if (!old_ || !new_) throw new Error('Old URL and New URL are required');
+                const row = {
+                    old: old_,
+                    new: new_,
+                    statuscode: document.getElementById('formStatus').value,
+                    country: document.getElementById('formCountry').value,
+                    label: document.getElementById('formLabel').value.trim(),
+                };
+                return { rows: [row], count: 1 };
+            }
+            if (cbManual.checked) {
                 const text = document.getElementById('textInput').value;
                 if (!text.trim()) throw new Error('Paste some rows first');
                 const r = await fetch(`${API}/parse-text`, {
@@ -353,6 +397,14 @@
                 if (!r.ok) throw new Error((await r.json()).detail || 'Parse failed');
                 return await r.json();
             }
+            // File upload
+            const f = document.getElementById('fileInput').files[0];
+            if (!f) throw new Error('Please choose a file');
+            const fd = new FormData();
+            fd.append('file', f);
+            const r = await fetch(`${API}/parse-file`, { method: 'POST', body: fd });
+            if (!r.ok) throw new Error((await r.json()).detail || 'Parse failed');
+            return await r.json();
         }
 
         async function runPreview() {

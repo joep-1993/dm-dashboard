@@ -47,8 +47,14 @@ def _parse_text(text: str) -> list[dict]:
         return []
 
     first_line = text.splitlines()[0]
-    has_header = any(h in first_line.lower() for h in ("old", "new", "from", "to"))
     sep = "\t" if "\t" in first_line else ","
+    # Header detection must match WHOLE TOKENS, not substrings — otherwise URLs
+    # like /products/autos/... fire on the "to" in "auto" and the URL is parsed
+    # as a column name (giving zero data rows).
+    HEADER_TOKENS = {"old", "new", "from", "to", "fromurl", "tourl",
+                     "statuscode", "country", "label"}
+    tokens = [p.strip().lower() for p in first_line.split(sep)]
+    has_header = any(t in HEADER_TOKENS for t in tokens)
 
     if has_header:
         reader = csv.DictReader(io.StringIO(text), delimiter=sep)
