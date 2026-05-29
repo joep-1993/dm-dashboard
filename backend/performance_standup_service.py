@@ -23,10 +23,28 @@ from backend.database import get_redshift_connection, return_redshift_connection
 
 logger = logging.getLogger(__name__)
 
-EXCEL_PATH = os.getenv(
-    "STANDUP_EXCEL_PATH",
+# Candidate file locations across the machines this script runs on.
+# Tried in order; first existing path wins. Set STANDUP_EXCEL_PATH to
+# override for a one-off machine without code changes.
+_EXCEL_PATH_CANDIDATES = [
+    # Joep — WSL
+    "/mnt/c/Users/JoepvanSchagen/Beslist.nl BV/SEO - Documenten/2025 Dagstats SEO-Overig-GSaaS omzet stand up.xlsx",
+    # Luc — Windows
     r"C:\Users\l.davidowski\OneDrive - Beslist.nl BV\SEO - Documenten\2025 Dagstats SEO-Overig-GSaaS omzet stand up.xlsx",
-)
+]
+
+
+def _resolve_excel_path() -> str:
+    override = os.getenv("STANDUP_EXCEL_PATH")
+    if override:
+        return override
+    for p in _EXCEL_PATH_CANDIDATES:
+        if os.path.exists(p):
+            return p
+    return _EXCEL_PATH_CANDIDATES[0]  # so the "not found" error names a real candidate
+
+
+EXCEL_PATH = _resolve_excel_path()
 
 SHEET_SEO_ONLY = "SEO only"
 SHEET_GSAAS = "GSaaS"
