@@ -560,7 +560,16 @@ def _dedupe_internal_compounds(h1: str) -> str:
         if len(spans) < 2:
             continue
         spans.sort()
+        kept_s, kept_e = spans[-1]
         for s, e in spans[:-1]:
+            # Skip spans that overlap the kept (last) occurrence. An overlapping
+            # span is the SAME occurrence rendered at a different length, not a
+            # genuine repeat — this happens when _norm_for_dedupe folds a
+            # boundary separator, e.g. "Scotch" and "Scotch &" both normalize to
+            # "scotch" for a brand like "Scotch & Soda". Dropping the shorter one
+            # would corrupt the kept span and orphan tokens (→ "& Soda ...").
+            if s < kept_e and e > kept_s:
+                continue
             if any(d in drop_set for d in range(s, e)):
                 continue
             for k in range(s, e):
