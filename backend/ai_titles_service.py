@@ -600,6 +600,24 @@ def _dutch_plural_stem(s: str) -> str:
     return s
 
 
+def _fix_neuter_adjective(h1: str) -> str:
+    """Drop the -e from an adjective wrongly inflected before a neuter noun.
+
+    Dutch attributive adjectives take -e EXCEPT before a singular indefinite
+    neuter (het-) noun: "het gereedschap" -> "elektrisch gereedschap", not
+    "elektrische gereedschap". The taxonomy facet value is stored as the
+    de-word form "Elektrische" and emitted verbatim, so titles combining it
+    with the neuter category "gereedschap" read ungrammatically. Strip the -e
+    for that pairing, preserving capitalisation. The plural "gereedschappen"
+    keeps the -e and is protected by the trailing word boundary.
+    """
+    if not h1:
+        return h1
+    # Noun match is case-insensitive (category often capitalised: "Gereedschap")
+    # but its casing is preserved via the capture group.
+    return re.sub(r'\b([Ee]lektrisch)e(\s+[Gg]ereedschap)\b', r'\1\2', h1)
+
+
 def _dedupe_adjacent_plural(h1: str) -> str:
     """Collapse two ADJACENT tokens that are singular/plural of each other.
 
@@ -631,9 +649,12 @@ def _dedupe_adjacent_plural(h1: str) -> str:
         sa, sb = _dutch_plural_stem(a), _dutch_plural_stem(b)
         if sa == sb and len(sa) >= 5:
             drop.add(i)  # keep the later (canonical) token
-    if not drop:
-        return h1
-    return ' '.join(w for i, w in enumerate(words) if i not in drop)
+    result = h1 if not drop else ' '.join(w for i, w in enumerate(words) if i not in drop)
+    # Neuter-adjective de-inflection runs LAST: this is the shared facet/category
+    # adjacency-cleanup step in every chain, and the plural collapse above can
+    # itself CREATE a singular "Elektrische gereedschappen Gereedschap" ->
+    # "Elektrische Gereedschap" that must then be de-inflected.
+    return _fix_neuter_adjective(result)
 
 
 def _dedupe_prefix_overlap(h1: str) -> str:
