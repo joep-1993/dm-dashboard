@@ -579,6 +579,63 @@ def _dedupe_internal_compounds(h1: str) -> str:
     return ' '.join(w for i, w in enumerate(words) if i not in drop_set)
 
 
+def _dutch_plural_stem(s: str) -> str:
+    """Reduce a Dutch noun to a singular-ish stem for adjacent-duplicate checks.
+
+    Folds the regular Dutch plural endings that the simple -s stem in
+    `_dedupe_internal_compounds` misses:
+      CC + en   "gereedschappen" -> "gereedschap", "hoekbanken" -> "hoekbank"
+                (plurals double the final consonant; reverse to a single one)
+      -en       "stoelen" -> "stoel"
+      -s        "tafels" -> "tafel"
+    Length floors keep short tokens intact.
+    """
+    s = s.lower()
+    if len(s) > 7 and re.search(r'(.)\1en$', s):
+        return s[:-3]
+    if len(s) > 7 and s.endswith('en'):
+        return s[:-2]
+    if len(s) > 6 and s.endswith('s'):
+        return s[:-1]
+    return s
+
+
+def _dedupe_adjacent_plural(h1: str) -> str:
+    """Collapse two ADJACENT tokens that are singular/plural of each other.
+
+    Targets the narrow case where the H1 generator places a facet/product noun
+    immediately before the canonical category in the other number, e.g. the AI
+    pluralises the bare category and the deterministic category re-append then
+    adds the singular:
+      "Elektrische gereedschappen gereedschap" -> "Elektrische gereedschap"
+      "Beige Hoekbanken Hoekbank links"        -> "Beige Hoekbank links"
+      "Epson Printers printer"                 -> "Epson printer"
+
+    Adjacency is deliberate: it avoids dropping a brand word that merely shares
+    a stem with a later category token ("Makeup Revolution … Make-up",
+    "Koelkast zonder … Koelkasten"), which a position-agnostic dedupe mangles.
+    Keeps the LAST occurrence (canonical category trails). Only fires when both
+    tokens stem to the same form and that stem is ≥5 chars.
+    """
+    if not h1:
+        return h1
+    words = h1.split()
+    drop: set = set()
+    for i in range(len(words) - 1):
+        if i in drop:
+            continue
+        a = words[i].lower().strip('.,!?;:')
+        b = words[i + 1].lower().strip('.,!?;:')
+        if a == b:
+            continue  # exact repeats handled elsewhere; require number-difference here
+        sa, sb = _dutch_plural_stem(a), _dutch_plural_stem(b)
+        if sa == sb and len(sa) >= 5:
+            drop.add(i)  # keep the later (canonical) token
+    if not drop:
+        return h1
+    return ' '.join(w for i, w in enumerate(words) if i not in drop)
+
+
 def _dedupe_prefix_overlap(h1: str) -> str:
     """Drop a token that's a strict prefix of an adjacent longer token.
 
@@ -1296,6 +1353,7 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
     api_h1 = _dedupe_compound_category(api_h1, canonical_category)
     api_h1 = _dedupe_prefix_overlap(api_h1)
     api_h1 = _dedupe_internal_compounds(api_h1)
+    api_h1 = _dedupe_adjacent_plural(api_h1)
     api_h1 = _dedupe_facet_values(api_h1, selected_facets)
 
     # Type-facets carry the product type in their values (e.g. soort_bz="Dahliabollen",
@@ -1377,11 +1435,11 @@ def generate_title_from_api(url: str, *, prompt_mode: str = 'v1',
         # If no OpenAI, just return the API H1
         return {
             "h1_title": _dedupe_facet_values(
-                _dedupe_internal_compounds(
+                _dedupe_adjacent_plural(_dedupe_internal_compounds(
                     _dedupe_prefix_overlap(
                         _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category)
                     )
-                ),
+                )),
                 selected_facets,
             ),
             "original_h1": api_h1,
@@ -1747,11 +1805,11 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         print(f"[AI_TITLES] timings url={url} fetch={_t_fetch_ms:.0f}ms polish={_t_polish_ms:.0f}ms")
         return {
             "h1_title": _dedupe_facet_values(
-                _dedupe_internal_compounds(
+                _dedupe_adjacent_plural(_dedupe_internal_compounds(
                     _dedupe_prefix_overlap(
                         _dedupe_compound_category(_strip_pre_clause_duplicates(improved_h1), canonical_category)
                     )
-                ),
+                )),
                 selected_facets,
             ),
             "original_h1": api_h1,
@@ -1762,11 +1820,11 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
         # Return API H1 as fallback
         return {
             "h1_title": _dedupe_facet_values(
-                _dedupe_internal_compounds(
+                _dedupe_adjacent_plural(_dedupe_internal_compounds(
                     _dedupe_prefix_overlap(
                         _dedupe_compound_category(_strip_pre_clause_duplicates(api_h1), canonical_category)
                     )
-                ),
+                )),
                 selected_facets,
             ),
             "original_h1": api_h1,
@@ -1942,6 +2000,7 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
     h1 = _dedupe_compound_category(h1, category_name)
     h1 = _dedupe_prefix_overlap(h1)
     h1 = _dedupe_internal_compounds(h1)
+    h1 = _dedupe_adjacent_plural(h1)
     h1 = _dedupe_facet_values(h1, selected_facets or [])
     # Lowercase standalone "Met"/"Zonder" when not the first word — Dutch
     # connector words inside an H1 read better lowercase.
@@ -2156,6 +2215,7 @@ def generate_title_v3(url: str, polish: bool = True) -> Optional[Dict]:
     polished = _dedupe_compound_category(polished, category_name)
     polished = _dedupe_prefix_overlap(polished)
     polished = _dedupe_internal_compounds(polished)
+    polished = _dedupe_adjacent_plural(polished)
     polished = _dedupe_facet_values(polished, selected_facets)
 
     # Ensure first character is uppercase (composed builder already does
