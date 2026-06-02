@@ -625,41 +625,51 @@ def _fix_neuter_adjective(h1: str) -> str:
     ("Elektrische", "Rode") and emitted verbatim before the neuter category
     "gereedschap", reading ungrammatically. Two safe classes are corrected:
 
-    1. -ische drive-type adjectives anywhere before "gereedschap": "-ische" ->
+    1. -ische drive-type adjectives directly before "gereedschap": "-ische" ->
        "-isch" is always a valid base (elektrische->elektrisch) with no stem
-       change, so this is unconstrained.
+       change, safe regardless of where the noun sits.
 
-    2. Colour adjectives ONLY when directly adjacent to a "(...)gereedschap" head
-       noun at the END of the title. Adjacency + final position guarantees the
-       neuter noun is the head (avoids the traps "witte tuingereedschap
-       accessoires" — plural head — and "groene accu gereedschap" — de-word
-       between). Base forms come from the taxonomy (rode->rood, gele->geel);
-       irregular stems are therefore correct, invariable colours (oranje, roze)
-       and material "-en" adjectives (gouden, zilveren) are excluded, and brand
-       names ending in -e are untouched because they aren't colours.
+    2. Colour and -ische adjectives in the modifier chain when the title's HEAD
+       is a FINAL singular "(...)gereedschap" noun. All attributive adjectives in
+       a noun phrase agree, so once the head is a confirmed final neuter noun,
+       every preceding colour/-ische adjective de-inflects — this handles
+       multi-adjective NPs like "Gele elektrisch Gereedschap" -> "Geel elektrisch
+       Gereedschap" where the colour isn't adjacent to the noun. The final-noun
+       anchor is the safety guard: it excludes the traps "witte tuingereedschap
+       accessoires" (plural head — gereedschap not final) and any title where the
+       real head is a different trailing noun. Colour base forms come from the
+       taxonomy (rode->rood, gele->geel) so irregular stems are correct;
+       invariable colours (oranje, roze) and material "-en" adjectives (gouden,
+       zilveren) are excluded; brand names are untouched because they aren't
+       colours or -ische.
 
-    The plural "gereedschappen" is protected by the word boundary / $ anchor;
-    casing is preserved. Titles carry no article so the indefinite reading holds;
-    definite/possessive body text is handled separately at the DB level.
+    The plural "gereedschappen" is excluded by the $ anchor (it ends in -pen,
+    not -gereedschap); casing is preserved. Titles carry no article so the
+    indefinite reading holds; definite/possessive body text is handled at the DB
+    level.
     """
     if not h1:
         return h1
-    # 1) -ische drive-type adjectives -> -isch (safe anywhere before gereedschap)
+    # 1) -ische directly before gereedschap (safe even when not the final word,
+    #    e.g. "elektrisch gereedschap accessoires").
     h1 = re.sub(r'\b(\w*isch)e(\s+[Gg]ereedschap)\b', r'\1\2', h1,
                 flags=re.IGNORECASE)
 
-    # 2) colour adjective directly before a final (...)gereedschap head noun
-    def _col(m):
-        prefix, base, noun = m.group(1), _NEUTER_COLOUR_BASE[m.group(2).lower()], m.group(3)
-        word = prefix + base
-        if m.group(0)[:1].isupper():
-            word = word[:1].upper() + word[1:]
-        return word + noun
+    # 2) when the HEAD is a final singular gereedschap-family noun, de-inflect
+    #    every colour / -ische adjective in the preceding modifier chain.
+    m = re.search(r'(?i)\b\w*gereedschap\s*$', h1)
+    if not m:
+        return h1
+    pre, head = h1[:m.start()], h1[m.start():]
 
-    return re.sub(
-        r'\b([a-zA-Z]*?)(' + _COLOUR_ALT + r')(\s+\w*gereedschap)\s*$',
-        _col, h1, flags=re.IGNORECASE,
-    )
+    def _col(mm):
+        prefix, base = mm.group(1), _NEUTER_COLOUR_BASE[mm.group(2).lower()]
+        word = prefix + base
+        return word[:1].upper() + word[1:] if mm.group(0)[:1].isupper() else word
+
+    pre = re.sub(r'\b([a-zA-Z]*?)(' + _COLOUR_ALT + r')\b', _col, pre, flags=re.IGNORECASE)
+    pre = re.sub(r'\b(\w*isch)e\b', r'\1', pre, flags=re.IGNORECASE)
+    return pre + head
 
 
 def _dedupe_adjacent_plural(h1: str) -> str:
