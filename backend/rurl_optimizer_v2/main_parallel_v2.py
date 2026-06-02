@@ -334,7 +334,12 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
         return result
 
     matched_name = (subcategory_match.get('matched_category', '') or '').lower()
-    matched_words = set(re.findall(r'\w+', matched_name))
+    # Drop 1–2 char fragments: a subcat name like "T-shirts" tokenizes to
+    # {'t', 'shirts'}, and a 1-char 't' would substring-match (and wrongly
+    # absorb) any leftover token containing a 't' — e.g. "elftal", "thuis" —
+    # before facet matching ever sees them. Real category nouns we want to
+    # absorb ("shirts", "tuinkasten") are all >= 3 chars.
+    matched_words = {w for w in re.findall(r'\w+', matched_name) if len(w) >= 3}
 
     def _absorbed_by_subcat(tok: str) -> bool:
         # Treat the token as "already matched" if it's a substring of any
