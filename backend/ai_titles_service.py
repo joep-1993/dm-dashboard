@@ -615,6 +615,16 @@ _NEUTER_COLOUR_BASE = {
 }
 _COLOUR_ALT = '|'.join(_NEUTER_COLOUR_BASE)
 
+# Singular neuter (het-) category HEAD nouns before which an attributive adjective
+# must lose its -e. Restricted to singular *collective/mass* nouns, because plural
+# category names (Schoenen, Vloerkleden, ...) correctly keep the -e regardless of
+# gender, and de-word singulars (de jurk, de tafel) keep it too. Every entry is a
+# confirmed het-word that occurs as a real title head with colours in the data;
+# their plurals (serviezen, bestekken, dekbedden) end differently so the $-anchor
+# excludes them. The gereedschap family is matched by \w*gereedschap.
+_NEUTER_HEADS = (r'(?:\w*gereedschap|speelgoed|bestek|behang|beddengoed|'
+                 r'servies|keukengerei|grind|dekbed)')
+
 
 def _fix_neuter_adjective(h1: str) -> str:
     """De-inflect a facet adjective wrongly inflected before neuter 'gereedschap'.
@@ -655,9 +665,9 @@ def _fix_neuter_adjective(h1: str) -> str:
     h1 = re.sub(r'\b(\w*isch)e(\s+[Gg]ereedschap)\b', r'\1\2', h1,
                 flags=re.IGNORECASE)
 
-    # 2) when the HEAD is a final singular gereedschap-family noun, de-inflect
-    #    every colour / -ische adjective in the preceding modifier chain.
-    m = re.search(r'(?i)\b\w*gereedschap\s*$', h1)
+    # 2) when the HEAD is a final singular neuter category noun, de-inflect every
+    #    colour / -ische adjective in the preceding modifier chain.
+    m = re.search(r'(?i)\b' + _NEUTER_HEADS + r'\s*$', h1)
     if not m:
         return h1
     pre, head = h1[:m.start()], h1[m.start():]
