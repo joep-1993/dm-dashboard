@@ -176,6 +176,26 @@ SYNONYMS = {
     "wc-ontstoppers": ["toilet ontstoppers", "toiletontstoppers", "wc ontstoppers"],
     "toilet ontstoppers": ["wc ontstoppers", "wc-ontstoppers", "toiletontstoppers"],
     "toiletontstoppers": ["wc ontstoppers", "wc-ontstoppers", "toilet ontstoppers"],
+
+    # ==========================================================================
+    # TV-RESOLUTIE AFKORTINGEN
+    # Facetwaarden (televisie_b) spellen de resolutie voluit — "4K Ultra HD",
+    # "8K Ultra HD", "Full HD" — terwijl zoekopdrachten de afkorting gebruiken
+    # ("4k", "uhd", "fhd"). Zonder mapping matcht "samsung 55 inch 4k uhd tv"
+    # niet op "4K Ultra HD": "4k" is te kort (<3 tekens) en "uhd" deelt geen
+    # letters met "Ultra HD". Elk synoniem is de EXACTE genormaliseerde
+    # facetwaarde-naam, zodat de matcher een synoniem-treffer (score 95) krijgt.
+    # ==========================================================================
+    "uhd": ["4k ultra hd"],
+    "4k": ["4k ultra hd"],
+    "4k uhd": ["4k ultra hd"],
+    "uhd 4k": ["4k ultra hd"],
+    "ultra hd": ["4k ultra hd"],
+    "8k": ["8k ultra hd"],
+    "8k uhd": ["8k ultra hd"],
+    "fhd": ["full hd"],
+    "hd ready": ["hd-ready"],
+    "hdready": ["hd-ready"],
 }
 
 # V28: Compound-noun decomposition. Dutch retail keywords often glue a

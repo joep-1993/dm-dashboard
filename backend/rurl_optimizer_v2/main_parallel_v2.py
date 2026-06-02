@@ -488,6 +488,140 @@ def _rescue_long_unmatched_token(keyword, target_text, threshold=8):
     return None
 
 
+def _is_bare_category_noun(tok: str, cat_name: str) -> bool:
+    """Whole-token test: True only when the token IS the category noun (or its
+    Dutch singular/plural stem), NOT merely contains it. So for category
+    "Shirts": 'shirt'/'shirts' -> True, but the compound 'trainingsshirt'
+    (which discovers the Sportshirts child) -> False. This is the token-level
+    version of the 1-char-fragment guard from the _absorbed_by_subcat fix:
+    substring containment over-absorbs, equality does not."""
+    if not tok or not cat_name:
+        return False
+    c = cat_name.lower()
+    cstem = c.rstrip('s').rstrip('en')
+    tstem = tok.rstrip('s').rstrip('en')
+    return tok == c or tok == cstem or tstem == c or tstem == cstem
+
+
+def _split_strip_keyword(keyword: str, cat_name: str) -> list:
+    """Tokenize on whitespace AND hyphens (global-pass style), then drop any
+    token that is the bare category noun. 'nike-nederlands-elftal-trainingsshirt'
+    with cat "Shirts" -> ['nike','nederlands','elftal','trainingsshirt'] (nothing
+    dropped — no token equals 'shirt'); 'nike-shirt' -> ['nike']."""
+    import re as _re
+    toks = [t for t in _re.split(r'[\s-]+', (keyword or '').lower()) if t]
+    return [t for t in toks if not _is_bare_category_noun(t, cat_name)]
+
+
+def _facet_url_parts(facet_url: str):
+    """Extract {main_category, subcategory_name, subcategory_id} from a facet
+    value URL like '/products/mode/mode_432360_469350/c/type_sportshirts~...'.
+    Mirrors process_global_rurls._extract_category_from_facet_url."""
+    if not facet_url:
+        return None
+    path = facet_url.split('/c/')[0] if '/c/' in facet_url else facet_url
+    path = path.rstrip('/')
+    if '/products/' in path:
+        path = path.split('/products/')[-1]
+    parts = path.split('/')
+    if len(parts) < 2:
+        return None
+    subcat_name = parts[1]
+    subcat_id = ''
+    for p in reversed(subcat_name.split('_')):
+        if p.isdigit():
+            subcat_id = p
+            break
+    return {'main_category': parts[0], 'subcategory_name': subcat_name,
+            'subcategory_id': subcat_id}
+
+
+def _derive_facets_in_subtree(parsed, anchor_subcat_id, anchor_cat_name,
+                              facet_filter, matcher, all_type_facets, builder):
+    """Convergence helper: derive facets the global-pass way, but bounded by the
+    category the URL already pins.
+
+    (1) Tokenize the keyword on hyphens + drop the bare category noun.
+    (2) Discover the best type facet WITHIN the anchor's subtree (the anchor
+        subcat + any deeper child) to find the right child subcat — e.g.
+        'trainingsshirt' -> type_sportshirts living in mode_432360_469350.
+    (3) Descend into that subcat and run a full multi-facet match there
+        (fanshop/merk/ut_voetbalshirt/…). Fall back to a multi-facet match in
+        the anchor subcat itself.
+
+    Returns a builder result (with >=1 facet) or None. Bounding the discovery
+    to the subtree makes this strictly safer than the unanchored global pass:
+    it cannot jump to an unrelated category (the meubel->Kapstokmeubels class
+    of error), because every candidate lives under the URL's own category."""
+    from src.parser import ParsedRUrl
+
+    if not anchor_subcat_id:
+        return None
+    anchor_slug = parsed.subcategory_name or ''
+    search_kw = ' '.join(_split_strip_keyword(parsed.keyword, anchor_cat_name))
+    if not search_kw.strip() or not anchor_slug:
+        return None
+
+    def _accept(res):
+        return res if (res and getattr(res, 'facet_count', 0) >= 1) else None
+
+    # (1)+(2) type-facet discovery constrained to the anchor subtree.
+    subtree_types = []
+    for fv in (all_type_facets or []):
+        cp = _facet_url_parts(fv.url)
+        slug = cp['subcategory_name'] if cp else ''
+        if slug == anchor_slug or slug.startswith(anchor_slug + '_'):
+            subtree_types.append(fv)
+
+    result = None
+    if subtree_types:
+        type_matches = [m for m in (matcher.match_multi_word(
+            search_kw, subtree_types, all_type_facets=None,
+            require_type_for_merk=True,
+            current_main_category=parsed.main_category) or []) if m.facet_value]
+        if type_matches:
+            best = max(type_matches, key=lambda m: m.score)
+            disc = _facet_url_parts(best.facet_value.url)
+            if disc and disc.get('subcategory_id'):
+                dfacets = facet_filter.get_facet_values(
+                    facet_filter.filter_by_subcategory(disc['subcategory_id']))
+                if dfacets:
+                    multi = matcher.match_multi_word(
+                        search_kw, dfacets, all_type_facets=None,
+                        require_type_for_merk=True,
+                        current_main_category=disc['main_category'])
+                    if multi:
+                        pseudo = ParsedRUrl(
+                            original_url=parsed.original_url,
+                            category_path=f"{disc['main_category']}/{disc['subcategory_name']}",
+                            full_category_path=f"/products/{disc['main_category']}/{disc['subcategory_name']}",
+                            main_category=disc['main_category'],
+                            subcategory_id=disc['subcategory_id'],
+                            subcategory_name=disc['subcategory_name'],
+                            keyword=parsed.keyword,
+                            existing_facet=getattr(parsed, 'existing_facet', '') or '',
+                        )
+                        res = builder.build_multi_facet(pseudo, multi)
+                        res.reason = f"[subtree_type_descend] {res.reason}"
+                        result = _accept(res)
+
+    # (3) fallback: multi-facet match directly in the anchor subcat.
+    if not result:
+        afacets = facet_filter.get_facet_values(
+            facet_filter.filter_by_subcategory(anchor_subcat_id))
+        if afacets:
+            multi = matcher.match_multi_word(
+                search_kw, afacets, all_type_facets=None,
+                require_type_for_merk=True,
+                current_main_category=parsed.main_category)
+            if multi:
+                res = builder.build_multi_facet(parsed, multi)
+                res.reason = f"[subtree_anchor] {res.reason}"
+                result = _accept(res)
+
+    return result
+
+
 def process_url_v2(args):
     """Process single URL in worker."""
     global _worker_data
@@ -630,15 +764,15 @@ def process_url_v2(args):
     # existing /c/ facet instead.
     _sub_name = category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else ''
     if parsed.subcategory_id and _sub_name and _non_stop_non_shop and not _shops_in_kw:
-        _cat_l = _sub_name.lower()
-        _cat_stem = _cat_l.rstrip('s').rstrip('en')
-
-        def _is_cat_noun(w):
-            ws = w.rstrip('s').rstrip('en')
-            return (w in _cat_l or _cat_l in w or ws in _cat_l
-                    or _cat_stem in w or ws in _cat_stem or _cat_stem in ws)
-
-        _residual = [w for w in _non_stop_non_shop if not _is_cat_noun(w)]
+        # Residual = keyword tokens (hyphen-split) minus the bare category noun,
+        # using WHOLE-TOKEN equality. The old check used substring containment
+        # (`_cat_stem in w`), which judged 'nike-nederlands-elftal-trainingsshirt'
+        # to be "just the Shirts category noun" because 'shirt' is a substring of
+        # the glued token — collapsing a rich query to the bare category page.
+        # Now V32 only fires when nothing meaningful remains after dropping bare
+        # category nouns (e.g. /mode_432360/r/shirt/ or /r/shirts/).
+        _residual = [w for w in _split_strip_keyword(parsed.keyword, _sub_name)
+                     if w not in STOPWORDS and w not in SHOP_NAMES and len(w) >= 2]
         if not _residual:
             _base = f"https://www.beslist.nl{parsed.full_category_path}"
             _ef = getattr(parsed, 'existing_facet', '') or ''
@@ -1074,6 +1208,58 @@ def process_url_v2(args):
                     main_category=parsed.main_category,
                     existing_facet=parsed.existing_facet  # V19: preserve existing facet
                 )
+
+    # CONVERGENCE RESCUE: when the anchored cascade above produced NO facets
+    # (None, a bare-category redirect, or a facet-less subcat/collapse), try
+    # the global-pass-style subtree delegation — hyphen-split the keyword, drop
+    # the bare category noun, discover the best type facet within THIS
+    # category's subtree to find the right child subcat, then run a full
+    # multi-facet match there. This is what lets
+    # /products/mode/mode_432360/r/nike-nederlands-elftal-trainingsshirt/
+    # resolve to mode_432360_469350 (Sportshirts) with
+    # fanshop~Nederlands Elftal ~~ merk~Nike ~~ type_sportshirts.
+    #
+    # Gated to FACET-LESS outcomes only (rescue, not pre-empt): a confident
+    # anchored multi-facet result from the cascade is never overridden — that
+    # pre-empting was what regressed cases like 'alcatel_senioren_mobiel'
+    # (Mobiele telefoons → wrongly Huistelefoons) and dropped facets like
+    # 'illy_koffiebonen_1kg' (lost '1 kg'). Bounded to the anchor subtree so it
+    # can't jump to an unrelated maincat.
+    # Trigger width (<=2) only controls HOW OFTEN the rescue runs, never
+    # correctness: the adoption rule below is monotonic-safe (it only ever adds
+    # facets within the SAME destination subcat, or fills a 0-facet baseline).
+    # <=2 lets a thin 2-facet cascade (e.g. samsung TV -> merk + 4K Ultra HD)
+    # be enriched with the dimension facet (55 inch) it missed, without paying
+    # the rescue cost on already-rich (3+ facet) results.
+    _cascade_fc = getattr(result, 'facet_count', 0) if result else 0
+    if parsed.subcategory_id and (not result or _cascade_fc <= 2):
+        _sub_nm = category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else ''
+        _resc = _derive_facets_in_subtree(
+            parsed, parsed.subcategory_id, _sub_nm,
+            facet_filter, matcher, all_type_facets, builder,
+        )
+        if _resc and getattr(_resc, 'facet_count', 0) >= 1:
+            # Adoption rules, ordered safest-first:
+            #  (a) baseline had NO facets (bare category / collapse / block) →
+            #      adopt any faceted rescue.
+            #  (b) baseline was THIN (1 facet) → adopt ONLY as pure enrichment:
+            #      same destination subcategory, strictly more facets. This
+            #      turns the target's cascade result (Sportshirts +
+            #      type_sportshirts only) into the full Sportshirts + fanshop +
+            #      merk + type, WITHOUT ever flipping a different-category thin
+            #      match (e.g. alcatel_senioren_mobiel → Mobiele telefoons stays
+            #      put, since the rescue's Huistelefoons is a different subcat).
+            _resc_fc = getattr(_resc, 'facet_count', 0)
+            _adopt = False
+            if not result or _cascade_fc == 0:
+                _adopt = True
+            elif (extract_subcategory_id_from_url(_resc.redirect_url)
+                  == extract_subcategory_id_from_url(result.redirect_url)
+                  and _resc_fc > _cascade_fc):
+                _adopt = True
+            if _adopt:
+                _resc.reason = "[subtree-rescue] " + (_resc.reason or '')
+                result = _resc
 
     if not result:
         result = builder.build_category_only(parsed)
