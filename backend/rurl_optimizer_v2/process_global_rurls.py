@@ -181,6 +181,32 @@ def process_global_url(args):
                 subcat_match = word_match
                 break
 
+    # Compound-noun subcat recovery. The global keyword extractor flattens
+    # hyphens to spaces (extract_keyword_from_global_url), so a hyphenated
+    # compound subcategory name like "TV-meubels" no longer matches the split
+    # tokens — "tv meubel" scores 84 (below threshold) while "tv-meubel"
+    # scores 99. Re-try adjacent word bigrams rejoined with a hyphen so a
+    # compound-noun subcat wins its rightful match BEFORE the greedy
+    # type-facet discovery (section 1.5b) drags "meubel" onto "Kapstokmeubels"
+    # in an unrelated category. Same HIGH threshold, so only near-exact
+    # compound matches qualify; multi-word product queries (e.g.
+    # "nike nederlands elftal trainingsshirt") produce no ≥95 bigram hit and
+    # fall through to type-facet discovery unchanged.
+    if not subcat_match or subcat_match.get('score', 0) < HIGH_SUBCAT_THRESHOLD:
+        kw_tokens = keyword.split()
+        for i in range(len(kw_tokens) - 1):
+            a, b = kw_tokens[i], kw_tokens[i + 1]
+            if a in STOPWORDS or b in STOPWORDS or a in SHOP_NAMES or b in SHOP_NAMES:
+                continue
+            if len(a) < 2 or len(b) < 2:
+                continue
+            bigram_match = matcher.match_subcategory_name(
+                f"{a}-{b}", categories_df, main_category=None
+            )
+            if bigram_match and bigram_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
+                subcat_match = bigram_match
+                break
+
     if subcat_match and subcat_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
         # We hebben een categorie gevonden — probeer facet matching daarin
         matched_main_cat = _extract_main_cat_from_url_name(
@@ -188,15 +214,36 @@ def process_global_url(args):
         )
         matched_subcat_name = subcat_match.get('url_name', '')
 
-        # Probeer facets binnen de gevonden subcategorie
-        if matched_subcat_name:
+        # Strip the tokens the category NAME already accounts for, so in-subcat
+        # facet matching only sees the genuinely leftover modifiers. Without
+        # this, "tv meubel hout" -> TV-meubels still matches "meubel" onto
+        # brand "Profijt Meubel" / type "Wandmeubels" inside the subcat — the
+        # category noun shouldn't also be matched as a facet. Mirrors
+        # _absorbed_by_subcat in main_parallel_v2; min length 2 drops 1-char
+        # fragments (e.g. 't' from "T-shirts") that would absorb every token,
+        # while still letting real 2-char nouns ("tv", "3d") absorb their token.
+        matched_cat_name = (subcat_match.get('matched_category', '') or '').lower()
+        cat_words = {w for w in re.findall(r'\w+', matched_cat_name) if len(w) >= 2}
+
+        def _absorbed_by_cat(tok: str) -> bool:
+            return any(tok == cw or tok in cw or cw in tok for cw in cat_words)
+
+        leftover_kw = ' '.join(
+            t for t in keyword.split() if not _absorbed_by_cat(t)
+        ).strip()
+
+        # Probeer facets binnen de gevonden subcategorie — alleen op de
+        # leftover tokens. Als de categorie het hele keyword al dekt
+        # (leftover leeg), sla facet matching over en gebruik de kale
+        # subcat-redirect (bv. "tv-meubel" -> kale TV-meubels).
+        if matched_subcat_name and leftover_kw:
             matched_subcat_id = _extract_last_id(matched_subcat_name)
             if matched_subcat_id:
                 filtered_facets = facet_filter.filter_by_subcategory(matched_subcat_id)
                 facet_values = facet_filter.get_facet_values(filtered_facets)
                 if facet_values:
                     match_results = matcher.match_multi_word(
-                        keyword, facet_values,
+                        leftover_kw, facet_values,
                         all_type_facets=None,
                         require_type_for_merk=True,
                         current_main_category=matched_main_cat
