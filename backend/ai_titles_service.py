@@ -601,21 +601,29 @@ def _dutch_plural_stem(s: str) -> str:
 
 
 def _fix_neuter_adjective(h1: str) -> str:
-    """Drop the -e from an adjective wrongly inflected before a neuter noun.
+    """Drop the -e from an '-ische' adjective wrongly inflected before 'gereedschap'.
 
     Dutch attributive adjectives take -e EXCEPT before a singular indefinite
-    neuter (het-) noun: "het gereedschap" -> "elektrisch gereedschap", not
-    "elektrische gereedschap". The taxonomy facet value is stored as the
-    de-word form "Elektrische" and emitted verbatim, so titles combining it
-    with the neuter category "gereedschap" read ungrammatically. Strip the -e
-    for that pairing, preserving capitalisation. The plural "gereedschappen"
-    keeps the -e and is protected by the trailing word boundary.
+    neuter (het-) noun: "elektrisch gereedschap", not "elektrische gereedschap".
+    The taxonomy `type_gereedschap` facet stores its values in the inflected
+    de-word form ("Elektrische", "Pneumatische") and the generator emits them
+    verbatim before the neuter category "gereedschap", reading ungrammatically.
+
+    Scope is deliberately the -ische class only: "-ische" -> "-isch" is always a
+    valid base form (elektrische->elektrisch, pneumatische->pneumatisch) with no
+    stem change. Other adjective classes are intentionally NOT touched here —
+    colours/sizes need irregular stems (rode->rood, grijze->grijs), some are
+    invariable (oranje, turquoise), and a bare -e strip would also corrupt brand
+    names ending in -e (Milwaukee, Klauke, Gedore). The noun match is
+    case-insensitive (often capitalised "Gereedschap") but casing is preserved
+    via the capture groups; the plural "gereedschappen" is protected by the
+    trailing word boundary. Titles carry no article, so the indefinite reading
+    holds; definite/possessive body text is handled separately at the DB level.
     """
     if not h1:
         return h1
-    # Noun match is case-insensitive (category often capitalised: "Gereedschap")
-    # but its casing is preserved via the capture group.
-    return re.sub(r'\b([Ee]lektrisch)e(\s+[Gg]ereedschap)\b', r'\1\2', h1)
+    return re.sub(r'\b(\w*isch)e(\s+[Gg]ereedschap)\b', r'\1\2', h1,
+                  flags=re.IGNORECASE)
 
 
 def _dedupe_adjacent_plural(h1: str) -> str:
