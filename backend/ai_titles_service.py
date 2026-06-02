@@ -600,20 +600,88 @@ def _dutch_plural_stem(s: str) -> str:
     return s
 
 
-# Colour adjectives whose taxonomy base form (nameInColumn) is a genuine
-# attributive base, i.e. they de-inflect before a singular neuter noun:
-# inflected (lowercase) -> base. Sourced from the colour facets, EXCLUDING the
-# entries whose nameInColumn is a noun rather than an adjective base:
-#   - material "-en" colours (gouden, zilveren) are invariable -> already correct
-#   - "...kleurige" map to a noun in taxonomy (Brons/Goud) -> would be wrong
-#   - invariable colours (oranje, roze, beige, taupe, ecru, camel, multicolor)
-# all of those are deliberately absent so they're never touched.
+# Colour adjectives that de-inflect before a singular neuter noun:
+# inflected (lowercase) -> base. This STATIC set is the fallback/baseline; the
+# live map is loaded from the taxonomy colour facets at runtime (see
+# _colour_base_map) so new colour values are picked up automatically. Entries
+# whose taxonomy base is a noun rather than an attributive base are filtered out
+# by _is_deinflectable (material "-en" colours gouden/zilveren are invariable;
+# "...kleurige" map to a noun like Brons/Goud; invariable colours oranje/roze
+# have base == inflected).
 _NEUTER_COLOUR_BASE = {
     'blauwe': 'blauw', 'bruine': 'bruin', 'gele': 'geel', 'grijze': 'grijs',
     'groene': 'groen', 'paarse': 'paars', 'rode': 'rood', 'witte': 'wit',
     'zwarte': 'zwart',
 }
-_COLOUR_ALT = '|'.join(_NEUTER_COLOUR_BASE)
+
+_TAXV2_BASE = os.getenv("TAXV2_BASE",
+                        "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl")
+_COLOUR_FACET_IDS = (3241, 3255)  # kleur facets
+_colour_map_lock = threading.Lock()
+_colour_map_cache: Optional[dict] = None
+
+
+def _is_deinflectable(infl: str, base: str) -> bool:
+    """True only when `base` is a genuine attributive base of colour `infl`.
+
+    Excludes the taxonomy entries whose nameInColumn is a NOUN, not an adjective
+    base: material "-en" colours (gouden->Goud, zilveren->Zilver are invariable),
+    "...kleurige" (->Brons/Goud, a much shorter noun) and invariable colours
+    (oranje->oranje, base == inflected). The accepted forms all read
+    inflected = base + agreement-suffix with at most a small spelling change
+    (blauwe->blauw, gele->geel, rode->rood, witte->wit).
+    """
+    il, bl = infl.lower(), base.lower()
+    return (
+        bool(il) and bool(bl)
+        and il != bl                                  # real change (skip invariable)
+        and il.endswith("e") and not il.endswith("en")  # adjective -e, not material -en
+        and abs(len(il) - len(bl)) <= 2               # excludes '...kleurige' -> short noun
+        and il[:2] == bl[:2]                           # shares the colour stem
+    )
+
+
+def _colour_base_map() -> dict:
+    """Inflected->base colour map, loaded once from the taxonomy colour facets
+    (nameInColumn) and guarded by _is_deinflectable. Falls back to / is seeded
+    with _NEUTER_COLOUR_BASE so generation never breaks if the API is down.
+    New taxonomy colour values are picked up on the next process start."""
+    global _colour_map_cache
+    if _colour_map_cache is not None:
+        return _colour_map_cache
+    with _colour_map_lock:
+        if _colour_map_cache is not None:
+            return _colour_map_cache
+        m = dict(_NEUTER_COLOUR_BASE)
+        try:
+            for fid in _COLOUR_FACET_IDS:
+                off = 0
+                while True:
+                    r = _http_session.get(
+                        f"{_TAXV2_BASE}/api/Facets/{fid}/values",
+                        params={"limit": 200, "offset": off}, timeout=10,
+                    )
+                    r.raise_for_status()
+                    items = r.json().get("items", [])
+                    if not items:
+                        break
+                    for v in items:
+                        lab = next((l for l in v.get("labels", [])
+                                    if (l.get("locale") or "").startswith("nl")), None)
+                        if not lab:
+                            continue
+                        infl = (lab.get("nameOnDetail") or "").strip()
+                        base = (lab.get("nameInColumn") or "").strip()
+                        if _is_deinflectable(infl, base):
+                            m[infl.lower()] = base.lower()
+                    off += len(items)
+                    if len(items) < 200:
+                        break
+            print(f"[AI_TITLES] colour base-map loaded from taxonomy: {len(m)} entries")
+        except Exception as e:
+            print(f"[AI_TITLES] colour base-map taxonomy load failed, using static set: {e}")
+        _colour_map_cache = m
+        return m
 
 # Singular neuter (het-) category HEAD nouns before which an attributive adjective
 # must lose its -e. Restricted to singular *collective/mass* nouns, because plural
@@ -672,12 +740,15 @@ def _fix_neuter_adjective(h1: str) -> str:
         return h1
     pre, head = h1[:m.start()], h1[m.start():]
 
+    cmap = _colour_base_map()
+    calt = '|'.join(re.escape(k) for k in sorted(cmap, key=len, reverse=True))
+
     def _col(mm):
-        prefix, base = mm.group(1), _NEUTER_COLOUR_BASE[mm.group(2).lower()]
+        prefix, base = mm.group(1), cmap[mm.group(2).lower()]
         word = prefix + base
         return word[:1].upper() + word[1:] if mm.group(0)[:1].isupper() else word
 
-    pre = re.sub(r'\b([a-zA-Z]*?)(' + _COLOUR_ALT + r')\b', _col, pre, flags=re.IGNORECASE)
+    pre = re.sub(r'\b([a-zA-Z]*?)(' + calt + r')\b', _col, pre, flags=re.IGNORECASE)
     pre = re.sub(r'\b(\w*isch)e\b', r'\1', pre, flags=re.IGNORECASE)
     return pre + head
 
