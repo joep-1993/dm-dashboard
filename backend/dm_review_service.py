@@ -641,7 +641,8 @@ def run_dm_review(target_yyyymm: Optional[int] = None) -> Dict:
 
     # Update the SERP rankings table + the target/behaald cards on slide 2.
     from backend.dm_review_pptx_tables import update_serp_table, update_target_cards
-    pptx_table_result = update_serp_table(PPTX_PATH, EXCEL_PATH, PPTX_SLIDE_INDEX)
+    pptx_table_result = update_serp_table(PPTX_PATH, EXCEL_PATH, PPTX_SLIDE_INDEX,
+                                          target_yyyymm=serp_target_yyyymm)
     if pptx_table_result.get("status") != "ok":
         logger.warning("serp table update skipped: %s", pptx_table_result.get("error"))
     pptx_targets_result = update_target_cards(PPTX_PATH, EXCEL_PATH, PPTX_SLIDE_INDEX,

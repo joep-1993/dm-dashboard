@@ -52,11 +52,16 @@ def _check_pptx_lock(path: str) -> Optional[str]:
     return None
 
 
-def _read_serp_last_two_months(excel_path: str) -> Optional[Tuple[str, str, Dict[str, float], Dict[str, float]]]:
+def _read_serp_last_two_months(excel_path: str, target_yyyymm: Optional[int] = None
+                               ) -> Optional[Tuple[str, str, Dict[str, float], Dict[str, float]]]:
     """Return (prev_month_name, last_month_name, prev_values_by_type, last_values_by_type).
 
-    Reads the rightmost two month columns from the `serp` tab (those whose
-    header is a Dutch month name). Skips the Delta column.
+    Reads two adjacent month columns from the `serp` tab (those whose header is a
+    Dutch month name), skipping the Delta column. When `target_yyyymm` is given,
+    the "last" month is that month's column (the rightmost one with that name, to
+    handle the annually-recycling header) and "prev" is the month column directly
+    to its left — so a May review reports April | Mei even if a later Juni column
+    already exists. Without it, the two rightmost columns are used.
     """
     wb = load_workbook(excel_path, data_only=True, read_only=True)
     if "serp" not in wb.sheetnames:
@@ -70,8 +75,16 @@ def _read_serp_last_two_months(excel_path: str) -> Optional[Tuple[str, str, Dict
             month_cols.append((c, v.strip().capitalize()))
     if len(month_cols) < 2:
         return None
-    prev_col, prev_name = month_cols[-2]
-    last_col, last_name = month_cols[-1]
+
+    last_idx = len(month_cols) - 1  # default: rightmost
+    if target_yyyymm is not None:
+        target_name = DUTCH_MONTH_FULL[target_yyyymm % 100]
+        # rightmost column matching the target month (names recycle each year)
+        match = [i for i, (_, name) in enumerate(month_cols) if name == target_name]
+        if match and match[-1] >= 1:
+            last_idx = match[-1]
+    prev_col, prev_name = month_cols[last_idx - 1]
+    last_col, last_name = month_cols[last_idx]
     prev_vals: Dict[str, float] = {}
     last_vals: Dict[str, float] = {}
     for r in range(2, ws.max_row + 1):
@@ -304,13 +317,17 @@ def update_target_cards(pptx_path: str, excel_path: str, slide_index: int = 1,
     }
 
 
-def update_serp_table(pptx_path: str, excel_path: str, slide_index: int = 1) -> Dict:
-    """Update the SERP rankings table on the given slide (0-based)."""
+def update_serp_table(pptx_path: str, excel_path: str, slide_index: int = 1,
+                      target_yyyymm: Optional[int] = None) -> Dict:
+    """Update the SERP rankings table on the given slide (0-based).
+
+    When `target_yyyymm` is given, the table reports that month and the one
+    before it; otherwise the two rightmost month columns are used."""
     lock_err = _check_pptx_lock(pptx_path)
     if lock_err:
         return {"status": "error", "error": lock_err}
 
-    src = _read_serp_last_two_months(excel_path)
+    src = _read_serp_last_two_months(excel_path, target_yyyymm)
     if src is None:
         return {"status": "error", "error": "Could not read 2 month columns from `serp` sheet"}
     prev_name, last_name, prev_vals, last_vals = src
