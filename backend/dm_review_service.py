@@ -151,8 +151,10 @@ _OMZET_EXPR = ("SUM(fv.cpc_revenue + fv.ww_revenue "
                "+ COALESCE(fv.affiliate_revenue, 0))")
 
 
-def _fetch_monthly_channel(conn, start_yyyymm: int) -> List[Dict]:
-    """Monthly visits + omzet for SEO + DMA organic, from start_yyyymm inclusive."""
+def _fetch_monthly_channel(conn, start_yyyymm: int, end_yyyymm: int) -> List[Dict]:
+    """Monthly visits + omzet for SEO + DMA organic, from start_yyyymm through
+    end_yyyymm inclusive. The upper bound keeps an older-month run (e.g. May
+    while it's June) from pulling a partial current month into the review."""
     sql = f"""
         SELECT  (fv.dim_date_key / 100)::int        AS yyyymm,
                 c.marketing_channel                 AS kanaal,
@@ -163,19 +165,21 @@ def _fetch_monthly_channel(conn, start_yyyymm: int) -> List[Dict]:
         JOIN    chan_deriv.ref_channel_derivation_stats c
                   ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
         WHERE   fv.dim_date_key >= %s
+          AND   fv.dim_date_key <= %s
           AND   c.marketing_channel IN ('SEO','DMA organic')
           AND   dv.is_real_visit = 1
         GROUP BY 1, 2
         ORDER BY 1, 2
     """
     start_key = start_yyyymm * 100 + 1
+    end_key = end_yyyymm * 100 + 99  # covers every day of end_yyyymm, < next month
     with conn.cursor() as cur:
-        cur.execute(sql, (start_key,))
+        cur.execute(sql, (start_key, end_key))
         return [dict(r) for r in cur.fetchall()]
 
 
-def _fetch_daily_channel(conn, after_dk: int) -> List[Dict]:
-    """Daily visits + omzet for SEO + DMA organic, dim_date_key > after_dk."""
+def _fetch_daily_channel(conn, after_dk: int, end_dk: int) -> List[Dict]:
+    """Daily visits + omzet for SEO + DMA organic, after_dk < dim_date_key <= end_dk."""
     sql = f"""
         SELECT  fv.dim_date_key                     AS dk,
                 c.marketing_channel                 AS kanaal,
@@ -186,13 +190,14 @@ def _fetch_daily_channel(conn, after_dk: int) -> List[Dict]:
         JOIN    chan_deriv.ref_channel_derivation_stats c
                   ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
         WHERE   fv.dim_date_key > %s
+          AND   fv.dim_date_key <= %s
           AND   c.marketing_channel IN ('SEO','DMA organic')
           AND   dv.is_real_visit = 1
         GROUP BY 1, 2
         ORDER BY 1, 2
     """
     with conn.cursor() as cur:
-        cur.execute(sql, (after_dk,))
+        cur.execute(sql, (after_dk, end_dk))
         return [dict(r) for r in cur.fetchall()]
 
 
@@ -215,8 +220,9 @@ def _fetch_monthly_serp_by_url_type(conn, yyyymm: int) -> Dict[str, float]:
                 if r["weighted_pos"] is not None}
 
 
-def _fetch_daily_serp_by_device(conn, after_dk: int) -> List[Dict]:
-    """Per-day impression-weighted avg_position for DESKTOP + MOBILE, NL only."""
+def _fetch_daily_serp_by_device(conn, after_dk: int, end_dk: int) -> List[Dict]:
+    """Per-day impression-weighted avg_position for DESKTOP + MOBILE, NL only,
+    after_dk < dim_date_key <= end_dk."""
     sql = """
         SELECT  dim_date_key                        AS dk,
                 device,
@@ -227,11 +233,12 @@ def _fetch_daily_serp_by_device(conn, after_dk: int) -> List[Dict]:
           AND   deleted_ind = 0
           AND   device IN ('DESKTOP','MOBILE')
           AND   dim_date_key > %s
+          AND   dim_date_key <= %s
         GROUP BY 1, 2
         ORDER BY 1, 2
     """
     with conn.cursor() as cur:
-        cur.execute(sql, (after_dk,))
+        cur.execute(sql, (after_dk, end_dk))
         return [dict(r) for r in cur.fetchall()]
 
 
@@ -494,11 +501,13 @@ def _insert_serp_month_column(sheet, new_month_name: str, delta_col: Optional[in
 
 
 def _write_monthly_serp_type(sheet, new_yyyymm: int, positions: Dict[str, float]) -> int:
-    """Insert a new month column with the latest avg-position data and refresh Delta.
+    """Write the month's avg-position data into the serp tab and refresh Delta.
 
-    Idempotent: if the rightmost month-name column already equals the target
-    month (i.e. a previous run for the same month), reuse it instead of
-    inserting a duplicate.
+    Idempotent and order-safe: if a column for the target month already exists
+    ANYWHERE (not just the rightmost), overwrite it in place rather than
+    inserting a duplicate — so re-processing an older month (e.g. May while a
+    later Juni column exists) doesn't append a second 'Mei'. Only when the month
+    is absent do we insert a new column (before Delta).
 
     Assumes rows 2..5 are the four URL types in this order:
         Cat-url, C-url, PLP, R-url
@@ -507,18 +516,20 @@ def _write_monthly_serp_type(sheet, new_yyyymm: int, positions: Dict[str, float]
     if not month_cols:
         return 0
 
-    last_month_col = month_cols[max(month_cols)]
+    ordered_cols = [month_cols[i] for i in sorted(month_cols)]  # left→right
+    names = [(sheet.cell(row=1, column=c).value or "") for c in ordered_cols]
+    names = [n.strip() if isinstance(n, str) else "" for n in names]
     new_month_name = DUTCH_MONTHS[(new_yyyymm % 100) - 1]
-    last_month_name = sheet.cell(row=1, column=last_month_col).value
-    last_month_name = (last_month_name or "").strip() if isinstance(last_month_name, str) else ""
 
-    if last_month_name == new_month_name:
-        # Already have a column for this month — overwrite in place, don't insert.
-        new_col = last_month_col
-        # prev_col is the second-to-last month column
-        sorted_month_cols = [month_cols[i] for i in sorted(month_cols)]
-        prev_col = sorted_month_cols[-2] if len(sorted_month_cols) >= 2 else last_month_col
+    # Rightmost existing column for this month (month names recycle annually,
+    # so the most recent occurrence is the one we refresh).
+    existing = [i for i, n in enumerate(names) if n == new_month_name]
+    if existing:
+        pos = existing[-1]
+        new_col = ordered_cols[pos]
+        prev_col = ordered_cols[pos - 1] if pos >= 1 else new_col
     else:
+        last_month_col = ordered_cols[-1]
         new_col = _insert_serp_month_column(sheet, new_month_name, delta_col)
         if delta_col and new_col <= delta_col:
             delta_col += 1  # shifted right by the insert
@@ -592,21 +603,24 @@ def run_dm_review(target_yyyymm: Optional[int] = None) -> Dict:
 
     # Lookback windows (intersected with the tab's existing range to handle
     # initial backfill — if a tab is empty we still pull from the lookback).
+    # The window ENDS at the processed month (anchor), so an older-month run
+    # never pulls a partial current month into the visits/omzet feeds.
     daily_start = anchor - timedelta(days=LOOKBACK_DAYS_DAILY)
     daily_after_dk = int((daily_start - timedelta(days=1)).strftime("%Y%m%d"))
+    daily_end_dk = int(anchor.strftime("%Y%m%d"))
 
     monthly_start_yyyymm = _months_back(anchor, LOOKBACK_MONTHS_MONTHLY)
 
     logger.info(
-        "Refresh windows — monthly:>=%s daily:>%s serp_device:>%s serp_target:%s",
-        monthly_start_yyyymm, daily_after_dk, daily_after_dk, serp_target_yyyymm,
+        "Refresh windows — monthly:%s..%s daily:>%s..%s serp_target:%s",
+        monthly_start_yyyymm, serp_target_yyyymm, daily_after_dk, daily_end_dk, serp_target_yyyymm,
     )
 
     conn = get_redshift_connection()
     try:
-        monthly_rows = _fetch_monthly_channel(conn, monthly_start_yyyymm)
-        daily_rows = _fetch_daily_channel(conn, daily_after_dk)
-        serp_dev_rows = _fetch_daily_serp_by_device(conn, daily_after_dk)
+        monthly_rows = _fetch_monthly_channel(conn, monthly_start_yyyymm, serp_target_yyyymm)
+        daily_rows = _fetch_daily_channel(conn, daily_after_dk, daily_end_dk)
+        serp_dev_rows = _fetch_daily_serp_by_device(conn, daily_after_dk, daily_end_dk)
         serp_type_positions = _fetch_monthly_serp_by_url_type(conn, serp_target_yyyymm)
     finally:
         return_redshift_connection(conn)
