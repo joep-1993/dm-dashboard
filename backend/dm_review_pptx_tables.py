@@ -52,7 +52,7 @@ def _check_pptx_lock(path: str) -> Optional[str]:
     return None
 
 
-def _read_serp_last_two_months(excel_path: str, target_yyyymm: Optional[int] = None
+def _read_serp_last_two_months(wb, target_yyyymm: Optional[int] = None
                                ) -> Optional[Tuple[str, str, Dict[str, float], Dict[str, float]]]:
     """Return (prev_month_name, last_month_name, prev_values_by_type, last_values_by_type).
 
@@ -62,8 +62,10 @@ def _read_serp_last_two_months(excel_path: str, target_yyyymm: Optional[int] = N
     handle the annually-recycling header) and "prev" is the month column directly
     to its left — so a May review reports April | Mei even if a later Juni column
     already exists. Without it, the two rightmost columns are used.
+
+    Takes the already-open in-memory workbook (the cells we read are literal
+    values, not formulas) so we never re-read the OneDrive file from disk.
     """
-    wb = load_workbook(excel_path, data_only=True, read_only=True)
     if "serp" not in wb.sheetnames:
         return None
     ws = wb["serp"]
@@ -157,9 +159,10 @@ def _find_serp_table(slide):
     return None, None
 
 
-def _read_seo_latest_month_actuals(excel_path: str) -> Optional[Tuple[_dt.date, int, float]]:
-    """Return (month_date, seo_visits, seo_omzet) for the most recent month in visits_omzet."""
-    wb = load_workbook(excel_path, data_only=True, read_only=True)
+def _read_seo_latest_month_actuals(wb) -> Optional[Tuple[_dt.date, int, float]]:
+    """Return (month_date, seo_visits, seo_omzet) for the most recent month in visits_omzet.
+
+    Reads the already-open in-memory workbook, not the OneDrive file."""
     if "visits_omzet" not in wb.sheetnames:
         return None
     ws = wb["visits_omzet"]
@@ -179,13 +182,13 @@ def _read_seo_latest_month_actuals(excel_path: str) -> Optional[Tuple[_dt.date, 
     return best
 
 
-def _read_seo_month_actuals(excel_path: str, yyyymm: int) -> Optional[Tuple[_dt.date, int, float]]:
+def _read_seo_month_actuals(wb, yyyymm: int) -> Optional[Tuple[_dt.date, int, float]]:
     """Return (month_date, seo_visits, seo_omzet) for a specific month in visits_omzet.
 
     Used when slide 2 is built for a month other than the most recent one, so the
     target/behaald cards read that month's row instead of the latest. Returns None
-    if there's no SEO row for that month yet."""
-    wb = load_workbook(excel_path, data_only=True, read_only=True)
+    if there's no SEO row for that month yet. Reads the already-open in-memory
+    workbook, not the OneDrive file."""
     if "visits_omzet" not in wb.sheetnames:
         return None
     ws = wb["visits_omzet"]
@@ -254,22 +257,23 @@ def _find_target_cards(slide) -> Tuple[Optional[object], Optional[object]]:
     return visits, revenue
 
 
-def update_target_cards(pptx_path: str, excel_path: str, slide_index: int = 1,
+def update_target_cards(pptx_path: str, wb, slide_index: int = 1,
                         target_yyyymm: Optional[int] = None) -> Dict:
     """Update slide-2 Visits + Revenue target/behaald cards.
 
-    When `target_yyyymm` is given, the achieved values are read from that month's
-    SEO row in visits_omzet (falling back to the latest month if that row doesn't
-    exist yet). Without it, the latest month is used."""
+    `wb` is the already-open in-memory workbook (avoids re-reading the OneDrive
+    file). When `target_yyyymm` is given, the achieved values are read from that
+    month's SEO row in visits_omzet (falling back to the latest month if that row
+    doesn't exist yet). Without it, the latest month is used."""
     lock_err = _check_pptx_lock(pptx_path)
     if lock_err:
         return {"status": "error", "error": lock_err}
 
     actuals = None
     if target_yyyymm is not None:
-        actuals = _read_seo_month_actuals(excel_path, target_yyyymm)
+        actuals = _read_seo_month_actuals(wb, target_yyyymm)
     if actuals is None:
-        actuals = _read_seo_latest_month_actuals(excel_path)
+        actuals = _read_seo_latest_month_actuals(wb)
     if actuals is None:
         return {"status": "error", "error": "No SEO data in visits_omzet"}
     month_date, seo_visits, seo_omzet = actuals
@@ -317,17 +321,18 @@ def update_target_cards(pptx_path: str, excel_path: str, slide_index: int = 1,
     }
 
 
-def update_serp_table(pptx_path: str, excel_path: str, slide_index: int = 1,
+def update_serp_table(pptx_path: str, wb, slide_index: int = 1,
                       target_yyyymm: Optional[int] = None) -> Dict:
     """Update the SERP rankings table on the given slide (0-based).
 
-    When `target_yyyymm` is given, the table reports that month and the one
+    `wb` is the already-open in-memory workbook (avoids re-reading the OneDrive
+    file). When `target_yyyymm` is given, the table reports that month and the one
     before it; otherwise the two rightmost month columns are used."""
     lock_err = _check_pptx_lock(pptx_path)
     if lock_err:
         return {"status": "error", "error": lock_err}
 
-    src = _read_serp_last_two_months(excel_path, target_yyyymm)
+    src = _read_serp_last_two_months(wb, target_yyyymm)
     if src is None:
         return {"status": "error", "error": "Could not read 2 month columns from `serp` sheet"}
     prev_name, last_name, prev_vals, last_vals = src

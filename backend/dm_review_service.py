@@ -640,12 +640,15 @@ def run_dm_review(target_yyyymm: Optional[int] = None) -> Dict:
                 "error": f"Cannot save — file is locked. Close Excel and retry. ({e})"}
 
     # Update the SERP rankings table + the target/behaald cards on slide 2.
+    # Pass the in-memory workbook (already saved above) so the pptx updaters read
+    # slide-2 values from RAM instead of re-reading the 14MB file over the slow
+    # OneDrive/WSL mount — a re-read there can hang while OneDrive syncs the save.
     from backend.dm_review_pptx_tables import update_serp_table, update_target_cards
-    pptx_table_result = update_serp_table(PPTX_PATH, EXCEL_PATH, PPTX_SLIDE_INDEX,
+    pptx_table_result = update_serp_table(PPTX_PATH, wb, PPTX_SLIDE_INDEX,
                                           target_yyyymm=serp_target_yyyymm)
     if pptx_table_result.get("status") != "ok":
         logger.warning("serp table update skipped: %s", pptx_table_result.get("error"))
-    pptx_targets_result = update_target_cards(PPTX_PATH, EXCEL_PATH, PPTX_SLIDE_INDEX,
+    pptx_targets_result = update_target_cards(PPTX_PATH, wb, PPTX_SLIDE_INDEX,
                                               target_yyyymm=serp_target_yyyymm)
     if pptx_targets_result.get("status") != "ok":
         logger.warning("target cards update skipped: %s", pptx_targets_result.get("error"))
