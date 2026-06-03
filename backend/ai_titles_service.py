@@ -2018,9 +2018,10 @@ PRODUCTEIGENSCHAPPEN — verplichte clause: "{example_clause}" — MOET na de pr
 # Pipeline v3 — deterministic builder + AI polish (EXPERIMENTAL — IN FRIDGE)
 # ---------------------------------------------------------------------------
 #
-# STATUS: NOT default. Opt-in via AI_TITLES_PIPELINE=v3 env var.
+# STATUS: DEFAULT frontend pipeline as of 2026-06-03 (polish=True). Set
+# AI_TITLES_PIPELINE=v1 to fall back to the legacy pipeline.
 # Originally shelved 2026-05-06 at ~76% acceptable. Thawed 2026-05-08 for an
-# update pass — still in the fridge but with several regressions addressed:
+# update pass; promoted to default 2026-06-03 with several regressions addressed:
 #   - Category-override reused from v1 (batch_classify_facets +
 #     _NEVER_/_ALWAYS_TYPE_URL_SLUGS): a t-facet whose value carries the
 #     product noun ("wandplaten" in Wanddecoratie) suppresses the canonical
@@ -2108,7 +2109,19 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
         if rule.get('position') == 'end':
             post_category.append(sod); continue
         if is_spec_value(sod, fname):
-            sizes.append(sod); continue
+            # Mirror v1's size normalization (see generate_title_from_api):
+            # prepend "Maat" to bare maat-numbers, and de-inflect a trailing
+            # Dutch dimension adjective for the end/predicative position
+            # ("90 cm hoge" -> "90 cm hoog"), so the adjective doesn't dangle
+            # inflected as the last word.
+            size_val = sod
+            if (fname.startswith('maat') and not size_val.lower().startswith('maat')
+                    and size_val.replace('.', '').replace(',', '').replace('-', '').strip().isdigit()):
+                size_val = f"Maat {size_val}"
+            _last = size_val.rsplit(None, 1)[-1].lower() if ' ' in size_val else ''
+            if _last in _ADJ_UNINFLECT:
+                size_val = size_val[:-(len(_last))] + _ADJ_UNINFLECT[_last]
+            sizes.append(size_val); continue
         # Condition facet (Dutch: 'conditie' — values like Nieuw / Gebruikt /
         # Refurbished). Goes at the END of the H1.
         if fname == 'conditie' or 'conditie' in url_slug or 'condition' in url_slug:
@@ -2482,14 +2495,14 @@ def process_single_url(url: str, use_api: bool = True) -> Dict:
         # Check if URL has facets (contains "~~" or "/c/")
         has_facets = "~~" in url or "/c/" in url
 
-        # Pipeline switch: AI_TITLES_PIPELINE=v3 enables the deterministic
-        # builder + AI polish path. Default 'v1' = current full-rewrite pipeline.
-        # Set to 'v3' via env var or per-batch override to A/B compare.
-        _pipeline = os.getenv("AI_TITLES_PIPELINE", "v1").lower()
-        if _pipeline == "v3":
-            ai_result = generate_title_v3(url)
-        else:
+        # Pipeline switch: v3 (deterministic builder + AI polish) is the
+        # default frontend pipeline as of 2026-06-03. Set AI_TITLES_PIPELINE=v1
+        # to fall back to the legacy full-rewrite pipeline for A/B compare.
+        _pipeline = os.getenv("AI_TITLES_PIPELINE", "v3").lower()
+        if _pipeline == "v1":
             ai_result = generate_title_from_api(url)
+        else:
+            ai_result = generate_title_v3(url)
 
         if not ai_result:
             result["status"] = "failed"
