@@ -81,10 +81,15 @@ def init_worker(cache_file, fuzzy_threshold):
 
     data = load_data_cache(cache_file)
 
+    facet_filter = FacetFilter(data['facets_df'])
+    builder = UrlBuilder()
+    # V32: let the builder verify brand/shop facets across subcat depths.
+    builder.facet_url_exists = facet_filter.facet_url_set().__contains__
+
     _worker_data = {
         'matcher': KeywordMatcher(fuzzy_threshold=fuzzy_threshold),
-        'builder': UrlBuilder(),
-        'facet_filter': FacetFilter(data['facets_df']),
+        'builder': builder,
+        'facet_filter': facet_filter,
         'category_lookup': data['category_lookup'],
         'all_type_facets': data['all_type_facets'],
         'categories_df': data['categories_df'],

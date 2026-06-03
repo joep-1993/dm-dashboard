@@ -13,6 +13,16 @@ import config
 from src.parser import ParsedRUrl
 from src.matcher import MatchResult
 
+# V32: Facet axes eligible for the cross-depth rescue in build_multi_facet.
+# A brand ("merk") or shop ("winkel") is one logical entity spread thinly
+# across many subcategories, so FacetFilter often parks its representative
+# row at a shallow parent rather than the leaf the primary facet landed in.
+# These axes are safe to re-point at the primary's leaf *only after* verifying
+# the value genuinely exists there. Type/colour/etc. facets are deliberately
+# excluded — they tend to be subcategory-specific and a depth mismatch usually
+# means a real "different subcat" intent, not a dedup artefact.
+_CROSS_DEPTH_RESCUE_AXES = {'merk', 'winkel'}
+
 
 @dataclass
 class RedirectResult:
@@ -51,6 +61,14 @@ class UrlBuilder:
             base_url: Base URL for beslist.nl (default from config)
         """
         self.base_url = base_url or config.BASE_URL
+        # V32: Optional callable(url:str)->bool that reports whether a facet
+        # URL exists in the loaded facet set. Wired up by the orchestrator
+        # (init_worker). Used by build_multi_facet to rescue a brand/shop
+        # facet whose cached representative row resolved to a shallower
+        # subcategory than the primary facet. When None, the rescue is
+        # silently skipped (legacy behaviour) — so unit tests and standalone
+        # callers that don't set it keep working unchanged.
+        self.facet_url_exists = None
 
     def build(self, parsed_url: ParsedRUrl, match_result: MatchResult) -> RedirectResult:
         """
@@ -557,6 +575,24 @@ class UrlBuilder:
                     )
                     if other_path == category_path:
                         same_target_matches.append(other)
+                    elif (
+                        self.facet_url_exists is not None
+                        and other.facet_value.facet_name.lower()
+                        in _CROSS_DEPTH_RESCUE_AXES
+                    ):
+                        # V32: the brand/shop facet's cached row resolved to a
+                        # shallower subcat than the primary (e.g. merk "Nike"
+                        # parked at /mode/mode_432360 while fanshop "Nederlands
+                        # Elftal" landed at the leaf /mode/mode_432360_432464).
+                        # If the value genuinely exists under the primary's
+                        # leaf, append it there instead of dropping it. The
+                        # url_fragment (merk~84748) is depth-independent, so we
+                        # only need to confirm the leaf-level URL is real.
+                        rescued_url = (
+                            f"{category_path}/c/{other.facet_value.url_fragment}"
+                        )
+                        if self.facet_url_exists(rescued_url):
+                            same_target_matches.append(other)
 
                 # Beslist URLs allow only one value per facet name — dedupe
                 # by axis, keeping the higher-scoring match on collision.

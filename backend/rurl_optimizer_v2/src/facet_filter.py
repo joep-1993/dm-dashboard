@@ -69,6 +69,25 @@ class FacetFilter:
                 return col
         return None
 
+    def facet_url_set(self) -> frozenset:
+        """V32: All facet URLs as a frozenset for O(1) existence checks.
+
+        Built once and cached. Used by UrlBuilder.build_multi_facet to verify
+        a brand/shop facet exists under a sibling leaf subcategory before
+        rescuing it across depths. Returns an empty set if no URL column.
+        """
+        cached = getattr(self, '_url_set_cache', None)
+        if cached is not None:
+            return cached
+        url_col = self.col_mapping.get('url')
+        if url_col is None:
+            self._url_set_cache = frozenset()
+        else:
+            self._url_set_cache = frozenset(
+                self.facets_df[url_col].astype(str)
+            )
+        return self._url_set_cache
+
     def filter_by_subcategory(self, subcategory_id: str) -> pd.DataFrame:
         """
         Filter facets to only those valid for a subcategory.
