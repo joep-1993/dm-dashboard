@@ -1,6 +1,63 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## R-URL optimizer: main-pass multi-facet convergence via subtree rescue (2026-06-03)
+Follow-up to the 2026-06-02 hyphen/facet work. A category-pinned R-URL
+`/products/mode/mode_432360/r/nike-nederlands-elftal-trainingsshirt/` collapsed
+to the bare Shirts page; user wanted `mode_432360_469350` (Sportshirts) with
+fanshop~Nederlands Elftal ~~ merk~Nike ~~ type_sportshirts. The main pass
+(`process_url_v2`) preserves hyphens and matches facets only inside the pinned
+subcat, so it under-served these; the global pass (`process_global_url`) splits
+hyphens and does type-facet→child-subcat discovery, so the maincat-less variant
+already worked. Converged them. Commit `55f1048`.
+
+- **V32 `_is_cat_noun` used substring containment, collapsing rich queries.** For
+  subcat "Shirts" it stemmed to `shirt` and tested `'shirt' in token`; the glued
+  token `nike-nederlands-elftal-trainingsshirt` contains `shirt`, so the WHOLE
+  query was judged "just the category noun" → bare-category redirect. Fix:
+  whole-token + hyphen-split residual (`_split_strip_keyword` + `len>=2`
+  equality), so V32 only fires when nothing meaningful remains (`/r/shirt/` still
+  collapses; multi-token queries proceed).
+- **Delegate facet-finding to the global-pass pattern, but BOUNDED to the anchor
+  subtree.** `_derive_facets_in_subtree`: hyphen-split + drop bare category noun
+  (whole-token — keep `trainingsshirt`, drop `shirt`), discover the best type
+  facet whose subcat slug is under the anchor (`mode_432360` + children),
+  descend, full multi-facet match. Bounding to the subtree is strictly SAFER
+  than the unanchored global pass — it can't jump to an unrelated maincat.
+- **Wire it as a RESCUE, never a pre-empt — verified by full-corpus diff.** A
+  step-0 pre-empt (run delegation first for every subcat'd URL) regressed ~a
+  dozen real URLs in the 754-URL diff: it overrode already-correct anchored
+  matches (`alcatel_senioren_mobiel` Mobiele telefoons → wrongly Huistelefoons)
+  and dropped facets (`illy_koffiebonen_1kg` lost '1 kg'). Pattern was sharp:
+  wins where the baseline FAILED, regressions where it already SUCCEEDED.
+- **Adoption rule is the safety mechanism (monotonic-safe).** Run the rescue when
+  the cascade produced `<=2` facets; ADOPT only when (a) baseline had 0 facets,
+  or (b) the rescue lands in the SAME destination subcat with strictly MORE
+  facets (pure enrichment). (b) is why `samsung_55-inch_4k_uhd_tv` gets enriched
+  (merk+4K → +55 inch) while `alcatel` (rescue's Huistelefoons is a DIFFERENT
+  subcat) is left untouched. Trigger width only affects how often the rescue
+  runs, never correctness.
+- **Abbreviation gap: query acronym vs spelled-out facet value.** `televisie_b`
+  value is "4K Ultra HD"; query says "4k uhd". `4k` is 2 chars (<
+  MIN_KEYWORD_LENGTH_FOR_FUZZY=3 → dropped); `uhd` shares no letters with "Ultra
+  HD" and `_is_semantic_match` rejects acronym↔expansion; token-coverage reduces
+  the value to just `['ultra']`. So only the exact phrase "4k ultra hd" matched —
+  ANY pass missed it. Fix = synonym entries in `synonyms.py` mapping the
+  abbreviation to the EXACT normalized facet value name (`uhd`/`4k` →
+  `"4k ultra hd"`, `fhd` → `"full hd"`, `8k` → `"8k ultra hd"`,
+  `hd ready` → `"hd-ready"`); the matcher's synonym branch then gets an exact hit
+  (score 95). Same class as hoesloze↔"Zonder overtrek".
+- **Harness gotcha: don't `git stash` to swap code versions in a shared repo.**
+  Multiple Claude agents run concurrently in this same working copy (saw 3+
+  `claude` procs + a `pagetitles_from_unique.py build` at 74% CPU + concurrent
+  pushes + a `git clean` deleting my untracked temp files mid-run). A botched
+  `git stash pop` popped a pre-existing autostash and conflicted. Diff two code
+  versions by `git show HEAD:<path> > /tmp/base.py` and importlib-loading it with
+  the package dir on `sys.path` — keep temp files in /tmp (immune to git clean),
+  run FOREGROUND. The full 754-URL side-by-side diff is too slow (~timed out at
+  595s); only the URLs with a subcategory id are affected (both V32 + rescue gate
+  on `parsed.subcategory_id`), so diff just those.
+
 ## R-URL optimizer: facet drop-out from 1-char subcat fragments + main-vs-global hyphen split (2026-06-02)
 Session started from a user report: `/products/mode/r/nike_replica_-_..._nederlands_elftal_thuis_..._junior/` redirected with only `merk~84748` (Nike), dropping `fanshop~1335065` (Nederlands Elftal) and `ut_voetbalshirt~9134156` (Thuis), even though both facets exist in the chosen subcat `mode_432360_432464` (T-shirts). Two commits shipped: `0133a77` (main pass) + `c898cb2` (global pass).
 
