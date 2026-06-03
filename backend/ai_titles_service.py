@@ -935,6 +935,33 @@ def fix_redundant_met(text: str) -> str:
     return _REDUNDANT_MET_RE.sub(lambda m: m.group(1), text)
 
 
+# Match the OLED-tv / LED-tv category token in any casing/spacing variant.
+# The negative lookbehind keeps the 'led' inside 'qled' (a separate category)
+# from matching, so QLED-tv is deliberately left untouched.
+_TV_CATEGORY_RE = re.compile(r"(?<![A-Za-z])(o?led)[-\s]?tv(['’]?s)?\b", re.IGNORECASE)
+
+
+def normalize_tv_category_caps(text: str) -> str:
+    """Force the OLED-tv / LED-tv category names into canonical casing.
+
+    Beslist convention writes these display-category acronyms in caps while
+    keeping 'tv' lowercase, e.g. 'oled-tv's' -> 'OLED-tv's', 'Led-Tv' ->
+    'LED-tv', 'LED TV's' -> 'LED-tv's'. OLED/LED are uppercased, the separator
+    is normalized to a single hyphen, and the apostrophe-s is normalized to a
+    straight apostrophe. Singular forms (no trailing 's) stay singular. QLED is
+    not touched (see _TV_CATEGORY_RE).
+    """
+    if not text:
+        return text
+
+    def repl(m):
+        prefix = m.group(1).upper()           # OLED / LED
+        suffix = "'s" if m.group(2) else ""   # keep singular as-is
+        return f"{prefix}-tv{suffix}"
+
+    return _TV_CATEGORY_RE.sub(repl, text)
+
+
 def normalize_preposition_case(text: str) -> str:
     """
     Ensure prepositions like 'met', 'in', 'zonder' are lowercase,
@@ -2481,6 +2508,8 @@ def process_single_url(url: str, use_api: bool = True) -> Dict:
         new_h1 = normalize_preposition_case(new_h1)
         # Strip "met met X" / "met zonder X" -> "met X" / "zonder X"
         new_h1 = fix_redundant_met(new_h1)
+        # Force OLED-tv / LED-tv category acronyms into canonical caps
+        new_h1 = normalize_tv_category_caps(new_h1)
 
         # Step 4: Create SEO title
         # Format: "{h1} kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl"
