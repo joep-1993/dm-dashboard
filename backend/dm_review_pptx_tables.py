@@ -166,6 +166,31 @@ def _read_seo_latest_month_actuals(excel_path: str) -> Optional[Tuple[_dt.date, 
     return best
 
 
+def _read_seo_month_actuals(excel_path: str, yyyymm: int) -> Optional[Tuple[_dt.date, int, float]]:
+    """Return (month_date, seo_visits, seo_omzet) for a specific month in visits_omzet.
+
+    Used when slide 2 is built for a month other than the most recent one, so the
+    target/behaald cards read that month's row instead of the latest. Returns None
+    if there's no SEO row for that month yet."""
+    wb = load_workbook(excel_path, data_only=True, read_only=True)
+    if "visits_omzet" not in wb.sheetnames:
+        return None
+    ws = wb["visits_omzet"]
+    y, m = divmod(yyyymm, 100)
+    for r in range(2, ws.max_row + 1):
+        d = ws.cell(row=r, column=1).value
+        v = ws.cell(row=r, column=2).value
+        o = ws.cell(row=r, column=3).value
+        k = ws.cell(row=r, column=4).value
+        if not (isinstance(d, _dt.datetime) and k == "SEO"):
+            continue
+        if v is None:
+            continue
+        if d.year == y and d.month == m:
+            return (d.date(), int(v), float(o or 0))
+    return None
+
+
 def _read_targets_for_month(month: int) -> Optional[Tuple[float, float]]:
     """Return (visits_target, omzet_target) for the given month (1..12) from seo_targets.xlsx."""
     if not os.path.exists(TARGETS_EXCEL_PATH):
@@ -216,13 +241,22 @@ def _find_target_cards(slide) -> Tuple[Optional[object], Optional[object]]:
     return visits, revenue
 
 
-def update_target_cards(pptx_path: str, excel_path: str, slide_index: int = 1) -> Dict:
-    """Update slide-2 Visits + Revenue target/behaald cards."""
+def update_target_cards(pptx_path: str, excel_path: str, slide_index: int = 1,
+                        target_yyyymm: Optional[int] = None) -> Dict:
+    """Update slide-2 Visits + Revenue target/behaald cards.
+
+    When `target_yyyymm` is given, the achieved values are read from that month's
+    SEO row in visits_omzet (falling back to the latest month if that row doesn't
+    exist yet). Without it, the latest month is used."""
     lock_err = _check_pptx_lock(pptx_path)
     if lock_err:
         return {"status": "error", "error": lock_err}
 
-    actuals = _read_seo_latest_month_actuals(excel_path)
+    actuals = None
+    if target_yyyymm is not None:
+        actuals = _read_seo_month_actuals(excel_path, target_yyyymm)
+    if actuals is None:
+        actuals = _read_seo_latest_month_actuals(excel_path)
     if actuals is None:
         return {"status": "error", "error": "No SEO data in visits_omzet"}
     month_date, seo_visits, seo_omzet = actuals

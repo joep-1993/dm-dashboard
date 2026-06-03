@@ -79,6 +79,8 @@
     </nav>
 
     <div class="container mt-5 pb-5">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
         <div class="card mb-4">
             <div class="card-header d-flex align-items-center" style="background: #5e4a90; color: white;">
                 <h5 class="mb-0">Slide 2 - SEO cijfers <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px; margin-left: 0.4rem;"><title>Close review_dm_seo.xlsx in Excel before running, otherwise the save will fail. After the run, the pivot tables in the workbook are flagged refresh-on-open, so the charts in DM review_NEW.pptx will show fresh values the next time you open it in PowerPoint and click Update Links.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg></h5>
@@ -96,7 +98,12 @@
                     <li><b>serp</b> — monthly avg position per URL type, impression-weighted (bt.search_console, country=nld)</li>
                     <li><b>serp_device</b> — daily avg position by DESKTOP / MOBILE (bt.search_console, country=nld)</li>
                 </ul>
-                <div class="d-flex justify-content-end">
+                <div class="d-flex justify-content-between align-items-end gap-3">
+                    <div>
+                        <label for="monthInput" class="form-label small text-muted mb-1">Maand</label>
+                        <input type="month" id="monthInput" class="form-control form-control-sm" style="width:160px;">
+                        <div class="form-text small">Standaard de huidige maand. Kies een eerdere maand om die te verwerken.</div>
+                    </div>
                     <button id="runBtn" class="btn" style="background:#CC5500;color:white;border:none;"
                             onmouseover="this.style.backgroundColor='#E97451'"
                             onmouseout="this.style.backgroundColor='#CC5500'">
@@ -112,6 +119,8 @@
         </div>
 
         <div id="resultArea" style="display:none;"></div>
+            </div>
+        </div>
 
         <footer class="text-center py-4">
             <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
@@ -121,15 +130,24 @@
     <script>
     (function() {
         const runBtn = document.getElementById('runBtn');
+        const monthInput = document.getElementById('monthInput');
         const loading = document.getElementById('loadingArea');
         const result = document.getElementById('resultArea');
+
+        // Default the picker to the current month (YYYY-MM).
+        const now = new Date();
+        monthInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
         runBtn.addEventListener('click', async () => {
             runBtn.disabled = true;
             loading.style.display = '';
             result.style.display = 'none';
             try {
-                const r = await fetch('/api/dm-review/run', { method: 'POST' });
+                const r = await fetch('/api/dm-review/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_month: monthInput.value || null })
+                });
                 const data = await r.json();
                 if (!r.ok) {
                     renderError(data.detail || 'Unknown error');

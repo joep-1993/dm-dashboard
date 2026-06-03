@@ -130,6 +130,19 @@ def _months_back(today: date, n: int) -> int:
     return y * 100 + m
 
 
+def _yyyymm_anchor_date(yyyymm: int, today: date) -> date:
+    """Anchor date for the lookback windows when processing a given month.
+
+    Uses the last day of that month, but never later than today — so processing
+    the current (most-recent) month behaves exactly like an un-parameterized run,
+    while processing an older month (e.g. May while it's June) anchors the
+    windows to that month instead of "now"."""
+    y, m = divmod(yyyymm, 100)
+    first_next = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
+    last_day = first_next - timedelta(days=1)
+    return min(last_day, today)
+
+
 # ---------------------------------------------------------------------------
 # Redshift queries
 # ---------------------------------------------------------------------------
@@ -544,13 +557,18 @@ def _write_monthly_serp_type(sheet, new_yyyymm: int, positions: Dict[str, float]
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def run_dm_review() -> Dict:
+def run_dm_review(target_yyyymm: Optional[int] = None) -> Dict:
     """Refresh slide-2 feeds in review_dm_seo.xlsx.
 
     Behavior: re-fetches a lookback window from Redshift each run and UPSERTs
     into the workbook. Existing rows within the window get updated in place;
     rows for new dates get appended. Rows older than the lookback are left
     untouched.
+
+    `target_yyyymm` selects which month slide 2 is built for (the serp column +
+    the target/behaald cards). Defaults to the current month. Choosing an older
+    month anchors the refresh windows to that month and makes the target cards
+    read that month's row in visits_omzet instead of the latest.
     """
     lock_err = _check_file_lock()
     if lock_err:
@@ -566,16 +584,18 @@ def run_dm_review() -> Dict:
 
     today = datetime.now().date()
 
+    # The serp tab is anchored to the month being processed (defaults to the
+    # current month). We refresh that one column (insert or overwrite in place).
+    serp_target_yyyymm = target_yyyymm or (today.year * 100 + today.month)
+    # Anchor the lookback windows to the processed month, capped at today.
+    anchor = _yyyymm_anchor_date(serp_target_yyyymm, today)
+
     # Lookback windows (intersected with the tab's existing range to handle
     # initial backfill — if a tab is empty we still pull from the lookback).
-    daily_start = today - timedelta(days=LOOKBACK_DAYS_DAILY)
+    daily_start = anchor - timedelta(days=LOOKBACK_DAYS_DAILY)
     daily_after_dk = int((daily_start - timedelta(days=1)).strftime("%Y%m%d"))
 
-    monthly_start_yyyymm = _months_back(today, LOOKBACK_MONTHS_MONTHLY)
-
-    # The serp tab is anchored to the current month — we refresh the latest
-    # one column (insert or overwrite in place).
-    serp_target_yyyymm = today.year * 100 + today.month
+    monthly_start_yyyymm = _months_back(anchor, LOOKBACK_MONTHS_MONTHLY)
 
     logger.info(
         "Refresh windows — monthly:>=%s daily:>%s serp_device:>%s serp_target:%s",
@@ -624,7 +644,8 @@ def run_dm_review() -> Dict:
     pptx_table_result = update_serp_table(PPTX_PATH, EXCEL_PATH, PPTX_SLIDE_INDEX)
     if pptx_table_result.get("status") != "ok":
         logger.warning("serp table update skipped: %s", pptx_table_result.get("error"))
-    pptx_targets_result = update_target_cards(PPTX_PATH, EXCEL_PATH, PPTX_SLIDE_INDEX)
+    pptx_targets_result = update_target_cards(PPTX_PATH, EXCEL_PATH, PPTX_SLIDE_INDEX,
+                                              target_yyyymm=serp_target_yyyymm)
     if pptx_targets_result.get("status") != "ok":
         logger.warning("target cards update skipped: %s", pptx_targets_result.get("error"))
 
