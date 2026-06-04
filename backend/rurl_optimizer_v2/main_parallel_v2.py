@@ -93,9 +93,19 @@ def load_data_cache(cache_file):
 _worker_data = None
 
 
-def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=True):
+# V34: when True, the multi-facet rescue appends an explicit query size
+# (XL, 122-128) onto the assembled /c/ URL. Off by default because per-size
+# pages churn in/out of stock — the size match is always COLLECTED in the
+# probe cache, but only emitted when this is set (CLI: --rescue-include-size).
+# Worker processes pick it up via init_worker_v2 initargs.
+RESCUE_INCLUDE_SIZE = False
+
+
+def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=True,
+                   rescue_include_size=False):
     """Initialize worker with pre-cached data."""
-    global _worker_data
+    global _worker_data, RESCUE_INCLUDE_SIZE
+    RESCUE_INCLUDE_SIZE = rescue_include_size
 
     from src.parser import RUrlParser
     from src.facet_filter import FacetFilter
@@ -455,12 +465,19 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
     return result
 
 
-def _rescue_long_unmatched_token(keyword, target_text, threshold=8):
+def _rescue_long_unmatched_token(keyword, target_text, threshold=8, prefix_link=False):
     """Hard-reject guard for the V28 search-derived rescue path.
 
     Returns the first non-stopword, non-generic-adjective query token of
     length >= threshold whose stem is NOT present as a token of target_text
     (the rescued dom_cat name + appended facet value name), else None.
+
+    prefix_link (V33): when True, a long token also counts as represented if
+    a target token is its >=4-char prefix (or vice versa) — so the assembled
+    facet value 'Thuis' covers the query token 'thuisshirt'. Only the
+    multi-facet rescue passes this; the single-facet path keeps the strict
+    stem-equality test so it can't be loosened into the false-positives it
+    was built to block (waterfilter / inductiekookplaat).
 
     Used only on the rescue path — where the matcher FAILED and search
     guessed a category — so a long product-type token the guess dropped
@@ -488,9 +505,43 @@ def _rescue_long_unmatched_token(keyword, target_text, threshold=8):
             continue
         if w in STOPWORDS or w in SHOP_NAMES or w in GENERIC_ADJECTIVES:
             continue
-        if _stem(w) not in target_toks:
-            return w
+        sw = _stem(w)
+        if sw in target_toks:
+            continue
+        if prefix_link and any(
+            (len(tt) >= 4 and sw.startswith(tt)) or (len(sw) >= 4 and tt.startswith(sw))
+            for tt in target_toks
+        ):
+            continue
+        return w
     return None
+
+
+def _assemble_multi_facet(multi, existing_facet, size_facet=None):
+    """V33: build a multi-facet /c/ fragment from the cached multi_facets list
+    (one keyword-consistent value per axis). Preserves any facet the original
+    R-URL already carried and never repeats a facet name. Returns
+    (fragment, [value_name, ...]) or ('', []) when nothing assemblable.
+
+    V34: when ``size_facet`` is provided (caller opted into honouring an
+    explicit query size), it's appended last — after the intent axes — so the
+    landing page is size-narrowed. Off by default; see RESCUE_INCLUDE_SIZE."""
+    existing_names = {p.split('~', 1)[0]
+                      for p in (existing_facet or '').split('~~') if '~' in p}
+    seen = set(existing_names)
+    frags, names = [], []
+    for m in list(multi or []) + ([size_facet] if size_facet else []):
+        fn = m.get('facet_name')
+        vid = m.get('value_id')
+        if not fn or vid is None or fn in seen:
+            continue
+        seen.add(fn)
+        frags.append(f"{fn}~{vid}")
+        names.append(m.get('value_name') or '')
+    if not frags:
+        return '', []
+    fragment = '~~'.join(([existing_facet] if existing_facet else []) + frags)
+    return fragment, names
 
 
 def _is_bare_category_noun(tok: str, cat_name: str) -> bool:
@@ -1496,6 +1547,7 @@ def process_url_v2(args):
             dom_slug = derived.get('dom_cat_url_slug')
             local_match = None
             appended_value_name = ''  # facet value name appended below, if any
+            _used_multi = False       # V33: multi-facet rescue overrode the reject
             if dom_slug:
                 # Extract subcat_id from slug (last numeric segment).
                 dom_subcat_id = ''
@@ -1591,6 +1643,53 @@ def process_url_v2(args):
                 ' '.join(filter(None, [derived.get('dom_cat_name', ''), appended_value_name])),
             )
             if _reject_tok:
+                # V33: before giving up, try a multi-facet assembly. A single
+                # appended facet can't represent a query spanning several axes
+                # (fanshop + merk + product-type + colour); assembling one
+                # keyword-consistent value per axis often DOES cover the long
+                # token the single-facet path dropped. e.g.
+                # /mode/r/Nike_nederlands_elftal_thuisshirt_oranje_maat_-_122-128/
+                # → Sportshirts /c/ fanshop~Nederlands Elftal ~~ merk~Nike
+                #   ~~ ut_voetbalshirt~Thuis ~~ kleur~Oranje. 'nederlands' is
+                # then covered by fanshop and 'thuisshirt' by 'Thuis' (prefix).
+                _probe_payload = (derive_search_facet(parsed.main_category,
+                                                      parsed.keyword) or {})
+                _multi = _probe_payload.get('multi_facets') or []
+                # V34: size is opt-in — per-size pages churn in/out of stock,
+                # so honour an explicit query size only when RESCUE_INCLUDE_SIZE.
+                _size_facet = (_probe_payload.get('size_facet')
+                               if RESCUE_INCLUDE_SIZE else None)
+                _multi_frag, _multi_names = _assemble_multi_facet(
+                    _multi, parsed.existing_facet, size_facet=_size_facet)
+                _still_unmatched = None
+                if _multi_frag and len(_multi) >= 2:
+                    _still_unmatched = _rescue_long_unmatched_token(
+                        parsed.keyword,
+                        ' '.join(filter(None, [derived.get('dom_cat_name', '')] + _multi_names)),
+                        prefix_link=True,
+                    )
+                if _multi_frag and len(_multi) >= 2 and _still_unmatched is None:
+                    _used_multi = True
+                    final_redirect_url = f"{base_redirect}/c/{_multi_frag}"
+                    final_match_type = 'search_derived_subcat_multi_facet'
+                    final_reason_extra = (
+                        "; multi-facet: "
+                        + ", ".join(f"{m['facet_name']}~{m['value_id']}"
+                                    f"({m['value_name']!r})" for m in _multi)
+                    )
+                    # Falls through to the shared finals block below, which is
+                    # gated on `not _used_multi` only for the cat-name/score
+                    # lines; those are set here instead.
+                    final_redirect_cat_name = derived['dom_cat_name']
+                    final_score = 70
+                    final_tier = get_reliability_tier(final_score)
+                    final_reason = (
+                        f"[V33] Search-derived multi-facet rescue: "
+                        f"'{derived['dom_cat_name']}'" + final_reason_extra
+                        + (f" (rescued long token '{_reject_tok}')")
+                    )
+                    reject_reason = ''
+            if _reject_tok and not _used_multi:
                 final_redirect_url = None
                 final_redirect_cat_name = ''
                 final_match_type = 'rejected_long_unmatched'
@@ -1641,17 +1740,18 @@ def process_url_v2(args):
                     'reason': final_reason,
                 }
 
-            final_redirect_cat_name = derived['dom_cat_name']
-            final_score = 75
-            final_tier = get_reliability_tier(final_score)
-            final_reason = (
-                f"[V28] Search-derived: {derived.get('total')} products dominantly "
-                f"in '{derived['dom_cat_name']}' ({int(100*derived['dom_cat_share'])}%)"
-                + (f"; preserved original facet '{parsed.existing_facet}'"
-                   if parsed.existing_facet else "")
-                + final_reason_extra
-            )
-            reject_reason = ''
+            if not _used_multi:
+                final_redirect_cat_name = derived['dom_cat_name']
+                final_score = 75
+                final_tier = get_reliability_tier(final_score)
+                final_reason = (
+                    f"[V28] Search-derived: {derived.get('total')} products dominantly "
+                    f"in '{derived['dom_cat_name']}' ({int(100*derived['dom_cat_share'])}%)"
+                    + (f"; preserved original facet '{parsed.existing_facet}'"
+                       if parsed.existing_facet else "")
+                    + final_reason_extra
+                )
+                reject_reason = ''
         elif reliability_score >= 70 and derived.get('mode') in ('and', 'fallback') and not derived.get('redirect_url'):
             flag_for_review = (
                 f"[V28] Legacy score {reliability_score}, but search "
@@ -1882,6 +1982,13 @@ def main():
                              "the V28 base response's facets[] (no extra calls); "
                              'stage 2 falls back to per-value filter probes. '
                              'Same SEARCH_QPS budget as V28 prefetch.')
+    parser.add_argument('--rescue-include-size', action='store_true',
+                        help='V34 EXPERIMENTAL: when the multi-facet rescue '
+                             'fires and the query names a size (XL, 122-128), '
+                             'append the matching maat_* facet so the landing '
+                             'page is size-narrowed. Off by default — per-size '
+                             'pages churn in/out of stock, so the broader '
+                             'category page is usually the safer redirect.')
 
     args = parser.parse_args()
 
@@ -1982,7 +2089,8 @@ def main():
     with mp.Pool(
         processes=num_workers,
         initializer=init_worker_v2,
-        initargs=(cache_file, args.threshold, not args.no_token_coverage)
+        initargs=(cache_file, args.threshold, not args.no_token_coverage,
+                  args.rescue_include_size)
     ) as pool:
         # Use imap_unordered for better throughput
         with tqdm(total=total_remaining, desc="Processing") as pbar:

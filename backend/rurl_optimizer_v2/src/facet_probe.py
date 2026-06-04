@@ -136,6 +136,166 @@ def _value_matches_keyword(keyword: str, value_name: str) -> bool:
     return vtoks <= _tokens(keyword)
 
 
+def _tok_links(vtok: str, ktok: str) -> bool:
+    """Looser token link than equality: a value token "links" to a keyword
+    token if they're equal OR one is a >=4-char prefix of the other. This
+    bridges the cases pure set-membership misses, e.g. value 'Thuis'
+    (ut_voetbalshirt) ↔ query token 'thuisshirt', or 'EK' ↔ 'ek'. The
+    >=4 floor keeps short noise ('L', 'M') from prefix-matching."""
+    if vtok == ktok:
+        return True
+    if len(vtok) >= 4 and ktok.startswith(vtok):
+        return True
+    if len(ktok) >= 4 and vtok.startswith(ktok):
+        return True
+    return False
+
+
+def _value_consistent_with_keyword(keyword: str, value_name: str) -> bool:
+    """Like _value_matches_keyword but uses _tok_links instead of strict set
+    membership, so 'Thuis' ⊂ 'thuisshirt' and '122/128' ↔ '122-128' count.
+    Every token of the value name must link to SOME keyword token — partial
+    junk ('Nederlands Duitsland') is still rejected because 'duitsland'
+    links to nothing in the query."""
+    vtoks = _tokens(value_name)
+    if not vtoks:
+        return False
+    ktoks = _tokens(keyword)
+    return all(any(_tok_links(vt, kt) for kt in ktoks) for vt in vtoks)
+
+
+# Size/quantity facets are excluded from multi-facet assembly: per-value
+# pages (maat=XL, gewicht=…) churn in and out of stock far faster than the
+# product-type / fanshop / colour axes, so pinning a redirect to one size is
+# brittle. Matched as PREFIXES because the real slugs are category-qualified
+# (e.g. 'maat_mode_bovenkleding', 'maat_schoenen'). Colour (kleur) is
+# deliberately NOT here — it's stable enough and the user often searches it
+# explicitly (e.g. "oranje").
+_MULTI_FACET_SIZE_PREFIXES = ("maat", "gewicht", "formaat", "lengte", "inhoud",
+                              "schoenmaat", "sz_")
+
+
+def _is_size_facet(facet_name: str) -> bool:
+    return (facet_name or "").lower().startswith(_MULTI_FACET_SIZE_PREFIXES)
+
+# Intent-bearing facet prefixes/names sort to the FRONT of an assembled /c/
+# URL; attribute facets (kleur, materiaal, …) trail. Order only affects the
+# URL's readability/canonical shape, not whether it resolves.
+_MULTI_FACET_INTENT_PREFIXES = ("type_", "ut_", "o_", "eigenschap_", "soort_")
+_MULTI_FACET_INTENT_NAMES = {"fanshop", "merk"}
+
+
+def _extract_multi_facets(api_facets: Optional[list], keyword: str) -> list[dict]:
+    """From a subcat-level search response's facets[], pick the single
+    top-count keyword-consistent value of each intent-bearing facet.
+
+    Returns an ordered list of {facet_name, value_id, value_name, count}.
+    Used by the V33 multi-facet rescue: a query that spans several axes
+    (fanshop + merk + product-type + colour) can't be represented by the
+    single appended facet the V29 probe picks, so we assemble one value per
+    axis the query actually names.
+    """
+    ktoks = _tokens(keyword)
+    picks: list[dict] = []
+    for f in (api_facets or []):
+        fname = (f.get("urlName") or "").lower()
+        if (not fname or fname == "winkel"
+                or fname in FACET_BLACKLIST
+                or _is_size_facet(fname)):
+            continue
+        # Among keyword-consistent values of THIS facet, prefer the one that
+        # covers the most query intent — by tokens covered, then by the
+        # longest token covered, then by product count. Picking by raw count
+        # alone mis-selects when several values match: for "nederlands elftal
+        # ... ek '88", fanshop value 'EK' has more products than 'Nederlands
+        # Elftal', but only 'Nederlands Elftal' represents the long token
+        # 'nederlands' that the reject guard cares about.
+        best = None       # (n_covered, max_len_covered, count)
+        best_meta = None  # (value_id, value_name, count)
+        for v in (f.get("values") or []):
+            vid = v.get("id")
+            vname = v.get("facetValue") or ""
+            cnt = int(v.get("count") or 0)
+            if vid is None or cnt <= 0:
+                continue
+            if not _value_consistent_with_keyword(keyword, vname):
+                continue
+            covered = {kt for kt in ktoks
+                       if any(_tok_links(vt, kt) for vt in _tokens(vname))}
+            rank = (len(covered), max((len(t) for t in covered), default=0), cnt)
+            if best is None or rank > best:
+                best = rank
+                best_meta = (int(vid), vname, cnt)
+        if best_meta:
+            vid, vname, cnt = best_meta
+            picks.append({"facet_name": fname, "value_id": vid,
+                          "value_name": vname, "count": cnt})
+
+    def _prio(d: dict) -> int:
+        n = d["facet_name"]
+        if n in _MULTI_FACET_INTENT_NAMES or n.startswith(_MULTI_FACET_INTENT_PREFIXES):
+            return 0
+        return 1
+
+    picks.sort(key=lambda d: (_prio(d), -d["count"]))
+    return picks
+
+
+def _extract_size_facet(api_facets: Optional[list], keyword: str) -> Optional[dict]:
+    """V34: when the query names a size (XL, 122-128, …), resolve it against
+    the dom_cat's maat_* facet values from the search response. Returns
+    {facet_name, value_id, value_name} or None. Kept SEPARATE from
+    _extract_multi_facets so size is opt-in at assembly time — per-size pages
+    churn in/out of stock, so we collect the match but only append it when
+    the caller explicitly wants size honoured."""
+    from src.size_tokens import extract_sizes, match_size_value
+    sizes = extract_sizes(keyword)
+    if not sizes:
+        return None
+    for f in (api_facets or []):
+        fname = (f.get("urlName") or "").lower()
+        if not _is_size_facet(fname):
+            continue
+        values = [(v.get("id"), v.get("facetValue") or "")
+                  for v in (f.get("values") or []) if int(v.get("count") or 0) > 0]
+        hit = match_size_value(sizes, values)
+        if hit:
+            vid, vname = hit
+            return {"facet_name": fname, "value_id": int(vid), "value_name": vname}
+    return None
+
+
+def _fetch_subcat_facets(dom_slug: str, keyword: str,
+                         bucket: "_TokenBucket") -> Optional[list]:
+    """One throttled subcat-level query → the response's facets[] list (or
+    None on any error). Shared by the multi-facet and size extractors so a
+    rescued pair costs a single extra call."""
+    if not dom_slug or not keyword:
+        return None
+    bucket.acquire()
+    try:
+        params = {
+            "category": dom_slug, "query": keyword,
+            "countryLanguage": COUNTRY_LANG, "isBot": "true", "limit": "1",
+        }
+        url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
+        r = requests.get(url, timeout=TIMEOUT)
+        if r.status_code != 200:
+            return None
+        return (r.json() or {}).get("facets")
+    except Exception as e:
+        logger.debug(f"subcat facet fetch failed ({dom_slug}, {keyword!r}): {e}")
+        return None
+
+
+def _derive_multi_facets(dom_slug: str, keyword: str,
+                         bucket: "_TokenBucket") -> list[dict]:
+    """Convenience wrapper: fetch + _extract_multi_facets. Returns [] on any
+    error (the multi-facet rescue is strictly additive — a failure just
+    leaves the existing single-facet / reject behaviour in place)."""
+    return _extract_multi_facets(_fetch_subcat_facets(dom_slug, keyword, bucket), keyword)
+
+
 def _facets_df() -> pd.DataFrame:
     global _FACETS_CACHE
     if _FACETS_CACHE is None:
@@ -329,6 +489,26 @@ def _subcat_keyword_facet(dom_slug: str, keyword: str, bucket: _TokenBucket) -> 
 
 def _do_probe(maincat: str, keyword: str, v28_payload: dict,
               bucket: _TokenBucket) -> dict:
+    """Single-facet probe (see _do_probe_inner) plus the V33 multi_facets
+    list. The multi-facet assembly is cached alongside the single pick so
+    the cache-only worker can fall back to it when its single appended facet
+    would be hard-rejected for dropping a long product token."""
+    res = _do_probe_inner(maincat, keyword, v28_payload, bucket)
+    dom_slug = v28_payload.get("dom_cat_url_slug")
+    if dom_slug and res.get("mode") != "no_probe":
+        try:
+            facets = _fetch_subcat_facets(dom_slug, keyword, bucket)
+            res["multi_facets"] = _extract_multi_facets(facets, keyword)
+            size = _extract_size_facet(facets, keyword)
+            if size:
+                res["size_facet"] = size
+        except Exception as e:
+            logger.debug(f"multi-facet attach failed ({maincat}, {keyword!r}): {e}")
+    return res
+
+
+def _do_probe_inner(maincat: str, keyword: str, v28_payload: dict,
+                    bucket: _TokenBucket) -> dict:
     """Find the best facet value for this (maincat, keyword) pair.
 
     Two-stage:
