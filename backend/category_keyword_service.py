@@ -250,6 +250,7 @@ def process_category_keywords(keyword: str, categories: List[Dict]) -> Dict:
 
     # Aggregate per deepest_cat
     deepest_volumes = {}
+    deepest_combos = defaultdict(list)
     for combo, cat_info in combination_map.items():
         key = (cat_info["maincat"], cat_info["deepest_cat"], cat_info.get("maincat_id", ""), cat_info.get("cat_id", ""))
         # Normalize the combo the same way clean_keyword does
@@ -261,16 +262,20 @@ def process_category_keywords(keyword: str, categories: List[Dict]) -> Dict:
         if key not in deepest_volumes:
             deepest_volumes[key] = 0
         deepest_volumes[key] += vol
+        deepest_combos[key].append(combo)
 
     # Build deepest_cat results
     deepest_cat_results = []
     for (maincat, deepest_cat, maincat_id, cat_id), vol in deepest_volumes.items():
+        key = (maincat, deepest_cat, maincat_id, cat_id)
         deepest_cat_results.append({
             "maincat": maincat,
             "maincat_id": maincat_id,
             "deepest_cat": deepest_cat,
             "cat_id": cat_id,
             "search_volume": vol,
+            "original_keyword": keyword,
+            "combinations": deepest_combos[key],
         })
 
     deepest_cat_results.sort(key=lambda x: (x["maincat"], x["deepest_cat"]))

@@ -4127,11 +4127,14 @@ async def keyword_planner_category_volumes_download(request: dict):
         # Build output DataFrame matching input format + volume columns
         rows = []
         for r in deepest_results:
+            combos = r.get("combinations") or []
             rows.append({
                 "maincat": r.get("maincat", ""),
                 "maincat_id": r.get("maincat_id", ""),
                 "deepest_cat": r.get("deepest_cat", ""),
                 "cat_id": r.get("cat_id", ""),
+                "original_keyword": r.get("original_keyword", ""),
+                "final_keyword": "; ".join(combos),
                 "search_volume_deepest_cat": r.get("search_volume", 0),
                 "search_volume_maincat": maincat_volumes.get(r.get("maincat", ""), 0),
             })
