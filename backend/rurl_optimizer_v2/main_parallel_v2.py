@@ -592,6 +592,19 @@ def _facet_url_parts(facet_url: str):
             'subcategory_id': subcat_id}
 
 
+def _facet_fragment_superset(child_fragment, parent_fragment):
+    """True iff every facet axis (name~id) in parent_fragment is also present
+    in child_fragment AND child carries at least one extra. Used by the
+    maincat-mode rescue to adopt only strict enrichments — e.g. the cascade's
+    'fanshop~1335065' being superseded by 'fanshop~1335065~~type_sportshirts~9253235'
+    — while refusing a rescue that drops or swaps the cascade's facet."""
+    def _axes(frag):
+        return {p for p in (frag or '').split('~~') if p}
+    child = _axes(child_fragment)
+    parent = _axes(parent_fragment)
+    return bool(parent) and parent < child
+
+
 def _derive_facets_in_subtree(parsed, anchor_subcat_id, anchor_cat_name,
                               facet_filter, matcher, all_type_facets, builder):
     """Convergence helper: derive facets the global-pass way, but bounded by the
@@ -611,23 +624,40 @@ def _derive_facets_in_subtree(parsed, anchor_subcat_id, anchor_cat_name,
     of error), because every candidate lives under the URL's own category."""
     from src.parser import ParsedRUrl
 
-    if not anchor_subcat_id:
-        return None
+    # (B) maincat_mode: the URL pinned only a main category (a top-level
+    # /products/<maincat>/r/<kw>/), so there is no subcat to anchor to.
+    # Discovery is then bounded to the whole main category instead of a single
+    # subcat subtree. This is what lets a bare /products/mode/r/ URL still
+    # discover 'trainingsshirt' -> type_sportshirts (mode_432360_469350) and
+    # recombine it with the fanshop facet section 4 found on its own.
+    maincat_mode = not anchor_subcat_id
     anchor_slug = parsed.subcategory_name or ''
     search_kw = ' '.join(_split_strip_keyword(parsed.keyword, anchor_cat_name))
-    if not search_kw.strip() or not anchor_slug:
+    if not search_kw.strip():
+        return None
+    if maincat_mode:
+        if not parsed.main_category:
+            return None
+    elif not anchor_slug:
         return None
 
     def _accept(res):
         return res if (res and getattr(res, 'facet_count', 0) >= 1) else None
 
-    # (1)+(2) type-facet discovery constrained to the anchor subtree.
+    # (1)+(2) type-facet discovery constrained to the anchor scope: the anchor
+    # subtree (subcat mode) or the whole main category (maincat mode).
     subtree_types = []
     for fv in (all_type_facets or []):
         cp = _facet_url_parts(fv.url)
-        slug = cp['subcategory_name'] if cp else ''
-        if slug == anchor_slug or slug.startswith(anchor_slug + '_'):
-            subtree_types.append(fv)
+        if not cp:
+            continue
+        if maincat_mode:
+            if cp.get('main_category') == parsed.main_category:
+                subtree_types.append(fv)
+        else:
+            slug = cp['subcategory_name']
+            if slug == anchor_slug or slug.startswith(anchor_slug + '_'):
+                subtree_types.append(fv)
 
     result = None
     if subtree_types:
@@ -662,7 +692,9 @@ def _derive_facets_in_subtree(parsed, anchor_subcat_id, anchor_cat_name,
                         result = _accept(res)
 
     # (3) fallback: multi-facet match directly in the anchor subcat.
-    if not result:
+    # Skipped in maincat mode — there is no anchor subcat, and a maincat-wide
+    # multi-match would just reproduce section 4's facet-collapse.
+    if not result and not maincat_mode:
         afacets = facet_filter.get_facet_values(
             facet_filter.filter_by_subcategory(anchor_subcat_id))
         if afacets:
@@ -1287,11 +1319,17 @@ def process_url_v2(args):
     # <=2 lets a thin 2-facet cascade (e.g. samsung TV -> merk + 4K Ultra HD)
     # be enriched with the dimension facet (55 inch) it missed, without paying
     # the rescue cost on already-rich (3+ facet) results.
+    # (B) The rescue also runs for top-level /products/<maincat>/r/<kw>/ URLs
+    # that pin only a main category (no subcategory_id). Section 4's maincat
+    # match collapses a multi-axis query (fanshop + type) to the single
+    # best-covered facet value and emits that value's standalone subcat, so the
+    # type axis is lost. Anchored to the main category, discovery can re-find
+    # the type facet, pin the right subcat, and recombine both facets.
     _cascade_fc = getattr(result, 'facet_count', 0) if result else 0
-    if parsed.subcategory_id and (not result or _cascade_fc <= 2):
+    if (parsed.subcategory_id or parsed.main_category) and (not result or _cascade_fc <= 2):
         _sub_nm = category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else ''
         _resc = _derive_facets_in_subtree(
-            parsed, parsed.subcategory_id, _sub_nm,
+            parsed, parsed.subcategory_id or None, _sub_nm,
             facet_filter, matcher, all_type_facets, builder,
         )
         if _resc and getattr(_resc, 'facet_count', 0) >= 1:
@@ -1309,10 +1347,26 @@ def process_url_v2(args):
             _adopt = False
             if not result or _cascade_fc == 0:
                 _adopt = True
-            elif (extract_subcategory_id_from_url(_resc.redirect_url)
-                  == extract_subcategory_id_from_url(result.redirect_url)
-                  and _resc_fc > _cascade_fc):
-                _adopt = True
+            elif parsed.subcategory_id:
+                # Anchored baseline: enrich ONLY within the same destination
+                # subcat, so a different-subcat thin match stays put
+                # (alcatel_senioren_mobiel → Mobiele telefoons isn't flipped).
+                if (extract_subcategory_id_from_url(_resc.redirect_url)
+                        == extract_subcategory_id_from_url(result.redirect_url)
+                        and _resc_fc > _cascade_fc):
+                    _adopt = True
+            else:
+                # (B) maincat-only baseline: the URL pinned no subcat, so there
+                # is no anchor to respect. Adopt when the rescue strictly
+                # enriches the cascade — every cascade facet preserved plus a
+                # type facet that pins a more specific subcat (fanshop ->
+                # fanshop + type_sportshirts). The superset test refuses a
+                # rescue that drops or swaps the cascade's facet.
+                if (_resc_fc > _cascade_fc
+                        and _facet_fragment_superset(
+                            getattr(_resc, 'facet_fragment', ''),
+                            getattr(result, 'facet_fragment', ''))):
+                    _adopt = True
             if _adopt:
                 _resc.reason = "[subtree-rescue] " + (_resc.reason or '')
                 result = _resc

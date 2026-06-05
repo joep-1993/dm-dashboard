@@ -592,7 +592,39 @@ class KeywordMatcher:
         if self.use_token_coverage:
             tc = self.match_by_token_coverage(keyword, facet_values)
             if tc.is_match:
-                return [tc]
+                # V35: tc is the single best facet VALUE for the whole keyword,
+                # which is exactly right when every keyword token belongs to one
+                # axis ("vaste senioren telefoons" → one type_telefoon value).
+                # But a keyword can span multiple axes — e.g.
+                # "nederlands elftal trainingsshirt" → fanshop "Nederlands Elftal"
+                # AND type "Trainingsshirts". The old early `return [tc]`
+                # collapsed those to a single facet, dropping the type axis (and
+                # with it the subcat it would have pinned). Instead, keep tc
+                # authoritative for ITS axis (preserving the V29 fix) and run the
+                # per-word cascade with token-coverage OFF to graft on matches
+                # that land on OTHER axes.
+                tc_axis = (tc.facet_value.facet_name.lower()
+                           if tc.facet_value else '')
+                self.use_token_coverage = False
+                try:
+                    others = self.match_multi_word(
+                        keyword, facet_values,
+                        all_type_facets=all_type_facets,
+                        require_type_for_merk=require_type_for_merk,
+                        current_main_category=current_main_category,
+                        category_name=category_name,
+                    )
+                finally:
+                    self.use_token_coverage = True
+                merged = [tc]
+                seen_axes = {tc_axis}
+                for r in others:
+                    ax = (r.facet_value.facet_name.lower()
+                          if r.facet_value else '')
+                    if ax and ax not in seen_axes:
+                        merged.append(r)
+                        seen_axes.add(ax)
+                return merged
 
         words = keyword.split()
         results = []
