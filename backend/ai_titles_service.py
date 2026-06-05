@@ -2330,6 +2330,62 @@ def _v3_preserves_content(composed: str, polished: str) -> bool:
     return True
 
 
+# Audience / doelgroep words that the polish AI sometimes half-agglutinates into
+# non-words ("Dames Kleding" -> "Damest Kleding" / "Damess Kleding"). These have
+# a small CLOSED set of valid surface forms, so a strict check here is safe and
+# won't over-reject legitimate inflection of ordinary adjectives.
+_V3_AUDIENCE_WORDS = {
+    'dames', 'heren', 'kinder', 'kinderen', 'meisjes', 'jongens', 'unisex',
+}
+
+
+def _v3_polish_mangled_audience(composed: str, polished: str) -> bool:
+    """Return True if the polish step corrupted an audience word.
+
+    The observed failure: the AI starts to agglutinate "Dames" with the
+    following product noun but emits a truncated non-word standalone token —
+    "Dames Kleding" -> "Damest Kleding" / "Damess Kleding". The generic
+    content guard misses this because "dames" is a substring of "damest".
+
+    A polished token that starts with an audience word X (from the composed
+    H1) and has trailing characters is only legitimate when those trailing
+    characters form a full agglutination (the rest is another composed token,
+    e.g. "dames"+"kleding"="dameskleding"), or for the one in-set inflection
+    "kinder"->"kinderen". These words are already plural ("dames"/"heren"/
+    "meisjes"/"jongens"), so a bare consonant suffix — a stray consonant
+    ("damest"), a doubled final consonant ("damess"), an invalid plural
+    ("herens"), or a partial fragment ("dameskled") — is always the mangling,
+    and the caller falls back to the clean deterministic composed_h1.
+    """
+    if not composed or not polished:
+        return False
+    composed_tokens = {t.lower() for t in re.findall(r"[\w\-]+", composed)}
+    audience_present = composed_tokens & _V3_AUDIENCE_WORDS
+    if not audience_present:
+        return False
+    for ptok in re.findall(r"[A-Za-zÀ-ÿ]+", polished):
+        pl = ptok.lower()
+        for x in audience_present:
+            if pl == x or not pl.startswith(x) or len(pl) <= len(x):
+                continue
+            suffix = pl[len(x):]
+            # Full agglutination: the rest is itself a composed token
+            # (optionally inflected with a trailing e/en/s).
+            if (suffix in composed_tokens
+                    or (len(suffix) > 2 and suffix[:-1] in composed_tokens)
+                    or (len(suffix) > 3 and suffix[:-2] in composed_tokens)):
+                break
+            # The ONLY legit single-token inflection in this closed set is
+            # kinder -> kinderen. None of these words take a trailing -s/-t
+            # ("dames"/"heren"/"meisjes"/"jongens" are already plural), so a
+            # bare consonant suffix ("herens", "damest") is always the mangling.
+            if x == 'kinder' and pl == 'kinderen':
+                break
+            # Anything else is a mangled audience word.
+            return True
+    return False
+
+
 def generate_title_v3(url: str, polish: bool = True) -> Optional[Dict]:
     """v3 pipeline: deterministic compose + (optional) AI polish.
 
@@ -2430,6 +2486,9 @@ def generate_title_v3(url: str, polish: bool = True) -> Optional[Dict]:
         polished = composed_h1
     elif not _v3_preserves_brands(composed_h1, polished, selected_facets):
         print(f"[AI_TITLES_V3] polish swallowed a brand into a compound for {url}; falling back to composed_h1")
+        polished = composed_h1
+    elif _v3_polish_mangled_audience(composed_h1, polished):
+        print(f"[AI_TITLES_V3] polish mangled an audience word for {url}; falling back to composed_h1")
         polished = composed_h1
 
     # NOTE: v3 deliberately does NOT run _apply_hallucination_guard. The
