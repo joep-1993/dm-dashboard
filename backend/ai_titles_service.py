@@ -2213,12 +2213,23 @@ def _build_v3_h1(selected_facets: list, category_name: str,
     parts.extend(materials)
     parts.extend(other_adj_values)
     parts.extend(doelgroep)
-    parts.extend(pre_noun)
-    # Noun slot: the real category when present, else the type-facet value(s)
-    # that carry the product noun (category suppressed via override).
+    # Noun slot. position='pre_noun' facets bind to the HEAD noun (the last
+    # word) so a leading category modifier stays in front of them, rather than
+    # sitting ahead of the whole category phrase:
+    #   "Korte broeken" + pre_noun "Fiets"        -> "Korte Fiets broeken"
+    #   category suppressed: pre_noun "Honden" +
+    #     type-facet noun "Bench"                 -> "Honden Bench"
     if category_name:
-        parts.append(category_name)
+        if pre_noun:
+            _cat_toks = category_name.split()
+            parts.extend(_cat_toks[:-1])   # leading category modifiers ("Korte")
+            parts.extend(pre_noun)         # pre-noun facet(s) ("Fiets")
+            parts.append(_cat_toks[-1])    # category head noun ("broeken")
+        else:
+            parts.append(category_name)
     else:
+        # Category suppressed — the type-facet value(s) carry the product noun.
+        parts.extend(pre_noun)
         parts.extend(noun_values)
     parts.extend(post_category)
     parts.extend(met_clauses)
@@ -2354,7 +2365,8 @@ def _v3_polish_mangled_audience(composed: str, polished: str) -> bool:
     "kinder"->"kinderen". These words are already plural ("dames"/"heren"/
     "meisjes"/"jongens"), so a bare consonant suffix — a stray consonant
     ("damest"), a doubled final consonant ("damess"), an invalid plural
-    ("herens"), or a partial fragment ("dameskled") — is always the mangling,
+    ("herens"), a partial fragment ("dameskled"), or fusion with a following
+    attributive adjective ("heren"+"korte" -> "herenkorte") — is the mangling,
     and the caller falls back to the clean deterministic composed_h1.
     """
     if not composed or not polished:
@@ -2369,11 +2381,21 @@ def _v3_polish_mangled_audience(composed: str, polished: str) -> bool:
             if pl == x or not pl.startswith(x) or len(pl) <= len(x):
                 continue
             suffix = pl[len(x):]
-            # Full agglutination: the rest is itself a composed token
-            # (optionally inflected with a trailing e/en/s).
-            if (suffix in composed_tokens
-                    or (len(suffix) > 2 and suffix[:-1] in composed_tokens)
-                    or (len(suffix) > 3 and suffix[:-2] in composed_tokens)):
+            # Full agglutination with the product NOUN (e.g. "dames"+"kleding").
+            # The merged composed token must be a noun, NOT an attributive
+            # adjective: Dutch modifiers are inflected to end in -e ("korte",
+            # "lange", "grote"), so fusing the audience word with one of them
+            # ("heren"+"korte" -> "herenkorte") is the mangling, not a real
+            # compound. Product nouns ("schoenen", "broeken", "kleding") don't
+            # end in -e, so require the merged token not to.
+            _aggl = None
+            if suffix in composed_tokens:
+                _aggl = suffix
+            elif len(suffix) > 2 and suffix[:-1] in composed_tokens:
+                _aggl = suffix[:-1]
+            elif len(suffix) > 3 and suffix[:-2] in composed_tokens:
+                _aggl = suffix[:-2]
+            if _aggl and not _aggl.endswith('e'):
                 break
             # The ONLY legit single-token inflection in this closed set is
             # kinder -> kinderen. None of these words take a trailing -s/-t
@@ -2381,7 +2403,7 @@ def _v3_polish_mangled_audience(composed: str, polished: str) -> bool:
             # bare consonant suffix ("herens", "damest") is always the mangling.
             if x == 'kinder' and pl == 'kinderen':
                 break
-            # Anything else is a mangled audience word.
+            # Anything else (mangled token, or fusion with an adjective) is bad.
             return True
     return False
 
