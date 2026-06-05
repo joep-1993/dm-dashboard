@@ -149,6 +149,8 @@ _POSITION_LABEL_NL = {
     'start': 'helemaal vooraan',
     'end': 'helemaal achteraan',
     'start_or_end': 'OF helemaal vooraan OF helemaal achteraan (niet ergens in het midden)',
+    'pre_noun': 'direct vóór de productnaam/categorie',
+    'end_before_size': 'helemaal achteraan, maar vóór maten/aantallen',
 }
 
 
@@ -2067,13 +2069,25 @@ Titel: "{composed_h1}"
 Geef ALLEEN de gepolijste titel terug, geen uitleg."""
 
 
-def _build_v3_h1(selected_facets: list, category_name: str) -> str:
+def _build_v3_h1(selected_facets: list, category_name: str,
+                 noun_facet_ids: Optional[set] = None) -> str:
     """Compose an H1 from the facets without using Beslist's api_h1 or the AI.
 
     Slot order:
         <colour> <merk> <populaire_serie> <type_productlijn> <productlijn>
-        <materials> <other adjectives> <doelgroep> <category>
-        <met-clauses> <voor-clauses> <color-combos> <size>
+        <materials> <other adjectives> <doelgroep> <pre_noun> <category/noun>
+        <post_category> <met-clauses> <voor-clauses> <color-combos>
+        <end_before_size> <size> <conditions>
+
+    `noun_facet_ids` is a set of id() of the facets that carry the product
+    noun (type-facets, e.g. soort_winterjas→"Puffer jackets" when the category
+    is suppressed). Their values are routed to the NOUN slot instead of the
+    free-floating adjective bucket, so a higher-order_index adjective can never
+    land *behind* the noun (the "...Puffer jackets Zakelijke" bug).
+
+    Two `position` pins from pa.facet_position_rules get dedicated slots:
+      * 'pre_noun'        → directly in front of the category/noun
+      * 'end_before_size' → at the very end, but ahead of sizes/quantities
 
     Uses detail_value (SOD) — Beslist's prefix-friendly form. Same dedup
     safety nets the v1 pipeline runs are applied at the end.
@@ -2090,6 +2104,9 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
     materials: List[str] = []
     other_adj: List[tuple] = []   # (order_index, value) — sorted by Excel order after loop
     post_category: List[str] = [] # facets with position='end' rule — placed AFTER category
+    pre_noun: List[str] = []      # position='pre_noun' — directly in front of the noun
+    end_before_size: List[str] = []  # position='end_before_size' — last, but before sizes
+    noun_values: List[str] = []   # type-facet values that carry the product noun
     doelgroep: List[str] = []
     met_clauses: List[str] = []
     voor_values: List[str] = []
@@ -2103,11 +2120,24 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
         url_slug = (f.get('url_name') or '').lower()
         fname = (f.get('facet_name') or '').lower()
         rule = _pos_rules.get(url_slug, {}) if _pos_rules else {}
+        # Noun-carrying type-facet: its value IS the product noun (the category
+        # was suppressed). Route to the NOUN slot so adjectives with a higher
+        # order_index can't sort behind it. Wins over every other bucket.
+        if noun_facet_ids and id(f) in noun_facet_ids:
+            noun_values.append(sod); continue
+        _pos = rule.get('position')
         # Hard pin to post-category: position='end' wins over all other bucket
         # routing (the slug-author has explicitly said "this value reads after
         # the productnoun, not in front of it").
-        if rule.get('position') == 'end':
+        if _pos == 'end':
             post_category.append(sod); continue
+        # Directly in front of the category/noun (e.g. type_sportkleding).
+        if _pos == 'pre_noun':
+            pre_noun.append(sod); continue
+        # At the very end, but ahead of sizes/quantities (e.g.
+        # dier_dierenbenodigdheden).
+        if _pos == 'end_before_size':
+            end_before_size.append(sod); continue
         if is_spec_value(sod, fname):
             # Mirror v1's size normalization (see generate_title_from_api):
             # prepend "Maat" to bare maat-numbers, and de-inflect a trailing
@@ -2183,11 +2213,18 @@ def _build_v3_h1(selected_facets: list, category_name: str) -> str:
     parts.extend(materials)
     parts.extend(other_adj_values)
     parts.extend(doelgroep)
-    parts.append(category_name)
+    parts.extend(pre_noun)
+    # Noun slot: the real category when present, else the type-facet value(s)
+    # that carry the product noun (category suppressed via override).
+    if category_name:
+        parts.append(category_name)
+    else:
+        parts.extend(noun_values)
     parts.extend(post_category)
     parts.extend(met_clauses)
     parts.extend(voor_values)
     parts.extend(color_combos)
+    parts.extend(end_before_size)
     parts.extend(sizes)
     parts.extend(conditions)
 
@@ -2346,10 +2383,12 @@ def generate_title_v3(url: str, polish: bool = True) -> Optional[Dict]:
             return True
         return bool(type_class.get((f.get('facet_name') or '').lower().strip(), False))
 
-    has_category_override = any(_is_type_facet_for(f) for f in selected_facets)
+    noun_facet_ids = {id(f) for f in selected_facets if _is_type_facet_for(f)}
+    has_category_override = bool(noun_facet_ids)
     effective_category = '' if has_category_override else category_name
 
-    composed_h1 = _build_v3_h1(selected_facets, effective_category)
+    composed_h1 = _build_v3_h1(selected_facets, effective_category,
+                               noun_facet_ids=noun_facet_ids)
     if not composed_h1:
         print(f"[AI_TITLES_V3] empty composed h1 for {url} — falling back to api_h1")
         return {"h1_title": api_h1, "original_h1": api_h1, "composed_h1": ""}
