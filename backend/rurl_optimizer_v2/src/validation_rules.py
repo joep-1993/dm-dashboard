@@ -137,7 +137,9 @@ STOPWORDS = {
     # --- Nederlandse grammatica (V6, V27 uitgebreid) ---
     # Voorzetsels / lidwoorden / voegwoorden
     'de', 'het', 'een', 'en', 'of', 'met', 'voor', 'van', 'naar', 'aan',
-    'op', 'in', 'uit', 'bij', 'tot', 'over', 'onder', 'tegen', 'door',
+    # 'uit' deliberately NOT a stopword: in fanshop/voetbal context it is the
+    # away-kit qualifier (ut_voetbalshirt "Uit"), e.g. /r/nederlands_elftal_shirt_uit/.
+    'op', 'in', 'bij', 'tot', 'over', 'onder', 'tegen', 'door',
     'te', 'om', 'als', 'dan', 'dat', 'die', 'deze', 'dit',
     'maar', 'want', 'dus', 'toch',
 

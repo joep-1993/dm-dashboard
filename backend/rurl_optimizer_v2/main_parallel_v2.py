@@ -605,11 +605,58 @@ def _facet_fragment_superset(child_fragment, parent_fragment):
     return bool(parent) and parent < child
 
 
+def _resolve_category_noun_anchor(keyword, categories_df, main_category, matcher,
+                                  min_score=95):
+    """Return {'subcat_id','url_name','display_name'} for the best (sub)category
+    whose display name a keyword token NAMES (score >= min_score), within
+    main_category; else None.
+
+    A query token that names a category is a category signal, not a facet:
+    'shirt' -> "Shirts" (mode_432360). Resolving that anchor lets the caller
+    keep the head-noun out of facet matching, so a generic noun never drives a
+    mono-category facet (type_sportshirts lives only in Sportshirts) and
+    over-narrows the redirect. Specific compounds ('trainingsshirt',
+    'voetbalshirt') do NOT name a category, so they fall through to the normal
+    type-facet discovery and can still descend to a child."""
+    import re as _re
+    if categories_df is None or not keyword:
+        return None
+    candidates = [keyword] + [t for t in _re.split(r'[\s_-]+', keyword.lower())
+                              if len(t) >= 4]
+    best, seen = None, set()
+    for cand in candidates:
+        if cand in seen:
+            continue
+        seen.add(cand)
+        m = matcher.match_subcategory_name(cand, categories_df,
+                                           main_category=main_category)
+        if m and m.get('score', 0) >= min_score:
+            if best is None or m['score'] > best['score']:
+                best = m
+    if not best:
+        return None
+    url_name = best.get('url_name', '')
+    subcat_id = ''
+    for p in reversed(url_name.split('_')):
+        if p.isdigit():
+            subcat_id = p
+            break
+    if not subcat_id:
+        return None
+    return {'subcat_id': subcat_id, 'url_name': url_name,
+            'display_name': best.get('matched_category', '')}
+
+
 def _derive_facets_in_subtree(parsed, anchor_subcat_id, anchor_cat_name,
-                              facet_filter, matcher, all_type_facets, builder):
+                              facet_filter, matcher, all_type_facets, builder,
+                              categories_df=None):
     """Convergence helper: derive facets the global-pass way, but bounded by the
     category the URL already pins.
 
+    (C) When the URL pins only a main category and categories_df is supplied, a
+        keyword token that NAMES a (sub)category ('shirt' -> "Shirts") first
+        anchors that category — keeping the generic head-noun out of facet
+        matching so it can't drive a mono-category facet (type_sportshirts).
     (1) Tokenize the keyword on hyphens + drop the bare category noun.
     (2) Discover the best type facet WITHIN the anchor's subtree (the anchor
         subcat + any deeper child) to find the right child subcat — e.g.
@@ -632,6 +679,22 @@ def _derive_facets_in_subtree(parsed, anchor_subcat_id, anchor_cat_name,
     # recombine it with the fanshop facet section 4 found on its own.
     maincat_mode = not anchor_subcat_id
     anchor_slug = parsed.subcategory_name or ''
+
+    # (C) Category-noun anchoring (maincat mode). A query token that NAMES a
+    # (sub)category is a category signal, not a facet: 'shirt' -> "Shirts"
+    # (mode_432360). Anchor there and strip the noun, so a generic head-noun
+    # never drives a mono-category facet like type_sportshirts (only present in
+    # Sportshirts) and over-narrows the redirect. Remaining specific tokens can
+    # still descend to a child via the type-facet discovery below.
+    if maincat_mode and categories_df is not None and parsed.main_category:
+        cat_anchor = _resolve_category_noun_anchor(
+            parsed.keyword, categories_df, parsed.main_category, matcher)
+        if cat_anchor:
+            anchor_subcat_id = cat_anchor['subcat_id']
+            anchor_cat_name = cat_anchor['display_name']
+            anchor_slug = cat_anchor['url_name']
+            maincat_mode = False
+
     search_kw = ' '.join(_split_strip_keyword(parsed.keyword, anchor_cat_name))
     if not search_kw.strip():
         return None
@@ -703,7 +766,23 @@ def _derive_facets_in_subtree(parsed, anchor_subcat_id, anchor_cat_name,
                 require_type_for_merk=True,
                 current_main_category=parsed.main_category)
             if multi:
-                res = builder.build_multi_facet(parsed, multi)
+                # When the anchor came from a category-noun match (not the URL),
+                # parsed has no subcat — build against a pseudo pinned to the
+                # anchor so the redirect lands on e.g. mode_432360 "Shirts".
+                if parsed.subcategory_id == anchor_subcat_id:
+                    build_parsed = parsed
+                else:
+                    build_parsed = ParsedRUrl(
+                        original_url=parsed.original_url,
+                        category_path=f"{parsed.main_category}/{anchor_slug}",
+                        full_category_path=f"/products/{parsed.main_category}/{anchor_slug}",
+                        main_category=parsed.main_category,
+                        subcategory_id=anchor_subcat_id,
+                        subcategory_name=anchor_slug,
+                        keyword=parsed.keyword,
+                        existing_facet=getattr(parsed, 'existing_facet', '') or '',
+                    )
+                res = builder.build_multi_facet(build_parsed, multi)
                 res.reason = f"[subtree_anchor] {res.reason}"
                 result = _accept(res)
 
@@ -1331,6 +1410,7 @@ def process_url_v2(args):
         _resc = _derive_facets_in_subtree(
             parsed, parsed.subcategory_id or None, _sub_nm,
             facet_filter, matcher, all_type_facets, builder,
+            categories_df=d.get('categories_df'),
         )
         if _resc and getattr(_resc, 'facet_count', 0) >= 1:
             # Adoption rules, ordered safest-first:
