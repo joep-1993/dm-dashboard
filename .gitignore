@@ -95,3 +95,6 @@ docs/indexnow_n8n.json
 # Local scratch
 changes.md
 backend/data/rurl_optimizer_history.json
+
+# rurl_optimizer_v2 runtime cache (319MB search_derived.sqlite etc — not source)
+backend/rurl_optimizer_v2/data/
