@@ -1,6 +1,67 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## R-URL optimizer: V34 size facet on by default (2026-06-06)
+User asked why Auto-Redirects proposed `/products/mode/mode_432360/c/fanshop~1335065~~ut_voetbalshirt~9134156`
+for `/products/mode/r/nederlands_elftal_shirt_thuis_junior_maat_122-128_(xs)/`
+and dropped the size. The size machinery (`src/size_tokens.py`) DOES recognise
+`122-128`/`(xs)` and collect the match — it was just never emitted, gated behind
+the `RESCUE_INCLUDE_SIZE` flag (off by default because per-size pages churn in/out
+of stock). User asked to flip it on by default. Commit `04b0653`.
+
+- **There are TWO facet-assembly paths and the flag only governed one.** Know
+  which path a URL hits before debugging a missing facet (check the `reason`
+  prefix):
+  1. **V28 search-derived rescue** (`main_parallel_v2.py` ~line 1789) — fires
+     only when the Search API finds a dominant deepest cat (`dom_cat_share >=
+     0.75`, `DOMINANCE_THRESHOLD`). Consumes `multi_facets` + `size_facet` from
+     the facet-probe cache. This was the ONLY path that read `RESCUE_INCLUDE_SIZE`.
+  2. **`[child_subcat]` / `[V14 subcategory_match]`** (`_append_facet_to_subcat_redirect`,
+     ~line 337) — fires when a subcategory NAME matches; appends facets by fuzzy-
+     matching leftover tokens against the target subcat's facet pool. Has its own
+     assembler and never touched the flag.
+  The example URL resolves via path #2, so flipping the flag alone changed
+  nothing for it. Worse, even path #1 wouldn't have fired here: the cached search
+  signal had `dom_cat_name=Voetbaltenues dom_cat_share=0.36` (below 0.75) and the
+  probe payload had no `size_facet` — and that dom_cat (`mode_4850293_7296077`) is
+  a DIFFERENT category from where the winning redirect lands (Shirts `mode_432360`),
+  so its maat values wouldn't even apply.
+
+- **Flag lives in three spots — flip all three or the subprocess overrides you.**
+  `RESCUE_INCLUDE_SIZE` module global (for direct imports), `init_worker_v2(...,
+  rescue_include_size=...)` default (multiprocessing workers re-set the global per
+  worker), and the CLI arg (the subprocess path argparse-parses, then passes into
+  `init_worker_v2` initargs). The CLI was `action='store_true'` (defaults False),
+  so it would force the worker back to False even with the global flipped. Changed
+  to `argparse.BooleanOptionalAction default=True` (Python 3.9+, env is 3.12) →
+  on by default with `--no-rescue-include-size` as the off-switch. The FastAPI
+  service (`rurl_optimizer_v2_service.py`) builds argv WITHOUT the flag, so it now
+  inherits the size-on worker default.
+
+- **Fix for path #2: deterministic size append.** The fuzzy leftover collector
+  (`_collect_longest_per_axis_from_leftover`) can't match numeric/short sizes —
+  `122-128` is numeric, `XL` is <3 chars, both fail its len/fuzzy gates (this is
+  exactly why `size_tokens.py` exists). Added a flag-gated step after the merk
+  pass in `_append_facet_to_subcat_redirect`: `extract_sizes(parsed.keyword)` →
+  `match_size_value(...)` against `[fv for fv in facet_values if _is_size_facet(fv.facet_name)]`,
+  then append the matching FacetValue (wrapped in a `MatchResult`, `match_type='size_token'`).
+  Skipped if a size axis was already collected, so no double-append.
+
+- **`match_size_value` prefers letter over numeric** when both are present. Title
+  "maat 122-128 (xs)" → picks `maat_mode_bovenkleding~471667` (XS), not `~23811956`
+  (122/128). Both are valid maat values in the Shirts subcat; if you ever want the
+  numeric form, that preference is in `size_tokens.match_size_value`
+  (`return letter_hit or numeric_hit`).
+
+- **Verified live; quantifies the thin-page tradeoff.** Search API for category
+  `mode_432360` with the assembled filters: fanshop+voetbalshirt = 32 products;
+  +maat XS (471667) = 2; +maat 122/128 (23811956) = 1. The page resolves, but
+  size-narrowing is now ON for every run — these thin pages can empty out when
+  that size sells out. That's the documented reason the flag was off; user
+  accepted the tradeoff. No linter configured → validate with
+  `dm-tools/venv/bin/python -m py_compile` (and run via the venv python, not
+  system python — workers crash silently without `fuzzywuzzy`).
+
 ## R-URL optimizer: main-pass multi-facet convergence via subtree rescue (2026-06-03)
 Follow-up to the 2026-06-02 hyphen/facet work. A category-pinned R-URL
 `/products/mode/mode_432360/r/nike-nederlands-elftal-trainingsshirt/` collapsed
