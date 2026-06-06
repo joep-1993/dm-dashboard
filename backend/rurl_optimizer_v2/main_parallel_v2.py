@@ -94,15 +94,18 @@ _worker_data = None
 
 
 # V34: when True, the multi-facet rescue appends an explicit query size
-# (XL, 122-128) onto the assembled /c/ URL. Off by default because per-size
-# pages churn in/out of stock — the size match is always COLLECTED in the
-# probe cache, but only emitted when this is set (CLI: --rescue-include-size).
+# (XL, 122-128) onto the assembled /c/ URL. ON by default (2026-06-06) — the
+# size match is always COLLECTED in the probe cache and is now emitted unless
+# explicitly disabled (CLI: --no-rescue-include-size). NOTE: per-size pages
+# churn in/out of stock faster than the type/fanshop/colour axes, so a
+# size-narrowed redirect can go thin if that size sells out; disable per-run
+# with --no-rescue-include-size if that's a concern.
 # Worker processes pick it up via init_worker_v2 initargs.
-RESCUE_INCLUDE_SIZE = False
+RESCUE_INCLUDE_SIZE = True
 
 
 def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=True,
-                   rescue_include_size=False):
+                   rescue_include_size=True):
     """Initialize worker with pre-cached data."""
     global _worker_data, RESCUE_INCLUDE_SIZE
     RESCUE_INCLUDE_SIZE = rescue_include_size
@@ -437,6 +440,36 @@ def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_fi
     )
     if merk_match:
         appends.append(merk_match)
+
+    # V34: deterministic size append (flag-gated). The fuzzy leftover collector
+    # above can't match clothing/shoe sizes ("122-128", "XL") — they're <3 chars
+    # or numeric, so size_tokens does it deterministically against this subcat's
+    # own maat_* values. Appended last (least navigational intent) and only when
+    # RESCUE_INCLUDE_SIZE is on, mirroring the V28 search-derived rescue. Skipped
+    # if a size axis was somehow already collected, so we never double-append.
+    if RESCUE_INCLUDE_SIZE:
+        from src.matcher import MatchResult
+        from src.facet_probe import _is_size_facet
+        from src.size_tokens import extract_sizes, match_size_value
+        already_size = any(_is_size_facet(m.facet_value.facet_name) for m in appends)
+        sizes = extract_sizes(parsed.keyword) if not already_size else []
+        if sizes:
+            size_fvs = [fv for fv in facet_values if _is_size_facet(fv.facet_name)]
+            hit = match_size_value(sizes, [(fv.facet_value_id, fv.facet_value_name)
+                                           for fv in size_fvs])
+            if hit:
+                hit_id = hit[0]
+                size_fv = next((fv for fv in size_fvs
+                                if fv.facet_value_id == hit_id), None)
+                if size_fv is not None:
+                    appends.append(MatchResult(
+                        keyword=parsed.keyword,
+                        facet_value=size_fv,
+                        match_type='size_token',
+                        score=90,
+                        matched_text=size_fv.facet_value_name,
+                    ))
+
     if not appends:
         return result
 
@@ -2116,13 +2149,16 @@ def main():
                              "the V28 base response's facets[] (no extra calls); "
                              'stage 2 falls back to per-value filter probes. '
                              'Same SEARCH_QPS budget as V28 prefetch.')
-    parser.add_argument('--rescue-include-size', action='store_true',
-                        help='V34 EXPERIMENTAL: when the multi-facet rescue '
-                             'fires and the query names a size (XL, 122-128), '
-                             'append the matching maat_* facet so the landing '
-                             'page is size-narrowed. Off by default — per-size '
-                             'pages churn in/out of stock, so the broader '
-                             'category page is usually the safer redirect.')
+    parser.add_argument('--rescue-include-size',
+                        dest='rescue_include_size',
+                        action=argparse.BooleanOptionalAction, default=True,
+                        help='V34: when the multi-facet rescue fires and the '
+                             'query names a size (XL, 122-128), append the '
+                             'matching maat_* facet so the landing page is '
+                             'size-narrowed. ON by default (2026-06-06); pass '
+                             '--no-rescue-include-size to fall back to the '
+                             'broader category page (per-size pages churn '
+                             'in/out of stock).')
 
     args = parser.parse_args()
 
