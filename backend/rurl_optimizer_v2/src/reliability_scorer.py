@@ -185,6 +185,18 @@ def calculate_reliability_score(
     # ==========================================================================
 
     if match_type == 'subcategory_name':
+        # V32: subcategory-name matches now get the SAME unmatched-token
+        # treatment as facet matches. A long unmatched qualifier (e.g.
+        # "waterdicht" in "tuinkasten waterdicht" -> bare "Tuinkasten") or a
+        # generic-only match hard-rejects to 0, exactly as it would on the
+        # facet path below. Previously this branch returned early and skipped
+        # the rule entirely, so a subcategory redirect could silently drop a
+        # long product qualifier and still score 95. Requires the caller to
+        # compute real matched/unmatched_keywords for subcategory matches
+        # (see main_parallel_v2: subcategory_name removed from TRUSTED).
+        if _v27_reject_reason(matched_keywords, unmatched_keywords, match_type=match_type) is not None:
+            return 0
+
         # Subcategorie naam match - speciale scoring
         if match_score == 100:
             # Exact match met subcategorie naam = Tier A

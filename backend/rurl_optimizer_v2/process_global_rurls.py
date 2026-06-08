@@ -489,8 +489,9 @@ def process_global_url(args):
         )
         reliability_tier = get_reliability_tier(reliability_score)
     # V27: only surface the reason when the scorer actually rejected
-    # (score=0). Subcategory-name matches return early in the scorer and
-    # would otherwise carry a misleading flag.
+    # (score=0). V32: subcategory-name matches now run V27 in the scorer too,
+    # so this surfaces their long-unmatched rejections; the score==0 gate
+    # still avoids a misleading flag on rows whose score was never reduced.
     reject_reason = (
         _v27_reject_reason(matched_keywords, unmatched_keywords, match_type=r.match_type) or ''
         if reliability_score == 0 else ''

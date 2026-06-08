@@ -1539,9 +1539,13 @@ def process_url_v2(args):
         # e.g. "senioren telefoon" → "Senioren mobiel" (via synonym) gets
         # 'telefoon' marked unmatched, V27 long-unmatched fires, score
         # drops to 0, V28 rescue overrides the good match with bare subcat.
+        # V32: subcategory_name removed from the trusted set. We now always
+        # look for unmatched query parts in subcategory-name matches and treat
+        # them the same as facet matches (coverage penalty + V27 long-unmatched
+        # hard-reject in the scorer). 'synonym'/'token_coverage' stay trusted
+        # because their matchers already validate intent semantically.
         TRUSTED_MATCH_TYPES = {
             'synonym', 'token_coverage',
-            'subcategory_name',  # already returns early in scorer
         }
         if r.match_type in TRUSTED_MATCH_TYPES:
             for word in keyword_words:
@@ -1634,9 +1638,10 @@ def process_url_v2(args):
         )
         reliability_tier = get_reliability_tier(reliability_score)
     # V27: Only surface the rejection reason when the scorer actually
-    # acted on it (score dropped to 0). The subcategory_name scoring branch
-    # returns early before V27 runs, so without this gate the export would
-    # show a "rejected" reason on rows whose score was never reduced.
+    # acted on it (score dropped to 0). V32: the subcategory_name branch now
+    # also runs V27, so this correctly surfaces long-unmatched rejections for
+    # subcategory matches too; the gate still suppresses the reason on rows
+    # whose score was never reduced.
     reject_reason = (
         _v27_reject_reason(matched_keywords, unmatched_keywords, match_type=r.match_type) or ''
         if reliability_score == 0 else ''
