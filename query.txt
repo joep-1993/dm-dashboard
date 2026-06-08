@@ -11,7 +11,7 @@ join chan_deriv.ref_channel_derivation_stats chan on dv.aff_id = chan.aff_id and
 
 where dv.is_real_visit = 1
 	and chan.marketing_channel = 'SEO'
-	and fcv.dim_date_key between 20260301 and 20260603
+	and fcv.dim_date_key between 20250101 and 20260608
 	and dv.url like '%beslist.nl%'
 	and dv.url like '%/c/%'	
 	and dv.url not like '%/r/%'
@@ -20,6 +20,6 @@ where dv.is_real_visit = 1
 	and dv.url not like '%/page_%'
 	and dv.url not like '%#%'
 group by 3,2,1
-having visits > 3
+having visits > 0
 order by 2 desc
 limit 1000000
