@@ -1,6 +1,12 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Top-N facet combination blueprints per category (2026-06-09)
+Extension of the blueprint work below: `scripts/pagetitles_topn_combinations.py` (param N, default 5) ranks each category's facets by **summed SEO visits** (from the Redshift traffic cache `/tmp/seo_traffic_rows.pkl` — a facet's score = sum of visits of all URLs in that category that use it), takes the **top N**, and emits the blueprint for **every non-empty subset** of those N facets (power set = 2^N−1 per category, reusing `bp.build_row`/`facet_phrase`). Writes the complete set to a `top{N}_combinations` sheet and appends only net-new `(cat_id, canon_key)` combos to `all_combined` (source=`top{N}_combinations`).
+- **Excel's hard per-sheet limit is 1,048,576 rows.** Across 3,486 SEO-trafficked categories: top-5 = 80,390; top-7 = 240,710; **top-8 = 405,318 (fits)**; top-10 = **1,114,950 (OVER the limit — won't fit one sheet)**. Always size the power set before generating: top-N is 33× bigger going 5→10.
+- Top-K facets ⊆ top-(K+M) facets, so a smaller run's combos are a subset of a larger run's — appending top-8 after top-5 only adds the delta (top-5 added 46,817 to all_combined; top-8 then added 337,676 net-new). all_combined ended at 539,215 (154,722 base + 46,817 top5 + 337,676 top8), under the limit.
+- **openpyxl round-trips silently flatten PivotTables/charts to static values** (and the user's `dt_all_combined` pivot over all_combined didn't survive interactive after my saves). Saving a ~540k+405k+80k-row workbook with openpyxl takes ~1–2 min — run it backgrounded.
+
 ## tblPageTitles blueprints straight from faceted URLs (2026-06-08)
 New deliverable: clean, deterministic `tblPageTitles` title/h1/description blueprints built directly from the faceted `/c/` URL structure, instead of reverse-templatizing rendered copy (the older `scripts/pagetitles_from_unique.py` approach). Two new scripts, both pushed to dm-dashboard.
 
