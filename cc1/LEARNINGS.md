@@ -81,8 +81,117 @@ Zijwindschermen, Kattenhangmatten, Tuinbroeken; kept generic Sport & outdoor buc
    click-weighted position primary; impressions directional-only; equal weekday
    mixes (whole weeks) to avoid weekday composition masquerading as ranking shift.
 
-OPEN ITEMS: (a) get official core-update rollout dates; (b) decide regen current
-deliverable to 6 days; (c) build the time-series + paired winners/losers workbook.
+OPEN ITEMS: (a) ~~get official core-update rollout dates~~ DONE — May 2026 core
+update ran **May 21 → June 2, 2026** (Search Engine Land / SE Roundtable);
+(b) regen current may-vs-june deliverable to 6 days — still open, superseded in
+practice by the new core-update workbook below; (c) ~~build the time-series +
+paired winners/losers workbook~~ DONE — see next section.
+
+## May 2026 core-update analysis RESULTS (2026-06-10)
+Built `/home/joepvanschagen/core_update_analysis.py` → deliverable
+`Downloads/claude/core_update_may2026_analysis_nld.xlsx` (6 sheets: Info,
+Daily time series, Pre vs Post segments, Paired ranking shift, Top winners,
+Top losers). Re-runnable; standalone (loads beslist-query `.env`).
+
+**Window design (improved on the may-vs-june file):** pinned to the official
+rollout (May 21–June 2). PRE = **May 13–17**, POST = **June 3–7** — both Wed–Sun
+(identical weekday mix, removes weekday-composition bias), both clean, rollout
+days excluded. Beats the old `{11,13,14,15,16}` vs `{1,3,4,5,6}` which mixed
+weekdays and included June 1 (mid-rollout).
+- **The late-May traffic surge is seasonal, not algorithmic.** Daily series shows
+  May 22–26 impr 3.7M→5.1M / clicks→46k, then back to baseline. May 25 = Tweede
+  Pinksterdag (NL holiday). It sits *inside* the excluded rollout window, so it
+  doesn't contaminate pre/post — but don't mistake it for core-update lift.
+- **June 8 has the SAME impressions glitch as June 2** (1.30M impr vs ~3M, rows
+  ~460k vs ~580k, clicks normal, impr-wt pos collapses to 4.8). June 9 incomplete
+  (17.9k clicks). Both excluded. June 7 confirmed clean (3.30M/34k). So a fresh
+  pull today (June 10) has clean days only through June 7.
+
+**HEADLINE — impact is REDISTRIBUTION, not an aggregate ranking move.** Across
+409,355 paired url+keyword units (present in BOTH windows):
+- click-weighted position 4.430 → 4.450 (**+0.020, flat**) — the mean barely moved.
+- BUT 157,599 pairs improved ≥0.5 vs 137,970 declined ≥0.5, and 72,317 moved
+  **up >2** while 62,830 moved **down >2**. Lots of churn under a flat mean.
+- Paired clicks fell −12.8% (82,465→71,939) even though more pairs improved than
+  declined — established url+keyword pairs lost click share (likely to newly-
+  ranking June pages not in the paired set). **Only the up-by->2 bucket GAINED
+  clicks (+2,990); every other bucket lost** → redistribution toward the big winners.
+
+**By URL-type (paired):** R-url (241k pairs) took the hit — clicks −15%, position
+slightly worse (4.23→4.28). C-url (category, 152k) ranking *improved* 4.60→4.56,
+clicks −8%. PLP improved notably (9.05→8.51). Browse-url small but +32% clicks.
+→ category/PLP pages held or gained rank; product/R-url pages bore the loss.
+
+**Reusable method notes:**
+- `top` is a **reserved keyword in Redshift** (`SELECT TOP n`) — can't name a CTE
+  `top` (syntax error "at or near top"). Renamed to `ranked`.
+- Per-pair ranking uses **impression-weighted** avg_position (valid because both
+  windows are all-clean days); the daily-series **click-weighted** pos is what
+  stays stable through the glitch days and confirms June 2/8 are impressions-only.
+- Heavy part is the paired inner-join over ~400k url+kw groups (full run ~5–6 min);
+  Python stdout to a redirected file is block-buffered — use `python3 -u` to watch.
+
+## May 2026 core-update — IMPRESSION-FREE re-analysis + independent cross-check (2026-06-10)
+User didn't fully trust the impressions column, so rebuilt the analysis using it
+NOWHERE. Script `/home/joepvanschagen/core_update_analysis_v2.py` → deliverable
+`Downloads/claude/core_update_may2026_impression_free_nld.xlsx` (6 sheets: Info,
+Daily time series, Paired ranking shift incl. rank-bucket transition matrix,
+Top winners, Top losers, SEO visits cross-check). Same windows (May 13–17 vs
+June 3–7).
+
+**Trust split that makes impressions unnecessary:** clicks = trusted (proven by
+June 2/8); avg_position = trusted *per-row* (Google-supplied) — the only leak in
+v1 was *weighting position by impressions*. v2 fixes it:
+- Per-pair position = **UNWEIGHTED mean of daily avg_position** (`AVG(avg_position)`),
+  defined even at zero clicks, never touches impressions.
+- Volume = **CLICK SHARE** (pair clicks / total NLD clicks in window) — self-
+  normalizes the seasonal traffic level, so a site-wide up/down cancels and what
+  remains is genuine redistribution. Δshare in pp.
+- Daily series drops impressions entirely; **row count** is the glitch tell instead.
+
+**SAME conclusion as v1, now impression-free + corroborated:**
+- Universe (non-seasonal) NLD clicks PRE 149,188 → POST 137,330 (−7.9%, weekday-matched).
+- Paired 409,355 units: **click-share 55.3% → 52.4% (−2.89pp)** — established pairs
+  ceded ~3pp of the click pie to newly-ranking/non-paired URLs (the redistribution).
+- Unweighted-mean position 7.64 → 7.38 (long-tail *improved*); 158,695 pairs up ≥0.5
+  vs 136,543 down. Only the up->2 bucket gained clicks; all others lost.
+- By URL-type: **R-url took the hit** (−2.99pp share, pos ~flat 4.49→4.45); **C-url
+  share flat (−0.05pp) but rank improved 4.93→4.75**; PLP rank improved 8.95→8.58;
+  Browse +0.14pp share. → product/term pages lost, category/facet pages held/gained.
+
+**INDEPENDENT cross-validation (the trust clincher):** Redshift SEO real-visits
+(`datamart.fct_visits`+`dim_visit`+`chan_deriv.ref_channel_derivation_stats`,
+`is_real_visit=1`, `dv.domain='1'`, `marketing_channel='SEO'`; url-type via
+`dv.url LIKE '%/r/%'` vs `'%/c/%'`) — a source that never saw a GSC impression —
+**agrees on direction and magnitude**: R/term −12.2%, C/facet +0.1%, other +0.3%,
+total −6.1%. So the decline is real and concentrated in R/term/product pages,
+regardless of how much you trust GSC impressions.
+
+**Method gotchas:** short SQL aliases bite — Redshift rejected `ts` as a column
+alias ("syntax error at or near ts"); use explicit names (`fl_tsale` etc.). v2
+re-runs the full paired CTE once per segment (8 heavy joins for the intent loop) →
+~10–12 min total; could be cut by materializing `pair` to a temp table first.
+
+## May-vs-June SC: maincat-bucket-filtered variant + device + summary (2026-06-10)
+User wanted the original `search_console_may_vs_june_2026_nld_v2.xlsx` analysis
+re-cut to drop the "maincat bucket" rows. Script `/home/joepvanschagen/sc_compare_filtered.py`
+→ `Downloads/claude/search_console_may_vs_june_2026_nld_no_maincat.xlsx`. Same
+windows as the v2 file (May 11,13–16 vs June 1,3–6, impression-weighted ranking).
+- **"Maincat buckets" = deepest_category_name == main_category_name** (e.g.
+  `Klussen — Klussen`, `Woonaccessoires — Woonaccessoires`, and the `Beslist.nl`
+  homepage bucket at 37.5k clicks). 32 buckets, ~96k clicks. Detect via a CTE:
+  `GROUP BY deepest_category_id HAVING MAX(deepest_category_name)=MAX(main_category_name)`
+  then `NOT IN`. Removing them leaves ~3,129 real deep-leaf cats (~184k clicks) and
+  is applied to EVERY sheet (shared `UNIV` filter = excl ∪ mainbucket NOT IN).
+- Sheets: Info, **Summary** (consolidated Avg-ranking Δ abs / Clicks Δ abs / CTR Δ
+  rel across URL-type+keyword-length+device+maincat, each sorted by clicks Δ),
+  By URL-type, By keyword length, **By device**, By maincat, Seasonal (excluded),
+  Maincat buckets (excluded), Included deepest cats.
+- **Finding (same movement, three angles):** total clicks −7,858 / impr −7.5% /
+  pos +0.03. It's a **mobile** story (MOBILE −5,739 ≈ 73% of the drop, impr −12.4%;
+  DESKTOP impr flat −0.9% and rank *improved* −0.20), a **mid-tail** story
+  (Mid-tail −7,272 of −7,858), and a **furniture/home** story (Meubels −2,903,
+  Woonaccessoires −2,352, Klussen −914; gainers Drogisterij +294, Fietsen +161).
 
 ## R-URL optimizer: V34 size facet on by default (2026-06-06)
 User asked why Auto-Redirects proposed `/products/mode/mode_432360/c/fanshop~1335065~~ut_voetbalshirt~9134156`
