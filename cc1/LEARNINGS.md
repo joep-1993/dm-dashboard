@@ -1,6 +1,24 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Bothits AI-bot log extraction — full run completed + merge step (2026-06-10)
+Ran the full CloudFront AI-bot pipeline (runbook: `cc1/BOTHITS_PROCESS.md`) end-to-end over
+7 date-folders. Filtered **64.55M** bot rows from **229,288 .gz** → 11,062 unique IPs;
+verified **2,978** IPs (8,021 failed, 63 unverifiable) against official ranges + rDNS;
+final **64,401,787** kept. Output in `Downloads\claude\bothits_new\`.
+- **Resume gotcha**: `bothits_filter.py` writes `_ip_inventory.json` only after ALL folders
+  (accumulated in-process). A crash leaves per-folder `.csv`/`.gz` but no inventory, so a
+  partial re-run (`[folders...]` arg) would yield an inventory missing the done folders and
+  break verification. **Resume = re-run all 7 from scratch** — it's idempotent.
+- **Durability pattern that worked**: chained the 3 steps in `bothits_chain.sh` (waits on
+  `pgrep -f bothits_filter.py`, guards on the `TOTAL` line, then verify → finalize), launched
+  via `nohup`. Survives reboot; progress in `bothits_stage/_chain.log`. Polled with
+  ScheduleWakeup between turns rather than blocking.
+- **New step 4**: `bothits_merge.py` concatenates all `<out>/*.gz` into one `all-dates.gz`
+  (~1.71 GB, 64.4M rows), keeping the `#Version`/`#Fields` header from the first file only.
+  Single-threaded gzip ≈ 5–8 min — background it.
+- Never stage long runs to `/tmp` (WSL wiped it mid-run once); staging lives on `/`.
+
 ## Top-N facet combination blueprints per category (2026-06-09)
 Extension of the blueprint work below: `scripts/pagetitles_topn_combinations.py` (param N, default 5) ranks each category's facets by **summed SEO visits** (from the Redshift traffic cache `/tmp/seo_traffic_rows.pkl` — a facet's score = sum of visits of all URLs in that category that use it), takes the **top N**, and emits the blueprint for **every non-empty subset** of those N facets (power set = 2^N−1 per category, reusing `bp.build_row`/`facet_phrase`). Writes the complete set to a `top{N}_combinations` sheet and appends only net-new `(cat_id, canon_key)` combos to `all_combined` (source=`top{N}_combinations`).
 - **Excel's hard per-sheet limit is 1,048,576 rows.** Across 3,486 SEO-trafficked categories: top-5 = 80,390; top-7 = 240,710; **top-8 = 405,318 (fits)**; top-10 = **1,114,950 (OVER the limit — won't fit one sheet)**. Always size the power set before generating: top-N is 33× bigger going 5→10.
