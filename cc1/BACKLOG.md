@@ -51,5 +51,10 @@ _Capture ideas for future consideration_
 - **Improve 202 retry logic for Cloudflare queuing**: Consider exponential backoff for HTTP 202 responses (2s, 5s, 10s) instead of single 2s retry - may reduce failure rate during high-load periods
 - **Adaptive delay based on 202 response rate**: Monitor HTTP 202 response rate in real-time and dynamically adjust scraping delay to stay below Cloudflare's threshold. Start at 0.2s, increase to 0.5s if 202 rate exceeds 10%, decrease back to 0.2s if 202 rate drops below 2%. Would provide automatic optimization between speed and rate limit avoidance.
 
+## Fridged / Parked Work
+_Work that exists in the codebase but is intentionally NOT wired into production. Pick up later._
+
+- **Koptekst prompt v2** (parked 2026-05-22). New prompt lives in `dm-tools/backend/gpt_service_v2.py` (`SYSTEM_MESSAGE_V2`, `generate_product_content_v2`). NOT wired into `backend/main.py` — production still uses v1 in `backend/gpt_service.py`. Only consumer today is the benchmark script `dm-tools/scripts/koptekst_v2_comparison.py` (pulls N random URLs from `pa.kopteksten_content`, regenerates with v2, writes side-by-side Excel + aggregate metrics + both prompts to Downloads). Latest n=20 run: 20 v1 valid, 19 v2 valid (1 zero-product URL), v2 hits comparison-authority claim ~98% vs v1 ~0%, relative links ~91% vs v1 ~6%, opening-cliché rate 0% vs v1 ~94%. **Variation fix shipped**: `COMPARISON_AUTHORITY_PHRASINGS` (12 templates, varied syntax positions + quantifiers — "alle/diverse/uiteenlopende/talloze/breed aanbod/meerdere") picked at random per call in `build_user_prompt_v2`, system prompt now defers to the per-call hint and explicitly bans the "Op Beslist vind je veel aanbieders van ..." cliché which had become the default. n=20 sample showed 9 distinct templates used across 19 kopteksten with 0 cliché hits. **To activate**: swap the v1 import in `backend/main.py` for `generate_product_content_v2`, or add an env/query-param toggle for gradual cutover. Latest benchmark: `/mnt/c/Users/JoepvanSchagen/Downloads/claude/koptekst_v1_vs_v2_n20_variation.xlsx`.
+
 ---
-_Last updated: 2025-10-10_
+_Last updated: 2026-05-22_

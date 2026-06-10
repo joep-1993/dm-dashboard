@@ -18,6 +18,72 @@ New deliverable: clean, deterministic `tblPageTitles` title/h1/description bluep
 - **Gotchas**: `pymysql` lives only in `~/.mysql-venv` — run both scripts under `~/.mysql-venv/bin/python` (it also has psycopg2+openpyxl). openpyxl can't overwrite an xlsx open in Excel → `PermissionError` fallback writes `_v2`/`_v3`; once the file is closed, `mv` the latest version onto the base name to consolidate. Redshift = plain `psycopg2` on **port 5439**, creds in `dm-tools/.env` (`REDSHIFT_HOST/PORT/DB/USER/PASSWORD`), helper `get_redshift_connection()` in `backend/database.py`. The big Redshift query took ~6.5 min.
 - **Final deliverable** `Downloads\claude\tblPageTitles_blueprint_from_urls.xlsx`: sheet `new_pagetitles` (1,628), `seo_traffic_new` (10,932 + visits/revenue, revenue-sorted), and `all_combined` (**154,722** = the two new sets + all 142,162 existing tblPageTitles NL rows, with a `source` column = tblPageTitles / new_from_urls / seo_traffic). Verified 0 overlap between the created sheets and tblPageTitles.
 
+## bt.search_console data quality + core-update analysis (2026-06-10)
+Built a Search Console period comparison (May vs June 2026, `country='nld'`) and then
+stress-tested whether the table's daily counts can be trusted. Deliverable +
+working script:
+- **Excel:** `/mnt/c/Users/JoepvanSchagen/Downloads/claude/search_console_may_vs_june_2026_nld_v2.xlsx`
+  (6 sheets: Info & methodology, By URL-type, By keyword length, By maincat,
+  Seasonal (excluded), Included deepest cats). `_v2` because the non-v2 file was
+  locked open in Excel at save time — `wb.save` raises `PermissionError`; the
+  script now falls back to a `_v2.xlsx` name.
+- **Script:** `/home/joepvanschagen/sc_compare.py` (standalone; loads the
+  beslist-query skill `.env`, psycopg2 + openpyxl). Re-runnable.
+
+**Comparison setup (decisions baked in):** P1=May {11,13,14,15,16}, P2=June
+{1,3,4,5,6} — 5 clean days each. Δ = June−May. CTR = SUM(clicks)/SUM(impr).
+Avg ranking = impression-weighted `avg_position` (valid here because all 10 days
+are clean). Weather-seasonal deepest categories excluded BOTH directions
+(May-peakers like Tuinstoelen −52% AND June-risers like Plafondventilators +111%,
+Koelboxen +87%, Parasols +65%) — 117 deepest cats removed, identified data-driven
+by name regex on `deepest_category_name` (false positives scrubbed: Oogschaduws,
+Zijwindschermen, Kattenhangmatten, Tuinbroeken; kept generic Sport & outdoor bucket).
+
+**KEY DATA-QUALITY FINDINGS (the important part):**
+- **ALWAYS filter `deleted_ind=0`.** The table holds duplicate/superseded snapshots
+  with `deleted_ind=1` that carry ~0 clicks but real impressions. Not filtering
+  inflates impressions and tanks CTR. (My first exploratory query omitted the
+  filter and falsely flagged June 7 as corrupted — it is NOT.)
+- **June 7 is clean** under `deleted_ind=0` (3.30M impr / 34k clicks / pos 7.11).
+  So the original "6 days each" plan (June 1,3,4,5,6,7) is actually viable; the
+  shipped file conservatively used 5. Regen-to-6 offered, not yet done.
+- **June 2 is a genuine impressions glitch** even in clean data: ~1.29M impr
+  (~40% of normal ~3.0M) while clicks (31,077) are perfectly normal. Independent
+  failure — impressions pipeline broke without touching clicks.
+- **Fresh-data backfill lag:** the most recent ~2–3 days are incomplete and get
+  revised upward later (June 7's impressions doubled between two queries minutes
+  apart in-session as it backfilled; June 8/9 still low). Drop the last 2–3 days
+  of any pull.
+
+**TRUST VERDICT:**
+- **Clicks = trustworthy.** Proven by June 2: impressions broke, clicks stayed
+  normal (31,077, between June 1's 31,981 and June 3's 31,281). Only caveat: last
+  2–3 days under-counted until backfill.
+- **avg_position = trustworthy per-row, but aggregation method matters.** On bad-
+  impression days (June 2, 8) the **impression-weighted** AND **simple-average**
+  position collapse (~7.5 → ~4.5) because the missing rows are the high-impression
+  long-tail. The **click-weighted** position stays rock-stable (3.96–4.29 all
+  window). → For any analysis touching suspect days, use **click-weighted**
+  `avg_position` (SUM(avg_position*clicks)/SUM(clicks)), never impression-weighted
+  or simple AVG. (On clean comparison days impression-weighting is fine.)
+
+**CORE-UPDATE ANALYSIS PLAN (agreed approach, not yet built):**
+1. Pin windows to the OFFICIAL Google core-update rollout dates (need from user);
+   compare pre-rollout baseline vs post-completion, EXCLUDE the rollout days.
+2. Daily time series of clicks + click-weighted position to locate the step-change
+   and confirm it aligns with rollout (aggregate click-wt pos was ~flat 4.1–4.3 in
+   May–June → impact is in redistribution, not the mean).
+3. Paired url/keyword analysis (same url present in both windows → position delta
+   distribution; how many moved up >2 vs down >2) — NOT aggregate means.
+4. Segment winners/losers by `type_url`, `keyword_length`, and intent flags
+   (`is_transactional_*`, `is_commercial_*`, `is_informational`).
+5. Trust rules: `deleted_ind=0`; drop June 2 + trailing 2–3 days; clicks &
+   click-weighted position primary; impressions directional-only; equal weekday
+   mixes (whole weeks) to avoid weekday composition masquerading as ranking shift.
+
+OPEN ITEMS: (a) get official core-update rollout dates; (b) decide regen current
+deliverable to 6 days; (c) build the time-series + paired winners/losers workbook.
+
 ## R-URL optimizer: V34 size facet on by default (2026-06-06)
 User asked why Auto-Redirects proposed `/products/mode/mode_432360/c/fanshop~1335065~~ut_voetbalshirt~9134156`
 for `/products/mode/r/nederlands_elftal_shirt_thuis_junior_maat_122-128_(xs)/`
