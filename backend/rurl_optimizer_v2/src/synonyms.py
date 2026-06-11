@@ -416,16 +416,6 @@ def expand_compounds(keyword: str) -> list[str]:
     return variants
 
 
-# Reverse mapping: facet value -> search terms that should match it
-# Built from SYNONYMS
-REVERSE_SYNONYMS = {}
-for search_term, facet_values in SYNONYMS.items():
-    for fv in facet_values:
-        if fv not in REVERSE_SYNONYMS:
-            REVERSE_SYNONYMS[fv] = []
-        REVERSE_SYNONYMS[fv].append(search_term)
-
-
 def get_synonyms(keyword: str) -> list[str]:
     """
     Get synonyms for a keyword.
@@ -438,33 +428,3 @@ def get_synonyms(keyword: str) -> list[str]:
     """
     keyword_lower = keyword.lower().strip()
     return SYNONYMS.get(keyword_lower, [])
-
-
-def get_search_terms_for_facet(facet_value: str) -> list[str]:
-    """
-    Get search terms that should match a facet value.
-
-    Args:
-        facet_value: The facet value
-
-    Returns:
-        List of search terms that should match this facet
-    """
-    fv_lower = facet_value.lower().strip()
-    return REVERSE_SYNONYMS.get(fv_lower, [])
-
-
-def expand_keyword(keyword: str) -> list[str]:
-    """
-    Expand a keyword to include synonyms.
-
-    Args:
-        keyword: The original search keyword
-
-    Returns:
-        List containing the original keyword plus any synonyms
-    """
-    keywords = [keyword]
-    synonyms = get_synonyms(keyword)
-    keywords.extend(synonyms)
-    return keywords

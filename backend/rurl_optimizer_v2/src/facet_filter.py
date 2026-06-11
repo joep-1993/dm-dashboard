@@ -3,6 +3,7 @@ Facet filtering module.
 Filters facets based on subcategory to narrow down matching candidates.
 """
 
+import re
 import pandas as pd
 from dataclasses import dataclass
 from typing import Optional
@@ -234,7 +235,6 @@ class FacetFilter:
 
         # Filter for type facets
         type_prefixes = ('type_', 'kleur', 'materiaal', 'maat', 'vorm')
-        mask = self.facets_df[facet_name_col].astype(str).str.lower().str.startswith(type_prefixes)
         type_df = filtered_df[filtered_df[facet_name_col].astype(str).str.lower().str.startswith(type_prefixes)]
 
         return self.get_facet_values(type_df)
@@ -360,7 +360,7 @@ class FacetFilter:
                 c = getattr(fv, 'count', 0) or 0
                 d = self._count_subcategory_depth(fv.url)
                 return (-c, d)
-            leader = sorted(fvs, key=_rank)[0]
+            leader = min(fvs, key=_rank)
             leader_count = getattr(leader, 'count', 0) or 0
 
             # Step 1b: if a descendant of the leader concentrates most of
@@ -441,10 +441,9 @@ class FacetFilter:
                 subcat = parts[2]
                 # Count numeric IDs (underscores followed by digits)
                 # gezond_mooi_560760 has 1 ID, gezond_mooi_560760_6911749 has 2 IDs
-                import re
                 numeric_ids = re.findall(r'_(\d+)', subcat)
                 return len(numeric_ids)
-        except:
+        except Exception:
             pass
 
         return 999

@@ -1360,7 +1360,7 @@ def process_url_v2(args):
     # Voor generieke termen: "scharnieren" -> subcategorie "Deurscharnieren"
     # Dit voorkomt dat een specifieke facet ("Onzichtbare scharnieren") wordt gekozen
     # V28: Per-woord matching - probeer eerst full keyword, dan individuele woorden
-    HIGH_SUBCAT_THRESHOLD = 95
+    # (HIGH_SUBCAT_THRESHOLD already set in step 2b above — same 95 threshold.)
     if not result:
         categories_df = d.get('categories_df')
         if categories_df is not None:
@@ -2398,9 +2398,7 @@ def process_url_v2(args):
                         if _maincat_parts and len(_maincat_parts) < len(_second_parts):
                             _inferred = '_'.join(_maincat_parts)
                             _repaired_path = '/products/' + _inferred + '/' + '/'.join(_segs[1:])
-                            if not _p.path.endswith('/'):
-                                pass
-                            else:
+                            if _p.path.endswith('/'):
                                 _repaired_path += '/'
                             final_redirect_url = urlunparse(
                                 _p._replace(path=_repaired_path)
@@ -2422,6 +2420,28 @@ def process_url_v2(args):
                 + f"maincat validator error: {_e}"
             )
 
+    # V35 (Phase 1): keep the emitted facet_* columns consistent with the FINAL
+    # redirect URL. Late overrides (V28 rescue, cross-type guard, Fix D, multi-
+    # facet rescue, maincat repair) replace final_redirect_url, but the cascade
+    # result `r` still carries the facet_* of the now-discarded match. When an
+    # override actually changed the URL, derive the columns from the URL the row
+    # really points at; otherwise keep the rich cascade values verbatim (so
+    # non-overridden rows are byte-identical). Note: display value-names can't be
+    # reconstructed from the URL, so they're cleared on overridden rows.
+    if final_redirect_url == r.redirect_url:
+        out_facet_fragment = r.facet_fragment
+        out_facet_names = r.facet_names
+        out_facet_value_names = r.facet_value_names
+        out_facet_count = r.facet_count
+    else:
+        _ffrag = (final_redirect_url.split('/c/', 1)[1].rstrip('/')
+                  if (final_redirect_url and '/c/' in final_redirect_url) else '')
+        _faxes = [p for p in _ffrag.split('~~') if '~' in p]
+        out_facet_fragment = _ffrag
+        out_facet_names = ', '.join(p.split('~', 1)[0] for p in _faxes)
+        out_facet_value_names = ''
+        out_facet_count = len(_faxes)
+
     return {
         'original_url': r.original_url,
         'main_category': r.main_category,
@@ -2430,10 +2450,10 @@ def process_url_v2(args):
         'redirect_url': final_redirect_url,
         'redirect_category': final_redirect_cat_name,
         'is_cross_category': is_cross_category,
-        'facet_fragment': r.facet_fragment,
-        'facet_names': r.facet_names,
-        'facet_value_names': r.facet_value_names,
-        'facet_count': r.facet_count,
+        'facet_fragment': out_facet_fragment,
+        'facet_names': out_facet_names,
+        'facet_value_names': out_facet_value_names,
+        'facet_count': out_facet_count,
         'match_score': r.match_score,
         'match_type': final_match_type,
         'reliability_score': final_score,
@@ -2647,10 +2667,10 @@ def main():
     # Optimal chunksize: balance between overhead and load distribution
     # For large datasets: higher chunksize = less overhead
     chunksize = args.chunksize
-    if total_remaining > 10000:
-        chunksize = max(chunksize, 200)
-    elif total_remaining > 100000:
+    if total_remaining > 100000:
         chunksize = max(chunksize, 500)
+    elif total_remaining > 10000:
+        chunksize = max(chunksize, 200)
 
     # Batch save interval
     SAVE_INTERVAL = 5000  # Save every 5000 URLs

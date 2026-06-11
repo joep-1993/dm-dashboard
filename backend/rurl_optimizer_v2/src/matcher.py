@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
 from src.facet_filter import FacetValue
-from src.synonyms import expand_keyword, get_synonyms
+from src.synonyms import get_synonyms
 
 # Import all validation rules from central location
 from src.validation_rules import (
@@ -470,19 +470,9 @@ class KeywordMatcher:
             if tc.is_match:
                 return tc
 
-        """
-        Existing implementation continues below.
-
-        Useful for keywords like "zweefparasol 3m" matching "Zweefparasols".
-
-        Args:
-            keyword: The search keyword
-            facet_values: List of FacetValue objects
-            exclude_winkel: If True, exclude winkel facets
-
-        Returns:
-            MatchResult with best match
-        """
+        # Standard implementation continues below (fallback when token-coverage
+        # is disabled or finds nothing). Useful for keywords like
+        # "zweefparasol 3m" matching "Zweefparasols".
         # First try standard match
         result = self.match(keyword, facet_values, exclude_winkel)
         if result.is_match:

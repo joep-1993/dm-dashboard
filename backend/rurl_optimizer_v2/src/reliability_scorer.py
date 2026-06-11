@@ -55,6 +55,13 @@ BAD_CROSS_CATEGORY_PATTERNS = [
     (r'\bkeuken\b', r'keukenpincetten', -30),
 ]
 
+# Pre-compiled once at import — previously each (keyword, facet) pattern was
+# re.search'd from its string form on every scored row.
+_BAD_CROSS_COMPILED = [
+    (re.compile(kp), re.compile(fp), pen)
+    for kp, fp, pen in BAD_CROSS_CATEGORY_PATTERNS
+]
+
 
 def compute_h1_similarity(
     keyword: str,
@@ -280,8 +287,8 @@ def calculate_reliability_score(
     keyword_lower = keyword.lower() if keyword else ''
     facet_lower = (facet_value_names or '').lower()
 
-    for keyword_pattern, facet_pattern, penalty in BAD_CROSS_CATEGORY_PATTERNS:
-        if re.search(keyword_pattern, keyword_lower) and re.search(facet_pattern, facet_lower):
+    for kw_re, fv_re, penalty in _BAD_CROSS_COMPILED:
+        if kw_re.search(keyword_lower) and fv_re.search(facet_lower):
             base_score += penalty  # penalty is negative
 
     # Maincat/parent_subcat fallback with cross-category = less reliable
