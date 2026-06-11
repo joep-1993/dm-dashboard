@@ -2255,6 +2255,42 @@ def process_url_v2(args):
                             + ", ".join(local_leftover_tokens)
                         )
 
+    # Fix D (V35): same-main-category search-derived category override. When the
+    # Search API shows a strong dominant category in the R-URL's OWN main category
+    # (share >= 0.6) but the matcher only produced a weak stray cross-subcategory
+    # match (<=1 matched token, landing in NEITHER the R-URL's subcat nor the
+    # dominant cat — or no redirect at all), prefer the dominant category page.
+    # Same-main-category only (derive_search_redirect queries within the maincat),
+    # so no cross-maincat risk. e.g. /speelgoed_spelletjes_423615/r/bestuurbare_
+    # auto_100_km_h/: 69% of results are RC auto's (423615_423624), but a stray
+    # "auto"->th_puzzels 'Auto' (Puzzels) won and V31 protected it.
+    if has_matchable and parsed.main_category and parsed.keyword:
+        _dv = derive_search_redirect(parsed.main_category, parsed.keyword) or {}
+        _share = _dv.get('dom_cat_share') or 0
+        _dom_slug = _dv.get('dom_cat_url_slug') or ''
+        if _share >= 0.6 and _dom_slug and _dv.get('mode') in ('and', 'fallback'):
+            _dom_sub = ''
+            for _p in reversed(_dom_slug.split('_')):
+                if _p.isdigit():
+                    _dom_sub = _p
+                    break
+            _cur_sub = extract_subcategory_id_from_url(final_redirect_url) if final_redirect_url else ''
+            _psub = str(parsed.subcategory_id or '')
+            _weak = (len(matched_keywords) <= 1 and _cur_sub != _dom_sub and _cur_sub != _psub)
+            if _weak and _dom_sub and _dom_sub != _psub:
+                _ef = getattr(parsed, 'existing_facet', '') or ''
+                _base = f"https://www.beslist.nl/products/{parsed.main_category}/{_dom_slug}"
+                final_redirect_url = f"{_base}/c/{_ef}" if _ef else f"{_base}/"
+                final_redirect_cat_name = _dv.get('dom_cat_name', '') or final_redirect_cat_name
+                final_match_type = 'search_derived_samecat'
+                final_score = 65
+                final_tier = get_reliability_tier(final_score)
+                final_reason = (f"[Fix D] search-derived dominant same-maincat category "
+                                f"'{_dv.get('dom_cat_name', '')}' ({int(100 * _share)}%) "
+                                f"chosen over weak stray match")
+                reject_reason = ''
+                flag_for_review = ''
+
     # Maincat-path sanity check. A correct redirect path looks like
     # /products/{maincat}/{subcat}[/c/...] where {subcat} starts with
     # {maincat}_. Older code paths can lose the {maincat} segment for
