@@ -4856,7 +4856,13 @@ def add_shop_exclusions_batch(
     # Normalize shop names for case-insensitive matching
     shop_names_lower = {name.lower(): name for name in shop_names}
 
-    # Step 1: Read existing tree structure ONCE
+    # Step 1: Read existing tree structure ONCE.
+    # NOTE: we SELECT every common case_value dimension (custom_attribute, type,
+    # brand, item_id) — not just custom_attribute — so that when a tree has no
+    # CL3 level we can copy a leaf's exact case_value verbatim while rebuilding
+    # (e.g. a product_item_id "Everything else" leaf, as used by some BE PLA
+    # campaigns). Reading only custom_attribute would lose that dimension and
+    # produce an invalid sibling.
     query = f"""
         SELECT
             ad_group_criterion.resource_name,
@@ -4864,6 +4870,10 @@ def add_shop_exclusions_batch(
             ad_group_criterion.listing_group.parent_ad_group_criterion,
             ad_group_criterion.listing_group.case_value.product_custom_attribute.index,
             ad_group_criterion.listing_group.case_value.product_custom_attribute.value,
+            ad_group_criterion.listing_group.case_value.product_type.level,
+            ad_group_criterion.listing_group.case_value.product_type.value,
+            ad_group_criterion.listing_group.case_value.product_brand.value,
+            ad_group_criterion.listing_group.case_value.product_item_id.value,
             ad_group_criterion.negative,
             ad_group_criterion.cpc_bid_micros
         FROM ad_group_criterion
@@ -4905,101 +4915,107 @@ def add_shop_exclusions_batch(
                 parent_for_cl3 = lg.parent_ad_group_criterion
 
     if not parent_for_cl3:
-        # No CL3 level exists — find the deepest positive UNIT (not INDEX3) and
-        # convert it to a SUBDIVISION, then add CL3 children for exclusions.
-        # This works regardless of which custom label is the leaf (CL0, CL1, CL2, CL4).
-        print(f"      ℹ️  No CL3 level found, searching for deepest positive UNIT to subdivide...")
+        # No CL3 (shop) level exists in this tree. To attach shop exclusions we
+        # have to introduce one. We find EVERY positive (biddable) leaf UNIT —
+        # the buckets where products actually serve — and convert each into a
+        # SUBDIVISION carrying a CL3 catch-all + the requested shop exclusion(s).
+        #
+        # A leaf may be either:
+        #   • a labeled custom-label UNIT          (e.g. INDEX1='a')   — NL style
+        #   • an unlabeled "everything else" leaf  (e.g. the
+        #     product_item_id "Other" node)                            — BE style
+        # In both cases we copy the leaf's exact case_value onto the new
+        # SUBDIVISION so it keeps its position among its siblings; only the
+        # dimension *type* of the new children (INDEX3) is new. Copying verbatim
+        # is what lets this work for any leaf dimension (custom label, item_id,
+        # brand, type) without special-casing each.
+        print(f"      ℹ️  No CL3 level found, searching for positive leaf UNIT(s) to subdivide...")
 
-        leaf_unit = None  # Will hold: {resource, parent, value, bid, index_name, index_enum}
-
+        leaf_units = []  # each: {resource, parent, bid, case_value}
         for row in results:
             criterion = row.ad_group_criterion
             lg = criterion.listing_group
-            try:
-                index_name = lg.case_value.product_custom_attribute.index.name
-                index_enum = lg.case_value.product_custom_attribute.index
-            except (AttributeError, TypeError):
-                index_name = None
-                index_enum = None
-            if (index_name and index_name != 'INDEX3'
-                    and lg.type_.name == 'UNIT'
-                    and not criterion.negative
-                    and lg.case_value.product_custom_attribute.value):
-                leaf_unit = {
-                    'resource': criterion.resource_name,
-                    'parent': lg.parent_ad_group_criterion,
-                    'value': lg.case_value.product_custom_attribute.value,
-                    'bid': criterion.cpc_bid_micros if criterion.cpc_bid_micros > 0 else DEFAULT_BID_MICROS,
-                    'index_name': index_name,
-                    'index_enum': index_enum,
-                }
-                break
+            if lg.type_.name != 'UNIT' or criterion.negative:
+                continue
+            if not lg.parent_ad_group_criterion:
+                continue
+            # Defensive: skip any INDEX3 node (there shouldn't be one here).
+            if lg.case_value.product_custom_attribute.index.name == 'INDEX3':
+                continue
+            leaf_units.append({
+                'resource': criterion.resource_name,
+                'parent': lg.parent_ad_group_criterion,
+                'bid': criterion.cpc_bid_micros if criterion.cpc_bid_micros and criterion.cpc_bid_micros > 0 else DEFAULT_BID_MICROS,
+                'case_value': lg.case_value,
+            })
 
-        if not leaf_unit or not leaf_unit['parent']:
+        if not leaf_units:
             for shop_name in shop_names:
                 result['errors'].append((shop_name, "No parent for CL3 found"))
             return result
 
-        print(f"      Found {leaf_unit['index_name']} UNIT: value='{leaf_unit['value']}', rebuilding as SUBDIVISION with CL3 level...")
+        print(f"      Found {len(leaf_units)} positive leaf UNIT(s); rebuilding each with a CL3 level...")
 
         try:
             rebuild_ops = []
+            for leaf in leaf_units:
+                # 1. Remove the existing positive leaf UNIT.
+                remove_op = client.get_type("AdGroupCriterionOperation")
+                remove_op.remove = leaf['resource']
+                rebuild_ops.append(remove_op)
 
-            # 1. Remove the existing UNIT
-            remove_op = client.get_type("AdGroupCriterionOperation")
-            remove_op.remove = leaf_unit['resource']
-            rebuild_ops.append(remove_op)
+                # 2. Recreate it as a SUBDIVISION in the SAME position. Copy the
+                #    leaf's case_value verbatim so it stays a valid sibling
+                #    (preserves a custom-label value, or the item_id "Other"
+                #    marker that BE item-id trees use). A truly dimensionless
+                #    case_value (ByteSize 0, e.g. a lone root child) must be
+                #    passed as None so the helper omits case_value entirely.
+                dim_leaf = client.get_type("ListingDimensionInfo")
+                client.copy_from(dim_leaf, leaf['case_value'])
+                leaf_dim_arg = dim_leaf if dim_leaf._pb.ByteSize() > 0 else None
 
-            # 2. Create SUBDIVISION with the same index, value, and parent
-            dim_leaf = client.get_type("ListingDimensionInfo")
-            dim_leaf.product_custom_attribute.index = leaf_unit['index_enum']
-            dim_leaf.product_custom_attribute.value = leaf_unit['value']
+                leaf_subdiv_op = create_listing_group_subdivision(
+                    client=client,
+                    customer_id=customer_id,
+                    ad_group_id=ad_group_id,
+                    parent_ad_group_criterion_resource_name=leaf['parent'],
+                    listing_dimension_info=leaf_dim_arg,
+                )
+                leaf_subdiv_resource = leaf_subdiv_op.create.resource_name
+                rebuild_ops.append(leaf_subdiv_op)
 
-            leaf_subdiv_op = create_listing_group_subdivision(
-                client=client,
-                customer_id=customer_id,
-                ad_group_id=ad_group_id,
-                parent_ad_group_criterion_resource_name=leaf_unit['parent'],
-                listing_dimension_info=dim_leaf,
-            )
-            leaf_subdiv_resource = leaf_subdiv_op.create.resource_name
-            rebuild_ops.append(leaf_subdiv_op)
-
-            # 3. Create CL3 catch-all UNIT (biddable, everything else) under the new SUBDIVISION
-            dim_cl3_others = client.get_type("ListingDimensionInfo")
-            dim_cl3_others.product_custom_attribute.index = client.enums.ProductCustomAttributeIndexEnum.INDEX3
-
-            cl3_catchall_op = create_listing_group_unit_biddable(
-                client=client,
-                customer_id=customer_id,
-                ad_group_id=ad_group_id,
-                parent_ad_group_criterion_resource_name=leaf_subdiv_resource,
-                listing_dimension_info=dim_cl3_others,
-                targeting_negative=False,
-                cpc_bid_micros=leaf_unit['bid'],
-            )
-            rebuild_ops.append(cl3_catchall_op)
-
-            # 4. Add all shop exclusions as CL3 negative units
-            for shop_name in shop_names:
-                dim_cl3_shop = client.get_type("ListingDimensionInfo")
-                dim_cl3_shop.product_custom_attribute.index = client.enums.ProductCustomAttributeIndexEnum.INDEX3
-                dim_cl3_shop.product_custom_attribute.value = shop_name
-
-                cl3_excl_op = create_listing_group_unit_biddable(
+                # 3. CL3 catch-all UNIT (biddable, everything else), preserving
+                #    the leaf's bid so serving products keep their bid.
+                dim_cl3_others = client.get_type("ListingDimensionInfo")
+                dim_cl3_others.product_custom_attribute.index = client.enums.ProductCustomAttributeIndexEnum.INDEX3
+                rebuild_ops.append(create_listing_group_unit_biddable(
                     client=client,
                     customer_id=customer_id,
                     ad_group_id=ad_group_id,
                     parent_ad_group_criterion_resource_name=leaf_subdiv_resource,
-                    listing_dimension_info=dim_cl3_shop,
-                    targeting_negative=True,
-                    cpc_bid_micros=None,
-                )
-                rebuild_ops.append(cl3_excl_op)
+                    listing_dimension_info=dim_cl3_others,
+                    targeting_negative=False,
+                    cpc_bid_micros=leaf['bid'],
+                ))
 
-            # Execute all operations atomically
+                # 4. One negative CL3 UNIT per shop to exclude.
+                for shop_name in shop_names:
+                    dim_cl3_shop = client.get_type("ListingDimensionInfo")
+                    dim_cl3_shop.product_custom_attribute.index = client.enums.ProductCustomAttributeIndexEnum.INDEX3
+                    dim_cl3_shop.product_custom_attribute.value = shop_name
+                    rebuild_ops.append(create_listing_group_unit_biddable(
+                        client=client,
+                        customer_id=customer_id,
+                        ad_group_id=ad_group_id,
+                        parent_ad_group_criterion_resource_name=leaf_subdiv_resource,
+                        listing_dimension_info=dim_cl3_shop,
+                        targeting_negative=True,
+                        cpc_bid_micros=None,
+                    ))
+
+            # Execute the whole rebuild atomically (all leaves, all children).
             agc_service.mutate_ad_group_criteria(customer_id=customer_id, operations=rebuild_ops)
-            print(f"      ✅ Rebuilt {leaf_unit['index_name']} as SUBDIVISION and added {len(shop_names)} exclusion(s)")
+            print(f"      ✅ Rebuilt {len(leaf_units)} leaf UNIT(s) as SUBDIVISION(s), each with {len(shop_names)} exclusion(s)")
             result['success'] = list(shop_names)
             return result
 
