@@ -857,9 +857,38 @@ def _resolve_probe_facet_url(facet_filter, main_category, facet_name, value_id):
             continue
         subcat = u[len(prefix):].split('/c/')[0]
         depth = subcat.count('_')
-        if best is None or depth < best[0]:
+        # Break depth ties by URL (deterministic). facet_url_set() is a frozenset
+        # whose iteration order varies by process hash seed, so a bare
+        # `depth < best[0]` left same-depth ties resolving to different subcats
+        # across runs. Compare the (depth, url) tuple so the pick is stable.
+        if best is None or (depth, u) < (best[0], best[1]):
             best = (depth, u)
     return best[1] if best else None
+
+
+def _cross_maincat_candidate(parsed, categories_df, matcher):
+    """Fix E: if the keyword's HEAD (first meaningful) token EXACTLY names a
+    subcategory in a DIFFERENT main category, return (target_maincat, subcat_match).
+    This only nominates a maincat to VERIFY with a product-evidence probe — the
+    name match alone is never trusted (zink->Zink supplements). None otherwise."""
+    if categories_df is None or not parsed.keyword or not parsed.main_category:
+        return None
+    from src.validation_rules import STOPWORDS as _SW, SHOP_NAMES as _SN
+    head = None
+    for t in parsed.keyword.lower().split():
+        if len(t) >= 4 and t not in _SW and t not in _SN and not t.isdigit():
+            head = t
+            break
+    if not head:
+        return None
+    xm = matcher.match_subcategory_name(head, categories_df)
+    if not xm or xm.get('score', 0) < 100:
+        return None
+    segs = [s for s in (xm.get('category_path', '') or '').split('/') if s]
+    tgt_main = segs[1] if len(segs) >= 2 and segs[0] == 'products' else ''
+    if not tgt_main or tgt_main == parsed.main_category:
+        return None
+    return (tgt_main, xm)
 
 
 def process_url_v2(args):
@@ -1641,6 +1670,56 @@ def process_url_v2(args):
                     facet_names=_pf['facet_name'],
                     facet_value_names=_pf.get('value_name', '') or '',
                 )
+
+    # Fix E (V35): cross-main-category jump VERIFIED by product evidence. When the
+    # keyword's HEAD noun exactly names a subcategory in another main category AND
+    # the current cascade result didn't route into that product domain, confirm
+    # with a Search API probe (cache-only; the pair is prefetched): only jump if
+    # the FULL keyword AND-matches (genuine intersection, not OR-fallback) and
+    # concentrates (share >= 0.6) in that subcategory's main category. The AND vs
+    # fallback flag is what makes this safe — a bare name match (zink->Zink
+    # supplements, olie->Visolie) returns OR-fallback and is rejected, while
+    # driewielers->speelgoed Driewielers returns mode=and share=1.0.
+    if d.get('categories_df') is not None and parsed.keyword:
+        _cand = _cross_maincat_candidate(parsed, d['categories_df'], matcher)
+        if _cand:
+            _tgt_main, _xm = _cand
+            _xurl = _xm.get('url_name', '') or ''
+            _hn = (_xm.get('matched_category', '') or '').lower()
+            _cov = ((getattr(result, 'facet_value_names', '') or '') if result else '').lower()
+            if result and getattr(result, 'redirect_url', ''):
+                _cid = extract_subcategory_id_from_url(result.redirect_url)
+                _cov += ' ' + (category_lookup.get(str(_cid), '') or '').lower()
+            _result_ok = bool(result and getattr(result, 'success', False))
+            _head_covered = bool(_hn and _hn in _cov)
+            # Only when the current result is weak (missing or didn't reach that domain).
+            if not (_result_ok and _head_covered):
+                _pv = derive_search_redirect(_tgt_main, parsed.keyword) or {}
+                _domslug = _pv.get('dom_cat_url_slug') or ''
+                if (_pv.get('mode') == 'and'
+                        and (_pv.get('dom_cat_share') or 0) >= 0.6
+                        and _domslug and _xurl
+                        and (_domslug == _xurl
+                             or _domslug.startswith(_xurl + '_')
+                             or _xurl.startswith(_domslug + '_'))):
+                    _sm = {
+                        'matched_category': _pv.get('dom_cat_name', '') or _xm.get('matched_category', ''),
+                        'url_name': _domslug,
+                        'category_path': f"/products/{_tgt_main}/{_domslug}",
+                        'score': 100, 'match_type': 'subcategory_name',
+                    }
+                    _exr = builder.build_subcategory_redirect(
+                        original_url=url, keyword=parsed.keyword, subcategory_match=_sm,
+                        main_category=_tgt_main,
+                        existing_facet=getattr(parsed, 'existing_facet', '') or '')
+                    if _exr and getattr(_exr, 'success', False):
+                        _exr.reason = (
+                            f"[Fix E xmaincat-verified: '{_xm.get('matched_category', '')}' @ "
+                            f"{_tgt_main}, AND {int(100 * (_pv.get('dom_cat_share') or 0))}%] "
+                            + (_exr.reason or ''))
+                        _exr = _append_facet_to_subcat_redirect(
+                            _exr, parsed, _sm, facet_filter, matcher)
+                        result = _exr
 
     if not result:
         result = builder.build_category_only(parsed)
@@ -2534,6 +2613,29 @@ def main():
                 from src import facet_probe as _fp
                 fp_stats = _fp.prefetch_facet_probes(_pairs)
                 print(f"[V29 facet-probe] Prefetch done: {fp_stats}")
+
+            # Fix E: cross-main-category verification probes. For each URL whose
+            # head noun names a subcategory in ANOTHER main category, prefetch a
+            # search signal for (target_maincat, keyword) so the worker can read
+            # it cache-only and confirm an AND-mode dominant match before jumping.
+            from src.matcher import KeywordMatcher as _KM
+            _cdf = data.get('categories_df')
+            if _cdf is not None:
+                _km = _KM(fuzzy_threshold=args.threshold,
+                          use_token_coverage=not args.no_token_coverage)
+                _xpairs = []
+                for u in urls_to_process:
+                    p = _parser.parse(u)
+                    if not (p.is_valid and p.main_category and p.keyword):
+                        continue
+                    _c = _cross_maincat_candidate(p, _cdf, _km)
+                    if _c:
+                        _xpairs.append((_c[0], p.keyword))
+                if _xpairs:
+                    print(f"\n[Fix E] Prefetching {len(set(_xpairs)):,} cross-maincat "
+                          f"verification probe(s)...")
+                    _xstats = _sd.prefetch_pairs(_xpairs)
+                    print(f"[Fix E] Prefetch done: {_xstats}")
 
     # Process with pool
     print(f"\nProcessing {total_remaining:,} URLs with {num_workers} workers...")
