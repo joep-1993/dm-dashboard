@@ -822,6 +822,27 @@ def _derive_facets_in_subtree(parsed, anchor_subcat_id, anchor_cat_name,
     return result
 
 
+def _has_strong_subcat_name_match(parsed, categories_df, matcher, threshold=95):
+    """True if the keyword (full or a meaningful word) names a subcategory in
+    the URL's own subtree or main category at >= threshold. Mirrors the matching
+    in steps 2b/3 — used to decide whether a purely cross-category step-1 match
+    should be deferred so the subcategory-name steps can win instead."""
+    if categories_df is None or not parsed.keyword:
+        return False
+    from src.validation_rules import STOPWORDS as _SW, SHOP_NAMES as _SN
+    contexts = [c for c in (parsed.subcategory_name, parsed.main_category) if c]
+    candidates = [parsed.keyword] + [
+        w for w in parsed.keyword.lower().split()
+        if len(w) >= 4 and w not in _SW and w not in _SN
+    ]
+    for ctx in contexts:
+        for cand in candidates:
+            m = matcher.match_subcategory_name(cand, categories_df, main_category=ctx)
+            if m and m.get('score', 0) >= threshold:
+                return True
+    return False
+
+
 def process_url_v2(args):
     """Process single URL in worker."""
     global _worker_data
@@ -1053,6 +1074,12 @@ def process_url_v2(args):
         }
 
     result = None
+    # Holds a step-1 match that is PURELY cross-category (every facet hit lives
+    # in another main category). We defer it so the own-subtree subcategory-NAME
+    # steps (2b/3) get first chance — a stray token must not pre-empt naming the
+    # child subcat the keyword actually points at. Restored as a last-resort
+    # fallback below if nothing better is found.
+    _deferred_cross_result = None
 
     # ==========================================================================
     # MATCHING VOLGORDE (V14.1):
@@ -1093,7 +1120,24 @@ def process_url_v2(args):
                 category_name=_sub_cat_name,
             )
             if match_results:
-                result = builder.build_multi_facet(parsed, match_results)
+                # Defer a purely cross-category result (every hit has a
+                # cross_category_path) ONLY when the keyword also names a
+                # subcategory in the URL's own subtree/maincat at high score —
+                # then steps 2b/3 should win. e.g. /…_557622/r/rolgordijn_zonder_
+                # boren/ (Raamdecoratie): stray token "boren" hits cross-maincat
+                # "Appelboren" (Keukenhulpjes), but "rolgordijn" names child
+                # subcat Rolgordijnen (99) → defer. Without a strong subcat-name
+                # alternative we keep the cross-category match (often the best
+                # option, e.g. "toilet fontein" → t_wastafel), so good cross-cat
+                # matches with no better home are not stripped.
+                _all_cross = all(getattr(mr, 'cross_category_path', None)
+                                 for mr in match_results)
+                if _all_cross and _has_strong_subcat_name_match(
+                        parsed, d.get('categories_df'), matcher):
+                    _deferred_cross_result = builder.build_multi_facet(
+                        parsed, match_results)
+                else:
+                    result = builder.build_multi_facet(parsed, match_results)
 
     # 1. SUBCATEGORY FACETS - Single facet
     if not result and facet_values:
@@ -1526,6 +1570,12 @@ def process_url_v2(args):
             if _adopt:
                 _resc.reason = "[subtree-rescue] " + (_resc.reason or '')
                 result = _resc
+
+    # Restore the deferred purely-cross-category step-1 match as a last resort:
+    # nothing in the own subtree / same maincat matched, so the cross-maincat
+    # type hit is the only candidate left (better than a bare category page).
+    if not result and _deferred_cross_result is not None:
+        result = _deferred_cross_result
 
     if not result:
         result = builder.build_category_only(parsed)
