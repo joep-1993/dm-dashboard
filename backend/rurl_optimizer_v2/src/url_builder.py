@@ -499,6 +499,27 @@ class UrlBuilder:
             else:
                 facets_from_same_category.append(match)
 
+        # V35: prefer a richer in-subcat multi-facet over relocating to a
+        # different-category (typically product-type) facet's subcategory.
+        # The relocation branch below collapses the result to the facets living
+        # in the primary different-category facet's subcat — often a single
+        # type facet — and drops same-subcat matches even when they cover more
+        # of the keyword. When staying in the R-URL's OWN subcategory yields
+        # strictly more distinct facet axes, that is the higher-coverage answer
+        # and keeps the redirect on the page the URL was categorised under, e.g.
+        #   /huis_tuin/huis_tuin_505064/r/keuken_onderbouw_verlichting/
+        #   relocate  -> 505064_505173/c/t_spotjes~7574429                    (1 facet)
+        #   in-subcat -> 505064/c/m_verlichting~20112458~~ruimte_...~505268   (2 facets)
+        # Guarded on >=2 same-subcat axes so a lone same-subcat facet never
+        # blocks a legitimate single-type-facet relocation (no regression there).
+        if facets_from_different_category and facets_from_same_category:
+            _same_axes = {m.facet_value.facet_name
+                          for m in facets_from_same_category if m.facet_value}
+            _diff_axes = {m.facet_value.facet_name
+                          for m in facets_from_different_category if m.facet_value}
+            if len(_same_axes) >= 2 and len(_same_axes) > len(_diff_axes):
+                facets_from_different_category = []
+
         # v9: If we have facets from different categories, use the first one's category
         # and only include facets valid for that category
         if facets_from_different_category:
