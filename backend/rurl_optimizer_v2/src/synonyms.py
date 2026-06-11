@@ -224,6 +224,23 @@ SYNONYMS = {
     "fhd": ["full hd"],
     "hd ready": ["hd-ready"],
     "hdready": ["hd-ready"],
+
+    # ==========================================================================
+    # LEVENSFASE / SPEELGOED (V35) — the levensfase facet values are suffixed
+    # with "speelgoed" (e.g. "Volwassenenspeelgoed"), so a bare audience token
+    # in a keyword ("driewielers volwassen") never matched the value lexically.
+    # Bridge each audience word to its levensfase value.
+    # ==========================================================================
+    "volwassen": ["volwassenenspeelgoed"],
+    "volwassenen": ["volwassenenspeelgoed"],
+    "dreumes": ["dreumesspeelgoed"],
+    "kleuter": ["kleuterspeelgoed"],
+    "kleuters": ["kleuterspeelgoed"],
+
+    # ==========================================================================
+    # WITGOED / OVEN-OPTIES (V35)
+    # ==========================================================================
+    "combimagnetron": ["magnetron", "magnetronfunctie"],
 }
 
 # V28: Compound-noun decomposition. Dutch retail keywords often glue a

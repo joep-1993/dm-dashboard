@@ -843,6 +843,25 @@ def _has_strong_subcat_name_match(parsed, categories_df, matcher, threshold=95):
     return False
 
 
+def _resolve_probe_facet_url(facet_filter, main_category, facet_name, value_id):
+    """V35 (Fix B): resolve a (facet_name, value_id) probe hit to the SHALLOWEST
+    /products/<main>/<subcat>/c/<facet>~<id> URL that actually exists in the
+    facet catalogue, within the given main category. Shallowest = the broadest
+    subcategory that defines the facet (e.g. Speeltafels over its Pokertafels
+    child). Returns the path (no host) or None."""
+    suffix = f"/c/{facet_name}~{value_id}"
+    prefix = f"/products/{main_category}/"
+    best = None  # (depth, url)
+    for u in facet_filter.facet_url_set():
+        if not u.endswith(suffix) or not u.startswith(prefix):
+            continue
+        subcat = u[len(prefix):].split('/c/')[0]
+        depth = subcat.count('_')
+        if best is None or depth < best[0]:
+            best = (depth, u)
+    return best[1] if best else None
+
+
 def process_url_v2(args):
     """Process single URL in worker."""
     global _worker_data
@@ -1577,6 +1596,52 @@ def process_url_v2(args):
     if not result and _deferred_cross_result is not None:
         result = _deferred_cross_result
 
+    # Fix B / V35: probe-facet fallback. When the lexical cascade found no facet
+    # match, the Search-API facet probe may still have identified a high-coverage
+    # intent facet whose product noun only names the subcategory (so it never
+    # matched a facet VALUE lexically). e.g. "inklapbare tafel" in Puzzels ->
+    # o_speeltafels 'Inklapbaar' (coverage 0.93) lives in Speeltafels. Promote it,
+    # resolved to its shallowest same-main-category subcategory. Same-maincat by
+    # construction (the probe runs against parsed.main_category).
+    if ((not result or not getattr(result, 'success', False))
+            and parsed.main_category and parsed.keyword):
+        _pf = derive_search_facet(parsed.main_category, parsed.keyword) or {}
+        if (_pf.get('mode') in ('match', 'match_from_response')
+                and _pf.get('facet_name') and _pf.get('value_id')
+                # skip brand/shop facets — promoting "airfryer" -> merk~<brand>
+                # sends a generic product query to a single-brand page.
+                and _pf.get('facet_name', '').lower() not in ('merk', 'winkel')
+                and (_pf.get('coverage') or 0) >= 0.6
+                and (_pf.get('value_count') or 0) >= 15):
+            _purl = _resolve_probe_facet_url(
+                facet_filter, parsed.main_category, _pf['facet_name'], _pf['value_id'])
+            if _purl:
+                from src.url_builder import RedirectResult as _RR
+                _sub = ''
+                for _pp in reversed(_purl.split('/c/')[0].split('_')):
+                    if _pp.isdigit():
+                        _sub = _pp
+                        break
+                _covpct = int(round(100 * (_pf.get('coverage') or 0)))
+                result = _RR(
+                    original_url=url,
+                    redirect_url=f"https://www.beslist.nl{_purl}",
+                    facet_fragment=f"{_pf['facet_name']}~{_pf['value_id']}",
+                    match_score=_covpct,
+                    match_type='facet_probe_fallback',
+                    success=True,
+                    reason=(f"[facet_probe] no lexical facet match; promoted high-coverage "
+                            f"probe facet {_pf['facet_name']}~{_pf['value_id']} "
+                            f"('{_pf.get('value_name', '')}', coverage {_covpct}%, "
+                            f"{_pf.get('value_count')} products)"),
+                    keyword=parsed.keyword,
+                    facet_count=1,
+                    main_category=parsed.main_category,
+                    subcategory_id=_sub,
+                    facet_names=_pf['facet_name'],
+                    facet_value_names=_pf.get('value_name', '') or '',
+                )
+
     if not result:
         result = builder.build_category_only(parsed)
 
@@ -1625,6 +1690,20 @@ def process_url_v2(args):
         # Get matched values (lowercased for comparison)
         facet_values_lower = [fv.lower() for fv in match_target.split(', ')] if match_target else []
 
+        # V35 (Fix A): a keyword token is also "matched" when it names the
+        # DESTINATION subcategory itself. The redirect lands in that subcat, so
+        # a product-noun token like "rolgordijn" -> subcat "Rolgordijnen" is
+        # fully represented even though it is not a facet VALUE. Without this,
+        # V27's long-unmatched-token check zeroes otherwise-perfect in-subcat
+        # facet matches, e.g. /huis_tuin_557622_557624/r/bamboe_rolgordijn_buiten/
+        # -> materiaal~Bamboe ~~ ruimte~Buiten in "Rolgordijnen" scored 0 purely
+        # on the unmatched "rolgordijn". We add the subcat name (whole + its
+        # >=3-char words) to the texts a token can match against.
+        if redirect_cat_name:
+            _sn = redirect_cat_name.lower().strip()
+            facet_values_lower.append(_sn)
+            facet_values_lower.extend(t for t in _sn.split() if len(t) >= 3)
+
         # V29: trust the matcher when it used a semantic path. For synonym
         # phrase rewrites and the token-coverage scorer, the matcher has
         # already validated the match — V27's literal-substring check on
@@ -1639,6 +1718,10 @@ def process_url_v2(args):
         # because their matchers already validate intent semantically.
         TRUSTED_MATCH_TYPES = {
             'synonym', 'token_coverage',
+            # V35 (Fix B): the Search-API facet probe already validated intent
+            # via product coverage, so don't let V27's literal-substring check
+            # second-guess it (e.g. "inklapbare"≈"Inklapbaar").
+            'facet_probe_fallback',
         }
         if r.match_type in TRUSTED_MATCH_TYPES:
             for word in keyword_words:
@@ -1653,6 +1736,7 @@ def process_url_v2(args):
             # would have its original token "huistelefoon" flagged unmatched
             # even though its base form "telefoon" is in the facet.
             from src.synonyms import COMPOUND_DECOMPOSITIONS as _CDEC
+            from src.synonyms import get_synonyms as _get_syn
             for word in keyword_words:
                 word_matched = False
                 if word in STOPWORDS or word in SHOP_NAMES:
@@ -1662,6 +1746,14 @@ def process_url_v2(args):
                 base = _CDEC.get(word)
                 if base:
                     forms.append(base)
+                # V35: also credit a token whose SYNONYM is represented in the
+                # matched facet value(s). The matcher bridges e.g.
+                # "combimagnetron" -> oven_opties "Magnetronfunctie" via the
+                # synonym table, but the literal-substring check below would
+                # still flag "combimagnetron" as unmatched (it's not a substring
+                # of "Magnetronfunctie") -> V27 long-unmatched -> tier D. Adding
+                # the synonym forms lets the token score as matched.
+                forms.extend(_get_syn(word))
 
                 for form in forms:
                     for fv in facet_values_lower:
