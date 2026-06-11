@@ -108,7 +108,18 @@
             <div class="card-body">
                 <div class="d-flex gap-3 align-items-end mb-3">
                     <div style="flex: 1;">
-                        <label for="shopNames" class="form-label small">Shop Names</label>
+                        <label class="form-label small d-block">Search by</label>
+                        <div class="d-flex gap-3 mb-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="searchMode" id="modeName" value="name" checked onchange="updateInputLabel()">
+                                <label class="form-check-label" for="modeName">Shop Name</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="searchMode" id="modeId" value="id" onchange="updateInputLabel()">
+                                <label class="form-check-label" for="modeId">Shop ID</label>
+                            </div>
+                        </div>
+                        <label for="shopNames" class="form-label small" id="shopInputLabel">Shop Names</label>
                         <textarea class="form-control" id="shopNames" rows="3" placeholder="one shop per line"></textarea>
                     </div>
                     <div>
@@ -140,7 +151,7 @@
         <div id="resultsSection" style="display: none;">
             <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Results <span class="badge bg-secondary ms-2" id="resultCount">0</span></h5>
+                    <h5 class="mb-0">Results</h5>
                     <div class="d-flex gap-2">
                         <button class="btn btn-sm" style="border: 1px solid #8b7bb5; color: #8b7bb5; background: transparent;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyAllToClipboard()">Copy for Excel</button>
                         <button class="btn btn-sm" style="border: 1px solid #CC5500; color: #CC5500; background: transparent;" onmouseover="this.style.backgroundColor='#CC5500';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#CC5500'" onclick="exportExcel()">Export Excel</button>
@@ -197,9 +208,42 @@
 
         let allResults = [];
         let lastCountries = [];
+        let lastMode = 'name';
         let currentPage = 1;
         let sortColumn = null;
         let sortDirection = 'asc';
+
+        function getMode() {
+            return document.querySelector('input[name="searchMode"]:checked').value;
+        }
+
+        function updateInputLabel() {
+            const m = getMode();
+            const lbl = document.getElementById('shopInputLabel');
+            const input = document.getElementById('shopNames');
+            if (m === 'id') {
+                lbl.textContent = 'Shop IDs';
+                input.placeholder = 'one shop_id per line';
+            } else {
+                lbl.textContent = 'Shop Names';
+                input.placeholder = 'one shop per line';
+            }
+        }
+
+        // Leading columns adapt to search mode: by name → Shop Name then Shop ID;
+        // by id → Shop ID then Shop Name.
+        function leadingColumns() {
+            if (lastMode === 'id') {
+                return [
+                    { key: 'shop_id',   label: 'Shop ID' },
+                    { key: 'shop_name', label: 'Shop Name' },
+                ];
+            }
+            return [
+                { key: 'shop_name', label: 'Shop Name' },
+                { key: 'shop_id',   label: 'Shop ID' },
+            ];
+        }
 
         function getCheckedCountries() {
             const countries = [];
@@ -217,11 +261,16 @@
                 return;
             }
 
+            const mode = getMode();
             const shopText = document.getElementById('shopNames').value.trim();
-            const shopNames = shopText ? shopText.split('\n').map(s => s.trim()).filter(Boolean) : [];
+            const items = shopText ? shopText.split('\n').map(s => s.trim()).filter(Boolean) : [];
 
             const params = new URLSearchParams();
-            if (shopNames.length) params.append('shop_names', shopNames.join(','));
+            if (mode === 'id') {
+                if (items.length) params.append('shop_ids', items.join(','));
+            } else {
+                if (items.length) params.append('shop_names', items.join(','));
+            }
             params.append('countries', countries.join(','));
 
             document.getElementById('loadingArea').style.display = 'block';
@@ -238,6 +287,7 @@
                 const data = await res.json();
                 allResults = data.results || [];
                 lastCountries = countries;
+                lastMode = mode;
                 sortColumn = null;
                 sortDirection = 'asc';
                 currentPage = 1;
@@ -256,7 +306,9 @@
         function buildHeader() {
             const thead = document.getElementById('resultsHead');
             let html = '<tr>';
-            html += '<th class="sortable" data-sort="shop_name" onclick="sortBy(\'shop_name\')">Shop Name</th>';
+            leadingColumns().forEach(col => {
+                html += `<th class="sortable" data-sort="${col.key}" onclick="sortBy('${col.key}')">${col.label}</th>`;
+            });
             ['nl', 'be', 'de'].forEach(c => {
                 html += `<th class="sortable" data-sort="${countryKeys[c]}" onclick="sortBy('${countryKeys[c]}')">${countryLabels[c]}</th>`;
             });
@@ -309,7 +361,6 @@
             const end = perPage === Infinity ? total : start + perPage;
             const pageItems = allResults.slice(start, end);
 
-            document.getElementById('resultCount').textContent = total;
             renderTable(pageItems);
 
             document.getElementById('prevBtn').disabled = currentPage <= 1;
@@ -325,7 +376,7 @@
 
         function renderTable(results) {
             const tbody = document.getElementById('resultsBody');
-            const colCount = 5; // shop_name + 3 countries + last_changed
+            const colCount = 6; // 2 leading (name/id) + 3 countries + last_changed
 
             if (results.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="${colCount}" class="text-center text-muted py-4">No results found</td></tr>`;
@@ -333,7 +384,11 @@
             }
 
             tbody.innerHTML = results.map(r => {
-                let row = `<tr><td><strong>${escHtml(r.shop_name || '')}</strong></td>`;
+                let row = '<tr>';
+                leadingColumns().forEach(col => {
+                    const v = escHtml(String(r[col.key] ?? ''));
+                    row += col.key === 'shop_name' ? `<td><strong>${v}</strong></td>` : `<td>${v}</td>`;
+                });
                 ['nl', 'be', 'de'].forEach(c => {
                     const val = r[countryKeys[c]];
                     const hasVal = val && val !== '' && val !== '0' && val !== '1';
@@ -353,9 +408,10 @@
         }
 
         function buildAoa() {
-            const header = ['shop_name', 'mc_id_nl', 'mc_id_be', 'mc_id_de', 'last_changed'];
+            const lead = leadingColumns();
+            const header = [...lead.map(c => c.key), 'mc_id_nl', 'mc_id_be', 'mc_id_de', 'last_changed'];
             const rows = allResults.map(r => [
-                r.shop_name || '',
+                ...lead.map(c => r[c.key] ?? ''),
                 r[countryKeys.nl] || '',
                 r[countryKeys.be] || '',
                 r[countryKeys.de] || '',

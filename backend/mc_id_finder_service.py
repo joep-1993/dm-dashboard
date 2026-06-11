@@ -12,8 +12,12 @@ logger = logging.getLogger(__name__)
 def search_mc_ids(
     shop_names: Optional[List[str]] = None,
     countries: Optional[List[str]] = None,
+    shop_ids: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
-    """Search for MC IDs by shop names. countries controls which MC ID columns to return."""
+    """Search for MC IDs by shop names (partial LIKE) or shop ids (exact).
+
+    countries controls which MC ID columns to return.
+    """
     conn = get_redshift_connection()
     try:
         with conn.cursor() as cur:
@@ -21,11 +25,16 @@ def search_mc_ids(
             inner_where = "WHERE 1=1"
             params = []
 
-            if shop_names:
+            if shop_names or shop_ids:
                 conditions = []
-                for name in shop_names:
-                    conditions.append("LOWER(r.shop_name) LIKE LOWER(%s)")
-                    params.append(f"%{name}%")
+                if shop_names:
+                    for name in shop_names:
+                        conditions.append("LOWER(r.shop_name) LIKE LOWER(%s)")
+                        params.append(f"%{name}%")
+                if shop_ids:
+                    placeholders = ",".join(["%s"] * len(shop_ids))
+                    conditions.append(f"r.shop_id IN ({placeholders})")
+                    params.extend(shop_ids)
                 inner_where += " AND (" + " OR ".join(conditions) + ")"
 
             # Require at least one checked country MC ID to be non-empty (columns are strings)
@@ -52,15 +61,16 @@ def search_mc_ids(
                 inner_where += " AND (m.f_mc_id_nl NOT IN ('','0','1') OR m.f_mc_id_be NOT IN ('','0','1') OR m.f_mc_id_de NOT IN ('','0','1'))"
 
             query = f"""
-                SELECT shop_name, f_mc_id_nl, f_mc_id_be, f_mc_id_de, d_change
+                SELECT shop_id, shop_name, f_mc_id_nl, f_mc_id_be, f_mc_id_de, d_change
                 FROM (
                     SELECT DISTINCT
+                        r.shop_id,
                         r.shop_name,
                         m.f_mc_id_nl,
                         m.f_mc_id_be,
                         m.f_mc_id_de,
                         m.d_change,
-                        ROW_NUMBER() OVER (PARTITION BY r.shop_name ORDER BY m.d_change DESC) AS rn
+                        ROW_NUMBER() OVER (PARTITION BY r.shop_id ORDER BY m.d_change DESC) AS rn
                     FROM beslistbi.hda.efficy_shop_dm m
                     JOIN bt.shop_main_attributes_by_day r ON m.k_shop = r.efficy_k_shop
                     {inner_where}
@@ -77,6 +87,7 @@ def search_mc_ids(
             for row in rows:
                 d = row["d_change"]
                 results.append({
+                    "shop_id": row["shop_id"],
                     "shop_name": row["shop_name"],
                     "mc_id_nl": row["f_mc_id_nl"],
                     "mc_id_be": row["f_mc_id_be"],

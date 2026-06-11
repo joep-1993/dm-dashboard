@@ -19,11 +19,16 @@ def health_check():
 @router.get("/search")
 async def search(
     shop_names: Optional[str] = Query(None, description="Comma-separated shop names (partial match)"),
+    shop_ids: Optional[str] = Query(None, description="Comma-separated shop ids (exact match)"),
     countries: Optional[str] = Query(None, description="Comma-separated country codes (nl,be,de)"),
 ):
     """Search for Merchant Center IDs."""
     try:
         name_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
+        id_list = None
+        if shop_ids:
+            id_list = [int(s.strip()) for s in shop_ids.split(",") if s.strip().isdigit()]
+            id_list = id_list or None
         country_list = [c.strip().lower() for c in countries.split(",") if c.strip()] if countries else None
         # Validate country codes
         if country_list:
@@ -31,7 +36,7 @@ async def search(
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            executor, search_mc_ids, name_list, country_list
+            executor, search_mc_ids, name_list, country_list, id_list
         )
         if result["status"] == "error":
             raise HTTPException(status_code=500, detail=result["error"])
