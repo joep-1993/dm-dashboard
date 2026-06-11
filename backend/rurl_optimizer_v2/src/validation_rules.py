@@ -94,7 +94,14 @@ STOPWORDS = {
     # --- Koop-intentie / onderzoek (V27) ---
     'vergelijken', 'vergelijk',
     'review', 'reviews', 'recensie', 'recensies',
-    'test', 'ervaring', 'ervaringen',
+    # 'getest' covers marketing-label phrases like "als beste getest"
+    # ("als" + "beste" are already stopwords above, so the full phrase now
+    # routes to the clean category via the V27 stopwords-only short-circuit).
+    # NB: the count prefix in "10 goedkoopste" needs no entry — "goedkoopste"
+    # is already a stopword and a bare digit "10" is intentionally NOT added
+    # (it would wrongly strip legitimate numeric tokens: "iphone 10",
+    # "maat 10", "10 kg").
+    'test', 'getest', 'ervaring', 'ervaringen',
     'prijs', 'prijzen',
     'alternatief', 'alternatieven',
 

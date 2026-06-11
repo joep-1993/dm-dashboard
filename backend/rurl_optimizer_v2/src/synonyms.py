@@ -97,6 +97,34 @@ SYNONYMS = {
     "bijzettafel": ["salontafel", "hoektafel"],
 
     # ==========================================================================
+    # BEDDENGOED — "zonder hoes" / "hoesloos" => facetwaarde
+    # eigenschap_beddengoed "Zonder overtrek" (id 23812125, o.a. in Dekbedden
+    # 505149). Er is geen lexicale brug van "hoes"/"hoesloos" naar "overtrek",
+    # dus een expliciet synoniem. Zonder dit valt het losse token "hoes" terug
+    # op een cross-category type-match ("Opberghoes" in subcat Opbergzakken).
+    # De woord-paar lookup in match_multi_word pakt "zonder hoes" op; de losse
+    # tokens "hoesloos"/"hoesloze" worden in de per-woord facet-match opgepikt.
+    # ==========================================================================
+    "zonder hoes": ["zonder overtrek"],
+    "hoesloos": ["zonder overtrek"],
+    "hoesloze": ["zonder overtrek"],
+    "hoesloos dekbed": ["zonder overtrek"],
+
+    # ==========================================================================
+    # KEUKEN — een "afdekplaat (voor) inductiekookplaat" is een inductie-
+    # beschermer (facet type_kh "Inductie beschermer", id 23814360, o.a. in
+    # Keukenhulpjes 6284132). "afdekplaat" deelt geen letters met "beschermer",
+    # dus zonder synoniem matcht alleen "inductie" → de letterlijke waarde
+    # "Inductie" (o_keukengerei), en valt "afdekplaat" als long-unmatched token
+    # weg → geen redirect. De woord-paar lookup pakt de hele frase op; match_type
+    # 'synonym' is trusted, dus "afdekplaat" telt mee als gedekt.
+    # ==========================================================================
+    "afdekplaat inductiekookplaat": ["inductie beschermer"],
+    "afdekplaat inductie": ["inductie beschermer"],
+    "inductie afdekplaat": ["inductie beschermer"],
+    "afdekplaat inductiekookplaten": ["inductie beschermer"],
+
+    # ==========================================================================
     # EIGENSCHAPPEN & SPECIFICATIES (V27)
     # ==========================================================================
     "waterdicht": ["waterproof", "regendicht", "waterbestendig", "ip65", "ip68"],
@@ -244,6 +272,14 @@ COMPOUND_DECOMPOSITIONS = {
     # Tuin
     "tuinslang": "slang",
     "tuinhuisje": "tuinhuis",
+    # Badtextiel — "antislipmat" = "antislip" + "mat"; de matcher matcht de
+    # losse waarde "Antislip" (o_matten) pas als het glued compound wordt
+    # ontleed. Base = "antislip" zodat de in-subcat facetwaarde "Antislip"
+    # raakt (bv. in Douchematten 6674987).
+    "antislipmat": "antislip",
+    "antislipmatten": "antislip",
+    "antislipmatje": "antislip",
+    "antislipmatjes": "antislip",
     # Sport / outdoor
     "wandelstok": "stok",
     "kinderfiets": "fiets",

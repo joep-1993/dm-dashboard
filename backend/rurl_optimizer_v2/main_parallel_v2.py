@@ -922,7 +922,14 @@ def process_url_v2(args):
             and _kw_tokens
             and not _non_stop_non_shop
             and not _shops_in_kw):
-        clean_url = f"https://www.beslist.nl{parsed.full_category_path}/"
+        # Preserve any /c/<facet> the original URL already carried — a
+        # stopwords-only keyword ("beste getest", "de goedkoopste") means there
+        # is nothing to MATCH, but it must not silently drop a facet selection
+        # the URL pinned (e.g. /r/beste_getest/c/afmeting_bedbodem_bed_matras~…).
+        # Mirrors the V32 category-noun-only short-circuit below.
+        _ef27 = getattr(parsed, 'existing_facet', '') or ''
+        _base27 = f"https://www.beslist.nl{parsed.full_category_path}"
+        clean_url = f"{_base27}/c/{_ef27}" if _ef27 else f"{_base27}/"
         return {
             'original_url': url,
             'main_category': parsed.main_category or '',
@@ -931,10 +938,10 @@ def process_url_v2(args):
             'redirect_url': clean_url,
             'redirect_category': category_lookup.get(parsed.subcategory_id, '') if parsed.subcategory_id else (parsed.main_category or ''),
             'is_cross_category': False,
-            'facet_fragment': '',
-            'facet_names': '',
+            'facet_fragment': _ef27,
+            'facet_names': _ef27.split('~', 1)[0] if _ef27 else '',
             'facet_value_names': '',
-            'facet_count': 0,
+            'facet_count': 1 if _ef27 else 0,
             'match_score': 0,
             'match_type': 'stopwords_only_clean_category',
             'reliability_score': 80,  # category page is a safe landing — no facet so no bad-facet risk
@@ -951,7 +958,8 @@ def process_url_v2(args):
             'has_dimensions': False,
             'merk_of_shop_missing': '',
             'success': True,
-            'reason': 'V27: keyword is stopwords-only — redirected to clean category URL',
+            'reason': 'V27: keyword is stopwords-only — redirected to clean category URL'
+                      + (f" (preserved existing facet '{_ef27}')" if _ef27 else ''),
         }
 
     # V32: "redundant keyword" short-circuit. When every meaningful keyword
@@ -1092,6 +1100,41 @@ def process_url_v2(args):
         match_result = matcher.match_with_partial(parsed.keyword, facet_values)
         if match_result.is_match:
             result = builder.build(parsed, match_result)
+
+    # 1c. OWN-SUBCAT COMPOUND RETRY — must run BEFORE the parent/sibling
+    # fallback (step 2). A glued Dutch compound ("antislipmat" = "antislip" +
+    # "mat") doesn't match its base facet value ("Antislip" in o_matten) until
+    # it's decomposed. Without trying the decomposed form against the URL's OWN
+    # subcat here, step 2's parent_subcat fallback steals a weaker secondary
+    # token onto a sibling facet — e.g. /…_6674987/r/antislipmat_bad-douche/
+    # (Douchematten) matched "douche" → sibling Zeepdispensers t_zeepd "Douche"
+    # instead of "antislip" → own o_matten "Antislip". Scoped to the own subcat
+    # and same-maincat hits only, so it can't introduce a cross-category jump.
+    if not result and facet_values and parsed.keyword:
+        from src.synonyms import expand_compounds as _expand_compounds
+        _sub_cat_name_1c = (category_lookup.get(str(parsed.subcategory_id), '')
+                            if parsed.subcategory_id else '')
+        for _variant in _expand_compounds(parsed.keyword)[1:]:  # skip original
+            if ' ' in _variant:
+                _vm = matcher.match_multi_word(
+                    _variant, facet_values,
+                    all_type_facets=all_type_facets,
+                    require_type_for_merk=True,
+                    current_main_category=parsed.main_category,
+                    category_name=_sub_cat_name_1c,
+                )
+                _vm = [mr for mr in (_vm or [])
+                       if not getattr(mr, 'cross_category_path', None)]
+                if _vm:
+                    result = builder.build_multi_facet(parsed, _vm)
+                    result.reason = f"[own-subcat compound:{_variant!r}] " + result.reason
+                    break
+            else:
+                _vmp = matcher.match_with_partial(_variant, facet_values)
+                if _vmp.is_match:
+                    result = builder.build(parsed, _vmp)
+                    result.reason = f"[own-subcat compound:{_variant!r}] " + result.reason
+                    break
 
     # 2. PARENT SUBCATEGORY FACETS (only if we have a subcategory)
     if not result and parsed.subcategory_id:
@@ -1810,9 +1853,20 @@ def process_url_v2(args):
             # value, the redirect points at the wrong product (Q4
             # 'bewegingssensor', Q7 'waterfilter', Q9 'inductiekookplaat') —
             # emit no redirect instead.
+            # A curated synonym match semantically bridges its source tokens to
+            # the facet value even when there's zero lexical overlap (e.g.
+            # "afdekplaat inductiekookplaat" → "Inductie beschermer", "hoesloze"
+            # → "Zonder overtrek"). Feed the synonym's source phrase into the
+            # long-unmatched check so it doesn't reject a correct synonym match
+            # just because the descriptive token isn't literally in the facet
+            # name. Mirrors the TRUSTED_MATCH_TYPES handling in the coverage calc.
+            _synonym_src = ''
+            if local_match_used and getattr(local_match, 'match_type', '') == 'synonym':
+                _synonym_src = getattr(local_match, 'keyword', '') or ''
             _reject_tok = _rescue_long_unmatched_token(
                 parsed.keyword,
-                ' '.join(filter(None, [derived.get('dom_cat_name', ''), appended_value_name])),
+                ' '.join(filter(None, [derived.get('dom_cat_name', ''),
+                                       appended_value_name, _synonym_src])),
             )
             if _reject_tok:
                 # V33: before giving up, try a multi-facet assembly. A single
@@ -1929,6 +1983,54 @@ def process_url_v2(args):
                 f"[V28] Legacy score {reliability_score}, but search "
                 f"({derived.get('total')} products) shows no dominant deepest_cat"
             )
+
+        # GUARD: don't let a single weak token drag a cross-category type match
+        # out of the category the URL already pins, when the SEARCH SIGNAL
+        # agrees the URL's own subcategory is where the query belongs.
+        # Concrete case: /huis_tuin_505062_505149/r/dekbed_zonder_hoes/ — only
+        # "hoes" matched, onto type_opberger "Opberghoes" in the unrelated
+        # Opbergzakken subcat (10 products, tier D), while the Search API's
+        # dominant category for "dekbed zonder hoes" IS the URL's own Dekbedden
+        # subcat. We deliberately gate on search-derived dom_cat == origin
+        # subcat (not a hardcoded generic-word list) because the offending
+        # token here ("hoes") is not in GENERIC_NOUNS — the search agreement is
+        # the trustworthy signal. Single-token + <50% coverage keeps this
+        # narrow so genuine multi-token cross-category jumps are untouched.
+        # Falls back to the origin category page (preserving any existing /c/
+        # facet); the synonym fix above resolves THIS url to the right facet
+        # before it ever reaches here, so this is the general safety net.
+        if (
+            final_redirect_url
+            and r.match_type == 'cross_category_type'
+            and is_cross_category
+            and parsed.subcategory_id
+            and len(matched_keywords) == 1
+            and match_coverage < 50
+        ):
+            _dom_subcat_id = ''
+            for _part in reversed((derived.get('dom_cat_url_slug') or '').split('_')):
+                if _part.isdigit():
+                    _dom_subcat_id = _part
+                    break
+            if _dom_subcat_id and _dom_subcat_id == str(parsed.subcategory_id):
+                _origin_base = f"https://www.beslist.nl{parsed.full_category_path}"
+                _ef = getattr(parsed, 'existing_facet', '') or ''
+                final_redirect_url = (
+                    f"{_origin_base}/c/{_ef}" if _ef else f"{_origin_base}/"
+                )
+                final_redirect_cat_name = original_cat_name
+                final_match_type = 'cross_type_rejected_kept_origin'
+                final_score = 70
+                final_tier = get_reliability_tier(final_score)
+                final_reason = (
+                    f"[guard] rejected cross-category type jump to "
+                    f"'{redirect_cat_name}' on single token "
+                    f"'{matched_keywords[0]}'; Search API's dominant category is "
+                    f"the URL's own '{original_cat_name}' — kept origin category"
+                    + (f" + existing facet '{_ef}'" if _ef else " page")
+                )
+                reject_reason = ''
+                flag_for_review = ''
 
         # V31: leftover-token facet append on high-score rows.
         # The rescue path above only runs when the matcher failed (score<50).
@@ -2180,6 +2282,19 @@ def main():
     urls = df[args.column].tolist()
     total = len(urls)
     print(f"Loaded {total:,} URLs")
+
+    # Hard exclusion: external API / scraper-proxy URLs (e.g. api.scrape.do,
+    # which embeds a beslist URL as a query param and otherwise leaks into the
+    # global pass). Drop them at the input so they never appear in the output
+    # at all — the in-worker guard in process_url_v2 stays as a backstop.
+    EXCLUDED_HOSTS = ("api.scrape.do",)
+    _kept = [u for u in urls if not any(h in str(u).lower() for h in EXCLUDED_HOSTS)]
+    _dropped = total - len(_kept)
+    if _dropped:
+        print(f"Excluded {_dropped:,} external-host URL(s) "
+              f"({', '.join(EXCLUDED_HOSTS)}) from processing")
+        urls = _kept
+        total = len(urls)
 
     # Pre-load data and cache
     data = preload_data(use_cache=True)
