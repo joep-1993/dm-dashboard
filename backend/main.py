@@ -874,15 +874,23 @@ async def upload_urls(file: UploadFile = File(...)):
             cur.close()
             return_db_connection(conn)
 
-        # "added"/"duplicates" report the kopteksten queue (the tool on this
-        # page); FAQ + unique-titles counts are in the breakdown below.
-        duplicate_count = valid_count - kopteksten_added
+        # Full accounting so the counts always sum to total_urls:
+        #   total = added + already_queued + invalid + repeated_in_input
+        # "added"/"already_queued" are about the kopteksten queue (the tool on
+        # this page). repeated_in_input = valid lines that collapsed onto an
+        # earlier line after canonicalization (same URL pasted twice).
+        already_queued = valid_count - kopteksten_added
+        repeated_in_input = (len(urls) - invalid_count) - valid_count
 
         return {
             "status": "success",
             "total_urls": len(urls),
             "added": kopteksten_added,
-            "duplicates": duplicate_count,
+            # Kept for backwards-compat: "duplicates" historically meant
+            # "already in the queue".
+            "duplicates": already_queued,
+            "already_queued": already_queued,
+            "repeated_in_input": repeated_in_input,
             "invalid": invalid_count,
             "queued": {
                 "kopteksten": kopteksten_added,
@@ -891,7 +899,7 @@ async def upload_urls(file: UploadFile = File(...)):
             },
             "message": (
                 f"Added {kopteksten_added} new URLs to the kopteksten queue "
-                f"({duplicate_count} already queued); also queued "
+                f"({already_queued} already queued); also queued "
                 f"{faq_added} FAQ + {unique_titles_added} unique-titles jobs"
             ),
         }

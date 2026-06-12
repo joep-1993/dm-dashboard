@@ -699,6 +699,21 @@ async function uploadManualUrls() {
     }
 }
 
+// Build a full upload-result breakdown whose buckets sum to total.
+// added + already queued + repeated-in-input + invalid = total.
+function formatUploadResult(label, data) {
+    const alreadyQueued = data.already_queued ?? data.duplicates ?? 0;
+    const parts = [`${data.added} new`, `${alreadyQueued} already queued`];
+    if (data.repeated_in_input) parts.push(`${data.repeated_in_input} repeated in input`);
+    if (data.invalid) parts.push(`${data.invalid} invalid`);
+    let line = `<strong>${label}:</strong> ${parts.join(', ')} (${data.total_urls} total)`;
+    if (data.queued) {
+        line += `<br><small class="text-muted">Queued for: kopteksten ${data.queued.kopteksten}, `
+              + `FAQ ${data.queued.faq}, unique titles ${data.queued.unique_titles}</small>`;
+    }
+    return line;
+}
+
 // Combined upload: processes file if selected, otherwise manual URLs
 async function processUploadUrls() {
     const fileInput = document.getElementById('urlFileInput');
@@ -726,7 +741,7 @@ async function processUploadUrls() {
             const response = await fetch(`${API_BASE}/api/upload-urls`, { method: 'POST', body: formData });
             const data = await response.json();
             if (response.ok) {
-                results.push(`<strong>File:</strong> ${data.added} new, ${data.duplicates} duplicates (${data.total_urls} total)`);
+                results.push(formatUploadResult('File', data));
                 fileInput.value = '';
             } else {
                 results.push(`<strong>File error:</strong> ${data.detail}`);
@@ -740,7 +755,7 @@ async function processUploadUrls() {
             const response = await fetch(`${API_BASE}/api/upload-urls`, { method: 'POST', body: formData });
             const data = await response.json();
             if (response.ok) {
-                results.push(`<strong>Manual:</strong> ${data.added} new, ${data.duplicates} duplicates (${data.total_urls} total)`);
+                results.push(formatUploadResult('Manual', data));
                 textInput.value = '';
             } else {
                 results.push(`<strong>Manual error:</strong> ${data.detail}`);
