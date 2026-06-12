@@ -929,6 +929,136 @@ def _cross_maincat_candidate(parsed, categories_df, matcher):
     return (tgt_main, xm)
 
 
+def _cross_maincat_any_token_match(parsed, categories_df, matcher, threshold=95):
+    """Last-resort variant of Fix E's candidate nomination: scan the FULL
+    keyword and then EVERY meaningful token (not just the head) for a
+    high-score subcategory-name match in a DIFFERENT main category. Fix E only
+    nominates on the head token, so a modifier-first keyword like
+    "opvouwbare wandelstok anwb" never reaches it — while 'wandelstok' names
+    the gezond_mooi 'Wandelstokken' subcat exactly. Same-maincat matches are
+    excluded: the cascade already tried those at this threshold (step 3), so
+    re-emitting one here would resurrect a match the cascade rejected.
+    Returns (target_maincat, subcat_match) or None."""
+    if categories_df is None or not parsed.keyword or not parsed.main_category:
+        return None
+    from src.validation_rules import STOPWORDS as _SW, SHOP_NAMES as _SN
+
+    def _target_main(m):
+        segs = [s for s in (m.get('category_path', '') or '').split('/') if s]
+        return segs[1] if len(segs) >= 2 and segs[0] == 'products' else ''
+
+    candidates = [parsed.keyword]
+    candidates += [t for t in parsed.keyword.lower().split()
+                   if len(t) >= 4 and t not in _SW and t not in _SN
+                   and not t.isdigit()]
+    for cand in candidates:
+        m = matcher.match_subcategory_name(cand, categories_df, main_category=None)
+        if not m or m.get('score', 0) < threshold:
+            continue
+        tgt = _target_main(m)
+        if tgt and tgt != parsed.main_category:
+            return (tgt, m)
+    return None
+
+
+def _covered_after_vowel_collapse(token, target_text, matcher):
+    """Second-chance check behind _rescue_long_unmatched_token: that guard's
+    stem+prefix test misses Dutch vowel-doubling inflection ('opvouwbare'
+    stems to 'opvouwbar' while the matched facet value 'Opvouwbaar' keeps the
+    double a, so neither is a prefix of the other). Re-run the same stem
+    comparison with double vowels collapsed on both sides before rejecting."""
+    import re as _re
+
+    def _stem(t):
+        t = t.lower()
+        if len(t) > 3 and t.endswith('s'):
+            t = t[:-1]
+        if len(t) > 3 and t.endswith('e'):
+            t = t[:-1]
+        return matcher._collapse_double_vowels(t)
+
+    s = _stem(token)
+    target_toks = {_stem(t) for t in _re.findall(r'[a-z0-9]+', (target_text or '').lower())}
+    return s in target_toks or any(
+        (len(tt) >= 4 and s.startswith(tt)) or (len(s) >= 4 and tt.startswith(s))
+        for tt in target_toks)
+
+
+def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
+                                   facet_filter, builder, category_lookup):
+    """V36: build the output-field overrides for the cross-maincat LAST-RESORT
+    fallback, or return None. Called only on rows that would otherwise ship
+    with NO redirect at all, so a low-tier cross-maincat suggestion strictly
+    adds reviewable coverage. A cache-only search probe (same evidence rule as
+    Fix E: AND-mode, share >= 0.6) upgrades the row to tier C; unverified rows
+    stay tier D so reviewers can filter on confidence. The original /c/ facet
+    (if any) is dropped — facet value ids are category-scoped and don't
+    transfer across maincats."""
+    from src.search_derived import derive_redirect as _derive
+    from src.reliability_scorer import get_reliability_tier as _tier
+
+    cand = _cross_maincat_any_token_match(parsed, categories_df, matcher)
+    if not cand:
+        return None
+    fb_main, fb_m = cand
+    res = builder.build_subcategory_redirect(
+        original_url=url, keyword=parsed.keyword, subcategory_match=fb_m,
+        main_category=fb_main, existing_facet='')
+    if not (res and getattr(res, 'success', False) and res.redirect_url):
+        return None
+    res = _append_facet_to_subcat_redirect(res, parsed, fb_m, facet_filter, matcher)
+
+    pv = _derive(fb_main, parsed.keyword) or {}
+    slug = fb_m.get('url_name', '') or ''
+    dom = pv.get('dom_cat_url_slug') or ''
+    verified = (
+        pv.get('mode') == 'and'
+        and (pv.get('dom_cat_share') or 0) >= 0.6
+        and dom and slug
+        and (dom == slug or dom.startswith(slug + '_')
+             or slug.startswith(dom + '_')))
+    # Long-unmatched-token guard (same rule as the V28 rescue): an UNVERIFIED
+    # jump is only safe when every long product token is represented in the
+    # target category/facets. Without it, an attribute token that happens to
+    # name a category elsewhere hijacks the row — "endoscoop riool inspectie
+    # camera kabel 30m" would land on accessoires 'Kabels' via 'kabel' while
+    # 'endoscoop' (the actual product) is nowhere in the target. Search
+    # evidence overrides the guard, mirroring the V33 multi-facet rescue.
+    if not verified:
+        target_text = ' '.join(filter(None, [
+            fb_m.get('matched_category', ''), res.facet_value_names or '']))
+        _bad = _rescue_long_unmatched_token(parsed.keyword, target_text,
+                                            prefix_link=True)
+        if _bad and not _covered_after_vowel_collapse(_bad, target_text, matcher):
+            return None
+    score = 65 if verified else 45
+    sub_id = extract_subcategory_id_from_url(res.redirect_url)
+    dropped = getattr(parsed, 'existing_facet', '') or ''
+    reason = (
+        f"[V36 cross-maincat fallback] no redirect found within "
+        f"'{parsed.main_category}' — subcat name match "
+        f"'{fb_m.get('matched_category', '')}' (score {fb_m.get('score', 0)}) "
+        f"in maincat '{fb_main}'"
+        + (f", search-verified AND {int(100 * (pv.get('dom_cat_share') or 0))}%"
+           if verified else ", unverified (no search evidence)")
+        + (f"; dropped original facet '{dropped}'" if dropped else '')
+        + ((res.reason and f"; {res.reason}") or ''))
+    return {
+        'redirect_url': res.redirect_url,
+        'redirect_category': (category_lookup.get(str(sub_id), '')
+                              or fb_m.get('matched_category', '')),
+        'match_type': ('cross_maincat_fallback_verified' if verified
+                       else 'cross_maincat_fallback'),
+        'reliability_score': score,
+        'reliability_tier': _tier(score),
+        'reason': reason,
+        'facet_fragment': res.facet_fragment or '',
+        'facet_names': res.facet_names or '',
+        'facet_value_names': res.facet_value_names or '',
+        'facet_count': res.facet_count or 0,
+    }
+
+
 def process_url_v2(args):
     """Process single URL in worker."""
     global _worker_data
@@ -2118,6 +2248,46 @@ def process_url_v2(args):
                 )
                 final_reason = reject_reason
                 flag_for_review = ''
+                # V36: this hard-reject would ship the row with NO redirect —
+                # exactly the case the cross-maincat fallback exists for.
+                _xfb = _cross_maincat_fallback_fields(
+                    url, parsed, d.get('categories_df'), matcher, facet_filter,
+                    builder, category_lookup)
+                if _xfb:
+                    return {
+                        'original_url': r.original_url,
+                        'main_category': r.main_category,
+                        'original_category': original_cat_name,
+                        'keyword': r.keyword,
+                        'redirect_url': _xfb['redirect_url'],
+                        'redirect_category': _xfb['redirect_category'],
+                        'is_cross_category': True,
+                        'facet_fragment': _xfb['facet_fragment'],
+                        'facet_names': _xfb['facet_names'],
+                        'facet_value_names': _xfb['facet_value_names'],
+                        'facet_count': _xfb['facet_count'],
+                        'match_score': r.match_score,
+                        'match_type': _xfb['match_type'],
+                        'reliability_score': _xfb['reliability_score'],
+                        'reliability_tier': _xfb['reliability_tier'],
+                        'h1_similarity': 0,
+                        'reject_reason': '',
+                        'flag_for_review': '',
+                        'search_derived_total': search_derived_total,
+                        'search_derived_dom_cat': search_derived_dom_cat,
+                        'search_derived_dom_share': search_derived_dom_share,
+                        'matched_keywords': matched_keywords_str,
+                        'unmatched_keywords': unmatched_keywords_str,
+                        'match_coverage': match_coverage,
+                        'has_stopwords': has_stopwords,
+                        'stopwords_found': stopwords_found,
+                        'shop_in_keyword': shop_in_keyword,
+                        'keyword_type': keyword_type,
+                        'has_dimensions': has_dims,
+                        'merk_of_shop_missing': getattr(r, 'merk_of_shop_missing', ''),
+                        'success': True,
+                        'reason': _xfb['reason'] + f" (after: {reject_reason})",
+                    }
                 # Fall through to the return; the V31 leftover block (score>=50)
                 # and the maincat validator (needs a redirect URL) both no-op.
                 return {
@@ -2410,6 +2580,30 @@ def process_url_v2(args):
         out_facet_value_names = ''
         out_facet_count = len(_faxes)
 
+    # V36: cross-maincat LAST-RESORT fallback. Only when the entire cascade —
+    # including Fix E (head-token + search-verified jump) — produced NO
+    # redirect at all, scan every meaningful keyword token for a >= 95
+    # subcategory-name match in another main category and redirect there,
+    # with leftover tokens appended as facets (e.g. sport_outdoor's
+    # "opvouwbare wandelstok anwb" -> gezond_mooi Wandelstokken /c/ Opvouwbaar).
+    if not final_redirect_url:
+        _xfb = _cross_maincat_fallback_fields(
+            url, parsed, d.get('categories_df'), matcher, facet_filter,
+            builder, category_lookup)
+        if _xfb:
+            final_redirect_url = _xfb['redirect_url']
+            final_redirect_cat_name = _xfb['redirect_category']
+            final_match_type = _xfb['match_type']
+            final_score = _xfb['reliability_score']
+            final_tier = _xfb['reliability_tier']
+            final_reason = _xfb['reason']
+            reject_reason = ''
+            is_cross_category = True
+            out_facet_fragment = _xfb['facet_fragment']
+            out_facet_names = _xfb['facet_names']
+            out_facet_value_names = _xfb['facet_value_names']
+            out_facet_count = _xfb['facet_count']
+
     return {
         'original_url': r.original_url,
         'main_category': r.main_category,
@@ -2619,6 +2813,12 @@ def main():
                     _c = _cross_maincat_candidate(p, _cdf, _km)
                     if _c:
                         _xpairs.append((_c[0], p.keyword))
+                    # V36: also prefetch for the any-token last-resort
+                    # fallback, so its cache-only verification probe has
+                    # evidence to read in the worker.
+                    _c2 = _cross_maincat_any_token_match(p, _cdf, _km)
+                    if _c2 and (not _c or _c2[0] != _c[0]):
+                        _xpairs.append((_c2[0], p.keyword))
                 if _xpairs:
                     print(f"\n[Fix E] Prefetching {len(set(_xpairs)):,} cross-maincat "
                           f"verification probe(s)...")

@@ -938,6 +938,12 @@ class KeywordMatcher:
             # After suffix removal, check if stems match or remainder is suffix
             if remainder == '' or remainder in DUTCH_SUFFIXES:
                 return True
+            # V36: Dutch consonant-doubling plural (stok->stokken, pil->pillen,
+            # kop->koppen). After stripping '-en' the plural stem keeps the
+            # doubled final consonant ("wandelstokken" -> "wandelstokk"), so the
+            # remainder vs the singular is exactly that one doubled letter.
+            if kw_base and remainder == kw_base[-1] and not kw_base[-1] in 'aeiou':
+                return True
             # INVALID: stems don't match
             # e.g., kw_base="meubel", fv_base="meubelset" -> remainder="set" not a suffix
 
@@ -956,6 +962,10 @@ class KeywordMatcher:
         if kw_base.startswith(fv_base):
             remainder = kw_base[len(fv_base):]
             if remainder == '' or remainder in DUTCH_SUFFIXES:
+                return True
+            # V36: consonant-doubling plural, reverse direction (user typed the
+            # plural stem, facet/category name is singular).
+            if fv_base and remainder == fv_base[-1] and not fv_base[-1] in 'aeiou':
                 return True
 
         # Rule 4: Facet at END of keyword
