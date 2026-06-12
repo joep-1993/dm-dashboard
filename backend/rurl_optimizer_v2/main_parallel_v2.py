@@ -334,6 +334,44 @@ def _collect_longest_per_axis_from_leftover(leftover_tokens, facet_values, match
     return by_axis
 
 
+def _high_subcat_name_match(url, parsed, categories_df, matcher, facet_filter,
+                            builder, context, reason_prefix, threshold=95):
+    """Shared body of cascade steps 2b and 3: a high-score (>= threshold)
+    subcategory-NAME match within `context` (the URL's own subtree for 2b, the
+    main category for 3). Tries the full keyword first, then individual words
+    (>=4 chars), applies the deeper-sibling specificity rescue, and builds the
+    subcategory redirect with a leftover-token facet appended. Returns a
+    RedirectResult or None. Behaviour is identical to the two former inline
+    blocks — only the match context and reason prefix differ between callers."""
+    if categories_df is None:
+        return None
+    m = matcher.match_subcategory_name(parsed.keyword, categories_df, main_category=context)
+    matched_word = parsed.keyword  # default: full-keyword match path
+    if not m or m.get('score', 0) < threshold:
+        for kw in parsed.keyword.lower().split():
+            if len(kw) < 4:
+                continue
+            wm = matcher.match_subcategory_name(kw, categories_df, main_category=context)
+            if wm and wm.get('score', 0) >= threshold:
+                m = wm
+                matched_word = kw
+                break
+    if m and m.get('score', 0) >= threshold:
+        m = _maybe_promote_to_specific_subcat(
+            m, matched_word, parsed, categories_df, facet_filter, matcher)
+    if m and m.get('score', 0) >= threshold:
+        res = builder.build_subcategory_redirect(
+            original_url=url,
+            keyword=parsed.keyword,
+            subcategory_match=m,
+            main_category=parsed.main_category,
+            existing_facet=parsed.existing_facet,
+        )
+        res.reason = f"{reason_prefix} " + res.reason
+        return _append_facet_to_subcat_redirect(res, parsed, m, facet_filter, matcher)
+    return None
+
+
 def _append_facet_to_subcat_redirect(result, parsed, subcategory_match, facet_filter, matcher):
     # When a subcat-name match wins (e.g. "tuinkast kunststof" → "Tuinkasten")
     # the leftover token ("kunststof") was previously thrown away. Match it
@@ -1317,93 +1355,23 @@ def process_url_v2(args):
     #     subcategory, first look for a child subcategory whose display name
     #     matches the keyword. Fixes cases like
     #       /main_sanitair_559434/r/wandpaneel/  ->  .../559434_560019 (Douchepanelen)
-    HIGH_SUBCAT_THRESHOLD = 95
+    # Steps 2b and 3 share one body (see _high_subcat_name_match): the same
+    # full-keyword -> per-word -> specificity-rescue -> build+append pipeline at
+    # the >=95 threshold. They differ only in the match CONTEXT and reason tag:
+    #   2b — within the URL's OWN subtree (parsed.subcategory_name): a child
+    #        subcategory whose name matches, e.g.
+    #        /main_sanitair_559434/r/wandpaneel/ -> .../559434_560019 (Douchepanelen)
+    #   3  — within the main category: generic terms like "scharnieren" ->
+    #        subcategory "Deurscharnieren" (so a specific facet doesn't win).
     if not result and parsed.subcategory_name:
-        categories_df = d.get('categories_df')
-        if categories_df is not None:
-            child_match = matcher.match_subcategory_name(
-                parsed.keyword, categories_df, main_category=parsed.subcategory_name
-            )
-            matched_word = parsed.keyword  # default: full-keyword match path
-            if not child_match or child_match.get('score', 0) < HIGH_SUBCAT_THRESHOLD:
-                for kw in parsed.keyword.lower().split():
-                    if len(kw) < 4:
-                        continue
-                    wm = matcher.match_subcategory_name(
-                        kw, categories_df, main_category=parsed.subcategory_name
-                    )
-                    if wm and wm.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
-                        child_match = wm
-                        matched_word = kw
-                        break
-            # Specificity rescue: prefer a deeper same-maincat sibling whose
-            # facets absorb a leftover keyword token.
-            if child_match and child_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
-                child_match = _maybe_promote_to_specific_subcat(
-                    child_match, matched_word, parsed, categories_df,
-                    facet_filter, matcher,
-                )
-            if child_match and child_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
-                result = builder.build_subcategory_redirect(
-                    original_url=url,
-                    keyword=parsed.keyword,
-                    subcategory_match=child_match,
-                    main_category=parsed.main_category,
-                    existing_facet=parsed.existing_facet,
-                )
-                result.reason = f"[child_subcat] " + result.reason
-                result = _append_facet_to_subcat_redirect(
-                    result, parsed, child_match, facet_filter, matcher
-                )
+        result = _high_subcat_name_match(
+            url, parsed, d.get('categories_df'), matcher, facet_filter, builder,
+            context=parsed.subcategory_name, reason_prefix='[child_subcat]')
 
-    # 3. V14.1: SUBCATEGORIE NAAM MATCHING met HOGE SCORE (≥95) binnen maincat
-    # Voor generieke termen: "scharnieren" -> subcategorie "Deurscharnieren"
-    # Dit voorkomt dat een specifieke facet ("Onzichtbare scharnieren") wordt gekozen
-    # V28: Per-woord matching - probeer eerst full keyword, dan individuele woorden
-    # (HIGH_SUBCAT_THRESHOLD already set in step 2b above — same 95 threshold.)
     if not result:
-        categories_df = d.get('categories_df')
-        if categories_df is not None:
-            # Probeer eerst het volledige keyword
-            subcat_match = matcher.match_subcategory_name(
-                parsed.keyword,
-                categories_df,
-                main_category=parsed.main_category
-            )
-            matched_word = parsed.keyword  # default: full-keyword match path
-            # V28: Als full keyword niet matcht, probeer individuele woorden
-            if not subcat_match or subcat_match.get('score', 0) < HIGH_SUBCAT_THRESHOLD:
-                keywords_to_try = parsed.keyword.lower().split()
-                for kw in keywords_to_try:
-                    if len(kw) < 4:
-                        continue
-                    word_match = matcher.match_subcategory_name(
-                        kw, categories_df, main_category=parsed.main_category
-                    )
-                    if word_match and word_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
-                        subcat_match = word_match
-                        matched_word = kw
-                        break
-            # Specificity rescue: if a deeper same-maincat sibling can absorb
-            # a leftover keyword token via its facets, prefer it.
-            if subcat_match and subcat_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
-                subcat_match = _maybe_promote_to_specific_subcat(
-                    subcat_match, matched_word, parsed, categories_df,
-                    facet_filter, matcher,
-                )
-            # Alleen accepteren als score ≥ 95 (bijna exacte match)
-            if subcat_match and subcat_match.get('score', 0) >= HIGH_SUBCAT_THRESHOLD:
-                result = builder.build_subcategory_redirect(
-                    original_url=url,
-                    keyword=parsed.keyword,
-                    subcategory_match=subcat_match,
-                    main_category=parsed.main_category,
-                    existing_facet=parsed.existing_facet  # V19: preserve existing facet
-                )
-                result.reason = f"[subcat_name_high] " + result.reason
-                result = _append_facet_to_subcat_redirect(
-                    result, parsed, subcat_match, facet_filter, matcher
-                )
+        result = _high_subcat_name_match(
+            url, parsed, d.get('categories_df'), matcher, facet_filter, builder,
+            context=parsed.main_category, reason_prefix='[subcat_name_high]')
 
     # 4. MAIN CATEGORY FACETS - Zoek in alle facets binnen maincat
     # Voor specifiekere termen: "onzichtbare scharnieren" -> facet "Onzichtbare scharnieren"
