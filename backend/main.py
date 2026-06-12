@@ -821,62 +821,71 @@ async def upload_urls(file: UploadFile = File(...)):
         if not urls:
             raise HTTPException(status_code=400, detail="No URLs found in file")
 
-        # Insert URLs into Redshift work queue
-        output_conn = get_output_connection()
-        output_cur = output_conn.cursor()
+        # Add URLs to the shared catalog (pa.urls) and queue pending jobs for
+        # all three generators (kopteksten, FAQ, unique titles) so every tool
+        # picks them up. Post-Big-Bang the per-tool job tables key on
+        # pa.urls.url_id and each worker pulls rows where status='pending'.
+        from backend.url_catalog import bulk_upsert_urls, canonicalize_url
 
-        added_count = 0
-        duplicate_count = 0
-        base_url = "https://www.beslist.nl"
+        # Honest invalid count: URLs that fail canonicalization.
+        invalid_count = sum(1 for u in urls if canonicalize_url(u) is None)
 
-        # Convert relative URLs to absolute URLs
-        full_urls = []
-        for url in urls:
-            if url.startswith('/'):
-                full_url = base_url + url
-            else:
-                full_url = url
-            full_urls.append(full_url)
+        conn = get_db_connection()
+        cur = conn.cursor()
 
-        # Get existing URLs from database in batches (Redshift performs better with smaller batches)
-        existing_urls = set()
-        batch_size = 500  # Check in batches of 500
+        def _queue_pending(table, url_ids):
+            """Insert pending job rows; return how many were newly created."""
+            if not url_ids:
+                return 0
+            values = ','.join(
+                cur.mogrify(
+                    "(%s,'pending',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)", (uid,)
+                ).decode('utf-8')
+                for uid in url_ids
+            )
+            cur.execute(f"""
+                INSERT INTO {table} (url_id, status, created_at, updated_at)
+                VALUES {values}
+                ON CONFLICT (url_id) DO NOTHING
+                RETURNING url_id
+            """)
+            return len(cur.fetchall())
 
-        for i in range(0, len(full_urls), batch_size):
-            batch = full_urls[i:i + batch_size]
-            placeholders = ','.join(['%s'] * len(batch))
-            output_cur.execute(f"""
-                SELECT url FROM pa.jvs_seo_werkvoorraad_shopping_season
-                WHERE url IN ({placeholders})
-            """, batch)
-            existing_urls.update(row['url'] for row in output_cur.fetchall())
+        try:
+            # Upsert into the catalog; returns {canonical_url: url_id}.
+            url_id_map = bulk_upsert_urls(cur, urls)
+            url_ids = list(url_id_map.values())
+            valid_count = len(url_id_map)
 
-        # Filter out duplicates
-        new_urls = [(url,) for url in full_urls if url not in existing_urls]
-        duplicate_count = len(full_urls) - len(new_urls)
+            kopteksten_added = _queue_pending("pa.kopteksten_jobs", url_ids)
+            faq_added = _queue_pending("pa.faq_jobs", url_ids)
+            unique_titles_added = _queue_pending("pa.unique_titles_jobs", url_ids)
 
-        # Batch insert new URLs
-        if new_urls:
-            # Insert in batches for better Redshift performance
-            insert_batch_size = 100
-            for i in range(0, len(new_urls), insert_batch_size):
-                batch = new_urls[i:i + insert_batch_size]
-                output_cur.executemany("""
-                    INSERT INTO pa.jvs_seo_werkvoorraad_shopping_season (url, kopteksten)
-                    VALUES (%s, 0)
-                """, batch)
-            added_count = len(new_urls)
+            conn.commit()
+        finally:
+            cur.close()
+            return_db_connection(conn)
 
-        output_conn.commit()
-        output_cur.close()
-        return_output_connection(output_conn)
+        # "added"/"duplicates" report the kopteksten queue (the tool on this
+        # page); FAQ + unique-titles counts are in the breakdown below.
+        duplicate_count = valid_count - kopteksten_added
 
         return {
             "status": "success",
             "total_urls": len(urls),
-            "added": added_count,
+            "added": kopteksten_added,
             "duplicates": duplicate_count,
-            "message": f"Added {added_count} new URLs, {duplicate_count} duplicates skipped"
+            "invalid": invalid_count,
+            "queued": {
+                "kopteksten": kopteksten_added,
+                "faq": faq_added,
+                "unique_titles": unique_titles_added,
+            },
+            "message": (
+                f"Added {kopteksten_added} new URLs to the kopteksten queue "
+                f"({duplicate_count} already queued); also queued "
+                f"{faq_added} FAQ + {unique_titles_added} unique-titles jobs"
+            ),
         }
 
     except Exception as e:
