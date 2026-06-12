@@ -40,6 +40,14 @@ from src.validation_rules import (
 PREPOSITION_QUALIFIERS = {'met', 'voor', 'van', 'zonder', 'op', 'bij', 'als', 'om', 'uit', 'aan'}
 
 
+def _strip_plural_suffix(s: str) -> str:
+    """Strip a single trailing Dutch plural suffix ('en' or 's'), suffix-aware.
+    Replaces the old `s.rstrip('s').rstrip('en')`, which stripped the CHARACTER
+    SET {e,n} and so over-stripped multi-letter stems (e.g. 'tuinen' -> 'tui'
+    instead of 'tuin', 'groen' -> 'gro')."""
+    return re.sub(r'(?:en|s)$', '', s)
+
+
 def extract_category_path_from_url(facet_url: str) -> Optional[str]:
     """
     v5: Extract the category path from a facet URL.
@@ -625,10 +633,10 @@ class KeywordMatcher:
         words_in_category = set()
         if category_name:
             cat_lower = category_name.lower()
-            cat_stem = cat_lower.rstrip('s').rstrip('en')
+            cat_stem = _strip_plural_suffix(cat_lower)
             for word in words:
                 word_lower = word.lower()
-                word_stem = word_lower.rstrip('s').rstrip('en')
+                word_stem = _strip_plural_suffix(word_lower)
                 # Check if word is contained in category name (or vice versa)
                 if (word_lower in cat_lower or cat_lower in word_lower or
                     word_stem in cat_lower or cat_stem in word_lower or

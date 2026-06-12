@@ -42,7 +42,7 @@ BAD_CROSS_CATEGORY_PATTERNS = [
     # "pomp" matched to "Pompons" (craft supplies)
     (r'\bpomp\b', r'pompons', -40),
     # "fontein" matched to "Vijverfonteinen" when looking for toilet
-    (r'\btoilet\b.*fontein|fontein.*toilet|fontein.*wc|wc.*fontein\b', r'vijverfonteinen', -40),
+    (r'(?:\btoilet\b.*fontein|fontein.*toilet|fontein.*wc|wc.*fontein)\b', r'vijverfonteinen', -40),
     # "opblaasbaar" matched to adult products
     (r'\bopblaasba', r'buttplugs|dildo|vibrator', -50),
     # "magnetron" matched to baby sterilizers
@@ -287,9 +287,13 @@ def calculate_reliability_score(
     keyword_lower = keyword.lower() if keyword else ''
     facet_lower = (facet_value_names or '').lower()
 
+    # Apply only the single WORST matching bad-pattern penalty (was summing all
+    # matching penalties, which double-docked rows that tripped two patterns).
+    _worst_penalty = 0
     for kw_re, fv_re, penalty in _BAD_CROSS_COMPILED:
         if kw_re.search(keyword_lower) and fv_re.search(facet_lower):
-            base_score += penalty  # penalty is negative
+            _worst_penalty = min(_worst_penalty, penalty)
+    base_score += _worst_penalty  # penalty is negative
 
     # Maincat/parent_subcat fallback with cross-category = less reliable
     if is_cross_category and '[maincat]' in reason:
