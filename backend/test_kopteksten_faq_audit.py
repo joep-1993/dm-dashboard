@@ -436,6 +436,29 @@ def test_replace_url_in_content_normalized_match():
     assert "/p/x/6/111" in out3 and "/p/y/6/222" not in out3, out3
 
 
+def test_product_subject_single_sourced_and_policy():
+    """build_product_subject / extract_selected_facets are single-sourced (FAQ ==
+    kopteksten), and carry the type_productlijn policy + original category case
+    that the kopteksten path used to lack."""
+    import backend.faq_service as f
+    import backend.scraper_service as s
+    assert f.build_product_subject is s.build_product_subject, "build_product_subject still duplicated"
+    assert f.extract_selected_facets is s.extract_selected_facets, "extract_selected_facets still duplicated"
+    bps = s.build_product_subject
+    # type_productlijn is a brand-line slug → keeps the category
+    assert bps([{"facet_name": "Type", "detail_value": "ProLine", "url_name": "type_productlijn"}],
+               "Boormachines") == "ProLine Boormachines"
+    # a real product type still suppresses the category
+    assert bps([{"facet_name": "Type", "detail_value": "Pistonmachines", "url_name": "type"}],
+               "Koffiezetters") == "Pistonmachines"
+    # brand-only keeps the category in its ORIGINAL case (not lowercased)
+    assert bps([{"facet_name": "Merk", "detail_value": "Garmin", "url_name": "merk"}],
+               "Accu's") == "Garmin Accu's"
+    # specific model suppresses the category
+    assert bps([{"facet_name": "Serie", "detail_value": "iPhone 15", "url_name": "serie"}],
+               "Smartphones") == "iPhone 15"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

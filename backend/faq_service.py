@@ -18,9 +18,12 @@ from urllib3.util.retry import Retry
 from openai import OpenAI
 from backend.category_lookup import lookup_category
 from backend.beslist_rate_limit import productsearch_bucket
-# Single source of truth for these identical URL helpers (canonical copy lives
+# Single source of truth for these URL + facet helpers (canonical copies live
 # in scraper_service; re-exported here so existing imports keep working).
-from backend.scraper_service import clean_url, parse_beslist_url, build_api_params
+from backend.scraper_service import (
+    clean_url, parse_beslist_url, build_api_params,
+    extract_selected_facets, build_product_subject,
+)
 
 # Configuration
 USER_AGENT = "Beslist script voor SEO"
@@ -145,33 +148,7 @@ _faq_session = create_faq_session()
 # scraper_service (single source of truth) — see the import near the top.
 
 
-def extract_selected_facets(api_response: Dict) -> List[Dict[str, str]]:
-    """
-    Extract selected facet values from API response.
-
-    Returns list of dicts with:
-    - facet_name: Name of the facet group (e.g., "Kleur", "Serie")
-    - facet_value: Display value (e.g., "Geel")
-    - detail_value: Value for content generation (e.g., "Gele" - Dutch adjective form)
-    """
-    selected = []
-
-    facets = api_response.get("facets", [])
-    for facet_group in facets:
-        facet_name = facet_group.get("name", "")
-        url_name = facet_group.get("urlName", "")
-        values = facet_group.get("values", [])
-
-        for value in values:
-            if value.get("selected", False):
-                selected.append({
-                    "facet_name": facet_name,
-                    "url_name": url_name,
-                    "facet_value": value.get("facetValue", ""),
-                    "detail_value": value.get("detailValue", value.get("facetValue", ""))
-                })
-
-    return selected
+# extract_selected_facets is imported from scraper_service (single source of truth).
 
 
 def extract_related_plp_urls(api_response: Dict, max_urls: int = 15) -> List[Dict[str, str]]:
@@ -241,68 +218,7 @@ def extract_related_plp_urls(api_response: Dict, max_urls: int = 15) -> List[Dic
     return related_urls[:max_urls]
 
 
-def build_product_subject(selected_facets: List[Dict[str, str]], category_name: str = "") -> str:
-    """
-    Build a product subject/name from selected facet values.
-    """
-    if not selected_facets:
-        return category_name
-
-    # Categorize facets by type
-    colors = []
-    materials = []
-    product_names = []
-    brands = []
-    target_groups = []
-    other = []
-
-    product_name_facets = {"serie", "modelnaam", "modelnaam_mob", "model"}
-    product_type_facets = {"type", "type_koffiezetter", "t_klimplantrek"}
-    color_facets = {"kleur", "kleurtint", "kleurtint_paars", "kleurtint_blauw", "kleurtint_groen"}
-    material_facets = {"materiaal"}
-    target_group_facets = {"doelgroep", "doelgroep_schoenen", "doelgroep_mode"}
-    brand_facets = {"merk"}
-
-    has_specific_product = False
-
-    for facet in selected_facets:
-        facet_name_lower = facet["facet_name"].lower()
-        url_name_lower = (facet.get("url_name") or "").lower()
-        detail_value = facet["detail_value"]
-
-        if any(c in facet_name_lower for c in color_facets):
-            colors.append(detail_value)
-        elif any(m in facet_name_lower for m in material_facets):
-            materials.append(detail_value)
-        elif any(p in facet_name_lower for p in product_name_facets):
-            product_names.append(detail_value)
-            has_specific_product = True
-        elif any(t in facet_name_lower for t in product_type_facets):
-            # Policy override: type_productlijn (URL slug) is a brand-line
-            # variant, not a product type. Keep the value but don't let it
-            # suppress the category from being appended.
-            product_names.append(detail_value)
-            if url_name_lower != "type_productlijn":
-                has_specific_product = True
-        elif any(t in facet_name_lower for t in target_group_facets):
-            target_groups.append(detail_value)
-        elif any(b in facet_name_lower for b in brand_facets):
-            brands.append(detail_value)
-        else:
-            other.append(detail_value)
-
-    parts = colors + materials + product_names + brands + target_groups + other
-
-    needs_category = (
-        not has_specific_product and
-        category_name and
-        len(parts) > 0
-    )
-
-    if needs_category:
-        parts.append(category_name)
-
-    return " ".join(parts)
+# build_product_subject is imported from scraper_service (single source of truth).
 
 
 # --- Product Search API ---
