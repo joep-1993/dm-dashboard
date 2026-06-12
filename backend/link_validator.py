@@ -391,13 +391,30 @@ def lookup_plp_urls_for_content(content: str) -> Tuple[Dict[str, Optional[str]],
     return result, unknown_format_links
 
 
+def _norm_href(h: Optional[str]) -> str:
+    """Normalize an href for comparison: drop the beslist host (absolute vs
+    relative) and any trailing slash."""
+    if not h:
+        return ""
+    return h.replace("https://www.beslist.nl", "").rstrip("/")
+
+
 def replace_url_in_content(content: str, old_url: str, new_url: str) -> str:
-    """Replace all occurrences of old_url with new_url in HTML content."""
+    """Replace all occurrences of old_url with new_url in HTML content.
+
+    Matches the href on a normalized form (absolute/relative + trailing-slash
+    insensitive) rather than exact string equality. The old exact match could
+    silently replace nothing when the stored href differed cosmetically from
+    the form that was extracted for lookup — leaving the link uncorrected while
+    the caller still reported has_changes=True.
+    """
     # Use BeautifulSoup to properly handle HTML
     soup = BeautifulSoup(content, 'html.parser')
 
-    for link in soup.find_all('a', href=old_url):
-        link['href'] = new_url
+    target = _norm_href(old_url)
+    for link in soup.find_all('a', href=True):
+        if _norm_href(link['href']) == target:
+            link['href'] = new_url
 
     return str(soup)
 

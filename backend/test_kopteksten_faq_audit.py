@@ -399,6 +399,43 @@ def test_delete_endpoints_report_not_found_and_canonical():
     assert body.index("DELETE FROM pa.kopteksten_content") < body.index("def reset_redshift_flag")
 
 
+# --------------------------------------------------------------------------
+# Phase 5 cherry-picks (anti-drift + latent correctness)
+# --------------------------------------------------------------------------
+def test_url_helpers_single_sourced():
+    """parse_beslist_url / build_api_params / clean_url are one shared object,
+    not duplicated copies that can drift."""
+    import backend.faq_service as f
+    import backend.scraper_service as s
+    assert f.parse_beslist_url is s.parse_beslist_url, "parse_beslist_url duplicated (drift risk)"
+    assert f.build_api_params is s.build_api_params, "build_api_params duplicated"
+    assert f.clean_url is s.clean_url, "clean_url duplicated"
+    # still functional after the move
+    assert f.parse_beslist_url("/products/klussen/klussen_1_2/c/merk~123") == \
+        ("klussen", "klussen_1_2", {"merk": ["123"]})
+    # the faq_service source must no longer redefine them
+    src = _read("backend/faq_service.py")
+    assert "def parse_beslist_url(" not in src, "faq_service still redefines parse_beslist_url"
+    assert "def build_api_params(" not in src, "faq_service still redefines build_api_params"
+
+
+def test_replace_url_in_content_normalized_match():
+    """replace_url_in_content matches hrefs on a normalized form, so a corrected
+    URL is written even when the stored href differs cosmetically (abs/rel,
+    trailing slash) from the lookup form."""
+    import backend.link_validator as lv
+    # absolute href in content, relative old_url
+    out = lv.replace_url_in_content(
+        '<a href="https://www.beslist.nl/p/x/6/111">X</a>', "/p/x/6/111", "/p/y/6/222")
+    assert "/p/y/6/222" in out and "/p/x/6/111" not in out, out
+    # trailing-slash mismatch
+    out2 = lv.replace_url_in_content('<a href="/p/x/6/111">X</a>', "/p/x/6/111/", "/p/y/6/222")
+    assert "/p/y/6/222" in out2, out2
+    # genuinely different URL is left untouched
+    out3 = lv.replace_url_in_content('<a href="/p/x/6/111">X</a>', "/p/z/6/999", "/p/y/6/222")
+    assert "/p/x/6/111" in out3 and "/p/y/6/222" not in out3, out3
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

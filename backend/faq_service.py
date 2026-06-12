@@ -18,6 +18,9 @@ from urllib3.util.retry import Retry
 from openai import OpenAI
 from backend.category_lookup import lookup_category
 from backend.beslist_rate_limit import productsearch_bucket
+# Single source of truth for these identical URL helpers (canonical copy lives
+# in scraper_service; re-exported here so existing imports keep working).
+from backend.scraper_service import clean_url, parse_beslist_url, build_api_params
 
 # Configuration
 USER_AGENT = "Beslist script voor SEO"
@@ -138,101 +141,8 @@ def create_faq_session() -> requests.Session:
 _faq_session = create_faq_session()
 
 
-def clean_url(url: str) -> str:
-    """Remove query parameters from URL"""
-    return url.split("?")[0] if url else ""
-
-
-# --- URL Parsing and API Parameter Building ---
-
-def parse_beslist_url(url: str) -> Tuple[Optional[str], Optional[str], Dict[str, List[str]]]:
-    """
-    Parse a Beslist.nl URL and extract category and filter information.
-
-    URL formats supported:
-    - /products/{maincat}/{category}/c/{filters}  (with filters)
-    - /products/{maincat}/{category}/             (without filters)
-    - /products/{maincat}/c/{filters}             (top-level with filters)
-    - /products/{maincat}/                        (top-level without filters)
-
-    Filters format: facet1~value1~~facet2~value2
-
-    Returns:
-        Tuple of (main_category_name, category_urlname, filters_dict)
-        filters_dict maps facet names to list of filter value IDs
-    """
-    # Remove domain if present
-    if url.startswith("http"):
-        url = "/" + url.split("/", 3)[-1]
-
-    # Remove trailing slash for consistent parsing
-    url = url.rstrip("/")
-
-    # Pattern 1: /products/{maincat}/{category}/c/{filters}
-    # or: /products/{maincat}/c/{filters}
-    match = re.match(r'^/products/([^/]+)(?:/([^/]+))?/c/(.+)$', url)
-
-    if match:
-        main_category = match.group(1)
-        category = match.group(2)  # May be None for top-level categories
-        filters_str = match.group(3)
-
-        # Parse filters: facet1~value1~~facet2~value2 or facet1~value1~~facet1~value2
-        filters: Dict[str, List[str]] = {}
-        if filters_str:
-            # Split by ~~ to get individual filter pairs
-            filter_pairs = filters_str.split("~~")
-            for pair in filter_pairs:
-                if "~" in pair:
-                    facet_name, value_id = pair.split("~", 1)
-                    if facet_name not in filters:
-                        filters[facet_name] = []
-                    filters[facet_name].append(value_id)
-
-        return main_category, category, filters
-
-    # Pattern 2: /products/{maincat}/{category} (without /c/ filters)
-    # or: /products/{maincat}
-    match = re.match(r'^/products/([^/]+)(?:/([^/]+))?$', url)
-
-    if match:
-        main_category = match.group(1)
-        category = match.group(2)  # May be None for top-level categories
-        return main_category, category, {}  # Empty filters dict
-
-    return None, None, {}
-
-
-def build_api_params(main_category: str, category: Optional[str], filters: Dict[str, List[str]]) -> Dict:
-    """
-    Build API query parameters from parsed URL components.
-    """
-    main_cat_id = MAIN_CATEGORY_IDS.get(main_category)
-    if not main_cat_id:
-        return {}
-
-    params = {
-        "mainCategory": main_cat_id,
-        "sort": "popularity",
-        "sortDirection": "desc",
-        "limit": 76,
-        "offset": 0,
-        "isBot": "true",
-        "countryLanguage": "nl-nl",
-        "experiment": "topProducts",
-        "trackTotalHits": "false",
-    }
-
-    # Add category if present
-    if category:
-        params["category"] = category
-
-    # Add filters - API expects filters[facetName][index]=valueId
-    for facet_name, value_ids in filters.items():
-        for i, value_id in enumerate(value_ids):
-            params[f"filters[{facet_name}][{i}]"] = value_id
-
-    return params
+# clean_url, parse_beslist_url and build_api_params are imported from
+# scraper_service (single source of truth) — see the import near the top.
 
 
 def extract_selected_facets(api_response: Dict) -> List[Dict[str, str]]:
