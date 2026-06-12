@@ -786,9 +786,17 @@ async def upload_urls(file: UploadFile = File(...)):
         # Read file content
         content = await file.read()
 
-        # Try multiple encodings (UTF-16, UTF-8 with BOM, UTF-8, Windows-1252, Latin-1)
+        # Decode the upload. UTF-16 must only be tried when a BOM proves it:
+        # an even-length ASCII/UTF-8 payload (e.g. a single pasted URL) decodes
+        # as UTF-16 into silent garbage without raising or producing '�', so
+        # leading with utf-16 corrupts plain text. Excel "Unicode text" exports
+        # always carry a UTF-16 BOM, so BOM detection still handles them.
+        if content.startswith((b'\xff\xfe', b'\xfe\xff')):
+            encodings = ['utf-16', 'utf-8-sig', 'utf-8', 'windows-1252', 'latin-1']
+        else:
+            encodings = ['utf-8-sig', 'utf-8', 'utf-16', 'utf-16-le', 'windows-1252', 'latin-1']
         text_content = None
-        for encoding in ['utf-16', 'utf-16-le', 'utf-8-sig', 'utf-8', 'windows-1252', 'latin-1']:
+        for encoding in encodings:
             try:
                 text_content = content.decode(encoding)
                 # Verify no replacement characters
