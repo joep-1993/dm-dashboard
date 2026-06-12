@@ -273,52 +273,48 @@ def extract_hyperlinks_from_content(content: str) -> List[str]:
     return links
 
 
-def lookup_plp_urls_for_content(content: str) -> Tuple[Dict[str, Optional[str]], List[str]]:
-    """
-    Look up correct plpUrls for all product links in content.
+def _lookup_links(links: List[str]) -> Tuple[Dict[Tuple[str, str], Optional[str]],
+                                             Dict[str, Tuple[str, str, bool]],
+                                             List[str]]:
+    """Resolve product hyperlinks against Elasticsearch.
 
-    Returns a tuple (lookup, unknown_format_links):
-    - lookup: dict mapping original URLs to their correct plpUrls
-      - If plpUrl found: original_url -> correct_plpUrl
-      - If product gone: original_url -> None
-    - unknown_format_links: URLs whose format extract_from_url could not
-      parse. These are NOT classified as gone — a new PLP format being
-      introduced should not silently delete content.
+    Shared core for the kopteksten path (lookup_plp_urls_for_content) and the
+    FAQ path (validate_faq_links) so their dead/alive logic can't drift again.
+
+    Given a list of links, returns:
+      - lookup_to_plp_url: {(maincat_id, lookup_value): plpUrl or None}.
+            Keyed by (maincat_id, lookup_value) — NOT lookup_value alone — so
+            the same pimId/plpUrl under two different maincats can't clobber
+            each other. A key is ABSENT only when the ES query failed
+            (transient); callers treat absent as "skip, don't mark gone".
+      - url_to_lookup: {original_link: (maincat_id, lookup_value, is_v4)}
+      - unknown_format_links: links extract_from_url could not parse (a new PLP
+            format) — NOT treated as gone.
     """
     maincat_mapping = load_maincat_mapping()
-    links = extract_hyperlinks_from_content(content)
 
-    if not links:
-        return {}, []
-
-    # Group links by maincat_id for batch ES queries
-    # Separate V4 URLs (query by plpUrl) from regular URLs (query by pimId)
-    # Structure: {maincat_id: {lookup_value: original_url}}
-    maincat_pimid_groups: Dict[str, Dict[str, str]] = {}  # For pimId lookups
-    maincat_plpurl_groups: Dict[str, Dict[str, str]] = {}  # For V4 plpUrl lookups
-    url_to_lookup: Dict[str, Tuple[str, bool]] = {}  # url -> (lookup_value, is_v4)
+    # Group links by maincat_id for batch ES queries.
+    # Separate V4 URLs (query by plpUrl) from regular URLs (query by pimId).
+    maincat_pimid_groups: Dict[str, Dict[str, str]] = {}
+    maincat_plpurl_groups: Dict[str, Dict[str, str]] = {}
+    url_to_lookup: Dict[str, Tuple[str, str, bool]] = {}
     unknown_format_links: List[str] = []
 
-    for link in set(links):  # deduplicate
-        maincat_id, lookup_value, is_v4 = extract_from_url(link, maincat_mapping)
+    for link in dict.fromkeys(links):  # dedupe, order-preserving (deterministic)
+        # Accept both relative (/p/...) and absolute (https://www.beslist.nl/p/...)
+        relative_link = link
+        if link.startswith('https://www.beslist.nl'):
+            relative_link = link.replace('https://www.beslist.nl', '')
 
+        maincat_id, lookup_value, is_v4 = extract_from_url(relative_link, maincat_mapping)
         if maincat_id and lookup_value:
-            url_to_lookup[link] = (lookup_value, is_v4)
-            if is_v4:
-                # V4 URL - group for plpUrl lookup
-                if maincat_id not in maincat_plpurl_groups:
-                    maincat_plpurl_groups[maincat_id] = {}
-                maincat_plpurl_groups[maincat_id][lookup_value] = link
-            else:
-                # Regular URL - group for pimId lookup
-                if maincat_id not in maincat_pimid_groups:
-                    maincat_pimid_groups[maincat_id] = {}
-                maincat_pimid_groups[maincat_id][lookup_value] = link
+            url_to_lookup[link] = (maincat_id, lookup_value, is_v4)
+            groups = maincat_plpurl_groups if is_v4 else maincat_pimid_groups
+            groups.setdefault(maincat_id, {})[lookup_value] = link
         else:
             unknown_format_links.append(link)
 
-    # Results dict: lookup_value -> plpUrl (or None)
-    lookup_to_plp_url: Dict[str, Optional[str]] = {}
+    lookup_to_plp_url: Dict[Tuple[str, str], Optional[str]] = {}
 
     # Query all maincat indices in parallel (pimId + V4 plpUrl lookups).
     # The _es_session connection pool (pool_block=True) throttles actual
@@ -328,7 +324,7 @@ def lookup_plp_urls_for_content(content: str) -> Tuple[Dict[str, Optional[str]],
         pim_ids = list(pim_id_map.keys())
         try:
             res = query_elasticsearch(index, pim_ids)
-            return {pid: res.get(pid) for pid in pim_ids}
+            return {(maincat_id, pid): res.get(pid) for pid in pim_ids}
         except Exception as e:
             print(f"[LINK_VALIDATOR] Error querying ES index {index} by pimId: {e} - skipping batch (not marking as gone)")
             return {}
@@ -338,7 +334,7 @@ def lookup_plp_urls_for_content(content: str) -> Tuple[Dict[str, Optional[str]],
         plp_urls = list(plp_url_map.keys())
         try:
             res = query_elasticsearch_by_plpurl(index, plp_urls)
-            return {u: res[u] for u in plp_urls if u in res}
+            return {(maincat_id, u): res[u] for u in plp_urls if u in res}
         except Exception as e:
             print(f"[LINK_VALIDATOR] Error querying ES index {index} by plpUrl: {e} - skipping batch (not marking as gone)")
             return {}
@@ -360,18 +356,37 @@ def lookup_plp_urls_for_content(content: str) -> Tuple[Dict[str, Optional[str]],
             for future in as_completed(futures):
                 lookup_to_plp_url.update(future.result())
 
+    return lookup_to_plp_url, url_to_lookup, unknown_format_links
+
+
+def lookup_plp_urls_for_content(content: str) -> Tuple[Dict[str, Optional[str]], List[str]]:
+    """
+    Look up correct plpUrls for all product links in content.
+
+    Returns a tuple (lookup, unknown_format_links):
+    - lookup: dict mapping original URLs to their correct plpUrls
+      - If plpUrl found: original_url -> correct_plpUrl
+      - If product gone: original_url -> None
+    - unknown_format_links: URLs whose format extract_from_url could not
+      parse. These are NOT classified as gone — a new PLP format being
+      introduced should not silently delete content.
+    """
+    links = extract_hyperlinks_from_content(content)
+
+    if not links:
+        return {}, []
+
+    lookup_to_plp_url, url_to_lookup, unknown_format_links = _lookup_links(links)
+
     # Build result: original_url -> correct_plpUrl (or None if GONE).
-    # Unknown-format URLs are returned in a separate list and are NOT
-    # treated as gone — see docstring.
+    # A key missing from lookup_to_plp_url means the ES query failed — skip it
+    # (don't mark gone). Unknown-format URLs are returned separately and are
+    # NOT treated as gone — see docstring.
     result: Dict[str, Optional[str]] = {}
-    for link in set(links):
-        lookup_info = url_to_lookup.get(link)
-        if lookup_info:
-            lookup_value, _ = lookup_info
-            if lookup_value in lookup_to_plp_url:
-                result[link] = lookup_to_plp_url[lookup_value]
-            # else: ES query failed or URL not found - skip it entirely (don't mark as gone)
-        # Unknown-format links are tracked separately in unknown_format_links.
+    for link, (maincat_id, lookup_value, _) in url_to_lookup.items():
+        key = (maincat_id, lookup_value)
+        if key in lookup_to_plp_url:
+            result[link] = lookup_to_plp_url[key]
 
     return result, unknown_format_links
 
@@ -448,128 +463,6 @@ def validate_and_fix_content_links(content: str, content_url: str) -> Dict:
     return result
 
 
-def update_content_in_redshift(content_url: str, new_content: str) -> bool:
-    """Update kopteksten content for a URL in pa.kopteksten_content.
-    Function name kept for backwards compatibility.
-    """
-    from backend.url_catalog import get_url_id
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        url_id = get_url_id(cur, content_url)
-        if url_id is None:
-            print(f"[LINK_VALIDATOR] Cannot canonicalize URL: {content_url!r}")
-            return False
-        cur.execute("""
-            UPDATE pa.kopteksten_content
-               SET content = %s,
-                   updated_at = CURRENT_TIMESTAMP
-             WHERE url_id = %s
-        """, (new_content, url_id))
-        conn.commit()
-        print(f"[LINK_VALIDATOR] Updated content for URL: {content_url}")
-        return True
-    except Exception as e:
-        print(f"[LINK_VALIDATOR] Error updating content in PostgreSQL: {e}")
-        if conn:
-            conn.rollback()
-        return False
-    finally:
-        if conn:
-            return_db_connection(conn)
-
-
-def add_urls_to_werkvoorraad(urls: List[str]) -> int:
-    """Add URLs to the kopteksten queue for reprocessing.
-    Marks pa.kopteksten_jobs.status = 'pending' (creates the URL in the catalog
-    if missing). Returns number of URLs touched.
-    """
-    if not urls:
-        return 0
-    from backend.url_catalog import get_url_id
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        added_count = 0
-        for url in urls:
-            try:
-                url_id = get_url_id(cur, url)
-                if url_id is None:
-                    continue
-                cur.execute("""
-                    INSERT INTO pa.kopteksten_jobs (url_id, status, created_at, updated_at)
-                    VALUES (%s, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    ON CONFLICT (url_id) DO UPDATE SET
-                        status = 'pending',
-                        updated_at = CURRENT_TIMESTAMP
-                """, (url_id,))
-                added_count += cur.rowcount
-            except Exception as e:
-                print(f"[LINK_VALIDATOR] Error adding URL {url} to werkvoorraad: {e}")
-        conn.commit()
-        print(f"[LINK_VALIDATOR] Added {added_count} URLs to werkvoorraad for reprocessing")
-        return added_count
-    except Exception as e:
-        print(f"[LINK_VALIDATOR] Error adding URLs to werkvoorraad: {e}")
-        if conn:
-            conn.rollback()
-        return 0
-    finally:
-        if conn:
-            return_db_connection(conn)
-
-
-def validate_and_fix_content_batch(contents: List[Tuple[str, str]],
-                                    auto_update_db: bool = False,
-                                    auto_add_to_werkvoorraad: bool = False) -> Dict:
-    """
-    Validate and fix hyperlinks for multiple content items.
-
-    Args:
-        contents: List of tuples (content_url, content)
-        auto_update_db: If True, automatically update corrected content in PostgreSQL
-        auto_add_to_werkvoorraad: If True, automatically add gone URLs to werkvoorraad
-
-    Returns:
-        Dict with summary and detailed results
-    """
-    results = []
-    all_gone_urls = []
-    total_replaced = 0
-    total_updated = 0
-
-    for content_url, content in contents:
-        validation = validate_and_fix_content_links(content, content_url)
-        results.append(validation)
-
-        # Collect gone URLs
-        all_gone_urls.extend(validation['gone_urls'])
-
-        # Update PostgreSQL if content changed and auto_update is enabled
-        if validation['has_changes'] and auto_update_db:
-            if update_content_in_redshift(content_url, validation['corrected_content']):
-                total_updated += 1
-
-        total_replaced += len(validation['replaced_urls'])
-
-    # Add gone URLs to werkvoorraad if enabled
-    urls_added_to_werkvoorraad = 0
-    if auto_add_to_werkvoorraad and all_gone_urls:
-        urls_added_to_werkvoorraad = add_urls_to_werkvoorraad(all_gone_urls)
-
-    return {
-        'total_content_items': len(contents),
-        'total_urls_replaced': total_replaced,
-        'total_content_updated_in_db': total_updated,
-        'total_gone_urls': len(all_gone_urls),
-        'urls_added_to_werkvoorraad': urls_added_to_werkvoorraad,
-        'gone_urls': list(set(all_gone_urls)),  # deduplicated
-        'details': results
-    }
-
-
 # --- FAQ Link Validation ---
 
 def extract_hyperlinks_from_faq_json(faq_json: str) -> List[str]:
@@ -627,132 +520,33 @@ def validate_faq_links(faq_json: str) -> Dict:
             'has_unknown_format_links': False,
         }
 
-    # Look up all links
-    maincat_mapping = load_maincat_mapping()
+    lookup_to_plp_url, url_to_lookup, unknown_format_links = _lookup_links(links)
 
-    # Group links by maincat_id for batch ES queries
-    # Separate V4 URLs (query by plpUrl) from regular URLs (query by pimId)
-    maincat_pimid_groups: Dict[str, Dict[str, str]] = {}
-    maincat_plpurl_groups: Dict[str, Dict[str, str]] = {}
-    url_to_lookup: Dict[str, Tuple[str, bool]] = {}  # url -> (lookup_value, is_v4)
-    unknown_format_links: List[str] = []
-
-    unique_links = list(set(links))
-
-    for link in unique_links:
-        # Handle both relative and absolute URLs
-        relative_link = link
-        if link.startswith('https://www.beslist.nl'):
-            relative_link = link.replace('https://www.beslist.nl', '')
-
-        maincat_id, lookup_value, is_v4 = extract_from_url(relative_link, maincat_mapping)
-
-        if maincat_id and lookup_value:
-            url_to_lookup[link] = (lookup_value, is_v4)
-            if is_v4:
-                if maincat_id not in maincat_plpurl_groups:
-                    maincat_plpurl_groups[maincat_id] = {}
-                maincat_plpurl_groups[maincat_id][lookup_value] = link
-            else:
-                if maincat_id not in maincat_pimid_groups:
-                    maincat_pimid_groups[maincat_id] = {}
-                maincat_pimid_groups[maincat_id][lookup_value] = link
-        else:
-            unknown_format_links.append(link)
-
-    # Results dict
-    lookup_to_plp_url: Dict[str, Optional[str]] = {}
-
-    # Query by pimId for regular URLs
-    for maincat_id, pim_id_map in maincat_pimid_groups.items():
-        index = f"{INDEX_PREFIX}{maincat_id}"
-        pim_ids = list(pim_id_map.keys())
-
-        try:
-            result = query_elasticsearch(index, pim_ids)
-            for pim_id in pim_ids:
-                lookup_to_plp_url[pim_id] = result.get(pim_id)
-        except Exception as e:
-            print(f"[FAQ_VALIDATOR] Error querying ES index {index} by pimId: {e} - skipping batch (not marking as gone)")
-
-    # Query by plpUrl for V4 URLs
-    for maincat_id, plp_url_map in maincat_plpurl_groups.items():
-        index = f"{INDEX_PREFIX}{maincat_id}"
-        plp_urls = list(plp_url_map.keys())
-
-        try:
-            result = query_elasticsearch_by_plpurl(index, plp_urls)
-            for plp_url in plp_urls:
-                if plp_url in result:
-                    lookup_to_plp_url[plp_url] = result[plp_url]
-                # else: URL not found (e.g. V4 pimId lookup miss) - skip, don't mark as gone
-        except Exception as e:
-            print(f"[FAQ_VALIDATOR] Error querying ES index {index} by plpUrl: {e} - skipping batch (not marking as gone)")
-
-    # Determine which links are gone vs. unknown-format vs. valid.
+    # Determine which links are gone vs. valid. A key missing from
+    # lookup_to_plp_url means the ES query failed — skip it (don't mark gone).
+    # Unknown-format links were collected separately and are NOT counted as gone.
     gone_links = []
     valid_count = 0
-    skipped_count = 0
 
-    for link in unique_links:
-        lookup_info = url_to_lookup.get(link)
-        if lookup_info:
-            lookup_value, _ = lookup_info
-            if lookup_value not in lookup_to_plp_url:
-                skipped_count += 1
-                continue
-            plp_url = lookup_to_plp_url[lookup_value]
-            if plp_url is None:
-                gone_links.append(link)
-            else:
-                valid_count += 1
-        # Unknown-format links were already collected into unknown_format_links
-        # above; they are NOT counted as gone.
+    for link, (maincat_id, lookup_value, _) in url_to_lookup.items():
+        key = (maincat_id, lookup_value)
+        if key not in lookup_to_plp_url:
+            continue
+        if lookup_to_plp_url[key] is None:
+            gone_links.append(link)
+        else:
+            valid_count += 1
 
+    # Every distinct link is either parsed (url_to_lookup) or unknown-format,
+    # so this equals the old len(set(links)).
+    total_links = len(url_to_lookup) + len(unknown_format_links)
     return {
-        'total_links': len(unique_links),
+        'total_links': total_links,
         'valid_links': valid_count,
         'gone_links': gone_links,
         'has_gone_links': len(gone_links) > 0,
         'unknown_format_links': unknown_format_links,
         'has_unknown_format_links': len(unknown_format_links) > 0,
-    }
-
-
-def validate_faq_batch(faqs: List[Tuple[str, str]]) -> Dict:
-    """
-    Validate links for multiple FAQ entries.
-
-    Args:
-        faqs: List of tuples (url, faq_json)
-
-    Returns:
-        Dict with validation summary and list of URLs with gone products
-    """
-    urls_with_gone_products = []
-    total_links = 0
-    total_valid = 0
-    total_gone = 0
-
-    for url, faq_json in faqs:
-        result = validate_faq_links(faq_json)
-        total_links += result['total_links']
-        total_valid += result['valid_links']
-        total_gone += len(result['gone_links'])
-
-        if result['has_gone_links']:
-            urls_with_gone_products.append({
-                'url': url,
-                'gone_links': result['gone_links']
-            })
-
-    return {
-        'total_faqs_checked': len(faqs),
-        'total_links_checked': total_links,
-        'total_valid_links': total_valid,
-        'total_gone_links': total_gone,
-        'faqs_with_gone_products': len(urls_with_gone_products),
-        'urls_with_gone_products': urls_with_gone_products
     }
 
 

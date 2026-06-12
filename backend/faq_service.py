@@ -554,19 +554,13 @@ def fetch_products_api(url: str, include_related: bool = True) -> Optional[Dict]
 
 # --- FAQ Generation ---
 
-def generate_faqs_for_page(page_data: Dict, num_faqs: int = 5):
-    """
-    Generate FAQ content for a page using AI.
+def build_faq_prompt(page_data: Dict, num_faqs: int = 6) -> str:
+    """Build the FAQ generation prompt.
 
-    Returns a tuple (faq_page, error_detail). On success, error_detail is None.
-    On any failure path, faq_page is None and error_detail describes the cause —
-    that string is what the persistence layer writes into pa.faq_jobs.last_error.
+    Single source of truth shared by the real-time path
+    (generate_faqs_for_page) and the batch path
+    (batch_api_service._build_faq_prompt) so the two can't drift.
     """
-    client = get_openai_client()
-    if not client:
-        print("[FAQ] Error: OPENAI_API_KEY environment variable not set")
-        return None, "OPENAI_API_KEY not set"
-
     # Build context from products
     products_context = ""
     if page_data.get("products"):
@@ -594,7 +588,7 @@ def generate_faqs_for_page(page_data: Dict, num_faqs: int = 5):
         facet_context = f"\n\nActieve filters op deze pagina:\n" + "\n".join(f"- {d}" for d in facet_descriptions)
         facet_instruction = "\n- BELANGRIJK: Deze pagina is gefilterd op specifieke kenmerken (zie \"Actieve filters\" hierboven). Maak de vragen en antwoorden specifiek over die filters. Als er gefilterd is op een merk, stel dan vragen over dat merk en hun producten. Als er gefilterd is op een kleur, materiaal of type, stel dan vragen die specifiek over die eigenschap gaan. Schrijf GEEN generieke vragen die net zo goed op de ongefilterde categoriepagina zouden passen."
 
-    prompt = f"""Je bent een SEO-expert die FAQ's schrijft voor e-commerce pagina's.
+    return f"""Je bent een SEO-expert die FAQ's schrijft voor e-commerce pagina's.
 
 Pagina titel: {page_data['h1_title']}
 URL: {page_data['url']}
@@ -642,6 +636,22 @@ Voorbeeld formaat (let op: URLs moeten EXACT uit de lijst komen, formaat /p/prod
   {{"question": "Andere vraag?", "answer": "Een ander goed product is de <a href=\"https://www.beslist.nl/p/philips-airfryer/12000/9876543210987/\">Philips Airfryer</a>."}}
 ]"""
 
+
+def generate_faqs_for_page(page_data: Dict, num_faqs: int = 6):
+    """
+    Generate FAQ content for a page using AI.
+
+    Returns a tuple (faq_page, error_detail). On success, error_detail is None.
+    On any failure path, faq_page is None and error_detail describes the cause —
+    that string is what the persistence layer writes into pa.faq_jobs.last_error.
+    """
+    client = get_openai_client()
+    if not client:
+        print("[FAQ] Error: OPENAI_API_KEY environment variable not set")
+        return None, "OPENAI_API_KEY not set"
+
+    prompt = build_faq_prompt(page_data, num_faqs)
+
     try:
         response = client.chat.completions.create(
             model=AI_MODEL,
@@ -687,12 +697,15 @@ Voorbeeld formaat (let op: URLs moeten EXACT uit de lijst komen, formaat /p/prod
                 if normalized_text in VAGUE_ANCHOR_TEXTS:
                     return link_text
 
-                # Check if URL is valid (must be /p/ format and in our list)
+                # Check if URL is valid (must be /p/ format and in our list).
+                # Match on canonical equality (trailing-slash-insensitive), NOT
+                # substring — a substring test let a fabricated URL that merely
+                # contains (or is a prefix of) a real one slip through.
                 is_valid = False
                 if "/p/" in url and "/products/" not in url and "/c/" not in url:
-                    # Check if it matches any of our provided URLs
+                    url_norm = url.rstrip("/")
                     for valid_url in valid_urls:
-                        if valid_url in url or url in valid_url:
+                        if url_norm == valid_url.rstrip("/"):
                             is_valid = True
                             break
 
@@ -725,7 +738,7 @@ Voorbeeld formaat (let op: URLs moeten EXACT uit de lijst komen, formaat /p/prod
         return None, f"{type(e).__name__}: {e}"
 
 
-def process_single_url_faq(url: str, num_faqs: int = 5) -> Dict:
+def process_single_url_faq(url: str, num_faqs: int = 6) -> Dict:
     """
     Process a single URL for FAQ generation.
 

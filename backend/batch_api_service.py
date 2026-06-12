@@ -23,7 +23,7 @@ from openai import OpenAI
 
 from backend.faq_service import (
     fetch_products_api, generate_faqs_for_page, FAQPage, FAQItem,
-    get_openai_client, extract_selected_facets
+    get_openai_client, extract_selected_facets, build_faq_prompt
 )
 from backend.scraper_service import scrape_product_page_api
 from backend.gpt_service import create_product_recommendation_prompt, MODEL
@@ -122,9 +122,13 @@ def _fetch_pending_faq_urls(limit: int = 50000) -> List[str]:
             LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
             WHERE j.status = 'pending'
               AND (v.is_valid IS NULL OR v.is_valid = TRUE)
+            ORDER BY u.url_id
             LIMIT %s
         """, (limit,))
-        return [row['url'] for row in cur.fetchall()]
+        urls = [row['url'] for row in cur.fetchall()]
+        if len(urls) == limit:
+            print(f"[BATCH-FAQ] Hit fetch cap of {limit} pending URLs; remaining backlog deferred to next run")
+        return urls
     finally:
         cur.close()
         return_db_connection(conn)
@@ -142,86 +146,25 @@ def _fetch_pending_kopteksten_urls(limit: int = 50000) -> List[str]:
             LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
             WHERE j.status = 'pending'
               AND (v.is_valid IS NULL OR v.is_valid = TRUE)
+            ORDER BY u.url_id
             LIMIT %s
         """, (limit,))
-        return [row['url'] for row in cur.fetchall()]
+        urls = [row['url'] for row in cur.fetchall()]
+        if len(urls) == limit:
+            print(f"[BATCH-KOPT] Hit fetch cap of {limit} pending URLs; remaining backlog deferred to next run")
+        return urls
     finally:
         cur.close()
         return_db_connection(conn)
 
 
 def _build_faq_prompt(page_data: Dict, num_faqs: int = 6) -> str:
-    """Build the FAQ generation prompt (same as faq_service but returns string only)."""
-    products_context = ""
-    if page_data.get("products"):
-        products_list = "\n".join([
-            f"- {p['title']}: {p['description']}"
-            for p in page_data["products"][:15]
-        ])
-        products_context = f"\n\nBeschikbare producten:\n{products_list}"
+    """Build the FAQ generation prompt.
 
-    product_urls_context = ""
-    if page_data.get("product_urls"):
-        urls_list = "\n".join([
-            f"- {item['label']}: {item['url']}"
-            for item in page_data["product_urls"][:12]
-        ])
-        product_urls_context = f"\n\nProductpagina's (gebruik deze voor hyperlinks in antwoorden):\n{urls_list}"
-
-    # Build context from selected facets so the AI writes facet-specific FAQs
-    facet_context = ""
-    facet_instruction = ""
-    if page_data.get("selected_facets"):
-        facets = page_data["selected_facets"]
-        facet_descriptions = [f"{f['facet_name']}: {f['facet_value']}" for f in facets]
-        facet_context = f"\n\nActieve filters op deze pagina:\n" + "\n".join(f"- {d}" for d in facet_descriptions)
-        facet_instruction = "\n- BELANGRIJK: Deze pagina is gefilterd op specifieke kenmerken (zie \"Actieve filters\" hierboven). Maak de vragen en antwoorden specifiek over die filters. Als er gefilterd is op een merk, stel dan vragen over dat merk en hun producten. Als er gefilterd is op een kleur, materiaal of type, stel dan vragen die specifiek over die eigenschap gaan. Schrijf GEEN generieke vragen die net zo goed op de ongefilterde categoriepagina zouden passen."
-
-    return f"""Je bent een SEO-expert die FAQ's schrijft voor e-commerce pagina's.
-
-Pagina titel: {page_data['h1_title']}
-URL: {page_data['url']}
-{facet_context}
-{products_context}
-{product_urls_context}
-
-Schrijf {num_faqs} veelgestelde vragen (FAQ's) die relevant zijn voor bezoekers van deze productcategorie pagina.
-
-Vereisten:
-- Vragen moeten natuurlijk klinken, zoals echte klanten ze zouden stellen
-- Antwoorden moeten informatief en behulpzaam zijn (50-100 woorden per antwoord)
-- Focus op koopadvies, productvergelijkingen, en praktische tips{facet_instruction}
-- Schrijf in het Nederlands
-- Noem geen specifieke prijzen
-- BELANGRIJK: Gebruik een informele, toegankelijke toon. Gebruik "jij" en "je" in plaats van "u" en "uw". Spreek de lezer direct en vriendelijk aan.
-- BELANGRIJK: Gebruik NOOIT "wij", "we", "ons", "onze", "onze producten", "onze website" of vergelijkbare eerste persoon meervoud. Schrijf neutraal en informatief, alsof je een onafhankelijke adviseur bent.
-- BELANGRIJK voor hyperlinks:
-  * Gebruik ALLEEN URLs uit de hierboven gegeven lijst "Productpagina's" (URLs met /p/)
-  * Verzin NOOIT zelf URLs - gebruik alleen de exacte URLs die in de lijst staan
-  * Gebruik GEEN URLs met /c/ (categoriepagina's) - alleen productpagina URLs met /p/
-  * VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text):
-    - "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link"
-    - Elke andere vage of demonstratieve verwijzing zonder productnaam of zoekterm
-  * Voorbeelden van FOUT (NIET doen):
-    - "... voor de Dark Grey variant kun je <a href=\\"...\\">hier klikken</a>"
-    - "... is er <a href=\\"...\\">deze link</a>"
-  * Voorbeelden van GOED (wel doen):
-    - "... bekijk de <a href=\\"...\\">Philips Airfryer XXL</a> voor grotere porties"
-  * Linktekst MOET de productnaam zijn of een logische, beschrijvende zoekterm
-  * HOUD DE LINKTEKST KORT (max 3-5 woorden). Vermijd lange productnamen met specificaties.
-  * Als je de productnaam niet logisch in de zin kunt verwerken als anchor text, maak dan GEEN hyperlink - herschrijf liever de zin zonder link
-  * Als er geen relevante URL in de lijst staat, maak dan GEEN hyperlink
-- Verwerk 1-3 hyperlinks per antwoord waar relevant (naar specifieke producten)
-
-Geef je antwoord als JSON array met objecten die "question" en "answer" bevatten.
-De "answer" mag HTML hyperlinks bevatten.
-Alleen de JSON array, geen andere tekst.
-
-Voorbeeld formaat:
-[
-  {{"question": "Welke merken zijn populair?", "answer": "Populaire merken zijn onder andere <a href=\\"https://www.beslist.nl/p/samsung-galaxy-s24/6/1234567890123/\\">Samsung Galaxy S24</a>. Dit model staat bekend om zijn kwaliteit."}},
-  {{"question": "Andere vraag?", "answer": "Een ander goed product is de <a href=\\"https://www.beslist.nl/p/philips-airfryer/12000/9876543210987/\\">Philips Airfryer</a>."}}
-]"""
+    Thin wrapper that delegates to the shared builder in faq_service so the
+    batch path and the real-time path always emit an identical prompt.
+    """
+    return build_faq_prompt(page_data, num_faqs)
 
 
 def _build_kopteksten_messages(page_data: Dict) -> List[Dict]:
@@ -424,7 +367,10 @@ def _run_faq_batch(num_faqs: int = 6):
             _update_state(batch_type, phase=f"processing chunk {chunk_idx + 1}/{len(chunks)}", batch_id=batch.id)
             print(f"[BATCH-FAQ] Batch created: {batch.id}")
 
-            # Poll for completion
+            # Poll for completion (cap the wait so a batch stuck in
+            # validating/in_progress can't loop forever holding the active flag)
+            poll_started = time.monotonic()
+            MAX_POLL_SECONDS = 26 * 3600  # completion_window is 24h
             while True:
                 time.sleep(15)
                 batch = client.batches.retrieve(batch.id)
@@ -433,6 +379,11 @@ def _run_faq_batch(num_faqs: int = 6):
 
                 if batch.status in ("completed", "failed", "expired", "cancelled"):
                     break
+                if time.monotonic() - poll_started > MAX_POLL_SECONDS:
+                    _update_state(batch_type, phase="error", active=False,
+                        error=f"Chunk {chunk_idx + 1} batch {batch.id} exceeded "
+                              f"{MAX_POLL_SECONDS // 3600}h poll timeout (status: {batch.status})")
+                    return
 
             if batch.status != "completed":
                 _update_state(batch_type, phase="error", active=False,
@@ -670,8 +621,8 @@ def _run_kopteksten_batch():
                             "    status = EXCLUDED.status, "
                             "    last_error = EXCLUDED.last_error, "
                             "    updated_at = CURRENT_TIMESTAMP",
-                        failed_urls
-                    )
+                            rows
+                        )
                 conn.commit()
             finally:
                 cur.close()
@@ -712,6 +663,10 @@ def _run_kopteksten_batch():
             _update_state(batch_type, phase=f"processing chunk {chunk_idx + 1}/{len(chunks)}", batch_id=batch.id)
             print(f"[BATCH-KOPT] Batch created: {batch.id}")
 
+            # Poll for completion (cap the wait so a batch stuck in
+            # validating/in_progress can't loop forever holding the active flag)
+            poll_started = time.monotonic()
+            MAX_POLL_SECONDS = 26 * 3600  # completion_window is 24h
             while True:
                 time.sleep(15)
                 batch = client.batches.retrieve(batch.id)
@@ -720,6 +675,11 @@ def _run_kopteksten_batch():
 
                 if batch.status in ("completed", "failed", "expired", "cancelled"):
                     break
+                if time.monotonic() - poll_started > MAX_POLL_SECONDS:
+                    _update_state(batch_type, phase="error", active=False,
+                        error=f"Chunk {chunk_idx + 1} batch {batch.id} exceeded "
+                              f"{MAX_POLL_SECONDS // 3600}h poll timeout (status: {batch.status})")
+                    return
 
             if batch.status != "completed":
                 _update_state(batch_type, phase="error", active=False,
@@ -737,6 +697,9 @@ def _run_kopteksten_batch():
             save_failed = 0
 
             for line in results_text.strip().split('\n'):
+                if not line.strip():
+                    continue  # OpenAI batch output sometimes has trailing blank lines
+                result = None
                 try:
                     result = json.loads(line)
                     url = result["custom_id"]
@@ -752,7 +715,7 @@ def _run_kopteksten_batch():
                     content_data.append((url, content))
 
                 except Exception as e:
-                    url = result.get("custom_id", "unknown")
+                    url = result.get("custom_id", "unknown") if isinstance(result, dict) else "unknown"
                     tracking_data.append((url, "failed", f"parse_error: {str(e)[:200]}"))
                     save_failed += 1
 

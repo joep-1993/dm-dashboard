@@ -591,6 +591,8 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
             "results": results
         }
 
+    except HTTPException:
+        raise  # preserve deliberate 4xx (e.g. validation 400) instead of remapping to 500
     except Exception as e:
         print(f"[ERROR] process_urls failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -655,37 +657,6 @@ def get_status():
             "failed": failed,
             "pending": pending,
             "recent_results": recent
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/failure-reasons")
-def get_failure_reasons():
-    """Get breakdown of failure reasons"""
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute("""
-            SELECT status, skip_reason, COUNT(*) AS count
-            FROM (
-                SELECT status, last_error AS skip_reason FROM pa.kopteksten_jobs
-                UNION ALL
-                SELECT CASE WHEN is_valid = FALSE THEN 'skipped' ELSE 'valid' END AS status,
-                       reason AS skip_reason
-                FROM pa.url_validation
-            ) combined
-            GROUP BY status, skip_reason
-            ORDER BY count DESC
-        """)
-        rows = cur.fetchall()
-
-        cur.close()
-        return_db_connection(conn)
-
-        return {
-            "breakdown": [{"status": r["status"], "reason": r["skip_reason"], "count": r["count"]} for r in rows]
         }
 
     except Exception as e:
@@ -904,6 +875,8 @@ async def upload_urls(file: UploadFile = File(...)):
             ),
         }
 
+    except HTTPException:
+        raise  # preserve deliberate 4xx instead of remapping to 500
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -971,56 +944,80 @@ async def lookup_content(url: str):
 async def delete_result(url: str):
     """Delete a result and reset the URL back to pending state"""
     try:
+        from backend.url_catalog import canonicalize_url
+        canon = canonicalize_url(url)
+        if canon is None:
+            raise HTTPException(status_code=400, detail=f"Could not canonicalize URL: {url!r}")
+
         use_redshift = os.getenv("USE_REDSHIFT_OUTPUT", "false").lower() == "true"
         # Redshift werkvoorraad_shopping_season is a separate Redshift table,
         # NOT migrated as part of the Big Bang refactor.
         werkvoorraad_table = "pa.jvs_seo_werkvoorraad_shopping_season"
 
-        # If using Redshift output, also reset the kopteksten flag in Redshift
-        @retry_on_redshift_serialization_error(max_retries=5, initial_delay=0.2)
-        def reset_redshift_flag():
-            output_conn = get_output_connection()
-            output_cur = output_conn.cursor()
-            try:
-                output_cur.execute(f"""
-                    UPDATE {werkvoorraad_table}
-                    SET kopteksten = 0
-                    WHERE url = %s
-                """, (url,))
-                output_conn.commit()
-            except Exception as e:
-                output_conn.rollback()
-                raise e
-            finally:
-                output_cur.close()
-                return_output_connection(output_conn)
-
-        if use_redshift:
-            reset_redshift_flag()
-
-        # Delete from new schema: kopteksten content + jobs + url_validation
-        from backend.url_catalog import canonicalize_url
+        # Local delete FIRST so a Redshift failure can't leave the two stores
+        # inconsistent (Redshift flipped to 0 while local still has the row).
         conn = get_db_connection()
         cur = conn.cursor()
-        canon = canonicalize_url(url)
-        if canon is not None:
-            cur.execute("SELECT url_id FROM pa.urls WHERE url = %s", (canon,))
-            row = cur.fetchone()
-            if row:
-                uid = row['url_id']
-                cur.execute("DELETE FROM pa.kopteksten_content WHERE url_id = %s", (uid,))
-                cur.execute("DELETE FROM pa.kopteksten_jobs WHERE url_id = %s", (uid,))
-                cur.execute("DELETE FROM pa.url_validation WHERE url_id = %s", (uid,))
+        found = False
+        cur.execute("SELECT url_id FROM pa.urls WHERE url = %s", (canon,))
+        row = cur.fetchone()
+        if row:
+            found = True
+            uid = row['url_id']
+            # Back up content to history before deleting (matches the
+            # validate-links gone-products path) so a manual delete stays
+            # recoverable. INSERT...SELECT is a no-op if no content exists.
+            cur.execute("""
+                INSERT INTO pa.content_history
+                    (url, content, reset_reason, reset_details, original_created_at)
+                SELECT u.url, c.content, 'manual_delete', NULL, c.created_at
+                FROM pa.kopteksten_content c
+                JOIN pa.urls u ON c.url_id = u.url_id
+                WHERE c.url_id = %s
+            """, (uid,))
+            cur.execute("DELETE FROM pa.kopteksten_content WHERE url_id = %s", (uid,))
+            cur.execute("DELETE FROM pa.kopteksten_jobs WHERE url_id = %s", (uid,))
+            cur.execute("DELETE FROM pa.url_validation WHERE url_id = %s", (uid,))
         conn.commit()
         cur.close()
         return_db_connection(conn)
 
+        if not found:
+            return {"status": "not_found", "found": False,
+                    "message": "No result found for URL", "url": url}
+
+        # Only after the local delete commits, reset the Redshift flag — matched
+        # on the canonical URL (same key the local pa.urls lookup used).
+        if use_redshift:
+            @retry_on_redshift_serialization_error(max_retries=5, initial_delay=0.2)
+            def reset_redshift_flag():
+                output_conn = get_output_connection()
+                output_cur = output_conn.cursor()
+                try:
+                    output_cur.execute(f"""
+                        UPDATE {werkvoorraad_table}
+                        SET kopteksten = 0
+                        WHERE url = %s
+                    """, (canon,))
+                    output_conn.commit()
+                except Exception as e:
+                    output_conn.rollback()
+                    raise e
+                finally:
+                    output_cur.close()
+                    return_output_connection(output_conn)
+
+            reset_redshift_flag()
+
         return {
             "status": "success",
+            "found": True,
             "message": f"Result deleted and URL reset to pending",
             "url": url
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1041,6 +1038,81 @@ def validate_single_content_es(content_data: tuple) -> dict:
     """
     content_url, content = content_data
     return validate_and_fix_content_links(content, content_url)
+
+
+def _apply_corrected_and_gone(cur, urls_to_update_content, urls_with_gone_products,
+                              url_to_gone_details, log_prefix="VALIDATE"):
+    """Apply kopteksten validation outcomes to the DB within the caller's
+    transaction (no commit here). Shared by the sync /api/validate-links and the
+    background /api/validate-all-links paths so the destructive gone-products
+    reset can't drift between them.
+
+    - urls_to_update_content: list of (corrected_content, url) for links that were
+      only replaced (content updated in place, kopteksten=1 kept).
+    - urls_with_gone_products: urls whose linked product is gone — content is
+      backed up to content_history, deleted, and the job reset to 'pending'.
+    Returns the number of gone-product URLs reset.
+    """
+    from backend.url_catalog import get_url_id
+
+    if urls_to_update_content:
+        for new_content, the_url in urls_to_update_content:
+            uid = get_url_id(cur, the_url)
+            if uid is not None:
+                cur.execute("""
+                    UPDATE pa.kopteksten_content
+                       SET content = %s, updated_at = CURRENT_TIMESTAMP
+                     WHERE url_id = %s
+                """, (new_content, uid))
+        print(f"[{log_prefix}] Updated content for {len(urls_to_update_content)} URLs with corrected links")
+
+    if not urls_with_gone_products:
+        return 0
+
+    uids = []
+    for url in urls_with_gone_products:
+        u = get_url_id(cur, url)
+        if u is not None and u not in uids:
+            uids.append(u)
+    if not uids:
+        return 0
+
+    placeholders = ','.join(['%s'] * len(uids))
+    # Backup content to history before deletion
+    cur.execute(f"""
+        SELECT u.url, c.content, c.created_at
+        FROM pa.kopteksten_content c
+        JOIN pa.urls u ON c.url_id = u.url_id
+        WHERE c.url_id IN ({placeholders})
+    """, uids)
+    content_to_backup = cur.fetchall()
+    for row in content_to_backup:
+        gone_urls = url_to_gone_details.get(row['url'], [])
+        cur.execute("""
+            INSERT INTO pa.content_history
+                (url, content, reset_reason, reset_details, original_created_at)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (row['url'], row['content'], 'gone_products',
+              json.dumps({'gone_urls': gone_urls}), row['created_at']))
+    print(f"[{log_prefix}] Backed up {len(content_to_backup)} URLs to content_history")
+
+    cur.execute(f"DELETE FROM pa.kopteksten_content WHERE url_id IN ({placeholders})", uids)
+    # Reset jobs to 'pending' so they get reprocessed; clear url_validation
+    cur.execute(f"""
+        UPDATE pa.kopteksten_jobs
+           SET status = 'pending', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE url_id IN ({placeholders})
+    """, uids)
+    cur.execute(f"DELETE FROM pa.url_validation WHERE url_id IN ({placeholders})", uids)
+    # Ensure a job row exists for any URL not yet tracked (in case it was content-only)
+    cur.executemany("""
+        INSERT INTO pa.kopteksten_jobs (url_id, status, created_at, updated_at)
+        VALUES (%s, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (url_id) DO NOTHING
+    """, [(uid,) for uid in uids])
+    print(f"[{log_prefix}] Deleted content for {len(uids)} URLs with gone products")
+    return len(uids)
+
 
 @app.post("/api/validate-links")
 def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative_mode: bool = False):
@@ -1174,68 +1246,11 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
                 'moved_to_pending': has_gone
             })
 
-        # Update corrected content in local database
-        if urls_to_update_content:
-            from backend.url_catalog import get_url_id
-            for new_content, the_url in urls_to_update_content:
-                uid = get_url_id(cur, the_url)
-                if uid is not None:
-                    cur.execute("""
-                        UPDATE pa.kopteksten_content
-                           SET content = %s, updated_at = CURRENT_TIMESTAMP
-                         WHERE url_id = %s
-                    """, (new_content, uid))
-            print(f"[VALIDATE-LINKS] Updated content for {len(urls_to_update_content)} URLs with corrected links")
-
-        # Delete/reset operations for gone products only
-        if urls_with_gone_products:
-            from backend.url_catalog import get_url_id
-            url_id_map = {}
-            for url in urls_with_gone_products:
-                uid = get_url_id(cur, url)
-                if uid is not None:
-                    url_id_map[url] = uid
-            uids = list(url_id_map.values())
-
-            if uids:
-                # Backup content to history table before deletion
-                placeholders = ','.join(['%s'] * len(uids))
-                cur.execute(f"""
-                    SELECT u.url, c.content, c.created_at
-                    FROM pa.kopteksten_content c
-                    JOIN pa.urls u ON c.url_id = u.url_id
-                    WHERE c.url_id IN ({placeholders})
-                """, uids)
-                content_to_backup = cur.fetchall()
-
-                for row in content_to_backup:
-                    the_url = row['url']
-                    gone_urls = url_to_gone_details.get(the_url, [])
-                    cur.execute("""
-                        INSERT INTO pa.content_history
-                            (url, content, reset_reason, reset_details, original_created_at)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (the_url, row['content'], 'gone_products',
-                          json.dumps({'gone_urls': gone_urls}), row['created_at']))
-
-                print(f"[VALIDATE-LINKS] Backed up {len(content_to_backup)} URLs to content_history")
-
-                cur.execute(f"DELETE FROM pa.kopteksten_content WHERE url_id IN ({placeholders})", uids)
-                # Reset jobs to 'pending' so they get reprocessed; clear url_validation
-                cur.execute(f"""
-                    UPDATE pa.kopteksten_jobs
-                       SET status = 'pending', last_error = NULL, updated_at = CURRENT_TIMESTAMP
-                     WHERE url_id IN ({placeholders})
-                """, uids)
-                cur.execute(f"DELETE FROM pa.url_validation WHERE url_id IN ({placeholders})", uids)
-                # Ensure a job row exists for any URL not yet tracked (in case it was content-only)
-                cur.executemany("""
-                    INSERT INTO pa.kopteksten_jobs (url_id, status, created_at, updated_at)
-                    VALUES (%s, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    ON CONFLICT (url_id) DO NOTHING
-                """, [(uid,) for uid in uids])
-
-                print(f"[VALIDATE-LINKS] Deleted content for {len(uids)} URLs with gone products")
+        # Apply corrected-content updates and gone-product resets (shared with
+        # the background /api/validate-all-links path).
+        _apply_corrected_and_gone(cur, urls_to_update_content,
+                                  urls_with_gone_products, url_to_gone_details,
+                                  log_prefix="VALIDATE-LINKS")
 
         conn.commit()
         cur.close()
@@ -1249,6 +1264,8 @@ def validate_links(batch_size: int = 10, parallel_workers: int = 3, conservative
             "results": results
         }
 
+    except HTTPException:
+        raise  # preserve deliberate 4xx instead of remapping to 500
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1400,52 +1417,9 @@ def validate_all_links(parallel_workers: int = 3, batch_size: int = 100):
                             validated_at = CURRENT_TIMESTAMP
                     """, validation_inserts)
 
-                if urls_to_update_content:
-                    from backend.url_catalog import get_url_id
-                    for new_content, the_url in urls_to_update_content:
-                        uid = get_url_id(cur, the_url)
-                        if uid is not None:
-                            cur.execute("""
-                                UPDATE pa.kopteksten_content
-                                   SET content = %s, updated_at = CURRENT_TIMESTAMP
-                                 WHERE url_id = %s
-                            """, (new_content, uid))
-
-                if urls_with_gone_products:
-                    from backend.url_catalog import get_url_id
-                    uids = []
-                    for url in urls_with_gone_products:
-                        u = get_url_id(cur, url)
-                        if u is not None:
-                            uids.append(u)
-                    if uids:
-                        placeholders = ','.join(['%s'] * len(uids))
-                        cur.execute(f"""
-                            SELECT u.url, c.content, c.created_at
-                            FROM pa.kopteksten_content c
-                            JOIN pa.urls u ON c.url_id = u.url_id
-                            WHERE c.url_id IN ({placeholders})
-                        """, uids)
-                        for row in cur.fetchall():
-                            gone_urls = url_to_gone_details.get(row['url'], [])
-                            cur.execute(
-                                "INSERT INTO pa.content_history "
-                                "(url, content, reset_reason, reset_details, original_created_at) "
-                                "VALUES (%s, %s, %s, %s, %s)",
-                                (row['url'], row['content'], 'gone_products',
-                                 json.dumps({'gone_urls': gone_urls}), row['created_at']))
-                        cur.execute(f"DELETE FROM pa.kopteksten_content WHERE url_id IN ({placeholders})", uids)
-                        cur.execute(f"""
-                            UPDATE pa.kopteksten_jobs
-                               SET status = 'pending', last_error = NULL, updated_at = CURRENT_TIMESTAMP
-                             WHERE url_id IN ({placeholders})
-                        """, uids)
-                        cur.execute(f"DELETE FROM pa.url_validation WHERE url_id IN ({placeholders})", uids)
-                        cur.executemany("""
-                            INSERT INTO pa.kopteksten_jobs (url_id, status, created_at, updated_at)
-                            VALUES (%s, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (url_id) DO NOTHING
-                        """, [(uid,) for uid in uids])
+                _apply_corrected_and_gone(cur, urls_to_update_content,
+                                          urls_with_gone_products, url_to_gone_details,
+                                          log_prefix="VALIDATE-ALL")
 
                 conn.commit()
                 cur.close()
@@ -2017,14 +1991,19 @@ def faq_json_to_html(faq_json_str: str) -> str:
         return ''
     try:
         faqs = json.loads(faq_json_str)
+        if not isinstance(faqs, list):
+            # Valid JSON but wrong shape (e.g. a dict) — don't crash the export.
+            return ''
         html_parts = []
         for faq in faqs:
+            if not isinstance(faq, dict):
+                continue
             question = faq.get('question', '')
             answer = faq.get('answer', '')
             html_parts.append(f'<b>{question}</b><br>{answer}')
         content = '<br><br>'.join(html_parts)
         return f'<br />{content}<br />' if content else ''
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError, AttributeError):
         return ''
 
 
@@ -2218,24 +2197,26 @@ def validate_faq_links_endpoint(batch_size: int = 100, parallel_workers: int = 3
                     # until extract_from_url is updated.
                     url_to_unknown_format[result['url']] = result['unknown_format_links']
 
-        # Record validation results (for URLs that passed - no gone, no unknown format)
+        # Record validation results for ALL URLs (prevents infinite re-fetch of
+        # URLs with unknown_format or gone links that aren't deleted yet — the
+        # fetch query filters on v.url_id IS NULL). Mirrors the background path.
         from backend.url_catalog import get_url_id
         conn = get_db_connection()
         cur = conn.cursor()
         for record in validation_records:
-            if not record['has_gone'] and not record['has_unknown_format']:
-                uid = get_url_id(cur, record['url'])
-                if uid is not None:
-                    cur.execute("""
-                        INSERT INTO pa.faq_link_validation
-                            (url_id, total_links, valid_links, gone_links, validated_at)
-                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        ON CONFLICT (url_id) DO UPDATE SET
-                            total_links = EXCLUDED.total_links,
-                            valid_links = EXCLUDED.valid_links,
-                            gone_links = EXCLUDED.gone_links,
-                            validated_at = CURRENT_TIMESTAMP
-                    """, (uid, record['total_links'], record['valid_links'], 0))
+            uid = get_url_id(cur, record['url'])
+            if uid is not None:
+                gone_count = len(record['gone_links']) if isinstance(record['gone_links'], list) else record['gone_links']
+                cur.execute("""
+                    INSERT INTO pa.faq_link_validation
+                        (url_id, total_links, valid_links, gone_links, validated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (url_id) DO UPDATE SET
+                        total_links = EXCLUDED.total_links,
+                        valid_links = EXCLUDED.valid_links,
+                        gone_links = EXCLUDED.gone_links,
+                        validated_at = CURRENT_TIMESTAMP
+                """, (uid, record['total_links'], record['valid_links'], gone_count))
         conn.commit()
         cur.close()
         return_db_connection(conn)
@@ -2499,23 +2480,33 @@ async def delete_faq_result(url: str):
     """Delete FAQ content and reset URL to pending."""
     try:
         from backend.url_catalog import canonicalize_url
+        canon = canonicalize_url(url)
+        if canon is None:
+            raise HTTPException(status_code=400, detail=f"Could not canonicalize URL: {url!r}")
         conn = get_db_connection()
         cur = conn.cursor()
-        canon = canonicalize_url(url)
-        deleted = 0
-        if canon is not None:
-            cur.execute("SELECT url_id FROM pa.urls WHERE url = %s", (canon,))
-            row = cur.fetchone()
-            if row:
-                uid = row['url_id']
-                cur.execute("DELETE FROM pa.faq_content_v2 WHERE url_id = %s", (uid,))
-                deleted = cur.rowcount
-                cur.execute("DELETE FROM pa.faq_jobs WHERE url_id = %s", (uid,))
-                cur.execute("DELETE FROM pa.faq_link_validation WHERE url_id = %s", (uid,))
+        found = False
+        cur.execute("SELECT url_id FROM pa.urls WHERE url = %s", (canon,))
+        row = cur.fetchone()
+        if row:
+            found = True
+            uid = row['url_id']
+            cur.execute("DELETE FROM pa.faq_content_v2 WHERE url_id = %s", (uid,))
+            cur.execute("DELETE FROM pa.faq_jobs WHERE url_id = %s", (uid,))
+            cur.execute("DELETE FROM pa.faq_link_validation WHERE url_id = %s", (uid,))
+            # Also clear the shared skip table so a skipped→deleted URL
+            # returns to FAQ pending (process-urls filters out is_valid=FALSE).
+            cur.execute("DELETE FROM pa.url_validation WHERE url_id = %s", (uid,))
         conn.commit()
         cur.close()
         return_db_connection(conn)
-        return {"status": "success", "message": f"FAQ deleted and URL reset to pending", "url": url}
+        if not found:
+            return {"status": "not_found", "found": False,
+                    "message": "No FAQ found for URL", "url": url}
+        return {"status": "success", "found": True,
+                "message": f"FAQ deleted and URL reset to pending", "url": url}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2643,39 +2634,6 @@ async def export_combined_xlsx():
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f"attachment; filename=combined_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
         )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/api/faq/result/{url:path}")
-async def delete_faq_result(url: str):
-    """Delete a FAQ result and reset the URL back to pending state"""
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        # Delete from FAQ tables + shared validation, all keyed on url_id
-        from backend.url_catalog import canonicalize_url
-        canon = canonicalize_url(url)
-        if canon is not None:
-            cur.execute("SELECT url_id FROM pa.urls WHERE url = %s", (canon,))
-            row = cur.fetchone()
-            if row:
-                uid = row['url_id']
-                cur.execute("DELETE FROM pa.faq_content_v2 WHERE url_id = %s", (uid,))
-                cur.execute("DELETE FROM pa.faq_jobs WHERE url_id = %s", (uid,))
-                cur.execute("DELETE FROM pa.url_validation WHERE url_id = %s", (uid,))
-
-        conn.commit()
-        cur.close()
-        return_db_connection(conn)
-
-        return {
-            "status": "success",
-            "message": f"FAQ result deleted and URL reset to pending",
-            "url": url
-        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
