@@ -63,7 +63,13 @@ PREFETCH_WORKERS = 8       # parallel page fetches; the API tolerates this fine
 _HTTP = requests.Session()
 
 DEFAULT_COUNTRY = "nl"
-ALLOWED_STATUS_CODES = {301, 302, 303, 307, 308}
+# 200 is a *canonical* (the API stores it as a real rule, fromUrl serves 200 +
+# declares its canonical toUrl), not an HTTP redirect. We accept it so canonicals
+# round-trip through the uploader instead of being silently coerced to 301. The
+# API itself puts no enum on statusCode (swagger: plain integer, default 301);
+# this set is our own allow-list of the codes we knowingly support.
+CANONICAL_STATUS_CODE = 200
+ALLOWED_STATUS_CODES = {200, 301, 302, 303, 307, 308}
 DEFAULT_STATUS_CODE = 301
 
 # Paths that resolve to the homepage and must never be redirected
@@ -402,9 +408,20 @@ def preflight_rows(
 
         hit = _cached_fromurl(new, country)
         if hit:
+            # `new` is itself a fromUrl, so it CANNOT also be a toUrl: the API
+            # forbids any URL from being both at once (verified empirically —
+            # zero fromUrl/toUrl overlap across the whole table). So we must
+            # flatten to the terminal target or the POST is rejected. This holds
+            # whether the hop is a 301 redirect OR a 200 canonical: in the
+            # canonical case `new` has been canonicalized away to `hit["url"]`,
+            # which is the true canonical and therefore also where the new rule
+            # should point. We tag the canonical case so the preview can show
+            # "flattened through a canonical" rather than a plain redirect hop.
             item["final_new"] = hit["url"]
             item["flatten_from"] = new
             stats["flattened"] = 1
+            if hit.get("statusCode") == CANONICAL_STATUS_CODE:
+                item["flatten_via_canonical"] = True
 
         if equiv_key(item["final_new"]) == equiv_key(old):
             item["skip_reason"] = "self-redirect"
