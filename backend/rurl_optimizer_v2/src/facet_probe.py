@@ -47,9 +47,12 @@ EARLY_STOP_COVERAGE = 0.9       # stop probing once a value covers ≥ this
 # Bump when the probe SELECTION logic changes so cached picks from older
 # logic are ignored and re-derived. v2: keyword↔value-name match priority,
 # generic-attribute coverage suppression, and the Stage 1.5 live subcat
-# keyword probe. Without this, stale picks (e.g. type_shampoos 'Anti-roos'
-# for "ketoconazol shampoo") would linger in the cache indefinitely.
-PROBE_SCHEMA_VERSION = 2
+# keyword probe. v3: Stage-1 coverage-winner now requires cov <= 1.0 (rejects
+# OR-fallback / maincat-vs-subcat scope-mismatch inflation like the 212%
+# doelgroep pick), and demographic facets (doelgroep_*/leeftijd_*/geslacht_*)
+# are treated as generic attributes. Without this, stale picks (e.g.
+# doelgroep_feestkleding 'Volwassenen' for "humor") would linger in the cache.
+PROBE_SCHEMA_VERSION = 3
 
 # Facet names that aren't useful for routing — operational / commercial
 # attributes that don't help the user pick a category-narrowed page.
@@ -92,9 +95,21 @@ GENERIC_ATTRIBUTE_FACETS = {
     "kleur", "materiaal", "maat", "gewicht", "formaat",
 }
 
+# Demographic/audience facets (doelgroep_*, leeftijd_*, geslacht_*, …) are the
+# same class of intent-free attribute: nearly every product in a category
+# carries one, so they win on coverage while saying nothing about WHAT the user
+# searched (e.g. "humor" → doelgroep_feestkleding 'Volwassenen', coverage 212%).
+# They're category-qualified slugs, so match by prefix rather than enumerating
+# all of them. Like the set above, this only suppresses the pure-coverage
+# branch — an explicit keyword match (query literally says "kinderen") still
+# appends via kw_best.
+_GENERIC_ATTRIBUTE_PREFIXES = ("doelgroep", "leeftijd", "geschikte_leeftijd",
+                               "geslacht")
+
 
 def _is_generic_attribute_facet(facet_name: str) -> bool:
-    return (facet_name or "").lower() in GENERIC_ATTRIBUTE_FACETS
+    n = (facet_name or "").lower()
+    return n in GENERIC_ATTRIBUTE_FACETS or n.startswith(_GENERIC_ATTRIBUTE_PREFIXES)
 
 
 # ── Keyword ↔ facet-value-name matching ──────────────────────────────────
@@ -434,7 +449,15 @@ def _check_surfaced(v28_payload: dict, base_total: int,
                 cand = (round(cov, 3), int(count), facet_name, int(vid), vname or "", True)
                 if kw_best is None or cand > kw_best:
                     kw_best = cand
-            if cov >= MIN_FACET_COVERAGE and not _is_generic_attribute_facet(facet_name):
+            # Coverage-winner branch. Require a real, in-scope fraction: a
+            # surfaced count > base_total means either the base call OR-fell-
+            # back, or the count is maincat-wide while base_total is only the
+            # dominant subcat (dom_cat_count) — both inflate coverage past
+            # 100% (e.g. 1485/700 = 212%). Stage 2's _probe_one rejects the
+            # same signal via `cov > 1.0`; mirror it here so the bogus ratio
+            # can't win. A literal keyword match (kw_best, above) is unaffected.
+            if (MIN_FACET_COVERAGE <= cov <= 1.0
+                    and not _is_generic_attribute_facet(facet_name)):
                 cand = (round(cov, 3), int(count), facet_name, int(vid), vname or "", False)
                 if cov_best is None or cand > cov_best:
                     cov_best = cand
