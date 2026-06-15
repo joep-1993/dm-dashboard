@@ -37,6 +37,13 @@ logger = logging.getLogger(__name__)
 # Tunables
 MIN_FACET_COVERAGE = 0.6       # winning value must cover this fraction of base T
 MIN_VALUE_PRODUCTS = 5          # skip facet values with fewer products subcat-wide
+# Coverage over a tiny base is statistically meaningless: when the dom_cat has
+# only 1-2 AND-matches for the keyword (common when the base call OR-fell-back
+# and dom_cat_count is tiny), any facet on those products scores ~100% by luck
+# (e.g. "ivermectine" → Wormenkuur dom_cat_count=1 → dier~Paarden, 1/1=100%).
+# Require this many base products before a COVERAGE win is trusted. Keyword
+# matches bypass it — the user explicitly named the value, so 1 product is fine.
+MIN_COVERAGE_BASE_TOTAL = 5
 # V31: raised from 15 to 50. The candidates list is sorted by raw subcat-wide
 # count desc, but niche-specific facet values often sit deep in the tail
 # (e.g. "Zonder overtrek" ranks ~#32 of 190 in huis_tuin_505062_505149).
@@ -54,8 +61,10 @@ EARLY_STOP_COVERAGE = 0.9       # stop probing once a value covers ≥ this
 # prefix/suffix based, so category-qualified attribute slugs (kleurtint,
 # kleur_*, materiaal_*, maat_*, *kleur) are suppressed too — not just the bare
 # names. Without this, stale picks (e.g. kleurtint 'Koper' for "pellets")
-# would linger in the cache.
-PROBE_SCHEMA_VERSION = 4
+# would linger in the cache. v5: stijl_*/dier_* added to the generic-attribute
+# families, and coverage wins now require base_total >= MIN_COVERAGE_BASE_TOTAL
+# (kills 1/1 flukes like "ivermectine" → dier~Paarden).
+PROBE_SCHEMA_VERSION = 5
 
 # Facet names that aren't useful for routing — operational / commercial
 # attributes that don't help the user pick a category-narrowed page.
@@ -98,13 +107,15 @@ _FACETS_CACHE: Optional[pd.DataFrame] = None
 # Matched by PREFIX, because each family has many category-qualified slugs
 # (kleur, kleurtint, kleur_glazen_zb, materiaal_sieraad, maat_mode_bovenkleding,
 # formaat_tv, …) — enumerating bare names alone (the old behaviour) let every
-# qualified variant slip through and win on coverage. Demographic facets
-# (doelgroep_*, leeftijd_*, geslacht_*) are the same class — nearly every
-# product carries one (e.g. "humor" → doelgroep_feestkleding 'Volwassenen',
-# coverage 212%) — so they're folded in here too.
+# qualified variant slip through and win on coverage. Demographic/audience
+# facets (doelgroep_*, leeftijd_*, geslacht_*, dier_* = target-animal) are the
+# same class — nearly every product carries one (e.g. "humor" →
+# doelgroep_feestkleding 'Volwassenen' 212%; "mini gps-tracker" →
+# dier_dierenbenodigdheden 'Honden' 92%) — as is decor style (stijl_*, e.g.
+# "vogelgeluiden" → stijl_woonaccessoires 'Modern' 86%). All folded in here.
 _GENERIC_ATTRIBUTE_PREFIXES = (
-    "kleur", "materiaal", "maat", "gewicht", "formaat",
-    "doelgroep", "leeftijd", "geschikte_leeftijd", "geslacht",
+    "kleur", "materiaal", "maat", "gewicht", "formaat", "stijl",
+    "doelgroep", "leeftijd", "geschikte_leeftijd", "geslacht", "dier",
 )
 # A few colour slugs carry 'kleur' as a suffix rather than a prefix
 # (goudkleur, haarkleur, subkleur).
@@ -460,8 +471,11 @@ def _check_surfaced(v28_payload: dict, base_total: int,
             # dominant subcat (dom_cat_count) — both inflate coverage past
             # 100% (e.g. 1485/700 = 212%). Stage 2's _probe_one rejects the
             # same signal via `cov > 1.0`; mirror it here so the bogus ratio
-            # can't win. A literal keyword match (kw_best, above) is unaffected.
+            # can't win. Also require a non-trivial base (MIN_COVERAGE_BASE_TOTAL)
+            # so a 1/1 fluke can't score 100%. A literal keyword match (kw_best,
+            # above) is unaffected by both guards.
             if (MIN_FACET_COVERAGE <= cov <= 1.0
+                    and base_total >= MIN_COVERAGE_BASE_TOTAL
                     and not _is_generic_attribute_facet(facet_name)):
                 cand = (round(cov, 3), int(count), facet_name, int(vid), vname or "", False)
                 if cov_best is None or cand > cov_best:
@@ -647,6 +661,10 @@ def _do_probe_inner(maincat: str, keyword: str, v28_payload: dict,
                 kw_best = cand
             break  # candidates are sorted kw-first; first live kw match wins
         if cov < MIN_FACET_COVERAGE:
+            continue
+        # Coverage over a tiny base is noise — a 1/1 fluke scores 100%. Only
+        # keyword matches (handled above) are trusted at a tiny base.
+        if base_total < MIN_COVERAGE_BASE_TOTAL:
             continue
         # Skip generic-attribute facets (kleur/materiaal/maat/…) that win
         # purely on coverage — appending them to a non-keyword-matched query

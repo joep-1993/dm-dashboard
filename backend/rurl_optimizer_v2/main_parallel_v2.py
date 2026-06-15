@@ -881,26 +881,45 @@ def _has_strong_subcat_name_match(parsed, categories_df, matcher, threshold=95):
     return False
 
 
-def _resolve_probe_facet_url(facet_filter, main_category, facet_name, value_id):
-    """V35 (Fix B): resolve a (facet_name, value_id) probe hit to the SHALLOWEST
+def _resolve_probe_facet_url(facet_filter, main_category, facet_name, value_id,
+                             dom_cat_slug=None):
+    """V35 (Fix B): resolve a (facet_name, value_id) probe hit to a
     /products/<main>/<subcat>/c/<facet>~<id> URL that actually exists in the
-    facet catalogue, within the given main category. Shallowest = the broadest
-    subcategory that defines the facet (e.g. Speeltafels over its Pokertafels
-    child). Returns the path (no host) or None."""
+    facet catalogue, within the given main category. Returns the path (no host)
+    or None.
+
+    V37 (Fix D): prefer the subcategory CLOSEST to the dom_cat the probe
+    identified, when known. A cross-cutting facet (dier_*, doelgroep_*) is
+    attached to dozens of unrelated subcats, so the old "globally shallowest,
+    alphabetical tie-break" rule funnelled every such redirect into one
+    arbitrary subcat (e.g. all dier_* hits in dieren_accessoires → Dierenurnen,
+    because '3213084' sorts first). Ranking by proximity to dom_cat keeps the
+    landing page on-topic; the shallowest-overall rule is only the last resort
+    when dom_cat is unknown or doesn't carry the facet. For a product-type facet
+    that lives in a single branch this is a no-op (the dom_cat IS that branch)."""
     suffix = f"/c/{facet_name}~{value_id}"
     prefix = f"/products/{main_category}/"
-    best = None  # (depth, url)
+    dom = (dom_cat_slug or "").strip()
+    best = None  # (rank_tuple, url)
     for u in facet_filter.facet_url_set():
         if not u.endswith(suffix) or not u.startswith(prefix):
             continue
         subcat = u[len(prefix):].split('/c/')[0]
         depth = subcat.count('_')
-        # Break depth ties by URL (deterministic). facet_url_set() is a frozenset
-        # whose iteration order varies by process hash seed, so a bare
-        # `depth < best[0]` left same-depth ties resolving to different subcats
-        # across runs. Compare the (depth, url) tuple so the pick is stable.
-        if best is None or (depth, u) < (best[0], best[1]):
-            best = (depth, u)
+        # Proximity tier to dom_cat: 0 exact, 1 nearest descendant (shallowest
+        # below dom_cat), 2 nearest ancestor (deepest above), 3 unrelated.
+        if dom and subcat == dom:
+            rank = (0, 0, u)
+        elif dom and subcat.startswith(dom + '_'):
+            rank = (1, depth, u)
+        elif dom and dom.startswith(subcat + '_'):
+            rank = (2, -depth, u)
+        else:
+            # No dom_cat (or unrelated): broadest subcat that defines the facet,
+            # stable tie-break by URL. Same as the pre-V37 behaviour.
+            rank = (3, depth, u)
+        if best is None or rank < best[0]:
+            best = (rank, u)
     return best[1] if best else None
 
 
@@ -1740,8 +1759,13 @@ def process_url_v2(args):
                 and _pf.get('facet_name', '').lower() not in ('merk', 'winkel')
                 and (_pf.get('coverage') or 0) >= 0.6
                 and (_pf.get('value_count') or 0) >= 15):
+            # V37: pass the probe's dom_cat so the facet resolves to the
+            # on-topic subcat, not the alphabetically-first shallowest carrier.
+            _dom_slug = (derive_search_redirect(parsed.main_category, parsed.keyword)
+                         or {}).get('dom_cat_url_slug')
             _purl = _resolve_probe_facet_url(
-                facet_filter, parsed.main_category, _pf['facet_name'], _pf['value_id'])
+                facet_filter, parsed.main_category, _pf['facet_name'], _pf['value_id'],
+                dom_cat_slug=_dom_slug)
             if _purl:
                 from src.url_builder import RedirectResult as _RR
                 _sub = ''
