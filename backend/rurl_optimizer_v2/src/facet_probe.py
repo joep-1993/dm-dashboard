@@ -63,8 +63,10 @@ EARLY_STOP_COVERAGE = 0.9       # stop probing once a value covers ≥ this
 # names. Without this, stale picks (e.g. kleurtint 'Koper' for "pellets")
 # would linger in the cache. v5: stijl_*/dier_* added to the generic-attribute
 # families, and coverage wins now require base_total >= MIN_COVERAGE_BASE_TOTAL
-# (kills 1/1 flukes like "ivermectine" → dier~Paarden).
-PROBE_SCHEMA_VERSION = 5
+# (kills 1/1 flukes like "ivermectine" → dier~Paarden). v6: search_derived
+# SCHEMA_VERSION bumped to 4 (greedy dom_cat) — base_total/dom_slug change, so
+# re-derive probes against the new dom_cats rather than reusing stale picks.
+PROBE_SCHEMA_VERSION = 6
 
 # Facet names that aren't useful for routing — operational / commercial
 # attributes that don't help the user pick a category-narrowed page.

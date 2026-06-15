@@ -71,7 +71,7 @@ DOMINANCE_THRESHOLD = 0.75
 # re-fetches them with the new classifier. Previously, fallback-mode rows
 # stored only {"mode": "fallback", "total": N} and never produced a dom_cat,
 # which blocked the facet-probe pipeline for niche queries.
-SCHEMA_VERSION = 3  # Q8: semantic dom_cat override + dominance-gate bypass
+SCHEMA_VERSION = 4  # V37: greedy hierarchical descent + global semantic override
 
 _CACHE_DB_PATH = Path(__file__).parent.parent / "data" / "cache" / "search_derived.sqlite"
 _CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -202,37 +202,87 @@ def _classify(api_resp: Optional[dict], keyword: str = "") -> dict:
 
     cats_resp = api_resp.get("categories") or []
     if cats_resp:
-        # Pick the deepest depth that has at least one category — that's
-        # the "leaf" level for this query — then pick the cat with the
-        # highest count among siblings at that depth.
-        max_depth = max((c.get("depth") or 0) for c in cats_resp)
-        leaf_cats = [c for c in cats_resp if (c.get("depth") or 0) == max_depth]
-        leaf_cats.sort(key=lambda c: -(c.get("count") or 0))
-        sum_at_leaf = sum((c.get("count") or 0) for c in leaf_cats) or 1
-        top = leaf_cats[0]
+        # V37: greedy hierarchical descent by count. Start at the shallowest
+        # depth present and pick the highest-count category; at each deeper
+        # level restrict to CHILDREN of the current pick (urlName-prefix) and
+        # take the highest-count child, stopping where the branch ends.
+        #
+        # The old rule — globally deepest depth, then highest count among ALL
+        # cats at that depth — conflated sibling sets from different branches
+        # and could land in a minority branch. e.g. "pellets" in tuin_accessoires
+        # leads with Barbecues (211) at depth 1, but keyword-stuffed copper-mesh
+        # spam made Gaas the single biggest depth-2 leaf (170, in the minority
+        # Tuinafscheiding branch), so the old rule mis-picked Gaas. Descent stays
+        # in the Barbecues tree.
+        by_depth = {}
+        for c in cats_resp:
+            by_depth.setdefault(c.get("depth") or 0, []).append(c)
+        depths = sorted(by_depth)
+        siblings = by_depth[depths[0]]
+        top = max(siblings, key=lambda c: c.get("count") or 0)
+        for dep in depths[1:]:
+            kids = [c for c in by_depth[dep]
+                    if (c.get("urlName") or "").startswith((top.get("urlName") or "") + "_")]
+            if not kids:
+                break
+            siblings = kids
+            top = max(kids, key=lambda c: c.get("count") or 0)
 
-        # Q8: semantic dom_cat override. The volume leader is usually right,
-        # but when a DIFFERENT leaf category's NAME matches MORE of the query's
-        # distinctive tokens, prefer it — e.g. "anti snurk kussen" →
-        # 'Anti-snurk' (matches {anti,snurk}) over 'Massagekussens' (whose
-        # single compound token shares nothing with the query). Gated so a
-        # tiny semantic match never unseats a dominant volume category:
-        # strictly more matched tokens + a non-trivial product count. The
-        # winning semantic score is stored so _build_redirect_url can bypass
-        # the volume-dominance gate when the name match is strong (>=2 tokens).
+        def _siblings_of(cat):
+            un = cat.get("urlName") or ""
+            dep = cat.get("depth") or 0
+            parent = un.rsplit("_", 1)[0] if "_" in un else ""
+            out_sibs = []
+            for c in cats_resp:
+                cun = c.get("urlName") or ""
+                cpar = cun.rsplit("_", 1)[0] if "_" in cun else ""
+                if (c.get("depth") or 0) == dep and cpar == parent:
+                    out_sibs.append(c)
+            return out_sibs
+
+        # Q8 + V37: GLOBAL semantic override. The volume pick is usually right,
+        # but when a category ANYWHERE in the breakdown — not just a sibling of
+        # the volume pick — has a NAME matching MORE of the query's distinctive
+        # tokens, prefer it. This is what lets a name match jump BRANCHES, which
+        # the descent alone can't: "hittebestendige verf" volume-descends into a
+        # bigger sibling branch (Schuurpapier), but 'Verf' names the query, so
+        # override to it. Gated so a tiny match can't unseat the volume leader:
+        # strictly more matched tokens + a non-trivial product count. A query
+        # that names no category (e.g. "pellets") leaves the override silent, so
+        # the descent's Barbecues pick stands. The score is stored so
+        # _build_redirect_url can bypass the dominance gate on a strong (>=2) match.
         SEM_OVERRIDE_MIN_COUNT = 10
         sem_score = 0
         q_toks = _sem_tokens(keyword)
-        if q_toks and len(leaf_cats) > 1:
-            for c in leaf_cats:
+        if q_toks:
+            for c in cats_resp:
                 c['_sem'] = len(q_toks & _sem_tokens(c.get('name', '')))
-            sem_best = max(leaf_cats, key=lambda c: (c.get('_sem', 0), c.get('count') or 0))
-            if (sem_best is not top
+            # Pick the best name-match, but EXCLUDE the greedy pick itself and
+            # any ANCESTOR of it: the descent already chose the right branch,
+            # and an ancestor is only broader. A name token often matches a
+            # shallow parent but not its more-specific compound child ("koffie"
+            # ⊆ 'Koffie' but ⊄ 'Koffiecups'), which would otherwise broaden
+            # Koffiecups → Koffie. Excluding ancestors at SELECTION time (not
+            # just blocking afterwards) matters: for "karwei fietsen" the
+            # highest-count name match is the 'Fietsen' maincat (ancestor), but
+            # the right override is the sibling 'Elektrische fietsen' — drop the
+            # ancestor so the sibling can win. Cross-BRANCH jumps (verf in a
+            # different subtree) are unaffected.
+            _top_un = top.get('urlName') or ''
+            _sem_cands = [c for c in cats_resp
+                          if c is not top
+                          and not (_top_un.startswith((c.get('urlName') or '') + '_'))]
+            sem_best = (max(_sem_cands, key=lambda c: (c.get('_sem', 0), c.get('count') or 0))
+                        if _sem_cands else None)
+            if (sem_best is not None
                     and sem_best.get('_sem', 0) > top.get('_sem', 0)
                     and (sem_best.get('count') or 0) >= SEM_OVERRIDE_MIN_COUNT):
                 top = sem_best
                 sem_score = sem_best.get('_sem', 0)
+                siblings = _siblings_of(top)
 
+        max_depth = top.get("depth") or 0
+        sum_at_leaf = sum((c.get("count") or 0) for c in siblings) or 1
         share = (top.get("count") or 0) / sum_at_leaf
         out.update({
             "dom_cat_id": top.get("id"),
