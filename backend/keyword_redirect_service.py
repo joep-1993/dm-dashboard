@@ -55,12 +55,20 @@ def resolve_shop(query: str) -> Dict[str, Any]:
     if not query:
         return {"shop_id": None, "shop_name": None, "candidates": []}
 
-    if query.isdigit():
-        sid = int(query)
+    # Accept a bare id ("652149") or the facet form the URLs use ("winkel~652149").
+    m = re.match(r"^winkel~\s*(\d+)$", query, re.IGNORECASE)
+    query_id = m.group(1) if m else query
+
+    if query_id.isdigit():
+        sid = int(query_id)
         res = search_gsd(shop_ids=[sid]).get("results", [])
-        name = res[0]["shop_name"] if res else None
-        return {"shop_id": sid, "shop_name": name,
-                "candidates": [{"shop_id": sid, "shop_name": name}]}
+        if not res:
+            # Guard: a numeric id that isn't a real shop would otherwise build
+            # meaningless winkel~<id> URLs and silently return 0 products.
+            return {"shop_id": None, "shop_name": None, "candidates": [],
+                    "error": f"No active shop found with id {sid}."}
+        return {"shop_id": sid, "shop_name": res[0]["shop_name"],
+                "candidates": [{"shop_id": sid, "shop_name": res[0]["shop_name"]}]}
 
     res = search_gsd(shop_names=[query]).get("results", [])
     candidates = [{"shop_id": r["shop_id"], "shop_name": r["shop_name"]} for r in res]

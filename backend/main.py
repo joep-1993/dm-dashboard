@@ -4162,7 +4162,7 @@ async def keyword_planner_keyword_redirects(request: dict):
         loop = asyncio.get_event_loop()
         shop_info = await loop.run_in_executor(None, resolve_shop, shop)
         if not shop_info.get("shop_id"):
-            raise HTTPException(status_code=404, detail=f"No shop found matching '{shop}'")
+            raise HTTPException(status_code=404, detail=shop_info.get("error") or f"No shop found matching '{shop}'")
 
         cat = await loop.run_in_executor(
             None, process_category_keywords, keyword, PRELOADED_CATEGORIES
