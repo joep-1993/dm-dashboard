@@ -257,6 +257,29 @@ GENERIC_NOUNS = {
     'pakket', 'pakketten',
 }
 
+# V38: generic FORM / packaging words. These describe the physical form a
+# product comes in, not its identity — matching ONLY a form word (while the
+# actual product term goes unmatched) is a weak signal that usually mis-routes,
+# e.g. "borax poeder" → type_allesreiniger 'Poeder' (lands in Allesreinigers,
+# but borax is not an all-purpose cleaner). Used by _v27_reject_reason's
+# generic-only rule. NOT used by the matcher — a query that legitimately names
+# the form ("wasmiddel poeder") still matches because the product term
+# ("wasmiddel") also matches, so not ALL matched tokens are generic.
+GENERIC_FORM_WORDS = {
+    'poeder', 'poeders',
+    'spray', 'sprays',
+    'gel', 'gels',
+    'tablet', 'tabletten',
+    'capsule', 'capsules',
+    'korrel', 'korrels',
+    'vloeibaar', 'vloeistof',
+    'pasta',
+    'schuim',
+    'stick', 'sticks',
+    'doekje', 'doekjes',
+    'druppels',
+}
+
 
 # ==============================================================================
 # WINKELNAMEN (V23) - Worden APART behandeld, nooit naar facet matchen

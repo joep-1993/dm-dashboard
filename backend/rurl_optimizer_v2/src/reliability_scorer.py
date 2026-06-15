@@ -26,6 +26,11 @@ Extra: Bij cross-category match EN coverage < 33%: score wordt 0 (blokkeer match
 import re
 from typing import Optional
 
+# V38: hard-reject a match where ONLY generic descriptor/form tokens matched
+# while a specific product term went unmatched (see _v27_reject_reason). Module
+# flag so an A/B can toggle it off to compare against the prior behaviour.
+V38_GENERIC_ONLY_REJECT = True
+
 # Generic brand/store names that often cause false matches
 GENERIC_FACET_VALUES = {
     'action', 'action.com', 'hema', 'ikea', 'kruidvat', 'kruidvat.nl',
@@ -122,7 +127,8 @@ def _v27_reject_reason(
        ingredients or product types — losing them in the match means the
        redirect is missing the user's actual intent.
     """
-    from src.validation_rules import GENERIC_ADJECTIVES, GENERIC_NOUNS
+    from src.validation_rules import (GENERIC_ADJECTIVES, GENERIC_NOUNS,
+                                       GENERIC_FORM_WORDS)
 
     matched = [w.lower().strip() for w in (matched_keywords or []) if w and w.strip()]
     unmatched = [w.lower().strip() for w in (unmatched_keywords or []) if w and w.strip()]
@@ -137,6 +143,22 @@ def _v27_reject_reason(
             and matched
             and all(w in GENERIC_ADJECTIVES or w in GENERIC_NOUNS for w in matched)):
         return f"V31: cross-category match on generic word(s) only: {', '.join(matched)}"
+
+    # V38: ANY match type — every matched token is a generic descriptor
+    # (adjective / generic noun / form word) AND a SPECIFIC product term went
+    # unmatched. Matching only "poeder" while "borax" is unmatched routes the
+    # query by its physical form, not its identity (→ Allesreinigers 'Poeder').
+    # Gated on an unmatched specific token so a legitimately-generic query
+    # ("kast" → Kasten, nothing unmatched) is NOT rejected, and on the form/
+    # noun being the ONLY thing matched so "losse lamellen" (lamellen is
+    # specific → matched) survives. Flag lets the A/B compare old vs new.
+    if V38_GENERIC_ONLY_REJECT and matched:
+        _generic = GENERIC_ADJECTIVES | GENERIC_NOUNS | GENERIC_FORM_WORDS
+        unmatched_specific = [w for w in unmatched
+                              if len(w) >= 4 and w.isalpha() and w not in _generic]
+        if unmatched_specific and all(w in _generic for w in matched):
+            return (f"V38: only generic/form token(s) matched ({', '.join(matched)}); "
+                    f"specific term(s) unmatched ({', '.join(unmatched_specific)})")
 
     long_unmatched = [w for w in unmatched if len(w) >= long_token_threshold]
     if long_unmatched:
