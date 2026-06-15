@@ -15,6 +15,10 @@ Checks:
   4. Title variables           — !!DISCOUNT!! / !!NR!! / !!JAAR!! placeholders
                                  stored in pa.unique_titles_content are
                                  properly substituted on the rendered page
+  5. XML-Sitemaps             — landing (PLP) + browse sitemap XML files are
+                                 reachable (200)
+  6. HTML-Sitemaps             — HTML sitemap pages are reachable (200) and
+                                 list at least one item
 """
 import csv
 import json
@@ -41,6 +45,25 @@ FACET_LOOKUP_MAX_TRIES = 60
 
 MAINCAT_CSV = Path(__file__).parent / "maincat_mapping.csv"
 CAT_URLS_CSV = Path(__file__).parent / "data" / "cat_urls.csv"
+
+# XML sitemap availability check — a fixed set of landing (PLP) and browse
+# sitemap URLs that must each return HTTP 200 with non-empty XML.
+SITEMAP_XML_URLS = [
+    f"{SITE_BASE}/sitemapxml/nl/current/sitemap-landing-cs-elektronica.xml",
+    f"{SITE_BASE}/sitemapxml/nl/current/sitemap-landing-cs-mode.xml",
+    f"{SITE_BASE}/sitemapxml/nl/current/sitemap-browse-cs-huis_tuin.xml",
+    f"{SITE_BASE}/sitemapxml/nl/current/sitemap-browse-cs-meubilair.xml",
+]
+
+# HTML sitemap pages must be reachable (200) AND list at least one item.
+HTML_SITEMAP_URLS = [
+    f"{SITE_BASE}/sitemap/schoenen/schoenen_430884/",
+    f"{SITE_BASE}/sitemap/parfum_aftershave/",
+]
+# An item is a <li class="sitemap__item--XXXXX"> — the suffix after "--" is a
+# per-build CSS-module hash that differs between pages (e.g. R6p3e on
+# parfum_aftershave, xkQIJ on schoenen), so we match the stable prefix.
+SITEMAP_ITEM_CLASS = "sitemap__item--"
 
 NOSCRIPT_TITLE_CLASS = "noScript__title--LfAWg"
 BASEMENT_GROUP_CLASS = "basementlinks__group--igXdw"
@@ -264,6 +287,44 @@ def _has_noscript_title(html: str, text: str) -> bool:
     return needle in html
 
 
+def _check_sitemaps(urls: List[str]) -> Tuple[bool, List[Dict]]:
+    """Fetch each sitemap URL and confirm it returns HTTP 200 with non-empty
+    XML. Returns (failed, details) where failed is True if any URL is
+    unreachable."""
+    failed = False
+    details: List[Dict] = []
+    for url in urls:
+        body, http_status = _fetch(url)
+        present = http_status == 200 and bool(body and body.strip())
+        details.append({"url": url, "present": present, "http_status": http_status})
+        if not present:
+            failed = True
+    return failed, details
+
+
+def _check_html_sitemaps(urls: List[str]) -> Tuple[bool, List[Dict]]:
+    """Fetch each HTML sitemap page and confirm it returns HTTP 200 AND lists
+    at least one sitemap item (<li class="sitemap__item--R6p3e">). Returns
+    (failed, details) where failed is True if any page is unreachable or has
+    no items."""
+    failed = False
+    details: List[Dict] = []
+    for url in urls:
+        body, http_status = _fetch(url)
+        reachable = http_status == 200 and bool(body)
+        item_count = body.count(SITEMAP_ITEM_CLASS) if body else 0
+        present = reachable and item_count > 0
+        details.append({
+            "url": url,
+            "present": present,
+            "http_status": http_status,
+            "item_count": item_count,
+        })
+        if not present:
+            failed = True
+    return failed, details
+
+
 def _check_basement_links(html: str) -> Tuple[bool, str]:
     if f'class="{BASEMENT_GROUP_CLASS}"' not in html:
         return False, "basementlinks group div not found"
@@ -481,6 +542,30 @@ def _check_title_variables() -> Dict:
 # Slack — DM to the SEO_USER_ID via SLACK_BOT_TOKEN (same pattern as
 # backend/daily_automation.py)
 # ---------------------------------------------------------------------------
+_SITEMAP_CHECK_KEYS = ("xml_sitemaps", "html_sitemaps")
+
+
+def _sitemap_slack_lines(check_key: str, details: List[Dict]) -> List[str]:
+    """Per-URL breakdown lines for the sitemap checks, indented under the
+    check's summary line. Returns [] for any non-sitemap check. HTML sitemaps
+    also report the item count; XML/HTML failures report the HTTP status."""
+    if check_key not in _SITEMAP_CHECK_KEYS:
+        return []
+    lines: List[str] = []
+    for d in details:
+        url = (d.get("url") or "").replace(SITE_BASE, "")
+        ok = d.get("present") is True
+        mark = ":white_check_mark:" if ok else ":x:"
+        if check_key == "html_sitemaps":
+            suffix = f" ({d.get('item_count', 0)} items)"
+        elif not ok:
+            suffix = f" (HTTP {d.get('http_status')})"
+        else:
+            suffix = ""
+        lines.append(f"        {mark} {url}{suffix}")
+    return lines
+
+
 def _send_slack(text: str) -> Dict:
     token = os.getenv("SLACK_BOT_TOKEN", "")
     user_id = os.getenv("SLACK_USER_ID", "")
@@ -511,6 +596,8 @@ CHECK_LABELS = {
     "no_script_facet_links": "No-script facet-links",
     "basement_links": "Basement links",
     "title_variables": "Title variables",
+    "xml_sitemaps": "XML-Sitemaps",
+    "html_sitemaps": "HTML-Sitemaps",
 }
 
 
@@ -584,12 +671,28 @@ def run_all_checks() -> Dict:
     results["checks"]["title_variables"] = "failed" if tv["failed"] else "passed"
     results["details"]["title_variables"] = tv["findings"]
 
+    # --- Check 5 (XML sitemaps — landing/PLP + browse) ---
+    xml_sm_failed, xml_sm_details = _check_sitemaps(SITEMAP_XML_URLS)
+    results["checks"]["xml_sitemaps"] = "failed" if xml_sm_failed else "passed"
+    results["details"]["xml_sitemaps"] = xml_sm_details
+
+    # --- Check 6 (HTML sitemaps — reachable + has items) ---
+    html_sm_failed, html_sm_details = _check_html_sitemaps(HTML_SITEMAP_URLS)
+    results["checks"]["html_sitemaps"] = "failed" if html_sm_failed else "passed"
+    results["details"]["html_sitemaps"] = html_sm_details
+
     # --- Summary + Slack ---
     passed = [k for k, v in results["checks"].items() if v == "passed"]
     failed = [k for k, v in results["checks"].items() if v == "failed"]
     icon = ":x:" if failed else ":white_check_mark:"
-    summary_lines = [f":white_check_mark: {CHECK_LABELS[k]}" for k in passed]
-    summary_lines += [f":x: {CHECK_LABELS[k]}" for k in failed]
+    # Passed first, then failed — but keep each check's own per-URL breakdown
+    # (sitemap checks only) indented under its line so a failure shows exactly
+    # which URL is down.
+    summary_lines: List[str] = []
+    for k in passed + failed:
+        mark = ":white_check_mark:" if k in passed else ":x:"
+        summary_lines.append(f"{mark} {CHECK_LABELS[k]}")
+        summary_lines.extend(_sitemap_slack_lines(k, results["details"].get(k, [])))
     slack_text = (
         f"{icon} *SEO Rulings — {len(failed)} failed, {len(passed)} passed*\n"
         + "\n".join(summary_lines)

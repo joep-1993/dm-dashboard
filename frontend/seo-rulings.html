@@ -155,6 +155,8 @@
                             <span class="pill">No-script facet-links</span>
                             <span class="pill">Basement links</span>
                             <span class="pill">Title variables</span>
+                            <span class="pill">XML-Sitemaps</span>
+                            <span class="pill">HTML-Sitemaps</span>
                         </p>
                         <div class="d-flex justify-content-between align-items-center">
                             <div class="info-bar">
@@ -216,6 +218,8 @@
             no_script_facet_links: "No-script facet-links",
             basement_links: "Basement links",
             title_variables: "Title variables",
+            xml_sitemaps: "XML-Sitemaps",
+            html_sitemaps: "HTML-Sitemaps",
         };
 
         function escapeHtml(s) {
@@ -519,6 +523,32 @@
                 ])
             ));
 
+            // Check 5 — XML-Sitemaps (landing/PLP + browse). Simple
+            // availability table: the HTTP status is the whole point here, so
+            // it gets its own column (unlike the category tables, where every
+            // row is guaranteed 200).
+            detailsBody.appendChild(buildSection(
+                CHECK_LABELS.xml_sitemaps,
+                buildTable(details.xml_sitemaps || [], [
+                    { label: "Status", width: "120px", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "HTTP",   width: "100px", get: r => httpCell(r.http_status), align: "center" },
+                    { label: "URL",    width: "600px", get: r => linkCell(r.url) },
+                ])
+            ));
+
+            // Check 6 — HTML-Sitemaps. Reachability + item presence, so it
+            // carries an extra "Items" column showing how many
+            // sitemap__item--R6p3e entries were found on the page.
+            detailsBody.appendChild(buildSection(
+                CHECK_LABELS.html_sitemaps,
+                buildTable(details.html_sitemaps || [], [
+                    { label: "Status", width: "120px", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "HTTP",   width: "100px", get: r => httpCell(r.http_status), align: "center" },
+                    { label: "Items",  width: "100px", get: r => itemCountCell(r.item_count), align: "center" },
+                    { label: "URL",    width: "600px", get: r => linkCell(r.url) },
+                ])
+            ));
+
             document.getElementById("detailsPanel").classList.remove("d-none");
         }
 
@@ -597,6 +627,13 @@
             const n = Number(status);
             if (!n) return `<span class="check-status fail">err</span>`;
             const cls = (n >= 200 && n < 400) ? "pass" : "fail";
+            return `<span class="check-status ${cls}">${n}</span>`;
+        }
+
+        function itemCountCell(count) {
+            if (count === undefined || count === null) return "";
+            const n = Number(count);
+            const cls = n > 0 ? "pass" : "fail";
             return `<span class="check-status ${cls}">${n}</span>`;
         }
 
