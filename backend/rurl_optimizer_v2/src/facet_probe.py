@@ -50,9 +50,12 @@ EARLY_STOP_COVERAGE = 0.9       # stop probing once a value covers ≥ this
 # keyword probe. v3: Stage-1 coverage-winner now requires cov <= 1.0 (rejects
 # OR-fallback / maincat-vs-subcat scope-mismatch inflation like the 212%
 # doelgroep pick), and demographic facets (doelgroep_*/leeftijd_*/geslacht_*)
-# are treated as generic attributes. Without this, stale picks (e.g.
-# doelgroep_feestkleding 'Volwassenen' for "humor") would linger in the cache.
-PROBE_SCHEMA_VERSION = 3
+# are treated as generic attributes. v4: generic-attribute detection is now
+# prefix/suffix based, so category-qualified attribute slugs (kleurtint,
+# kleur_*, materiaal_*, maat_*, *kleur) are suppressed too — not just the bare
+# names. Without this, stale picks (e.g. kleurtint 'Koper' for "pellets")
+# would linger in the cache.
+PROBE_SCHEMA_VERSION = 4
 
 # Facet names that aren't useful for routing — operational / commercial
 # attributes that don't help the user pick a category-narrowed page.
@@ -85,31 +88,33 @@ _FACETS_CACHE: Optional[pd.DataFrame] = None
 # Generic ATTRIBUTE facets carry little navigational intent when the user
 # didn't actually search for the value. A material/colour/size/weight value
 # that wins purely on coverage is usually noise (e.g. "fontein wc" →
-# materiaal~Keramiek). Such facets are appended ONLY when they're a keyword
-# match (the kw_best branch); as a pure coverage winner they're skipped so
-# the redirect stays at the bare dom_cat. Deliberately EXCLUDES type_* /
-# eigenschap_* / o_* facets — those carry intent even via coverage (e.g.
-# "hoesloze dekbedden" → eigenschap_beddengoed "Zonder overtrek"). Matched
-# on the facet slug (id_to_name) and a few common slug prefixes.
-GENERIC_ATTRIBUTE_FACETS = {
+# materiaal~Keramiek, or "pellets" → kleurtint~Koper). Such facets are
+# appended ONLY when they're a keyword match (the kw_best branch); as a pure
+# coverage winner they're skipped so the redirect stays at the bare dom_cat.
+# Deliberately EXCLUDES type_* / eigenschap_* / o_* facets — those carry intent
+# even via coverage (e.g. "hoesloze dekbedden" → eigenschap_beddengoed "Zonder
+# overtrek").
+#
+# Matched by PREFIX, because each family has many category-qualified slugs
+# (kleur, kleurtint, kleur_glazen_zb, materiaal_sieraad, maat_mode_bovenkleding,
+# formaat_tv, …) — enumerating bare names alone (the old behaviour) let every
+# qualified variant slip through and win on coverage. Demographic facets
+# (doelgroep_*, leeftijd_*, geslacht_*) are the same class — nearly every
+# product carries one (e.g. "humor" → doelgroep_feestkleding 'Volwassenen',
+# coverage 212%) — so they're folded in here too.
+_GENERIC_ATTRIBUTE_PREFIXES = (
     "kleur", "materiaal", "maat", "gewicht", "formaat",
-}
-
-# Demographic/audience facets (doelgroep_*, leeftijd_*, geslacht_*, …) are the
-# same class of intent-free attribute: nearly every product in a category
-# carries one, so they win on coverage while saying nothing about WHAT the user
-# searched (e.g. "humor" → doelgroep_feestkleding 'Volwassenen', coverage 212%).
-# They're category-qualified slugs, so match by prefix rather than enumerating
-# all of them. Like the set above, this only suppresses the pure-coverage
-# branch — an explicit keyword match (query literally says "kinderen") still
-# appends via kw_best.
-_GENERIC_ATTRIBUTE_PREFIXES = ("doelgroep", "leeftijd", "geschikte_leeftijd",
-                               "geslacht")
+    "doelgroep", "leeftijd", "geschikte_leeftijd", "geslacht",
+)
+# A few colour slugs carry 'kleur' as a suffix rather than a prefix
+# (goudkleur, haarkleur, subkleur).
+_GENERIC_ATTRIBUTE_SUFFIXES = ("kleur",)
 
 
 def _is_generic_attribute_facet(facet_name: str) -> bool:
     n = (facet_name or "").lower()
-    return n in GENERIC_ATTRIBUTE_FACETS or n.startswith(_GENERIC_ATTRIBUTE_PREFIXES)
+    return (n.startswith(_GENERIC_ATTRIBUTE_PREFIXES)
+            or n.endswith(_GENERIC_ATTRIBUTE_SUFFIXES))
 
 
 # ── Keyword ↔ facet-value-name matching ──────────────────────────────────
