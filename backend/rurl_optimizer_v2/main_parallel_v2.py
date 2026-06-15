@@ -594,23 +594,31 @@ def _assemble_multi_facet(multi, existing_facet, size_facet=None):
     R-URL already carried and never repeats a facet name. Returns
     (fragment, [value_name, ...]) or ('', []) when nothing assemblable.
 
-    V34: when ``size_facet`` is provided (caller opted into honouring an
-    explicit query size), it's appended last — after the intent axes — so the
-    landing page is size-narrowed. Off by default; see RESCUE_INCLUDE_SIZE."""
+    V34: ``size_facet`` is included only when the caller opted into honouring an
+    explicit query size (off by default; see RESCUE_INCLUDE_SIZE).
+
+    V37: new facets are emitted in canonical order — alphabetical by facet name
+    — to match Beslist's URL form and the url_builder multi-facet branch (V25).
+    _extract_multi_facets returns intent-priority order, which produced
+    non-canonical URLs like t_reismand~..~~dier_dierenbenodigdheden~.. instead
+    of dier_dierenbenodigdheden~..~~t_reismand~.. . Any existing R-URL facet
+    stays prepended (same as url_builder)."""
     existing_names = {p.split('~', 1)[0]
                       for p in (existing_facet or '').split('~~') if '~' in p}
     seen = set(existing_names)
-    frags, names = [], []
+    picked = []  # (facet_name, value_id, value_name)
     for m in list(multi or []) + ([size_facet] if size_facet else []):
         fn = m.get('facet_name')
         vid = m.get('value_id')
         if not fn or vid is None or fn in seen:
             continue
         seen.add(fn)
-        frags.append(f"{fn}~{vid}")
-        names.append(m.get('value_name') or '')
-    if not frags:
+        picked.append((fn, vid, m.get('value_name') or ''))
+    if not picked:
         return '', []
+    picked.sort(key=lambda t: t[0])  # canonical: alphabetical by facet name
+    frags = [f"{fn}~{vid}" for fn, vid, _ in picked]
+    names = [nm for _, _, nm in picked]
     fragment = '~~'.join(([existing_facet] if existing_facet else []) + frags)
     return fragment, names
 
