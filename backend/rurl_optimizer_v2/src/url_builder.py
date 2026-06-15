@@ -18,10 +18,21 @@ from src.matcher import MatchResult
 # across many subcategories, so FacetFilter often parks its representative
 # row at a shallow parent rather than the leaf the primary facet landed in.
 # These axes are safe to re-point at the primary's leaf *only after* verifying
-# the value genuinely exists there. Type/colour/etc. facets are deliberately
-# excluded — they tend to be subcategory-specific and a depth mismatch usually
-# means a real "different subcat" intent, not a dedup artefact.
+# the value genuinely exists there.
 _CROSS_DEPTH_RESCUE_AXES = {'merk', 'winkel'}
+
+# V37: product ATTRIBUTE axes (colour/material/shape) get the same rescue.
+# They describe the SAME product a type facet already pinned and routinely
+# co-occur with it in one leaf, so a depth mismatch is a FacetFilter dedup
+# artefact, not a "different subcat" intent — e.g. "houten wandpaneel" matches
+# t_wanddeco~Wandpanelen (leaf Wanddecoratie) AND materiaal~Hout, whose global
+# row resolved to a different subcat; both exist in the leaf, so the URL should
+# be materiaal~Hout~~t_wanddeco~Wandpanelen, not t_wanddeco alone. Matched by
+# prefix (category-qualified slugs: materiaal_sieraad, kleur_glazen_zb, …) and
+# still gated on facet_url_exists. Size (maat_*) is excluded — per-size pages
+# churn in/out of stock. Product-TYPE axes (type_/t_) stay excluded too: two
+# distinct types in one page usually IS a real different-subcat split.
+_CROSS_DEPTH_RESCUE_ATTR_PREFIXES = ('kleur', 'materiaal', 'vorm')
 
 
 @dataclass
@@ -598,13 +609,17 @@ class UrlBuilder:
                         same_target_matches.append(other)
                     elif (
                         self.facet_url_exists is not None
-                        and other.facet_value.facet_name.lower()
-                        in _CROSS_DEPTH_RESCUE_AXES
+                        and (other.facet_value.facet_name.lower()
+                             in _CROSS_DEPTH_RESCUE_AXES
+                             or other.facet_value.facet_name.lower()
+                             .startswith(_CROSS_DEPTH_RESCUE_ATTR_PREFIXES))
                     ):
                         # V32: the brand/shop facet's cached row resolved to a
                         # shallower subcat than the primary (e.g. merk "Nike"
                         # parked at /mode/mode_432360 while fanshop "Nederlands
                         # Elftal" landed at the leaf /mode/mode_432360_432464).
+                        # V37 extends this to colour/material/shape attributes
+                        # (e.g. materiaal~Hout for "houten wandpaneel").
                         # If the value genuinely exists under the primary's
                         # leaf, append it there instead of dropping it. The
                         # url_fragment (merk~84748) is depth-independent, so we
