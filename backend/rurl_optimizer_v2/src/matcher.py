@@ -357,6 +357,25 @@ class KeywordMatcher:
                 and t not in STOPWORDS
                 and t not in SHOP_NAMES]
 
+    def _tokens_equal_strict(self, t1: str, t2: str) -> bool:
+        """Like _tokens_equal_modulo_morphology but WITHOUT the loose fuzz.ratio
+        branch — exact, Dutch-suffix, or double-vowel equality only. Used by the
+        brand guard: a genuine brand mention matches a brand token exactly
+        ("philips"→Philips), whereas "papier"→"Paper" links only via fuzz, which
+        is the cross-language false-brand signal we want to distrust."""
+        if not t1 or not t2:
+            return False
+        if t1 == t2:
+            return True
+        for suffix in ("en", "es", "er", "s"):
+            if len(t1) > len(suffix) + 2 and t1.endswith(suffix) and t1[:-len(suffix)] == t2:
+                return True
+            if len(t2) > len(suffix) + 2 and t2.endswith(suffix) and t2[:-len(suffix)] == t1:
+                return True
+        if self._collapse_double_vowels(t1) == self._collapse_double_vowels(t2):
+            return True
+        return False
+
     def _tokens_equal_modulo_morphology(self, t1: str, t2: str) -> bool:
         """V29: two tokens count as 'the same' under the coverage scorer
         if they're exactly equal, equal after stripping a common Dutch
@@ -460,6 +479,48 @@ class KeywordMatcher:
             score=score,
             matched_text=fv.facet_value_name,
         )
+
+    def brand_match_is_spurious(self, keyword: str, brand_value: str,
+                                category_name: str = '') -> bool:
+        """V39: True when a lone merk (brand) match was NOT really named by the
+        query — the brand value is connected to the keyword only through a fuzzy
+        (cross-language) hit and/or a word that just describes the product
+        category. The classic false positive is "wc papier" → merk 'Paper
+        Dreams' / 'Architects Paper': "papier" only fuzz-matches "Paper", and
+        "papier" is the product, not a brand.
+
+        Kept when the query names the brand the way real brand queries do — a
+        token that matches a brand token STRICTLY (exact / Dutch-suffix /
+        double-vowel, not fuzz) and isn't itself a category word: "philips" →
+        Philips, "ferrero" → Ferrero Rocher, "swiffer" → Swiffer.
+        """
+        if not brand_value or not keyword:
+            return False
+        bt = self._coverage_tokens(brand_value)
+        kt = self._coverage_tokens(keyword)
+        ct = self._coverage_tokens(category_name) if category_name else []
+        if not bt or not kt:
+            return False
+        # Was the brand matched at all (under the loose scorer)?
+        covered = any(self._tokens_equal_modulo_morphology(k, b)
+                      for k in kt for b in bt)
+        if not covered:
+            return False
+
+        def _is_category_word(tok: str) -> bool:
+            return any(self._tokens_equal_modulo_morphology(tok, c)
+                       or (len(tok) >= 4 and tok in c)
+                       or (len(c) >= 4 and c in tok)
+                       for c in ct)
+
+        # A genuine, distinctive brand mention: a query token that STRICTLY
+        # names a brand token and isn't a product/category word. If one exists,
+        # the brand was really named → not spurious.
+        for k in kt:
+            if (any(self._tokens_equal_strict(k, b) for b in bt)
+                    and not _is_category_word(k)):
+                return False
+        return True
 
     def match_with_partial(self, keyword: str, facet_values: list[FacetValue], exclude_winkel: bool = False) -> MatchResult:
         """

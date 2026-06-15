@@ -103,6 +103,11 @@ _worker_data = None
 # Worker processes pick it up via init_worker_v2 initargs.
 RESCUE_INCLUDE_SIZE = True
 
+# V39: hard-reject a lone merk match whose brand name is only connected to the
+# query via a product/category word (see brand_match_via_category_word). Module
+# flag so an A/B can toggle it off to compare against the prior behaviour.
+V39_BRAND_GUARD = True
+
 
 def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=True,
                    rescue_include_size=True):
@@ -2013,10 +2018,25 @@ def process_url_v2(args):
         facet_value_names=r.facet_value_names,
     ) if r.success else 0
 
+    # V39: spurious-brand guard. A single merk facet whose brand name is only
+    # connected to the query through a product/category word (e.g. "wc papier"
+    # → merk 'Paper Dreams', "papier" ≈ "Paper", but papier IS the product)
+    # is a false brand match — hard-reject so it doesn't ship a generic query
+    # to a single-brand page. Gated to a lone merk facet: when merk rides
+    # alongside a real type facet, the type carries the intent and the brand is
+    # fine to keep.
+    _brand_spurious = (
+        V39_BRAND_GUARD and r.success
+        and (r.facet_names or '').strip().lower() == 'merk'
+        and bool(r.facet_value_names)
+        and matcher.brand_match_is_spurious(
+            r.keyword, r.facet_value_names, redirect_cat_name)
+    )
+
     # V21: Calculate reliability score WITH match_coverage
     reliability_score = 0
     reliability_tier = 'D'
-    if r.success:
+    if r.success and not _brand_spurious:
         reliability_score = calculate_reliability_score(
             match_score=r.match_score,
             facet_count=r.facet_count,
@@ -2036,10 +2056,14 @@ def process_url_v2(args):
     # also runs V27, so this correctly surfaces long-unmatched rejections for
     # subcategory matches too; the gate still suppresses the reason on rows
     # whose score was never reduced.
-    reject_reason = (
-        _v27_reject_reason(matched_keywords, unmatched_keywords, match_type=r.match_type) or ''
-        if reliability_score == 0 else ''
-    )
+    if _brand_spurious:
+        reject_reason = (f"V39: brand '{r.facet_value_names}' matched only via a "
+                         f"product/category word, not a real brand mention")
+    else:
+        reject_reason = (
+            _v27_reject_reason(matched_keywords, unmatched_keywords, match_type=r.match_type) or ''
+            if reliability_score == 0 else ''
+        )
 
     # V28: cache-only search-derived rescue + disagree-warning.
     # The prefetch step ran sequentially before this pool spawned and
@@ -2074,6 +2098,7 @@ def process_url_v2(args):
         _skip_rescue_override = False
         if (
             r.success
+            and not _brand_spurious  # V39: never restore a rejected spurious-brand match
             and getattr(r, 'facet_count', 0) >= 1
             and r.subcategory_id
             and r.subcategory_id == parsed.subcategory_id
