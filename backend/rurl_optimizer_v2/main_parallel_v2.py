@@ -1181,8 +1181,8 @@ def process_url_v2(args):
             'facet_count': 1 if _ef27 else 0,
             'match_score': 0,
             'match_type': 'stopwords_only_clean_category',
-            'reliability_score': 80,  # category page is a safe landing — no facet so no bad-facet risk
-            'reliability_tier': 'B',
+            'reliability_score': 60,  # C tier: stopwords-only query has nothing to match — clean-category redirect is safe but always needs a review
+            'reliability_tier': 'C',
             'h1_similarity': 0,
             'reject_reason': '',
             'matched_keywords': '',
