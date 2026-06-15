@@ -197,6 +197,76 @@
                     </div>
                 </div>
 
+                <!-- Keyword Redirects Section -->
+                <div class="card mb-4">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background-color: #b5651d;">
+                        <h5 class="mb-0">Keyword Redirects</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">Keyword &times; category traffic estimates for one shop, enriched with the shop's winkel-facet category URL and live product count. Only categories where the shop has products are kept. The export has two sheets: <strong>category_volumes</strong> (data + url + results) and <strong>redirects</strong> (old &rarr; new).</p>
+                        <div class="row align-items-end">
+                            <div class="col-md-4">
+                                <label for="krKeywordInput" class="form-label">Keyword</label>
+                                <input type="text" class="form-control" id="krKeywordInput" placeholder="e.g. hema">
+                            </div>
+                            <div class="col-md-4">
+                                <label for="krShopInput" class="form-label">Shop (name or id)</label>
+                                <input type="text" class="form-control" id="krShopInput" placeholder="e.g. Hema.nl or 652149">
+                            </div>
+                            <div class="col-md-2">
+                                <button class="btn text-white w-100" style="background-color: #b5651d;" onclick="getKeywordRedirects()">
+                                    <span id="krBtnText">Generate</span>
+                                    <span id="krSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                                </button>
+                            </div>
+                            <div class="col-md-2">
+                                <button class="btn btn-outline-secondary w-100" onclick="downloadKeywordRedirects()" id="krDownloadBtn" disabled>Download Excel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Keyword Redirects Progress -->
+                <div class="card mb-4 d-none" id="krProgressCard">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="krProgressText">Processing...</span>
+                            <span id="krProgressPercent"></span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" id="krProgressBar" role="progressbar" style="width: 0%; background-color: #b5651d;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Keyword Redirects Results -->
+                <div class="card mb-4 d-none" id="krResultsCard">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background-color: #198754;">
+                        <h5 class="mb-0">Keyword Redirect Results</h5>
+                        <span class="badge bg-light text-dark" id="krShopBadge"></span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="results-table">
+                            <table class="table table-striped table-hover mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Deepest Category</th>
+                                        <th class="text-end">Search Volume</th>
+                                        <th class="text-end">Products</th>
+                                        <th>URL</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="krResultsBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card-body pt-2 pb-2">
+                        <small class="text-muted" id="krStatsText"></small>
+                    </div>
+                </div>
+
                 <!-- Progress Section -->
                 <div class="card mb-4 d-none" id="progressCard">
                     <div class="card-body">
@@ -385,6 +455,109 @@
                 a.href = url;
                 const keyword = document.getElementById('catKeywordInput').value.trim() || 'category';
                 a.download = `category_volumes_${keyword}_${new Date().toISOString().slice(0,10)}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Download failed: ' + error.message);
+            }
+        }
+
+        // ====== Keyword Redirects ======
+
+        let krResultsData = null;
+
+        async function getKeywordRedirects() {
+            const keyword = document.getElementById('krKeywordInput').value.trim();
+            const shop = document.getElementById('krShopInput').value.trim();
+            if (!keyword) { alert('Please enter a keyword'); return; }
+            if (!shop) { alert('Please enter a shop name or id'); return; }
+
+            const btnText = document.getElementById('krBtnText');
+            const spinner = document.getElementById('krSpinner');
+            btnText.textContent = 'Processing...';
+            spinner.classList.remove('d-none');
+            document.getElementById('krDownloadBtn').disabled = true;
+
+            document.getElementById('krProgressCard').classList.remove('d-none');
+            document.getElementById('krProgressBar').style.width = '50%';
+            document.getElementById('krProgressText').textContent = 'Querying Google Ads, taxonomy & shop-stats (this can take a minute)...';
+            document.getElementById('krProgressPercent').textContent = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/keyword-redirects`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keyword, shop })
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Request failed');
+                }
+                const data = await response.json();
+                krResultsData = data;
+
+                document.getElementById('krProgressBar').style.width = '100%';
+                document.getElementById('krProgressText').textContent = 'Complete!';
+                document.getElementById('krProgressPercent').textContent = '100%';
+
+                const shopInfo = data.shop || {};
+                document.getElementById('krShopBadge').textContent =
+                    `${shopInfo.shop_name || '?'} · ${shopInfo.shop_id || '?'}`;
+
+                const tbody = document.getElementById('krResultsBody');
+                tbody.innerHTML = '';
+                (data.rows || []).slice(0, 500).forEach((r, i) => {
+                    const volumeClass = r.search_volume_deepest_cat >= 1000 ? 'volume-high' :
+                                        r.search_volume_deepest_cat >= 100 ? 'volume-medium' :
+                                        r.search_volume_deepest_cat > 0 ? 'volume-low' : 'volume-zero';
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td>${escapeHtml(r.deepest_cat)}</td>
+                        <td class="text-end ${volumeClass}">${(r.search_volume_deepest_cat || 0).toLocaleString()}</td>
+                        <td class="text-end">${(r.results || 0).toLocaleString()}</td>
+                        <td><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                const stats = data.stats || {};
+                let note = `${stats.categories_with_products || 0} categories with products | ${stats.total_redirects || 0} redirects`;
+                if ((data.rows || []).length > 500) note += ` | showing first 500 of ${data.rows.length} rows (full set in download)`;
+                document.getElementById('krStatsText').textContent = note;
+
+                document.getElementById('krResultsCard').classList.remove('d-none');
+                document.getElementById('krDownloadBtn').disabled = (data.rows || []).length === 0;
+
+            } catch (error) {
+                alert('Error: ' + error.message);
+                document.getElementById('krProgressCard').classList.add('d-none');
+            }
+
+            btnText.textContent = 'Generate';
+            spinner.classList.add('d-none');
+        }
+
+        async function downloadKeywordRedirects() {
+            if (!krResultsData || !krResultsData.rows) return;
+            try {
+                const response = await fetch(`${API_BASE}/api/keyword-planner/keyword-redirects/download`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rows: krResultsData.rows,
+                        redirects: krResultsData.redirects,
+                        shop_name: (krResultsData.shop || {}).shop_name || 'shop'
+                    })
+                });
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const shopName = ((krResultsData.shop || {}).shop_name || 'shop').replace(/[^A-Za-z0-9._-]+/g, '_');
+                a.download = `keyword_redirects_${shopName}_${new Date().toISOString().slice(0,10)}.xlsx`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);

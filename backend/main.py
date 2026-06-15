@@ -62,6 +62,7 @@ from backend.dm_review_router import router as dm_review_router
 from backend.seo_rulings_router import router as seo_rulings_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
+from backend.keyword_redirect_service import resolve_shop, enrich_redirects
 from backend.content_publisher import (
     get_total_content_count,
     get_content_batch,
@@ -4131,6 +4132,87 @@ async def keyword_planner_category_volumes_download(request: dict):
             content=output.getvalue(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f"attachment; filename=category_volumes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Keyword Redirects API (Category Keyword Volumes + shop winkel-facet URLs)
+# ============================================================================
+
+@app.post("/api/keyword-planner/keyword-redirects")
+async def keyword_planner_keyword_redirects(request: dict):
+    """
+    Combine a keyword with all category names (same as category-volumes), then
+    enrich each category with the shop's winkel-facet URL + live product count,
+    and build a redirect mapping (old /r/ search URL -> winkel-facet URL).
+
+    Body: {"keyword": "...", "shop": "Hema.nl" | "652149"}
+    Only categories where the shop has products (results > 0) are returned.
+    """
+    keyword = request.get("keyword", "").strip()
+    shop = str(request.get("shop", "")).strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="No keyword provided")
+    if not shop:
+        raise HTTPException(status_code=400, detail="No shop provided")
+
+    try:
+        loop = asyncio.get_event_loop()
+        shop_info = await loop.run_in_executor(None, resolve_shop, shop)
+        if not shop_info.get("shop_id"):
+            raise HTTPException(status_code=404, detail=f"No shop found matching '{shop}'")
+
+        cat = await loop.run_in_executor(
+            None, process_category_keywords, keyword, PRELOADED_CATEGORIES
+        )
+        enriched = await loop.run_in_executor(
+            None, enrich_redirects, cat["deepest_cat_results"], shop_info["shop_id"]
+        )
+        return {
+            "shop": shop_info,
+            "rows": enriched["rows"],
+            "redirects": enriched["redirects"],
+            "grand_total": cat.get("grand_total", 0),
+            "stats": {**cat.get("stats", {}), **enriched["stats"]},
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/keyword-planner/keyword-redirects/download")
+async def keyword_planner_keyword_redirects_download(request: dict):
+    """Download keyword-redirect results as a 2-sheet Excel:
+    'category_volumes' (data + url + results) and 'redirects' (old, new)."""
+    import pandas as pd
+
+    rows = request.get("rows", [])
+    redirects = request.get("redirects", [])
+    shop_name = request.get("shop_name") or "shop"
+    if not rows and not redirects:
+        raise HTTPException(status_code=400, detail="No results provided")
+
+    try:
+        cols = ["maincat", "maincat_id", "deepest_cat", "cat_id", "original_keyword",
+                "final_keyword", "search_volume_deepest_cat", "search_volume_maincat",
+                "url", "results"]
+        df = pd.DataFrame(rows, columns=cols)
+        rdf = pd.DataFrame(redirects, columns=["old", "new"])
+
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="category_volumes")
+            rdf.to_excel(writer, index=False, sheet_name="redirects")
+        output.seek(0)
+
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(shop_name)) or "shop"
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=keyword_redirects_{safe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
