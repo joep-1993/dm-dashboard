@@ -39,6 +39,14 @@ from src.validation_rules import (
 # "Dildo's met zuignap" → "met" before "zuignap" means zuignap is a feature, not the product
 PREPOSITION_QUALIFIERS = {'met', 'voor', 'van', 'zonder', 'op', 'bij', 'als', 'om', 'uit', 'aan'}
 
+# V40: weight/range qualifiers. These flank a numeric measure ("max 30 kg",
+# "vanaf 5 liter", "min. 2 jaar") and carry no product/brand intent. They must
+# never anchor a strict (merk/winkel) facet match: the bare token "max" exactly
+# equals the brand token in "Max & Molly" / "Lex & Max", which sent the weight
+# query "max 30 kg" to a single-brand leash page. Treated as non-distinctive so
+# a lone weight-qualifier match can't keep a brand/shop redirect alive.
+WEIGHT_RANGE_QUALIFIERS = {'max', 'min', 'maximaal', 'minimaal', 'vanaf', 'tot'}
+
 
 def _strip_plural_suffix(s: str) -> str:
     """Strip a single trailing Dutch plural suffix ('en' or 's'), suffix-aware.
@@ -453,6 +461,16 @@ class KeywordMatcher:
             if matched_kw == 0:
                 continue
 
+            # V40: a strict (merk/winkel) facet must not be anchored solely on a
+            # weight/range qualifier. "max 30 kg" coverage-matches "Max & Molly"
+            # on the lone token "max"; that's a brand false positive (the query
+            # is a weight class, not a brand). Skip when every matched token is a
+            # qualifier so the cascade falls back to the category page.
+            if (fv.facet_name.lower() in STRICT_FACETS
+                    and all(kw_tokens[i] in WEIGHT_RANGE_QUALIFIERS
+                            for i in matched_positions)):
+                continue
+
             coverage = matched_kw / len(kw_tokens)
             specificity = matched_kw / len(fv_tokens)
             if matched_kw == 1:
@@ -516,8 +534,12 @@ class KeywordMatcher:
         # A genuine, distinctive brand mention: a query token that STRICTLY
         # names a brand token and isn't a product/category word. If one exists,
         # the brand was really named → not spurious.
+        # V40: a weight/range qualifier ("max", "min") is never a distinctive
+        # brand mention even when it exactly equals a brand token ("max 30 kg"
+        # → "Max & Molly") — exclude it so it can't rescue the brand here.
         for k in kt:
             if (any(self._tokens_equal_strict(k, b) for b in bt)
+                    and k not in WEIGHT_RANGE_QUALIFIERS
                     and not _is_category_word(k)):
                 return False
         return True
@@ -818,6 +840,7 @@ class KeywordMatcher:
             if (len(word) >= 3 and
                 word.lower() not in matched_words and
                 word.lower() not in STOPWORDS and
+                word.lower() not in WEIGHT_RANGE_QUALIFIERS and  # V40: "max"/"min" don't name a shop
                 word.lower() not in words_used_in_pairs and
                 word.lower() not in words_in_category):
                 result = self.match_with_partial(word, winkel_facets, exclude_winkel=False)
@@ -838,6 +861,7 @@ class KeywordMatcher:
             if (len(word) >= 3 and
                 word.lower() not in matched_words and
                 word.lower() not in STOPWORDS and
+                word.lower() not in WEIGHT_RANGE_QUALIFIERS and  # V40: lone "max"/"min" ≠ brand "Max & Molly"
                 word.lower() not in words_used_in_pairs and
                 word.lower() not in words_in_category):
                 result = self.match_with_partial(word, merk_facets, exclude_winkel=False)

@@ -1856,6 +1856,19 @@ def process_url_v2(args):
                             _exr, parsed, _sm, facet_filter, matcher)
                         result = _exr
 
+    # V40: maincat-bound facet preservation. When the source R-URL already
+    # carries an appended /c/ facet (parsed.existing_facet), that facet value is
+    # bound to its main category — the same facet/value won't exist under a
+    # different maincat, so a cross-maincat redirect would silently drop it and
+    # land on a page the facet can't filter. Refuse any cross-maincat result in
+    # that case and fall back to the same-maincat category page (build_category_only
+    # rebuilds the original subcat WITH the existing facet intact).
+    if result and getattr(result, 'success', False) and parsed.existing_facet and parsed.main_category:
+        _rparts = _facet_url_parts(getattr(result, 'redirect_url', '') or '')
+        _rmain = (_rparts or {}).get('main_category', '')
+        if _rmain and _rmain != parsed.main_category:
+            result = None  # drop cross-maincat jump; preserve the facet below
+
     if not result:
         result = builder.build_category_only(parsed)
 
@@ -1887,8 +1900,13 @@ def process_url_v2(args):
     shop_in_keyword = ', '.join(shops_in_keyword) if shops_in_keyword else ''
 
     # V23.2: Check if keyword contains dimensions
+    # V40: added weight units (kg/g/gram/kilo) and the "max/min/vanaf/tot N <unit>"
+    # range form so weight-class keywords like "max 30 kg" are recognised as
+    # dimensional (was False, which let "max" get treated as a brand token).
     DIMENSION_PATTERN = re.compile(
-        r'\d+\s*x\s*\d+|\d+\s*cm\b|\d+\s*mm\b|\d+\s*meter\b|\d+\s*m\b|\d+\s*persoons\b|\d+\s*liter\b',
+        r'\d+\s*x\s*\d+|\d+\s*cm\b|\d+\s*mm\b|\d+\s*meter\b|\d+\s*m\b|\d+\s*persoons\b'
+        r'|\d+\s*liter\b|\d+\s*(?:kg|gram|kilo|g)\b'
+        r'|\b(?:max|min|maximaal|minimaal|vanaf|tot)\.?\s*\d+',
         re.IGNORECASE
     )
     has_dims = bool(DIMENSION_PATTERN.search(r.keyword)) if r.keyword else False
