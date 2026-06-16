@@ -76,7 +76,7 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
         $null = Invoke-WebRequest -Uri $loginUrl -Method POST -Body $body `
             -ContentType "application/x-www-form-urlencoded" `
             -WebSession $session -MaximumRedirection 0 -TimeoutSec 30 `
-            -ErrorAction SilentlyContinue
+            -UseBasicParsing -ErrorAction SilentlyContinue
         $loginOk = $true
         break
     } catch {
