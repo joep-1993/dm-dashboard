@@ -48,22 +48,34 @@ def _get_redshift_pool():
     return _redshift_pool
 
 def get_db_connection():
-    """Get PostgreSQL connection from pool, with stale connection recovery"""
+    """Get PostgreSQL connection from pool, with stale connection recovery.
+
+    When the network drops or the DB restarts, EVERY idle connection in the
+    pool can go stale at once (classic `SSL SYSCALL error: EOF detected`). The
+    old code tested only the first connection and returned the *replacement*
+    untested — so a fully-poisoned pool still surfaced the dead handle on the
+    first real query. Instead, test each connection with `SELECT 1` and discard
+    dead ones (putconn close=True permanently drops them), looping until we get
+    a live connection. Once the pool's stale handles are drained, getconn() mints
+    a fresh one. Budget = maxconn + 1 guarantees success while the DB is reachable.
+    """
     p = _get_pg_pool()
-    conn = p.getconn()
-    # Test if the connection is still alive
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.close()
-    except Exception:
-        # Connection is dead, close it and get a fresh one
-        try:
-            p.putconn(conn, close=True)
-        except Exception:
-            pass
+    attempts = getattr(p, "maxconn", 60) + 1
+    last_exc = None
+    for _ in range(attempts):
         conn = p.getconn()
-    return conn
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            return conn
+        except Exception as exc:
+            last_exc = exc
+            try:
+                p.putconn(conn, close=True)
+            except Exception:
+                pass
+    raise last_exc if last_exc else RuntimeError("no live PostgreSQL connection available")
 
 def return_db_connection(conn):
     """Return PostgreSQL connection to pool"""
@@ -72,24 +84,29 @@ def return_db_connection(conn):
         p.putconn(conn)
 
 def get_redshift_connection():
-    """Get Redshift connection from pool, with stale connection recovery"""
+    """Get Redshift connection from pool, with stale connection recovery.
+
+    Same poisoned-pool guard as get_db_connection(): loop testing+discarding
+    dead connections rather than returning an untested replacement.
+    """
     p = _get_redshift_pool()
-    conn = p.getconn()
-    # Test if the connection is still alive
-    try:
-        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.close()
-    except Exception:
-        # Connection is dead, close it and get a fresh one
-        try:
-            p.putconn(conn, close=True)
-        except Exception:
-            pass
+    attempts = getattr(p, "maxconn", 10) + 1
+    last_exc = None
+    for _ in range(attempts):
         conn = p.getconn()
-        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
-    return conn
+        try:
+            conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            return conn
+        except Exception as exc:
+            last_exc = exc
+            try:
+                p.putconn(conn, close=True)
+            except Exception:
+                pass
+    raise last_exc if last_exc else RuntimeError("no live Redshift connection available")
 
 def return_redshift_connection(conn):
     """Return Redshift connection to pool"""
