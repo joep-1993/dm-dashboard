@@ -2,6 +2,9 @@
 # Scheduled daily at 07:00 via Windows Task Scheduler
 
 $ErrorActionPreference = "Continue"
+# Prevent Invoke-WebRequest from hanging in non-interactive sessions (Task Scheduler)
+# by disabling the progress bar that can't render without a console.
+$ProgressPreference = "SilentlyContinue"
 $logDir  = "C:\Users\l.davidowski\dm-dashboard\logs"
 $logFile = Join-Path $logDir ("seo_rulings_{0}.log" -f (Get-Date -Format "yyyy-MM-dd"))
 $baseUrl = "https://win-htz-006.colo.beslist.net:3003"
@@ -22,6 +25,7 @@ public class TrustAll : ICertificatePolicy {
 "@
 }
 [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAll
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
 function Log($msg) {
