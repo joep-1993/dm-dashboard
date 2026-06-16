@@ -676,6 +676,55 @@ def _facet_url_parts(facet_url: str):
             'subcategory_id': subcat_id}
 
 
+def _existing_facet_in_url(redirect_url: str, existing_facet: str) -> bool:
+    """V41: True when every facet axis of the source URL's existing /c/ facet is
+    still present in `redirect_url`. existing_facet may be multi-axis
+    ('a~1~~b~2'); each name~value piece must survive verbatim. Empty
+    existing_facet trivially passes."""
+    if not existing_facet:
+        return True
+    if not redirect_url or '/c/' not in redirect_url:
+        return False
+    frag = redirect_url.split('/c/', 1)[1].rstrip('/')
+    have = {p for p in frag.split('~~') if '~' in p}
+    want = [p for p in existing_facet.split('~~') if '~' in p]
+    return all(w in have for w in want)
+
+
+def _canonicalize_facet_order(redirect_url: str) -> str:
+    """V41 (issue #2): emit multi-facet URLs in canonical alphabetical order by
+    facet name. Several append paths prepend the source URL's existing_facet
+    instead of merging it into the alphabetical sort (e.g.
+    't_reismand~…~~dier_dierenbenodigdheden~…'), producing a non-canonical
+    order. Re-sort the ~~ pieces by the facet name (text before first '~')."""
+    if not redirect_url or '/c/' not in redirect_url:
+        return redirect_url
+    base, frag = redirect_url.split('/c/', 1)
+    trailing = '/' if frag.endswith('/') else ''
+    frag = frag.rstrip('/')
+    pieces = [p for p in frag.split('~~') if p]
+    if len(pieces) <= 1:
+        return redirect_url
+    ordered = sorted(pieces, key=lambda p: p.split('~', 1)[0].lower())
+    if ordered == pieces:
+        return redirect_url
+    return f"{base}/c/{'~~'.join(ordered)}{trailing}"
+
+
+def _spurious_brand_facet(pf_name, pf_value_name, keyword, dom_cat_name, matcher) -> bool:
+    """V41 (issue #1): mirror the V39 spurious-brand guard in the search-derived
+    append paths, which bypassed it. A merk/winkel facet whose brand name is
+    only connected to the query through a product/category word (e.g. "wc
+    papier" → merk 'Paper Dreams', "papier" ≈ "Paper") is a false brand match —
+    drop it and keep the bare search-derived subcategory (which is the correct
+    destination, e.g. Toiletpapier)."""
+    return (
+        (pf_name or '').strip().lower() in ('merk', 'winkel')
+        and bool(pf_value_name)
+        and matcher.brand_match_is_spurious(keyword, pf_value_name, dom_cat_name or '')
+    )
+
+
 def _facet_fragment_superset(child_fragment, parent_fragment):
     """True iff every facet axis (name~id) in parent_fragment is also present
     in child_fragment AND child carries at least one extra. Used by the
@@ -2182,7 +2231,19 @@ def process_url_v2(args):
                 existing_names = {p.split('~', 1)[0]
                                   for p in (parsed.existing_facet or '').split('~~')
                                   if '~' in p}
-                if pf_name not in existing_names:
+                # V41 (issue #1): the V39 spurious-brand guard never saw this
+                # search-derived append. Suppress a merk/winkel facet that the
+                # query only named through a product/category word and keep the
+                # bare (correct) dom_cat redirect instead.
+                if _spurious_brand_facet(pf_name, pf_value_name, parsed.keyword,
+                                         derived.get('dom_cat_name', ''), matcher):
+                    final_match_type = 'search_derived_subcat'
+                    final_reason_extra = (
+                        f"; [V41] suppressed spurious brand facet {pf_name}~{pf_vid} "
+                        f"({pf_value_name!r}) — only a product/category word matched"
+                    )
+                    local_match_used = True
+                elif pf_name not in existing_names:
                     if parsed.existing_facet:
                         final_redirect_url = (
                             f"{base_redirect}/c/{parsed.existing_facet}~~{fragment}"
@@ -2220,7 +2281,17 @@ def process_url_v2(args):
                 existing_names = {p.split('~', 1)[0]
                                   for p in (parsed.existing_facet or '').split('~~')
                                   if '~' in p}
-                if pf_name not in existing_names:
+                # V41 (issue #1): same spurious-brand suppression as the local
+                # matcher branch — a coverage-dominant merk/winkel value the
+                # query never really named is dropped to the bare subcat.
+                if _spurious_brand_facet(pf_name, pf_value_name, parsed.keyword,
+                                         derived.get('dom_cat_name', ''), matcher):
+                    final_match_type = 'search_derived_subcat'
+                    final_reason_extra = (
+                        f"; [V41] suppressed spurious brand facet {pf_name}~{pf_vid} "
+                        f"({pf_value_name!r}) — only a product/category word matched"
+                    )
+                elif pf_name not in existing_names:
                     if parsed.existing_facet:
                         final_redirect_url = (
                             f"{base_redirect}/c/{parsed.existing_facet}~~{fragment}"
@@ -2678,6 +2749,62 @@ def process_url_v2(args):
             out_facet_names = _xfb['facet_names']
             out_facet_value_names = _xfb['facet_value_names']
             out_facet_count = _xfb['facet_count']
+
+    # V41 (issue #4 + tightened maincat rule + new facet-preservation rule).
+    # When the source R-URL carried an appended /c/ facet, that facet value is
+    # an explicit user filter bound to its main category. The final suggestion
+    # MUST therefore (a) stay in the same main category and (b) still carry that
+    # facet value. The earlier V40 guard only covered cross-maincat jumps on the
+    # cascade `result`, but late overrides (facet_probe_fallback, search-derived
+    # rescue, Fix D/E) rewrite final_redirect_url afterwards and can drop the
+    # facet even within the same maincat — e.g. "max 30 kg" + t_reismand jumped
+    # to type_dierenriemen 'Halsbanden' and lost t_reismand. Any final URL that
+    # jumps maincat OR drops the existing facet is replaced by the origin
+    # category page WITH the facet intact (build_category_only), which is the
+    # only destination guaranteed to be valid for that facet value.
+    if final_redirect_url and parsed.existing_facet and parsed.main_category:
+        _rp = _facet_url_parts(final_redirect_url) or {}
+        _rmain = _rp.get('main_category', '')
+        _maincat_jump = bool(_rmain) and _rmain != parsed.main_category
+        _facet_dropped = not _existing_facet_in_url(final_redirect_url, parsed.existing_facet)
+        if _maincat_jump or _facet_dropped:
+            _co = builder.build_category_only(parsed)
+            _why = []
+            if _maincat_jump:
+                _why.append(f"jumped maincat to '{_rmain}'")
+            if _facet_dropped:
+                _why.append(f"dropped existing facet '{parsed.existing_facet}'")
+            final_redirect_url = _co.redirect_url
+            final_redirect_cat_name = original_cat_name
+            final_match_type = 'category_fallback'
+            final_score = _co.match_score
+            final_tier = get_reliability_tier(final_score)
+            final_reason = (
+                f"[V41] suggestion {' and '.join(_why)} while the source URL pins "
+                f"facet '{parsed.existing_facet}'; reverted to the origin category "
+                f"page with the facet intact"
+            )
+            reject_reason = ''
+            flag_for_review = ''
+            is_cross_category = False
+            out_facet_fragment = _co.facet_fragment
+            out_facet_names = ''
+            out_facet_value_names = ''
+            out_facet_count = _co.facet_count
+
+    # V41 (issue #2): normalise any multi-facet URL to canonical alphabetical
+    # order. Several append paths prepend the existing_facet rather than merging
+    # it into the alphabetical sort, so the emitted order could be non-canonical
+    # (e.g. t_reismand~…~~dier_dierenbenodigdheden~… instead of dier_…~~t_…).
+    if final_redirect_url:
+        _canon = _canonicalize_facet_order(final_redirect_url)
+        if _canon != final_redirect_url:
+            final_redirect_url = _canon
+            _cfrag = (final_redirect_url.split('/c/', 1)[1].rstrip('/')
+                      if '/c/' in final_redirect_url else '')
+            out_facet_fragment = _cfrag
+            _caxes = [p for p in _cfrag.split('~~') if '~' in p]
+            out_facet_names = ', '.join(p.split('~', 1)[0] for p in _caxes)
 
     return {
         'original_url': r.original_url,

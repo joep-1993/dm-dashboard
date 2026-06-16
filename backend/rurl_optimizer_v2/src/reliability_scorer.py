@@ -167,6 +167,26 @@ def _v27_reject_reason(
     return None
 
 
+def _keyword_bridges_value(keyword: Optional[str], value_names: Optional[str]) -> bool:
+    """Issue #3: True when at least one content token of the keyword lexically
+    overlaps the facet value name(s) (exact, or a >=4-char stem appearing in
+    either direction). Deliberately loose — it only gates a hard-floor, so a
+    false 'bridge' just leaves the normal score in place. "vogelgeluiden" vs
+    "Keuken" has no bridge; "kunststof tuinstoel" vs "Kunststof" does."""
+    kt = [w for w in re.findall(r'[a-z0-9]+', (keyword or '').lower()) if len(w) >= 3]
+    vt = re.findall(r'[a-z0-9]+', (value_names or '').lower())
+    if not kt or not vt:
+        return False
+    for k in kt:
+        ks = k.rstrip('s').rstrip('e')
+        for v in vt:
+            if k == v:
+                return True
+            if len(ks) >= 4 and (ks in v or (len(v) >= 4 and v.rstrip('s').rstrip('e') in k)):
+                return True
+    return False
+
+
 def calculate_reliability_score(
     match_score: int,
     facet_count: int,
@@ -359,6 +379,17 @@ def calculate_reliability_score(
             base_score -= 10  # was -5 in V26
         else:
             base_score -= 20  # was -10 in V26
+
+    # Issue #3: a facet_probe_fallback promotes a facet purely on result-set
+    # coverage (match_score == coverage%). When NONE of the keyword's content
+    # tokens lexically bridges the promoted facet value, the facet doesn't
+    # represent the query — e.g. "vogelgeluiden" → ruimte_woonaccessoires
+    # "Keuken" (the destination subcat is vogel-related, but the FACET is not).
+    # Hard-floor to 0, the same outcome as a generic-only lexical match (borax →
+    # 'Poeder'). Synonym-bridged probes ride a different match_type
+    # (search_derived_subcat_with_probe_facet), so they are untouched.
+    if match_type == 'facet_probe_fallback' and not _keyword_bridges_value(keyword, facet_value_names):
+        return 0
 
     # V27: Hard-rejection rules — generic-only matches and long unmatched
     # tokens. Reasons are computed by _v27_reject_reason so the export
