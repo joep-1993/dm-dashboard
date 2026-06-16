@@ -157,6 +157,28 @@ def url_variants(path: str) -> list[str]:
     return out
 
 
+def normalize_country(raw: str) -> str:
+    """Map a free-form country field to a value the redirect API stores.
+
+    The API stores combined NL+BE as the literal string ``"nl, be"``, and the
+    country is part of its ``url_UNIQUE`` key: POSTing ``country="nl"`` toward a
+    target that an ``"nl, be"`` rule already points at fails with a duplicate-key
+    error (confirmed empirically 2026-06-16 — root cause of run #22's failures).
+    So inputs like ``NL+BE`` / ``nl,be`` / ``NL BE`` MUST resolve to ``"nl, be"``
+    rather than being collapsed to a single country. The old code only accepted
+    bare ``nl``/``be`` and silently defaulted everything else (including
+    ``NL+BE``) to ``nl``, which then collided with the ``"nl, be"`` canonicals.
+    """
+    toks = set(re.findall(r"\b(nl|be)\b", (raw or "").lower()))
+    if {"nl", "be"} <= toks:
+        return "nl, be"
+    if "be" in toks:
+        return "be"
+    if "nl" in toks:
+        return "nl"
+    return DEFAULT_COUNTRY
+
+
 def is_homepage(path: str) -> bool:
     # Accept either path or full URL — strip domain first so callers can't bypass
     # the safety block by passing 'https://www.beslist.nl'.
@@ -398,9 +420,7 @@ def preflight_rows(
     def _process_one(raw: dict) -> tuple[dict, dict]:
         old = strip_domain(str(raw.get("old", "")))
         new = strip_domain(str(raw.get("new", "")))
-        country = (str(raw.get("country") or "").strip() or DEFAULT_COUNTRY).lower()
-        if country not in {"nl", "be"}:
-            country = DEFAULT_COUNTRY
+        country = normalize_country(str(raw.get("country") or ""))
         try:
             sc = int(str(raw.get("statuscode") or DEFAULT_STATUS_CODE).strip())
         except (ValueError, TypeError):
