@@ -74,6 +74,15 @@ LIST_PAGE_SIZE = 50
 PREFETCH_THRESHOLD = 2000
 PREFETCH_PAGE_SIZE = 5000  # upstream API supports this; ~900KB per page
 PREFETCH_WORKERS = 8       # parallel page fetches; the API tolerates this fine
+# A failed page fetch used to be swallowed into an empty list, which is
+# indistinguishable from a genuine end-of-table short page — so a single
+# transient page error silently TRUNCATED the index and the run then
+# preflighted against a partial snapshot, letting thousands of conflicting
+# rows slip through as "submittable" (run #21: 8789 POST failures that
+# should have been flagged). Now each page is retried, and a page that
+# still can't be fetched aborts the whole prefetch loudly rather than
+# producing a misleading partial index.
+PREFETCH_PAGE_RETRIES = 3
 
 # Shared session for connection pooling. Re-uses the underlying TCP+TLS
 # connection across calls, saving ~50ms per call on the second+ request
@@ -633,13 +642,28 @@ def build_redirect_index(task: dict | None = None) -> tuple[dict, dict]:
     tourl_index: dict[str, list[dict]] = {}
 
     def _fetch_page(offset: int) -> list[dict]:
-        r = _HTTP.get(
-            f"{REDIRECT_API}/api/redirects",
-            params={"limit": PREFETCH_PAGE_SIZE, "offset": offset},
-            timeout=HTTP_TIMEOUT,
+        """Fetch one page, retrying transient failures. Raises after
+        PREFETCH_PAGE_RETRIES exhausted so the caller can abort rather than
+        treat a fetch failure as end-of-table. A successful fetch that
+        returns fewer than PREFETCH_PAGE_SIZE rows is a genuine short page."""
+        last_exc: Exception | None = None
+        for attempt in range(PREFETCH_PAGE_RETRIES):
+            try:
+                r = _HTTP.get(
+                    f"{REDIRECT_API}/api/redirects",
+                    params={"limit": PREFETCH_PAGE_SIZE, "offset": offset},
+                    timeout=HTTP_TIMEOUT,
+                )
+                r.raise_for_status()
+                return r.json().get("data", []) or []
+            except Exception as exc:  # noqa: BLE001 — retry any transient error
+                last_exc = exc
+                logger.warning("prefetch page offset=%s attempt %s/%s failed: %s",
+                               offset, attempt + 1, PREFETCH_PAGE_RETRIES, exc)
+        raise RuntimeError(
+            f"prefetch page at offset={offset} failed after "
+            f"{PREFETCH_PAGE_RETRIES} attempts: {last_exc}"
         )
-        r.raise_for_status()
-        return r.json().get("data", []) or []
 
     def _ingest(rows: list[dict]) -> None:
         for row in rows:
@@ -679,12 +703,15 @@ def build_redirect_index(task: dict | None = None) -> tuple[dict, dict]:
             window_results: dict[int, list[dict]] = {}
             for fut in as_completed(future_to_off):
                 off = future_to_off[fut]
-                try:
-                    window_results[off] = fut.result()
-                except Exception as exc:
-                    logger.warning("prefetch page offset=%s failed: %s", off, exc)
-                    window_results[off] = []
-        # Ingest in offset order for deterministic last-write-wins.
+                # _fetch_page already retried; if it still raised, the page
+                # is genuinely unreachable. Propagate so the whole prefetch
+                # aborts instead of building a truncated index (see
+                # PREFETCH_PAGE_RETRIES). start_preflight marks the task
+                # failed and the user can retry the upload.
+                window_results[off] = fut.result()
+        # Ingest in offset order for deterministic last-write-wins. Every
+        # page here was fetched successfully, so a short page (< PAGE_SIZE)
+        # reliably marks the end of the table.
         short_page_seen = False
         for off in window_offsets:
             data = window_results.get(off, [])

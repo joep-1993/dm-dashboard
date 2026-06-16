@@ -268,7 +268,7 @@
                                 <input type="text" id="runLabel" class="form-control" placeholder="e.g. migration-batch-2026-05">
                             </div>
                             <div class="col-md-6 d-flex justify-content-end align-items-end gap-3">
-                                <div class="form-check" title="When checked, rows whose old URL already has a redirect rule will have the existing rule deleted before the new rule is posted.">
+                                <div class="form-check" title="When checked, a row whose old URL already redirects somewhere else (A→B) has that rule deleted and replaced with the new one (A→C). Any other rules that point at the old URL are also repointed to the new target. Rows already redirecting to the correct target are left untouched.">
                                     <input class="form-check-input" type="checkbox" id="cbReplaceExisting">
                                     <label class="form-check-label small-muted" for="cbReplaceExisting">
                                         Replace existing redirects
@@ -506,8 +506,11 @@
         // (they'll be DELETE+POST'd at submit). Stats + filter outcomes
         // need to react to it without re-running preflight.
         function isReplaceableRow(row) {
+            // Must match the skip_reason the backend emits in
+            // redirect_tool_service.preflight_rows (_process_one). Any drift
+            // here silently disables the "Replace existing redirects" toggle.
             return row && row.existing_id
-                && row.skip_reason === 'old URL already has a redirect rule';
+                && row.skip_reason === 'source has existing rule';
         }
         function replaceExistingOn() {
             return !!document.getElementById('cbReplaceExisting')?.checked;
