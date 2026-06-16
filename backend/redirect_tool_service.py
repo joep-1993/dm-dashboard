@@ -456,6 +456,42 @@ def preflight_rows(
             item["skip_reason"] = "multi-value facet (no-index)"
             return item, stats
 
+        # Flatten the TARGET first — before classifying the source's existing
+        # rule. If `new` is itself a fromUrl, then writing `old -> new` would be
+        # a chain the API rejects (duplicate-key on `new`), so rewrite to new's
+        # terminal destination. This MUST run before the source-rule check
+        # below: a replaceable row (old already redirects elsewhere) is deleted
+        # then re-POSTed, and it has to be re-POSTed toward the *terminal*, not
+        # toward `new` — otherwise the chain POST fails again. Previously the
+        # flatten ran only after an early return in the source-rule branch, so
+        # replace rows skipped flattening entirely (run #23's residual 67).
+        # Also lets a row whose `old` already points at the terminal be
+        # correctly recognised as already-redirected instead of replaced.
+        #
+        # Follow the chain to the terminal (the data is multi-level
+        # canonicalization), capped with a cycle guard. Holds whether a hop is a
+        # 301 redirect or a 200 canonical; the canonical flag reflects the last
+        # hop so the preview can show "flattened through a canonical".
+        cursor_url = new
+        seen_hops = {equiv_key(new)}
+        last_hit = None
+        for _ in range(6):
+            h = _cached_fromurl(cursor_url, country)
+            if not h:
+                break
+            term = h.get("url") or ""
+            if not term or equiv_key(term) in seen_hops:
+                break  # dead-end or cycle
+            last_hit = h
+            cursor_url = term
+            seen_hops.add(equiv_key(term))
+        if last_hit is not None:
+            item["final_new"] = cursor_url
+            item["flatten_from"] = new
+            stats["flattened"] = 1
+            if last_hit.get("statusCode") == CANONICAL_STATUS_CODE:
+                item["flatten_via_canonical"] = True
+
         existing = _cached_fromurl(old, country)
         if existing:
             existing_url = existing.get("url") or ""
@@ -467,23 +503,6 @@ def preflight_rows(
                 item["skip_reason"] = "source has existing rule"
                 item["existing_id"] = existing.get("id")
             return item, stats
-
-        hit = _cached_fromurl(new, country)
-        if hit:
-            # `new` is itself a fromUrl, so it CANNOT also be a toUrl: the API
-            # forbids any URL from being both at once (verified empirically —
-            # zero fromUrl/toUrl overlap across the whole table). So we must
-            # flatten to the terminal target or the POST is rejected. This holds
-            # whether the hop is a 301 redirect OR a 200 canonical: in the
-            # canonical case `new` has been canonicalized away to `hit["url"]`,
-            # which is the true canonical and therefore also where the new rule
-            # should point. We tag the canonical case so the preview can show
-            # "flattened through a canonical" rather than a plain redirect hop.
-            item["final_new"] = hit["url"]
-            item["flatten_from"] = new
-            stats["flattened"] = 1
-            if hit.get("statusCode") == CANONICAL_STATUS_CODE:
-                item["flatten_via_canonical"] = True
 
         if equiv_key(item["final_new"]) == equiv_key(old):
             item["skip_reason"] = "self-redirect"
