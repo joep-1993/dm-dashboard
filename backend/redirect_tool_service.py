@@ -45,6 +45,16 @@ _PREVIEW_TASKS_MAX = 100
 
 REDIRECT_API = "https://redirect.api.beslist.nl"
 HTTP_TIMEOUT = 30
+# Per-row read lookups (resolve + incoming-list) run on the hot preflight path,
+# 24 at a time. A slow upstream that pins each call for the full 30s stalls the
+# whole batch (see the 2026-06-15 incident). These read calls are normally
+# <300ms, so cap them tighter and retry ONCE on timeout: a transient blip
+# recovers (preserving chain-flatten detection) while a genuinely dead upstream
+# frees the worker in ~2×LOOKUP_TIMEOUT instead of 30s. Writes (POST/DELETE) and
+# the bulk prefetch pages keep the full HTTP_TIMEOUT — they're not on the hot
+# 24-wide path and a slow write should not be abandoned mid-flight.
+LOOKUP_TIMEOUT = 8
+LOOKUP_RETRIES = 1
 LIST_PAGE_SIZE = 50
 
 # When a preflight batch exceeds this row count, switch from per-row HTTP
@@ -52,7 +62,16 @@ LIST_PAGE_SIZE = 50
 # table is ~820k rows / ~150MB JSON / ~200MB RAM as a Python dict — heavy,
 # but pays for itself once we'd otherwise be making >>3× as many HTTP calls.
 # Below the threshold, the existing per-row path is faster (no warmup cost).
-PREFETCH_THRESHOLD = 5000
+#
+# Lowered 5000 -> 2000 (2026-06-15): a 3320-row batch sat in the awkward
+# middle — too big to preflight cheaply per-row (one+ HTTP call each), too
+# small to trigger prefetch. When the upstream API went slow, thousands of
+# per-row calls hit the 30s read timeout and each one pinned a worker for the
+# full 30s, stalling the run for ~20min near the end. The bulk prefetch makes
+# only ~164 pipelined page calls regardless of batch size, so a slow upstream
+# can't amplify into thousands of timeouts. 2000 keeps tiny batches on the
+# faster no-warmup path while pulling the danger zone onto prefetch.
+PREFETCH_THRESHOLD = 2000
 PREFETCH_PAGE_SIZE = 5000  # upstream API supports this; ~900KB per page
 PREFETCH_WORKERS = 8       # parallel page fetches; the API tolerates this fine
 
@@ -154,14 +173,30 @@ def _has_multivalue_facet(url: str) -> bool:
 # Redirect API client
 # ---------------------------------------------------------------------------
 
+def _get_with_retry(url: str, params: dict) -> requests.Response:
+    """GET a read-only lookup with a tight timeout and one retry on read
+    timeout. Non-timeout errors (4xx/5xx/connection) propagate immediately —
+    only a slow-but-alive upstream is worth a second attempt."""
+    last_exc: Exception | None = None
+    for attempt in range(LOOKUP_RETRIES + 1):
+        try:
+            r = _HTTP.get(url, params=params, timeout=LOOKUP_TIMEOUT)
+            r.raise_for_status()
+            return r
+        except requests.exceptions.Timeout as exc:
+            last_exc = exc
+            if attempt < LOOKUP_RETRIES:
+                logger.debug("lookup timed out (attempt %s), retrying: %s",
+                             attempt + 1, url)
+    raise last_exc  # type: ignore[misc]
+
+
 def _resolve_one(url: str, country: str = DEFAULT_COUNTRY) -> dict | None:
     try:
-        r = _HTTP.get(
+        r = _get_with_retry(
             f"{REDIRECT_API}/api/redirect",
             params={"searchterm": url, "country": country},
-            timeout=HTTP_TIMEOUT,
         )
-        r.raise_for_status()
         data = r.json()
         if data.get("totalRecords", 0) > 0 and data.get("data"):
             return data["data"][0]
@@ -198,16 +233,14 @@ def check_url_incoming(path: str, max_pages: int = 2) -> list[dict]:
     matches: list[dict] = []
     for page in range(max_pages):
         try:
-            r = _HTTP.get(
+            r = _get_with_retry(
                 f"{REDIRECT_API}/api/redirects",
                 params={
                     "limit": LIST_PAGE_SIZE,
                     "offset": page * LIST_PAGE_SIZE,
                     "urlContains": search,
                 },
-                timeout=HTTP_TIMEOUT,
             )
-            r.raise_for_status()
             data = r.json().get("data", [])
         except Exception as exc:
             logger.warning("incoming list call failed: %s", exc)
