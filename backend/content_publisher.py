@@ -28,6 +28,51 @@ CONTENT_API_KEYS = {
 # Default environment
 DEFAULT_ENV = os.getenv("CONTENT_API_ENV", "dev")
 
+# Transient transport failures when posting to the website-configuration API.
+# The envoy/LB proxy in front of it (DNS resolves to several backends)
+# occasionally kills a TLS connection mid-upload on a large payload — this
+# surfaces as SSLEOFError "EOF occurred in violation of protocol", a bare
+# ConnectionError, or a half-sent ChunkedEncodingError. The publish is a
+# full-set upsert, so re-POSTing the identical payload is safe; retry with
+# exponential backoff (each attempt opens a fresh TLS session and can land on a
+# different healthy backend) before surfacing the failure to the user.
+_RETRYABLE_POST_EXC = (
+    requests.exceptions.SSLError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.Timeout,
+)
+
+
+def _post_with_retry(api_url, *, headers, timeout, data=None, json=None,
+                     max_attempts=4, on_retry=None):
+    """POST with exponential-backoff retry on transient transport failures.
+
+    Only transport-level errors are retried; an HTTP error *response* (4xx/5xx)
+    is returned as-is for the caller to handle. Raises the last exception when
+    every attempt fails. `on_retry(attempt, max_attempts, backoff_s, exc)` is
+    called before each sleep so callers can surface retry state in the UI.
+    """
+    last_exc = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return requests.post(api_url, headers=headers, data=data,
+                                 json=json, timeout=timeout)
+        except _RETRYABLE_POST_EXC as e:
+            last_exc = e
+            if attempt == max_attempts:
+                break
+            backoff = min(5 * 2 ** (attempt - 1), 60)  # 5s, 10s, 20s, cap 60s
+            print(f"[Publisher] POST attempt {attempt}/{max_attempts} failed "
+                  f"({type(e).__name__}: {e}); retrying in {backoff}s...")
+            if on_retry:
+                try:
+                    on_retry(attempt, max_attempts, backoff, e)
+                except Exception:
+                    pass
+            time.sleep(backoff)
+    raise last_exc
+
 # Background task storage
 _publish_tasks = {}
 _task_lock = threading.Lock()
@@ -454,12 +499,21 @@ def publish_all_content(environment: str = None, content_type: str = "all", task
 
     try:
         print(f"[Publisher] Sending request to {api_url}...")
-        _update_progress("uploading", total_items=total_count, payload_size_mb=round(payload_size / 1024 / 1024, 2))
-        response = requests.post(
+        _payload_mb = round(payload_size / 1024 / 1024, 2)
+        _update_progress("uploading", total_items=total_count, payload_size_mb=_payload_mb)
+
+        def _on_retry(attempt, max_attempts, backoff, exc):
+            _update_progress("retrying", total_items=total_count,
+                             payload_size_mb=_payload_mb, attempt=attempt,
+                             max_attempts=max_attempts, retry_in_sec=backoff,
+                             last_error=f"{type(exc).__name__}: {exc}")
+
+        response = _post_with_retry(
             api_url,
             headers=headers,
             data=payload_json,
-            timeout=1800  # 30 minute timeout for large payload
+            timeout=1800,  # 30 minute timeout for large payload
+            on_retry=_on_retry,
         )
         t4 = time.time()
         print(f"[Publisher] Response: {response.status_code} in {t4-t3:.1f}s (total: {t4-t0:.1f}s)")
@@ -558,11 +612,11 @@ def publish_content_batched(batch_size: int = 5000, limit: int = None, dry_run: 
         print(f"[Publisher] Batch {batch_num}: Sending {len(batch_items)} items ({payload_size / 1024 / 1024:.2f} MB)...")
 
         try:
-            response = requests.post(
+            response = _post_with_retry(
                 api_url,
                 headers=headers,
                 json=payload,
-                timeout=300  # 5 minute timeout per batch
+                timeout=300,  # 5 minute timeout per batch
             )
 
             batch_success = response.status_code in (200, 201)
