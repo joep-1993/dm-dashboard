@@ -2177,6 +2177,14 @@ def _build_v3_h1(selected_facets: list, category_name: str,
             colors.append(sod); continue
         if fname == 'materiaal' or url_slug == 'materials':
             materials.append(sod); continue
+        # Drugstore audience reads as a trailing "voor mannen"/"voor vrouwen"
+        # suffix, NOT a pre-noun modifier — mirrors the v1 path (generate_title_
+        # from_api). Routing it pre-noun let the polish agglutinate the audience
+        # word with the product noun ("Mannen Stick" -> "mannenstick"). Fashion
+        # doelgroep (doelgroep_mode etc.) still goes pre-noun ("Heren schoenen").
+        if fname == 'doelgroep_drogisterij' or url_slug == 'doelgroep_drogisterij':
+            voor_values.append(f"voor {sod.lower()}")
+            continue
         if fname.startswith('doelgroep'):
             doelgroep.append(sod); continue
         low = sod.lower()
