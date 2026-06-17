@@ -29,6 +29,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 import requests
 
@@ -78,10 +79,17 @@ _ACTIVE_CACHE: Dict[str, bool] = {}
 # and the check phase don't refetch the same page twice.
 _HTML_CACHE: Dict[str, Tuple[Optional[str], int]] = {}
 
+# Per-run cache of (redirected, final_url) for each fetched URL. `redirected`
+# is True when the request landed on a different page (the path changed after
+# following 30x redirects) — the title-variable check uses this to skip a URL
+# that no longer serves its own page and sample another instead.
+_REDIRECT_CACHE: Dict[str, Tuple[bool, str]] = {}
+
 
 def _clear_run_caches() -> None:
     _ACTIVE_CACHE.clear()
     _HTML_CACHE.clear()
+    _REDIRECT_CACHE.clear()
 
 
 def _is_category_active(cat_id: str) -> bool:
@@ -257,6 +265,14 @@ def _pick_sample_categories() -> List[Dict]:
 # ---------------------------------------------------------------------------
 # HTTP fetch (SEO user-agent)
 # ---------------------------------------------------------------------------
+def _path_changed(requested: str, final: str) -> bool:
+    """True when `final` (the URL after following redirects) points at a
+    different page than `requested` — i.e. the path differs once trailing
+    slashes are ignored. Scheme/host-only or trailing-slash normalisation
+    redirects (which keep the same page) don't count."""
+    return urlsplit(requested).path.rstrip("/") != urlsplit(final).path.rstrip("/")
+
+
 def _fetch(url: str) -> Tuple[Optional[str], int]:
     if url in _HTML_CACHE:
         return _HTML_CACHE[url]
@@ -272,9 +288,14 @@ def _fetch(url: str) -> Tuple[Optional[str], int]:
         # mangles characters like the warning emoji (⚠️ → â ï¸). Force UTF-8.
         r.encoding = "utf-8"
         result = (r.text, r.status_code)
+        _REDIRECT_CACHE[url] = (
+            bool(r.history) and _path_changed(url, r.url),
+            r.url,
+        )
     except Exception as e:
         logger.warning(f"[SEO_RULINGS] fetch failed {url}: {e}")
         result = (None, 0)
+        _REDIRECT_CACHE[url] = (False, url)
     _HTML_CACHE[url] = result
     return result
 
@@ -457,8 +478,9 @@ def _check_variable(
             ORDER BY random()
             LIMIT %s
         """
-        # Fetch extra rows so we can skip 404s and still have enough results
-        cur.execute(sql, (f"%{placeholder}%", limit * 3))
+        # Fetch extra rows so we can skip 404s / redirected URLs and still
+        # have enough live candidates left to check.
+        cur.execute(sql, (f"%{placeholder}%", limit * 5))
         rows = cur.fetchall()
     finally:
         cur.close()
@@ -497,6 +519,18 @@ def _check_variable(
                 "url": url,
                 "status": "skipped",
                 "detail": f"HTTP {http_status}",
+            })
+            continue
+        # Skip URLs that redirected to a different page — the rendered title
+        # then belongs to the redirect target, not this template's page, so
+        # we can't verify substitution here. Sample another candidate instead.
+        redirected, final_url = _REDIRECT_CACHE.get(url, (False, url))
+        if redirected:
+            findings.append({
+                "variable": placeholder,
+                "url": url,
+                "status": "skipped",
+                "detail": f"redirected to {final_url}",
             })
             continue
         checked += 1
