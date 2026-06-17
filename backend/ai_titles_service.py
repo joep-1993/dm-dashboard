@@ -132,11 +132,11 @@ _FACET_ORDER_FALLBACK = 10_000_000
 # agglutinate into non-words ("Mannenhelm", "vrouwenhelmen", "mannenstick").
 # The compound-forming fashion modifiers (Heren/Dames/Meisjes/Jongens/Kinder)
 # are deliberately NOT here — they stay pre-noun where they form legit Dutch
-# compounds ("herenschoenen", "dameskleding"). "volwassenen" is also excluded:
-# it doesn't agglutinate and already reads fine as a trailing word ("Fietsen
-# Volwassenen"), so routing it to "voor volwassenen" would restyle ~2k fine
-# titles rather than fix a bug.
-_V3_PEOPLE_NOUN_AUDIENCE = {'mannen', 'vrouwen'}
+# compounds ("herenschoenen", "dameskleding"). "volwassenen" is included by
+# explicit product preference (2026-06-17): it doesn't agglutinate, but the
+# "voor volwassenen" suffix reads cleaner than a trailing/floating "Volwassenen"
+# ("Zwarte Fietsmanden voor volwassenen").
+_V3_PEOPLE_NOUN_AUDIENCE = {'mannen', 'vrouwen', 'volwassenen'}
 
 
 def _ordered_facet_values(selected_facets: list) -> List[str]:
