@@ -127,6 +127,17 @@ def _type_facet_override_by_slug(slug: str) -> Optional[bool]:
 # Sentinel used to push slugs with no order_index past all known orders.
 _FACET_ORDER_FALLBACK = 10_000_000
 
+# doelgroep VALUES that are standalone people-nouns: they read as a trailing
+# "voor mannen"/"voor vrouwen" suffix on ANY facet, because pre-noun they
+# agglutinate into non-words ("Mannenhelm", "vrouwenhelmen", "mannenstick").
+# The compound-forming fashion modifiers (Heren/Dames/Meisjes/Jongens/Kinder)
+# are deliberately NOT here — they stay pre-noun where they form legit Dutch
+# compounds ("herenschoenen", "dameskleding"). "volwassenen" is also excluded:
+# it doesn't agglutinate and already reads fine as a trailing word ("Fietsen
+# Volwassenen"), so routing it to "voor volwassenen" would restyle ~2k fine
+# titles rather than fix a bug.
+_V3_PEOPLE_NOUN_AUDIENCE = {'mannen', 'vrouwen'}
+
 
 def _ordered_facet_values(selected_facets: list) -> List[str]:
     """Return facet detail_values sorted by global order_index.
@@ -2186,6 +2197,13 @@ def _build_v3_h1(selected_facets: list, category_name: str,
             voor_values.append(f"voor {sod.lower()}")
             continue
         if fname.startswith('doelgroep'):
+            # Value-based guard: a people-noun audience value (Mannen/Vrouwen/
+            # Volwassenen) reads as a "voor X" suffix on ANY doelgroep facet —
+            # pre-noun it agglutinates into a non-word ("Mannenhelm"). Fashion
+            # modifiers (Heren/Dames/…) keep their pre-noun compound behavior.
+            if sod.lower() in _V3_PEOPLE_NOUN_AUDIENCE:
+                voor_values.append(f"voor {sod.lower()}")
+                continue
             doelgroep.append(sod); continue
         low = sod.lower()
         if low.startswith('met ') or low.startswith('zonder '):
