@@ -463,7 +463,21 @@ def _check_surfaced(v28_payload: dict, base_total: int,
             if count is None or count <= 0:
                 continue
             cov = count / base_total if base_total else 0
-            if keyword and _value_matches_keyword(keyword, vname or ""):
+            # Keyword-name match. The coverage FLOOR is waived (a niche value
+            # the user literally searched for — "Ketoconazol", "Inklapbaar" —
+            # can be rare yet exactly right). But two guards still apply:
+            #   * cov <= 1.0 — a surfaced count > base_total is the OR-fallback /
+            #     maincat-wide inflation signal (e.g. 106/37 = 286%); it must NOT
+            #     leak through as a bogus high coverage that later becomes the
+            #     match_score. Mirrors Stage 2's _probe_one `cov > 1.0` reject.
+            #   * not a generic-attribute facet — a materiaal/kleur/maat value
+            #     that merely happens to also be a query token ("aluminium",
+            #     "rood", "xl") promotes an adjective while dropping the head
+            #     noun ("aluminium-overgangsprofiel tapijt" → materiaal~Aluminium).
+            #     Same noise the coverage branch and Stage 2 already suppress.
+            if (keyword and cov <= 1.0
+                    and not _is_generic_attribute_facet(facet_name)
+                    and _value_matches_keyword(keyword, vname or "")):
                 cand = (round(cov, 3), int(count), facet_name, int(vid), vname or "", True)
                 if kw_best is None or cand > kw_best:
                     kw_best = cand
@@ -474,8 +488,7 @@ def _check_surfaced(v28_payload: dict, base_total: int,
             # 100% (e.g. 1485/700 = 212%). Stage 2's _probe_one rejects the
             # same signal via `cov > 1.0`; mirror it here so the bogus ratio
             # can't win. Also require a non-trivial base (MIN_COVERAGE_BASE_TOTAL)
-            # so a 1/1 fluke can't score 100%. A literal keyword match (kw_best,
-            # above) is unaffected by both guards.
+            # so a 1/1 fluke can't score 100%.
             if (MIN_FACET_COVERAGE <= cov <= 1.0
                     and base_total >= MIN_COVERAGE_BASE_TOTAL
                     and not _is_generic_attribute_facet(facet_name)):
@@ -608,12 +621,16 @@ def _do_probe_inner(maincat: str, keyword: str, v28_payload: dict,
         kw_hit = _subcat_keyword_facet(dom_slug, keyword, bucket)
         if kw_hit:
             fname, vid, vname, cnt = kw_hit
+            # cnt is a subcat-level count while base_total is the maincat-level
+            # dom_cat_count, so the ratio can exceed 1.0; cap it so an inflated
+            # coverage can't propagate downstream as the match_score.
+            _cov = min(1.0, (cnt / base_total) if base_total else 0)
             return {
                 "mode": "match_from_response",
                 "facet_name": fname,
                 "value_id": vid,
                 "value_name": vname,
-                "coverage": round((cnt / base_total) if base_total else 0, 3),
+                "coverage": round(_cov, 3),
                 "value_count": cnt,
                 "keyword_match": True,
                 "candidates_probed": 0,

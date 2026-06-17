@@ -1835,7 +1835,7 @@ def process_url_v2(args):
                     if _pp.isdigit():
                         _sub = _pp
                         break
-                _covpct = int(round(100 * (_pf.get('coverage') or 0)))
+                _covpct = min(100, int(round(100 * (_pf.get('coverage') or 0))))
                 result = _RR(
                     original_url=url,
                     redirect_url=f"https://www.beslist.nl{_purl}",
