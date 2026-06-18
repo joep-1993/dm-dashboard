@@ -1027,6 +1027,7 @@ _SPEC_UNITS_RE = re.compile(
     r'^\d+[\.,]?\d*\s*'
     r'(liter|liters|watt|volt|bar|pk|rpm|mph|kwh|kw'
     r'|cm|mm|meter|m|inch|"'
+    r'|tb|gb|mb|kb'
     r'|kg|gram|g|mg|ml|cl|dl|l'
     r'|persoons|personen|deurs|zits)\b',
     re.IGNORECASE,
