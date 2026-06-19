@@ -187,6 +187,27 @@ def _keyword_bridges_value(keyword: Optional[str], value_names: Optional[str]) -
     return False
 
 
+def _value_equals_query(keyword: Optional[str], value_names: Optional[str]) -> bool:
+    """RC5: True when the facet value name essentially IS the query — every
+    query content token appears in the value name (modulo a trailing plural -s),
+    and the value adds at most one extra token. Distinguishes a true "value ==
+    query" match ("watertafel" vs "Watertafels", "toiletmeubel" vs
+    "Toiletmeubels") from a fragment match of a long query ("…13 polig naar 7
+    polig" vs "7-polige stekkers") or a head-noun-dropped match
+    ("kunststof-hoekprofielen" vs "Kunststof", where 'hoekprofielen' is missing).
+    """
+    def _norm(s):
+        toks = re.findall(r'[a-z0-9]+', (s or '').lower())
+        return {t[:-1] if (t.endswith('s') and len(t) > 3) else t for t in toks}
+    kw = _norm(keyword)
+    vn = _norm(value_names)
+    if not kw or not vn:
+        return False
+    # every query token must be represented in the value (value may be a superset
+    # by at most one descriptor token, e.g. "Watertafels" vs "watertafel").
+    return kw <= vn and (len(vn) - len(kw)) <= 1
+
+
 def calculate_reliability_score(
     match_score: int,
     facet_count: int,
@@ -403,6 +424,24 @@ def calculate_reliability_score(
     # heavily so it lands in tier D and reviewers spot it.
     if match_type == 'duplicate_facet_dropped':
         base_score = min(base_score, 25)
+
+    # RC5 (2026-06-19): lift a genuinely perfect single-facet match. When the
+    # facet value name IS the query (modulo plural — "watertafel"→"Watertafels")
+    # or the query is a single-token synonym ("transparant"→"Doorzichtig"), and
+    # the whole query is covered with nothing left over, the match is as good as
+    # an exact one — it shouldn't sit at tier C (67) just because the fuzzy/
+    # synonym/plural path capped match_score at 95 or a [maincat] rescue docked
+    # it. A plural-equal value match is treated like an exact match (A); a
+    # synonym match lands at B. The value≡query test fails for long gamed-coverage
+    # queries ("verloop stekker 13 polig…" vs "7-polige stekkers") and for
+    # head-noun-dropped matches ("kunststof-hoekprofielen" vs "Kunststof"), so
+    # those are NOT lifted.
+    if (facet_count <= 1 and match_coverage >= 100.0 and not unmatched_keywords):
+        _val_eq = _value_equals_query(keyword, facet_value_names)
+        if _val_eq:
+            base_score = max(base_score, 90)
+        elif match_type == 'synonym':
+            base_score = max(base_score, 80)
 
     # Clamp to 0-100
     return max(0, min(100, int(base_score)))

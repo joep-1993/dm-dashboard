@@ -47,6 +47,40 @@ PREPOSITION_QUALIFIERS = {'met', 'voor', 'van', 'zonder', 'op', 'bij', 'als', 'o
 # a lone weight-qualifier match can't keep a brand/shop redirect alive.
 WEIGHT_RANGE_QUALIFIERS = {'max', 'min', 'maximaal', 'minimaal', 'vanaf', 'tot'}
 
+# RC1 (2026-06-19): numeric/dimension facet values ("200 liter", "3x5 meter",
+# "30 cm") are matched by the token-coverage scorer purely on the unit word
+# ("liter"/"meter"/"cm") because _coverage_tokens strips digits. That let the
+# WRONG sibling win on product count ("200 liter" → "10 liter", "3x5 meter" →
+# "3x3 meter") at a high score. _numeric_signature extracts the comparable
+# number-groups from a string so the scorer can require the chosen value's
+# numbers to actually be present in the query.
+_DIM_RE = re.compile(r'\d+(?:[.,]\d+)?\s*[x×]\s*\d+(?:[.,]\d+)?')
+_NUM_RE = re.compile(r'\d+(?:[.,]\d+)?')
+
+
+def _numeric_signature(text: str) -> set:
+    """Return the set of canonical number-groups in `text`.
+
+    Dimensions are order-normalised ("5x3" → "3x5") and treated as one token;
+    remaining scalars become their own tokens. Decimal comma → dot.
+        "3x5 meter 5x3 meter" -> {"3x5"}
+        "200 liter"           -> {"200"}
+        "2,5x3 meter"         -> {"2.5x3"}
+        "kunststof"           -> set()
+    """
+    if not text:
+        return set()
+    t = text.lower()
+    sig = set()
+    for m in _DIM_RE.finditer(t):
+        nums = [n.replace(',', '.') for n in _NUM_RE.findall(m.group(0))]
+        sig.add('x'.join(sorted(nums, key=lambda s: float(s))))
+    # scalars NOT already consumed by a dimension
+    leftover = _DIM_RE.sub(' ', t)
+    for m in _NUM_RE.finditer(leftover):
+        sig.add(m.group(0).replace(',', '.'))
+    return sig
+
 
 def _strip_plural_suffix(s: str) -> str:
     """Strip a single trailing Dutch plural suffix ('en' or 's'), suffix-aware.
@@ -471,14 +505,26 @@ class KeywordMatcher:
                             for i in matched_positions)):
                 continue
 
+            # RC1: a numeric/dimension value must have its number-group(s)
+            # present in the query. Otherwise the value matched only on its
+            # unit word ("200 liter" winning on "liter" while the query asked
+            # for a different litreage) — skip it so the scorer never picks the
+            # wrong sibling on count alone. Values with no numbers are unaffected.
+            fv_sig = _numeric_signature(fv.facet_value_name)
+            if fv_sig and not (fv_sig <= _numeric_signature(keyword)):
+                continue
+
             coverage = matched_kw / len(kw_tokens)
-            specificity = matched_kw / len(fv_tokens)
+            # specificity is capped at 1.0: a query that repeats a token
+            # ("3x5 meter 5x3 meter" → ["meter","meter"]) could otherwise push
+            # matched_kw above len(fv_tokens) and inflate the score past 100.
+            specificity = min(1.0, matched_kw / len(fv_tokens))
             if matched_kw == 1:
                 adjacency = 1.0
             else:
                 span = matched_positions[-1] - matched_positions[0] + 1
                 adjacency = matched_kw / span  # 1.0 when fully contiguous
-            score = int(50 * coverage + 30 * specificity + 20 * adjacency)
+            score = min(100, int(50 * coverage + 30 * specificity + 20 * adjacency))
             if score < 50:
                 continue
 
@@ -985,6 +1031,13 @@ class KeywordMatcher:
         """
         kw = keyword.lower().strip()
         fv = facet_value_name.lower().strip()
+
+        # RC1: reject a numeric/dimension value whose number-group(s) aren't in
+        # the keyword ("200 liter" fuzzy-matching "5 liter", "3x5 meter" matching
+        # "3x3 meter"). The unit word alone must not carry a numeric value match.
+        fv_sig = _numeric_signature(fv)
+        if fv_sig and not (fv_sig <= _numeric_signature(kw)):
+            return False
 
         # Exact match is always valid
         if kw == fv:

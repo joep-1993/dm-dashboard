@@ -711,6 +711,33 @@ def _canonicalize_facet_order(redirect_url: str) -> str:
     return f"{base}/c/{'~~'.join(ordered)}{trailing}"
 
 
+def _adj_norm(w: str) -> str:
+    """RC4: normalise a Dutch size/shape adjective for descriptor-facet matching.
+    Strips an inflection suffix and collapses double vowels so the query token
+    and the facet value land on the same stem:
+        ronde -> rond,  kleine -> klein,  grote -> grot  (Groot -> grot too).
+    """
+    import re as _re
+    w = (w or '').lower()
+    for suf in ('ere', 'er', 'en', 'e'):
+        if w.endswith(suf) and len(w) - len(suf) >= 3:
+            w = w[:-len(suf)]
+            break
+    return _re.sub(r'([aeiou])\1', r'\1', w)
+
+
+def _qualifier_matches_value(tok: str, value_name: str) -> bool:
+    """RC4: True when a qualifier token equals (modulo inflection/double-vowel)
+    a whole token of the descriptor value name. Whole-token equality keeps
+    'ronde' on 'Rond' rather than 'Halfrond'."""
+    import re as _re
+    n = _adj_norm(tok)
+    if len(n) < 3:
+        return False
+    return any(_adj_norm(t) == n
+               for t in _re.findall(r'[a-zà-ž]+', value_name.lower()))
+
+
 def _spurious_brand_facet(pf_name, pf_value_name, keyword, dom_cat_name, matcher) -> bool:
     """V41 (issue #1): mirror the V39 spurious-brand guard in the search-derived
     append paths, which bypassed it. A merk/winkel facet whose brand name is
@@ -1828,13 +1855,31 @@ def process_url_v2(args):
             _purl = _resolve_probe_facet_url(
                 facet_filter, parsed.main_category, _pf['facet_name'], _pf['value_id'],
                 dom_cat_slug=_dom_slug)
+            _sub = ''
             if _purl:
-                from src.url_builder import RedirectResult as _RR
-                _sub = ''
                 for _pp in reversed(_purl.split('/c/')[0].split('_')):
                     if _pp.isdigit():
                         _sub = _pp
                         break
+            # RC3 (2026-06-19): a coverage-only probe facet must not stand in for
+            # the query's HEAD noun. "kunststof-hoekprofielen" promoting
+            # materiaal~Kunststof onto subcat 'Tegelaccessoires' drops the head
+            # noun 'hoekprofielen' entirely yet scored tier B. Require the head
+            # token to be represented by the target subcat name OR the facet
+            # value; otherwise skip the probe-fallback (a legit "kunststof
+            # tuinstoel" → Tuinstoelen+Kunststof still passes, head 'tuinstoel'
+            # bridges the subcat name).
+            _head_ok = True
+            if _purl:
+                from src.reliability_scorer import _keyword_bridges_value as _bridges_hn
+                _kw_toks = [t for t in re.split(r'[\s\-_]+', (parsed.keyword or '').lower())
+                            if len(t) >= 3 and t not in STOPWORDS and t not in SHOP_NAMES]
+                _head = _kw_toks[-1] if _kw_toks else ''
+                _subname = category_lookup.get(_sub, '') or ''
+                _head_ok = (not _head) or _bridges_hn(
+                    _head, f"{_subname} {_pf.get('value_name', '')}")
+            if _purl and _head_ok:
+                from src.url_builder import RedirectResult as _RR
                 _covpct = min(100, int(round(100 * (_pf.get('coverage') or 0))))
                 result = _RR(
                     original_url=url,
@@ -2585,13 +2630,13 @@ def process_url_v2(args):
             base_path = final_redirect_url.split('/c/', 1)[0].rstrip('/')
             matcher_subcat = base_path.rsplit('/', 1)[-1]
             if matcher_subcat == derived['dom_cat_url_slug']:
+                from src.reliability_scorer import _keyword_bridges_value
                 probe = derive_search_facet(parsed.main_category, parsed.keyword)
                 if probe and probe.get('mode') in ('match', 'match_from_response'):
                     pf_name = probe.get('facet_name')
                     pf_vid = probe.get('value_id')
                     pf_value_name = probe.get('value_name', '')
                     pf_cov = probe.get('coverage', 0)
-                    fragment = f"{pf_name}~{pf_vid}"
                     existing_facet_part = ''
                     if '/c/' in final_redirect_url:
                         existing_facet_part = (
@@ -2602,6 +2647,40 @@ def process_url_v2(args):
                         for p in (existing_facet_part or '').split('~~')
                         if '~' in p
                     }
+                    # RC2 (2026-06-19): the coverage-only probe attaches a value
+                    # with no lexical relation to the leftover token it claims to
+                    # cover ('Deur' for "kast", 'Verzinkt' for "kokos"). Prefer a
+                    # facet value IN THE TARGET SUBCAT that actually bridges a
+                    # leftover token; only fall back to the probe pick when it too
+                    # bridges. A non-bridging probe value is dropped entirely.
+                    try:
+                        _tgt_id = matcher_subcat.rsplit('_', 1)[-1]
+                        _tgt_fvs = facet_filter.get_facet_values(
+                            facet_filter.filter_by_subcategory(_tgt_id))
+                    except Exception:
+                        _tgt_fvs = []
+                    _bridge = None
+                    for _tok in local_leftover_tokens:
+                        _cands = [fv for fv in _tgt_fvs
+                                  if fv.facet_name.lower() not in existing_names
+                                  and _keyword_bridges_value(_tok, fv.facet_value_name)]
+                        if _cands:
+                            # closest value name to the token wins, then by count
+                            from fuzzywuzzy import fuzz as _fz
+                            _bridge = max(_cands, key=lambda fv: (
+                                _fz.partial_ratio(_tok, fv.facet_value_name.lower()),
+                                getattr(fv, 'count', 0) or 0))
+                            break
+                    if _bridge is not None:
+                        pf_name = _bridge.facet_name
+                        pf_vid = _bridge.facet_value_id
+                        pf_value_name = _bridge.facet_value_name
+                        pf_cov = None
+                    elif not _keyword_bridges_value(
+                            ' '.join(local_leftover_tokens), pf_value_name):
+                        # probe value relates to nothing in the query — drop it
+                        pf_name = None
+                    fragment = f"{pf_name}~{pf_vid}"
                     if pf_name and pf_name not in existing_names:
                         if existing_facet_part:
                             final_redirect_url = (
@@ -2610,13 +2689,75 @@ def process_url_v2(args):
                         else:
                             final_redirect_url = f"{base_path}/c/{fragment}"
                         final_match_type = f"{final_match_type}_with_probe_facet"
+                        _how = (f"coverage {int(100*pf_cov)}%" if pf_cov is not None
+                                else "lexical bridge")
                         final_reason = (
                             (final_reason or '')
                             + f"; [V31] appended {pf_name}~{pf_vid} "
-                            + f"({pf_value_name!r}, coverage {int(100*pf_cov)}%) "
+                            + f"({pf_value_name!r}, {_how}) "
                             + f"for leftover token(s): "
                             + ", ".join(local_leftover_tokens)
                         )
+
+        # RC4 (2026-06-19): attach a descriptor facet (vorm / formaat / kleur /
+        # opties / materiaal) from the redirect's OWN subcat for a leftover
+        # qualifier token that the chosen target doesn't cover — including the
+        # generic size/shape adjectives (ronde, kleine, grote) the V31 probe path
+        # deliberately skips. Strict facets (merk/winkel) are excluded, so a
+        # stray adjective can never anchor a brand. Same-subcat + lexical-bridge
+        # + axis-not-present make this safe and additive ("ronde schaal" gains
+        # vorm~Rond, "grote plastic wasmand" gains f_woonacc~Groot).
+        if (has_matchable and reliability_score >= 50 and final_redirect_url
+                and '/r/' not in final_redirect_url):
+            from src.validation_rules import STRICT_FACETS
+            _DESCRIPTOR_PREFIXES = ('vorm', 'kleur', 'materiaal', 'opties', 'optie', 'f_', 'formaat')
+            _base = final_redirect_url.split('/c/', 1)[0].rstrip('/')
+            _subslug = _base.rsplit('/', 1)[-1]
+            _ex_part = (final_redirect_url.split('/c/', 1)[1].rstrip('/')
+                        if '/c/' in final_redirect_url else '')
+            _ex_axes = {p.split('~', 1)[0] for p in _ex_part.split('~~') if '~' in p}
+            _target_text = ' '.join(filter(None, [
+                redirect_cat_name or '', r.facet_value_names or '', final_redirect_url or ''])).lower()
+            _qual = []
+            for w in keyword_words:
+                if w in STOPWORDS or w in SHOP_NAMES:
+                    continue
+                _stem = w.rstrip('e').rstrip('s')
+                if w in _target_text or (_stem and _stem in _target_text):
+                    continue
+                _qual.append(w)
+            if _qual and '_' in _subslug and _subslug.rsplit('_', 1)[-1].isdigit():
+                try:
+                    _sub_fvs = facet_filter.get_facet_values(
+                        facet_filter.filter_by_subcategory(_subslug.rsplit('_', 1)[-1]))
+                except Exception:
+                    _sub_fvs = []
+                # only descriptor (non-strict) facets, axis not already present
+                _cand = [fv for fv in _sub_fvs
+                         if fv.facet_name.lower() not in STRICT_FACETS
+                         and fv.facet_name.lower() not in _ex_axes
+                         and fv.facet_name.lower().startswith(_DESCRIPTOR_PREFIXES)]
+                for _tok in _qual:
+                    _hit = next((fv for fv in _cand
+                                 if fv.facet_name.lower() not in _ex_axes
+                                 and _qualifier_matches_value(_tok, fv.facet_value_name)),
+                                None)
+                    if _hit is not None:
+                        _ax = _hit.facet_name
+                        _frag = f"{_ax}~{_hit.facet_value_id}"
+                        if _ex_part:
+                            final_redirect_url = f"{_base}/c/{_ex_part}~~{_frag}"
+                        else:
+                            final_redirect_url = f"{_base}/c/{_frag}"
+                        final_redirect_url = _canonicalize_facet_order(final_redirect_url)
+                        _ex_part = final_redirect_url.split('/c/', 1)[1].rstrip('/')
+                        _ex_axes.add(_ax.lower())
+                        final_match_type = (final_match_type
+                                            if 'qualifier' in (final_match_type or '')
+                                            else f"{final_match_type}_with_qualifier")
+                        final_reason = ((final_reason or '')
+                                        + f"; [RC4] appended {_frag} "
+                                        + f"({_hit.facet_value_name!r}) for qualifier '{_tok}'")
 
     # Fix D (V35): same-main-category search-derived category override. When the
     # Search API shows a strong dominant category in the R-URL's OWN main category
