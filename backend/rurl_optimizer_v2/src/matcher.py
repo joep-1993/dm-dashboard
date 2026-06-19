@@ -944,6 +944,24 @@ class KeywordMatcher:
                     ))
                     _matched_axes.add(fv.facet_name.lower())
 
+        # RC6 (2026-06-19): collapse redundant numeric/dimension-axis over-matches.
+        # When the query carries a dimension/number ("30 cm") that matched several
+        # facet values across different axes — the EXACT one (a_woonacc "30 cm")
+        # plus ranges that merely contain it (diameter "van 20 tot 30 cm", hoogte
+        # "20 tot 30 cm") — keep only the exact-signature match(es) so the redirect
+        # stops at the dimension the user actually asked for instead of fanning the
+        # same number across diameter+hoogte+….
+        _q_sig = _numeric_signature(keyword)
+        if _q_sig:
+            _num_results = [r for r in results
+                            if r.facet_value and _numeric_signature(r.facet_value.facet_value_name)]
+            if len(_num_results) > 1:
+                _exact = [r for r in _num_results
+                          if _numeric_signature(r.facet_value.facet_value_name) == _q_sig]
+                if _exact:
+                    _drop = {id(r) for r in _num_results if r not in _exact}
+                    results = [r for r in results if id(r) not in _drop]
+
         # Deduplicate by facet name (keep best score per facet)
         seen_facets = {}
         for r in results:
