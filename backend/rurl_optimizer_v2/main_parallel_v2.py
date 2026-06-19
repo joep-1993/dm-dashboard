@@ -2845,6 +2845,42 @@ def process_url_v2(args):
                 + f"maincat validator error: {_e}"
             )
 
+    # RC6-L11 (2026-06-19): a V28 compound decomposition can attach a facet that
+    # was matched by a decomposed FRAGMENT rather than a real query token — e.g.
+    # "snijplank" -> "snij plank" -> "plank" lexically hits type_sp "Broodplanken"
+    # while the query is about snijplanken, not broodplanken. Drop any facet in a
+    # compound-decomposed result whose value name doesn't lexically bridge the
+    # ORIGINAL keyword (materiaal "Hout" bridges "kopshout" and stays; type_sp
+    # "Broodplanken" bridges nothing and goes), so the redirect keeps only the
+    # facets the query actually supports.
+    if (final_redirect_url and '/c/' in final_redirect_url
+            and '[V28 compound:' in (final_reason or '')):
+        from src.reliability_scorer import _keyword_bridges_value as _bridge_l11
+        from src.matcher import _numeric_signature as _numsig_l11
+        _l11_base, _l11_frag = final_redirect_url.split('/c/', 1)
+        _l11_trail = '/' if _l11_frag.endswith('/') else ''
+        _l11_pieces = [p for p in _l11_frag.rstrip('/').split('~~') if p]
+        _l11_n2v = dict(zip(
+            [n.strip() for n in (r.facet_names or '').split(',') if n.strip()],
+            [v.strip() for v in (r.facet_value_names or '').split(',') if v.strip()]))
+        _l11_keep, _l11_drop = [], []
+        for _pc in _l11_pieces:
+            _val = _l11_n2v.get(_pc.split('~', 1)[0], '')
+            # never drop the source-pinned facet; keep facets we can't name-resolve;
+            # exempt numeric/dimension values ("80 cm") — they don't share alpha
+            # tokens with the keyword but are already validated by RC1's numeric gate.
+            if (_pc == (parsed.existing_facet or '') or not _val
+                    or _numsig_l11(_val)
+                    or _bridge_l11(parsed.keyword, _val)):
+                _l11_keep.append(_pc)
+            else:
+                _l11_drop.append(_pc)
+        if _l11_drop:
+            final_redirect_url = (f"{_l11_base}/c/{'~~'.join(_l11_keep)}{_l11_trail}"
+                                  if _l11_keep else f"{_l11_base}{_l11_trail}")
+            final_reason = ((final_reason or '')
+                            + f"; [RC6] dropped fragment-only facet(s): {', '.join(_l11_drop)}")
+
     # V35 (Phase 1): keep the emitted facet_* columns consistent with the FINAL
     # redirect URL. Late overrides (V28 rescue, cross-type guard, Fix D, multi-
     # facet rescue, maincat repair) replace final_redirect_url, but the cascade
