@@ -2782,18 +2782,46 @@ def process_url_v2(args):
             _psub = str(parsed.subcategory_id or '')
             _weak = (len(matched_keywords) <= 1 and _cur_sub != _dom_sub and _cur_sub != _psub)
             if _weak and _dom_sub and _dom_sub != _psub:
-                _ef = getattr(parsed, 'existing_facet', '') or ''
-                _base = f"https://www.beslist.nl/products/{parsed.main_category}/{_dom_slug}"
-                final_redirect_url = f"{_base}/c/{_ef}" if _ef else f"{_base}/"
-                final_redirect_cat_name = _dv.get('dom_cat_name', '') or final_redirect_cat_name
-                final_match_type = 'search_derived_samecat'
-                final_score = 65
-                final_tier = get_reliability_tier(final_score)
-                final_reason = (f"[Fix D] search-derived dominant same-maincat category "
-                                f"'{_dv.get('dom_cat_name', '')}' ({int(100 * _share)}%) "
-                                f"chosen over weak stray match")
-                reject_reason = ''
-                flag_for_review = ''
+                from src.reliability_scorer import _keyword_bridges_value as _bridge_l13
+                _origin_name = category_lookup.get(_psub, '') or ''
+                # Only keep origin when the dominant is a SIDEWAYS sibling, not a
+                # more-specific DESCENDANT of the origin. "raam" in Raamdecoratie
+                # vs dominant Horren (different subtree) -> keep origin; but
+                # "lp kasten" in Kasten vs dominant CD/DVD-kasten (a child of
+                # Kasten) -> let Fix-D descend to the more specific child.
+                _dom_is_descendant = bool(parsed.subcategory_name) and _dom_slug.startswith(
+                    parsed.subcategory_name + '_')
+                if (_psub and _origin_name and not _dom_is_descendant
+                        and _bridge_l13(parsed.keyword, _origin_name)):
+                    # L13: the keyword names the R-URL's OWN (origin) subcategory
+                    # ("raam" -> "Raamdecoratie"); don't let a search-derived
+                    # dominant ("Horren") override it on a single generic token —
+                    # the origin subcat is the better, safer target.
+                    _ef = getattr(parsed, 'existing_facet', '') or ''
+                    _ob = (f"https://www.beslist.nl/products/{parsed.main_category}"
+                           f"/{parsed.subcategory_name}")
+                    final_redirect_url = f"{_ob}/c/{_ef}" if _ef else f"{_ob}/"
+                    final_match_type = 'origin_subcat_name'
+                    final_score = 70
+                    final_tier = get_reliability_tier(final_score)
+                    final_reason = (f"[L13] keyword names origin subcategory "
+                                    f"'{_origin_name}'; kept origin over search-derived "
+                                    f"'{_dv.get('dom_cat_name', '')}'")
+                    reject_reason = ''
+                    flag_for_review = ''
+                else:
+                    _ef = getattr(parsed, 'existing_facet', '') or ''
+                    _base = f"https://www.beslist.nl/products/{parsed.main_category}/{_dom_slug}"
+                    final_redirect_url = f"{_base}/c/{_ef}" if _ef else f"{_base}/"
+                    final_redirect_cat_name = _dv.get('dom_cat_name', '') or final_redirect_cat_name
+                    final_match_type = 'search_derived_samecat'
+                    final_score = 65
+                    final_tier = get_reliability_tier(final_score)
+                    final_reason = (f"[Fix D] search-derived dominant same-maincat category "
+                                    f"'{_dv.get('dom_cat_name', '')}' ({int(100 * _share)}%) "
+                                    f"chosen over weak stray match")
+                    reject_reason = ''
+                    flag_for_review = ''
 
     # Maincat-path sanity check. A correct redirect path looks like
     # /products/{maincat}/{subcat}[/c/...] where {subcat} starts with
