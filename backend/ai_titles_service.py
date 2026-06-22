@@ -2391,8 +2391,10 @@ def _v3_fix_adverb_before_infinitive(text: str) -> str:
         return text
     def _repl(m):
         adv, gap, verb = m.group(1), m.group(2), m.group(3)
-        base = adv[:-2] + 'os'  # "...loze" -> "...loos"
-        if adv[:1].isupper():
+        base = (adv[:-2] + 'os').lower()  # "...loze" -> "...loos"
+        # Adverb, never a proper noun: capitalised only when title-initial,
+        # lowercase mid-title (matches the existing correct "draadloos opladen").
+        if m.start() == 0:
             base = base[:1].upper() + base[1:]
         return base + gap + verb
     return re.sub(
