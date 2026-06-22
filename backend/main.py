@@ -3219,6 +3219,7 @@ from backend.canonical_service import (
     fetch_urls_from_redshift,
     fetch_urls_for_rules,
     generate_canonicals,
+    transform_url,
     parse_rules_from_json,
     TransformationRules,
     save_canonical_run,
@@ -3250,6 +3251,11 @@ class CanonicalExportRequest(BaseModel):
     results: List[dict] = []
 
 
+# Upper bound on URLs processed in one canonical request (manual or fetched),
+# so a single call can't pull an unbounded set into memory + JSON.
+MAX_CANONICAL_URLS = 50000
+
+
 @app.post("/api/canonical/generate")
 async def generate_canonical_urls(request: CanonicalRulesRequest):
     """
@@ -3267,6 +3273,12 @@ async def generate_canonical_urls(request: CanonicalRulesRequest):
             urls = fetch_urls_for_rules(rules, request.start_date, request.end_date)
         else:
             urls = request.manual_urls
+
+        if urls and len(urls) > MAX_CANONICAL_URLS:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Too many URLs ({len(urls)}); max {MAX_CANONICAL_URLS}",
+            )
 
         if not urls:
             return {
@@ -3304,14 +3316,30 @@ async def generate_canonical_urls(request: CanonicalRulesRequest):
             "run_id": run_id,
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("canonical generate failed")
+        raise HTTPException(status_code=500, detail="Failed to generate canonical URLs")
 
 
 @app.post("/api/canonical/export-excel")
-async def export_canonical_excel(request: CanonicalExportRequest):
-    """Stream the canonical results as a real .xlsx file."""
+def export_canonical_excel(request: CanonicalExportRequest):
+    """Stream the canonical results as a real .xlsx file.
+
+    Sync def (not async): the pandas/openpyxl serialization is blocking and
+    CPU-bound, so FastAPI runs it in the threadpool instead of stalling the
+    event loop for the whole request."""
     import pandas as pd
+
+    if len(request.results) > MAX_CANONICAL_URLS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many rows ({len(request.results)}); max {MAX_CANONICAL_URLS}",
+        )
 
     rows = [
         {"original_url": r.get("original", ""), "canonical_url": r.get("canonical", "")}
@@ -3360,7 +3388,13 @@ async def preview_canonical_urls(request: CanonicalRulesRequest):
     """
     try:
         rules = parse_rules_from_json(request.dict())
-        urls = fetch_urls_for_rules(rules, request.start_date, request.end_date)
+        # #15: mirror generate's URL source so the preview matches what generate
+        # will actually process (was always hitting Redshift, misleading the
+        # user when they supplied manual URLs).
+        if request.fetch_from_redshift:
+            urls = fetch_urls_for_rules(rules, request.start_date, request.end_date)
+        else:
+            urls = request.manual_urls
 
         return {
             "status": "success",
@@ -3368,8 +3402,12 @@ async def preview_canonical_urls(request: CanonicalRulesRequest):
             "urls": urls[:100]  # Limit preview to first 100
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("canonical preview failed")
+        raise HTTPException(status_code=500, detail="Failed to preview canonical URLs")
 
 
 @app.get("/api/canonical/fetch-urls")
@@ -3384,6 +3422,7 @@ async def fetch_canonical_urls(
     Useful for exploring what URLs exist before defining transformation rules.
     """
     try:
+        limit = max(1, min(limit, 10000))  # clamp client-supplied limit
         urls = fetch_urls_from_redshift(
             contains=contains,
             start_date=start_date,
@@ -3397,8 +3436,12 @@ async def fetch_canonical_urls(
             "urls": urls
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("canonical fetch-urls failed")
+        raise HTTPException(status_code=500, detail="Failed to fetch URLs")
 
 
 @app.post("/api/canonical/transform")
@@ -3408,8 +3451,6 @@ async def transform_single_url(url: str, rules: CanonicalRulesRequest):
     Useful for testing rules before running on full dataset.
     """
     try:
-        from backend.canonical_service import transform_url
-
         parsed_rules = parse_rules_from_json(rules.dict())
         canonical = transform_url(url, parsed_rules)
 
@@ -3419,8 +3460,12 @@ async def transform_single_url(url: str, rules: CanonicalRulesRequest):
             "changed": url != canonical
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("canonical transform failed")
+        raise HTTPException(status_code=500, detail="Failed to transform URL")
 
 
 # =============================================================================

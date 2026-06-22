@@ -404,7 +404,11 @@
             const yearAgo = new Date();
             yearAgo.setDate(today.getDate() - 365);
 
-            const formatDate = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
+            // Build YYYYMMDD from LOCAL date parts. toISOString() is UTC, which
+            // in CEST (UTC+2) reports yesterday's date between 22:00 and midnight
+            // local — the project runs on Europe/Amsterdam.
+            const formatDate = (d) =>
+                `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
             return {
                 start_date: formatDate(yearAgo),
                 end_date: formatDate(today)
@@ -603,8 +607,8 @@
                             ${results.map((r, i) => `
                                 <tr class="changed canon-row" data-idx="${i}">
                                     <td><input type="checkbox" class="canon-select form-check-input" data-idx="${i}" onchange="updateCanonSelectionCount()"></td>
-                                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtmlAttr(r.original)}', this)">${escapeHtml(r.original)}</td>
-                                    <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtmlAttr(r.canonical)}', this)">${escapeHtml(r.canonical)}</td>
+                                    <td class="url-cell copyable canon-orig">${escapeHtml(r.original)}</td>
+                                    <td class="url-cell copyable canon-canon">${escapeHtml(r.canonical)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -614,6 +618,16 @@
                     <button id="canonPushBtn" class="btn btn-secondary btn-sm" onclick="pushSelectedToRedirect()" disabled>Push</button>
                 </div>
             `;
+            // Copy-on-click via delegation, reading the URL from currentResults
+            // (never round-tripped through an HTML attribute → no XSS surface).
+            document.getElementById('canonResultsBody').addEventListener('click', (e) => {
+                const cell = e.target.closest('.copyable');
+                if (!cell) return;
+                const tr = cell.closest('.canon-row');
+                const r = tr && currentResults[+tr.dataset.idx];
+                if (!r) return;
+                copyToClipboard(cell.classList.contains('canon-orig') ? r.original : r.canonical, cell);
+            });
             applyCanonFilter();
             updateCanonSelectionCount();
         }
@@ -672,7 +686,28 @@
 
         const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+        // Poll a redirect-tool task to completion. Bounded (≈5 min) so a task
+        // stuck in 'running' can't hang the modal forever; total falls back so
+        // the width math never goes NaN.
+        async function _pollTask(statusUrl, progId, totalFallback) {
+            const MAX_POLLS = 600;  // 600 × 500ms ≈ 5 minutes
+            for (let i = 0; i < MAX_POLLS; i++) {
+                const s = await fetch(statusUrl);
+                if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
+                const task = await s.json();
+                const total = task.total || totalFallback || 1;
+                const done = task.processed || 0;
+                const el = document.getElementById(progId);
+                if (el) el.style.width = Math.min(100, Math.round(done / total * 100)) + '%';
+                if (task.status === 'completed' || task.status === 'failed') return task;
+                await _sleep(500);
+            }
+            throw new Error('Timed out waiting for the task to finish');
+        }
+
         async function pushSelectedToRedirect() {
+            _canonPreflight = null;  // drop any prior preflight so a failed
+                                     // re-preflight can't submit stale data
             const pairs = getSelectedCanonPairs();
             if (!pairs.length) { alert('No canonicals selected'); return; }
             const statuscode = document.getElementById('canonStatusCode').value || '200';
@@ -697,16 +732,7 @@
                 });
                 if (!start.ok) throw new Error((await start.json()).detail || 'Preview failed');
                 const { task_id } = await start.json();
-                let task = null;
-                while (true) {
-                    const s = await fetch(`${REDIRECT_API}/preview-status/${task_id}`);
-                    if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
-                    task = await s.json();
-                    const total = task.total || rows.length, done = task.processed || 0;
-                    document.getElementById('pushProg').style.width = Math.min(100, Math.round(done / total * 100)) + '%';
-                    if (task.status === 'completed' || task.status === 'failed') break;
-                    await _sleep(500);
-                }
+                const task = await _pollTask(`${REDIRECT_API}/preview-status/${task_id}`, 'pushProg', rows.length);
                 if (task.status === 'failed') throw new Error(task.error || 'Preflight failed');
                 _canonPreflight = task.result;
                 const st = _canonPreflight.stats || {};
@@ -751,16 +777,8 @@
                 });
                 if (!start.ok) throw new Error((await start.json()).detail || 'Submit failed');
                 const { task_id } = await start.json();
-                let task = null;
-                while (true) {
-                    const s = await fetch(`${REDIRECT_API}/submit-status/${task_id}`);
-                    if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
-                    task = await s.json();
-                    const total = task.total || 1, done = task.processed || 0;
-                    document.getElementById('pushProg2').style.width = Math.min(100, Math.round(done / total * 100)) + '%';
-                    if (task.status === 'completed' || task.status === 'failed') break;
-                    await _sleep(500);
-                }
+                const task = await _pollTask(`${REDIRECT_API}/submit-status/${task_id}`,
+                    'pushProg2', (_canonPreflight.processed || []).length);
                 if (task.status === 'failed') throw new Error(task.error || 'Submit failed');
                 const res = task.result || {};
                 body.innerHTML = `<div class="alert alert-success mb-2">Done — ${res.success || 0} succeeded, ${res.failed || 0} failed.${res.run_id ? ` Run #${res.run_id}.` : ''}</div>
@@ -801,14 +819,14 @@
                             <tbody>
                                 ${runs.map(r => `
                                     <tr>
-                                        <td>${r.id}</td>
-                                        <td>${formatRunDate(r.created_at)}</td>
+                                        <td>${escapeHtml(String(r.id))}</td>
+                                        <td>${escapeHtml(formatRunDate(r.created_at))}</td>
                                         <td>${escapeHtml(r.label || '—')}</td>
-                                        <td>${r.changed}</td>
-                                        <td>${r.total}</td>
+                                        <td>${escapeHtml(String(r.changed))}</td>
+                                        <td>${escapeHtml(String(r.total))}</td>
                                         <td>
-                                            <button class="btn btn-sm" style="border: 1px solid #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="loadCanonicalRun(${r.id})">Load</button>
-                                            <button class="btn btn-sm" style="border: 1px solid #dc3545; color: #dc3545;" onmouseover="this.style.backgroundColor='#dc3545';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#dc3545'" onclick="deleteCanonicalRun(${r.id})">Delete</button>
+                                            <button class="btn btn-sm" style="border: 1px solid #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="loadCanonicalRun(${Number(r.id) || 0})">Load</button>
+                                            <button class="btn btn-sm" style="border: 1px solid #dc3545; color: #dc3545;" onmouseover="this.style.backgroundColor='#dc3545';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#dc3545'" onclick="deleteCanonicalRun(${Number(r.id) || 0})">Delete</button>
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -879,11 +897,6 @@
             navigator.clipboard.writeText(tsv.join('\n')).then(() => {
                 alert('Copied to clipboard! Paste directly into Excel.');
             });
-        }
-
-        function escapeHtmlAttr(text) {
-            if (!text) return '';
-            return text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         }
 
         async function downloadResults() {

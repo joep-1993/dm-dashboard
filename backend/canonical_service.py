@@ -15,14 +15,37 @@ Transformation types:
 
 import json
 import re
-from typing import List, Dict, Optional, Tuple
+from datetime import datetime
+from typing import List, Dict, Optional
 from dataclasses import dataclass
+from psycopg2.extras import Json
 from backend.database import (
     get_redshift_connection,
     return_redshift_connection,
     get_db_connection,
     return_db_connection,
 )
+
+# Compiled once (was re.search'd per URL in _extract_maincat).
+_PRODUCTS_RE = re.compile(r'/products/([^/]+)/')
+
+
+def _like_escape(s: str) -> str:
+    """Escape LIKE wildcards in a user pattern so a literal % or _ in a URL
+    fragment isn't treated as a wildcard. Uses '!' as the escape char (paired
+    with ``ESCAPE '!'``) — a backslash would need doubling and collides with
+    Redshift string-literal escaping. Escape the escape-char first."""
+    return s.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+
+
+def _validate_yyyymmdd(value: str, label: str) -> None:
+    """Raise ValueError with a clear message if value isn't a YYYYMMDD date."""
+    if not re.fullmatch(r"\d{8}", str(value or "")):
+        raise ValueError(f"{label} must be an 8-digit YYYYMMDD date, got {value!r}")
+    try:
+        datetime.strptime(str(value), "%Y%m%d")
+    except ValueError:
+        raise ValueError(f"{label} is not a valid calendar date: {value!r}")
 
 
 @dataclass
@@ -104,7 +127,15 @@ def fetch_urls_from_redshift(
     Returns:
         List of dicts with 'url' and 'visits' keys
     """
+    # #6: validate dates up front (was `int(date)` mid-query → opaque 500 on a
+    # non-numeric value; also catches an inverted range).
+    _validate_yyyymmdd(start_date, "start_date")
+    _validate_yyyymmdd(end_date, "end_date")
+    if int(start_date) > int(end_date):
+        raise ValueError(f"start_date {start_date} is after end_date {end_date}")
+
     conn = None
+    cur = None
     try:
         conn = get_redshift_connection()
         cur = conn.cursor()
@@ -135,19 +166,25 @@ def fetch_urls_from_redshift(
 
         params = [int(start_date), int(end_date)]
 
+        # #4: escape LIKE wildcards in user patterns and skip empty entries (an
+        # empty pattern became `LIKE '%%'` = match-everything).
         if contains:
-            query += " AND dv.url LIKE %s"
-            params.append(f"%{contains}%")
+            query += " AND dv.url LIKE %s ESCAPE '!'"
+            params.append(f"%{_like_escape(contains)}%")
 
         if contains_all:
             for ca in contains_all:
-                query += " AND dv.url LIKE %s"
-                params.append(f"%{ca}%")
+                if not ca:
+                    continue
+                query += " AND dv.url LIKE %s ESCAPE '!'"
+                params.append(f"%{_like_escape(ca)}%")
 
         if not_contains:
             for nc in not_contains:
-                query += " AND dv.url NOT LIKE %s"
-                params.append(f"%{nc}%")
+                if not nc:
+                    continue
+                query += " AND dv.url NOT LIKE %s ESCAPE '!'"
+                params.append(f"%{_like_escape(nc)}%")
 
         query += """
             GROUP BY 1
@@ -159,19 +196,17 @@ def fetch_urls_from_redshift(
         cur.execute(query, params)
         rows = cur.fetchall()
 
-        # Handle both dict and tuple cursor results
-        results = []
-        for row in rows:
-            if isinstance(row, dict):
-                results.append({"url": row.get("url"), "visits": row.get("visits")})
-            else:
-                results.append({"url": row[0], "visits": row[1]})
-        return results
+        # Pools use RealDictCursor, so rows are dict-like.
+        return [{"url": row["url"], "visits": row["visits"]} for row in rows]
 
     except Exception as e:
         print(f"[ERROR] Failed to fetch URLs from Redshift: {e}")
+        if conn:
+            conn.rollback()
         raise
     finally:
+        if cur:
+            cur.close()
         if conn:
             return_redshift_connection(conn)
 
@@ -282,7 +317,7 @@ def _normalize_path(path: str) -> str:
 
 def _extract_maincat(url: str) -> str:
     """Extract maincat from URL like /products/maincat_123/..."""
-    match = re.search(r'/products/([^/]+)/', url)
+    match = _PRODUCTS_RE.search(url)
     if match:
         return f"/{match.group(1)}/"
     return ""
@@ -299,7 +334,10 @@ def _extract_cat(url: str, maincat: str) -> str:
 
 
 def _sort_facets(url: str) -> str:
-    """Sort facets in URL alphabetically"""
+    """Normalize the /c/ facet group: sort multi-facet groups alphabetically and
+    drop the trailing slash after /c/ (the project canonical rule). Previously a
+    SINGLE-facet URL was returned untouched, so it kept its trailing slash while
+    multi-facet URLs lost theirs — inconsistent canonical output."""
     if "/c/" not in url:
         return url
 
@@ -311,14 +349,15 @@ def _sort_facets(url: str) -> str:
     facet_str = parts[1].rstrip("/")
 
     if "~~" in facet_str:
-        facets = facet_str.split("~~")
-        facets = [f.lower() for f in facets if f]
+        facets = [f.lower() for f in facet_str.split("~~") if f]
         # Sort by facet name only (part before ~), not full string,
         # because ~ (ASCII 126) > letters, causing e.g. kleurtint~... < kleur~...
         facets.sort(key=lambda f: f.split("~")[0] if "~" in f else f)
-        return f"{base}/c/{'~~'.join(facets)}"
+        facet_str = "~~".join(facets)
+    else:
+        facet_str = facet_str.lower()
 
-    return url
+    return f"{base}/c/{facet_str}"
 
 
 def _contains_any(url: str, patterns: List[str]) -> bool:
@@ -338,9 +377,12 @@ def _determine_tasks(url: str, rules: TransformationRules) -> List[str]:
     if _contains_any(url, old_cats):
         tasks.append("CAT-CAT")
 
-    # Check FACET+FACET (URL must contain BOTH old and new facet)
+    # Check FACET+FACET (URL must contain BOTH facets, and the old one in the
+    # ~~-delimited form that _apply_facet_facet actually removes — matching its
+    # predicate so the task isn't reported when application would no-op).
     for rule in rules.facet_facet:
-        if rule.old_facet in url and rule.new_facet in url:
+        old_delimited = (f"{rule.old_facet}~~" in url or f"~~{rule.old_facet}" in url)
+        if old_delimited and rule.new_facet in url:
             if not rule.cat or rule.cat in url:
                 tasks.append("FACET-FACET")
                 break
@@ -417,6 +459,15 @@ def _apply_facet_facet(url: str, rules: List[FacetFacetRule]) -> str:
     return url
 
 
+def _dedupe_maincat(url: str, maincat: str) -> str:
+    """Collapse an accidental doubled maincat (e.g. /mode/mode/) back to one."""
+    if maincat:
+        double_main = (maincat + maincat).replace("//", "/")
+        if double_main in url:
+            url = url.replace(double_main, maincat)
+    return url
+
+
 def _apply_cat_facet(url: str, rules: List[CatFacetRule]) -> str:
     """Apply category+facet rule (keep facet)"""
     maincat = _extract_maincat(url)
@@ -432,18 +483,12 @@ def _apply_cat_facet(url: str, rules: List[CatFacetRule]) -> str:
 
         canon_cat = _normalize_path(rule.canon_cat)
 
-        if cat == "/c/":
-            # Category is the maincat
-            url = url.replace(cat, canon_cat)
-        elif cat:
+        # _extract_cat never returns "/c/" (it excludes the "c" segment), so the
+        # old `if cat == "/c/"` branch was dead and identical to this one.
+        if cat:
             url = url.replace(cat, canon_cat)
 
-    # Fix double maincat
-    if maincat:
-        double_main = (maincat + maincat).replace("//", "/")
-        if double_main in url:
-            url = url.replace(double_main, maincat)
-
+    url = _dedupe_maincat(url, maincat)
     return url
 
 
@@ -462,18 +507,15 @@ def _apply_cat_facet_remove(url: str, rules: List[CatFacetRemoveRule]) -> str:
 
         canon_cat = _normalize_path(rule.canon_cat)
 
-        # Replace category
-        if cat == "/c/":
-            url = url.replace(cat, canon_cat)
-        elif cat:
+        # Replace category (cat is never "/c/" — see _apply_cat_facet).
+        if cat:
             url = url.replace(cat, canon_cat)
 
-        # Remove the full facet (facet_name~numeric_id) using regex
-        # Input facet may be just the name (e.g. "type_spelcomputer")
-        # but in the URL it appears as "type_spelcomputer~480840"
+        # Remove the full facet (facet_name~value) using regex. The value is
+        # usually a numeric id ("type_spelcomputer~480840") but allow a named
+        # value too ([^~/]+) so a non-numeric value isn't left orphaned.
         facet = rule.facet
-        # Match facet name + ~numeric_id if present
-        facet_pattern = re.escape(facet) + r'(?:~\d+)?'
+        facet_pattern = re.escape(facet) + r'(?:~[^~/]+)?'
 
         # Try removal patterns in order of specificity
         regex_patterns = [
@@ -492,12 +534,7 @@ def _apply_cat_facet_remove(url: str, rules: List[CatFacetRemoveRule]) -> str:
                 url = new_url
                 break
 
-    # Fix double maincat
-    if maincat:
-        double_main = (maincat + maincat).replace("//", "/")
-        if double_main in url:
-            url = url.replace(double_main, maincat)
-
+    url = _dedupe_maincat(url, maincat)
     return url
 
 
@@ -535,7 +572,7 @@ def _apply_remove_bucket(url: str, rules: List[RemoveBucketRule]) -> str:
 
         # Try to extract full facet with number if not already has tilde
         if "~" not in bucket:
-            match = re.search(rf'{bucket}~(\d+)', url)
+            match = re.search(rf'{re.escape(bucket)}~(\d+)', url)
             if match:
                 bucket = match.group(0)
             else:
@@ -667,8 +704,16 @@ def parse_rules_from_json(data: dict) -> TransformationRules:
 #  or backend restart is needed to start saving).
 # =============================================================================
 
+_table_ensured = False
+
+
 def _ensure_canonical_runs_table() -> None:
+    # Run the DDL once per process instead of on every runs request.
+    global _table_ensured
+    if _table_ensured:
+        return
     conn = get_db_connection()
+    cur = None
     try:
         cur = conn.cursor()
         cur.execute(
@@ -685,7 +730,13 @@ def _ensure_canonical_runs_table() -> None:
             """
         )
         conn.commit()
+        _table_ensured = True
+    except Exception:
+        conn.rollback()
+        raise
     finally:
+        if cur:
+            cur.close()
         return_db_connection(conn)
 
 
@@ -695,24 +746,30 @@ def save_canonical_run(label: Optional[str], rules: dict, results: List[Dict],
     {original, canonical} pairs; `total` is the count of URLs processed."""
     _ensure_canonical_runs_table()
     conn = get_db_connection()
+    cur = None
     try:
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO canonical_runs (label, total, changed, rules, results)
                VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-            (label or None, total, len(results),
-             json.dumps(rules), json.dumps(results)),
+            (label or None, total, len(results), Json(rules), Json(results)),
         )
         new_id = cur.fetchone()["id"]
         conn.commit()
         return new_id
+    except Exception:
+        conn.rollback()
+        raise
     finally:
+        if cur:
+            cur.close()
         return_db_connection(conn)
 
 
 def list_canonical_runs(limit: int = 100) -> List[Dict]:
     _ensure_canonical_runs_table()
     conn = get_db_connection()
+    cur = None
     try:
         cur = conn.cursor()
         cur.execute(
@@ -725,12 +782,16 @@ def list_canonical_runs(limit: int = 100) -> List[Dict]:
             r["created_at"] = r["created_at"].isoformat()
         return rows
     finally:
+        if cur:
+            cur.close()
+        conn.rollback()  # end read txn before returning to pool
         return_db_connection(conn)
 
 
 def get_canonical_run(run_id: int) -> Optional[Dict]:
     _ensure_canonical_runs_table()
     conn = get_db_connection()
+    cur = None
     try:
         cur = conn.cursor()
         cur.execute(
@@ -743,17 +804,26 @@ def get_canonical_run(run_id: int) -> Optional[Dict]:
             row["created_at"] = row["created_at"].isoformat()
         return row
     finally:
+        if cur:
+            cur.close()
+        conn.rollback()  # end read txn before returning to pool
         return_db_connection(conn)
 
 
 def delete_canonical_run(run_id: int) -> bool:
     _ensure_canonical_runs_table()
     conn = get_db_connection()
+    cur = None
     try:
         cur = conn.cursor()
         cur.execute("DELETE FROM canonical_runs WHERE id = %s", (run_id,))
         deleted = cur.rowcount
         conn.commit()
         return deleted > 0
+    except Exception:
+        conn.rollback()
+        raise
     finally:
+        if cur:
+            cur.close()
         return_db_connection(conn)
