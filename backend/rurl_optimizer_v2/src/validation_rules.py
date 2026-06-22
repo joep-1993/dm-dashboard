@@ -71,6 +71,25 @@ STRICT_FACETS = {'winkel', 'merk'}
 # V5: Type facets eerst, dan kleur/materiaal/maat
 PRIORITY_FACET_PREFIXES = ('type_', 'kleur', 'materiaal', 'maat', 'vorm')
 
+# ==============================================================================
+# V43: GATED SUBCATEGORIES — accessory subcats that must not absorb a generic
+# brand/keyword redirect. Keyed by the URL subcat SLUG (the segment after the
+# main category, e.g. 'horloge_6918306'). A gated subcat is dropped from the
+# candidate facet pool of the maincat-WIDE pass (so the count-leader dedup picks
+# a real product subcat instead) UNLESS the query names it (one of its intent
+# tokens) OR the source r-url already lives in it.
+#
+# Origin: '/products/horloge/r/casio/' redirected to Horlogebandjes (watch
+# straps, 808 Casio products) instead of a watch subcat, because straps
+# outnumber watches in the catalog and dedup picks the global count-leader.
+# ==============================================================================
+GATED_SUBCATEGORIES = {
+    'horloge_6918306': frozenset({  # Horlogebandjes (watch straps)
+        'band', 'bandje', 'bandjes', 'horlogeband', 'horlogebandje',
+        'horlogebandjes', 'strap', 'polsband',
+    }),
+}
+
 
 # ==============================================================================
 # STOPWORDS - Woorden die NIET matchen mogen (V5-V11)

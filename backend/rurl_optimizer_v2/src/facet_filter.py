@@ -9,6 +9,19 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+def _subcat_slug_from_url(url: str) -> str:
+    """V43: the subcategory slug (segment after the main category) of a facet
+    value URL, e.g. '/products/horloge/horloge_6918306/c/merk~423317' ->
+    'horloge_6918306'. '' when the URL has no subcat segment."""
+    if not url:
+        return ""
+    path = url.split("/c/", 1)[0].rstrip("/")
+    if "/products/" in path:
+        path = path.split("/products/", 1)[-1]
+    parts = path.split("/")
+    return parts[1] if len(parts) >= 2 else ""
+
+
 @dataclass
 class FacetValue:
     """Represents a single facet value."""
@@ -257,7 +270,8 @@ class FacetFilter:
 
         return self.get_facet_values(type_df)
 
-    def get_facet_values(self, filtered_df: pd.DataFrame, deduplicate_to_highest_level: bool = True) -> list[FacetValue]:
+    def get_facet_values(self, filtered_df: pd.DataFrame, deduplicate_to_highest_level: bool = True,
+                         exclude_subcat_slugs: Optional[frozenset] = None) -> list[FacetValue]:
         """
         Convert filtered DataFrame to list of FacetValue objects.
 
@@ -295,6 +309,14 @@ class FacetFilter:
                 facet_values.append(fv)
             except (ValueError, TypeError):
                 continue
+
+        # V43: drop gated subcategories BEFORE dedup, so the count-leader dedup
+        # picks a real product subcat instead of the gated accessory one (the
+        # caller decides which slugs are gated for this URL — see
+        # GATED_SUBCATEGORIES and _gated_excluded_slugs).
+        if exclude_subcat_slugs:
+            facet_values = [fv for fv in facet_values
+                            if _subcat_slug_from_url(fv.url) not in exclude_subcat_slugs]
 
         # V16: Deduplicate to keep only highest level (shortest URL path) per facet_value_id
         if deduplicate_to_highest_level and facet_values:

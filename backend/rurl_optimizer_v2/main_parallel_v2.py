@@ -653,6 +653,23 @@ def _split_strip_keyword(keyword: str, cat_name: str) -> list:
     return [t for t in toks if not _is_bare_category_noun(t, cat_name)]
 
 
+def _gated_excluded_slugs(keyword: str, source_subcat_slug: str) -> frozenset:
+    """V43: the set of GATED_SUBCATEGORIES slugs that must be EXCLUDED from the
+    maincat-wide candidate pool for this URL. A gated subcat is excluded unless
+    the query contains one of its intent tokens (the user asked for it) or the
+    source r-url already lives in that subcat."""
+    from src.validation_rules import GATED_SUBCATEGORIES
+    if not GATED_SUBCATEGORIES:
+        return frozenset()
+    kw_tokens = set(re.findall(r'[a-zà-ž]+', (keyword or '').lower()))
+    excl = set()
+    for slug, intent_tokens in GATED_SUBCATEGORIES.items():
+        if (kw_tokens & intent_tokens) or slug == source_subcat_slug:
+            continue  # query names it, or source already there → allowed
+        excl.add(slug)
+    return frozenset(excl)
+
+
 def _facet_url_parts(facet_url: str):
     """Extract {main_category, subcategory_name, subcategory_id} from a facet
     value URL like '/products/mode/mode_432360_469350/c/type_sportshirts~...'.
@@ -1636,7 +1653,14 @@ def process_url_v2(args):
 
         maincat_facets_df = facet_filter.filter_by_main_category(parsed.main_category)
         if not maincat_facets_df.empty:
-            maincat_facets = facet_filter.get_facet_values(maincat_facets_df)
+            # V43: drop gated accessory subcats (e.g. Horlogebandjes) from the
+            # maincat-wide candidate pool unless the query names them or the
+            # source URL already lives there, so the count-leader dedup can't
+            # route a generic brand query (casio) to straps.
+            _gated_excl = _gated_excluded_slugs(
+                parsed.keyword, getattr(parsed, 'subcategory_name', '') or '')
+            maincat_facets = facet_filter.get_facet_values(
+                maincat_facets_df, exclude_subcat_slugs=_gated_excl)
             if maincat_facets:
                 if multi_facet or ' ' in parsed.keyword:
                     # V42: the maincat-WIDE pass assembles facets across every
@@ -3006,6 +3030,25 @@ def process_url_v2(args):
             out_facet_names = ''
             out_facet_value_names = ''
             out_facet_count = _co.facet_count
+
+    # V43 (issue #3): colour-combination enrichment. When the redirect pins a
+    # single base kleur facet and the keyword names a SECOND colour, live-probe
+    # for the matching kleurcombinaties_* value (which only surfaces under a
+    # kleur filter, so it isn't in the cache) and append it. Strictly additive:
+    # it only ever adds a facet to an already-successful colour redirect.
+    if final_redirect_url and 'kleur~' in (final_redirect_url or ''):
+        try:
+            from src.color_combo import enrich as _combo_enrich
+            _new_url, _combo = _combo_enrich(final_redirect_url, r.keyword)
+            if _combo:
+                final_redirect_url = _new_url
+                _cfname, _cvid, _cvname = _combo
+                out_facet_value_names = (
+                    f"{out_facet_value_names}, {_cvname}" if out_facet_value_names else _cvname)
+                out_facet_count = (out_facet_count or 0) + 1
+                final_reason = f"[V43 color-combo +{_cfname}~{_cvid} '{_cvname}'] " + (final_reason or '')
+        except Exception:
+            pass  # enrichment is best-effort; never break a good redirect
 
     # V41 (issue #2): normalise any multi-facet URL to canonical alphabetical
     # order. Several append paths prepend the existing_facet rather than merging
