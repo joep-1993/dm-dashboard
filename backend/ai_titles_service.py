@@ -127,6 +127,13 @@ def _type_facet_override_by_slug(slug: str) -> Optional[bool]:
 # Sentinel used to push slugs with no order_index past all known orders.
 _FACET_ORDER_FALLBACK = 10_000_000
 
+# An embedded prepositional clause inside a catch-all facet value — e.g.
+# "Kruidenrek met potjes", "Kast op wieltjes". The part from the preposition
+# onward reads AFTER the productnoun; the head before it stays a pre-noun
+# adjective (and is usually category-deduped). Only the post-noun prepositions
+# are matched (met/zonder/op/aan → met-clause; voor/vanaf → voor-clause).
+_EMBEDDED_PREP_RE = re.compile(r'\b(met|zonder|op|aan|voor|vanaf)\s+\S', re.I)
+
 # doelgroep VALUES that are standalone people-nouns: they read as a trailing
 # "voor mannen"/"voor vrouwen" suffix on ANY facet, because pre-noun they
 # agglutinate into non-words ("Mannenhelm", "vrouwenhelmen", "mannenstick").
@@ -2219,6 +2226,24 @@ def _build_v3_h1(selected_facets: list, category_name: str,
             met_clauses.append(sod[0].lower() + sod[1:]); continue
         if low.startswith('voor ') or low.startswith('vanaf '):
             voor_values.append(sod); continue
+        # Embedded prepositional clause in a catch-all value, e.g. a type-facet
+        # "Kruidenrek met potjes" (category not suppressed, so the value lands
+        # here). The "met …" clause must read AFTER the productnoun; the head
+        # ("Kruidenrek") stays a pre-noun adjective and gets category-deduped
+        # later. Without this the dedup strips the head and strands the clause
+        # pre-noun ("… met potjes Staande Kruidenrekken").
+        _emb = _EMBEDDED_PREP_RE.search(sod)
+        if _emb and _emb.start() > 0:
+            head = sod[:_emb.start()].strip()
+            clause = sod[_emb.start():].strip()
+            clause = clause[0].lower() + clause[1:]
+            if _emb.group(1).lower() in ('voor', 'vanaf'):
+                voor_values.append(clause)
+            else:
+                met_clauses.append(clause)
+            if head:
+                other_adj.append((rule.get('order_index') or _FACET_ORDER_FALLBACK, head))
+            continue
         other_adj.append((rule.get('order_index') or _FACET_ORDER_FALLBACK, sod))
 
     # Sort the catch-all bucket by Excel global order so high-order facets
