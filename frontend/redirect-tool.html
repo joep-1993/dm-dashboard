@@ -479,8 +479,11 @@
                     throw new Error(task.error || 'Preflight task failed');
                 }
                 preflight = task.result;
-                renderPreview(preflight);
-                status.textContent = `Preflight done — ${preflight.stats.submittable} of ${preflight.stats.total} ready to submit.`;
+                const ready = renderPreview();
+                // Use the SAME recomputed `ready` the tile shows — the backend's
+                // preflight.stats.submittable counts already-correct rows
+                // differently and diverges once the replace toggle is on.
+                status.textContent = `Preflight done — ${ready} of ${preflight.stats.total} ready to submit.`;
             } catch (e) {
                 status.textContent = '';
                 alert(e.message);
@@ -494,12 +497,13 @@
         // Persisted across re-renders; reset on each new preflight.
         let previewView = { filter: 'all', sortCol: null, sortDir: 'asc' };
 
-        function renderPreview(p) {
+        function renderPreview() {
             document.getElementById('previewCard').style.display = '';
-            recomputeStats();
+            const ready = recomputeStats();
             // Reset filter+sort to defaults whenever a fresh preflight lands.
             previewView = { filter: 'all', sortCol: null, sortDir: 'asc' };
             renderPreviewTable();
+            return ready;
         }
 
         // "Replace existing" toggle reclassifies replaceable rows as ready
@@ -535,6 +539,7 @@
             document.getElementById('statAlready').textContent = alreadyCount;
             document.getElementById('statSkipped').textContent = skipped;
             document.getElementById('statSubmittable').textContent = ready;
+            return ready;
         }
 
         // Re-renders the preview <tbody> using the current filter+sort against
@@ -747,7 +752,7 @@
                 const payload = {
                     processed: preflight.processed,
                     label: document.getElementById('runLabel').value.trim(),
-                    input_method: cbManual.checked ? 'text' : 'file',
+                    input_method: cbManual.checked ? 'text' : (cbForm.checked ? 'form' : 'file'),
                     replace_existing: replaceExistingOn(),
                 };
                 const startResp = await fetch(`${API}/submit`, {
@@ -771,7 +776,7 @@
                     progBar.style.width = pct + '%';
                     progPct.textContent = pct + '%';
                     progText.textContent = `Submitted ${done.toLocaleString()} / ${total.toLocaleString()}`
-                        + ` (${task.success || 0} ok, ${task.failed || 0} failed, ${task.skipped || 0} skipped)`;
+                        + ` (${task.success || 0} ok, ${task.warnings || 0} warn, ${task.failed || 0} failed, ${task.skipped || 0} skipped)`;
                     if (task.status === 'completed' || task.status === 'failed') break;
                     await sleep(500);
                 }
@@ -792,14 +797,20 @@
         }
 
         function renderSubmitResult(result) {
-            const ok = result.success;
-            const fail = result.failed;
+            // Use the submitter's OWN authoritative post-run counters, not a
+            // count derived from the preview stats (which double-counted
+            // already-correct rows and ignored the replace toggle).
+            const ok = result.success || 0;
+            const fail = result.failed || 0;
+            const warn = result.warnings || 0;
+            const skipped = result.skipped || 0;
             const stats = result.stats || {};
-            const skipped = (stats.total || 0) - (stats.submittable || 0);
+            const alertClass = fail > 0 ? 'danger' : (warn > 0 ? 'warning' : 'success');
+            const warnPart = warn > 0 ? ` ${warn} with warnings,` : '';
             const html = `
-                <div class="alert alert-${fail > 0 ? 'warning' : 'success'} mb-0">
+                <div class="alert alert-${alertClass} mb-0">
                     <strong>Run #${result.run_id} saved.</strong>
-                    ${ok} succeeded, ${fail} failed, ${skipped} skipped, ${stats.flattened || 0} flattened.
+                    ${ok} succeeded,${warnPart} ${fail} failed, ${skipped} skipped, ${stats.flattened || 0} flattened.
                 </div>`;
             document.getElementById('submitResult').innerHTML = html;
         }
@@ -830,7 +841,7 @@
                 outgoing = `<div class="check-result">
                     <strong>Outgoing redirect found:</strong><br>
                     <span class="pair">${escapeHtml(d.normalized_path)} → ${escapeHtml(d.outgoing.url)}</span>
-                    <span class="badge bg-secondary ms-2">${d.outgoing.statusCode}</span>
+                    <span class="badge bg-secondary ms-2">${escapeHtml(String(d.outgoing.statusCode))}</span>
                     ${d.outgoing.matched_variant && d.outgoing.matched_variant !== d.normalized_path
                         ? `<br><span class="small-muted">Matched via variant: <code>${escapeHtml(d.outgoing.matched_variant)}</code></span>`
                         : ''}
@@ -842,7 +853,7 @@
             let incoming = '';
             if (d.incoming_count > 0) {
                 const rows = d.incoming.map(r =>
-                    `<tr><td class="url-cell">${escapeHtml(r.fromUrl)}</td><td class="text-center">${r.statusCode}</td><td>${escapeHtml(r.country || '')}</td><td>${r.id}</td></tr>`).join('');
+                    `<tr><td class="url-cell">${escapeHtml(r.fromUrl)}</td><td class="text-center">${escapeHtml(String(r.statusCode))}</td><td>${escapeHtml(r.country || '')}</td><td>${escapeHtml(String(r.id))}</td></tr>`).join('');
                 incoming = `<div class="check-result">
                     <strong>${d.incoming_count} URL(s) point at this URL (incoming):</strong>
                     <table class="table table-sm mt-2 mb-0">
@@ -863,6 +874,7 @@
             body.innerHTML = '<tr><td colspan="9" class="text-center text-muted p-3">Loading…</td></tr>';
             try {
                 const r = await fetch(`${API}/runs`);
+                if (!r.ok) throw new Error((await r.json()).detail || 'Failed to load runs');
                 const data = await r.json();
                 if (!data.runs.length) {
                     body.innerHTML = '<tr><td colspan="9" class="text-center text-muted p-3">No runs yet.</td></tr>';
@@ -907,6 +919,7 @@
             out.innerHTML = '<div class="text-muted">Loading…</div>';
             try {
                 const r = await fetch(`${API}/runs/${id}`);
+                if (!r.ok) throw new Error((await r.json()).detail || 'Failed to load run');
                 const run = await r.json();
                 runDetailRows = run.results || [];
                 runDetailMeta = run;

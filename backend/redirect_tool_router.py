@@ -25,8 +25,17 @@ EXPECTED_COLUMNS = ["old", "new", "statuscode", "country", "label"]
 # Parse — accepts file (csv/xlsx) or pasted text
 # ---------------------------------------------------------------------------
 
+# Header aliases accepted on EVERY input path (file uploads + pasted text).
+_COLUMN_ALIASES = {"from": "old", "fromurl": "old", "to": "new", "tourl": "new"}
+
+
 def _df_to_rows(df: pd.DataFrame) -> list[dict]:
     df.columns = [str(c).strip().lower() for c in df.columns]
+    # Accept from/to (and fromUrl/toUrl) headers. Previously this rename lived
+    # only in _parse_text, so an uploaded CSV/XLSX with a `from,to` header had
+    # neither `old` nor `new` and silently produced 0 rows.
+    df = df.rename(columns={k: v for k, v in _COLUMN_ALIASES.items()
+                            if k in df.columns and v not in df.columns})
     # Fill missing expected columns with empty strings
     for col in EXPECTED_COLUMNS:
         if col not in df.columns:
@@ -47,7 +56,11 @@ def _parse_text(text: str) -> list[dict]:
         return []
 
     first_line = text.splitlines()[0]
-    sep = "\t" if "\t" in first_line else ","
+    # Sniff the delimiter by frequency across tab / semicolon / comma. Semicolon
+    # is the NL Excel-locale CSV default; without it a `old;new` paste collapsed
+    # to a single comma-column and every row was dropped.
+    _counts = {d: first_line.count(d) for d in ("\t", ";", ",")}
+    sep = max(_counts, key=_counts.get) if any(_counts.values()) else ","
     # Header detection must match WHOLE TOKENS, not substrings — otherwise URLs
     # like /products/autos/... fire on the "to" in "auto" and the URL is parsed
     # as a column name (giving zero data rows).
@@ -59,10 +72,7 @@ def _parse_text(text: str) -> list[dict]:
     if has_header:
         reader = csv.DictReader(io.StringIO(text), delimiter=sep)
         df = pd.DataFrame(list(reader))
-        # Map common aliases
-        df.columns = [str(c).strip().lower() for c in df.columns]
-        rename = {"from": "old", "fromurl": "old", "to": "new", "tourl": "new"}
-        df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+        # Alias rename + column normalization now happen in _df_to_rows.
         return _df_to_rows(df)
 
     rows: list[dict] = []
@@ -129,7 +139,9 @@ async def parse_file(file: UploadFile = File(...)) -> dict:
     warning: str | None = None
     try:
         if filename.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(io.BytesIO(content))
+            # dtype=str so a numeric statuscode column isn't read as float
+            # ("308" -> "308.0" -> int() fails -> silently coerced to 301).
+            df = pd.read_excel(io.BytesIO(content), dtype=str).fillna("")
         elif filename.endswith(".csv"):
             df, enc = _read_csv_any_encoding(content, sep=None, engine="python", dtype=str, keep_default_na=False)
             warning = _encoding_warning(enc, df)
@@ -204,6 +216,17 @@ def submit(req: SubmitRequest) -> dict:
     run_id + counts on completion."""
     if not req.processed:
         raise HTTPException(400, "Nothing to submit")
+    # Defence-in-depth: the `processed` rows round-trip through the browser, so
+    # re-apply the cheap deterministic normalization preflight did rather than
+    # trusting client-supplied country/statusCode verbatim. normalize_country
+    # is idempotent on preflight's own output (incl. an upgraded "nl, be").
+    for p in req.processed:
+        p["country"] = svc.normalize_country(str(p.get("country") or ""))
+        try:
+            _sc = int(str(p.get("statusCode") or svc.DEFAULT_STATUS_CODE).strip())
+        except (ValueError, TypeError):
+            _sc = svc.DEFAULT_STATUS_CODE
+        p["statusCode"] = _sc if _sc in svc.ALLOWED_STATUS_CODES else svc.DEFAULT_STATUS_CODE
     task_id = svc.start_submit(
         req.processed, req.label, req.input_method,
         replace_existing=req.replace_existing,

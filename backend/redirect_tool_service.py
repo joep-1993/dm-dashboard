@@ -103,24 +103,40 @@ DEFAULT_STATUS_CODE = 301
 # Paths that resolve to the homepage and must never be redirected
 HOMEPAGE_PATHS = {"", "/", "/index", "/index.html"}
 
+# Canonical skip-reason emitted for a row whose source already has a redirect
+# rule (the replace-existing toggle keys off this exact string). Single source
+# of truth so the preflight, submitter, failure-explainer, and frontend can't
+# drift on the wording (was hard-coded in 5 places).
+SKIP_REASON_EXISTING = "source has existing rule"
+
+# Pre-compiled once (was re.findall(r"\b(nl|be)\b") per row in normalize_country).
+_COUNTRY_RE = re.compile(r"\b(nl|be)\b")
+
 
 # ---------------------------------------------------------------------------
 # URL handling
 # ---------------------------------------------------------------------------
 
 def strip_domain(url: str) -> str:
-    """Return a /-prefixed path for any URL form (full URL, bare hostname, path)."""
+    """Return a /-prefixed path for any URL form (full URL, bare hostname, path).
+
+    The fragment (``#...``) and query (``?...``) are dropped on every branch: a
+    fragment never reaches the server, and the redirect API stores path-only
+    fromUrls/toUrls (the project canonicalization rule strips ``?``/``#`` before
+    any insert). Previously the full-URL branch re-appended the query while the
+    other branches left it inline, so the same logical page under two query
+    strings produced two different equiv_keys and dedup/match silently failed.
+    """
     if not url:
         return ""
-    s = url.strip()
+    s = url.strip().split("#", 1)[0].split("?", 1)[0]
+    if not s:
+        return ""
     if s.startswith("/"):
         return s
     if "://" in s:
         parsed = urllib.parse.urlparse(s)
-        path = parsed.path or "/"
-        if parsed.query:
-            path += "?" + parsed.query
-        return path
+        return parsed.path or "/"
     # bare hostname like www.beslist.nl/foo
     if "/" in s and ("." in s.split("/")[0]):
         return "/" + s.split("/", 1)[1]
@@ -169,7 +185,7 @@ def normalize_country(raw: str) -> str:
     bare ``nl``/``be`` and silently defaulted everything else (including
     ``NL+BE``) to ``nl``, which then collided with the ``"nl, be"`` canonicals.
     """
-    toks = set(re.findall(r"\b(nl|be)\b", (raw or "").lower()))
+    toks = set(_COUNTRY_RE.findall((raw or "").lower()))
     if {"nl", "be"} <= toks:
         return "nl, be"
     if "be" in toks:
@@ -222,7 +238,16 @@ def _get_with_retry(url: str, params: dict) -> requests.Response:
     raise last_exc  # type: ignore[misc]
 
 
-def _resolve_one(url: str, country: str = DEFAULT_COUNTRY) -> dict | None:
+def _resolve_one(url: str, country: str = DEFAULT_COUNTRY,
+                 raise_on_error: bool = False) -> dict | None:
+    """Resolve one variant. Returns the redirect row, or None when the URL is
+    genuinely not a fromUrl.
+
+    `raise_on_error` distinguishes "no redirect exists" from "the lookup
+    failed": with it True a request/HTTP error propagates instead of collapsing
+    to None, so a transient API failure during preflight is NOT misread as
+    "clean / submittable" (the run-#21 silent-failure class). Default False
+    keeps the lenient behaviour for the diagnostic /check-url path."""
     try:
         r = _get_with_retry(
             f"{REDIRECT_API}/api/redirect",
@@ -233,19 +258,23 @@ def _resolve_one(url: str, country: str = DEFAULT_COUNTRY) -> dict | None:
             return data["data"][0]
     except Exception as exc:
         logger.warning("resolver call failed for %s: %s", url, exc)
+        if raise_on_error:
+            raise
     return None
 
 
-def check_url_is_fromUrl(path: str, country: str = DEFAULT_COUNTRY) -> dict | None:
+def check_url_is_fromUrl(path: str, country: str = DEFAULT_COUNTRY,
+                         raise_on_error: bool = False) -> dict | None:
     """Return {url, statusCode, matched_variant} if `path` is a fromUrl in the DB."""
     for variant in url_variants(path):
-        hit = _resolve_one(variant, country)
+        hit = _resolve_one(variant, country, raise_on_error=raise_on_error)
         if hit:
             return {**hit, "matched_variant": variant}
     return None
 
 
-def check_url_incoming(path: str, max_pages: int = 2) -> list[dict]:
+def check_url_incoming(path: str, max_pages: int = 2,
+                       raise_on_error: bool = False) -> list[dict]:
     """Find redirects whose toUrl matches any variant of `path`.
 
     `max_pages=2` covers the vast majority of real URLs (most distinctive
@@ -275,6 +304,8 @@ def check_url_incoming(path: str, max_pages: int = 2) -> list[dict]:
             data = r.json().get("data", [])
         except Exception as exc:
             logger.warning("incoming list call failed: %s", exc)
+            if raise_on_error:
+                raise
             break
         if not data:
             break
@@ -395,7 +426,10 @@ def preflight_rows(
         if use_index:
             result = _lookup_fromurl_in_index(url)
         else:
-            result = check_url_is_fromUrl(url, country)
+            # raise_on_error: a transient API failure must NOT be read as
+            # "no existing rule" (→ row wrongly submitted). It propagates and
+            # the pool marks the row "preflight error" (skipped) instead.
+            result = check_url_is_fromUrl(url, country, raise_on_error=True)
         with _cache_lock:
             _fromurl_cache.setdefault(key, result)
             return _fromurl_cache[key]
@@ -408,7 +442,7 @@ def preflight_rows(
         if use_index:
             result = _lookup_incoming_in_index(url)
         else:
-            result = check_url_incoming(url)
+            result = check_url_incoming(url, raise_on_error=True)
         with _cache_lock:
             _incoming_cache.setdefault(key, result)
             return _incoming_cache[key]
@@ -496,11 +530,15 @@ def preflight_rows(
         if existing:
             existing_url = existing.get("url") or ""
             item["existing_target"] = existing_url
+            # Captured so the submitter can RESTORE the original rule if a
+            # replace's POST fails after the DELETE already removed it.
+            item["existing_statusCode"] = existing.get("statusCode") or DEFAULT_STATUS_CODE
+            item["existing_country"] = existing.get("country") or country
             if equiv_key(existing_url) == equiv_key(item["final_new"]):
                 item["skip_reason"] = "URL already redirected"
                 item["already_correct"] = True
             else:
-                item["skip_reason"] = "source has existing rule"
+                item["skip_reason"] = SKIP_REASON_EXISTING
                 item["existing_id"] = existing.get("id")
             return item, stats
 
@@ -534,9 +572,17 @@ def preflight_rows(
         # the API-quirk country field changes.
         incoming_to_new = _cached_incoming(item["final_new"])
         if incoming_to_new:
-            # Pick the country of the first existing rule (the API tends
-            # to use 'nl, be' uniformly; pick whatever is there).
-            existing_country = (incoming_to_new[0].get("country") or "").strip()
+            # Pick the upgrade country DETERMINISTICALLY: prefer a combined
+            # 'nl, be' rule (the API's canonical form), then lowest id. Reading
+            # incoming_to_new[0] was non-deterministic because the index path
+            # builds this list by iterating a set of variant keys, so the
+            # chosen country could vary run-to-run when several rules with
+            # different countries point at final_new.
+            ranked = sorted(
+                (r for r in incoming_to_new if (r.get("country") or "").strip()),
+                key=lambda r: (r.get("country") != "nl, be", r.get("id") or 0),
+            )
+            existing_country = (ranked[0].get("country").strip() if ranked else "")
             if existing_country and existing_country != item["country"]:
                 item["country_upgraded_from"] = item["country"]
                 item["country"] = existing_country
@@ -579,7 +625,7 @@ def preflight_rows(
                     "input_old": str(rows[idx].get("old", "")),
                     "input_new": str(rows[idx].get("new", "")),
                     "final_new": str(rows[idx].get("new", "")),
-                    "country": DEFAULT_COUNTRY,
+                    "country": normalize_country(str(rows[idx].get("country") or "")),
                     "statusCode": DEFAULT_STATUS_CODE,
                     "label": str(rows[idx].get("label") or ""),
                     "skip_reason": f"preflight error: {exc}",
@@ -903,13 +949,27 @@ def explain_submit_failure(item: dict, body: Any) -> dict:
         # separately from `existing_target` so the Run detail Note column
         # renders this row the same as preflight-skipped rows with the
         # same condition.
-        msg = "source has existing rule"
-    elif equiv_key(offending) == equiv_key(item.get("final_new") or ""):
-        msg = f"duplicate URL: {offending}"
+        msg = SKIP_REASON_EXISTING
     else:
+        # offending == final_new (or anything else): a rule already points at
+        # this target. (The previous elif/else both produced this same string.)
         msg = f"duplicate URL: {offending}"
     out["friendly_message"] = msg
     return out
+
+
+def _restore_redirect(from_url: str, to_url: str, country: str,
+                      status_code: int) -> dict:
+    """Best-effort re-POST of a rule we DELETEd but then failed to replace, so a
+    partial failure doesn't leave the fromUrl with no redirect at all. Never
+    raises; returns a small audit dict."""
+    if not from_url or not to_url:
+        return {"restored": False, "reason": "no original target captured"}
+    try:
+        code, body = post_redirect(from_url, to_url, country, status_code)
+    except Exception as exc:
+        return {"restored": False, "reason": f"restore POST raised: {exc}"}
+    return {"restored": 200 <= code < 300, "code": code, "body": body}
 
 
 def submit_rows(processed: list[dict], task: dict | None = None,
@@ -928,6 +988,7 @@ def submit_rows(processed: list[dict], task: dict | None = None,
     success = 0
     failed = 0
     skipped = 0
+    warnings = 0
     per_row: list[dict] = []
 
     for item in processed:
@@ -937,7 +998,7 @@ def submit_rows(processed: list[dict], task: dict | None = None,
         is_replaceable = (
             replace_existing
             and item.get("existing_id")
-            and item.get("skip_reason") == "source has existing rule"
+            and item.get("skip_reason") == SKIP_REASON_EXISTING
         )
         if item.get("skip_reason") and not is_replaceable:
             skipped += 1
@@ -999,27 +1060,36 @@ def submit_rows(processed: list[dict], task: dict | None = None,
                         # is the right action (the chain collapses to nothing).
                         rewired_count += 1
                         continue
+                    inc_country = inc.get("country") or item.get("country")
+                    inc_sc = inc.get("statusCode") or DEFAULT_STATUS_CODE
                     try:
                         rew_code, rew_body = post_redirect(
-                            inc["fromUrl"], item["final_new"],
-                            inc.get("country") or item.get("country"),
-                            inc.get("statusCode") or DEFAULT_STATUS_CODE,
+                            inc["fromUrl"], item["final_new"], inc_country, inc_sc,
                         )
                     except Exception as exc:
+                        # DELETE succeeded but re-POST raised — the incoming rule
+                        # is now gone. Restore it (fromUrl -> old) so we don't
+                        # silently drop a redirect.
+                        restore = _restore_redirect(
+                            inc["fromUrl"], item["input_old"], inc_country, inc_sc)
                         rewire_errors.append({
                             "incoming_id": rid,
                             "incoming_from": inc.get("fromUrl"),
                             "error": f"re-POST failed: {exc}",
+                            "restore": restore,
                         })
                         continue
                     if 200 <= rew_code < 300:
                         rewired_count += 1
                     else:
+                        restore = _restore_redirect(
+                            inc["fromUrl"], item["input_old"], inc_country, inc_sc)
                         rewire_errors.append({
                             "incoming_id": rid,
                             "incoming_from": inc.get("fromUrl"),
                             "error": f"re-POST returned {rew_code}",
                             "body": rew_body,
+                            "restore": restore,
                         })
 
             if replace_error is not None:
@@ -1044,6 +1114,16 @@ def submit_rows(processed: list[dict], task: dict | None = None,
                     ),
                 })
             else:
+                def _restore_replaced():
+                    # #1: a replace already DELETEd the existing rule; a failed
+                    # main POST leaves input_old with no rule — restore it.
+                    if not replaced_target:
+                        return None
+                    return _restore_redirect(
+                        item["input_old"], replaced_target,
+                        item.get("existing_country") or item["country"],
+                        item.get("existing_statusCode") or DEFAULT_STATUS_CODE)
+
                 try:
                     code, body = post_redirect(
                         item["input_old"], item["final_new"],
@@ -1052,14 +1132,17 @@ def submit_rows(processed: list[dict], task: dict | None = None,
                 except Exception as exc:
                     failed += 1
                     body = {"error": str(exc)}
-                    per_row.append({
+                    out_row = {
                         **item, "status": "fail", "api_response": body,
                         **explain_submit_failure(item, body),
-                    })
+                    }
+                    restore = _restore_replaced()
+                    if restore is not None:
+                        out_row["replace_restore"] = restore
+                    per_row.append(out_row)
                 else:
                     if 200 <= code < 300:
-                        success += 1
-                        out_row = {**item, "status": "ok", "api_response": body}
+                        out_row = {**item, "api_response": body}
                         if replaced_target:
                             out_row["replaced_target"] = replaced_target
                             out_row["skip_reason"] = None  # was overridden
@@ -1067,15 +1150,29 @@ def submit_rows(processed: list[dict], task: dict | None = None,
                             out_row["rewired_count"] = rewired_count
                         if rewire_errors:
                             out_row["rewire_errors"] = rewire_errors
+                        # #8: main rule posted, but >=1 incoming rewire failed
+                        # (those were restored). A partial result, not a clean
+                        # success — count it as a warning so the success tally
+                        # doesn't overstate correctness.
+                        if rewire_errors:
+                            warnings += 1
+                            out_row["status"] = "warning"
+                        else:
+                            success += 1
+                            out_row["status"] = "ok"
                         per_row.append(out_row)
                     else:
                         failed += 1
-                        per_row.append({
+                        out_row = {
                             **item, "status": "fail", "api_response": body,
                             "rewired_count": rewired_count,
                             "rewire_errors": rewire_errors,
                             **explain_submit_failure(item, body),
-                        })
+                        }
+                        restore = _restore_replaced()
+                        if restore is not None:
+                            out_row["replace_restore"] = restore
+                        per_row.append(out_row)
 
         if task is not None:
             with _SUBMIT_LOCK:
@@ -1083,8 +1180,10 @@ def submit_rows(processed: list[dict], task: dict | None = None,
                 task["success"] = success
                 task["failed"] = failed
                 task["skipped"] = skipped
+                task["warnings"] = warnings
 
-    return {"success": success, "failed": failed, "per_row": per_row}
+    return {"success": success, "failed": failed, "skipped": skipped,
+            "warnings": warnings, "per_row": per_row}
 
 
 # ---------------------------------------------------------------------------
@@ -1122,7 +1221,7 @@ def start_submit(processed: list[dict], label: str, input_method: str,
         return bool(
             replace_existing
             and p.get("existing_id")
-            and p.get("skip_reason") == "source has existing rule"
+            and p.get("skip_reason") == SKIP_REASON_EXISTING
         )
     preflight = {
         "stats": {
@@ -1145,6 +1244,7 @@ def start_submit(processed: list[dict], label: str, input_method: str,
         "success": 0,
         "failed": 0,
         "skipped": 0,
+        "warnings": 0,
         "stats": preflight["stats"],
     }
     with _SUBMIT_LOCK:
@@ -1162,6 +1262,8 @@ def start_submit(processed: list[dict], label: str, input_method: str,
                     "run_id": run_id,
                     "success": result["success"],
                     "failed": result["failed"],
+                    "skipped": result["skipped"],
+                    "warnings": result["warnings"],
                     "stats": preflight["stats"],
                 }
         except Exception as exc:
@@ -1208,6 +1310,9 @@ def save_run(label: str, input_method: str, preflight: dict, result: dict) -> in
         new_id = cur.fetchone()["id"]
         conn.commit()
         return new_id
+    except Exception:
+        conn.rollback()  # don't return an aborted transaction to the pool
+        raise
     finally:
         return_db_connection(conn)
 
@@ -1227,6 +1332,7 @@ def list_runs(limit: int = 100) -> list[dict]:
             r["created_at"] = r["created_at"].isoformat()
         return rows
     finally:
+        conn.rollback()  # end the read transaction (avoid idle-in-transaction)
         return_db_connection(conn)
 
 
@@ -1245,6 +1351,7 @@ def get_run(run_id: int) -> dict | None:
             row["created_at"] = row["created_at"].isoformat()
         return row
     finally:
+        conn.rollback()  # end the read transaction (avoid idle-in-transaction)
         return_db_connection(conn)
 
 
@@ -1256,5 +1363,8 @@ def delete_run(run_id: int) -> bool:
         deleted = cur.rowcount
         conn.commit()
         return deleted > 0
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         return_db_connection(conn)
