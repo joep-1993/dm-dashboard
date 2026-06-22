@@ -16,14 +16,26 @@ so the appended facet bypasses the cache-backed facet_url_exists check that
 would otherwise reject an un-enumerated facet. Results are memoised per worker;
 for large batches a prefetch (cf. facet_probe.py) would avoid the live calls.
 """
+import json
 import re
+import sqlite3
 import urllib.parse
-from functools import lru_cache
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import requests
 
 from src.db_loader import SEARCH_BASE_URL, SEARCH_LOCALE, DataLoader, HTTP_TIMEOUT
+from src.search_derived import _is_fresh  # 7-day TTL freshness (CACHE_TTL_DAYS)
+
+# Persistent probe cache. A SEPARATE sqlite file (not the shared
+# search_derived.sqlite) so enabling WAL here can't change the journal mode the
+# search_derived / facet_probe caches run under. Bump COMBO_SCHEMA_VERSION to
+# invalidate all cached picks after a selection-logic change.
+_COMBO_DB_PATH = Path(__file__).parent.parent / "data" / "cache" / "color_combo.sqlite"
+COMBO_SCHEMA_VERSION = 1
+_MISS = object()  # sentinel: key absent/stale (distinct from a cached "no combo")
 
 # Base colour vocabulary = the common `kleur` facet value names (lowercased).
 # Only used to detect colour TOKENS in the keyword; the value-name match below
@@ -71,27 +83,87 @@ def _subcat_slug(url: str) -> str:
     return parts[1] if len(parts) >= 2 else ""
 
 
-@lru_cache(maxsize=8192)
-def _probe_combo(subcat_slug: str, kleur_id: str, colors_key: frozenset):
-    """Probe the Search API with kleur=<kleur_id> applied; return
+def _connect(readonly: bool = False) -> sqlite3.Connection:
+    if readonly:
+        return sqlite3.connect(f"file:{_COMBO_DB_PATH}?mode=ro", uri=True, timeout=5)
+    conn = sqlite3.connect(_COMBO_DB_PATH, timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")  # safe concurrent reads + worker writes
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS color_combo_cache (
+            subcat_slug TEXT NOT NULL,
+            kleur_id    TEXT NOT NULL,
+            colors_key  TEXT NOT NULL,
+            payload     TEXT NOT NULL,
+            fetched_at  TEXT NOT NULL,
+            combo_schema INTEGER NOT NULL,
+            PRIMARY KEY (subcat_slug, kleur_id, colors_key)
+        )
+        """
+    )
+    return conn
+
+
+def _combo_get(subcat_slug: str, kleur_id: str, colors_key: str):
+    """Return the cached payload dict, or _MISS when absent/stale/old-schema."""
+    if not _COMBO_DB_PATH.exists():
+        return _MISS
+    try:
+        c = _connect(readonly=True)
+    except sqlite3.OperationalError:
+        return _MISS
+    try:
+        row = c.execute(
+            "SELECT payload, fetched_at, combo_schema FROM color_combo_cache "
+            "WHERE subcat_slug=? AND kleur_id=? AND colors_key=?",
+            (subcat_slug, kleur_id, colors_key),
+        ).fetchone()
+        if not row or row[2] != COMBO_SCHEMA_VERSION or not _is_fresh(row[1]):
+            return _MISS
+        return json.loads(row[0])
+    except (sqlite3.OperationalError, ValueError):
+        return _MISS
+    finally:
+        c.close()
+
+
+def _combo_put(subcat_slug: str, kleur_id: str, colors_key: str, payload: dict) -> None:
+    try:
+        c = _connect(readonly=False)
+    except sqlite3.OperationalError:
+        return
+    try:
+        c.execute(
+            "INSERT OR REPLACE INTO color_combo_cache "
+            "(subcat_slug, kleur_id, colors_key, payload, fetched_at, combo_schema) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (subcat_slug, kleur_id, colors_key, json.dumps(payload),
+             datetime.now(timezone.utc).isoformat(), COMBO_SCHEMA_VERSION),
+        )
+        c.commit()
+    except sqlite3.OperationalError:
+        pass  # another worker is writing; the miss just re-probes next time
+    finally:
+        c.close()
+
+
+def _live_probe(subcat_slug: str, kleur_id: str, want: set):
+    """One Search API call with kleur=<kleur_id> applied; return
     (facet_name, value_id, value_name) of a kleurcombinaties_* value whose name
-    covers every colour in colors_key, or None."""
-    if not subcat_slug or not kleur_id:
-        return None
+    covers every colour in `want`, or None."""
     params = {
         'category': subcat_slug,
         'countryLanguage': SEARCH_LOCALE,
         'isBot': 'true',
         'limit': '1',
         'trackTotalHits': 'true',
-        f'filters[kleur][0]': str(kleur_id),
+        'filters[kleur][0]': str(kleur_id),
     }
     url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
     try:
         data = requests.get(url, timeout=HTTP_TIMEOUT).json()
     except Exception:
         return None
-    want = set(colors_key)
     meta = _facet_meta()
     for f in (data.get('facets') or []):
         name = (meta.get(f.get('id')) or '').lower()
@@ -103,6 +175,27 @@ def _probe_combo(subcat_slug: str, kleur_id: str, colors_key: frozenset):
             if want and want <= vcolors and (v.get('count') or 0) >= 1:
                 return (meta.get(f.get('id')), v.get('id'), v.get('facetValue'))
     return None
+
+
+def _probe_combo(subcat_slug: str, kleur_id: str, colors):
+    """Cache-first lookup of the matching kleurcombinaties_* value. Reads the
+    persistent sqlite cache (incl. a negative 'no combo' result); on a miss it
+    live-probes once and writes the outcome back. Returns
+    (facet_name, value_id, value_name) or None."""
+    if not subcat_slug or not kleur_id:
+        return None
+    cols = sorted(set(colors))
+    colors_key = "+".join(cols)
+    if not colors_key:
+        return None
+    cached = _combo_get(subcat_slug, str(kleur_id), colors_key)
+    if cached is not _MISS:
+        combo = cached.get("combo")
+        return tuple(combo) if combo else None
+    result = _live_probe(subcat_slug, str(kleur_id), set(cols))
+    _combo_put(subcat_slug, str(kleur_id), colors_key,
+               {"combo": list(result)} if result else {"no_combo": True})
+    return result
 
 
 def enrich(redirect_url: str, keyword: str):

@@ -88,6 +88,10 @@ GATED_SUBCATEGORIES = {
         'band', 'bandje', 'bandjes', 'horlogeband', 'horlogebandje',
         'horlogebandjes', 'strap', 'polsband',
     }),
+    'horloge_6993675': frozenset({  # Horloge-onderdelen (watch parts)
+        'onderdeel', 'onderdelen', 'reparatie', 'reparatieset', 'uurwerk',
+        'gereedschap', 'batterij', 'batterijen', 'horlogeglas', 'part', 'parts',
+    }),
 }
 
 
