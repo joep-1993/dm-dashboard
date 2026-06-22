@@ -2391,14 +2391,16 @@ def _v3_fix_adverb_before_infinitive(text: str) -> str:
         return text
     def _repl(m):
         adv, gap, verb = m.group(1), m.group(2), m.group(3)
-        base = (adv[:-2] + 'os').lower()  # "...loze" -> "...loos"
+        base = (adv[:-2] + 'os').lower()  # "...loze"/"...loos" -> "...loos"
         # Adverb, never a proper noun: capitalised only when title-initial,
         # lowercase mid-title (matches the existing correct "draadloos opladen").
         if m.start() == 0:
             base = base[:1].upper() + base[1:]
         return base + gap + verb
+    # Matches both the wrongly-inflected "-loze" and a mid-title capitalised
+    # "-loos" form, normalising both to the correct uninflected lowercase.
     return re.sub(
-        r'\b(\w+loze)(\s+)(' + '|'.join(_V3_FEATURE_INFINITIVES) + r')\b',
+        r'\b(\w+lo(?:ze|os))(\s+)(' + '|'.join(_V3_FEATURE_INFINITIVES) + r')\b',
         _repl, text, flags=re.IGNORECASE)
 
 
