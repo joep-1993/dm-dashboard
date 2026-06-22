@@ -2090,6 +2090,20 @@ Titel: "{composed_h1}"
 Geef ALLEEN de gepolijste titel terug, geen uitleg."""
 
 
+def _v3_capitalize_first(s: str) -> str:
+    """Uppercase the first character, EXCEPT when the first word is an
+    intentional mixed-case brand (iPhone, iPad, eBay) — detected by an
+    uppercase letter elsewhere in that first token. Stops "iPhone 12" from
+    becoming "IPhone 12" when a feature moves off the front of the title.
+    """
+    if not s or not s[0].islower():
+        return s
+    first = s.split(' ', 1)[0]
+    if any(c.isupper() for c in first[1:]):
+        return s
+    return s[0].upper() + s[1:]
+
+
 def _build_v3_h1(selected_facets: list, category_name: str,
                  noun_facet_ids: Optional[set] = None) -> str:
     """Compose an H1 from the facets without using Beslist's api_h1 or the AI.
@@ -2316,8 +2330,7 @@ def _build_v3_h1(selected_facets: list, category_name: str,
     # Lowercase standalone "Met"/"Zonder" when not the first word — Dutch
     # connector words inside an H1 read better lowercase.
     h1 = re.sub(r'(?<=\S)\s+(Met|Zonder)\b', lambda m: ' ' + m.group(1).lower(), h1)
-    if h1 and h1[0].islower():
-        h1 = h1[0].upper() + h1[1:]
+    h1 = _v3_capitalize_first(h1)
     return h1
 
 
@@ -2642,8 +2655,7 @@ def generate_title_v3(url: str, polish: bool = True) -> Optional[Dict]:
     # Ensure first character is uppercase (composed builder already does
     # this; case-restoration may revert it if first token was lowercase
     # in the composed source — uncommon).
-    if polished and polished[0].islower():
-        polished = polished[0].upper() + polished[1:]
+    polished = _v3_capitalize_first(polished)
 
     return {
         "h1_title": polished,
