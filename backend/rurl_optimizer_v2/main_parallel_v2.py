@@ -1639,11 +1639,21 @@ def process_url_v2(args):
             maincat_facets = facet_filter.get_facet_values(maincat_facets_df)
             if maincat_facets:
                 if multi_facet or ' ' in parsed.keyword:
-                    match_results = matcher.match_multi_word(
-                        parsed.keyword, maincat_facets,
-                        all_type_facets=None, require_type_for_merk=True,
-                        current_main_category=parsed.main_category
-                    )
+                    # V42: the maincat-WIDE pass assembles facets across every
+                    # subcat of the main category; a facet-backed model number
+                    # ("RAL 9010" in kc_verf) disrupts that cross-subcat
+                    # assembly (drops the colour facet, keeps only the brand).
+                    # Model/series-number awareness is a subcat-scoped feature
+                    # (productline pages), so switch it off here.
+                    matcher.number_aware = False
+                    try:
+                        match_results = matcher.match_multi_word(
+                            parsed.keyword, maincat_facets,
+                            all_type_facets=None, require_type_for_merk=True,
+                            current_main_category=parsed.main_category
+                        )
+                    finally:
+                        matcher.number_aware = True
                     if match_results and not _maincat_match_is_generic_only(match_results):
                         result = builder.build_multi_facet(parsed, match_results)
                         result.reason = f"[maincat] " + result.reason

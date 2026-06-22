@@ -174,6 +174,12 @@ class KeywordMatcher:
         self.fuzzy_threshold = fuzzy_threshold or config.FUZZY_THRESHOLD
         self.strict_winkel = strict_winkel
         self.use_token_coverage = use_token_coverage
+        # V42: when False, the token-coverage scorer ignores model/series numbers
+        # (reverts to the pre-V42 alpha-only tokenizer). Toggled off around the
+        # maincat-WIDE assembly pass, where a facet-backed number ("RAL 9010")
+        # disrupts cross-subcat facet assembly; left on for subcat-scoped
+        # matching where the productline use-case lives ("philips 7000").
+        self.number_aware = True
 
     def _get_threshold_for_facet(self, facet_name: str) -> int:
         """Get the matching threshold for a specific facet type."""
@@ -387,17 +393,66 @@ class KeywordMatcher:
             matched_text=''
         )
 
-    def _coverage_tokens(self, text: str) -> list[str]:
+    def _coverage_tokens(self, text: str, number_filter="none") -> list[str]:
         """V29: tokenize for token-coverage matching. Lowercase, strip
         punctuation, drop stopwords + shops, drop tokens shorter than 3.
+
+        Alphabetic extraction is byte-identical to the original [a-zÀ-ž]+
+        tokenizer (mixed tokens still yield only their word part: "a4papier"
+        -> "papier"; 1-2 char fragments drop).
+
+        V42 (2026-06-22) — standalone model/series numbers. The old tokenizer
+        stripped every digit, so a productline facet whose distinguishing token
+        IS a number ("Philips 7000 series") tokenized to ["philips","series"]
+        and could never out-cover the bare brand facet "Philips" (keyword
+        "philips 7000" → merk~Philips, never productlijn_scheren). A standalone
+        PURE digit run of length >= 4 is now retainable. `number_filter` decides
+        which numbers survive:
+          - "none"  (default): NO numbers — exactly the pre-V42 behaviour. Used
+            by every caller that lacks facet context (brand_match_is_spurious,
+            the leftover-axis collector), so those paths stay byte-identical.
+          - "all"   : every pure >=4-digit run. Used to tokenize a FACET VALUE,
+            which is the source of truth for its own number ("Philips 7000
+            series" -> [...,"7000"]).
+          - a set   : only numbers in the set. Used for the KEYWORD inside
+            match_by_token_coverage, passing the set of numbers that actually
+            occur in the candidate facet values. A query number with no backing
+            facet value (RAL code "9010", set number "70413", model "venus
+            2000") is therefore dropped and the row reverts to baseline — this
+            is what kept the broad variant's 90 size/code regressions at 0.
+        1-3 digit sizes ("30","240","933"), dimensions ("100x100"), unit-glued
+        tokens ("74ah","12v","1tb") and letter-glued tails ("3010s") are never
+        emitted as numbers regardless of filter. The RC1 _numeric_signature
+        guard still protects numeric siblings on top of this.
         """
         if not text:
             return []
         import re as _re
-        toks = _re.findall(r"[a-zÀ-ž]+", text.lower())
-        return [t for t in toks if len(t) >= 3
-                and t not in STOPWORDS
-                and t not in SHOP_NAMES]
+        keep_all = number_filter == "all"
+        allowed = number_filter if isinstance(number_filter, (set, frozenset)) else None
+        out: list[str] = []
+        for run in _re.findall(r"[a-zÀ-ž0-9]+", text.lower()):
+            if run.isdigit():
+                if len(run) >= 4 and (keep_all or (allowed is not None and run in allowed)):
+                    out.append(run)
+            else:
+                for sub in _re.findall(r"[a-zÀ-ž]+", run):
+                    if len(sub) >= 3 and sub not in STOPWORDS and sub not in SHOP_NAMES:
+                        out.append(sub)
+        return out
+
+    def _facet_value_numbers(self, facet_values) -> frozenset:
+        """V42: the set of standalone >=4-digit numbers occurring in any of the
+        candidate facet value names. Used to gate which keyword numbers count in
+        match_by_token_coverage — a query number only matters when a real facet
+        value carries it."""
+        import re as _re
+        nums = set()
+        for fv in facet_values:
+            for run in _re.findall(r"[a-zÀ-ž0-9]+", (fv.facet_value_name or "").lower()):
+                if run.isdigit() and len(run) >= 4:
+                    nums.add(run)
+        return frozenset(nums)
 
     def _tokens_equal_strict(self, t1: str, t2: str) -> bool:
         """Like _tokens_equal_modulo_morphology but WITHOUT the loose fuzz.ratio
@@ -463,7 +518,13 @@ class KeywordMatcher:
           - Vaste telefoon:    matched=1 / cov= 50% / spec= 50% →  50
         ⇒ Senioren telefoon wins, as expected.
         """
-        kw_tokens = self._coverage_tokens(keyword)
+        # V42: gate keyword numbers on the numbers that actually occur in the
+        # candidate facet values, so an unbacked code/size number can't inflate
+        # the token set and steal/sink a match (see _coverage_tokens). Disabled
+        # (alpha-only, baseline) when number_aware is off.
+        fv_numbers = self._facet_value_numbers(facet_values) if self.number_aware else frozenset()
+        fv_number_filter = "all" if self.number_aware else "none"
+        kw_tokens = self._coverage_tokens(keyword, fv_numbers)
         if not kw_tokens:
             return MatchResult(keyword=keyword, facet_value=None,
                                match_type='none', score=0, matched_text='')
@@ -474,7 +535,7 @@ class KeywordMatcher:
 
         best = None  # (matched_kw, score, count, fv)
         for fv in facet_values:
-            fv_tokens = self._coverage_tokens(fv.facet_value_name)
+            fv_tokens = self._coverage_tokens(fv.facet_value_name, fv_number_filter)
             if not fv_tokens:
                 continue
 
@@ -600,8 +661,10 @@ class KeywordMatcher:
         degenerates to a simple "this token in facet" check there, where
         the existing partial-ratio logic is still better).
         """
+        _gate_numbers = (self._facet_value_numbers(facet_values)
+                         if self.number_aware else frozenset())
         if (self.use_token_coverage
-                and len(self._coverage_tokens(keyword)) >= 2):
+                and len(self._coverage_tokens(keyword, _gate_numbers)) >= 2):
             tc = self.match_by_token_coverage(keyword, facet_values,
                                               exclude_winkel=exclude_winkel)
             if tc.is_match:
