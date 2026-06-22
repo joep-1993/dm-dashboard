@@ -13,10 +13,16 @@ Transformation types:
 - REMOVEBUCKET: Remove bucket from URL
 """
 
+import json
 import re
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
-from backend.database import get_redshift_connection, return_redshift_connection
+from backend.database import (
+    get_redshift_connection,
+    return_redshift_connection,
+    get_db_connection,
+    return_db_connection,
+)
 
 
 @dataclass
@@ -653,3 +659,101 @@ def parse_rules_from_json(data: dict) -> TransformationRules:
         bucket_bucket=[BucketRule(**r) for r in data.get("bucket_bucket", []) if r.get("old_bucket")],
         remove_bucket=[RemoveBucketRule(**r) for r in data.get("remove_bucket", []) if r.get("bucket")]
     )
+
+
+# =============================================================================
+# Run persistence — saved canonical generations survive page refreshes
+# (mirrors the Redirect tool's run history; lazy CREATE TABLE so no migration
+#  or backend restart is needed to start saving).
+# =============================================================================
+
+def _ensure_canonical_runs_table() -> None:
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS canonical_runs (
+                id SERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                label TEXT,
+                total INTEGER NOT NULL DEFAULT 0,
+                changed INTEGER NOT NULL DEFAULT 0,
+                rules JSONB,
+                results JSONB
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        return_db_connection(conn)
+
+
+def save_canonical_run(label: Optional[str], rules: dict, results: List[Dict],
+                       total: int) -> int:
+    """Persist one canonical generation. `results` is the list of changed
+    {original, canonical} pairs; `total` is the count of URLs processed."""
+    _ensure_canonical_runs_table()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO canonical_runs (label, total, changed, rules, results)
+               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+            (label or None, total, len(results),
+             json.dumps(rules), json.dumps(results)),
+        )
+        new_id = cur.fetchone()["id"]
+        conn.commit()
+        return new_id
+    finally:
+        return_db_connection(conn)
+
+
+def list_canonical_runs(limit: int = 100) -> List[Dict]:
+    _ensure_canonical_runs_table()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT id, created_at, label, total, changed
+               FROM canonical_runs ORDER BY created_at DESC LIMIT %s""",
+            (limit,),
+        )
+        rows = cur.fetchall()
+        for r in rows:
+            r["created_at"] = r["created_at"].isoformat()
+        return rows
+    finally:
+        return_db_connection(conn)
+
+
+def get_canonical_run(run_id: int) -> Optional[Dict]:
+    _ensure_canonical_runs_table()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT id, created_at, label, total, changed, rules, results
+               FROM canonical_runs WHERE id = %s""",
+            (run_id,),
+        )
+        row = cur.fetchone()
+        if row:
+            row["created_at"] = row["created_at"].isoformat()
+        return row
+    finally:
+        return_db_connection(conn)
+
+
+def delete_canonical_run(run_id: int) -> bool:
+    _ensure_canonical_runs_table()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM canonical_runs WHERE id = %s", (run_id,))
+        deleted = cur.rowcount
+        conn.commit()
+        return deleted > 0
+    finally:
+        return_db_connection(conn)

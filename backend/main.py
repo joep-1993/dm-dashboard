@@ -3220,7 +3220,11 @@ from backend.canonical_service import (
     fetch_urls_for_rules,
     generate_canonicals,
     parse_rules_from_json,
-    TransformationRules
+    TransformationRules,
+    save_canonical_run,
+    list_canonical_runs,
+    get_canonical_run,
+    delete_canonical_run,
 )
 from pydantic import BaseModel
 from typing import List, Optional
@@ -3238,6 +3242,12 @@ class CanonicalRulesRequest(BaseModel):
     end_date: str = "20261231"
     fetch_from_redshift: bool = True
     manual_urls: List[str] = []
+    label: str = ""
+
+
+class CanonicalExportRequest(BaseModel):
+    """Request model for exporting canonical results to Excel."""
+    results: List[dict] = []
 
 
 @app.post("/api/canonical/generate")
@@ -3272,15 +3282,74 @@ async def generate_canonical_urls(request: CanonicalRulesRequest):
         # Filter to only include URLs that actually changed
         changed_results = [r for r in results if r["original"] != r["canonical"]]
 
+        # Persist the run so it survives page refreshes. A failed save must not
+        # break generation — the results are still returned either way.
+        run_id = None
+        if changed_results:
+            try:
+                run_id = save_canonical_run(
+                    request.label, request.dict(), changed_results, len(results)
+                )
+            except Exception as save_err:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Failed to save canonical run: %s", save_err
+                )
+
         return {
             "status": "success",
             "total": len(results),
             "changed": len(changed_results),
-            "results": changed_results
+            "results": changed_results,
+            "run_id": run_id,
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/canonical/export-excel")
+async def export_canonical_excel(request: CanonicalExportRequest):
+    """Stream the canonical results as a real .xlsx file."""
+    import pandas as pd
+
+    rows = [
+        {"original_url": r.get("original", ""), "canonical_url": r.get("canonical", "")}
+        for r in request.results
+    ]
+    df = pd.DataFrame(rows, columns=["original_url", "canonical_url"])
+    buf = BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    buf.seek(0)
+    fname = f"canonical_urls_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
+@app.get("/api/canonical/runs")
+async def list_canonical_runs_endpoint(limit: int = 100):
+    """List saved canonical runs (most recent first)."""
+    return {"runs": list_canonical_runs(limit)}
+
+
+@app.get("/api/canonical/runs/{run_id}")
+async def get_canonical_run_endpoint(run_id: int):
+    """Fetch one saved canonical run, including its rules and result pairs."""
+    run = get_canonical_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+@app.delete("/api/canonical/runs/{run_id}")
+async def delete_canonical_run_endpoint(run_id: int):
+    """Delete a saved canonical run."""
+    if not delete_canonical_run(run_id):
+        raise HTTPException(status_code=404, detail="Run not found")
+    return {"deleted": run_id}
 
 
 @app.post("/api/canonical/preview")

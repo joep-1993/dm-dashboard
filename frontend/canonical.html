@@ -22,6 +22,9 @@
         .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
         .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+        .btn-purple { background-color: #5e4a90; border-color: #5e4a90; color: #fff; }
+        .btn-purple:hover { background-color: #4a3a73; border-color: #4a3a73; color: #fff; }
+        #canonPushBtn:disabled { opacity: 0.65; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -125,7 +128,7 @@
                                     </div>
                                     <!-- Rules will be added here -->
                                 </div>
-                                <button class="btn btn-sm btn-warning" onclick="addCatCatRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-purple" onclick="addCatCatRule()">+ Add Rule</button>
                             </div>
 
                             <!-- FACET-FACET: Replace facet with another -->
@@ -138,7 +141,7 @@
                                         <div class="col-3"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-warning" onclick="addFacetFacetRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-purple" onclick="addFacetFacetRule()">+ Add Rule</button>
                             </div>
 
                             <!-- CAT+FACET (keep): Change category for faceted URLs (keep facet) -->
@@ -151,7 +154,7 @@
                                         <div class="col-3"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-warning" onclick="addCatFacetRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-purple" onclick="addCatFacetRule()">+ Add Rule</button>
                             </div>
 
                             <!-- CAT+FACET (remove): Change category and remove facet -->
@@ -164,7 +167,7 @@
                                         <div class="col-3"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-warning" onclick="addCatFacetRemoveRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-purple" onclick="addCatFacetRemoveRule()">+ Add Rule</button>
                             </div>
 
                             <!-- BUCKET: Replace or remove bucket -->
@@ -177,7 +180,7 @@
                                         <div class="col-5"><small class="text-muted">New Bucket</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-warning mb-3" onclick="addBucketBucketRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-purple mb-3" onclick="addBucketBucketRule()">+ Add Rule</button>
 
                                 <h6>Remove Bucket</h6>
                                 <div class="rule-section" id="removeBucketRules">
@@ -186,7 +189,7 @@
                                         <div class="col-5"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-warning" onclick="addRemoveBucketRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-purple" onclick="addRemoveBucketRule()">+ Add Rule</button>
                             </div>
                         </div>
 
@@ -199,9 +202,9 @@
                         </div>
 
                         <!-- Actions -->
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-primary btn-sm" onclick="generateCanonicals()">Generate Canonicals</button>
+                        <div class="d-flex gap-2 justify-content-end">
                             <button class="btn btn-outline-secondary btn-sm" onclick="previewUrls()">Preview URLs</button>
+                            <button class="btn btn-secondary btn-sm" onclick="generateCanonicals()">Generate Canonicals</button>
                         </div>
                     </div>
                 </div>
@@ -213,7 +216,7 @@
                         <div>
                             <span id="resultCount" class="badge bg-light text-dark me-2">0 URLs</span>
                             <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyAllToClipboard()">Copy for Excel</button>
-                            <button class="btn btn-sm btn-outline-warning" onclick="downloadResults()">Download CSV</button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="downloadResults()">Download Excel</button>
                         </div>
                     </div>
                     <div class="card-body">
@@ -226,6 +229,19 @@
 
                         <div id="resultsContainer">
                             <p class="text-muted text-center">Enter transformation rules and click "Generate Canonicals" to see results.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Saved Runs -->
+                <div class="card mb-4">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Recent results</h5>
+                        <button class="btn btn-sm" style="border: 1px solid #8b7bb5; color: #c3b6dd;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#c3b6dd'" onclick="loadCanonicalRuns()">↻ Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <div id="canonRunsContainer">
+                            <p class="text-muted text-center mb-0">Loading saved runs…</p>
                         </div>
                     </div>
                 </div>
@@ -251,6 +267,20 @@
         <small>Digital Marketing tools by Joep van Schagen - 2026</small>
     </footer>
 
+    <!-- Push-to-Redirect-tool modal -->
+    <div class="modal fade" id="pushModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">Push canonicals to production</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="pushModalBody"></div>
+                <div class="modal-footer" id="pushModalFooter"></div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Store results for download
@@ -264,6 +294,7 @@
             addCatFacetRemoveRule();
             addBucketBucketRule();
             addRemoveBucketRule();
+            loadCanonicalRuns();
         });
 
         function addCatCatRule() {
@@ -429,6 +460,8 @@
                     resultsContainer.innerHTML = '<p class="text-muted text-center">No URLs were changed by the transformation rules.</p>';
                 } else {
                     renderResults(currentResults);
+                    // A run was saved server-side — refresh the Saved Runs list.
+                    loadCanonicalRuns();
                 }
 
             } catch (error) {
@@ -534,17 +567,42 @@
             const container = document.getElementById('resultsContainer');
 
             container.innerHTML = `
+                <div class="canon-toolbar d-flex flex-wrap gap-2 align-items-center mb-2">
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="canonSelectAll" title="Select all" onchange="toggleSelectAllVisible(this)">
+                    </div>
+                    <div class="input-group input-group-sm" style="max-width: 300px;">
+                        <span class="input-group-text">Filter</span>
+                        <input type="text" id="canonFilter" class="form-control" placeholder="filter by URL part…" oninput="applyCanonFilter()">
+                        <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('canonFilter').value='';applyCanonFilter()">×</button>
+                    </div>
+                    <div class="input-group input-group-sm" style="max-width: 165px;">
+                        <span class="input-group-text">Status code</span>
+                        <select id="canonStatusCode" class="form-select">
+                            <option value="200" selected>200</option>
+                            <option value="301">301</option>
+                            <option value="302">302</option>
+                        </select>
+                    </div>
+                    <div class="input-group input-group-sm" style="max-width: 185px;">
+                        <span class="input-group-text">Country</span>
+                        <input type="text" id="canonCountry" class="form-control" value="nl,be">
+                    </div>
+                    <span id="canonSelCount" class="badge ms-auto" style="background-color: #8b7bb5;">0 selected</span>
+                </div>
                 <div class="results-table">
                     <table class="table table-sm table-striped">
                         <thead>
                             <tr>
-                                <th style="width: 50%">Original URL</th>
-                                <th style="width: 50%">Canonical URL</th>
+                                <th style="width: 34px"></th>
+                                <th style="width: 48%">Original URL</th>
+                                <th style="width: 48%">Canonical URL</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            ${results.map(r => `
-                                <tr class="changed">
+                        <tbody id="canonResultsBody">
+                            ${results.map((r, i) => `
+                                <tr class="changed canon-row" data-idx="${i}">
+                                    <td><input type="checkbox" class="canon-select form-check-input" data-idx="${i}" onchange="updateCanonSelectionCount()"></td>
                                     <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtmlAttr(r.original)}', this)">${escapeHtml(r.original)}</td>
                                     <td class="url-cell copyable" onclick="copyToClipboard('${escapeHtmlAttr(r.canonical)}', this)">${escapeHtml(r.canonical)}</td>
                                 </tr>
@@ -552,7 +610,252 @@
                         </tbody>
                     </table>
                 </div>
+                <div class="d-flex justify-content-end mt-4">
+                    <button id="canonPushBtn" class="btn btn-secondary btn-sm" onclick="pushSelectedToRedirect()" disabled>Push</button>
+                </div>
             `;
+            applyCanonFilter();
+            updateCanonSelectionCount();
+        }
+
+        // ---- Selection + filter (push-to-Redirect-tool) -------------------
+        const REDIRECT_API = '/api/redirect-tool';
+        let _canonPreflight = null;
+
+        function applyCanonFilter() {
+            const term = (document.getElementById('canonFilter')?.value || '').trim().toLowerCase();
+            const rows = document.querySelectorAll('#canonResultsBody tr.canon-row');
+            rows.forEach(tr => {
+                const r = currentResults[+tr.dataset.idx] || {};
+                const hay = ((r.original || '') + ' ' + (r.canonical || '')).toLowerCase();
+                const match = !term || hay.includes(term);
+                tr.style.display = match ? '' : 'none';
+            });
+            syncSelectAllState();
+        }
+
+        function toggleSelectAllVisible(cb) {
+            document.querySelectorAll('#canonResultsBody tr.canon-row').forEach(tr => {
+                if (tr.style.display === 'none') return;
+                const box = tr.querySelector('.canon-select');
+                if (box) box.checked = cb.checked;
+            });
+            updateCanonSelectionCount();
+        }
+
+        function syncSelectAllState() {
+            const sa = document.getElementById('canonSelectAll');
+            if (!sa) return;
+            const boxes = [...document.querySelectorAll('#canonResultsBody tr.canon-row')]
+                .filter(tr => tr.style.display !== 'none')
+                .map(tr => tr.querySelector('.canon-select'))
+                .filter(Boolean);
+            const checked = boxes.filter(b => b.checked).length;
+            sa.checked = boxes.length > 0 && checked === boxes.length;
+            sa.indeterminate = checked > 0 && checked < boxes.length;
+        }
+
+        function getSelectedCanonPairs() {
+            return [...document.querySelectorAll('#canonResultsBody .canon-select:checked')]
+                .map(b => currentResults[+b.dataset.idx])
+                .filter(Boolean);
+        }
+
+        function updateCanonSelectionCount() {
+            const n = document.querySelectorAll('#canonResultsBody .canon-select:checked').length;
+            const cnt = document.getElementById('canonSelCount');
+            if (cnt) cnt.textContent = `${n} selected`;
+            const btn = document.getElementById('canonPushBtn');
+            if (btn) btn.disabled = n === 0;
+            syncSelectAllState();
+        }
+
+        const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+        async function pushSelectedToRedirect() {
+            const pairs = getSelectedCanonPairs();
+            if (!pairs.length) { alert('No canonicals selected'); return; }
+            const statuscode = document.getElementById('canonStatusCode').value || '200';
+            const country = (document.getElementById('canonCountry').value || 'nl,be').trim();
+            const label = `canonicals-${new Date().toISOString().split('T')[0]}`;
+            const rows = pairs.map(p => ({
+                old: p.original, new: p.canonical, statuscode, country, label,
+            }));
+
+            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('pushModal'));
+            const body = document.getElementById('pushModalBody');
+            const footer = document.getElementById('pushModalFooter');
+            footer.innerHTML = '';
+            body.innerHTML = `<p>Preflighting ${rows.length} redirect(s)…</p>
+                <div class="progress"><div id="pushProg" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
+            modal.show();
+
+            try {
+                const start = await fetch(`${REDIRECT_API}/preview`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rows }),
+                });
+                if (!start.ok) throw new Error((await start.json()).detail || 'Preview failed');
+                const { task_id } = await start.json();
+                let task = null;
+                while (true) {
+                    const s = await fetch(`${REDIRECT_API}/preview-status/${task_id}`);
+                    if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
+                    task = await s.json();
+                    const total = task.total || rows.length, done = task.processed || 0;
+                    document.getElementById('pushProg').style.width = Math.min(100, Math.round(done / total * 100)) + '%';
+                    if (task.status === 'completed' || task.status === 'failed') break;
+                    await _sleep(500);
+                }
+                if (task.status === 'failed') throw new Error(task.error || 'Preflight failed');
+                _canonPreflight = task.result;
+                const st = _canonPreflight.stats || {};
+                const skipped = (st.total || 0) - (st.submittable || 0);
+                body.innerHTML = `
+                    <p class="mb-2">Preflight complete:</p>
+                    <ul class="mb-3">
+                        <li><strong>${st.submittable || 0}</strong> ready to submit</li>
+                        <li>${st.flattened || 0} chain-flattened</li>
+                        <li>${st.skipped_home || 0} skipped (homepage)</li>
+                        <li>${skipped} total skipped / blocked</li>
+                    </ul>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="pushReplace">
+                        <label class="form-check-label" for="pushReplace">Overwrite existing redirects (replace_existing)</label>
+                    </div>
+                    ${st.submittable ? '' : '<div class="alert alert-warning mt-2 mb-0">Nothing submittable in this selection.</div>'}`;
+                footer.innerHTML = `
+                    <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button id="pushConfirmBtn" class="btn btn-danger" ${st.submittable ? '' : 'disabled'} onclick="confirmPushToRedirect('${label}')">Push ${st.submittable || 0} to production</button>`;
+            } catch (e) {
+                body.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;
+            }
+        }
+
+        async function confirmPushToRedirect(label) {
+            if (!_canonPreflight) return;
+            const replace = document.getElementById('pushReplace')?.checked || false;
+            const body = document.getElementById('pushModalBody');
+            const footer = document.getElementById('pushModalFooter');
+            footer.innerHTML = '';
+            body.innerHTML = `<p>Submitting to production…</p>
+                <div class="progress"><div id="pushProg2" class="progress-bar bg-danger" role="progressbar" style="width:0%"></div></div>`;
+            try {
+                const start = await fetch(`${REDIRECT_API}/submit`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        processed: _canonPreflight.processed, label,
+                        input_method: 'text', replace_existing: replace,
+                    }),
+                });
+                if (!start.ok) throw new Error((await start.json()).detail || 'Submit failed');
+                const { task_id } = await start.json();
+                let task = null;
+                while (true) {
+                    const s = await fetch(`${REDIRECT_API}/submit-status/${task_id}`);
+                    if (!s.ok) throw new Error((await s.json()).detail || 'Status poll failed');
+                    task = await s.json();
+                    const total = task.total || 1, done = task.processed || 0;
+                    document.getElementById('pushProg2').style.width = Math.min(100, Math.round(done / total * 100)) + '%';
+                    if (task.status === 'completed' || task.status === 'failed') break;
+                    await _sleep(500);
+                }
+                if (task.status === 'failed') throw new Error(task.error || 'Submit failed');
+                const res = task.result || {};
+                body.innerHTML = `<div class="alert alert-success mb-2">Done — ${res.success || 0} succeeded, ${res.failed || 0} failed.${res.run_id ? ` Run #${res.run_id}.` : ''}</div>
+                    <p class="small text-muted mb-0">See the Redirect tool → Recent Results for full per-row details.</p>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;
+            } catch (e) {
+                body.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
+                footer.innerHTML = `<button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>`;
+            }
+        }
+
+        // ---- Saved runs (persisted server-side, survive refresh) ----------
+        async function loadCanonicalRuns() {
+            const container = document.getElementById('canonRunsContainer');
+            if (!container) return;
+            try {
+                const resp = await fetch('/api/canonical/runs');
+                if (!resp.ok) throw new Error('Failed to load saved runs');
+                const data = await resp.json();
+                const runs = data.runs || [];
+                if (!runs.length) {
+                    container.innerHTML = '<p class="text-muted text-center mb-0">No results yet. Generate canonicals to create one.</p>';
+                    return;
+                }
+                container.innerHTML = `
+                    <div class="results-table">
+                        <table class="table table-sm table-striped mb-0 text-center" style="table-layout: fixed;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 16.66%">#</th>
+                                    <th style="width: 16.66%">Date</th>
+                                    <th style="width: 16.66%">Label</th>
+                                    <th style="width: 16.66%">Changed</th>
+                                    <th style="width: 16.66%">Total</th>
+                                    <th style="width: 16.66%"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${runs.map(r => `
+                                    <tr>
+                                        <td>${r.id}</td>
+                                        <td>${formatRunDate(r.created_at)}</td>
+                                        <td>${escapeHtml(r.label || '—')}</td>
+                                        <td>${r.changed}</td>
+                                        <td>${r.total}</td>
+                                        <td>
+                                            <button class="btn btn-sm" style="border: 1px solid #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="loadCanonicalRun(${r.id})">Load</button>
+                                            <button class="btn btn-sm" style="border: 1px solid #dc3545; color: #dc3545;" onmouseover="this.style.backgroundColor='#dc3545';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#dc3545'" onclick="deleteCanonicalRun(${r.id})">Delete</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } catch (e) {
+                container.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function formatRunDate(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            return isNaN(d) ? iso : d.toLocaleString();
+        }
+
+        async function loadCanonicalRun(runId) {
+            try {
+                const resp = await fetch(`/api/canonical/runs/${runId}`);
+                if (!resp.ok) throw new Error((await resp.json()).detail || 'Failed to load run');
+                const run = await resp.json();
+                currentResults = run.results || [];
+                document.getElementById('resultCount').textContent =
+                    `${run.changed} changed / ${run.total} total (run #${run.id})`;
+                const resultsContainer = document.getElementById('resultsContainer');
+                if (!currentResults.length) {
+                    resultsContainer.innerHTML = '<p class="text-muted text-center">This run has no changed URLs.</p>';
+                } else {
+                    renderResults(currentResults);
+                }
+                resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        async function deleteCanonicalRun(runId) {
+            if (!confirm(`Delete saved run #${runId}? This cannot be undone.`)) return;
+            try {
+                const resp = await fetch(`/api/canonical/runs/${runId}`, { method: 'DELETE' });
+                if (!resp.ok) throw new Error((await resp.json()).detail || 'Failed to delete run');
+                loadCanonicalRuns();
+            } catch (e) {
+                alert(e.message);
+            }
         }
 
         function copyToClipboard(text, element) {
@@ -583,20 +886,28 @@
             return text.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         }
 
-        function downloadResults() {
+        async function downloadResults() {
             if (currentResults.length === 0) {
                 alert('No results to download');
                 return;
             }
 
-            const csv = 'original_url;canonical_url\n' +
-                currentResults.map(r => `"${r.original}";"${r.canonical}"`).join('\n');
-
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `canonical_urls_${new Date().toISOString().split('T')[0]}.csv`;
-            link.click();
+            try {
+                const resp = await fetch('/api/canonical/export-excel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ results: currentResults }),
+                });
+                if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || 'Failed to generate Excel');
+                const blob = await resp.blob();
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `canonical_urls_${new Date().toISOString().split('T')[0]}.xlsx`;
+                link.click();
+                URL.revokeObjectURL(link.href);
+            } catch (e) {
+                alert(e.message);
+            }
         }
 
         function escapeHtml(text) {
