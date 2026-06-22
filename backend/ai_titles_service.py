@@ -361,13 +361,14 @@ def _facet_position_clause(selected_facets: list) -> str:
 
     ordered = _ordered_facet_values(selected_facets)
     # Split into pre-productnoun adjectives vs post-productnoun clauses.
-    # "Met …", "Zonder …", "Voor …", "Vanaf …" always read AFTER the
-    # productnoun; everything else is an adjective that must precede it.
+    # "Met …", "Zonder …", "Voor …", "Vanaf …", "Op …", "Aan …" always read
+    # AFTER the productnoun ("voederhuisjes op paal"); everything else is an
+    # adjective that must precede it.
     pre_noun: List[str] = []
     post_noun: List[str] = []
     for v in ordered:
         low = (v or "").lower()
-        if low.startswith(("met ", "zonder ", "voor ", "vanaf ")):
+        if low.startswith(("met ", "zonder ", "voor ", "vanaf ", "op ", "aan ")):
             post_noun.append(v)
         else:
             pre_noun.append(v)
@@ -2209,6 +2210,13 @@ def _build_v3_h1(selected_facets: list, category_name: str,
         low = sod.lower()
         if low.startswith('met ') or low.startswith('zonder '):
             met_clauses.append(sod); continue
+        # "op X" / "aan X" are prepositional phrases that read AFTER the
+        # productnoun, same as "met X" ("voederhuisjes op paal", "barbecue op
+        # gas", "lamp aan de muur"). Without this they fell into other_adj and
+        # were placed pre-noun ("Op paal voederhuisjes"). Lowercase the leading
+        # preposition since it now sits mid-title, not at the front.
+        if low.startswith('op ') or low.startswith('aan '):
+            met_clauses.append(sod[0].lower() + sod[1:]); continue
         if low.startswith('voor ') or low.startswith('vanaf '):
             voor_values.append(sod); continue
         other_adj.append((rule.get('order_index') or _FACET_ORDER_FALLBACK, sod))
