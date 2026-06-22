@@ -2083,6 +2083,7 @@ Regels:
 3. Zet niet-eigennamen NÁ het eerste woord in kleine letters; eigennamen, merken en afkortingen behouden hoofdletters (LED, RVS, USB, Apple, Samsung).
 4. Voeg GEEN woorden toe en verwijder GEEN woorden — ook geen "in", "van", "voor", "met".
 5. Verander de woordvolgorde NIET.
+6. Verbuig een bijwoord vóór een werkwoord/infinitief NIET: "draadloos opladen" blijft "draadloos opladen" (NIET "draadloze opladen").
 
 Titel: "{composed_h1}"
 
@@ -2369,6 +2370,36 @@ def _v3_restore_casing(composed: str, polished: str) -> str:
     return re.sub(r"[\w\-]+", _swap, polished)
 
 
+# Adverbs ending in -loos ("draadloos", "snoerloos", "naadloos") stay
+# UNINFLECTED before an infinitive verb: "draadloos opladen" (wireless
+# charging), not "draadloze opladen". The polish AI's adjective-inflection rule
+# wrongly turns "<x>loos" into "<x>loze" here. This set lists feature
+# infinitives that can follow such an adverb in a product title.
+_V3_FEATURE_INFINITIVES = {
+    'opladen', 'laden', 'scheren', 'koken', 'grillen', 'bakken', 'stomen',
+    'stofzuigen', 'dweilen', 'strijken', 'snijden', 'vouwen', 'draaien',
+}
+
+
+def _v3_fix_adverb_before_infinitive(text: str) -> str:
+    """Revert a wrongly-inflected -loos adverb that sits before an infinitive
+    feature verb: "draadloze opladen" -> "draadloos opladen". Only fires on the
+    inflected "-loze" form directly before a known infinitive, so attributive
+    uses ("draadloze oordopjes") are untouched. Preserves the leading casing.
+    """
+    if not text:
+        return text
+    def _repl(m):
+        adv, gap, verb = m.group(1), m.group(2), m.group(3)
+        base = adv[:-2] + 'os'  # "...loze" -> "...loos"
+        if adv[:1].isupper():
+            base = base[:1].upper() + base[1:]
+        return base + gap + verb
+    return re.sub(
+        r'\b(\w+loze)(\s+)(' + '|'.join(_V3_FEATURE_INFINITIVES) + r')\b',
+        _repl, text, flags=re.IGNORECASE)
+
+
 def _v3_preserves_content(composed: str, polished: str) -> bool:
     """Return True iff every meaningful token from `composed` still appears
     in `polished` (possibly agglutinated, case-insensitive). Used as a
@@ -2585,6 +2616,10 @@ def generate_title_v3(url: str, polish: bool = True) -> Optional[Dict]:
     # polish AI applied. Agglutinated tokens / inflected forms not in the
     # composed map keep the polish casing.
     polished = _v3_restore_casing(composed_h1, polished)
+
+    # Undo the polish AI's bad inflection of a -loos adverb before an infinitive
+    # ("draadloze opladen" -> "draadloos opladen").
+    polished = _v3_fix_adverb_before_infinitive(polished)
 
     # Cheap insurance — run the same dedup passes the v1 pipeline runs.
     polished = _strip_pre_clause_duplicates(polished)
