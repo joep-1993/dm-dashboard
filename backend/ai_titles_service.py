@@ -2423,6 +2423,43 @@ def _v3_fix_adverb_before_infinitive(text: str) -> str:
         _repl, text, flags=re.IGNORECASE)
 
 
+def _dutch_attributive_inflections(base: str) -> set:
+    """Plausible attributive ("-e") inflections of a Dutch adjective base.
+    klein->kleine, groot->grote (oo->o), rood->rode, hoog->hoge, lief->lieve
+    (f->v), grijs->grijze (s->z)."""
+    b = base.lower()
+    out = {b + 'e'}
+    m = re.match(r'^(.*?)(aa|oo|ee|uu)([bcdfghjklmnpqrstvwxz])$', b)
+    if m:                                   # long-vowel collapse
+        out.add(m.group(1) + m.group(2)[0] + m.group(3) + 'e')
+    if b.endswith('f'):
+        out.add(b[:-1] + 've')
+    if b.endswith('s'):
+        out.add(b[:-1] + 'ze')
+    return out
+
+
+def _v3_fix_trailing_adjective(composed: str, polished: str) -> str:
+    """A trailing adjective (the last word, predicative position) reads in its
+    base form: "iPhone 14 Klein", not "iPhone 14 Kleine". The deterministic
+    builder already emits the base form (raw facet value / de-inflected size),
+    but the polish AI inflects it (its rule 1 example is literally
+    "Klein -> Kleine"). When the polished final word is an attributive
+    inflection of the composed final word, restore the composed (base) form.
+    Reverts ONLY polish's own inflection, so it can't corrupt an intentionally-
+    inflected facet value.
+    """
+    if not composed or not polished:
+        return polished
+    cw = composed.split()[-1] if composed.split() else ''
+    head, _, last = polished.rpartition(' ')
+    if (len(cw) >= 3 and cw.isalpha()
+            and last.lower() != cw.lower()
+            and last.lower() in _dutch_attributive_inflections(cw)):
+        return (head + ' ' + cw) if head else cw
+    return polished
+
+
 def _v3_preserves_content(composed: str, polished: str) -> bool:
     """Return True iff every meaningful token from `composed` still appears
     in `polished` (possibly agglutinated, case-insensitive). Used as a
@@ -2643,6 +2680,10 @@ def generate_title_v3(url: str, polish: bool = True) -> Optional[Dict]:
     # Undo the polish AI's bad inflection of a -loos adverb before an infinitive
     # ("draadloze opladen" -> "draadloos opladen").
     polished = _v3_fix_adverb_before_infinitive(polished)
+
+    # Undo the polish AI inflecting a trailing predicative adjective
+    # ("iPhone 14 Kleine" -> "iPhone 14 Klein").
+    polished = _v3_fix_trailing_adjective(composed_h1, polished)
 
     # Cheap insurance — run the same dedup passes the v1 pipeline runs.
     polished = _strip_pre_clause_duplicates(polished)
