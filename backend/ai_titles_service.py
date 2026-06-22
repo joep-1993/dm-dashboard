@@ -2159,6 +2159,12 @@ def _build_v3_h1(selected_facets: list, category_name: str,
         # dier_dierenbenodigdheden).
         if _pos == 'end_before_size':
             end_before_size.append(sod); continue
+        # BTU rating facet: values are bare numbers ("12000"). Append the unit
+        # so the title reads "Airconditionings 12000 BTU" instead of a dangling
+        # "12000". Placed with the sizes at the end of the H1.
+        if url_slug == 'btu_units' or fname == 'btu units':
+            sizes.append(sod if 'btu' in sod.lower() else f"{sod} BTU")
+            continue
         if is_spec_value(sod, fname):
             # Mirror v1's size normalization (see generate_title_from_api):
             # prepend "Maat" to bare maat-numbers, and de-inflect a trailing
