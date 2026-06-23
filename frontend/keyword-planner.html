@@ -89,7 +89,7 @@
                 <div class="card mb-4">
                     <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Keyword Input</h5>
-                        <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="testConnection()">Test API Connection</button>
+                        <button class="btn btn-outline-purple btn-sm" onclick="testConnection()">Test API Connection</button>
                     </div>
                     <div class="card-body">
                         <ul class="nav nav-tabs mb-3" id="inputTabs">
@@ -324,6 +324,7 @@
                                 <option value="keyword_asc">Keyword (A-Z)</option>
                                 <option value="keyword_desc">Keyword (Z-A)</option>
                             </select>
+                            <button class="btn btn-outline-purple btn-sm" onclick="copyForExcel()" id="copyExcelBtn">Copy for Excel</button>
                         </div>
                     </div>
                     <div class="card-body p-0">
@@ -716,6 +717,43 @@
                 `;
                 tbody.appendChild(tr);
             });
+        }
+
+        function copyForExcel() {
+            if (!currentResults.length) return;
+            const header = ['#', 'Original Keyword', 'Normalized Keyword', 'Search Volume'];
+            const lines = [header.join('\t')];
+            currentResults.forEach((r, i) => {
+                lines.push([
+                    i + 1,
+                    r.original_keyword || '',
+                    r.normalized_keyword || '',
+                    r.search_volume || 0
+                ].join('\t'));
+            });
+            const text = lines.join('\n');
+            const btn = document.getElementById('copyExcelBtn');
+            const done = () => {
+                const orig = btn.textContent;
+                btn.textContent = '✓ Copied';
+                setTimeout(() => { btn.textContent = orig; }, 1500);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+            } else {
+                fallbackCopy(text, done);
+            }
+        }
+
+        function fallbackCopy(text, done) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { alert('Copy failed'); }
+            document.body.removeChild(ta);
         }
 
         function filterResults() {
