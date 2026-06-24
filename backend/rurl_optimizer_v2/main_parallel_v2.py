@@ -2845,15 +2845,62 @@ def process_url_v2(args):
                     flag_for_review = ''
                 else:
                     _ef = getattr(parsed, 'existing_facet', '') or ''
+                    _dom_name = _dv.get('dom_cat_name', '') or ''
                     _base = f"https://www.beslist.nl/products/{parsed.main_category}/{_dom_slug}"
-                    final_redirect_url = f"{_base}/c/{_ef}" if _ef else f"{_base}/"
-                    final_redirect_cat_name = _dv.get('dom_cat_name', '') or final_redirect_cat_name
-                    final_match_type = 'search_derived_samecat'
-                    final_score = 65
+                    # V44 (Phase 1): enrich the dominant-category redirect with the
+                    # facets the Search-API probe already matched, instead of
+                    # emitting only the bare category. Two append rules:
+                    #   * BRAND facet (merk/winkel): append only when the query
+                    #     literally names the brand value, so "intex opblaas bank"
+                    #     -> .../c/merk~Intex but a generic query never lands on a
+                    #     single-brand page.
+                    #   * NON-BRAND facet: append only when the dominant category
+                    #     name is itself lexically on-topic for the query
+                    #     (name_link). So "inklapbaar droogrek muur" enriches
+                    #     Droogrekken with Inklapbaar+Muur, but "waxinelicht groot"
+                    #     does NOT bolt f_woonacc~Groot onto the off-topic
+                    #     Gedenkartikelen category.
+                    # This never suppresses: a no-match / unanchored query keeps the
+                    # bare dominant category exactly as before. Phase 2 (junk
+                    # suppression) is tracked separately — see cc1 LEARNINGS.
+                    _name_link = _bridge_l13(parsed.keyword, _dom_name)
+                    _probe_fd = derive_search_facet(parsed.main_category, parsed.keyword) or {}
+                    _cands_fd = list(_probe_fd.get('multi_facets') or [])
+                    if (_probe_fd.get('facet_name') and _probe_fd.get('value_id') is not None
+                            and not any(c.get('value_id') == _probe_fd['value_id']
+                                        for c in _cands_fd)):
+                        _cands_fd.append({'facet_name': _probe_fd['facet_name'],
+                                          'value_id': _probe_fd['value_id'],
+                                          'value_name': _probe_fd.get('value_name', '')})
+                    _keep_fd = []
+                    for _c in _cands_fd:
+                        _fn = (_c.get('facet_name') or '')
+                        _vid = _c.get('value_id')
+                        _vn = _c.get('value_name') or ''
+                        if _vid is None or not _fn:
+                            continue
+                        if not _bridge_l13(parsed.keyword, _vn):
+                            continue  # keyword must literally match the facet value
+                        _is_brand = _fn.lower() in ('merk', 'winkel')
+                        if _is_brand or _name_link:
+                            _keep_fd.append(f"{_fn}~{_vid}")
+                    if _keep_fd:
+                        _frags = ([_ef] if _ef else []) + _keep_fd
+                        final_redirect_url = f"{_base}/c/" + "~~".join(sorted(set(_frags)))
+                        final_match_type = 'search_derived_samecat_faceted'
+                        final_score = 70
+                        final_reason = (f"[Fix D+facets] search-derived dominant same-maincat "
+                                        f"category '{_dom_name}' ({int(100 * _share)}%); appended "
+                                        f"probe facets {', '.join(_keep_fd)}")
+                    else:
+                        final_redirect_url = f"{_base}/c/{_ef}" if _ef else f"{_base}/"
+                        final_match_type = 'search_derived_samecat'
+                        final_score = 65
+                        final_reason = (f"[Fix D] search-derived dominant same-maincat category "
+                                        f"'{_dom_name}' ({int(100 * _share)}%) "
+                                        f"chosen over weak stray match")
+                    final_redirect_cat_name = _dom_name or final_redirect_cat_name
                     final_tier = get_reliability_tier(final_score)
-                    final_reason = (f"[Fix D] search-derived dominant same-maincat category "
-                                    f"'{_dv.get('dom_cat_name', '')}' ({int(100 * _share)}%) "
-                                    f"chosen over weak stray match")
                     reject_reason = ''
                     flag_for_review = ''
 
