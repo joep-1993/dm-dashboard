@@ -1,6 +1,22 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools Shop-campaigns dashboard — SA360 performance of SHOP/ campaigns (2026-06-24, commit `0062c3d`)
+
+New tool under Google Ads tracking the per-day performance of every campaign named `SHOP/*` (the 186 branded Search campaigns across 28 category subaccounts under MCC 3011145605). `backend/shop_campaigns_service.py` + `_router.py` (`/api/shop-campaigns`), `frontend/shop-campaigns.html`.
+
+**Data source = Search Ads 360, NOT Google Ads / Redshift.** Reuses the vendored `util_searchads360` client (same as GSD Budgets), SA360 login customer `9816507046`. clicks/impressions/cost_micros/conversions come off the SA360 `campaign`/`ad_group` resource; revenue & margin are **manager-level custom columns** queried via `custom_columns.id[...]`:
+- **`Totaal: Revenue` = 29314662**, **`Totaal: Profit` = 29126930** (the same column GSD Budgets sums for "marge"). Both DOUBLE.
+- Found them by listing custom columns on the **manager** `9816507046` (`CustomColumnService.list_custom_columns`) — a child account's `list_custom_columns` only returns that account's *own* columns (a subaccount has just `Profit` 6082414, Direct Shopping has `Winst` 24299909), but the manager columns still resolve in a child-account GAQL select. There is **no Floodlight activity literally named "Totaal"** — "Totaal:" is the SEA team's custom-column naming.
+- Read cells with `getattr(cc, 'double_value', None)` — proto-plus raises AttributeError on absent fields, so bare 2-arg attribute access (e.g. `.long_value`) crashes.
+
+**Gotchas / patterns:**
+- Omitting `segments.date` from the SELECT makes SA360 **range-aggregate** (one row per campaign/ad group over the WHERE window) → used for top performers; including it gives the per-day series. `FROM ad_group` supports the same custom columns.
+- All `SHOP/` campaigns are PAUSED/REMOVED with 0 clicks in 180 days as of 2026-06-24 (built ~Jun 19, never served) → the dashboard renders zeros; verified the query shape returns live `Totaal: Revenue`/`Totaal: Profit` against the Direct Shopping account `7938980174`.
+- `/performance` and `/top-performers` first call the cached `/inventory` (which records `accounts_with_shop`) and only fan out to those ~28 accounts; concurrent per-account `ThreadPoolExecutor` with retry/backoff on SA360 429/Aborted/Unavailable. Derived CTR/conv-rate/avg-CPC are computed from summed components so day/total ratios stay correct.
+- Runtime SA360 yaml (`backend/data/shop_campaigns_sa360.yaml`, derived from env creds) is **gitignored** like the GSD `search-ads-360.yaml`.
+- Frontend: flatpickr range + presets, summary tiles (incl. # campaigns), multi-series Chart.js trend (unit-grouped axes count/€/%/CPC + custom HTML tooltip), per-day sortable+paginated table, full-width Top campaigns / Top ad groups tables (per-page 10/50/100/all + live name filter + sortable + paginated), single Export Excel on the per-day card → one workbook, three sheets. Deployed via uvicorn kill+relaunch (no --reload). Memory: `sa360_totaal_custom_columns.md`.
+
 ## Auto-Redirects V42/V43 + Redirect-tool & Canonicals audits (2026-06-22/23, commits `4df4329`, `3e16e32`, `b96d5dc`, `60a6cba`, `6be35e2`)
 
 Big session: 3 auto-redirect features, then full audit-and-fix passes on the Redirect tool and Canonicals. Everything verified with OLD-vs-NEW regression diffs before push; backend restarted to deploy the Python changes.
