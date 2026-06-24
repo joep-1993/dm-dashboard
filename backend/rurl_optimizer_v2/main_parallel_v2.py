@@ -2854,16 +2854,18 @@ def process_url_v2(args):
                     #     literally names the brand value, so "intex opblaas bank"
                     #     -> .../c/merk~Intex but a generic query never lands on a
                     #     single-brand page.
-                    #   * NON-BRAND facet: append only when the dominant category
-                    #     name is itself lexically on-topic for the query
-                    #     (name_link). So "inklapbaar droogrek muur" enriches
-                    #     Droogrekken with Inklapbaar+Muur, but "waxinelicht groot"
-                    #     does NOT bolt f_woonacc~Groot onto the off-topic
-                    #     Gedenkartikelen category.
+                    #   * NON-BRAND facet: append when the dominant category name is
+                    #     lexically on-topic for the query (name_link) OR every
+                    #     significant query token is represented by the category name
+                    #     or a matched facet value (all_repr). So "inklapbaar droogrek
+                    #     muur" (name_link via Droogrekken) and "voor mannen" (whole
+                    #     query covered by doelgroep~Mannen) both enrich, but
+                    #     "waxinelicht groot" does NOT bolt f_woonacc~Groot onto
+                    #     Gedenkartikelen — neither the category nor the facet covers
+                    #     the head noun "waxinelicht".
                     # This never suppresses: a no-match / unanchored query keeps the
                     # bare dominant category exactly as before. Phase 2 (junk
                     # suppression) is tracked separately — see cc1 LEARNINGS.
-                    _name_link = _bridge_l13(parsed.keyword, _dom_name)
                     _probe_fd = derive_search_facet(parsed.main_category, parsed.keyword) or {}
                     _cands_fd = list(_probe_fd.get('multi_facets') or [])
                     if (_probe_fd.get('facet_name') and _probe_fd.get('value_id') is not None
@@ -2872,18 +2874,22 @@ def process_url_v2(args):
                         _cands_fd.append({'facet_name': _probe_fd['facet_name'],
                                           'value_id': _probe_fd['value_id'],
                                           'value_name': _probe_fd.get('value_name', '')})
-                    _keep_fd = []
+                    # keep only probe facets whose value the keyword literally matches
+                    _bridged_fd = []
                     for _c in _cands_fd:
                         _fn = (_c.get('facet_name') or '')
                         _vid = _c.get('value_id')
                         _vn = _c.get('value_name') or ''
-                        if _vid is None or not _fn:
+                        if _vid is None or not _fn or not _bridge_l13(parsed.keyword, _vn):
                             continue
-                        if not _bridge_l13(parsed.keyword, _vn):
-                            continue  # keyword must literally match the facet value
-                        _is_brand = _fn.lower() in ('merk', 'winkel')
-                        if _is_brand or _name_link:
-                            _keep_fd.append(f"{_fn}~{_vid}")
+                        _bridged_fd.append((_fn, _vid, _vn, _fn.lower() in ('merk', 'winkel')))
+                    _name_link = _bridge_l13(parsed.keyword, _dom_name)
+                    _repr_text = _dom_name + ' ' + ' '.join(v for _, _, v, _ in _bridged_fd)
+                    _sig_toks = [_w for _w in re.split(r'[\s\-_]+', (parsed.keyword or '').lower())
+                                 if len(_w) >= 3 and _w not in STOPWORDS and _w not in SHOP_NAMES]
+                    _all_repr = bool(_sig_toks) and all(_bridge_l13(_w, _repr_text) for _w in _sig_toks)
+                    _keep_fd = [f"{_fn}~{_vid}" for _fn, _vid, _vn, _isb in _bridged_fd
+                                if _isb or _name_link or _all_repr]
                     if _keep_fd:
                         _frags = ([_ef] if _ef else []) + _keep_fd
                         final_redirect_url = f"{_base}/c/" + "~~".join(sorted(set(_frags)))
