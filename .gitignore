@@ -37,6 +37,8 @@ backend/data/dma_plus_history.json
 backend/data/gsd_budgets_history.json
 # GSD Budgets runtime search-ads-360.yaml (derived from env vars)
 backend/data/search-ads-360.yaml
+# Shop-campaigns runtime SA360 yaml (derived from env vars)
+backend/data/shop_campaigns_sa360.yaml
 # Service-account JSON for Google Sheets (copied locally, not tracked)
 backend/data/gsd-campaign-creation.json
 

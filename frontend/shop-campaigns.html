@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shop-campaigns</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
+    <style>
+        .stat-card {
+            background: #fff; border: 1px solid #e6e3ef; border-radius: 10px;
+            padding: 0.75rem 0.5rem; flex: 1 1 105px; min-width: 105px; text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .stat-card h3 { margin: 0; font-size: 1.25rem; font-weight: 700; color: #5e4a90; }
+        .stat-card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
+        .metric-toggle {
+            display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+            border: 1px solid #d9d4e8; border-radius: 20px; padding: 4px 12px;
+            font-size: 0.82rem; user-select: none; background: #fff; transition: all .15s ease;
+        }
+        .metric-toggle input { display: none; }
+        .metric-toggle .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; opacity: .35; }
+        .metric-toggle.on { border-color: #5e4a90; background: #f3f0fa; font-weight: 600; }
+        .metric-toggle.on .dot { opacity: 1; }
+        .perf-table { font-size: 0.9rem; }
+        .perf-table th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .perf-table td, .perf-table th { white-space: nowrap; text-align: right; vertical-align: middle; }
+        .perf-table td:first-child, .perf-table th:first-child { text-align: left; }
+        .perf-table td.text-col, .perf-table th.text-col { text-align: left; }
+        .perf-table tfoot td { font-weight: 700; background: #f3f0fa; border-top: 2px solid #5e4a90; }
+        .perf-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+        .perf-table th.sortable:hover { opacity: 0.85; }
+        .perf-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .perf-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
+        .perf-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
+        .pagination-controls select { font-size: 0.85rem; width: auto; }
+        .pagination-controls .page-info { color: #636e72; }
+        .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+        .neg { color: #d63031; }
+        #startDate, #endDate {
+            border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
+            box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+        #startDate:hover, #endDate:hover { border-color: #b9b0d8; }
+        #startDate:focus, #endDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
+        #startDate::-webkit-calendar-picker-indicator, #endDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
+        #startDate:hover::-webkit-calendar-picker-indicator, #endDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
+        /* flatpickr calendar dropdown — modern themed look */
+        .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
+        .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
+        .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+        .flatpickr-month, .flatpickr-current-month, .flatpickr-weekday { color: #5e4a90 !important; fill: #5e4a90 !important; }
+        .flatpickr-monthDropdown-months, .numInput { color: #5e4a90 !important; font-weight: 600; }
+        .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #5e4a90 !important; }
+        .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
+        .flatpickr-day.today { border-color: #5e4a90; }
+        .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
+        .btn-preset { border: 1px solid #5e4a90; color: #5e4a90; background: #fff; }
+        .btn-preset:hover, .btn-preset:focus { background: #5e4a90; color: #fff; }
+        .btn-group .btn-preset:not(:first-child) { border-left: 1px solid #5e4a90; }
+        .chart-wrap { position: relative; height: 420px; }
+        .chart-tooltip {
+            position: absolute; pointer-events: none; z-index: 10;
+            background: #f1f1f4; color: #2d2a3a;
+            border: 1px solid #e3e3ea; border-radius: 12px;
+            padding: 12px 14px; min-width: 160px;
+            box-shadow: 0 6px 20px rgba(45,42,58,0.16);
+            font-size: 12.5px; opacity: 0; transition: opacity .12s ease;
+            transform: translate(-50%, calc(-100% - 14px));
+        }
+        .chart-tooltip .ct-title { font-weight: 700; font-size: 13px; margin-bottom: 9px; }
+        .chart-tooltip .ct-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+        .chart-tooltip .ct-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+        .chart-tooltip .ct-label { flex: 1 1 auto; color: #6a6a78; }
+        .chart-tooltip .ct-val { font-weight: 600; margin-left: 16px; white-space: nowrap; }
+        .info-note { background: #fff8ed; border: 1px solid #f0d9b5; color: #8a5a00; border-radius: 8px; padding: 10px 14px; font-size: 0.88rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Shop-campaigns</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Redirects</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rurl-optimizer.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Auto-Redirects</a>
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirect Generator</a>
+                        <a href="/static/redirect-tool.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 17V7a2 2 0 0 1 2-2h9"/><path d="M15 2l4 3-4 3"/><path d="M20 7v10a2 2 0 0 1-2 2H9"/><path d="M9 22l-4-3 4-3"/></svg> Redirect Tool</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Indexation</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/dma-plus.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="10"/></svg> DMA+</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C9.5 4 6 7.5 6 12s3.5 8 7.8 8c2 0 3.8-.8 5.2-2"/></svg> GSD Budgets</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/gsd-check.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> GSD Check</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                        <a href="/static/shop-campaigns.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg> Shop-campaigns</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                        <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
+                        <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 pb-5">
+        <div id="metaLine" class="text-muted text-end mb-2" style="font-size:0.82rem;"></div>
+
+        <!-- Controls -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-3 align-items-end">
+                    <div>
+                        <label for="startDate" class="form-label small mb-1">Start date</label>
+                        <input type="date" class="form-control form-control-sm" id="startDate" style="width: 160px;">
+                    </div>
+                    <div>
+                        <label for="endDate" class="form-label small mb-1">End date</label>
+                        <input type="date" class="form-control form-control-sm" id="endDate" style="width: 160px;">
+                    </div>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="presets">
+                        <button class="btn btn-preset" onclick="setPreset(7)">7d</button>
+                        <button class="btn btn-preset" onclick="setPreset(14)">14d</button>
+                        <button class="btn btn-preset" onclick="setPreset(30)">30d</button>
+                        <button class="btn btn-preset" onclick="setPreset(90)">90d</button>
+                    </div>
+                    <div class="ms-auto">
+                        <button class="btn btn-sm text-white" style="background:#CC5500; border:1px solid #CC5500; min-width:90px; transition: background-color 0.2s ease, border-color 0.2s ease;" onmouseover="this.style.backgroundColor='#E97451';this.style.borderColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500';this.style.borderColor='#CC5500'" onclick="load(false)" id="loadBtn">Load</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="load(true)" title="Bypass cache and re-query SA360">Refresh</button>
+                    </div>
+                </div>
+                <div id="infoNote" class="info-note mt-4" style="display:none;"></div>
+            </div>
+        </div>
+
+        <!-- Summary cards -->
+        <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="statsRow"></div>
+
+        <!-- Chart -->
+        <div class="card mb-4">
+            <div class="card-header" style="background:#5e4a90; color:#fff;">
+                <h5 class="mb-0">Trend</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-2 mb-3" id="metricToggles"></div>
+                <div class="chart-wrap"><canvas id="chart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Per-day table -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center" style="background:#5e4a90; color:#fff;">
+                <h5 class="mb-0">Per-day overview</h5>
+                <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportXlsx()" id="exportBtn" disabled>Export Excel</button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover perf-table mb-0">
+                        <thead><tr id="tableHead"></tr></thead>
+                        <tbody id="tableBody"></tbody>
+                        <tfoot><tr id="tableFoot"></tr></tfoot>
+                    </table>
+                </div>
+                <div class="pagination-controls" id="paginationControls">
+                    <span>Per page:</span>
+                    <select class="form-select form-select-sm" id="perPage" onchange="perfPage=1; renderPage();">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="all">Show all</option>
+                    </select>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                    <span class="page-info" id="pageInfo">-</span>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top campaigns -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
+                <h5 class="mb-0">Top campaigns</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <input type="text" class="form-control form-control-sm" id="topCampFilter" placeholder="Filter campaigns…" style="width:200px;" oninput="topFilterChange('campaigns')">
+                    <select class="form-select form-select-sm" id="topCampPerPage" style="width:auto;" onchange="topPerPageChange('campaigns')">
+                        <option value="10" selected>10</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">All</option>
+                    </select>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover perf-table mb-0">
+                        <thead><tr id="topCampHead"></tr></thead>
+                        <tbody id="topCampBody"></tbody>
+                    </table>
+                </div>
+                <div class="pagination-controls">
+                    <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('campaigns',-1)" id="topCampPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                    <span class="page-info" id="topCampInfo">-</span>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('campaigns',1)" id="topCampNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top ad groups -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
+                <h5 class="mb-0">Top ad groups</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <input type="text" class="form-control form-control-sm" id="topAgFilter" placeholder="Filter ad groups / campaigns…" style="width:240px;" oninput="topFilterChange('ad_groups')">
+                    <select class="form-select form-select-sm" id="topAgPerPage" style="width:auto;" onchange="topPerPageChange('ad_groups')">
+                        <option value="10" selected>10</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">All</option>
+                    </select>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover perf-table mb-0">
+                        <thead><tr id="topAgHead"></tr></thead>
+                        <tbody id="topAgBody"></tbody>
+                    </table>
+                </div>
+                <div class="pagination-controls">
+                    <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('ad_groups',-1)" id="topAgPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                    <span class="page-info" id="topAgInfo">-</span>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('ad_groups',1)" id="topAgNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API = window.location.origin + '/api/shop-campaigns';
+
+        // metric key -> {label, unit group, color}
+        const METRICS = {
+            clicks:      { label: 'Clicks',      unit: 'count', axis: 'count', color: '#5e4a90' },
+            revenue:     { label: 'Revenue',     unit: 'euro',  axis: 'euro',  color: '#00b894' },
+            cost:        { label: 'Cost',        unit: 'euro',  axis: 'euro',  color: '#d63031' },
+            margin:      { label: 'Margin',      unit: 'euro',  axis: 'euro',  color: '#0984e3' },
+            conversions: { label: 'Conversions', unit: 'num',   axis: 'count', color: '#e17055' },
+            ctr:         { label: 'CTR',         unit: 'pct',   axis: 'pct',   color: '#6c5ce7' },
+            conv_rate:   { label: 'Conv. rate',  unit: 'pct',   axis: 'pct',   color: '#fdcb6e' },
+            avg_cpc:     { label: 'Avg CPC',     unit: 'cpc',   axis: 'cpc',   color: '#e84393' },
+        };
+        const ORDER = ['clicks','revenue','cost','margin','conversions','ctr','conv_rate','avg_cpc'];
+        const AXES = {
+            count: { title: 'Count', position: 'left' },
+            euro:  { title: '€',     position: 'right' },
+            pct:   { title: '%',     position: 'right' },
+            cpc:   { title: '€ CPC', position: 'right' },
+        };
+        let selected = new Set(['clicks', 'revenue', 'cost']);
+        let lastData = null;
+        let chart = null;
+
+        // Per-day table sort + pagination state
+        let perfRows = [];
+        let perfSortCol = 'date';
+        let perfSortDir = 'asc';
+        let perfPage = 1;
+        let fpStart = null, fpEnd = null;
+        let lastTop = null;
+
+        // Top-performer tables (campaigns + ad groups): sortable, default by revenue desc.
+        const TOP_TABLES = {
+            campaigns: {
+                headId: 'topCampHead', bodyId: 'topCampBody', perPageId: 'topCampPerPage',
+                prevId: 'topCampPrev', nextId: 'topCampNext', infoId: 'topCampInfo', filterId: 'topCampFilter',
+                col: 'revenue', dir: 'desc', source: [], rows: [], page: 1, filter: '',
+                columns: [{ key: 'campaign_name', label: 'Campaign' }]
+                    .concat(ORDER.map(k => ({ key: k, label: METRICS[k].label, numeric: true }))),
+            },
+            ad_groups: {
+                headId: 'topAgHead', bodyId: 'topAgBody', perPageId: 'topAgPerPage',
+                prevId: 'topAgPrev', nextId: 'topAgNext', infoId: 'topAgInfo', filterId: 'topAgFilter',
+                col: 'revenue', dir: 'desc', source: [], rows: [], page: 1, filter: '',
+                columns: [{ key: 'ad_group_name', label: 'Ad group' }, { key: 'campaign_name', label: 'Campaign' }]
+                    .concat(ORDER.map(k => ({ key: k, label: METRICS[k].label, numeric: true }))),
+            },
+        };
+
+        function fmt(key, v) {
+            if (v === null || v === undefined) return '–';
+            const u = METRICS[key].unit;
+            if (u === 'euro' || u === 'cpc') return '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            if (u === 'pct') return Number(v).toFixed(2) + '%';
+            if (u === 'count') return Math.round(v).toLocaleString('nl-NL');
+            return Number(v).toLocaleString('nl-NL', { maximumFractionDigits: 2 });
+        }
+        function ymd(d) { return d.toISOString().slice(0, 10); }
+
+        function setDates(start, end) {
+            if (fpStart) fpStart.setDate(start, false); else document.getElementById('startDate').value = ymd(start);
+            if (fpEnd) fpEnd.setDate(end, false); else document.getElementById('endDate').value = ymd(end);
+        }
+
+        function setPreset(days) {
+            const end = new Date();
+            const start = new Date();
+            start.setDate(end.getDate() - (days - 1));
+            setDates(start, end);
+            load(false);
+        }
+
+        function buildToggles() {
+            const wrap = document.getElementById('metricToggles');
+            wrap.innerHTML = '';
+            ORDER.forEach(key => {
+                const m = METRICS[key];
+                const on = selected.has(key);
+                const lab = document.createElement('label');
+                lab.className = 'metric-toggle' + (on ? ' on' : '');
+                lab.innerHTML = `<span class="dot" style="background:${m.color}"></span>${m.label}`;
+                lab.onclick = () => {
+                    if (selected.has(key)) selected.delete(key); else selected.add(key);
+                    buildToggles();
+                    renderChart();
+                };
+                wrap.appendChild(lab);
+            });
+        }
+
+        function externalTooltip(context) {
+            const { chart, tooltip } = context;
+            let el = chart.canvas.parentNode.querySelector('.chart-tooltip');
+            if (!el) {
+                el = document.createElement('div');
+                el.className = 'chart-tooltip';
+                chart.canvas.parentNode.appendChild(el);
+            }
+            if (tooltip.opacity === 0) { el.style.opacity = 0; return; }
+            const keys = ORDER.filter(k => selected.has(k));
+            const title = (tooltip.title && tooltip.title[0]) || '';
+            const rows = (tooltip.dataPoints || []).map(dp => {
+                const key = keys[dp.datasetIndex];
+                return `<div class="ct-row"><span class="ct-dot" style="background:${dp.dataset.borderColor}"></span>` +
+                       `<span class="ct-label">${dp.dataset.label}</span>` +
+                       `<span class="ct-val">${fmt(key, dp.parsed.y)}</span></div>`;
+            }).join('');
+            el.innerHTML = `<div class="ct-title">${title}</div>${rows}`;
+            el.style.opacity = 1;
+            el.style.left = chart.canvas.offsetLeft + tooltip.caretX + 'px';
+            el.style.top = chart.canvas.offsetTop + tooltip.caretY + 'px';
+        }
+
+        function renderChart() {
+            if (!lastData) return;
+            const labels = lastData.daily.map(r => r.date);
+            const usedAxes = new Set();
+            const datasets = ORDER.filter(k => selected.has(k)).map(key => {
+                const m = METRICS[key];
+                usedAxes.add(m.axis);
+                return {
+                    label: m.label,
+                    data: lastData.daily.map(r => r[key]),
+                    borderColor: m.color,
+                    backgroundColor: m.color + '22',
+                    yAxisID: m.axis,
+                    tension: 0.25,
+                    pointRadius: 2,
+                    borderWidth: 2,
+                };
+            });
+            const scales = { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } } };
+            let rightUsed = 0;
+            ['count','euro','pct','cpc'].forEach(ax => {
+                if (!usedAxes.has(ax)) return;
+                const cfg = AXES[ax];
+                const isRight = cfg.position === 'right';
+                scales[ax] = {
+                    position: cfg.position,
+                    title: { display: true, text: cfg.title },
+                    grid: { drawOnChartArea: !(isRight && rightUsed > 0) },
+                    beginAtZero: true,
+                };
+                if (isRight) rightUsed++;
+            });
+            const cfg = {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'top', labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8, padding: 16 } },
+                        tooltip: { enabled: false, external: externalTooltip },
+                    },
+                    scales,
+                },
+            };
+            if (chart) { chart.data = cfg.data; chart.options = cfg.options; chart.update(); }
+            else { chart = new Chart(document.getElementById('chart'), cfg); }
+        }
+
+        function renderStats() {
+            const t = lastData.totals;
+            const row = document.getElementById('statsRow');
+            row.innerHTML = '';
+            const campCard = document.createElement('div');
+            campCard.className = 'stat-card';
+            campCard.innerHTML = `<h3>${(lastData.campaign_total || 0).toLocaleString('nl-NL')}</h3><div class="label"># Campaigns</div>`;
+            row.appendChild(campCard);
+            ORDER.forEach(key => {
+                const v = t[key];
+                const cls = (key === 'margin' && v < 0) ? ' class="neg"' : '';
+                const card = document.createElement('div');
+                card.className = 'stat-card';
+                card.innerHTML = `<h3${cls}>${fmt(key, v)}</h3><div class="label">${METRICS[key].label}</div>`;
+                row.appendChild(card);
+            });
+        }
+
+        function initTable() {
+            // Fresh copy to sort without mutating lastData.daily (chart uses it).
+            perfRows = lastData.daily.slice();
+            perfPage = 1;
+            const head = document.getElementById('tableHead');
+            head.innerHTML = '<th class="sortable" data-sort="date" onclick="sortBy(\'date\')">Date</th>' +
+                ORDER.map(k => `<th class="sortable" data-sort="${k}" onclick="sortBy('${k}')">${METRICS[k].label}</th>`).join('');
+            sortRows();
+            updateSortIndicators();
+            renderFoot();
+            renderPage();
+        }
+
+        function sortRows() {
+            const col = perfSortCol;
+            perfRows.sort((a, b) => {
+                let va = a[col], vb = b[col];
+                if (col === 'date') { va = String(va); vb = String(vb); }
+                else { va = Number(va) || 0; vb = Number(vb) || 0; }
+                if (va < vb) return perfSortDir === 'asc' ? -1 : 1;
+                if (va > vb) return perfSortDir === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        function updateSortIndicators() {
+            document.querySelectorAll('.perf-table th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === perfSortCol) {
+                    th.classList.add(perfSortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        }
+
+        function sortBy(column) {
+            if (perfSortCol === column) {
+                perfSortDir = perfSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                perfSortCol = column;
+                perfSortDir = column === 'date' ? 'asc' : 'desc';
+            }
+            sortRows();
+            updateSortIndicators();
+            perfPage = 1;
+            renderPage();
+        }
+
+        function getPerPage() {
+            const val = document.getElementById('perPage').value;
+            return val === 'all' ? Infinity : parseInt(val);
+        }
+
+        function changePage(delta) {
+            perfPage += delta;
+            renderPage();
+        }
+
+        function renderPage() {
+            const perPage = getPerPage();
+            const total = perfRows.length;
+            const totalPages = perPage === Infinity ? 1 : Math.ceil(total / perPage);
+            if (perfPage > totalPages) perfPage = totalPages || 1;
+
+            const start = perPage === Infinity ? 0 : (perfPage - 1) * perPage;
+            const end = perPage === Infinity ? total : start + perPage;
+            renderBody(perfRows.slice(start, end));
+
+            document.getElementById('prevBtn').disabled = perfPage <= 1;
+            document.getElementById('nextBtn').disabled = perfPage >= totalPages;
+            const showing = total === 0 ? '0' : `${start + 1}-${Math.min(end, total)}`;
+            document.getElementById('pageInfo').textContent = `${showing} of ${total.toLocaleString()} days`;
+        }
+
+        function renderBody(rows) {
+            const body = document.getElementById('tableBody');
+            if (!rows.length) {
+                body.innerHTML = `<tr><td colspan="${ORDER.length + 1}" class="text-center text-muted py-4">No data.</td></tr>`;
+                return;
+            }
+            body.innerHTML = rows.map(r => {
+                const cells = ORDER.map(k => {
+                    const cls = (k === 'margin' && r[k] < 0) ? ' class="neg"' : '';
+                    return `<td${cls}>${fmt(k, r[k])}</td>`;
+                }).join('');
+                return `<tr><td>${r.date}</td>${cells}</tr>`;
+            }).join('');
+        }
+
+        function renderFoot() {
+            const foot = document.getElementById('tableFoot');
+            const t = lastData.totals;
+            foot.innerHTML = '<td>Total</td>' + ORDER.map(k => {
+                const cls = (k === 'margin' && t[k] < 0) ? ' class="neg"' : '';
+                return `<td${cls}>${fmt(k, t[k])}</td>`;
+            }).join('');
+        }
+
+        function renderMeta() {
+            const d = lastData;
+            document.getElementById('metaLine').textContent =
+                `${d.campaign_total} campaigns tracked - last updated ${new Date(d.generated_at).toLocaleDateString('nl-NL')}` +
+                (d.accounts_failed && d.accounts_failed.length ? ` · ⚠ ${d.accounts_failed.length} account(s) failed` : '');
+            const note = document.getElementById('infoNote');
+            const hasData = d.daily.some(r => r.clicks || r.revenue || r.cost);
+            const enabled = (d.campaign_by_status || {}).ENABLED || 0;
+            if (!hasData) {
+                note.style.display = 'block';
+                note.innerHTML = enabled === 0
+                    ? `No <code>SHOP/</code> campaign is currently enabled, so there is no performance data in this range yet.`
+                    : `No clicks/cost recorded in this date range yet.`;
+            } else {
+                note.style.display = 'none';
+            }
+        }
+
+        async function load(force) {
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            const btn = document.getElementById('loadBtn');
+            btn.disabled = true; btn.textContent = 'Loading…';
+            try {
+                const params = new URLSearchParams();
+                if (start) params.set('start_date', start);
+                if (end) params.set('end_date', end);
+                if (force) params.set('force', 'true');
+                const [res, topRes] = await Promise.all([
+                    fetch(`${API}/performance?${params}`),
+                    fetch(`${API}/top-performers?${params}`),
+                ]);
+                if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + (await res.text()));
+                lastData = await res.json();
+                renderStats();
+                renderChart();
+                initTable();
+                renderMeta();
+                document.getElementById('exportBtn').disabled = false;
+                if (topRes.ok) {
+                    lastTop = await topRes.json();
+                    renderTop();
+                }
+            } catch (e) {
+                document.getElementById('metaLine').innerHTML = `<span class="text-danger">Failed to load: ${e.message}</span>`;
+            } finally {
+                btn.disabled = false; btn.textContent = 'Load';
+            }
+        }
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function renderTopHead(t) {
+            const tr = document.getElementById(t.headId);
+            tr.innerHTML = t.columns.map(c =>
+                `<th class="sortable${c.numeric ? '' : ' text-col'}" data-sort="${c.key}">${c.label}</th>`).join('');
+            tr.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => sortTop(t, th.dataset.sort)));
+            updateTopIndicators(t);
+        }
+
+        function updateTopIndicators(t) {
+            document.getElementById(t.headId).querySelectorAll('th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === t.col) th.classList.add(t.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+            });
+        }
+
+        function sortTopRows(t) {
+            const c = t.columns.find(x => x.key === t.col);
+            t.rows.sort((a, b) => {
+                let va = a[t.col], vb = b[t.col];
+                if (c && c.numeric) { va = Number(va) || 0; vb = Number(vb) || 0; }
+                else { va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase(); }
+                if (va < vb) return t.dir === 'asc' ? -1 : 1;
+                if (va > vb) return t.dir === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        function sortTop(t, key) {
+            if (t.col === key) { t.dir = t.dir === 'asc' ? 'desc' : 'asc'; }
+            else { t.col = key; const c = t.columns.find(x => x.key === key); t.dir = c && c.numeric ? 'desc' : 'asc'; }
+            sortTopRows(t);
+            updateTopIndicators(t);
+            t.page = 1;
+            renderTopPage(t);
+        }
+
+        function getTopPerPage(t) {
+            const v = document.getElementById(t.perPageId).value;
+            return v === 'all' ? Infinity : parseInt(v);
+        }
+
+        function changeTopPage(kind, delta) {
+            const t = TOP_TABLES[kind];
+            t.page += delta;
+            renderTopPage(t);
+        }
+
+        function topPerPageChange(kind) {
+            const t = TOP_TABLES[kind];
+            t.page = 1;
+            renderTopPage(t);
+        }
+
+        function topFilterChange(kind) {
+            const t = TOP_TABLES[kind];
+            t.filter = document.getElementById(t.filterId).value.trim().toLowerCase();
+            applyTopFilter(t);
+        }
+
+        function applyTopFilter(t) {
+            const q = t.filter || '';
+            const textCols = t.columns.filter(c => !c.numeric).map(c => c.key);
+            t.rows = q
+                ? t.source.filter(r => textCols.some(k => String(r[k] || '').toLowerCase().includes(q)))
+                : t.source.slice();
+            sortTopRows(t);
+            t.page = 1;
+            renderTopPage(t);
+        }
+
+        function renderTopPage(t) {
+            const perPage = getTopPerPage(t);
+            const total = t.rows.length;
+            const totalPages = perPage === Infinity ? 1 : Math.ceil(total / perPage);
+            if (t.page > totalPages) t.page = totalPages || 1;
+            const start = perPage === Infinity ? 0 : (t.page - 1) * perPage;
+            const end = perPage === Infinity ? total : start + perPage;
+            renderTopBody(t, t.rows.slice(start, end));
+            document.getElementById(t.prevId).disabled = t.page <= 1;
+            document.getElementById(t.nextId).disabled = t.page >= totalPages;
+            const showing = total === 0 ? '0' : `${start + 1}-${Math.min(end, total)}`;
+            document.getElementById(t.infoId).textContent = `${showing} of ${total.toLocaleString()}`;
+        }
+
+        function renderTopBody(t, rows) {
+            const body = document.getElementById(t.bodyId);
+            if (!rows.length) {
+                body.innerHTML = `<tr><td colspan="${t.columns.length}" class="text-center text-muted py-4">No data.</td></tr>`;
+                return;
+            }
+            body.innerHTML = rows.map(r => '<tr>' + t.columns.map(c => {
+                if (c.numeric) {
+                    const cls = (c.key === 'margin' && r[c.key] < 0) ? ' class="neg"' : '';
+                    return `<td${cls}>${fmt(c.key, r[c.key])}</td>`;
+                }
+                return `<td class="text-col">${escapeHtml(r[c.key] || '-')}</td>`;
+            }).join('') + '</tr>').join('');
+        }
+
+        function renderTop() {
+            ['campaigns', 'ad_groups'].forEach(kind => {
+                const t = TOP_TABLES[kind];
+                t.source = (lastTop[kind] || []).slice();
+                renderTopHead(t);
+                applyTopFilter(t);
+            });
+        }
+
+        // Per-day Export button: exports all three tables into one workbook (one sheet each),
+        // each in its current sort order.
+        function exportXlsx() {
+            if (!lastData) return;
+            const wb = XLSX.utils.book_new();
+
+            // Sheet 1: Per-day overview (+ Total row)
+            const dayRows = (perfRows.length ? perfRows : lastData.daily).map(r => {
+                const o = { Date: r.date };
+                ORDER.forEach(k => { o[METRICS[k].label] = r[k]; });
+                return o;
+            });
+            const totalRow = { Date: 'Total' };
+            ORDER.forEach(k => { totalRow[METRICS[k].label] = lastData.totals[k]; });
+            dayRows.push(totalRow);
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dayRows), 'Per-day');
+
+            // Sheets 2 & 3: full ranked Top campaigns / Top ad groups
+            [['campaigns', 'Top campaigns'], ['ad_groups', 'Top ad groups']].forEach(([kind, sheet]) => {
+                const t = TOP_TABLES[kind];
+                const rows = t.rows.map(r => {
+                    const o = {};
+                    t.columns.forEach(c => { o[c.label] = r[c.key]; });
+                    return o;
+                });
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{}]), sheet);
+            });
+
+            XLSX.writeFile(wb, `shop-campaigns_${lastData.start_date}_${lastData.end_date}.xlsx`);
+        }
+
+        // Init: default last 30 days
+        (function () {
+            buildToggles();
+            const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
+                             disableMobile: true, locale: { firstDayOfWeek: 1 } };
+            if (window.flatpickr) {
+                fpStart = flatpickr('#startDate', fpOpts);
+                fpEnd = flatpickr('#endDate', fpOpts);
+            }
+            const end = new Date();
+            const start = new Date();
+            start.setDate(end.getDate() - 29);
+            setDates(start, end);
+            load(false);
+        })();
+    </script>
+</body>
+</html>

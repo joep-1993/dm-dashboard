@@ -60,6 +60,7 @@ from backend.redirect_tool_router import router as redirect_tool_router
 from backend.performance_standup_router import router as performance_standup_router
 from backend.dm_review_router import router as dm_review_router
 from backend.seo_rulings_router import router as seo_rulings_router
+from backend.shop_campaigns_router import router as shop_campaigns_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.keyword_redirect_service import resolve_shop, enrich_redirects
@@ -184,6 +185,9 @@ app.include_router(dm_review_router)
 
 # Include seo_rulings router (live sanity checks against beslist.nl)
 app.include_router(seo_rulings_router)
+
+# Include shop_campaigns router (SA360 performance of SHOP/ campaigns)
+app.include_router(shop_campaigns_router)
 
 # Include task_scheduler router (env-gated — Windows-only, depends on schtasks)
 TASK_SCHEDULER_ENABLED = os.getenv("ENABLE_TASK_SCHEDULER", "false").lower() == "true"
