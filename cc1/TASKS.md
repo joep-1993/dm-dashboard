@@ -21,6 +21,8 @@ _Active tasks for immediate work_
 ## In Progress
 _Tasks currently being worked on_
 
+- [ ] **GSD tag_toppers Q3-2026 refresh — live run pending (NL first)** (2026-06-24). Full pipeline rebuilt + every capability live-validated (Deloox update, Seasondm create). Unified orchestrator `tt_run_all.py` smoke-tested; full NL dry-run running. **Before the live run (probably tomorrow): (1) PERSIST the `tt_*.py` scripts out of the ephemeral session scratchpad** to a durable dir (e.g. `Downloads\Python\scripts_def\tag_toppers\`); (2) confirm the full NL dry-run totals are clean; (3) build a single unified restore script (revert exclusion edits + remove created campaigns + restore topper statuses from the run backup JSON); (4) user sign-off on the temp-suppression trade-off for the 194 create shops. Then `tt_run_all.py --country=NL --live` (background, hours; chunked+paced+backed-up), verify, then BE then DE. Inputs: `tag_toppers_q3-2026.xlsx` (new, overflow-column format), `tag_toppers_old.xlsx` (teardown-shop list only). See LEARNINGS "GSD tag_toppers Q3-2026 refresh". #priority:high
+
 ## Completed
 _Finished tasks (move here when done)_
 
