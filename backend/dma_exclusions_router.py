@@ -16,7 +16,17 @@ from backend.dma_exclusions_service import (
     apply as svc_apply,
     enable as svc_enable,
     list_exclusions as svc_list,
+    oos_scan as svc_oos_scan,
+    oos_exclude as svc_oos_exclude,
+    oos_recovered as svc_oos_recovered,
+    oos_reenable as svc_oos_reenable,
 )
+from pydantic import BaseModel
+
+
+class OosExcludeBody(BaseModel):
+    market: str = "NL"
+    item_ids: list[str]
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +100,48 @@ async def list_endpoint():
         return {"exclusions": await _run(svc_list)}
     except Exception as e:
         logger.exception("list failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/oos/scan")
+async def oos_scan_endpoint(market: str = Query("NL", description="Market: NL or BE")):
+    """List OOS products that are live in DMA, with 30d spend/clicks/conversions."""
+    try:
+        return await _run(svc_oos_scan, market)
+    except Exception as e:
+        logger.exception("oos scan failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/oos/exclude")
+async def oos_exclude_endpoint(body: OosExcludeBody):
+    """Exclude a selected set of OOS item ids (tagged source=oos)."""
+    if not body.item_ids:
+        raise HTTPException(status_code=400, detail="item_ids is empty")
+    try:
+        return await _run(svc_oos_exclude, body.item_ids, body.market)
+    except Exception as e:
+        logger.exception("oos exclude failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/oos/recovered")
+async def oos_recovered_endpoint(market: str = Query("NL", description="Market: NL or BE")):
+    """OOS exclusions whose product has recovered (re-enable candidates)."""
+    try:
+        return {"recovered": await _run(svc_oos_recovered, market)}
+    except Exception as e:
+        logger.exception("oos recovered failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/oos/reenable")
+async def oos_reenable_endpoint(market: str = Query("NL", description="Market: NL or BE")):
+    """Re-enable every recovered OOS exclusion for a market."""
+    try:
+        return await _run(svc_oos_reenable, market)
+    except Exception as e:
+        logger.exception("oos reenable failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -8,6 +8,10 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### DMA Exclusions
+- [ ] **General serving-leaf walker for allow-list / store-format category trees** (logged 2026-06-25). The exclusion tool's category targeting only handles **block-list** trees (biddable CL3-OTHERS). **Allow-list** trees — the `store_`-format, multi-ad-group campaigns like `PLA/Sport & outdoor store_b` where CL3-OTHERS is NEGATIVE and specific shops are the included positive leaves — are currently **skipped** (safe, but the category portion of those exclusions is not applied; bestsellers+APlus still are). To cover them, replace the per-family `_leaf_for_category`/`_leaf_for_aplus` shortcuts with a general walker: descend the tree following the product's matched custom attributes (CL0/CL1/CL3 from `shopping_performance_view`, captured per ad group), stop at the biddable UNIT the product actually serves under, then subdivide THAT on item_id (reusing the existing convert/append + prune-on-enable logic + the `_ad_group_cpc` bid fallback). Needs careful multi-structure round-trip verification before live use. Matters for OOS bulk-exclusion coverage (many OOS products live in `store_`-format campaigns). See LEARNINGS "OOS feed integration + allow-list tree fix (2026-06-25)".
+
+
 ### Phase 1: Core Features
 - [ ] User authentication
 - [ ] Data persistence patterns

@@ -34,6 +34,8 @@ import os
 import re
 import json
 import logging
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -61,6 +63,11 @@ CL3_INDEX = "INDEX3"             # category campaigns: leaf dimension is shop (C
 
 # Matches "PLA/<category>_a" / "_b" / "_c" but NOT the named campaigns above.
 _CATEGORY_RE = re.compile(r"^PLA/(?P<cat>.+)_(?P<tier>[abc])$")
+
+# OOS (out-of-stock) crawl-override monitor — feeds the exclusion candidate list.
+OOS_BASE = "https://googlemc-suc.bva-apps.aks.private.beslist.nl/api/v1/overrides"
+# DMA aggregated feed prefixes every offer id with this; suffix is the GTIN/EAN.
+DMA_ITEM_PREFIX = "nl-nl-gold-"
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +153,16 @@ def _read_tree(client: GoogleAdsClient, customer_id: str, ad_group_id: str) -> D
 
 def _children(nodes: Dict[str, dict], parent_resource: str) -> List[dict]:
     return [n for n in nodes.values() if n["parent"] == parent_resource]
+
+
+def _ad_group_cpc(client: GoogleAdsClient, customer_id: str, ad_group_id: str) -> int:
+    """Ad group's default cpc_bid_micros (fallback bid for new biddable units)."""
+    ga = client.get_service("GoogleAdsService")
+    q = (f"SELECT ad_group.cpc_bid_micros FROM ad_group "
+         f"WHERE ad_group.id = {ad_group_id}")
+    for row in ga.search(customer_id=customer_id, query=q):
+        return int(row.ad_group.cpc_bid_micros or 0)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +377,13 @@ def _build_target(client, customer_id, item_id, kind, campaign, ad_group, nodes,
                 t["skip_reason"] = "item already excluded here"
             else:
                 t["action"] = "append_negative"
+    elif leaf["negative"]:
+        # allow-list tree: the OTHERS bucket is EXCLUDED and specific shops are
+        # included. The product serves via an included CL3=shop leaf, not here;
+        # converting this negative bucket would wrongly start serving it. Skip.
+        t["leaf_role"] = "negative_unit"
+        t["action"] = "skip"
+        t["skip_reason"] = "leaf is an excluded (negative) bucket — allow-list tree, not auto-excludable"
     else:
         # biddable UNIT -> must convert to a subdivision first
         t["leaf_role"] = "biddable_unit"
@@ -524,7 +548,10 @@ def _apply_one_target(client, customer_id, item_id, target) -> dict:
         # Atomic: remove biddable leaf, create subdivision in its place, add
         # item-id OTHERS (positive, original bid) + the negative item id.
         ca = {"index": leaf["index"], "value": leaf["value"] or ""}
-        bid = leaf["bid"] or None
+        # The biddable OTHERS unit needs a bid. Use the leaf's own bid; if it
+        # inherits (0), fall back to the ad group's default CPC so a manual-CPC
+        # ad group doesn't reject the new unit (cpc_bid_micros REQUIRED).
+        bid = leaf["bid"] or _ad_group_cpc(client, customer_id, ad_group_id) or None
         # parent is the leaf's parent in the live tree
         nodes = _read_tree(client, customer_id, ad_group_id)
         live_leaf = nodes.get(leaf["resource"])
@@ -558,7 +585,7 @@ def _apply_one_target(client, customer_id, item_id, target) -> dict:
 
 
 def apply(item_id: str, market: str, shop: Optional[str] = None,
-          campaign_filter: Optional[str] = None) -> Dict[str, Any]:
+          campaign_filter: Optional[str] = None, source: str = "manual") -> Dict[str, Any]:
     """Apply the exclusion live, then persist it for later re-enable."""
     item_id = (item_id or "").strip()
     client = _get_client()
@@ -588,6 +615,7 @@ def apply(item_id: str, market: str, shop: Optional[str] = None,
         status="excluded" if applied else "failed",
         targets=applied,
         last_result={"applied": len(applied), "errors": errors, "warnings": plan["warnings"]},
+        source=source,
     )
     return {
         "id": record_id,
@@ -708,11 +736,13 @@ def _ensure_table():
                     status          TEXT NOT NULL DEFAULT 'excluded',
                     targets         JSONB,
                     last_result     JSONB,
+                    source          TEXT DEFAULT 'manual',
                     created_at      TIMESTAMP DEFAULT now(),
                     applied_at      TIMESTAMP DEFAULT now(),
                     enabled_at      TIMESTAMP
                 )
             """)
+            cur.execute("ALTER TABLE dma_exclusions ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'")
             cur.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS dma_exclusions_item_market_uniq
                 ON dma_exclusions (item_id, market)
@@ -724,7 +754,7 @@ def _ensure_table():
 
 
 def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
-                 status, targets, last_result) -> int:
+                 status, targets, last_result, source="manual") -> int:
     _ensure_table()
     conn = get_db_connection()
     try:
@@ -732,8 +762,8 @@ def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
             cur.execute("""
                 INSERT INTO dma_exclusions
                     (item_id, market, shop, category, cl0, campaign_filter,
-                     status, targets, last_result, applied_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                     status, targets, last_result, source, applied_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
                 ON CONFLICT (item_id, market) DO UPDATE SET
                     shop = EXCLUDED.shop,
                     category = EXCLUDED.category,
@@ -742,11 +772,12 @@ def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
                     status = EXCLUDED.status,
                     targets = EXCLUDED.targets,
                     last_result = EXCLUDED.last_result,
+                    source = EXCLUDED.source,
                     applied_at = now(),
                     enabled_at = NULL
                 RETURNING id
             """, (item_id, market, shop, category, cl0, campaign_filter, status,
-                  json.dumps(targets), json.dumps(last_result)))
+                  json.dumps(targets), json.dumps(last_result), source))
             rid = cur.fetchone()["id"]
         conn.commit()
         return rid
@@ -788,7 +819,7 @@ def list_exclusions() -> List[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id, item_id, market, shop, category, cl0, campaign_filter,
-                       status, created_at, applied_at, enabled_at,
+                       status, source, created_at, applied_at, enabled_at,
                        COALESCE(jsonb_array_length(targets), 0) AS target_count
                 FROM dma_exclusions
                 ORDER BY applied_at DESC NULLS LAST, id DESC
@@ -801,3 +832,147 @@ def list_exclusions() -> List[dict]:
         return rows
     finally:
         return_db_connection(conn)
+
+
+# ---------------------------------------------------------------------------
+# OOS (out-of-stock) integration
+#
+# The OOS crawl-override monitor lists offers Google flagged out of stock that
+# are still live on beslist.nl. Its product_id_v3 is an opaque per-shop key and
+# does NOT match DMA; the bridge is the GTIN -> DMA item id `nl-nl-gold-<gtin>`
+# (verified). We expose the actionable candidates (live in DMA, with their 30d
+# spend/clicks/conversions so the operator can avoid pulling profitable items),
+# let them exclude a selected set, and re-enable EANs that have recovered
+# (dropped off the active OOS list / state=recovered).
+# ---------------------------------------------------------------------------
+
+def _oos_eans(market: str, state: str = "active") -> List[str]:
+    """Fetch the OOS EAN list for a market from the monitor API."""
+    country = (market or "NL").upper()
+    qs = urllib.parse.urlencode({"country": country, "state": state})
+    url = f"{OOS_BASE}/oos-eans?{qs}"
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return list(data.get("eans") or [])
+
+
+def _campaign_family(name: str) -> str:
+    if name == BESTSELLERS_CAMPAIGN:
+        return "bestsellers"
+    if name == APLUS_CAMPAIGN:
+        return "aplus"
+    if _CATEGORY_RE.match(name):
+        return "category"
+    return "other"
+
+
+def oos_scan(market: str) -> Dict[str, Any]:
+    """Return OOS EANs that are live in DMA, with 30d clicks/spend/conversions
+    and the campaigns they serve in. READ-ONLY."""
+    eans = _oos_eans(market, "active")
+    client = _get_client()
+    customer_id = _customer_id(market)
+    ga = client.get_service("GoogleAdsService")
+
+    # item_id -> aggregated metrics + campaign set
+    agg: Dict[str, dict] = {}
+    for i in range(0, len(eans), 200):
+        ids = [DMA_ITEM_PREFIX + e for e in eans[i:i + 200]]
+        q = (
+            "SELECT segments.product_item_id, campaign.name, metrics.clicks, "
+            "metrics.impressions, metrics.cost_micros, metrics.conversions, "
+            "metrics.conversions_value FROM shopping_performance_view "
+            f"WHERE segments.product_item_id IN ({','.join(repr(x) for x in ids)}) "
+            "AND segments.date DURING LAST_30_DAYS"
+        )
+        for row in ga.search(customer_id=customer_id, query=q):
+            iid = row.segments.product_item_id
+            m = row.metrics
+            a = agg.setdefault(iid, {"clicks": 0, "impr": 0, "cost": 0,
+                                     "conv": 0.0, "conv_value": 0.0, "campaigns": set()})
+            a["clicks"] += m.clicks
+            a["impr"] += m.impressions
+            a["cost"] += m.cost_micros
+            a["conv"] += m.conversions
+            a["conv_value"] += m.conversions_value
+            if row.campaign.name:
+                a["campaigns"].add(row.campaign.name)
+
+    # which item ids are already excluded (so the UI can disable them)
+    excluded = {r["item_id"] for r in list_exclusions()
+                if r["market"] == market.upper() and r["status"] in ("excluded", "partial")}
+
+    candidates = []
+    for iid, a in agg.items():
+        camps = sorted(a["campaigns"])
+        fams = {_campaign_family(c) for c in camps}
+        cat = next((_CATEGORY_RE.match(c).group("cat") for c in camps if _CATEGORY_RE.match(c)), None)
+        candidates.append({
+            "item_id": iid,
+            "ean": iid[len(DMA_ITEM_PREFIX):],
+            "category": cat,
+            "campaigns": camps,
+            "uncovered_campaigns": sorted(c for c in camps if _campaign_family(c) == "other"),
+            "fully_covered": "other" not in fams,
+            "clicks": int(a["clicks"]),
+            "impressions": int(a["impr"]),
+            "cost_eur": round(a["cost"] / 1e6, 2),
+            "conversions": round(a["conv"], 1),
+            "conv_value_eur": round(a["conv_value"], 2),
+            "already_excluded": iid in excluded,
+        })
+    candidates.sort(key=lambda c: c["cost_eur"], reverse=True)
+
+    return {
+        "market": market.upper(),
+        "oos_total": len(eans),
+        "live_in_dma": len(candidates),
+        "totals": {
+            "clicks": sum(c["clicks"] for c in candidates),
+            "cost_eur": round(sum(c["cost_eur"] for c in candidates), 2),
+            "conversions": round(sum(c["conversions"] for c in candidates), 1),
+            "conv_value_eur": round(sum(c["conv_value_eur"] for c in candidates), 2),
+        },
+        "candidates": candidates,
+    }
+
+
+def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
+    """Exclude a selected list of OOS item ids (source-tagged 'oos')."""
+    results = []
+    for iid in item_ids:
+        try:
+            res = apply(iid, market, source="oos")
+            results.append({"item_id": iid, "id": res["id"], "applied": res["applied"],
+                            "errors": res["errors"]})
+        except Exception as e:  # noqa: BLE001
+            logger.exception("oos_exclude failed for %s", iid)
+            results.append({"item_id": iid, "error": str(e)})
+    return {"market": market.upper(), "processed": len(results), "results": results}
+
+
+def oos_recovered(market: str) -> List[dict]:
+    """OOS-sourced exclusions whose EAN is no longer in the active OOS list
+    (recovered / back in stock) — candidates to re-enable."""
+    active = set(_oos_eans(market, "active"))
+    out = []
+    for r in list_exclusions():
+        if (r["market"] == market.upper() and r.get("source") == "oos"
+                and r["status"] in ("excluded", "partial")):
+            ean = r["item_id"][len(DMA_ITEM_PREFIX):] if r["item_id"].startswith(DMA_ITEM_PREFIX) else r["item_id"]
+            if ean not in active:
+                out.append(r)
+    return out
+
+
+def oos_reenable(market: str) -> Dict[str, Any]:
+    """Re-enable every recovered OOS exclusion for a market."""
+    recovered = oos_recovered(market)
+    results = []
+    for r in recovered:
+        try:
+            results.append(enable(r["id"]))
+        except Exception as e:  # noqa: BLE001
+            logger.exception("oos_reenable failed for %s", r["id"])
+            results.append({"id": r["id"], "error": str(e)})
+    return {"market": market.upper(), "recovered": len(recovered), "results": results}
