@@ -1,0 +1,803 @@
+"""
+DMA Exclusions Service
+======================
+
+Excludes a single product (item id) from Beslist's DMA / Shopping (PLA) campaigns
+by adding a negative product_item_id UNIT to the listing-group (product partition)
+tree, and re-enables it later by removing that negative and pruning the tree back.
+
+Given only a product item id we resolve its bid category from
+`shopping_performance_view` (the campaigns/ad-groups it actually serves in, plus
+its custom labels). From that we build the target set:
+
+  * the category trio  PLA/<category>_a / _b / _c
+  * PLA/Amazon bestsellers
+  * PLA/APlus            (per-category ad group, matched on CL0 = deepest-cat-id)
+
+Three tree shapes, two underlying operations (verified live 2026-06-25):
+
+  bestsellers : CL0='amazon bestsellers' is already an item_id SUBDIVISION ->
+                append one negative item_id UNIT.
+  category    : the biddable CL3-OTHERS UNIT (bid set) must be converted to a
+                SUBDIVISION holding item_id-OTHERS (positive, original bid) +
+                the negative item_id.
+  aplus       : same convert-the-biddable-leaf op, leaf = the INDEX0=<cl0> unit
+                under the INDEX1='aplus' subdivision of the category's ad group.
+
+Re-enable removes the negative and, where we created the subdivision, collapses
+it back to the original biddable UNIT (the user's "remove & prune" choice).
+
+Writes go through Google Ads atomic mutates. Nothing here runs unless the router
+calls apply()/enable(); preview()/lookup() are strictly read-only.
+"""
+import os
+import re
+import json
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from google.ads.googleads.client import GoogleAdsClient
+from google.ads.googleads.errors import GoogleAdsException
+
+from backend.database import get_db_connection, return_db_connection
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+MCC_CUSTOMER_ID = "3011145605"
+ACCOUNTS = {
+    "NL": "3800751597",
+    "BE": "9920951707",
+}
+
+BESTSELLERS_CAMPAIGN = "PLA/Amazon bestsellers"
+APLUS_CAMPAIGN = "PLA/APlus"
+APLUS_CATEGORY_INDEX = "INDEX0"  # APlus subdivides on CL0 = deepest-cat-id
+CL3_INDEX = "INDEX3"             # category campaigns: leaf dimension is shop (CL3)
+
+# Matches "PLA/<category>_a" / "_b" / "_c" but NOT the named campaigns above.
+_CATEGORY_RE = re.compile(r"^PLA/(?P<cat>.+)_(?P<tier>[abc])$")
+
+
+# ---------------------------------------------------------------------------
+# Client
+# ---------------------------------------------------------------------------
+
+def _get_client() -> GoogleAdsClient:
+    config = {
+        "developer_token": os.environ.get("GOOGLE_DEVELOPER_TOKEN", ""),
+        "refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN", ""),
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        "login_customer_id": os.environ.get("GOOGLE_LOGIN_CUSTOMER_ID", MCC_CUSTOMER_ID),
+        "use_proto_plus": True,
+    }
+    return GoogleAdsClient.load_from_dict(config)
+
+
+def _customer_id(market: str) -> str:
+    cid = ACCOUNTS.get((market or "").upper())
+    if not cid:
+        raise ValueError(f"Unknown market {market!r}; expected one of {list(ACCOUNTS)}")
+    return cid
+
+
+# ---------------------------------------------------------------------------
+# Listing-tree reading
+# ---------------------------------------------------------------------------
+
+def _read_tree(client: GoogleAdsClient, customer_id: str, ad_group_id: str) -> Dict[str, dict]:
+    """Return {resource_name: node} for every LISTING_GROUP criterion in an ad group."""
+    ga = client.get_service("GoogleAdsService")
+    query = f"""
+        SELECT
+          ad_group_criterion.resource_name,
+          ad_group_criterion.criterion_id,
+          ad_group_criterion.listing_group.type,
+          ad_group_criterion.listing_group.parent_ad_group_criterion,
+          ad_group_criterion.listing_group.case_value.product_custom_attribute.index,
+          ad_group_criterion.listing_group.case_value.product_custom_attribute.value,
+          ad_group_criterion.listing_group.case_value.product_item_id.value,
+          ad_group_criterion.negative,
+          ad_group_criterion.cpc_bid_micros
+        FROM ad_group_criterion
+        WHERE ad_group_criterion.ad_group = 'customers/{customer_id}/adGroups/{ad_group_id}'
+          AND ad_group_criterion.type = 'LISTING_GROUP'
+          AND ad_group_criterion.status != 'REMOVED'
+    """
+    nodes: Dict[str, dict] = {}
+    for row in ga.search(customer_id=customer_id, query=query):
+        agc = row.ad_group_criterion
+        lg = agc.listing_group
+        # defensive: skip any criterion whose listing-group type didn't resolve
+        if lg.type_.name not in ("SUBDIVISION", "UNIT"):
+            continue
+        cv = lg.case_value
+        which = cv._pb.WhichOneof("dimension")
+        dim = None
+        index = None
+        value = None
+        item_id = None
+        if which == "product_item_id":
+            dim = "item_id"
+            item_id = cv.product_item_id.value  # "" => OTHERS
+        elif which == "product_custom_attribute":
+            dim = "custom_attr"
+            index = cv.product_custom_attribute.index.name  # INDEX0..INDEX4
+            value = cv.product_custom_attribute.value        # "" => OTHERS
+        nodes[agc.resource_name] = {
+            "resource": agc.resource_name,
+            "criterion_id": agc.criterion_id,
+            "type": lg.type_.name,  # SUBDIVISION | UNIT
+            "parent": lg.parent_ad_group_criterion or None,
+            "dim": dim,
+            "index": index,
+            "value": value,
+            "item_id": item_id,
+            "negative": bool(agc.negative),
+            "bid": int(agc.cpc_bid_micros or 0),
+        }
+    return nodes
+
+
+def _children(nodes: Dict[str, dict], parent_resource: str) -> List[dict]:
+    return [n for n in nodes.values() if n["parent"] == parent_resource]
+
+
+# ---------------------------------------------------------------------------
+# Category resolution from a bare item id
+# ---------------------------------------------------------------------------
+
+def lookup(item_id: str, market: str) -> Dict[str, Any]:
+    """Resolve category + serving campaigns for an item id (READ-ONLY)."""
+    item_id = (item_id or "").strip()
+    if not item_id:
+        raise ValueError("item_id is required")
+    client = _get_client()
+    customer_id = _customer_id(market)
+    ga = client.get_service("GoogleAdsService")
+
+    query = f"""
+        SELECT
+          campaign.name, ad_group.name,
+          segments.product_item_id,
+          segments.product_custom_attribute0, segments.product_custom_attribute3,
+          segments.product_type_l1, segments.product_type_l2,
+          metrics.impressions
+        FROM shopping_performance_view
+        WHERE segments.product_item_id = '{item_id}'
+          AND segments.date DURING LAST_30_DAYS
+    """
+    serving: List[dict] = []
+    try:
+        for row in ga.search(customer_id=customer_id, query=query):
+            serving.append({
+                "campaign": row.campaign.name,
+                "ad_group": row.ad_group.name,
+                "cl0": row.segments.product_custom_attribute0,
+                "shop": row.segments.product_custom_attribute3,
+                "type_l1": row.segments.product_type_l1,
+                "type_l2": row.segments.product_type_l2,
+            })
+    except GoogleAdsException as e:
+        raise RuntimeError(f"Google Ads query failed: {e.error.code().name}") from e
+
+    category = None
+    cl0 = None
+    shop = None
+    for r in serving:
+        m = _CATEGORY_RE.match(r["campaign"])
+        if m:
+            category = m.group("cat")
+            if r["cl0"] and r["cl0"].isdigit():
+                cl0 = r["cl0"]
+            if r["shop"]:
+                shop = r["shop"]
+    # fall back to any serving row for the headline shop
+    if shop is None:
+        for r in serving:
+            if r["shop"]:
+                shop = r["shop"]
+                break
+
+    return {
+        "item_id": item_id,
+        "market": market.upper(),
+        "found": bool(serving),
+        "category": category,
+        "cl0": cl0,
+        "shop": shop,
+        "serving_campaigns": sorted({r["campaign"] for r in serving}),
+        "note": (
+            None if serving else
+            "No serving rows in the last 30 days; category cannot be resolved "
+            "from Google Ads (Merchant Center fallback not yet enabled)."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Target discovery (which campaigns/ad-groups/nodes to touch)
+# ---------------------------------------------------------------------------
+
+def _find_campaigns(client, customer_id, like_patterns: List[str]) -> List[dict]:
+    ga = client.get_service("GoogleAdsService")
+    out: List[dict] = []
+    seen = set()
+    for pat in like_patterns:
+        esc = pat.replace("'", "\\'")
+        q = (
+            "SELECT campaign.id, campaign.name, campaign.status FROM campaign "
+            f"WHERE campaign.status != 'REMOVED' AND campaign.name LIKE '{esc}'"
+        )
+        for row in ga.search(customer_id=customer_id, query=q):
+            if row.campaign.id in seen:
+                continue
+            seen.add(row.campaign.id)
+            out.append({
+                "campaign_id": str(row.campaign.id),
+                "campaign_name": row.campaign.name,
+                "status": row.campaign.status.name,
+            })
+    return out
+
+
+def _aplus_adgroups_for_cl0(client, customer_id, campaign_id, cl0) -> List[dict]:
+    """Find the APlus ad group(s) whose tree carries an INDEX0=<cl0> node.
+
+    One campaign-scoped criterion query instead of scanning all ~1400 ad groups.
+    A deepest-cat-id is unique to its category, so this returns a single ad group.
+    """
+    ga = client.get_service("GoogleAdsService")
+    esc = str(cl0).replace("'", "\\'")
+    q = (
+        "SELECT ad_group.id, ad_group.name FROM ad_group_criterion "
+        f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
+        "AND ad_group_criterion.status != 'REMOVED' "
+        f"AND ad_group_criterion.listing_group.case_value.product_custom_attribute.index = '{APLUS_CATEGORY_INDEX}' "
+        f"AND ad_group_criterion.listing_group.case_value.product_custom_attribute.value = '{esc}'"
+    )
+    out: Dict[str, dict] = {}
+    for r in ga.search(customer_id=customer_id, query=q):
+        out[str(r.ad_group.id)] = {"ad_group_id": str(r.ad_group.id), "ad_group_name": r.ad_group.name}
+    return list(out.values())
+
+
+def _ad_groups(client, customer_id, campaign_id) -> List[dict]:
+    ga = client.get_service("GoogleAdsService")
+    q = (
+        "SELECT ad_group.id, ad_group.name, ad_group.status FROM ad_group "
+        f"WHERE ad_group.campaign = 'customers/{customer_id}/campaigns/{campaign_id}' "
+        "AND ad_group.status != 'REMOVED'"
+    )
+    return [
+        {"ad_group_id": str(r.ad_group.id), "ad_group_name": r.ad_group.name,
+         "status": r.ad_group.status.name}
+        for r in ga.search(customer_id=customer_id, query=q)
+    ]
+
+
+def _node_summary(node: Optional[dict]) -> Optional[dict]:
+    if not node:
+        return None
+    return {k: node[k] for k in ("resource", "type", "dim", "index", "value", "item_id", "negative", "bid")}
+
+
+def _leaf_for_category(nodes: Dict[str, dict]) -> Optional[dict]:
+    """The CL3-OTHERS node (the catch-all shop bucket products serve under)."""
+    for n in nodes.values():
+        if n["dim"] == "custom_attr" and n["index"] == CL3_INDEX and (n["value"] or "") == "":
+            return n
+    return None
+
+
+def _leaf_for_aplus(nodes: Dict[str, dict], cl0: str) -> Optional[dict]:
+    """The INDEX0=<cl0> category node inside an APlus ad group."""
+    for n in nodes.values():
+        if n["dim"] == "custom_attr" and n["index"] == APLUS_CATEGORY_INDEX and (n["value"] or "") == cl0:
+            return n
+    return None
+
+
+def _bestsellers_subdiv(nodes: Dict[str, dict]) -> Optional[dict]:
+    for n in nodes.values():
+        if (n["dim"] == "custom_attr" and n["index"] == "INDEX0"
+                and (n["value"] or "") == "amazon bestsellers" and n["type"] == "SUBDIVISION"):
+            return n
+    return None
+
+
+def _negative_item_children(nodes: Dict[str, dict], subdiv_resource: str) -> List[dict]:
+    return [n for n in _children(nodes, subdiv_resource)
+            if n["dim"] == "item_id" and (n["item_id"] or "") != "" and n["negative"]]
+
+
+def _existing_negative(nodes: Dict[str, dict], subdiv_resource: str, item_id: str) -> Optional[dict]:
+    for n in _children(nodes, subdiv_resource):
+        if n["dim"] == "item_id" and (n["item_id"] or "") == item_id and n["negative"]:
+            return n
+    return None
+
+
+def _build_target(client, customer_id, item_id, kind, campaign, ad_group, nodes, leaf) -> dict:
+    """Assemble a per-ad-group target with the planned action, given its leaf node."""
+    t = {
+        "kind": kind,
+        "campaign_id": campaign["campaign_id"],
+        "campaign_name": campaign["campaign_name"],
+        "ad_group_id": ad_group["ad_group_id"],
+        "ad_group_name": ad_group["ad_group_name"],
+        "leaf": _node_summary(leaf),
+        "action": None,
+        "leaf_role": None,
+        "original_bid": None,
+        "already_excluded": False,
+        "skip_reason": None,
+    }
+    if leaf is None:
+        t["action"] = "skip"
+        t["skip_reason"] = "target node not found in tree"
+        return t
+
+    if leaf["type"] == "SUBDIVISION":
+        # already subdivided -> only safe to append if it splits on item_id
+        children = _children(nodes, leaf["resource"])
+        item_children = [c for c in children if c["dim"] == "item_id"]
+        if not item_children:
+            split = children[0]["index"] if children else "?"
+            t["leaf_role"] = "other_subdivision"
+            t["action"] = "skip"
+            t["skip_reason"] = f"leaf subdivides on {split}, not item_id (unsupported topology)"
+        else:
+            t["leaf_role"] = "item_subdivision"
+            if _existing_negative(nodes, leaf["resource"], item_id):
+                t["action"] = "skip"
+                t["already_excluded"] = True
+                t["skip_reason"] = "item already excluded here"
+            else:
+                t["action"] = "append_negative"
+    else:
+        # biddable UNIT -> must convert to a subdivision first
+        t["leaf_role"] = "biddable_unit"
+        t["original_bid"] = leaf["bid"]
+        t["action"] = "subdivide_and_exclude"
+    return t
+
+
+def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = None,
+                    resolution: Optional[dict] = None) -> Dict[str, Any]:
+    """Discover every ad group + node to touch (READ-ONLY). Returns plan."""
+    item_id = (item_id or "").strip()
+    client = _get_client()
+    customer_id = _customer_id(market)
+    res = resolution or lookup(item_id, market)
+    cf = (campaign_filter or "").strip().lower()
+
+    targets: List[dict] = []
+    warnings: List[str] = []
+
+    # --- category trio -----------------------------------------------------
+    if res.get("category"):
+        cat = res["category"]
+        camps = _find_campaigns(client, customer_id, [f"PLA/{cat}_%"])
+        trio = [c for c in camps if _CATEGORY_RE.match(c["campaign_name"])
+                and _CATEGORY_RE.match(c["campaign_name"]).group("cat") == cat]
+        if not trio:
+            warnings.append(f"No PLA/{cat}_a/_b/_c campaigns found.")
+        for c in trio:
+            for ag in _ad_groups(client, customer_id, c["campaign_id"]):
+                nodes = _read_tree(client, customer_id, ag["ad_group_id"])
+                leaf = _leaf_for_category(nodes)
+                targets.append(_build_target(client, customer_id, item_id, "category", c, ag, nodes, leaf))
+    else:
+        warnings.append("Category not resolved; skipping category trio + APlus.")
+
+    # --- Amazon bestsellers ------------------------------------------------
+    for c in _find_campaigns(client, customer_id, [BESTSELLERS_CAMPAIGN]):
+        for ag in _ad_groups(client, customer_id, c["campaign_id"]):
+            nodes = _read_tree(client, customer_id, ag["ad_group_id"])
+            leaf = _bestsellers_subdiv(nodes)
+            targets.append(_build_target(client, customer_id, item_id, "bestsellers", c, ag, nodes, leaf))
+
+    # --- APlus (needs cl0 to pick the right per-category ad group) ----------
+    if res.get("cl0"):
+        cl0 = res["cl0"]
+        aplus = _find_campaigns(client, customer_id, [APLUS_CAMPAIGN])
+        for c in aplus:
+            ag_rows = _aplus_adgroups_for_cl0(client, customer_id, c["campaign_id"], cl0)
+            if not ag_rows:
+                warnings.append(f"No APlus ad group found for category id {cl0}.")
+            for ag in ag_rows:
+                nodes = _read_tree(client, customer_id, ag["ad_group_id"])
+                leaf = _leaf_for_aplus(nodes, cl0)
+                targets.append(_build_target(client, customer_id, item_id, "aplus", c, ag, nodes, leaf))
+    elif res.get("category"):
+        warnings.append("CL0 (deepest-cat-id) not resolved; skipping APlus.")
+
+    if cf:
+        targets = [t for t in targets if cf in t["campaign_name"].lower()]
+
+    return {
+        "item_id": item_id,
+        "market": market.upper(),
+        "resolution": res,
+        "campaign_filter": campaign_filter or None,
+        "targets": targets,
+        "warnings": warnings,
+        "actionable": sum(1 for t in targets if t["action"] in ("append_negative", "subdivide_and_exclude")),
+    }
+
+
+def preview(item_id: str, market: str, shop: Optional[str] = None,
+            campaign_filter: Optional[str] = None) -> Dict[str, Any]:
+    """Dry-run: exactly what apply() would change. No writes."""
+    plan = resolve_targets(item_id, market, campaign_filter)
+    plan["shop"] = shop or plan["resolution"].get("shop")
+    plan["dry_run"] = True
+    return plan
+
+
+# ---------------------------------------------------------------------------
+# Mutations
+# ---------------------------------------------------------------------------
+
+class _Temp:
+    """Per-mutate temporary-id generator (negative ints)."""
+    def __init__(self):
+        self.n = 0
+
+    def path(self, client, customer_id, ad_group_id) -> str:
+        self.n -= 1
+        return client.get_service("AdGroupCriterionService").ad_group_criterion_path(
+            customer_id, str(ad_group_id), str(self.n))
+
+
+def _unit_op(client, customer_id, ad_group_id, temp, parent_resource, *,
+             item_id_value=None, custom_attr=None, negative=False, bid=None):
+    """Build a create-UNIT AdGroupCriterionOperation."""
+    op = client.get_type("AdGroupCriterionOperation")
+    cr = op.create
+    cr.resource_name = temp.path(client, customer_id, ad_group_id)
+    cr.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
+    if bid and not negative:
+        cr.cpc_bid_micros = bid
+    lg = cr.listing_group
+    lg.type_ = client.enums.ListingGroupTypeEnum.UNIT
+    lg.parent_ad_group_criterion = parent_resource
+    if item_id_value is not None:
+        if item_id_value != "":
+            lg.case_value.product_item_id.value = item_id_value
+        else:
+            # item-id OTHERS: touch the message but set no value
+            client.copy_from(lg.case_value.product_item_id, client.get_type("ProductItemIdInfo"))
+    elif custom_attr is not None:
+        lg.case_value.product_custom_attribute.index = client.enums.ProductCustomAttributeIndexEnum[custom_attr["index"]]
+        if custom_attr["value"]:
+            lg.case_value.product_custom_attribute.value = custom_attr["value"]
+    if negative:
+        cr.negative = True
+    return op, cr.resource_name
+
+
+def _subdiv_op(client, customer_id, ad_group_id, temp, parent_resource, *, custom_attr):
+    op = client.get_type("AdGroupCriterionOperation")
+    cr = op.create
+    cr.resource_name = temp.path(client, customer_id, ad_group_id)
+    cr.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
+    lg = cr.listing_group
+    lg.type_ = client.enums.ListingGroupTypeEnum.SUBDIVISION
+    lg.parent_ad_group_criterion = parent_resource
+    lg.case_value.product_custom_attribute.index = client.enums.ProductCustomAttributeIndexEnum[custom_attr["index"]]
+    if custom_attr["value"]:
+        lg.case_value.product_custom_attribute.value = custom_attr["value"]
+    return op, cr.resource_name
+
+
+def _remove_op(client, resource_name):
+    op = client.get_type("AdGroupCriterionOperation")
+    op.remove = resource_name
+    return op
+
+
+def _apply_one_target(client, customer_id, item_id, target) -> dict:
+    """Execute a single target's planned write. Returns reversal metadata."""
+    agc = client.get_service("AdGroupCriterionService")
+    ad_group_id = target["ad_group_id"]
+    temp = _Temp()
+    rev = dict(target)  # carry kind/campaign/ad_group/leaf for enable
+    leaf = target["leaf"]
+
+    if target["action"] == "append_negative":
+        op, neg_res = _unit_op(client, customer_id, ad_group_id, temp,
+                               leaf["resource"], item_id_value=item_id, negative=True)
+        resp = agc.mutate_ad_group_criteria(customer_id=customer_id, operations=[op])
+        rev["created_subdivision"] = False
+        rev["negative_resource"] = resp.results[0].resource_name
+        rev["status"] = "excluded"
+        return rev
+
+    if target["action"] == "subdivide_and_exclude":
+        # Atomic: remove biddable leaf, create subdivision in its place, add
+        # item-id OTHERS (positive, original bid) + the negative item id.
+        ca = {"index": leaf["index"], "value": leaf["value"] or ""}
+        bid = leaf["bid"] or None
+        # parent is the leaf's parent in the live tree
+        nodes = _read_tree(client, customer_id, ad_group_id)
+        live_leaf = nodes.get(leaf["resource"])
+        if live_leaf is None:
+            raise RuntimeError("leaf node disappeared before apply")
+        parent_resource = live_leaf["parent"]
+
+        ops = []
+        ops.append(_remove_op(client, leaf["resource"]))
+        sub_op, sub_res = _subdiv_op(client, customer_id, ad_group_id, temp, parent_resource, custom_attr=ca)
+        ops.append(sub_op)
+        others_op, others_res = _unit_op(client, customer_id, ad_group_id, temp, sub_res,
+                                         item_id_value="", negative=False, bid=bid)
+        ops.append(others_op)
+        neg_op, neg_res = _unit_op(client, customer_id, ad_group_id, temp, sub_res,
+                                   item_id_value=item_id, negative=True)
+        ops.append(neg_op)
+        resp = agc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops)
+        # resp.results order matches ops order: [remove, subdiv, others, negative]
+        rev["created_subdivision"] = True
+        rev["subdivision_resource"] = resp.results[1].resource_name
+        rev["others_resource"] = resp.results[2].resource_name
+        rev["negative_resource"] = resp.results[3].resource_name
+        rev["leaf_custom_attr"] = ca
+        rev["original_bid"] = leaf["bid"]
+        rev["status"] = "excluded"
+        return rev
+
+    rev["status"] = "skipped"
+    return rev
+
+
+def apply(item_id: str, market: str, shop: Optional[str] = None,
+          campaign_filter: Optional[str] = None) -> Dict[str, Any]:
+    """Apply the exclusion live, then persist it for later re-enable."""
+    item_id = (item_id or "").strip()
+    client = _get_client()
+    customer_id = _customer_id(market)
+    plan = resolve_targets(item_id, market, campaign_filter)
+    shop = shop or plan["resolution"].get("shop")
+
+    results: List[dict] = []
+    errors: List[dict] = []
+    for t in plan["targets"]:
+        if t["action"] not in ("append_negative", "subdivide_and_exclude"):
+            results.append({**t, "result": "skipped", "reason": t.get("skip_reason")})
+            continue
+        try:
+            rev = _apply_one_target(client, customer_id, item_id, t)
+            results.append({**rev, "result": "excluded"})
+        except Exception as e:  # noqa: BLE001 - surface per-target failures, keep going
+            logger.exception("apply failed for %s", t.get("campaign_name"))
+            errors.append({"campaign_name": t["campaign_name"],
+                           "ad_group_id": t["ad_group_id"], "error": str(e)})
+
+    applied = [r for r in results if r.get("result") == "excluded"]
+    record_id = _save_record(
+        item_id=item_id, market=market.upper(), shop=shop,
+        category=plan["resolution"].get("category"), cl0=plan["resolution"].get("cl0"),
+        campaign_filter=campaign_filter,
+        status="excluded" if applied else "failed",
+        targets=applied,
+        last_result={"applied": len(applied), "errors": errors, "warnings": plan["warnings"]},
+    )
+    return {
+        "id": record_id,
+        "item_id": item_id,
+        "market": market.upper(),
+        "applied": len(applied),
+        "skipped": sum(1 for r in results if r.get("result") == "skipped"),
+        "errors": errors,
+        "warnings": plan["warnings"],
+        "targets": results,
+    }
+
+
+def enable(record_id: int) -> Dict[str, Any]:
+    """Re-enable a previously-excluded product: remove negatives and prune."""
+    rec = _get_record(record_id)
+    if rec is None:
+        raise ValueError(f"Exclusion #{record_id} not found")
+    if rec["status"] == "enabled":
+        return {"id": record_id, "status": "already_enabled", "reverted": 0}
+
+    client = _get_client()
+    customer_id = _customer_id(rec["market"])
+    agc = client.get_service("AdGroupCriterionService")
+    item_id = rec["item_id"]
+
+    reverted: List[dict] = []
+    errors: List[dict] = []
+    for t in rec.get("targets") or []:
+        ad_group_id = t["ad_group_id"]
+        try:
+            nodes = _read_tree(client, customer_id, ad_group_id)
+            # locate the subdivision the item lives under
+            if t.get("created_subdivision"):
+                subdiv = nodes.get(t.get("subdivision_resource")) or _relocate_subdiv(nodes, t)
+            else:
+                subdiv = nodes.get(t["leaf"]["resource"]) or _relocate_subdiv(nodes, t)
+            if subdiv is None:
+                errors.append({"campaign_name": t["campaign_name"], "error": "subdivision not found (already changed?)"})
+                continue
+
+            neg = _existing_negative(nodes, subdiv["resource"], item_id)
+            ops = []
+            if neg:
+                ops.append(_remove_op(client, neg["resource"]))
+
+            if t.get("created_subdivision"):
+                # collapse only if our item was the sole negative under it
+                other_negs = [n for n in _negative_item_children(nodes, subdiv["resource"])
+                              if (n["item_id"] or "") != item_id]
+                if not other_negs:
+                    # remove item-id OTHERS + the subdivision, recreate biddable UNIT
+                    others = [n for n in _children(nodes, subdiv["resource"])
+                              if n["dim"] == "item_id" and (n["item_id"] or "") == ""]
+                    for o in others:
+                        ops.append(_remove_op(client, o["resource"]))
+                    ops.append(_remove_op(client, subdiv["resource"]))
+                    temp = _Temp()
+                    ca = t.get("leaf_custom_attr") or {
+                        "index": t["leaf"]["index"], "value": t["leaf"]["value"] or ""}
+                    unit_op, _ = _unit_op(client, customer_id, ad_group_id, temp, subdiv["parent"],
+                                          custom_attr=ca, negative=False,
+                                          bid=(t.get("original_bid") or None))
+                    ops.append(unit_op)
+
+            if ops:
+                agc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops)
+            reverted.append({"campaign_name": t["campaign_name"], "ad_group_id": ad_group_id})
+        except Exception as e:  # noqa: BLE001
+            logger.exception("enable failed for %s", t.get("campaign_name"))
+            errors.append({"campaign_name": t["campaign_name"], "error": str(e)})
+
+    new_status = "enabled" if not errors else "partial"
+    _update_status(record_id, new_status, {"reverted": len(reverted), "errors": errors})
+    return {"id": record_id, "status": new_status, "reverted": len(reverted), "errors": errors}
+
+
+def _relocate_subdiv(nodes, target):
+    """Best-effort: re-find the subdivision the item lives under by its dimension."""
+    kind = target["kind"]
+    if kind == "bestsellers":
+        return _bestsellers_subdiv(nodes)
+    if kind == "category":
+        n = _leaf_for_category(nodes)
+        return n if n and n["type"] == "SUBDIVISION" else None
+    if kind == "aplus":
+        ca = target.get("leaf_custom_attr") or {}
+        val = ca.get("value") or (target["leaf"].get("value") if target.get("leaf") else None)
+        if val:
+            n = _leaf_for_aplus(nodes, val)
+            return n if n and n["type"] == "SUBDIVISION" else None
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Persistence
+# ---------------------------------------------------------------------------
+
+_TABLE_READY = False
+
+
+def _ensure_table():
+    global _TABLE_READY
+    if _TABLE_READY:
+        return
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS dma_exclusions (
+                    id              SERIAL PRIMARY KEY,
+                    item_id         TEXT NOT NULL,
+                    market          TEXT NOT NULL,
+                    shop            TEXT,
+                    category        TEXT,
+                    cl0             TEXT,
+                    campaign_filter TEXT,
+                    status          TEXT NOT NULL DEFAULT 'excluded',
+                    targets         JSONB,
+                    last_result     JSONB,
+                    created_at      TIMESTAMP DEFAULT now(),
+                    applied_at      TIMESTAMP DEFAULT now(),
+                    enabled_at      TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS dma_exclusions_item_market_uniq
+                ON dma_exclusions (item_id, market)
+            """)
+        conn.commit()
+        _TABLE_READY = True
+    finally:
+        return_db_connection(conn)
+
+
+def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
+                 status, targets, last_result) -> int:
+    _ensure_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO dma_exclusions
+                    (item_id, market, shop, category, cl0, campaign_filter,
+                     status, targets, last_result, applied_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                ON CONFLICT (item_id, market) DO UPDATE SET
+                    shop = EXCLUDED.shop,
+                    category = EXCLUDED.category,
+                    cl0 = EXCLUDED.cl0,
+                    campaign_filter = EXCLUDED.campaign_filter,
+                    status = EXCLUDED.status,
+                    targets = EXCLUDED.targets,
+                    last_result = EXCLUDED.last_result,
+                    applied_at = now(),
+                    enabled_at = NULL
+                RETURNING id
+            """, (item_id, market, shop, category, cl0, campaign_filter, status,
+                  json.dumps(targets), json.dumps(last_result)))
+            rid = cur.fetchone()["id"]
+        conn.commit()
+        return rid
+    finally:
+        return_db_connection(conn)
+
+
+def _get_record(record_id: int) -> Optional[dict]:
+    _ensure_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM dma_exclusions WHERE id = %s", (record_id,))
+            return cur.fetchone()
+    finally:
+        return_db_connection(conn)
+
+
+def _update_status(record_id: int, status: str, result_patch: dict):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE dma_exclusions
+                SET status = %s,
+                    enabled_at = CASE WHEN %s = 'enabled' THEN now() ELSE enabled_at END,
+                    last_result = COALESCE(last_result, '{}'::jsonb) || %s::jsonb
+                WHERE id = %s
+            """, (status, status, json.dumps(result_patch), record_id))
+        conn.commit()
+    finally:
+        return_db_connection(conn)
+
+
+def list_exclusions() -> List[dict]:
+    _ensure_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, item_id, market, shop, category, cl0, campaign_filter,
+                       status, created_at, applied_at, enabled_at,
+                       COALESCE(jsonb_array_length(targets), 0) AS target_count
+                FROM dma_exclusions
+                ORDER BY applied_at DESC NULLS LAST, id DESC
+            """)
+            rows = cur.fetchall()
+        for r in rows:
+            for k in ("created_at", "applied_at", "enabled_at"):
+                if r.get(k):
+                    r[k] = r[k].isoformat()
+        return rows
+    finally:
+        return_db_connection(conn)

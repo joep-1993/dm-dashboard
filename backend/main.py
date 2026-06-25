@@ -62,6 +62,7 @@ from backend.dm_review_router import router as dm_review_router
 from backend.seo_rulings_router import router as seo_rulings_router
 from backend.shop_campaigns_router import router as shop_campaigns_router
 from backend.seo_stats_router import router as seo_stats_router
+from backend.dma_exclusions_router import router as dma_exclusions_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.keyword_redirect_service import resolve_shop, enrich_redirects
@@ -192,6 +193,9 @@ app.include_router(shop_campaigns_router)
 
 # Include seo_stats router (Redshift SEO/DMA-organic/GSAAS visits + revenue dashboard)
 app.include_router(seo_stats_router)
+
+# Include dma_exclusions router (exclude individual products from DMA campaigns)
+app.include_router(dma_exclusions_router)
 
 # Include task_scheduler router (env-gated — Windows-only, depends on schtasks)
 TASK_SCHEDULER_ENABLED = os.getenv("ENABLE_TASK_SCHEDULER", "false").lower() == "true"

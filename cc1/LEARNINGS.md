@@ -1,6 +1,24 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools DMA Exclusions — exclude a product by item id from DMA campaigns (2026-06-25)
+
+New Google Ads tool: enter a product/item id (+ optional shop, optional campaign filter, market NL/BE), it resolves the bid category and adds a negative `product_item_id` UNIT to the listing tree of the **category `_a/_b/_c`**, **`PLA/Amazon bestsellers`** and **`PLA/APlus`** campaigns; re-enable removes the negative and prunes the tree back. `backend/dma_exclusions_service.py` + `_router.py` (`/api/dma-exclusions`: lookup/preview/apply/list/enable/{id}/export/xlsx), `frontend/dma-exclusions.html`, DB table `dma_exclusions` (lazy-created, `UNIQUE(item_id,market)`, stores per-target reversal metadata in JSONB). NL `3800751597` / BE `9920951707`, login_customer = MCC `3011145605`. Dry-run **Preview → Apply** model; verified with a self-reversing apply→enable round-trip on `nl-nl-gold-6941057404028` (every tree restored byte-for-byte).
+
+**Category resolution from a bare item id = `shopping_performance_view` segmented by `segments.product_item_id`** (MUST also be in the SELECT, else `EXPECTED_REFERENCED_FIELD_IN_SELECT_CLAUSE`). Returns the campaigns it serves in + `product_custom_attribute0` (= deepest-cat-id / CL0); category *name* comes from the serving `PLA/<cat>_a|b|c` campaign name. Only works for products with ≥1 serving row in the window — MC Content API fallback was deliberately NOT built (googleapiclient is in the venv but unused).
+
+**Listing-tree custom labels (DMA):** INDEX0 = deepest cat id (CL0), INDEX1 = a/b/c tier, INDEX3 = shop (CL3). Three campaign shapes, two write ops:
+- **Category `PLA/<cat>_a/_b/_c`:** products serve under the biddable **CL3-OTHERS UNIT** (INDEX3='' with a bid). Op = convert that UNIT→SUBDIVISION holding item-id-OTHERS (positive, **preserve the original bid**) + the negative item id.
+- **`PLA/Amazon bestsellers`:** one ad group, CL0='amazon bestsellers' is already an item_id SUBDIVISION → just append the negative item id.
+- **`PLA/APlus`:** 1387 ad groups, one per category; tree = root subdivides INDEX1 → INDEX1='aplus' subdivides INDEX0 → INDEX0=<cl0> (UNIT if untouched, SUBDIVISION if already excluded). Find the right ad group with ONE campaign-scoped criterion query filtering `...case_value.product_custom_attribute.value = '<cl0>'` — do NOT scan all 1387 ad groups (each a tree read = minutes).
+- Unified op: if the target node is a UNIT → convert+exclude; if it's already an item_id SUBDIVISION → append; if it's a SUBDIVISION splitting on a non-item_id dimension → skip with a reason (don't blind-append).
+
+**GOTCHA — tree-read GAQL MUST include `AND ad_group_criterion.status != 'REMOVED'`.** Without it, removed criteria come back as **phantom nodes** (type=`UNKNOWN`, parent=`None`); a leaf-finder grabbed one → atomic mutate failed with `RESOURCE_NOT_FOUND` on the remove op + empty `parent_ad_group_criterion` on the subdivision create. Same filter on the APlus value-lookup query.
+
+**Other gotchas:** GAQL `LIKE` doesn't take a backslash-escaped `_` (`'PLA/x\_%'` → `BAD_VALUE`) — use `'PLA/<cat>_%'` and regex-filter the trio. The convert-the-biddable-leaf op works as a **single atomic mutate** (remove old UNIT + create SUBDIVISION same case_value + item-id-OTHERS + negative, with temp negative ids) — no per-op sleeps needed. Re-enable re-reads the live tree (resource-name independent) and only collapses the subdivision back to the biddable UNIT when our item was its sole negative. Memory: `dma_exclusions_tool.md`.
+
+UI mirrors the house style: header "i" SVG tooltip (like seo-stats deltaInfo), right-aligned Preview/Apply, `btn-outline-purple ↻ Refresh`, centered Saved-exclusions table, Export Excel → `/export/xlsx` (pandas+openpyxl `Response`, same as rurl). Nav link inserted into the Google Ads dropdown across 29 pages + a dashboard tile. Backend has `--reload`; static HTML live on refresh.
+
 ## dm-tools SEO stats dashboard — live web version of Performance Standup (2026-06-25)
 
 New SEO-tools page giving the Performance-Standup numbers as a live web UI (no Excel). `backend/seo_stats_service.py` + `_router.py` (`/api/seo-stats`), `frontend/seo-stats.html`. Also reordered the Google Ads dropdown (Shop-campaigns above Thema Ads, A–Z) across all nav files.
