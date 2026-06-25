@@ -372,7 +372,7 @@ def get_performance(start_date: Optional[str] = None,
                    "conversions": 0.0, "revenue": 0.0, "margin": 0.0}
     cur = d0
     while cur <= d1:
-        key_str = cur.strftime("%Y%m%d")
+        key_str = cur.isoformat()  # SA360 segments.date is ISO "YYYY-MM-DD"
         base = merged.get(key_str, {"clicks": 0.0, "impressions": 0.0, "cost": 0.0,
                                     "conversions": 0.0, "revenue": 0.0, "margin": 0.0})
         for k in totals_base:
