@@ -37,6 +37,13 @@ CHANNEL_LABELS = {"seo": "SEO", "dma": "DMA Organic", "gsaas": "GSAAS"}
 
 TOP_N = 100  # rows returned per top-cat table (frontend slices to the chosen Top X)
 
+# Revenue (cpc + ww) counted ONLY from visits that registered a product click.
+# A visit carrying revenue but zero cpc/ww product clicks is a data glitch
+# (e.g. Veiligheidshelmen: €217 cpc on a 0-click visit) and is excluded.
+REV_EXPR = ("(CASE WHEN COALESCE(fv.number_of_cpc_productclicks,0)=0 "
+            "AND COALESCE(fv.number_of_ww_productclicks,0)=0 "
+            "THEN 0 ELSE fv.cpc_revenue + fv.ww_revenue END)")
+
 # ---------------------------------------------------------------------------
 # Tiny in-process TTL cache (Redshift is slow; the data is daily-grained)
 # ---------------------------------------------------------------------------
@@ -93,7 +100,7 @@ def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
         SELECT fv.dim_date_key            AS d,
                c.marketing_channel        AS chan,
                COUNT(*)                   AS visits,
-               SUM(fv.cpc_revenue + fv.ww_revenue) AS omzet
+               SUM({REV_EXPR}) AS omzet
         FROM datamart.fct_visits fv
         JOIN datamart.dim_visit dv  ON fv.dim_visit_key = dv.dim_visit_key
         JOIN chan_deriv.ref_channel_derivation_stats c
@@ -133,8 +140,8 @@ def _fetch_channel_deltas(conn, vis_p1: date, vis_p2: date,
         SELECT c.marketing_channel AS chan,
                SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p1,
                SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p2,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN fv.cpc_revenue + fv.ww_revenue ELSE 0 END) AS rev_p1,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN fv.cpc_revenue + fv.ww_revenue ELSE 0 END) AS rev_p2
+               SUM(CASE WHEN fv.dim_date_key = %s THEN {REV_EXPR} ELSE 0 END) AS rev_p1,
+               SUM(CASE WHEN fv.dim_date_key = %s THEN {REV_EXPR} ELSE 0 END) AS rev_p2
         FROM datamart.fct_visits fv
         JOIN datamart.dim_visit dv ON fv.dim_visit_key = dv.dim_visit_key
         JOIN chan_deriv.ref_channel_derivation_stats c
@@ -175,10 +182,16 @@ def _fetch_cat_deltas(conn, level: str, vis_p1: date, vis_p2: date,
     vp1, vp2 = _date_key(vis_p1), _date_key(vis_p2)
     rp1, rp2 = _date_key(rev_p1), _date_key(rev_p2)
 
+    # The deepest level lists only true leaf categories (is_lowest_category=1).
+    # Without this, visits that land on a non-leaf subcategory overview page
+    # (e.g. "Zwembaden", which has child categories) would show up as their own
+    # row and outrank real leaves like "Parasols".
+    lowest_clause = ""
     if level == "deepest":
         select_cols = ("COALESCE(cat.main_category_name,'-') AS maincat, "
                        "COALESCE(cat.deepest_category_name,'-') AS cat")
         group_by = "1, 2"
+        lowest_clause = "AND cat.is_lowest_category = 1"
     elif level == "sub":
         select_cols = ("COALESCE(cat.main_category_name,'-') AS maincat, "
                        "COALESCE(cat.sub_category_name,'-')  AS cat")
@@ -192,8 +205,8 @@ def _fetch_cat_deltas(conn, level: str, vis_p1: date, vis_p2: date,
         SELECT {select_cols},
                SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p1,
                SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p2,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN fv.cpc_revenue + fv.ww_revenue ELSE 0 END) AS rev_p1,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN fv.cpc_revenue + fv.ww_revenue ELSE 0 END) AS rev_p2
+               SUM(CASE WHEN fv.dim_date_key = %s THEN {REV_EXPR} ELSE 0 END) AS rev_p1,
+               SUM(CASE WHEN fv.dim_date_key = %s THEN {REV_EXPR} ELSE 0 END) AS rev_p2
         FROM datamart.fct_visits fv
         JOIN datamart.dim_visit dv ON fv.dim_visit_key = dv.dim_visit_key
         JOIN chan_deriv.ref_channel_derivation_stats c
@@ -202,6 +215,7 @@ def _fetch_cat_deltas(conn, level: str, vis_p1: date, vis_p2: date,
         WHERE fv.dim_date_key IN (%s, %s, %s, %s)
           AND c.marketing_channel = 'SEO'
           AND dv.is_real_visit = 1
+          {lowest_clause}
         GROUP BY {group_by}
     """
     params = (vp1, vp2, rp1, rp2, vp1, vp2, rp1, rp2)
