@@ -9,6 +9,7 @@ import json
 import requests
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import List, Dict, Optional
 from backend.database import get_db_connection, return_db_connection
 
@@ -44,6 +45,16 @@ _RETRYABLE_POST_EXC = (
 )
 
 
+_post_deadline_executor = ThreadPoolExecutor(max_workers=2)
+
+# Hard wall-clock cap per POST attempt. On Windows, requests' (connect, read)
+# timeout does not cover the SSL handshake — it can hang indefinitely. Running
+# the POST in a thread and using Future.result(timeout=) guarantees we regain
+# control. Set slightly above the requests timeout so the requests timeout
+# fires first under normal conditions.
+POST_DEADLINE = 2100  # 35 minutes — above the 1800s requests timeout
+
+
 def _post_with_retry(api_url, *, headers, timeout, data=None, json=None,
                      max_attempts=4, on_retry=None):
     """POST with exponential-backoff retry on transient transport failures.
@@ -52,12 +63,25 @@ def _post_with_retry(api_url, *, headers, timeout, data=None, json=None,
     is returned as-is for the caller to handle. Raises the last exception when
     every attempt fails. `on_retry(attempt, max_attempts, backoff_s, exc)` is
     called before each sleep so callers can surface retry state in the UI.
+
+    Each attempt is wrapped in a hard wall-clock deadline via a thread executor
+    to guard against Windows SSL handshake hangs where the requests timeout
+    parameter does not fire.
     """
     last_exc = None
     for attempt in range(1, max_attempts + 1):
         try:
-            return requests.post(api_url, headers=headers, data=data,
-                                 json=json, timeout=timeout)
+            future = _post_deadline_executor.submit(
+                requests.post, api_url, headers=headers, data=data,
+                json=json, timeout=timeout,
+            )
+            try:
+                return future.result(timeout=POST_DEADLINE)
+            except FuturesTimeoutError:
+                future.cancel()
+                raise requests.exceptions.Timeout(
+                    f"POST to {api_url} exceeded hard deadline of {POST_DEADLINE}s"
+                )
         except _RETRYABLE_POST_EXC as e:
             last_exc = e
             if attempt == max_attempts:
