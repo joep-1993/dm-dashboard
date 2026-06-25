@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shop-campaigns</title>
+    <title>SEO stats</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -13,10 +13,10 @@
     <style>
         .stat-card {
             background: #fff; border: 1px solid #e6e3ef; border-radius: 10px;
-            padding: 0.75rem 0.5rem; flex: 1 1 105px; min-width: 105px; text-align: center;
+            padding: 0.75rem 0.5rem; flex: 1 1 130px; min-width: 130px; text-align: center;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
-        .stat-card h3 { margin: 0; font-size: 1.25rem; font-weight: 700; color: #5e4a90; }
+        .stat-card h3 { margin: 0; font-size: 1.2rem; font-weight: 700; color: #5e4a90; }
         .stat-card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
         .metric-toggle {
             display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
@@ -30,6 +30,22 @@
         .perf-table { font-size: 0.9rem; }
         .perf-table th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
         .perf-table td, .perf-table th { white-space: nowrap; text-align: right; vertical-align: middle; }
+        .perf-fixed { table-layout: fixed; width: 100%; }
+        .perf-fixed th { white-space: normal; }
+        .perf-fixed td, .perf-fixed th { text-align: center; }
+        .perf-fixed td:first-child, .perf-fixed th:first-child,
+        .perf-fixed td.text-col, .perf-fixed th.text-col { text-align: center; }
+        .note-wrap { display: flex; flex-direction: column; gap: 4px; }
+        .note-input { width: 100%; border: 1px solid #e0dcec; border-radius: 6px; padding: 2px 6px; font-size: 0.85rem; }
+        .note-input:focus { border-color: #5e4a90; outline: none; box-shadow: 0 0 0 2px rgba(94,74,144,0.15); }
+        .note-swatches { display: none; gap: 4px; flex-wrap: wrap; justify-content: center; }
+        .note-wrap:focus-within .note-swatches { display: flex; }
+        .swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.15); cursor: pointer; padding: 0; }
+        .swatch.sel { outline: 2px solid #5e4a90; outline-offset: 1px; }
+        .standup-head { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 12px; border-radius: 6px 6px 0 0; }
+        .standup-table { font-size: 0.85rem; }
+        .standup-table th, .standup-table td { padding: 4px 10px; }
+        .standup-table th { font-size: 0.72rem; }
         .perf-table td:first-child, .perf-table th:first-child { text-align: left; }
         .perf-table td.text-col, .perf-table th.text-col { text-align: left; }
         .perf-table tfoot td { font-weight: 700; background: #f3f0fa; border-top: 2px solid #5e4a90; }
@@ -43,16 +59,15 @@
         .pagination-controls .page-info { color: #636e72; }
         .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
         .neg { color: #d63031; }
-        #startDate, #endDate {
+        #startDate, #endDate, #refDate {
             border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
             box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
             transition: border-color .15s ease, box-shadow .15s ease;
         }
-        #startDate:hover, #endDate:hover { border-color: #b9b0d8; }
-        #startDate:focus, #endDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
-        #startDate::-webkit-calendar-picker-indicator, #endDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
-        #startDate:hover::-webkit-calendar-picker-indicator, #endDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
-        /* flatpickr calendar dropdown — modern themed look */
+        #startDate:hover, #endDate:hover, #refDate:hover { border-color: #b9b0d8; }
+        #startDate:focus, #endDate:focus, #refDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
+        #startDate::-webkit-calendar-picker-indicator, #endDate::-webkit-calendar-picker-indicator, #refDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
+        #startDate:hover::-webkit-calendar-picker-indicator, #endDate:hover::-webkit-calendar-picker-indicator, #refDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
         .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
         .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
         .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
@@ -81,12 +96,33 @@
         .chart-tooltip .ct-label { flex: 1 1 auto; color: #6a6a78; }
         .chart-tooltip .ct-val { font-weight: 600; margin-left: 16px; white-space: nowrap; }
         .info-note { background: #fff8ed; border: 1px solid #f0d9b5; color: #8a5a00; border-radius: 8px; padding: 10px 14px; font-size: 0.88rem; }
+        /* Channel delta cards */
+        .delta-card {
+            background: #fff; border: 1px solid #e6e3ef; border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05); flex: 1 1 220px; min-width: 220px;
+            overflow: hidden;
+        }
+        .delta-card .dc-head { background: #5e4a90; color: #fff; font-weight: 700; padding: 0.5rem 0.9rem; font-size: 0.95rem; }
+        .delta-card .dc-body { display: flex; }
+        .delta-card .dc-metric { flex: 1 1 0; padding: 0.7rem 0.9rem; }
+        .delta-card .dc-metric + .dc-metric { border-left: 1px solid #eee; }
+        .delta-card .dc-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: .04em; color: #8a8a8a; }
+        .delta-card .dc-value { font-size: 1.25rem; font-weight: 700; color: #2d2a3a; line-height: 1.2; margin: 2px 0; }
+        .delta-card .dc-sub { font-size: 0.72rem; color: #9a96a8; }
+        .delta-badge { display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 1px 8px; border-radius: 20px; }
+        .delta-badge.up { background: #e3f9f0; color: #00854c; }
+        .delta-badge.down { background: #fdecec; color: #c0392b; }
+        .delta-badge.flat { background: #eee; color: #888; }
+        td .delta-badge { font-size: 0.74rem; }
+        .seg-toggle .btn { border: 1px solid #5e4a90; color: #5e4a90; background: transparent; }
+        .seg-toggle .btn:hover { background: #5e4a90; color: #fff; }
+        .seg-toggle .btn-check:checked + .btn { background: #5e4a90; color: #fff; border-color: #5e4a90; }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-dark bg-primary sticky-top">
         <div class="container d-flex flex-nowrap align-items-center gap-2">
-            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Shop-campaigns</span>
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">SEO stats</span>
             <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
                 <div class="nav-dropdown">
                     <button class="nav-dropdown-toggle">Generators</button>
@@ -115,7 +151,7 @@
                     </div>
                 </div>
                 <div class="nav-dropdown">
-                    <button class="nav-dropdown-toggle nav-dropdown-active">Google Ads</button>
+                    <button class="nav-dropdown-toggle">Google Ads</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
                         <a href="/static/dma-plus.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="10"/></svg> DMA+</a>
@@ -123,12 +159,12 @@
                         <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
                         <a href="/static/gsd-check.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> GSD Check</a>
                         <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
-                        <a href="/static/shop-campaigns.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg> Shop-campaigns</a>
+                        <a href="/static/shop-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg> Shop-campaigns</a>
                         <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
                     </div>
                 </div>
                 <div class="nav-dropdown">
-                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
@@ -136,7 +172,7 @@
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
                         <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
                         <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
-                        <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO stats</a>
+                        <a href="/static/seo-stats.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO stats</a>
                         <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
                         <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
                     </div>
@@ -149,10 +185,16 @@
     <div class="container mt-4 pb-5">
         <div id="metaLine" class="text-muted text-end mb-2" style="font-size:0.82rem;"></div>
 
-        <!-- Controls -->
+        <!-- Summary cards -->
+        <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="statsRow"></div>
+
+        <!-- Chart -->
         <div class="card mb-4">
+            <div class="card-header" style="background:#5e4a90; color:#fff;">
+                <h5 class="mb-0">Visits & revenue per day</h5>
+            </div>
             <div class="card-body">
-                <div class="d-flex flex-wrap gap-3 align-items-end">
+                <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
                     <div>
                         <label for="startDate" class="form-label small mb-1">Start date</label>
                         <input type="date" class="form-control form-control-sm" id="startDate" style="width: 160px;">
@@ -169,24 +211,49 @@
                     </div>
                     <div class="ms-auto">
                         <button class="btn btn-sm text-white" style="background:#CC5500; border:1px solid #CC5500; min-width:90px; transition: background-color 0.2s ease, border-color 0.2s ease;" onmouseover="this.style.backgroundColor='#E97451';this.style.borderColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500';this.style.borderColor='#CC5500'" onclick="load(false)" id="loadBtn">Load</button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="load(true)" title="Bypass cache and re-query SA360">Refresh</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="load(true)" title="Bypass cache and re-query Redshift">Refresh</button>
                     </div>
                 </div>
-                <div id="infoNote" class="info-note mt-4" style="display:none;"></div>
+                <div id="infoNote" class="info-note mb-3" style="display:none;"></div>
+                <div class="d-flex flex-wrap gap-2 mb-3" id="metricToggles"></div>
+                <div class="chart-wrap"><canvas id="chart"></canvas></div>
             </div>
         </div>
 
-        <!-- Summary cards -->
-        <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="statsRow"></div>
-
-        <!-- Chart -->
+        <!-- Top categories -->
         <div class="card mb-4">
-            <div class="card-header" style="background:#5e4a90; color:#fff;">
-                <h5 class="mb-0">Trend</h5>
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
+                <h5 class="mb-0">Top categories</h5>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <div class="btn-group btn-group-sm seg-toggle" role="group">
+                        <input type="radio" class="btn-check" name="catMetric" id="catVisits" autocomplete="off" checked onchange="catMetric='visits'; renderCats();">
+                        <label class="btn" for="catVisits">Visits</label>
+                        <input type="radio" class="btn-check" name="catMetric" id="catRevenue" autocomplete="off" onchange="catMetric='revenue'; renderCats();">
+                        <label class="btn" for="catRevenue">Revenue</label>
+                    </div>
+                    <select class="form-select form-select-sm" id="catTopN" style="width:auto;" onchange="renderCats()">
+                        <option value="10" selected>Top 10</option>
+                        <option value="50">Top 50</option>
+                        <option value="100">Top 100</option>
+                        <option value="all">All</option>
+                    </select>
+                </div>
             </div>
             <div class="card-body">
-                <div class="d-flex flex-wrap gap-2 mb-3" id="metricToggles"></div>
-                <div class="chart-wrap"><canvas id="chart"></canvas></div>
+                <h6 class="text-muted mb-2">Top maincats</h6>
+                <div class="table-responsive mb-4">
+                    <table class="table table-hover perf-table mb-0">
+                        <thead><tr id="mainCatHead"></tr></thead>
+                        <tbody id="mainCatBody"></tbody>
+                    </table>
+                </div>
+                <h6 class="text-muted mb-2">Top subcats</h6>
+                <div class="table-responsive">
+                    <table class="table table-hover perf-table mb-0">
+                        <thead><tr id="subCatHead"></tr></thead>
+                        <tbody id="subCatBody"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -198,7 +265,7 @@
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover perf-table mb-0">
+                    <table class="table table-hover perf-table perf-fixed mb-0">
                         <thead><tr id="tableHead"></tr></thead>
                         <tbody id="tableBody"></tbody>
                         <tfoot><tr id="tableFoot"></tr></tfoot>
@@ -219,60 +286,32 @@
             </div>
         </div>
 
-        <!-- Top campaigns -->
+        <!-- Performance standup -->
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
-                <h5 class="mb-0">Top campaigns</h5>
-                <div class="d-flex align-items-center gap-2">
-                    <input type="text" class="form-control form-control-sm" id="topCampFilter" placeholder="Filter campaigns…" style="width:200px;" oninput="topFilterChange('campaigns')">
-                    <select class="form-select form-select-sm" id="topCampPerPage" style="width:auto;" onchange="topPerPageChange('campaigns')">
-                        <option value="10" selected>10</option>
-                        <option value="50">50</option>
-                        <option value="100">100</option>
-                        <option value="all">All</option>
-                    </select>
+                <h5 class="mb-0">Performance standup</h5>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <label for="refDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Compare day:</label>
+                    <input type="date" class="form-control form-control-sm" id="refDate" style="width:150px;" onchange="loadDeltas(false)">
+                    <svg id="deltaInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
+                        <title id="deltaInfoTitle">Comparison windows</title>
+                        <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
+                        <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                        <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                    </svg>
                 </div>
             </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover perf-table mb-0">
-                        <thead><tr id="topCampHead"></tr></thead>
-                        <tbody id="topCampBody"></tbody>
-                    </table>
-                </div>
-                <div class="pagination-controls">
-                    <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('campaigns',-1)" id="topCampPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
-                    <span class="page-info" id="topCampInfo">-</span>
-                    <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('campaigns',1)" id="topCampNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Top ad groups -->
-        <div class="card mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
-                <h5 class="mb-0">Top ad groups</h5>
-                <div class="d-flex align-items-center gap-2">
-                    <input type="text" class="form-control form-control-sm" id="topAgFilter" placeholder="Filter ad groups / campaigns…" style="width:240px;" oninput="topFilterChange('ad_groups')">
-                    <select class="form-select form-select-sm" id="topAgPerPage" style="width:auto;" onchange="topPerPageChange('ad_groups')">
-                        <option value="10" selected>10</option>
-                        <option value="50">50</option>
-                        <option value="100">100</option>
-                        <option value="all">All</option>
-                    </select>
-                </div>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover perf-table mb-0">
-                        <thead><tr id="topAgHead"></tr></thead>
-                        <tbody id="topAgBody"></tbody>
-                    </table>
-                </div>
-                <div class="pagination-controls">
-                    <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('ad_groups',-1)" id="topAgPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
-                    <span class="page-info" id="topAgInfo">-</span>
-                    <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('ad_groups',1)" id="topAgNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="standupTiles"></div>
+                <div class="row g-4">
+                    <div class="col-lg-6">
+                        <div class="standup-head" id="standupVisitsTitle">Subcats (visits)</div>
+                        <div id="standupVisitsList" class="standup-list"></div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="standup-head" id="standupRevenueTitle">Subcats (revenue)</div>
+                        <div id="standupRevenueList" class="standup-list"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -280,65 +319,73 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const API = window.location.origin + '/api/shop-campaigns';
+        const API = window.location.origin + '/api/seo-stats';
 
-        // metric key -> {label, unit group, color}
         const METRICS = {
-            clicks:      { label: 'Clicks',      unit: 'count', axis: 'count', color: '#5e4a90' },
-            revenue:     { label: 'Revenue',     unit: 'euro',  axis: 'euro',  color: '#00b894' },
-            cost:        { label: 'Cost',        unit: 'euro',  axis: 'euro',  color: '#d63031' },
-            margin:      { label: 'Margin',      unit: 'euro',  axis: 'euro',  color: '#0984e3' },
-            conversions: { label: 'Conversions', unit: 'num',   axis: 'count', color: '#e17055' },
-            ctr:         { label: 'CTR',         unit: 'pct',   axis: 'pct',   color: '#6c5ce7' },
-            conv_rate:   { label: 'Conv. rate',  unit: 'pct',   axis: 'pct',   color: '#fdcb6e' },
-            avg_cpc:     { label: 'Avg CPC',     unit: 'cpc',   axis: 'cpc',   color: '#e84393' },
+            seo_visits:   { label: 'SEO visits',          unit: 'count', axis: 'count', color: '#5e4a90' },
+            dma_visits:   { label: 'DMA Organic visits',  unit: 'count', axis: 'count', color: '#0984e3' },
+            gsaas_visits: { label: 'GSAAS visits',        unit: 'count', axis: 'count', color: '#00b894' },
+            seo_omzet:    { label: 'SEO revenue',         unit: 'euro',  axis: 'euro',  color: '#6c5ce7' },
+            dma_omzet:    { label: 'DMA Organic revenue', unit: 'euro',  axis: 'euro',  color: '#e17055' },
+            gsaas_omzet:  { label: 'GSAAS revenue',       unit: 'euro',  axis: 'euro',  color: '#e84393' },
         };
-        const ORDER = ['clicks','revenue','cost','margin','conversions','ctr','conv_rate','avg_cpc'];
+        const ORDER = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','dma_omzet','gsaas_omzet'];
+        // Per-day overview shows only these metric columns (DMA Organic & GSAAS revenue omitted).
+        const TABLE_COLS = ['seo_visits','dma_visits','gsaas_visits','seo_omzet'];
         const AXES = {
-            count: { title: 'Count', position: 'left' },
-            euro:  { title: '€',     position: 'right' },
-            pct:   { title: '%',     position: 'right' },
-            cpc:   { title: '€ CPC', position: 'right' },
+            count: { title: 'Visits', position: 'left' },
+            euro:  { title: '€',      position: 'right' },
         };
-        let selected = new Set(['clicks', 'revenue', 'cost']);
+        let selected = new Set(['seo_visits', 'dma_visits', 'gsaas_visits']);
         let lastData = null;
         let chart = null;
+        let lastDeltas = null;
+        let catMetric = 'visits';
+        // Top-categories tables: independent sort state, default by Δ desc.
+        const CAT_TABLES = {
+            main: { headId: 'mainCatHead', bodyId: 'mainCatBody', withSub: false, src: 'maincats' },
+            sub:  { headId: 'subCatHead',  bodyId: 'subCatBody',  withSub: true,  src: 'subcats'  },
+        };
+        const catSort = { main: { col: 'delta', dir: 'desc' }, sub: { col: 'delta', dir: 'desc' } };
 
         // Per-day table sort + pagination state
         let perfRows = [];
         let perfSortCol = 'date';
         let perfSortDir = 'asc';
         let perfPage = 1;
-        let fpStart = null, fpEnd = null;
-        let lastTop = null;
-
-        // Top-performer tables (campaigns + ad groups): sortable, default by revenue desc.
-        const TOP_TABLES = {
-            campaigns: {
-                headId: 'topCampHead', bodyId: 'topCampBody', perPageId: 'topCampPerPage',
-                prevId: 'topCampPrev', nextId: 'topCampNext', infoId: 'topCampInfo', filterId: 'topCampFilter',
-                col: 'revenue', dir: 'desc', source: [], rows: [], page: 1, filter: '',
-                columns: [{ key: 'campaign_name', label: 'Campaign' }]
-                    .concat(ORDER.map(k => ({ key: k, label: METRICS[k].label, numeric: true }))),
-            },
-            ad_groups: {
-                headId: 'topAgHead', bodyId: 'topAgBody', perPageId: 'topAgPerPage',
-                prevId: 'topAgPrev', nextId: 'topAgNext', infoId: 'topAgInfo', filterId: 'topAgFilter',
-                col: 'revenue', dir: 'desc', source: [], rows: [], page: 1, filter: '',
-                columns: [{ key: 'ad_group_name', label: 'Ad group' }, { key: 'campaign_name', label: 'Campaign' }]
-                    .concat(ORDER.map(k => ({ key: k, label: METRICS[k].label, numeric: true }))),
-            },
-        };
+        let fpStart = null, fpEnd = null, fpRef = null;
+        let notesMap = {};   // date -> { note, color }
+        // 6 preset pastel note colors (yellow, green, blue, pink, purple, orange).
+        const PRESET_COLORS = ['#fff3b0', '#c7f0d2', '#cfe3fc', '#fdd2d2', '#e3d4f7', '#ffe0c2'];
 
         function fmt(key, v) {
             if (v === null || v === undefined) return '–';
             const u = METRICS[key].unit;
-            if (u === 'euro' || u === 'cpc') return '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            if (u === 'pct') return Number(v).toFixed(2) + '%';
+            if (u === 'euro') return '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             if (u === 'count') return Math.round(v).toLocaleString('nl-NL');
             return Number(v).toLocaleString('nl-NL', { maximumFractionDigits: 2 });
         }
+        function fmtInt(v) { return Math.round(v || 0).toLocaleString('nl-NL'); }
+        function fmtEuro(v) { return '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
         function ymd(d) { return d.toISOString().slice(0, 10); }
+        function weekdayOf(iso) {
+            const [y, m, d] = iso.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('nl-NL', { weekday: 'short' });
+        }
+
+        function pctBadge(pct, digits = 1) {
+            if (pct === null || pct === undefined) return '<span class="delta-badge flat">n/a</span>';
+            const cls = pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat');
+            const sign = pct > 0 ? '+' : '';
+            return `<span class="delta-badge ${cls}">${sign}${pct.toLocaleString('nl-NL', { maximumFractionDigits: digits })}%</span>`;
+        }
+
+        function pctText(pct, digits = 0) {
+            if (pct === null || pct === undefined) return '<span class="text-muted">n/a</span>';
+            const color = pct > 0 ? '#00854c' : (pct < 0 ? '#c0392b' : '#888');
+            const sign = pct > 0 ? '+' : '';
+            return `<span style="color:${color}">${sign}${pct.toLocaleString('nl-NL', { maximumFractionDigits: digits })}%</span>`;
+        }
 
         function setDates(start, end) {
             if (fpStart) fpStart.setDate(start, false); else document.getElementById('startDate').value = ymd(start);
@@ -347,7 +394,8 @@
 
         function setPreset(days) {
             const end = new Date();
-            const start = new Date();
+            end.setDate(end.getDate() - 1);   // yesterday is the latest complete day
+            const start = new Date(end);
             start.setDate(end.getDate() - (days - 1));
             setDates(start, end);
             load(false);
@@ -414,7 +462,7 @@
             });
             const scales = { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } } };
             let rightUsed = 0;
-            ['count','euro','pct','cpc'].forEach(ax => {
+            ['count','euro'].forEach(ax => {
                 if (!usedAxes.has(ax)) return;
                 const cfg = AXES[ax];
                 const isRight = cfg.position === 'right';
@@ -443,31 +491,33 @@
             else { chart = new Chart(document.getElementById('chart'), cfg); }
         }
 
+        function computeTotals() {
+            const t = {};
+            ORDER.forEach(k => { t[k] = 0; });
+            lastData.daily.forEach(r => ORDER.forEach(k => { t[k] += Number(r[k]) || 0; }));
+            return t;
+        }
+
         function renderStats() {
-            const t = lastData.totals;
+            const t = computeTotals();
             const row = document.getElementById('statsRow');
             row.innerHTML = '';
-            const campCard = document.createElement('div');
-            campCard.className = 'stat-card';
-            campCard.innerHTML = `<h3>${(lastData.campaign_total || 0).toLocaleString('nl-NL')}</h3><div class="label"># Campaigns</div>`;
-            row.appendChild(campCard);
             ORDER.forEach(key => {
-                const v = t[key];
-                const cls = (key === 'margin' && v < 0) ? ' class="neg"' : '';
                 const card = document.createElement('div');
                 card.className = 'stat-card';
-                card.innerHTML = `<h3${cls}>${fmt(key, v)}</h3><div class="label">${METRICS[key].label}</div>`;
+                card.innerHTML = `<h3>${fmt(key, t[key])}</h3><div class="label">${METRICS[key].label}</div>`;
                 row.appendChild(card);
             });
         }
 
         function initTable() {
-            // Fresh copy to sort without mutating lastData.daily (chart uses it).
             perfRows = lastData.daily.slice();
             perfPage = 1;
             const head = document.getElementById('tableHead');
             head.innerHTML = '<th class="sortable" data-sort="date" onclick="sortBy(\'date\')">Date</th>' +
-                ORDER.map(k => `<th class="sortable" data-sort="${k}" onclick="sortBy('${k}')">${METRICS[k].label}</th>`).join('');
+                '<th class="text-col">Weekday</th>' +
+                TABLE_COLS.map(k => `<th class="sortable" data-sort="${k}" onclick="sortBy('${k}')">${METRICS[k].label}</th>`).join('') +
+                '<th class="text-col">Notes</th>';
             sortRows();
             updateSortIndicators();
             renderFoot();
@@ -487,7 +537,8 @@
         }
 
         function updateSortIndicators() {
-            document.querySelectorAll('.perf-table th.sortable').forEach(th => {
+            document.querySelectorAll('.perf-table th.sortable[data-sort]').forEach(th => {
+                if (!th.closest('#tableHead')) return;
                 th.classList.remove('sort-asc', 'sort-desc');
                 if (th.dataset.sort === perfSortCol) {
                     th.classList.add(perfSortDir === 'asc' ? 'sort-asc' : 'sort-desc');
@@ -513,66 +564,261 @@
             return val === 'all' ? Infinity : parseInt(val);
         }
 
-        function changePage(delta) {
-            perfPage += delta;
-            renderPage();
-        }
+        function changePage(delta) { perfPage += delta; renderPage(); }
 
         function renderPage() {
             const perPage = getPerPage();
             const total = perfRows.length;
             const totalPages = perPage === Infinity ? 1 : Math.ceil(total / perPage);
             if (perfPage > totalPages) perfPage = totalPages || 1;
-
             const start = perPage === Infinity ? 0 : (perfPage - 1) * perPage;
             const end = perPage === Infinity ? total : start + perPage;
             renderBody(perfRows.slice(start, end));
-
             document.getElementById('prevBtn').disabled = perfPage <= 1;
             document.getElementById('nextBtn').disabled = perfPage >= totalPages;
             const showing = total === 0 ? '0' : `${start + 1}-${Math.min(end, total)}`;
             document.getElementById('pageInfo').textContent = `${showing} of ${total.toLocaleString()} days`;
         }
 
+        // Visits columns get a red→green heatmap, scaled independently per column
+        // across the full range (not just the visible page).
+        const VISIT_KEYS = ORDER.filter(k => METRICS[k].unit === 'count');
+
+        function heatColor(t) {
+            // Diverging scale: low = red fades, high = green fades, neutral white midpoint.
+            t = Math.max(0, Math.min(1, t));
+            const white = [255, 255, 255];
+            const red = [248, 105, 107];
+            const green = [99, 190, 123];
+            const lerp = (a, b, u) => Math.round(a + (b - a) * u);
+            const target = t >= 0.5 ? green : red;
+            const u = t >= 0.5 ? (t - 0.5) / 0.5 : (0.5 - t) / 0.5;
+            return `rgb(${lerp(white[0], target[0], u)},${lerp(white[1], target[1], u)},${lerp(white[2], target[2], u)})`;
+        }
+
+        function visitColScales() {
+            const sc = {};
+            VISIT_KEYS.forEach(k => {
+                let mn = Infinity, mx = -Infinity;
+                perfRows.forEach(r => {
+                    const v = Number(r[k]) || 0;
+                    if (v < mn) mn = v;
+                    if (v > mx) mx = v;
+                });
+                sc[k] = { mn: mn === Infinity ? 0 : mn, mx: mx === -Infinity ? 0 : mx };
+            });
+            return sc;
+        }
+
         function renderBody(rows) {
             const body = document.getElementById('tableBody');
             if (!rows.length) {
-                body.innerHTML = `<tr><td colspan="${ORDER.length + 1}" class="text-center text-muted py-4">No data.</td></tr>`;
+                body.innerHTML = `<tr><td colspan="${TABLE_COLS.length + 3}" class="text-center text-muted py-4">No data.</td></tr>`;
                 return;
             }
+            const sc = visitColScales();
             body.innerHTML = rows.map(r => {
-                const cells = ORDER.map(k => {
-                    const cls = (k === 'margin' && r[k] < 0) ? ' class="neg"' : '';
-                    return `<td${cls}>${fmt(k, r[k])}</td>`;
+                const cells = TABLE_COLS.map(k => {
+                    if (METRICS[k].unit === 'count') {
+                        const s = sc[k];
+                        const t = s.mx > s.mn ? (Number(r[k]) - s.mn) / (s.mx - s.mn) : 0.5;
+                        return `<td style="background:${heatColor(t)}">${fmt(k, r[k])}</td>`;
+                    }
+                    return `<td>${fmt(k, r[k])}</td>`;
                 }).join('');
-                return `<tr><td>${r.date}</td>${cells}</tr>`;
+                const nd = notesMap[r.date] || {};
+                const noteText = nd.note || '';
+                const color = nd.color || PRESET_COLORS[0];
+                const style = noteText ? `background:${color}` : '';
+                // Swatches always exist (hidden until the field is focused), with the
+                // note's current colour pre-selected.
+                const swatches = `<div class="note-swatches" data-color="${color}">` +
+                    PRESET_COLORS.map(c =>
+                        `<button type="button" class="swatch${c === color ? ' sel' : ''}" style="background:${c}" data-color="${c}" onclick="pickSwatch(this)"></button>`
+                    ).join('') + `</div>`;
+                const noteCell = `<td class="text-col"><div class="note-wrap">` +
+                    `<input type="text" class="note-input" data-date="${r.date}" value="${escapeHtml(noteText)}" style="${style}" placeholder="…" onchange="saveNoteFrom(this)">` +
+                    swatches + `</div></td>`;
+                return `<tr><td>${r.date}</td><td class="text-col">${weekdayOf(r.date)}</td>${cells}${noteCell}</tr>`;
             }).join('');
         }
 
         function renderFoot() {
             const foot = document.getElementById('tableFoot');
-            const t = lastData.totals;
-            foot.innerHTML = '<td>Total</td>' + ORDER.map(k => {
-                const cls = (k === 'margin' && t[k] < 0) ? ' class="neg"' : '';
-                return `<td${cls}>${fmt(k, t[k])}</td>`;
-            }).join('');
+            const t = computeTotals();
+            foot.innerHTML = '<td>Total</td><td></td>' + TABLE_COLS.map(k => `<td>${fmt(k, t[k])}</td>`).join('') + '<td></td>';
         }
 
         function renderMeta() {
             const d = lastData;
             document.getElementById('metaLine').textContent =
-                `${d.campaign_total} campaigns tracked - last updated ${new Date(d.generated_at).toLocaleDateString('nl-NL')}` +
-                (d.accounts_failed && d.accounts_failed.length ? ` · ⚠ ${d.accounts_failed.length} account(s) failed` : '');
+                `last updated ${new Date(d.generated_at).toLocaleDateString('nl-NL')}`;
             const note = document.getElementById('infoNote');
-            const hasData = d.daily.some(r => r.clicks || r.revenue || r.cost);
-            const enabled = (d.campaign_by_status || {}).ENABLED || 0;
-            if (!hasData) {
-                note.style.display = 'block';
-                note.innerHTML = enabled === 0
-                    ? `No <code>SHOP/</code> campaign is currently enabled, so there is no performance data in this range yet.`
-                    : `No clicks/cost recorded in this date range yet.`;
-            } else {
-                note.style.display = 'none';
+            const hasData = d.daily.some(r => r.seo_visits || r.dma_visits || r.gsaas_visits);
+            note.style.display = hasData ? 'none' : 'block';
+            if (!hasData) note.innerHTML = `No visits recorded in this date range yet.`;
+        }
+
+        // ---- Top categories ----
+
+        function catTopN() {
+            const v = document.getElementById('catTopN').value;
+            return v === 'all' ? Infinity : parseInt(v);
+        }
+
+        // Normalise a backend cat row to the currently-selected metric.
+        function buildCatRows(src, withSub) {
+            const isVis = catMetric === 'visits';
+            return (src || []).map(r => ({
+                maincat: r.maincat,
+                subcat: withSub ? r.subcat : null,
+                p1: isVis ? r.visits_p1 : r.revenue_p1,
+                p2: isVis ? r.visits_p2 : r.revenue_p2,
+                delta: isVis ? r.visits_delta : r.revenue_delta,
+                pct: isVis ? r.visits_pct : r.revenue_pct,
+            }));
+        }
+
+        function catColumns(withSub) {
+            const cols = [{ key: 'maincat', label: 'Maincat', text: true }];
+            if (withSub) cols.push({ key: 'subcat', label: 'Subcat', text: true });
+            cols.push({ key: 'p1', label: 'Week before' });
+            cols.push({ key: 'p2', label: 'Selected day' });
+            cols.push({ key: 'delta', label: 'Δ' });
+            cols.push({ key: 'pct', label: 'Δ%' });
+            return cols;
+        }
+
+        function sortCat(which, col) {
+            const s = catSort[which];
+            if (s.col === col) { s.dir = s.dir === 'asc' ? 'desc' : 'asc'; }
+            else { s.col = col; s.dir = (col === 'maincat' || col === 'subcat') ? 'asc' : 'desc'; }
+            renderCats();
+        }
+
+        function renderCatTable(which, src) {
+            const t = CAT_TABLES[which];
+            const s = catSort[which];
+            const f = catMetric === 'visits' ? fmtInt : fmtEuro;
+            const cols = catColumns(t.withSub);
+
+            const head = document.getElementById(t.headId);
+            head.innerHTML = cols.map(c => {
+                const sortCls = s.col === c.key ? (s.dir === 'asc' ? ' sort-asc' : ' sort-desc') : '';
+                return `<th class="sortable${c.text ? ' text-col' : ''}${sortCls}" onclick="sortCat('${which}','${c.key}')">${c.label}</th>`;
+            }).join('');
+
+            let rows = buildCatRows(src, t.withSub);
+            // Drop "-" subcats — those are visits that landed on the maincat itself.
+            if (t.withSub) rows = rows.filter(r => r.subcat && r.subcat !== '-');
+            rows.sort((a, b) => {
+                let va = a[s.col], vb = b[s.col];
+                if (s.col === 'maincat' || s.col === 'subcat') {
+                    va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase();
+                    if (va < vb) return s.dir === 'asc' ? -1 : 1;
+                    if (va > vb) return s.dir === 'asc' ? 1 : -1;
+                    return 0;
+                }
+                va = Number(va) || 0; vb = Number(vb) || 0;
+                return s.dir === 'asc' ? va - vb : vb - va;
+            });
+            const n = catTopN();
+            if (n !== Infinity) rows = rows.slice(0, n);
+
+            const body = document.getElementById(t.bodyId);
+            if (!rows.length) {
+                body.innerHTML = `<tr><td colspan="${cols.length}" class="text-center text-muted py-3">No data.</td></tr>`;
+                return;
+            }
+            body.innerHTML = rows.map(r => '<tr>' + cols.map(c => {
+                if (c.text) return `<td class="text-col">${escapeHtml(r[c.key])}</td>`;
+                if (c.key === 'pct') return `<td>${pctBadge(r.pct)}</td>`;
+                const v = r[c.key];
+                const prefix = (c.key === 'delta' && v >= 0) ? '+' : '';
+                return `<td>${prefix}${f(v)}</td>`;
+            }).join('') + '</tr>').join('');
+        }
+
+        function renderCats() {
+            if (!lastDeltas) return;
+            const key = catMetric === 'visits' ? 'by_visits' : 'by_revenue';
+            renderCatTable('main', lastDeltas.maincats[key]);
+            renderCatTable('sub', lastDeltas.subcats[key]);
+        }
+
+        // ---- Performance standup section ----
+
+        function standupList(items, isVis) {
+            if (!items || !items.length) return '<div class="text-muted px-2 py-2">No data.</div>';
+            const f = isVis ? fmtInt : fmtEuro;
+            const rows = items.map(r => {
+                const delta = isVis ? r.visits_delta : r.revenue_delta;
+                const pct = isVis ? r.visits_pct : r.revenue_pct;
+                return `<tr>
+                    <td class="text-col">${escapeHtml(r.subcat)}</td>
+                    <td class="text-col">${escapeHtml(r.maincat)}</td>
+                    <td>${delta >= 0 ? '+' : ''}${f(delta)}</td>
+                    <td>${pctBadge(pct)}</td>
+                </tr>`;
+            }).join('');
+            return `<table class="table table-sm table-hover perf-table standup-table mb-0">
+                <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th><th>Δ</th><th>Δ%</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
+        }
+
+        function renderStandup() {
+            if (!lastDeltas) return;
+            const c = lastDeltas.comparison;
+            document.getElementById('deltaInfoTitle').textContent =
+                `Visits: ${c.visits_p2} vs ${c.visits_p1}\nRevenue: ${c.revenue_p2} vs ${c.revenue_p1}`;
+            const chans = lastDeltas.channels;
+            const byKey = k => chans.find(c => c.channel === k) || {};
+
+            // Tiles: visit delta % per channel.
+            document.getElementById('standupTiles').innerHTML = ['seo', 'gsaas', 'dma'].map(k => {
+                const ch = byKey(k);
+                return `<div class="stat-card"><h3>${pctText(ch.visits_pct)}</h3>` +
+                       `<div class="label">${ch.label || k} visits Δ</div></div>`;
+            }).join('');
+
+            // Skip "-" / maincat-level visits and the "Beslist.nl" catch-all.
+            const realCat = r => r.subcat && r.subcat !== '-'
+                && r.maincat !== 'Beslist.nl' && r.subcat !== 'Beslist.nl'
+                && r.subcat !== r.maincat;
+            const dc = lastDeltas.deepestcats;
+            const seo = byKey('seo');
+            // Visits list: gainers if SEO visits up, decliners if down.
+            const visUp = (seo.visits_delta || 0) >= 0;
+            const visItems = (visUp ? dc.by_visits : dc.worst_by_visits)
+                .filter(realCat).slice(0, 3);
+            document.getElementById('standupVisitsTitle').textContent =
+                visUp ? 'Top 3 gaining categories (visits)' : 'Top 3 declining categories (visits)';
+            document.getElementById('standupVisitsList').innerHTML = standupList(visItems, true);
+
+            // Revenue list: same logic on SEO revenue delta.
+            const revUp = (seo.revenue_delta || 0) >= 0;
+            const revItems = (revUp ? dc.by_revenue : dc.worst_by_revenue)
+                .filter(realCat).slice(0, 3);
+            document.getElementById('standupRevenueTitle').textContent =
+                revUp ? 'Top 3 gaining categories (revenue)' : 'Top 3 declining categories (revenue)';
+            document.getElementById('standupRevenueList').innerHTML = standupList(revItems, false);
+        }
+
+        async function loadDeltas(force) {
+            try {
+                const params = new URLSearchParams();
+                const ref = document.getElementById('refDate').value;
+                if (ref) params.set('ref_date', ref);
+                if (force) params.set('force', 'true');
+                const res = await fetch(`${API}/deltas?${params}`);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                lastDeltas = await res.json();
+                renderCats();
+                renderStandup();
+            } catch (e) {
+                document.getElementById('standupTiles').innerHTML =
+                    `<span class="text-danger">Failed to load deltas: ${e.message}</span>`;
             }
         }
 
@@ -586,26 +832,21 @@
                 if (start) params.set('start_date', start);
                 if (end) params.set('end_date', end);
                 if (force) params.set('force', 'true');
-                const [res, topRes] = await Promise.all([
-                    fetch(`${API}/performance?${params}`),
-                    fetch(`${API}/top-performers?${params}`),
-                ]);
+                const res = await fetch(`${API}/daily?${params}`);
                 if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + (await res.text()));
                 lastData = await res.json();
+                await loadNotes(lastData.start_date, lastData.end_date);
                 renderStats();
                 renderChart();
                 initTable();
                 renderMeta();
                 document.getElementById('exportBtn').disabled = false;
-                if (topRes.ok) {
-                    lastTop = await topRes.json();
-                    renderTop();
-                }
             } catch (e) {
                 document.getElementById('metaLine').innerHTML = `<span class="text-danger">Failed to load: ${e.message}</span>`;
             } finally {
                 btn.disabled = false; btn.textContent = 'Load';
             }
+            loadDeltas(force);
         }
 
         function escapeHtml(s) {
@@ -613,157 +854,92 @@
                 ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         }
 
-        function renderTopHead(t) {
-            const tr = document.getElementById(t.headId);
-            tr.innerHTML = t.columns.map(c =>
-                `<th class="sortable${c.numeric ? '' : ' text-col'}" data-sort="${c.key}">${c.label}</th>`).join('');
-            tr.querySelectorAll('th.sortable').forEach(th => th.addEventListener('click', () => sortTop(t, th.dataset.sort)));
-            updateTopIndicators(t);
+        async function loadNotes(start, end) {
+            try {
+                const res = await fetch(`${API}/notes?start_date=${start}&end_date=${end}`);
+                notesMap = res.ok ? ((await res.json()).notes || {}) : {};
+            } catch (e) { notesMap = {}; }
         }
 
-        function updateTopIndicators(t) {
-            document.getElementById(t.headId).querySelectorAll('th.sortable').forEach(th => {
-                th.classList.remove('sort-asc', 'sort-desc');
-                if (th.dataset.sort === t.col) th.classList.add(t.dir === 'asc' ? 'sort-asc' : 'sort-desc');
-            });
+        function pickSwatch(btn) {
+            const cont = btn.closest('.note-swatches');
+            cont.querySelectorAll('.swatch').forEach(s => s.classList.remove('sel'));
+            btn.classList.add('sel');
+            cont.dataset.color = btn.dataset.color;
+            // Live-preview the colour on the text input.
+            const txt = btn.closest('.note-wrap').querySelector('.note-input');
+            if (txt.value.trim()) txt.style.background = btn.dataset.color;
         }
 
-        function sortTopRows(t) {
-            const c = t.columns.find(x => x.key === t.col);
-            t.rows.sort((a, b) => {
-                let va = a[t.col], vb = b[t.col];
-                if (c && c.numeric) { va = Number(va) || 0; vb = Number(vb) || 0; }
-                else { va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase(); }
-                if (va < vb) return t.dir === 'asc' ? -1 : 1;
-                if (va > vb) return t.dir === 'asc' ? 1 : -1;
-                return 0;
-            });
+        async function saveNoteFrom(el) {
+            const wrap = el.closest('.note-wrap');
+            const date = el.dataset.date;
+            const txt = wrap.querySelector('.note-input');
+            const note = txt.value;
+            const swatches = wrap.querySelector('.note-swatches');
+            const color = swatches ? swatches.dataset.color
+                                   : ((notesMap[date] && notesMap[date].color) || PRESET_COLORS[0]);
+            notesMap[date] = { note, color };
+            txt.style.background = note.trim() ? color : '';
+            try {
+                await fetch(`${API}/notes`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ date, note, color }),
+                });
+            } catch (e) { /* keep local value; will retry on next edit */ }
         }
 
-        function sortTop(t, key) {
-            if (t.col === key) { t.dir = t.dir === 'asc' ? 'desc' : 'asc'; }
-            else { t.col = key; const c = t.columns.find(x => x.key === key); t.dir = c && c.numeric ? 'desc' : 'asc'; }
-            sortTopRows(t);
-            updateTopIndicators(t);
-            t.page = 1;
-            renderTopPage(t);
-        }
-
-        function getTopPerPage(t) {
-            const v = document.getElementById(t.perPageId).value;
-            return v === 'all' ? Infinity : parseInt(v);
-        }
-
-        function changeTopPage(kind, delta) {
-            const t = TOP_TABLES[kind];
-            t.page += delta;
-            renderTopPage(t);
-        }
-
-        function topPerPageChange(kind) {
-            const t = TOP_TABLES[kind];
-            t.page = 1;
-            renderTopPage(t);
-        }
-
-        function topFilterChange(kind) {
-            const t = TOP_TABLES[kind];
-            t.filter = document.getElementById(t.filterId).value.trim().toLowerCase();
-            applyTopFilter(t);
-        }
-
-        function applyTopFilter(t) {
-            const q = t.filter || '';
-            const textCols = t.columns.filter(c => !c.numeric).map(c => c.key);
-            t.rows = q
-                ? t.source.filter(r => textCols.some(k => String(r[k] || '').toLowerCase().includes(q)))
-                : t.source.slice();
-            sortTopRows(t);
-            t.page = 1;
-            renderTopPage(t);
-        }
-
-        function renderTopPage(t) {
-            const perPage = getTopPerPage(t);
-            const total = t.rows.length;
-            const totalPages = perPage === Infinity ? 1 : Math.ceil(total / perPage);
-            if (t.page > totalPages) t.page = totalPages || 1;
-            const start = perPage === Infinity ? 0 : (t.page - 1) * perPage;
-            const end = perPage === Infinity ? total : start + perPage;
-            renderTopBody(t, t.rows.slice(start, end));
-            document.getElementById(t.prevId).disabled = t.page <= 1;
-            document.getElementById(t.nextId).disabled = t.page >= totalPages;
-            const showing = total === 0 ? '0' : `${start + 1}-${Math.min(end, total)}`;
-            document.getElementById(t.infoId).textContent = `${showing} of ${total.toLocaleString()}`;
-        }
-
-        function renderTopBody(t, rows) {
-            const body = document.getElementById(t.bodyId);
-            if (!rows.length) {
-                body.innerHTML = `<tr><td colspan="${t.columns.length}" class="text-center text-muted py-4">No data.</td></tr>`;
-                return;
-            }
-            body.innerHTML = rows.map(r => '<tr>' + t.columns.map(c => {
-                if (c.numeric) {
-                    const cls = (c.key === 'margin' && r[c.key] < 0) ? ' class="neg"' : '';
-                    return `<td${cls}>${fmt(c.key, r[c.key])}</td>`;
-                }
-                return `<td class="text-col">${escapeHtml(r[c.key] || '-')}</td>`;
-            }).join('') + '</tr>').join('');
-        }
-
-        function renderTop() {
-            ['campaigns', 'ad_groups'].forEach(kind => {
-                const t = TOP_TABLES[kind];
-                t.source = (lastTop[kind] || []).slice();
-                renderTopHead(t);
-                applyTopFilter(t);
-            });
-        }
-
-        // Per-day Export button: exports all three tables into one workbook (one sheet each),
-        // each in its current sort order.
         function exportXlsx() {
             if (!lastData) return;
             const wb = XLSX.utils.book_new();
-
-            // Sheet 1: Per-day overview (+ Total row)
             const dayRows = (perfRows.length ? perfRows : lastData.daily).map(r => {
-                const o = { Date: r.date };
-                ORDER.forEach(k => { o[METRICS[k].label] = r[k]; });
+                const o = { Date: r.date, Weekday: weekdayOf(r.date) };
+                TABLE_COLS.forEach(k => { o[METRICS[k].label] = r[k]; });
+                o.Notes = (notesMap[r.date] && notesMap[r.date].note) || '';
                 return o;
             });
-            const totalRow = { Date: 'Total' };
-            ORDER.forEach(k => { totalRow[METRICS[k].label] = lastData.totals[k]; });
+            const totalRow = { Date: 'Total', Weekday: '' };
+            const t = computeTotals();
+            TABLE_COLS.forEach(k => { totalRow[METRICS[k].label] = t[k]; });
+            totalRow.Notes = '';
             dayRows.push(totalRow);
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dayRows), 'Per-day');
 
-            // Sheets 2 & 3: full ranked Top campaigns / Top ad groups
-            [['campaigns', 'Top campaigns'], ['ad_groups', 'Top ad groups']].forEach(([kind, sheet]) => {
-                const t = TOP_TABLES[kind];
-                const rows = t.rows.map(r => {
-                    const o = {};
-                    t.columns.forEach(c => { o[c.label] = r[c.key]; });
+            if (lastDeltas) {
+                const catSheet = (rows, withSub) => rows.map(r => {
+                    const o = { Maincat: r.maincat };
+                    if (withSub) o.Subcat = r.subcat;
+                    o['Visits week before'] = r.visits_p1; o['Visits yesterday'] = r.visits_p2;
+                    o['Visits Δ'] = r.visits_delta; o['Visits Δ%'] = r.visits_pct;
+                    o['Revenue day-9'] = r.revenue_p1; o['Revenue day-2'] = r.revenue_p2;
+                    o['Revenue Δ'] = r.revenue_delta; o['Revenue Δ%'] = r.revenue_pct;
                     return o;
                 });
-                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{}]), sheet);
-            });
-
-            XLSX.writeFile(wb, `shop-campaigns_${lastData.start_date}_${lastData.end_date}.xlsx`);
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.maincats.by_visits, false)), 'Top maincats');
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.subcats.by_visits, true)), 'Top subcats');
+            }
+            XLSX.writeFile(wb, `seo-stats_${lastData.start_date}_${lastData.end_date}.xlsx`);
         }
 
-        // Init: default last 30 days
+        // Init: default last 30 days (ending yesterday)
         (function () {
             buildToggles();
             const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
                              disableMobile: true, locale: { firstDayOfWeek: 1 } };
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
             if (window.flatpickr) {
                 fpStart = flatpickr('#startDate', fpOpts);
                 fpEnd = flatpickr('#endDate', fpOpts);
+                fpRef = flatpickr('#refDate', { ...fpOpts, defaultDate: yesterday });
+            } else {
+                document.getElementById('refDate').value = ymd(yesterday);
             }
-            const end = new Date();
-            const start = new Date();
-            start.setDate(end.getDate() - 29);
+            // Default range: this month (1st of the current month → yesterday).
+            const end = new Date(yesterday);
+            let start = new Date(end.getFullYear(), end.getMonth(), 1);
+            if (start > end) start = new Date(end);   // edge case: on the 1st of the month
             setDates(start, end);
             load(false);
         })();

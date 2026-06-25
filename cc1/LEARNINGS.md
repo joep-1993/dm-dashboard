@@ -1,6 +1,22 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools SEO stats dashboard — live web version of Performance Standup (2026-06-25)
+
+New SEO-tools page giving the Performance-Standup numbers as a live web UI (no Excel). `backend/seo_stats_service.py` + `_router.py` (`/api/seo-stats`), `frontend/seo-stats.html`. Also reordered the Google Ads dropdown (Shop-campaigns above Thema Ads, A–Z) across all nav files.
+
+**Data = Redshift, reusing the standup channel logic exactly:** `datamart.fct_visits` ⨝ `dim_visit` ⨝ `chan_deriv.ref_channel_derivation_stats` with `is_real_visit=1`, `marketing_channel IN ('SEO','DMA organic','GSAAS')` (note the lowercase "organic"). Revenue = `cpc_revenue + ww_revenue`.
+- `/daily?start_date&end_date` — per-day visits + revenue per channel (chart + per-day table). Default range = **this month → yesterday**.
+- `/deltas?ref_date` — channel %-deltas + top categories. Anchored on **yesterday** (`ref_date` overridable via the "Compare day" picker). **Visits compare ref vs ref-7d; revenue compares ref-1 vs ref-8d** (revenue settles a day later — identical to the standup). Category rows are SEO-channel only.
+- Returns `maincats`/`subcats`/`deepestcats`, each with `by_visits`/`by_revenue` (top 100 by **absolute** delta desc) **and** `worst_by_visits`/`worst_by_revenue` (most-negative, for the decliner lists). The Performance-standup tables use `deepestcats` (= `dim_category.deepest_category_name`, e.g. "Airconditionings") and exclude `-`, the `Beslist.nl` catch-all, and rows where deepest==maincat (maincat-landing noise). Top-categories section uses maincat + sub_category_name.
+- `/notes` GET/PUT — per-date notes persisted in **`pa.seo_stats_notes`** (`note_date` PK, `note`, `color`, `updated_at`); empty note deletes the row. Used `ADD COLUMN IF NOT EXISTS color` to migrate the table created earlier in the same session.
+
+**GOTCHA — the Postgres pool (`get_db_connection`) hands back a `RealDictCursor`**, so rows are dicts, not tuples. `r[0]` raised `KeyError(0)` → FastAPI surfaced it as `{"detail":"0"}` (a 500). Use `r["col"]`. (Redshift cursor is also RealDict; this only bit the new notes table read.)
+
+**GOTCHA — `dashboard.html` has NO top-nav dropdown, only tiles.** The bulk "insert SEO stats into the SEO-tools dropdown" script matched the FIRST `seo-rulings.html` href, which in dashboard.html is the *Open Tool* button inside the SEO Rulings tile → it injected a stray `nav-dropdown-item` link into the card. Fixed by removing the stray link and adding a proper tile. The 28 real tool pages were fine (their first match is the nav dropdown). Lesson: a "first occurrence" bulk-insert is unsafe when one file has a different structure — verify per-file.
+
+**Frontend patterns (mirrors shop-campaigns.html):** multi-series Chart.js trend with metric toggles + HTML tooltip (visits left axis, € right); per-day table is `table-layout:fixed` (even columns, all centered) with a per-column **red→white→green heatmap on the visits columns** (diverging, scaled independently per column); editable per-date **Notes** column with 6 preset pastel swatches that only reveal on `:focus-within` (always in DOM so they return after clearing a note); whole-euro + whole-% formatting. Deployed via uvicorn kill+relaunch (no --reload); static HTML changes are live on refresh. Memory: `seo_stats_tool.md`.
+
 ## dm-tools Shop-campaigns dashboard — SA360 performance of SHOP/ campaigns (2026-06-24, commit `0062c3d`)
 
 New tool under Google Ads tracking the per-day performance of every campaign named `SHOP/*` (the 186 branded Search campaigns across 28 category subaccounts under MCC 3011145605). `backend/shop_campaigns_service.py` + `_router.py` (`/api/shop-campaigns`), `frontend/shop-campaigns.html`.
