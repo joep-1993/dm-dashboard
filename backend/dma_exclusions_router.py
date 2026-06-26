@@ -104,10 +104,13 @@ async def list_endpoint():
 
 
 @router.get("/oos/scan")
-async def oos_scan_endpoint(market: str = Query("NL", description="Market: NL or BE")):
+async def oos_scan_endpoint(
+    market: str = Query("NL", description="Market: NL or BE"),
+    limit: Optional[int] = Query(None, ge=1, description="Cap the number of OOS EANs pulled from the monitor"),
+):
     """List OOS products that are live in DMA, with 30d spend/clicks/conversions."""
     try:
-        return await _run(svc_oos_scan, market)
+        return await _run(svc_oos_scan, market, limit)
     except Exception as e:
         logger.exception("oos scan failed")
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,6 +1,19 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools DMA Exclusions — OOS headline-offer check (don't exclude non-headline variants) (2026-06-26)
+
+The OOS "waste" scan flagged EANs for exclusion purely on *being on the monitor's OOS list + serving in DMA*. Problem: apparel/footwear products carry **one EAN per size variant**, and the DMA gold ad rides the product's **headline (`bestOffer`) offer** while the PLP aggregates every shop/variant. The monitor flags individual variant EANs, so an OOS *non-headline* variant whose headline is a different **in-stock** variant/shop was being excluded — killing a live, buyable ad.
+
+**Rule (confirmed against live data): exclude an OOS EAN only when it IS the headline offer's EAN.** Cross-check each candidate against the product search index.
+- **ES:** `https://elasticsearch-job-cluster-eck-v9.beslist.nl`, wildcard index `product_search_v4_nl-nl_*` (one index per maincat), no auth on internal net. Query `{"query":{"term":{"eans": <ean>}}}`; **EAN must be zero-padded to 13 chars** (`zfill(13)`) — retail strips leading zeros, ES stores padded. Each hit `_id` = productidv3; headline = the offer with `bestOffer:true` inside `shops[].offers[]`. An EAN can resolve to several productidv3 docs → collect every bestOffer and prefer the one whose `ean` == the OOS ean.
+- **`stock` is unreliable** — null on ~half of even valid/live offers (`productValid:true`, active shop). The reliable signal is the **EAN-identity** comparison, NOT stock.
+- `headline_offer(ean)` returns status `match` / `differs` / `no_headline` / `not_found` / `error`. `oos_scan` enriches each candidate (`headline_status/ean/shop/match`) + a `headline_counts` summary; `_headline_offers` batches via a 16-worker pool on a keep-alive `requests.Session` (cold TLS ~3.5s vs warm ~30ms). `oos_exclude` re-checks server-side and **skips only `differs`** (safety net so a stale UI selection can't kill a live ad) — `not_found`/`no_headline`/`error` pass through (a gone product is a valid exclusion; don't fail-closed on a transient lookup).
+- **Frontend** (`dma-exclusions.html`): new **Headline** column with badges; `differs` rows locked (disabled checkbox, muted); **"Select all" picks confirmed `match` only** (unknown stays manually checkable, never auto-selected); summary shows match/non-headline/unconfirmed; "hide non-headline (kept)" filter; exclude alert reports skips.
+- **Live NL numbers:** 1,610 OOS EANs → 975 live in DMA → **871 match, 18 non-headline (kept), 86 unconfirmed**. The 18 kept include one with 3 conversions (headline = a different in-stock variant @ Kampeerhalroden) and the Nike P-6000 `…761681` whose headline is Footlocker `…763760` — the only non-headline EAN that actually *serves* in DMA (15/16 non-serving), i.e. the check earns its keep on exactly that case.
+
+**Also this session:** added an **OOS scan `limit`** (input next to the country picker → `/oos/scan?market&limit=N`, `ge=1`, slices the EAN list before the Google Ads + ES work; blank = all) for quick partial scans; and made the **Preview / Apply** buttons `btn-sm` to match Scan OOS / Re-enable. Backend is bare uvicorn (no `--reload`) → manual kill+relaunch to deploy. Memory: `dma_exclusions_tool.md`.
+
 ## dm-tools DMA Exclusions — OOS (out-of-stock) feed integration + allow-list tree fix (2026-06-25)
 
 Added an "Out-of-stock (OOS) waste" section to the DMA Exclusions tool, fed by the GMC crawl-override monitor (`https://googlemc-suc.bva-apps.aks.private.beslist.nl/api/v1/overrides`, internal, no auth). New service fns in `dma_exclusions_service.py` (`oos_scan`/`oos_exclude`/`oos_recovered`/`oos_reenable`) + `/api/dma-exclusions/oos/*` routes + a new section in `dma-exclusions.html`; added a `source` column ('manual'|'oos') to the `dma_exclusions` table.

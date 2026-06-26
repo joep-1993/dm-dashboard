@@ -134,7 +134,7 @@
                         <div class="mt-4 d-flex gap-2 justify-content-end align-items-center">
                             <span id="busy" class="text-muted me-auto" style="display:none;">
                                 <span class="spinner-border spinner-border-sm"></span> working…</span>
-                            <button id="previewBtn" class="btn btn-outline-primary" onclick="runPreview()">Preview</button>
+                            <button id="previewBtn" class="btn btn-sm btn-outline-primary" onclick="runPreview()">Preview</button>
                         </div>
 
                         <!-- Preview / result -->
@@ -158,7 +158,7 @@
                                 </table>
                             </div>
                             <div class="mt-4 d-flex justify-content-end">
-                                <button id="applyBtn" class="btn btn-primary" onclick="runApply()" disabled>Apply exclusion</button>
+                                <button id="applyBtn" class="btn btn-sm btn-primary" onclick="runApply()" disabled>Apply exclusion</button>
                             </div>
                         </div>
                     </div>
@@ -181,6 +181,7 @@
                                 <option value="NL">NL</option>
                                 <option value="BE">BE</option>
                             </select>
+                            <input id="oosLimit" type="number" min="1" class="form-control form-control-sm" style="width:130px;" placeholder="limit (all)" title="Cap the number of OOS EANs pulled from the monitor (blank = all)">
                         </div>
                     </div>
                     <div class="card-body">
@@ -196,6 +197,7 @@
                             <input id="oosFilter" class="form-control form-control-sm" style="width:220px;" placeholder="filter EAN / category…" oninput="renderOos()">
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideExcluded" onchange="renderOos()"><label class="form-check-label small" for="oosHideExcluded">hide already-excluded</label></div>
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosZeroConv" onchange="renderOos()"><label class="form-check-label small" for="oosZeroConv">only 0-conversion</label></div>
+                            <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideKept" onchange="renderOos()"><label class="form-check-label small" for="oosHideKept">hide non-headline (kept)</label></div>
                             <span class="ms-auto"></span>
                             <span id="oosSelCount" class="small text-muted">0 selected</span>
                             <button id="oosExcludeBtn" class="btn btn-sm btn-primary" onclick="excludeSelectedOos()" disabled>Exclude selected</button>
@@ -207,6 +209,7 @@
                                         <th><input type="checkbox" id="oosSelectAll" onclick="toggleAllOos(this.checked)"></th>
                                         <th>EAN</th><th>Category</th><th>Campaigns</th>
                                         <th>Clicks 30d</th><th>Spend 30d</th><th>Conv 30d</th>
+                                        <th>Headline</th>
                                     </tr>
                                 </thead>
                                 <tbody id="oosBody"></tbody>
@@ -391,9 +394,11 @@
             const f = document.getElementById("oosFilter").value.trim().toLowerCase();
             const hideEx = document.getElementById("oosHideExcluded").checked;
             const zeroOnly = document.getElementById("oosZeroConv").checked;
+            const hideKept = document.getElementById("oosHideKept").checked;
             return oosData.candidates.filter(c => {
                 if (hideEx && c.already_excluded) return false;
                 if (zeroOnly && c.conversions > 0) return false;
+                if (hideKept && c.headline_status === "differs") return false;
                 if (f && !(c.ean.toLowerCase().includes(f) || (c.category || "").toLowerCase().includes(f))) return false;
                 return true;
             });
@@ -409,8 +414,33 @@
             updateOosSel();
         }
 
+        // The gold ad rides the product's headline (bestOffer). 'differs' means the
+        // OOS EAN is NOT that offer — excluding it would kill a still-live ad, so it's
+        // locked out of selection (the backend also refuses it as a safety net).
+        const oosLocked = c => c.already_excluded || c.headline_status === "differs";
+
+        function headlineBadge(c) {
+            switch (c.headline_status) {
+                case "match":
+                    return '<span class="badge bg-danger-subtle text-danger border border-danger-subtle" title="OOS EAN is the advertised headline offer">OOS headline</span>';
+                case "differs":
+                    return `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Headline offer is a different, in-stock EAN — keep">live: ${esc(c.headline_ean || "?")}${c.headline_shop ? " @ " + esc(c.headline_shop) : ""}</span>`;
+                case "not_found":
+                    return '<span class="badge bg-secondary-subtle text-secondary" title="Not found in product index (likely gone)">not in index</span>';
+                case "no_headline":
+                    return '<span class="badge bg-secondary-subtle text-secondary" title="Product found but no headline offer">no headline</span>';
+                case "error":
+                    return '<span class="badge bg-warning text-dark" title="Headline lookup failed (transient)">check failed</span>';
+                default:
+                    return '<span class="text-muted">—</span>';
+            }
+        }
+
+        // "Select all" only picks confirmed OOS-headline rows. 'differs' is locked,
+        // and unknown (not_found / no_headline / lookup error) stays manually
+        // checkable but is never auto-selected — we only bulk-exclude what's confirmed.
         function toggleAllOos(on) {
-            oosVisible().forEach(c => { if (!c.already_excluded) { on ? oosSelected.add(c.item_id) : oosSelected.delete(c.item_id); } });
+            oosVisible().forEach(c => { if (c.headline_match && !c.already_excluded) { on ? oosSelected.add(c.item_id) : oosSelected.delete(c.item_id); } });
             renderOos();
         }
 
@@ -421,9 +451,10 @@
                 const warn = c.uncovered_campaigns.length
                     ? ` <span class="badge bg-warning text-dark" title="Not covered by this tool: ${esc(c.uncovered_campaigns.join(', '))}">+${c.uncovered_campaigns.length} other</span>` : "";
                 const checked = oosSelected.has(c.item_id) ? "checked" : "";
-                const dis = c.already_excluded ? "disabled" : "";
+                const dis = oosLocked(c) ? "disabled" : "";
                 const convCls = c.conversions > 0 ? "text-danger fw-semibold" : "text-muted";
-                return `<tr class="${c.already_excluded ? 'table-light text-muted' : ''}">
+                const muted = c.already_excluded || c.headline_status === "differs";
+                return `<tr class="${muted ? 'table-light text-muted' : ''}">
                     <td><input type="checkbox" ${checked} ${dis} onclick="toggleOos('${esc(c.item_id)}', this.checked)"></td>
                     <td class="mono">${esc(c.ean)}${c.already_excluded ? ' <span class="badge badge-excluded">excluded</span>' : ''}</td>
                     <td>${esc(c.category) || "—"}</td>
@@ -431,26 +462,32 @@
                     <td>${c.clicks.toLocaleString()}</td>
                     <td>€${c.cost_eur.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                     <td class="${convCls}">${c.conversions}</td>
+                    <td>${headlineBadge(c)}</td>
                 </tr>`;
             }).join("");
             document.getElementById("oosBody").innerHTML = rows ||
-                '<tr><td colspan="7" class="text-center text-muted py-3">No matching rows.</td></tr>';
+                '<tr><td colspan="8" class="text-center text-muted py-3">No matching rows.</td></tr>';
             updateOosSel();
         }
 
         async function scanOos() {
             const market = document.getElementById("oosMarket").value;
+            const limit = document.getElementById("oosLimit").value.trim();
             document.getElementById("oosSummary").innerHTML = '<span class="spinner-border spinner-border-sm"></span> scanning OOS list + DMA…';
             try {
-                const res = await fetch(`${API}/oos/scan?market=${market}`);
+                const res = await fetch(`${API}/oos/scan?market=${market}` + (limit ? `&limit=${encodeURIComponent(limit)}` : ""));
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || res.status);
                 oosData = data; oosSelected.clear();
                 const t = data.totals;
+                const h = data.headline_counts || { match: 0, differs: 0, unknown: 0 };
                 document.getElementById("oosSummary").innerHTML =
                     `<strong>${data.oos_total.toLocaleString()}</strong> OOS EANs · <strong>${data.live_in_dma.toLocaleString()}</strong> live in DMA · ` +
                     `last 30d in DMA: <strong>€${t.cost_eur.toLocaleString()}</strong> spend · ${t.clicks.toLocaleString()} clicks · ` +
-                    `${t.conversions.toLocaleString()} conv (€${t.conv_value_eur.toLocaleString()})`;
+                    `${t.conversions.toLocaleString()} conv (€${t.conv_value_eur.toLocaleString()})<br>` +
+                    `<span class="small"><span class="text-danger fw-semibold">${h.match.toLocaleString()}</span> OOS-headline (excludable) · ` +
+                    `<span class="text-success fw-semibold">${h.differs.toLocaleString()}</span> non-headline (kept) · ` +
+                    `<span class="text-secondary">${h.unknown.toLocaleString()}</span> unconfirmed</span>`;
                 document.getElementById("oosWarn").style.display = t.conversions > 0 ? "block" : "none";
                 document.getElementById("oosControls").style.removeProperty("display");
                 document.getElementById("oosTable").style.display = "table";
@@ -475,8 +512,11 @@
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || res.status);
                 const failed = (data.results || []).filter(r => r.error || (r.errors && r.errors.length));
-                alert(`Processed ${data.processed} product(s)` + (failed.length ? `, ${failed.length} with errors (see console).` : "."));
-                if (failed.length) console.error(failed);
+                const skipped = (data.results || []).filter(r => r.skipped);
+                alert(`Processed ${data.processed} product(s)`
+                    + (skipped.length ? `, ${skipped.length} skipped (non-headline, kept live)` : "")
+                    + (failed.length ? `, ${failed.length} with errors (see console).` : "."));
+                if (failed.length || skipped.length) console.log({ failed, skipped });
                 oosSelected.clear();
                 await scanOos(); loadList();
             } catch (e) {

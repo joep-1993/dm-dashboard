@@ -36,8 +36,12 @@ import json
 import logging
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+import requests
+from requests.adapters import HTTPAdapter
 
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
@@ -68,6 +72,92 @@ _CATEGORY_RE = re.compile(r"^PLA/(?P<cat>.+)_(?P<tier>[abc])$")
 OOS_BASE = "https://googlemc-suc.bva-apps.aks.private.beslist.nl/api/v1/overrides"
 # DMA aggregated feed prefixes every offer id with this; suffix is the GTIN/EAN.
 DMA_ITEM_PREFIX = "nl-nl-gold-"
+
+# ---------------------------------------------------------------------------
+# Headline-offer check (Elasticsearch product index)
+# ---------------------------------------------------------------------------
+# An OOS EAN that serves in DMA is only worth excluding if it IS the product's
+# *headline* (bestOffer) offer — the one the gold/DMA ad actually advertises and
+# the PLP lands on. Apparel/footwear products carry one EAN per size variant; the
+# monitor flags individual variant EANs, but the gold ad rides the headline
+# variant. If a non-headline variant is OOS while the headline is a different
+# in-stock variant/shop, excluding the EAN would needlessly kill a live, buyable
+# ad. So we cross-check each candidate against the product search index and only
+# treat it as a real exclusion when the OOS EAN == the headline offer's EAN.
+ES_URL = "https://elasticsearch-job-cluster-eck-v9.beslist.nl"
+# Products are spread across one index per maincat; wildcard covers them all.
+ES_INDEX = "product_search_v4_nl-nl_*"
+
+# Reuse one keep-alive session — a cold TLS handshake is ~3.5 s, a warm query ~30 ms.
+_es_session = requests.Session()
+_es_session.mount("https://", HTTPAdapter(
+    pool_connections=1, pool_maxsize=16, pool_block=True,
+))
+
+
+def _norm_ean(ean: str) -> str:
+    """ES stores EANs zero-padded to 13 chars; retail systems strip leading
+    zeros. Pad so "12345" matches "0000000012345"."""
+    e = str(ean or "").strip()
+    return e.zfill(13) if 0 < len(e) < 13 else e
+
+
+def headline_offer(ean: str) -> Dict[str, Any]:
+    """Resolve the headline (bestOffer) for the product carrying this EAN.
+
+    Returns {status, headline_ean, headline_shop, headline_stock} where status:
+      match       — the OOS EAN *is* the headline offer's EAN (safe to exclude)
+      differs     — the headline is a different EAN/shop (do NOT exclude)
+      no_headline — product found but no bestOffer (can't confirm)
+      not_found   — no product in ES for this EAN (likely gone)
+      error       — ES lookup failed (transient; don't fail-closed on it)
+    """
+    n = _norm_ean(ean)
+    q = {"query": {"term": {"eans": n}}, "size": 10, "_source": ["shops"]}
+    try:
+        r = _es_session.post(f"{ES_URL}/{ES_INDEX}/_search", json=q, timeout=20)
+        r.raise_for_status()
+        hits = r.json().get("hits", {}).get("hits", [])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ES headline lookup failed for %s: %s", ean, e)
+        return {"status": "error", "headline_ean": None,
+                "headline_shop": None, "headline_stock": None}
+
+    if not hits:
+        return {"status": "not_found", "headline_ean": None,
+                "headline_shop": None, "headline_stock": None}
+
+    # An EAN can resolve to several productidv3 docs; collect every bestOffer.
+    headlines = []
+    for h in hits:
+        for shop in h.get("_source", {}).get("shops", []) or []:
+            for off in shop.get("offers", []) or []:
+                if off.get("bestOffer"):
+                    headlines.append((off, shop))
+
+    if not headlines:
+        return {"status": "no_headline", "headline_ean": None,
+                "headline_shop": None, "headline_stock": None}
+
+    # Prefer a headline whose EAN equals the OOS EAN — that's a confirmed match.
+    match = next(((o, s) for (o, s) in headlines
+                  if o.get("ean") and _norm_ean(o["ean"]) == n), None)
+    off, shop = match or headlines[0]
+    return {
+        "status": "match" if match else "differs",
+        "headline_ean": off.get("ean"),
+        "headline_shop": shop.get("name"),
+        "headline_stock": off.get("stock"),
+    }
+
+
+def _headline_offers(eans: List[str]) -> Dict[str, Dict[str, Any]]:
+    """headline_offer() for many EANs concurrently (pool caps real ES load)."""
+    eans = list(dict.fromkeys(eans))  # dedupe, order-preserving
+    if not eans:
+        return {}
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        return dict(zip(eans, ex.map(headline_offer, eans)))
 
 
 # ---------------------------------------------------------------------------
@@ -877,10 +967,16 @@ def _campaign_family(name: str) -> str:
     return "other"
 
 
-def oos_scan(market: str) -> Dict[str, Any]:
+def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     """Return OOS EANs that are live in DMA, with 30d clicks/spend/conversions
-    and the campaigns they serve in. READ-ONLY."""
+    and the campaigns they serve in. READ-ONLY.
+
+    `limit` caps how many EANs are pulled from the monitor (handy for a quick
+    scan); None pulls the full list.
+    """
     eans = _oos_eans(market, "active")
+    if limit:
+        eans = eans[:limit]
     client = _get_client()
     customer_id = _customer_id(market)
     ga = client.get_service("GoogleAdsService")
@@ -932,12 +1028,31 @@ def oos_scan(market: str) -> Dict[str, Any]:
             "conv_value_eur": round(a["conv_value"], 2),
             "already_excluded": iid in excluded,
         })
+
+    # Headline-offer check: the gold ad rides the product's bestOffer. Only an
+    # OOS EAN that *is* that headline offer is a genuine exclusion; a flagged
+    # non-headline variant whose headline is still live must be kept.
+    hl = _headline_offers([c["ean"] for c in candidates])
+    for c in candidates:
+        info = hl.get(c["ean"], {})
+        c["headline_status"] = info.get("status")        # match|differs|no_headline|not_found|error
+        c["headline_ean"] = info.get("headline_ean")
+        c["headline_shop"] = info.get("headline_shop")
+        c["headline_stock"] = info.get("headline_stock")
+        c["headline_match"] = info.get("status") == "match"
+
     candidates.sort(key=lambda c: c["cost_eur"], reverse=True)
 
     return {
         "market": market.upper(),
         "oos_total": len(eans),
         "live_in_dma": len(candidates),
+        "headline_counts": {
+            "match": sum(1 for c in candidates if c["headline_status"] == "match"),
+            "differs": sum(1 for c in candidates if c["headline_status"] == "differs"),
+            "unknown": sum(1 for c in candidates
+                           if c["headline_status"] in ("no_headline", "not_found", "error")),
+        },
         "totals": {
             "clicks": sum(c["clicks"] for c in candidates),
             "cost_eur": round(sum(c["cost_eur"] for c in candidates), 2),
@@ -949,9 +1064,25 @@ def oos_scan(market: str) -> Dict[str, Any]:
 
 
 def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
-    """Exclude a selected list of OOS item ids (source-tagged 'oos')."""
+    """Exclude a selected list of OOS item ids (source-tagged 'oos').
+
+    Safety net: re-check the headline offer server-side and SKIP any EAN whose
+    gold ad rides a different (live) offer, so a stale UI selection can't kill a
+    buyable product. Only the confidently-wrong 'differs' case is blocked;
+    not_found / no_headline / ES errors are allowed through (a gone product is a
+    valid exclusion, and we don't fail-closed on a transient lookup).
+    """
     results = []
     for iid in item_ids:
+        ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
+        info = headline_offer(ean)
+        if info["status"] == "differs":
+            results.append({
+                "item_id": iid, "skipped": True, "headline_status": "differs",
+                "reason": (f"headline offer is a different EAN "
+                           f"({info['headline_ean']} @ {info['headline_shop']}); not excluded"),
+            })
+            continue
         try:
             res = apply(iid, market, source="oos")
             results.append({"item_id": iid, "id": res["id"], "applied": res["applied"],
@@ -959,7 +1090,9 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             logger.exception("oos_exclude failed for %s", iid)
             results.append({"item_id": iid, "error": str(e)})
-    return {"market": market.upper(), "processed": len(results), "results": results}
+    skipped = sum(1 for r in results if r.get("skipped"))
+    return {"market": market.upper(), "processed": len(results),
+            "skipped": skipped, "results": results}
 
 
 def oos_recovered(market: str) -> List[dict]:
