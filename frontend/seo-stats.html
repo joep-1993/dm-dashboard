@@ -18,6 +18,8 @@
         }
         .stat-card h3 { margin: 0; font-size: 1.2rem; font-weight: 700; color: #5e4a90; }
         .stat-card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
+        .stat-card .stat-delta { margin-top: 5px; }
+        .stat-card .stat-delta .stat-delta-cap { font-size: 0.62rem; text-transform: uppercase; letter-spacing: .04em; color: #b0acbe; margin-left: 3px; }
         .metric-toggle {
             display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
             border: 1px solid #d9d4e8; border-radius: 20px; padding: 4px 12px;
@@ -31,6 +33,8 @@
         .perf-table th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
         .perf-table td, .perf-table th { white-space: nowrap; text-align: right; vertical-align: middle; }
         .perf-fixed { table-layout: fixed; width: 100%; }
+        .perf-fixed th.col-weekday { width: 68px; }
+        .perf-fixed th.col-notes { width: 20%; }
         .perf-fixed th { white-space: normal; }
         .perf-fixed td, .perf-fixed th { text-align: center; }
         .perf-fixed td:first-child, .perf-fixed th:first-child,
@@ -227,7 +231,15 @@
         <!-- Top categories -->
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
-                <h5 class="mb-0">Top categories</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <h5 class="mb-0">Top categories</h5>
+                    <svg id="catInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
+                        <title id="catInfoTitle">Comparison windows</title>
+                        <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
+                        <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                        <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                    </svg>
+                </div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <div class="btn-group btn-group-sm seg-toggle" role="group">
                         <input type="radio" class="btn-check" name="catMetric" id="catVisits" autocomplete="off" checked onchange="catMetric='visits'; renderCats();">
@@ -265,7 +277,13 @@
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center" style="background:#5e4a90; color:#fff;">
                 <h5 class="mb-0">Per-day overview</h5>
-                <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportXlsx()" id="exportBtn" disabled>Export Excel</button>
+                <div class="d-flex align-items-center gap-3">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showDeltas" onchange="toggleDeltas()">
+                        <label class="form-check-label" for="showDeltas" style="font-size:0.85rem; cursor:pointer;">Show deltas</label>
+                    </div>
+                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportXlsx()" id="exportBtn" disabled>Export Excel</button>
+                </div>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -503,6 +521,31 @@
             return t;
         }
 
+        // Period-vs-prior-period % per metric for the top tiles: the selected range vs
+        // the equal-length window immediately before it (7d→prev 7d, 30d→prev 30d…).
+        // `tileDeltaDays` is that length, shown in each badge's caption so the
+        // comparison window is never ambiguous.
+        let tileDeltas = null;
+        let tileDeltaDays = 0;
+        // The 7 days immediately before the selected range (date -> row), used to
+        // backfill the per-day (always week-over-week) WoW column.
+        let wowBase = {};
+
+        async function loadWowBase() {
+            wowBase = {};
+            const start = document.getElementById('startDate').value;
+            if (!start) return;
+            const prevStart = shiftDays(start, -7);
+            const prevEnd = shiftDays(start, -1);
+            try {
+                const params = new URLSearchParams({ start_date: prevStart, end_date: prevEnd });
+                const res = await fetch(`${API}/daily?${params}`);
+                if (!res.ok) return;
+                const prev = await res.json();
+                (prev.daily || []).forEach(r => { wowBase[r.date] = r; });
+            } catch (e) { wowBase = {}; }
+        }
+
         function renderStats() {
             const t = computeTotals();
             const row = document.getElementById('statsRow');
@@ -510,19 +553,130 @@
             ORDER.forEach(key => {
                 const card = document.createElement('div');
                 card.className = 'stat-card';
-                card.innerHTML = `<h3>${fmt(key, t[key])}</h3><div class="label">${METRICS[key].label}</div>`;
+                let html = `<h3>${fmt(key, t[key])}</h3><div class="label">${METRICS[key].label}</div>`;
+                if (tileDeltas) {
+                    html += `<div class="stat-delta">${pctBadge(tileDeltas[key])}<span class="stat-delta-cap">vs prev ${tileDeltaDays}d</span></div>`;
+                }
+                card.innerHTML = html;
                 row.appendChild(card);
             });
+        }
+
+        // Inclusive day count of an ISO date range.
+        function rangeLenDays(start, end) {
+            const [ys, ms, ds] = start.split('-').map(Number);
+            const [ye, me, de] = end.split('-').map(Number);
+            return Math.round((new Date(ye, me - 1, de) - new Date(ys, ms - 1, ds)) / 86400000) + 1;
+        }
+
+        // Sum every metric over a fetched /daily window; null if the fetch fails.
+        async function fetchTotals(start, end) {
+            try {
+                const params = new URLSearchParams({ start_date: start, end_date: end });
+                const res = await fetch(`${API}/daily?${params}`);
+                if (!res.ok) return null;
+                const data = await res.json();
+                const t = {};
+                ORDER.forEach(k => { t[k] = 0; });
+                (data.daily || []).forEach(r => ORDER.forEach(k => { t[k] += Number(r[k]) || 0; }));
+                return t;
+            } catch (e) { return null; }
+        }
+
+        // Tile deltas: current-period totals vs the equal-length window right before it.
+        async function loadTileDeltas() {
+            tileDeltas = null;
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            if (!lastData || !start || !end) { renderStats(); return; }
+            const n = rangeLenDays(start, end);
+            const prevEnd = shiftDays(start, -1);
+            const prevStart = shiftDays(start, -n);
+            // Reuse wowBase when it already covers exactly the prior period (n === 7).
+            let prevTot;
+            if (n === 7 && Object.keys(wowBase).length) {
+                prevTot = {};
+                ORDER.forEach(k => { prevTot[k] = 0; });
+                Object.values(wowBase).forEach(r => ORDER.forEach(k => { prevTot[k] += Number(r[k]) || 0; }));
+            } else {
+                prevTot = await fetchTotals(prevStart, prevEnd);
+            }
+            if (!prevTot) { renderStats(); return; }
+            const curTot = computeTotals();
+            const d = {};
+            ORDER.forEach(k => {
+                const p1 = prevTot[k];
+                d[k] = (!p1) ? null : ((curTot[k] - p1) / p1) * 100;
+            });
+            tileDeltas = d;
+            tileDeltaDays = n;
+            renderStats();
+        }
+
+        // Shift an ISO date (YYYY-MM-DD) by n days, formatted in local time
+        // (avoids the UTC drift toISOString would introduce).
+        function shiftDays(iso, n) {
+            const [y, m, d] = iso.split('-').map(Number);
+            const dt = new Date(y, m - 1, d + n);
+            const p = x => String(x).padStart(2, '0');
+            return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+        }
+
+        // When on, every column gets an extra WoW % delta column.
+        let showDeltas = false;
+
+        function deltaHeaderFor(k) {
+            if (!showDeltas) return '';
+            return `<th class="sortable" data-sort="${k}_wow" onclick="sortBy('${k}_wow')">${METRICS[k].label} WoW %</th>`;
+        }
+        function renderHead() {
+            const head = document.getElementById('tableHead');
+            head.innerHTML = '<th class="sortable" data-sort="date" onclick="sortBy(\'date\')">Date</th>' +
+                '<th class="text-col col-weekday">Day</th>' +
+                TABLE_COLS.map(k => `<th class="sortable" data-sort="${k}" onclick="sortBy('${k}')">${METRICS[k].label}</th>` + deltaHeaderFor(k)).join('') +
+                '<th class="text-col col-notes">Notes</th>';
+        }
+
+        // A WoW % delta cell: coloured pill on the red→white→green fade.
+        function wowBadgeCell(pct) {
+            if (pct === null || pct === undefined) return `<td><span class="delta-badge flat">n/a</span></td>`;
+            const sign = pct > 0 ? '+' : '';
+            return `<td><span class="delta-badge" style="background:${wowColor(pct)};color:#2d2a3a">${sign}${pct.toLocaleString('nl-NL', { maximumFractionDigits: 1 })}%</span></td>`;
+        }
+        function deltaBodyCell(k, r) {
+            if (!showDeltas) return '';
+            return wowBadgeCell(r[`${k}_wow`]);
+        }
+
+        function toggleDeltas() {
+            showDeltas = document.getElementById('showDeltas').checked;
+            if (!lastData) return;
+            renderHead();
+            updateSortIndicators();
+            renderFoot();
+            renderPage();
         }
 
         function initTable() {
             perfRows = lastData.daily.slice();
             perfPage = 1;
-            const head = document.getElementById('tableHead');
-            head.innerHTML = '<th class="sortable" data-sort="date" onclick="sortBy(\'date\')">Date</th>' +
-                '<th class="text-col">Weekday</th>' +
-                TABLE_COLS.map(k => `<th class="sortable" data-sort="${k}" onclick="sortBy('${k}')">${METRICS[k].label}</th>`).join('') +
-                '<th class="text-col">Notes</th>';
+            // Week-over-week % delta for every column: compare each day to the
+            // same weekday 7 days earlier. The -7 day for the first 7 visible days
+            // falls outside the range, so `wowBase` (the 7 days before the range,
+            // fetched separately) backfills those lookups. Stored as `${k}_wow`.
+            const visBy = {};
+            Object.values(wowBase).forEach(r => { visBy[r.date] = r; });
+            lastData.daily.forEach(r => { visBy[r.date] = r; });
+            const wowPct = (cur, prev) =>
+                (prev === undefined || prev === null || prev === 0) ? null : ((cur - prev) / prev) * 100;
+            perfRows.forEach(r => {
+                const prevRow = visBy[shiftDays(r.date, -7)];
+                TABLE_COLS.forEach(k => {
+                    const prev = prevRow ? (Number(prevRow[k]) || 0) : undefined;
+                    r[`${k}_wow`] = wowPct(Number(r[k]) || 0, prev);
+                });
+            });
+            renderHead();
             sortRows();
             updateSortIndicators();
             renderFoot();
@@ -601,6 +755,21 @@
             return `rgb(${lerp(white[0], target[0], u)},${lerp(white[1], target[1], u)},${lerp(white[2], target[2], u)})`;
         }
 
+        // Visit columns with a WoW hover tooltip → their precomputed wow-pct field.
+        const WOW_BY_KEY = { dma_visits: 'dma_visits_wow', gsaas_visits: 'gsaas_visits_wow' };
+        function wowText(pct) {
+            if (pct === null || pct === undefined) return 'n/a';
+            return (pct > 0 ? '+' : '') + pct.toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + '%';
+        }
+
+        // WoW % delta → diverging red→white→green fade (white at 0%, saturating at ±WOW_CAP%).
+        const WOW_CAP = 50;
+        function wowColor(pct) {
+            if (pct === null || pct === undefined) return '';
+            const m = Math.max(-1, Math.min(1, pct / WOW_CAP));
+            return heatColor(0.5 + m / 2);
+        }
+
         function visitColScales() {
             const sc = {};
             VISIT_KEYS.forEach(k => {
@@ -618,18 +787,25 @@
         function renderBody(rows) {
             const body = document.getElementById('tableBody');
             if (!rows.length) {
-                body.innerHTML = `<tr><td colspan="${TABLE_COLS.length + 3}" class="text-center text-muted py-4">No data.</td></tr>`;
+                const span = 2 + TABLE_COLS.length + (showDeltas ? TABLE_COLS.length : 0) + 1;
+                body.innerHTML = `<tr><td colspan="${span}" class="text-center text-muted py-4">No data.</td></tr>`;
                 return;
             }
             const sc = visitColScales();
             body.innerHTML = rows.map(r => {
                 const cells = TABLE_COLS.map(k => {
+                    let cell;
                     if (METRICS[k].unit === 'count') {
                         const s = sc[k];
                         const t = s.mx > s.mn ? (Number(r[k]) - s.mn) / (s.mx - s.mn) : 0.5;
-                        return `<td style="background:${heatColor(t)}">${fmt(k, r[k])}</td>`;
+                        const wk = WOW_BY_KEY[k];
+                        const attrs = wk ? ` title="WoW: ${wowText(r[wk])}" style="background:${heatColor(t)};cursor:help"` : ` style="background:${heatColor(t)}"`;
+                        cell = `<td${attrs}>${fmt(k, r[k])}</td>`;
+                    } else {
+                        cell = `<td>${fmt(k, r[k])}</td>`;
                     }
-                    return `<td>${fmt(k, r[k])}</td>`;
+                    cell += deltaBodyCell(k, r);
+                    return cell;
                 }).join('');
                 const nd = notesMap[r.date] || {};
                 const noteText = nd.note || '';
@@ -651,7 +827,7 @@
         function renderFoot() {
             const foot = document.getElementById('tableFoot');
             const t = computeTotals();
-            foot.innerHTML = '<td>Total</td><td></td>' + TABLE_COLS.map(k => `<td>${fmt(k, t[k])}</td>`).join('') + '<td></td>';
+            foot.innerHTML = '<td>Total</td><td></td>' + TABLE_COLS.map(k => `<td>${fmt(k, t[k])}</td>` + (showDeltas ? '<td></td>' : '')).join('') + '<td></td>';
         }
 
         function renderMeta() {
@@ -749,6 +925,12 @@
             const key = catMetric === 'visits' ? 'by_visits' : 'by_revenue';
             renderCatTable('main', lastDeltas.maincats[key]);
             renderCatTable('sub', lastDeltas.subcats[key]);
+            // Info tooltip: the two days being compared for the selected metric.
+            const c = lastDeltas.comparison;
+            const p1 = catMetric === 'visits' ? c.visits_p1 : c.revenue_p1;
+            const p2 = catMetric === 'visits' ? c.visits_p2 : c.revenue_p2;
+            const ci = document.getElementById('catInfoTitle');
+            if (ci) ci.textContent = `Selected day: ${p2}\nWeek before: ${p1}`;
         }
 
         // ---- Performance standup section ----
@@ -843,11 +1025,14 @@
                 if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + (await res.text()));
                 lastData = await res.json();
                 await loadNotes(lastData.start_date, lastData.end_date);
+                await loadWowBase();   // prior 7 days, for per-day + tile WoW deltas
+                tileDeltas = null;
                 renderStats();
                 renderChart();
                 initTable();
                 renderMeta();
                 document.getElementById('exportBtn').disabled = false;
+                loadTileDeltas();      // tile deltas vs the equal-length prior period
             } catch (e) {
                 document.getElementById('metaLine').innerHTML = `<span class="text-danger">Failed to load: ${e.message}</span>`;
             } finally {
@@ -901,12 +1086,18 @@
             if (!lastData) return;
             const wb = XLSX.utils.book_new();
             const dayRows = (perfRows.length ? perfRows : lastData.daily).map(r => {
-                const o = { Date: r.date, Weekday: weekdayOf(r.date) };
-                TABLE_COLS.forEach(k => { o[METRICS[k].label] = r[k]; });
+                const o = { Date: r.date, Day: weekdayOf(r.date) };
+                TABLE_COLS.forEach(k => {
+                    o[METRICS[k].label] = r[k];
+                    if (showDeltas) {
+                        const w = r[`${k}_wow`];
+                        o[`${METRICS[k].label} WoW %`] = (w === null || w === undefined) ? '' : Math.round(w * 10) / 10;
+                    }
+                });
                 o.Notes = (notesMap[r.date] && notesMap[r.date].note) || '';
                 return o;
             });
-            const totalRow = { Date: 'Total', Weekday: '' };
+            const totalRow = { Date: 'Total', Day: '' };
             const t = computeTotals();
             TABLE_COLS.forEach(k => { totalRow[METRICS[k].label] = t[k]; });
             totalRow.Notes = '';
@@ -929,7 +1120,7 @@
             XLSX.writeFile(wb, `seo-stats_${lastData.start_date}_${lastData.end_date}.xlsx`);
         }
 
-        // Init: default last 30 days (ending yesterday)
+        // Init: default last 7 days (ending yesterday)
         (function () {
             buildToggles();
             const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
@@ -943,12 +1134,8 @@
             } else {
                 document.getElementById('refDate').value = ymd(yesterday);
             }
-            // Default range: this month (1st of the current month → yesterday).
-            const end = new Date(yesterday);
-            let start = new Date(end.getFullYear(), end.getMonth(), 1);
-            if (start > end) start = new Date(end);   // edge case: on the 1st of the month
-            setDates(start, end);
-            load(false);
+            // Default range: last 7 days (ending yesterday); also enables the tile WoW deltas.
+            setPreset(7);
         })();
     </script>
 </body>
