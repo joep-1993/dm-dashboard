@@ -28,9 +28,9 @@
         .badge-partial { background-color: #e17055 !important; }
         .badge-failed { background-color: #636e72 !important; }
         #savedTable th, #savedTable td { text-align: center; vertical-align: middle; }
-        /* Right-align Category (4) and Shop (5) */
-        #savedTable th:nth-child(4), #savedTable td:nth-child(4),
-        #savedTable th:nth-child(5), #savedTable td:nth-child(5) { text-align: right; }
+        /* Left-align Category (5) and Shop (6) */
+        #savedTable th:nth-child(5), #savedTable td:nth-child(5),
+        #savedTable th:nth-child(6), #savedTable td:nth-child(6) { text-align: left; }
         /* table-layout:fixed clips column widths but not cell content — keep the
            Headline badge / PLP link / Shop name from spilling past their cell. */
         #oosTable tbody td { overflow: hidden; }
@@ -250,12 +250,36 @@
                         <div class="table-responsive">
                             <table id="savedTable" class="table table-sm mb-0 align-middle">
                                 <thead>
-                                    <tr><th>Item id</th><th>Country</th><th>Source</th><th>Category</th><th>Shop</th><th>Targets</th><th>Status</th><th>Applied</th><th></th></tr>
+                                    <tr><th style="width:34px;"><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th>Item id</th><th>Country</th><th>Source</th><th>Category</th><th>Shop</th><th>Targets</th><th>Status</th><th>Applied</th><th></th></tr>
                                 </thead>
                                 <tbody id="listBody">
-                                    <tr><td colspan="9" class="text-center text-muted py-3">No exclusions yet.</td></tr>
+                                    <tr><td colspan="10" class="text-center text-muted py-3">No exclusions yet.</td></tr>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                    <div id="savedFooter" class="card-footer bg-white" style="display:none;">
+                        <div id="savedEnableProgress" class="mb-2" style="display:none;">
+                            <div class="d-flex justify-content-between small text-muted mb-1">
+                                <span id="savedEnableLabel">Re-enabling…</span>
+                                <span id="savedEnableCount">0 / 0</span>
+                            </div>
+                            <div class="progress" style="height:8px;">
+                                <div id="savedEnableBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%; background-color:#00b894;"></div>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <span id="savedSelCount" class="small text-muted">0 selected</span>
+                                <button id="savedEnableBtn" class="btn btn-sm btn-outline-success" onclick="enableSelected()" disabled>Enable selected</button>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <span id="savedPageInfo" class="small text-muted"></span>
+                                <div class="btn-group btn-group-sm">
+                                    <button id="savedPrev" class="btn btn-outline-secondary" onclick="savedGoto(savedPage - 1)">‹ Prev</button>
+                                    <button id="savedNext" class="btn btn-outline-secondary" onclick="savedGoto(savedPage + 1)">Next ›</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -385,7 +409,7 @@
             const row = document.getElementById(`excl-row-${id}`);
             if (!row) return;
             row.insertAdjacentHTML("afterend",
-                `<tr id="excl-detail-${id}"><td colspan="9" class="bg-light py-2"><span class="spinner-border spinner-border-sm"></span> loading campaigns…</td></tr>`);
+                `<tr id="excl-detail-${id}"><td colspan="10" class="bg-light py-2"><span class="spinner-border spinner-border-sm"></span> loading campaigns…</td></tr>`);
             const cell = document.querySelector(`#excl-detail-${id} td`);
             try {
                 const res = await fetch(`${API}/exclusion/${id}/targets`);
@@ -420,12 +444,40 @@
             return `<span class="badge ${cls}">${esc(s)}</span>`;
         }
 
+        // ----- Saved exclusions: data + pagination + multi-select -----
+        let savedData = [];
+        let savedPage = 1;
+        const SAVED_PAGE_SIZE = 20;
+        const savedSelected = new Set();
+        const savedEnableable = (x) => x.status === "excluded" || x.status === "partial";
+
         async function loadList() {
             try {
                 const res = await fetch(`${API}/list`);
                 const data = await res.json();
-                const rows = (data.exclusions || []).map(x => `
+                savedData = data.exclusions || [];
+                // drop selections that no longer exist / are no longer enable-able
+                const live = new Set(savedData.filter(savedEnableable).map(x => x.id));
+                [...savedSelected].forEach(id => { if (!live.has(id)) savedSelected.delete(id); });
+                const pages = Math.max(1, Math.ceil(savedData.length / SAVED_PAGE_SIZE));
+                if (savedPage > pages) savedPage = pages;
+                renderSaved();
+            } catch (e) { console.error(e); }
+        }
+
+        function renderSaved() {
+            const total = savedData.length;
+            const pages = Math.max(1, Math.ceil(total / SAVED_PAGE_SIZE));
+            const start = (savedPage - 1) * SAVED_PAGE_SIZE;
+            const pageRows = savedData.slice(start, start + SAVED_PAGE_SIZE);
+            const rows = pageRows.map(x => {
+                const checkable = savedEnableable(x);
+                const cb = checkable
+                    ? `<input type="checkbox" ${savedSelected.has(x.id) ? "checked" : ""} onclick="event.stopPropagation(); toggleSavedSel(${x.id}, this.checked)">`
+                    : "";
+                return `
                     <tr id="excl-row-${x.id}" style="cursor:pointer;" onclick="toggleExclDetail(${x.id})" title="Click to see the campaigns this was added to">
+                        <td>${cb}</td>
                         <td class="mono">${esc(x.item_id)}</td>
                         <td>${esc(x.market)}</td>
                         <td>${x.source === "oos" ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e8730c; color:#e8730c;">OOS</span>' : '<span class="badge bg-secondary">manual</span>'}</td>
@@ -434,13 +486,92 @@
                         <td>${x.target_count}</td>
                         <td>${statusBadge(x.status)}</td>
                         <td class="small text-muted">${x.applied_at ? esc(x.applied_at).replace("T", " ").slice(0, 16) : "—"}</td>
-                        <td>${x.status === "excluded" || x.status === "partial"
+                        <td>${checkable
                             ? `<button class="btn btn-sm btn-outline-success" onclick="enableExclusion(event, ${x.id}, '${esc(x.item_id)}')">Enable</button>`
                             : ""}</td>
-                    </tr>`).join("");
-                document.getElementById("listBody").innerHTML = rows ||
-                    '<tr><td colspan="9" class="text-center text-muted py-3">No exclusions yet.</td></tr>';
-            } catch (e) { console.error(e); }
+                    </tr>`;
+            }).join("");
+            document.getElementById("listBody").innerHTML = rows ||
+                '<tr><td colspan="10" class="text-center text-muted py-3">No exclusions yet.</td></tr>';
+
+            document.getElementById("savedFooter").style.display = total ? "block" : "none";
+            document.getElementById("savedPageInfo").textContent =
+                total ? `${start + 1}–${Math.min(start + SAVED_PAGE_SIZE, total)} of ${total}` : "";
+            document.getElementById("savedPrev").disabled = savedPage <= 1;
+            document.getElementById("savedNext").disabled = savedPage >= pages;
+            // select-all reflects the enable-able rows on this page
+            const pageEnableable = pageRows.filter(savedEnableable);
+            const allChecked = pageEnableable.length > 0 && pageEnableable.every(x => savedSelected.has(x.id));
+            const sa = document.getElementById("savedSelectAll");
+            sa.checked = allChecked;
+            sa.disabled = pageEnableable.length === 0;
+            updateSavedSel();
+        }
+
+        function savedGoto(page) {
+            const pages = Math.max(1, Math.ceil(savedData.length / SAVED_PAGE_SIZE));
+            savedPage = Math.min(Math.max(1, page), pages);
+            renderSaved();
+        }
+
+        function toggleSavedSel(id, on) {
+            on ? savedSelected.add(id) : savedSelected.delete(id);
+            updateSavedSel();
+            // keep header select-all in sync without a full re-render
+            const start = (savedPage - 1) * SAVED_PAGE_SIZE;
+            const pageEnableable = savedData.slice(start, start + SAVED_PAGE_SIZE).filter(savedEnableable);
+            document.getElementById("savedSelectAll").checked =
+                pageEnableable.length > 0 && pageEnableable.every(x => savedSelected.has(x.id));
+        }
+
+        function toggleAllSaved(on) {
+            const start = (savedPage - 1) * SAVED_PAGE_SIZE;
+            savedData.slice(start, start + SAVED_PAGE_SIZE).filter(savedEnableable)
+                .forEach(x => { on ? savedSelected.add(x.id) : savedSelected.delete(x.id); });
+            renderSaved();
+        }
+
+        function updateSavedSel() {
+            document.getElementById("savedSelCount").textContent = `${savedSelected.size} selected`;
+            document.getElementById("savedEnableBtn").disabled = savedSelected.size === 0;
+        }
+
+        async function enableSelected() {
+            const ids = [...savedSelected];
+            if (!ids.length) return;
+            if (!confirm(`Re-enable ${ids.length} exclusion(s)? This removes the negatives and prunes the trees back in Google Ads.`)) return;
+            const btn = document.getElementById("savedEnableBtn");
+            const prog = document.getElementById("savedEnableProgress");
+            const bar = document.getElementById("savedEnableBar");
+            const setProgress = (done) => {
+                bar.style.width = `${Math.round(done / ids.length * 100)}%`;
+                document.getElementById("savedEnableCount").textContent = `${done} / ${ids.length}`;
+            };
+            document.getElementById("savedEnableLabel").textContent = `Re-enabling ${ids.length} exclusion(s)…`;
+            setProgress(0);
+            prog.style.display = "block";
+            btn.disabled = true;
+            const errors = [];
+            try {
+                for (let i = 0; i < ids.length; i++) {
+                    try {
+                        const res = await fetch(`${API}/enable/${ids[i]}`, { method: "POST" });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.detail || res.status);
+                        if (data.errors && data.errors.length) errors.push({ id: ids[i], errors: data.errors });
+                    } catch (e) {
+                        errors.push({ id: ids[i], error: e.message });
+                    }
+                    setProgress(i + 1);
+                }
+                alert(`Re-enabled ${ids.length - errors.length} of ${ids.length} exclusion(s)`
+                    + (errors.length ? `, ${errors.length} with errors (see console).` : "."));
+                if (errors.length) console.error(errors);
+                savedSelected.clear();
+                await loadList();
+            } catch (e) {
+                alert("Enable failed: " + e.message);
+            } finally { prog.style.display = "none"; updateSavedSel(); }
         }
 
         function exportExcel() { window.location.href = `${API}/export/xlsx`; }
