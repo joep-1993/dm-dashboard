@@ -503,7 +503,7 @@
                             ? `<a href="${esc(safeUrl(x.plp_url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(x.item_id)}</a>`
                             : esc(x.item_id)}</td>
                         <td>${esc(x.market)}</td>
-                        <td>${x.source === "oos" ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e8730c; color:#e8730c;">OOS</span>' : '<span class="badge bg-secondary">manual</span>'}</td>
+                        <td>${x.source === "oos" ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e8730c; color:#e8730c;">OOS</span>' : '<span class="badge bg-transparent fw-bold" style="border:1px solid #5e4a90; color:#5e4a90;">MANUAL</span>'}</td>
                         <td title="${esc(x.category) || ""}">${esc(x.category) || "—"}</td>
                         <td title="${esc(x.shop) || ""}">${esc(x.shop) || "—"}</td>
                         <td>${statusBadge(x.status)}</td>
