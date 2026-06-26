@@ -421,11 +421,19 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
         warnings.append("Category not resolved; skipping category trio + APlus.")
 
     # --- Amazon bestsellers ------------------------------------------------
-    for c in _find_campaigns(client, customer_id, [BESTSELLERS_CAMPAIGN]):
-        for ag in _ad_groups(client, customer_id, c["campaign_id"]):
-            nodes = _read_tree(client, customer_id, ag["ad_group_id"])
-            leaf = _bestsellers_subdiv(nodes)
-            targets.append(_build_target(client, customer_id, item_id, "bestsellers", c, ag, nodes, leaf))
+    # Guard: the bestsellers campaign is a flat per-item-id list, so this branch
+    # used to run for ANY id — including a bogus/never-served one, whose append
+    # then fails because the id isn't in the tree. Only attempt it when the item
+    # actually resolved (has serving history; a real bestseller exclusion still
+    # has a serving row in PLA/Amazon bestsellers, so found is True there).
+    if res.get("found"):
+        for c in _find_campaigns(client, customer_id, [BESTSELLERS_CAMPAIGN]):
+            for ag in _ad_groups(client, customer_id, c["campaign_id"]):
+                nodes = _read_tree(client, customer_id, ag["ad_group_id"])
+                leaf = _bestsellers_subdiv(nodes)
+                targets.append(_build_target(client, customer_id, item_id, "bestsellers", c, ag, nodes, leaf))
+    else:
+        warnings.append("Item id not resolved (no serving history); skipping Amazon bestsellers.")
 
     # --- APlus (needs cl0 to pick the right per-category ad group) ----------
     if res.get("cl0"):
