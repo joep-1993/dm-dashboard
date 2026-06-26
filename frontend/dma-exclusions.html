@@ -202,7 +202,7 @@
                                     <col style="width:124px">
                                     <col style="width:19%">
                                     <col style="width:17%">
-                                    <col style="width:58px">
+                                    <col style="width:88px">
                                     <col style="width:78px">
                                     <col style="width:80px">
                                     <col style="width:66px">
@@ -499,7 +499,7 @@
             const rows = oosVisible().map(c => {
                 const camps = c.campaigns.length;
                 const warn = c.uncovered_campaigns.length
-                    ? ` <span class="badge bg-warning text-dark" title="Not covered by this tool: ${esc(c.uncovered_campaigns.join(', '))}">+${c.uncovered_campaigns.length} other</span>` : "";
+                    ? ` <span class="badge bg-warning text-dark" title="${c.uncovered_campaigns.length} other campaign(s) not covered by this tool: ${esc(c.uncovered_campaigns.join(', '))}">+${c.uncovered_campaigns.length}</span>` : "";
                 const checked = oosSelected.has(c.item_id) ? "checked" : "";
                 const dis = oosLocked(c) ? "disabled" : "";
                 const convCls = c.conversions > 0 ? "text-danger fw-semibold" : "text-muted";
