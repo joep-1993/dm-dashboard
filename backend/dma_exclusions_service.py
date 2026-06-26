@@ -842,8 +842,11 @@ def list_exclusions() -> List[dict]:
 # does NOT match DMA; the bridge is the GTIN -> DMA item id `nl-nl-gold-<gtin>`
 # (verified). We expose the actionable candidates (live in DMA, with their 30d
 # spend/clicks/conversions so the operator can avoid pulling profitable items),
-# let them exclude a selected set, and re-enable EANs that have recovered
-# (dropped off the active OOS list / state=recovered).
+# let them exclude a selected set, and re-enable EANs that have genuinely
+# recovered. Recovery is read from the monitor's explicit `recovered` state
+# (back in stock per Google, lingers 7 days) — NOT inferred from an EAN simply
+# leaving the active list, which can't distinguish a recovery from an offer we
+# pulled off the site ourselves. See oos_recovered() for the precedence rule.
 # ---------------------------------------------------------------------------
 
 def _oos_eans(market: str, state: str = "active") -> List[str]:
@@ -952,16 +955,46 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
 
 
 def oos_recovered(market: str) -> List[dict]:
-    """OOS-sourced exclusions whose EAN is no longer in the active OOS list
-    (recovered / back in stock) — candidates to re-enable."""
+    """OOS-sourced exclusions that are safe to re-enable because the GTIN has
+    genuinely come back in stock.
+
+    Recovery is judged at EAN level against the monitor's two states:
+      - ``active``    EANs still flagged OOS & live (an ``open`` offer remains).
+      - ``recovered`` EANs Google now reports back in stock (lingers 7 days).
+
+    A DMA exclusion is GTIN-level (``nl-nl-gold-<ean>``) while the monitor is
+    per shop-offer, so one EAN may map to several offers across shops. Applied
+    in precedence order:
+      * still in ``active``           -> an offer is still OOS    -> KEEP excluded
+      * in ``recovered`` (not active) -> genuinely back in stock  -> re-enable
+      * in neither                    -> offer vanished (we unpublished it or it
+                                         aged off, NOT a recovery) -> leave
+                                         excluded for manual review
+
+    This replaces the old "dropped off the active list => recovered" rule, which
+    could not tell a real recovery from an offer we pulled off the site.
+    """
     active = set(_oos_eans(market, "active"))
-    out = []
+    recovered = set(_oos_eans(market, "recovered"))
+    out: List[dict] = []
+    vanished = 0
     for r in list_exclusions():
-        if (r["market"] == market.upper() and r.get("source") == "oos"
+        if not (r["market"] == market.upper() and r.get("source") == "oos"
                 and r["status"] in ("excluded", "partial")):
-            ean = r["item_id"][len(DMA_ITEM_PREFIX):] if r["item_id"].startswith(DMA_ITEM_PREFIX) else r["item_id"]
-            if ean not in active:
-                out.append(r)
+            continue
+        iid = r["item_id"]
+        ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
+        if ean in active:
+            continue  # still OOS on some offer -> keep excluded
+        if ean in recovered:
+            out.append(r)  # genuine recovery
+        else:
+            vanished += 1  # vanished / aged off -> needs manual review
+    if vanished:
+        logger.info(
+            "oos_recovered[%s]: %d OOS exclusion(s) left the active list without a "
+            "recovery signal (unpublished or aged off); left excluded for review",
+            market.upper(), vanished)
     return out
 
 
