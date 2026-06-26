@@ -385,7 +385,7 @@
                 const campaignCount = new Set(targets.map(t => t.campaign_name)).size;
                 const body = sorted.map(t => `
                     <tr>
-                        <td class="mono" style="text-align:left; padding:8px 18px;">${esc(t.campaign_name) || "—"}</td>
+                        <td style="text-align:left; padding:8px 18px;">${esc(t.campaign_name) || "—"}</td>
                         <td style="text-align:left; padding:8px 18px;">${esc(t.ad_group_name) || "—"}</td>
                     </tr>`).join("");
                 cell.innerHTML = `<div class="px-3 py-3" style="text-align:center;">
