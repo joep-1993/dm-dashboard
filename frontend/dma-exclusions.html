@@ -267,6 +267,7 @@
                     <div class="card-header bg-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Saved exclusions</h5>
                         <div class="d-flex gap-2 align-items-center">
+                            <input id="savedFilter" class="form-control form-control-sm" style="width:240px;" placeholder="filter item id / category / shop…" oninput="savedPage=1; renderSaved();">
                             <span id="savedSelCount" class="small text-muted">0 selected</span>
                             <button id="savedEnableBtn" class="btn btn-sm btn-outline-secondary" onclick="enableSelected()" disabled>Enable selected</button>
                             <button class="btn btn-sm btn-outline-purple" onclick="exportExcel()">Export Excel</button>
@@ -466,11 +467,20 @@
             const v = document.getElementById("savedPerPage").value;
             return v === "all" ? Infinity : parseInt(v);
         }
+        function savedFiltered() {
+            const f = (document.getElementById("savedFilter").value || "").trim().toLowerCase();
+            if (!f) return savedData;
+            return savedData.filter(x =>
+                (x.item_id || "").toLowerCase().includes(f) ||
+                (x.category || "").toLowerCase().includes(f) ||
+                (x.shop || "").toLowerCase().includes(f));
+        }
         function savedPageRows() {
+            const data = savedFiltered();
             const pp = savedPerPage();
             const start = pp === Infinity ? 0 : (savedPage - 1) * pp;
-            const end = pp === Infinity ? savedData.length : start + pp;
-            return { start, end, rows: savedData.slice(start, end) };
+            const end = pp === Infinity ? data.length : start + pp;
+            return { start, end, rows: data.slice(start, end) };
         }
 
         async function loadList() {
@@ -486,7 +496,7 @@
         }
 
         function renderSaved() {
-            const total = savedData.length;
+            const total = savedFiltered().length;
             const pp = savedPerPage();
             const pages = pp === Infinity ? 1 : Math.max(1, Math.ceil(total / pp));
             if (savedPage > pages) savedPage = pages;
@@ -510,8 +520,10 @@
                         <td class="small text-muted">${x.applied_at ? esc(x.applied_at).replace("T", " ").slice(0, 16) : "—"}</td>
                     </tr>`;
             }).join("");
+            const emptyMsg = (document.getElementById("savedFilter").value || "").trim()
+                ? "No matching exclusions." : "No exclusions yet.";
             document.getElementById("listBody").innerHTML = rows ||
-                '<tr><td colspan="8" class="text-center text-muted py-3">No exclusions yet.</td></tr>';
+                `<tr><td colspan="8" class="text-center text-muted py-3">${emptyMsg}</td></tr>`;
 
             document.getElementById("savedFooter").style.display = total ? "block" : "none";
             const end = pp === Infinity ? total : Math.min(start + pp, total);
@@ -530,7 +542,7 @@
 
         function savedGoto(page) {
             const pp = savedPerPage();
-            const pages = pp === Infinity ? 1 : Math.max(1, Math.ceil(savedData.length / pp));
+            const pages = pp === Infinity ? 1 : Math.max(1, Math.ceil(savedFiltered().length / pp));
             savedPage = Math.min(Math.max(1, page), pages);
             renderSaved();
         }
