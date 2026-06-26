@@ -15,9 +15,9 @@
         .resolve-box { background: #f8f9fc; border-radius: 8px; padding: 1rem 1.25rem; }
         .resolve-box .k { color: #636e72; font-size: 0.78rem; text-transform: uppercase; letter-spacing: .4px; }
         .resolve-box .v { font-weight: 600; color: #2d3436; }
-        .action-subdivide { color: #b8860b; }
-        .action-append { color: #00867d; }
-        .action-skip { color: #999; }
+        .badge-action-subdivide { background-color: #b8860b; }
+        .badge-action-append { background-color: #00867d; }
+        .badge-action-skip { background-color: #6c757d; }
         #applyBtn:disabled { background-color: #6c757d; border-color: #6c757d; opacity: 1; }
         /* inverted outline buttons: filled by default, outline on hover */
         .btn-fill-primary { background-color: #CC5500; border: 1px solid #CC5500; color: #fff; }
@@ -142,16 +142,27 @@
                 </div>
 
                 <!-- Preview / result -->
-                <div id="planSection" style="display:none;" class="mb-4">
-                    <div class="resolve-box mb-3" id="resolveBox"></div>
-                    <div id="warningsBox"></div>
-                    <div class="table-responsive">
-                        <table class="table table-sm result-table align-middle mb-0">
-                            <thead>
-                                <tr><th>Type</th><th>Campaign</th><th>Ad group</th><th>Action</th><th>Result</th></tr>
-                            </thead>
-                            <tbody id="planBody"></tbody>
-                        </table>
+                <div class="card mb-4" id="planSection" style="display:none;">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0">Preview</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="resolve-box mb-3" id="resolveBox"></div>
+                        <div id="warningsBox"></div>
+                        <div class="table-responsive">
+                            <table class="table mb-0" id="planTable">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="padding: 8px 12px; text-align: center;">Type</th>
+                                        <th style="padding: 8px 12px; text-align: center;">Campaign</th>
+                                        <th style="padding: 8px 12px; text-align: center;">Ad group</th>
+                                        <th style="padding: 8px 12px; text-align: center;">Action</th>
+                                        <th style="padding: 8px 12px; text-align: center;">Result</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="planBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -177,8 +188,8 @@
                     <div class="card-body">
                         <div id="oosSummary" class="text-muted mb-2">Click <strong>Scan OOS</strong> to pull the out-of-stock list and see which products are live in DMA.</div>
                         <div class="d-flex justify-content-end gap-2 mb-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="reenableRecovered()" title="Re-enable OOS exclusions whose product is back in stock">↻ Re-enable recovered</button>
                             <button class="btn btn-sm btn-fill-primary" onclick="scanOos()">Scan OOS</button>
-                            <button class="btn btn-sm btn-fill-purple" onclick="reenableRecovered()" title="Re-enable OOS exclusions whose product is back in stock">↻ Re-enable recovered</button>
                         </div>
                         <div id="oosWarn" class="alert alert-warning py-2 small" style="display:none;">
                             ⚠️ These products still showed conversions in the last 30 days — many remain buyable via other in-stock shops. Excluding an EAN removes it for <em>all</em> shops in DMA. Review the <strong>Conv</strong> column and prefer the high-spend / zero-conversion rows.
@@ -243,10 +254,11 @@
 
         function actionLabel(t) {
             if (t.action === "subdivide_and_exclude")
-                return '<span class="action-subdivide">subdivide &amp; exclude</span>';
+                return '<span class="badge badge-action-subdivide">subdivide &amp; exclude</span>';
             if (t.action === "append_negative")
-                return '<span class="action-append">add negative</span>';
-            return '<span class="action-skip">skip' + (t.skip_reason ? " — " + esc(t.skip_reason) : "") + "</span>";
+                return '<span class="badge badge-action-append">add negative</span>';
+            return '<span class="badge badge-action-skip">skip</span>'
+                + (t.skip_reason ? ' <span class="text-muted small">— ' + esc(t.skip_reason) + '</span>' : "");
         }
 
         function renderPlan(plan, applied) {
@@ -259,7 +271,7 @@
                     <div class="col-md-2"><div class="k">Cat id (CL0)</div><div class="v mono">${esc(r.cl0) || "—"}</div></div>
                     <div class="col-md-3"><div class="k">Headline shop</div><div class="v">${esc(plan.shop || r.shop) || "—"}</div></div>
                     <div class="col-md-4"><div class="k">Currently serving in</div><div class="v">${(r.serving_campaigns || []).map(esc).join(", ") || "—"}</div></div>
-                 </div>` + (r.note ? `<div class="text-danger mt-2 small">${esc(r.note)}</div>` : "");
+                 </div>` + (r.note ? `<div class="text-dark mt-2 small">${esc(r.note)}</div>` : "");
 
             document.getElementById("warningsBox").innerHTML =
                 (plan.warnings || []).map(w => `<div class="alert alert-warning py-2 mb-2 small">⚠️ ${esc(w)}</div>`).join("");
@@ -270,12 +282,13 @@
                     if (t.result === "excluded") result = '<span class="badge badge-excluded">excluded</span>';
                     else if (t.result === "skipped") result = '<span class="text-muted">skipped</span>';
                 }
+                const kindClass = t.kind === "bestsellers" ? "bg-warning text-dark" : "bg-secondary";
                 return `<tr>
-                    <td><span class="badge bg-secondary kind-badge">${esc(t.kind)}</span></td>
-                    <td>${esc(t.campaign_name)}</td>
-                    <td class="mono">${esc(t.ad_group_id)}</td>
-                    <td>${actionLabel(t)}</td>
-                    <td>${result}</td>
+                    <td class="text-center"><span class="badge ${kindClass} kind-badge">${esc(t.kind)}</span></td>
+                    <td class="text-center">${esc(t.campaign_name)}</td>
+                    <td class="text-center mono">${esc(t.ad_group_id)}</td>
+                    <td class="text-center">${actionLabel(t)}</td>
+                    <td class="text-center">${result}</td>
                 </tr>`;
             }).join("");
             document.getElementById("planBody").innerHTML = rows ||
