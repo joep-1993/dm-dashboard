@@ -271,8 +271,9 @@
                     <div class="col-md-4"><div class="k">Currently serving in</div><div class="v">${(r.serving_campaigns || []).map(esc).join(", ") || "—"}</div></div>
                  </div>` + (r.note ? `<div class="text-dark mt-2 small">${esc(r.note)}</div>` : "");
 
+            const _warns = plan.warnings || [];
             document.getElementById("warningsBox").innerHTML =
-                (plan.warnings || []).map(w => `<div class="alert alert-warning py-2 mb-4 small">⚠️ ${esc(w)}</div>`).join("");
+                _warns.map((w, i) => `<div class="alert alert-warning py-2 ${i === _warns.length - 1 ? "mb-4" : "mb-2"} small">⚠️ ${esc(w)}</div>`).join("");
 
             const rows = (plan.targets || []).map(t => {
                 let result = '<span class="text-muted">—</span>';
