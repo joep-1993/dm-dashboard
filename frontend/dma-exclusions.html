@@ -229,12 +229,12 @@
                                 <tbody id="oosBody"></tbody>
                             </table>
                         </div>
-                        <div id="oosProgress" class="mt-4" style="display:none;">
-                            <div class="d-flex justify-content-between small text-muted mb-1">
+                        <div id="oosProgress" class="mt-4 mb-3" style="display:none;">
+                            <div class="d-flex justify-content-between mb-1">
                                 <span id="oosProgressLabel">Excluding…</span>
-                                <span id="oosProgressCount">0 / 0</span>
+                                <span id="oosProgressCount">0%</span>
                             </div>
-                            <div class="progress" style="height:8px;">
+                            <div class="progress" style="height:25px;">
                                 <div id="oosProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%; background-color:#e17055;"></div>
                             </div>
                         </div>
@@ -278,12 +278,12 @@
                         </div>
                     </div>
                     <div id="savedFooter" class="card-footer bg-white" style="display:none;">
-                        <div id="savedEnableProgress" class="mb-2" style="display:none;">
-                            <div class="d-flex justify-content-between small text-muted mb-1">
+                        <div id="savedEnableProgress" class="mb-3" style="display:none;">
+                            <div class="d-flex justify-content-between mb-1">
                                 <span id="savedEnableLabel">Re-enabling…</span>
-                                <span id="savedEnableCount">0 / 0</span>
+                                <span id="savedEnableCount">0%</span>
                             </div>
-                            <div class="progress" style="height:8px;">
+                            <div class="progress" style="height:25px;">
                                 <div id="savedEnableBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%; background-color:#00b894;"></div>
                             </div>
                         </div>
@@ -556,8 +556,9 @@
             const prog = document.getElementById("savedEnableProgress");
             const bar = document.getElementById("savedEnableBar");
             const setProgress = (done) => {
-                bar.style.width = `${Math.round(done / ids.length * 100)}%`;
-                document.getElementById("savedEnableCount").textContent = `${done} / ${ids.length}`;
+                const pct = Math.round(done / ids.length * 100);
+                bar.style.width = `${pct}%`;
+                document.getElementById("savedEnableCount").textContent = `${pct}% (${done}/${ids.length})`;
             };
             document.getElementById("savedEnableLabel").textContent = `Re-enabling ${ids.length} exclusion(s)…`;
             setProgress(0);
@@ -711,8 +712,9 @@
             const prog = document.getElementById("oosProgress");
             const bar = document.getElementById("oosProgressBar");
             const setProgress = (done) => {
-                bar.style.width = `${Math.round(done / ids.length * 100)}%`;
-                document.getElementById("oosProgressCount").textContent = `${done} / ${ids.length}`;
+                const pct = Math.round(done / ids.length * 100);
+                bar.style.width = `${pct}%`;
+                document.getElementById("oosProgressCount").textContent = `${pct}% (${done}/${ids.length})`;
             };
             document.getElementById("oosProgressLabel").textContent = `Excluding ${ids.length} EAN(s) from DMA (${market})…`;
             setProgress(0);
