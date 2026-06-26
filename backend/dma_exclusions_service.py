@@ -309,25 +309,27 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
     except GoogleAdsException as e:
         raise RuntimeError(f"Google Ads query failed: {e.error.code().name}") from e
 
-    category = None
-    cl0 = None
-    shop = None
+    # Collect candidates across the category-matching rows, then pick
+    # deterministically (lowest sorted) — serving-row order is arbitrary, so
+    # last-writer-wins gave a non-stable cl0/shop for multi-category products.
     cat_candidates: List[str] = []
+    cl0_candidates = set()
+    shop_candidates = set()
     for r in serving:
         m = _CATEGORY_RE.match(r["campaign"])
         if m:
             cat_candidates.append(m.group("cat"))
             if r["cl0"] and r["cl0"].isdigit():
-                cl0 = r["cl0"]
+                cl0_candidates.add(r["cl0"])
             if r["shop"]:
-                shop = r["shop"]
+                shop_candidates.add(r["shop"])
     category = _pick_category(cat_candidates)
-    # fall back to any serving row for the headline shop
+    cl0 = min(cl0_candidates) if cl0_candidates else None
+    shop = min(shop_candidates) if shop_candidates else None
+    # fall back to any serving row's shop (deterministic)
     if shop is None:
-        for r in serving:
-            if r["shop"]:
-                shop = r["shop"]
-                break
+        all_shops = {r["shop"] for r in serving if r["shop"]}
+        shop = min(all_shops) if all_shops else None
 
     return {
         "item_id": item_id,
@@ -361,8 +363,12 @@ def _pick_category(cands: List[str]) -> Optional[str]:
 # per-EAN lookup. Short TTL + graceful fallback to lookup() keep it safe/fresh.
 _RES_CACHE: Dict[tuple, tuple] = {}
 _RES_TTL = 1800.0  # 30 min
+_RES_MAX = 5000    # bound the cache; evict the oldest entries past this
 
 def _cache_resolution(res: dict) -> None:
+    if len(_RES_CACHE) >= _RES_MAX:
+        for k in [k for k, _ in sorted(_RES_CACHE.items(), key=lambda kv: kv[1][1])[:_RES_MAX // 10]]:
+            _RES_CACHE.pop(k, None)
     _RES_CACHE[(res["market"], res["item_id"])] = (res, time.monotonic())
 
 def _cached_lookup(item_id: str, market: str) -> dict:
@@ -713,16 +719,17 @@ def _apply_one_target(client, customer_id, item_id, target) -> dict:
         # Atomic: remove biddable leaf, create subdivision in its place, add
         # item-id OTHERS (positive, original bid) + the negative item id.
         ca = {"index": leaf["index"], "value": leaf["value"] or ""}
-        # The biddable OTHERS unit needs a bid. Use the leaf's own bid; if it
-        # inherits (0), fall back to the ad group's default CPC so a manual-CPC
-        # ad group doesn't reject the new unit (cpc_bid_micros REQUIRED).
-        bid = leaf["bid"] or _ad_group_cpc(client, customer_id, ad_group_id) or None
         # parent is the leaf's parent in the live tree
         nodes = _read_tree(client, customer_id, ad_group_id)
         live_leaf = nodes.get(leaf["resource"])
         if live_leaf is None:
             raise RuntimeError("leaf node disappeared before apply")
         parent_resource = live_leaf["parent"]
+        # The biddable OTHERS unit needs a bid. Use the LIVE leaf's own bid (not
+        # the possibly-stale snapshot); if it inherits (0), fall back to the ad
+        # group's default CPC so a manual-CPC ad group doesn't reject the new
+        # unit (cpc_bid_micros REQUIRED). None is correct for auto-bidding groups.
+        bid = live_leaf["bid"] or _ad_group_cpc(client, customer_id, ad_group_id) or None
 
         ops = []
         ops.append(_remove_op(client, leaf["resource"]))
@@ -741,7 +748,7 @@ def _apply_one_target(client, customer_id, item_id, target) -> dict:
         rev["others_resource"] = resp.results[2].resource_name
         rev["negative_resource"] = resp.results[3].resource_name
         rev["leaf_custom_attr"] = ca
-        rev["original_bid"] = leaf["bid"]
+        rev["original_bid"] = live_leaf["bid"]
         rev["status"] = "excluded"
         return rev
 
@@ -779,11 +786,14 @@ def apply(item_id: str, market: str, shop: Optional[str] = None,
         plp_url = headline_offer(ean).get("plp_url")
     except Exception:  # noqa: BLE001 - never fail an apply over the PLP lookup
         plp_url = None
+    # excluded = all actionable targets succeeded; partial = some applied but
+    # others errored (don't hide the failures); failed = nothing applied.
+    status = "excluded" if applied and not errors else "partial" if applied else "failed"
     record_id = _save_record(
         item_id=item_id, market=market.upper(), shop=shop,
         category=plan["resolution"].get("category"), cl0=plan["resolution"].get("cl0"),
         campaign_filter=campaign_filter,
-        status="excluded" if applied else "failed",
+        status=status,
         plp_url=plp_url,
         targets=applied,
         last_result={"applied": len(applied), "errors": errors, "warnings": plan["warnings"]},
@@ -835,10 +845,16 @@ def enable(record_id: int) -> Dict[str, Any]:
                 ops.append(_remove_op(client, neg["resource"]))
 
             if t.get("created_subdivision"):
-                # collapse only if our item was the sole negative under it
+                # collapse only if our item was the sole negative AND there are no
+                # other (hand-added) positive item leaves under the subdivision —
+                # removing the subdivision would destroy them. The empty-value
+                # OTHERS bucket we created doesn't count.
                 other_negs = [n for n in _negative_item_children(nodes, subdiv["resource"])
                               if (n["item_id"] or "") != item_id]
-                if not other_negs:
+                other_positives = [n for n in _children(nodes, subdiv["resource"])
+                                   if n["dim"] == "item_id" and not n["negative"]
+                                   and (n["item_id"] or "") not in ("", item_id)]
+                if not other_negs and not other_positives:
                     # remove item-id OTHERS + the subdivision, recreate biddable UNIT
                     others = [n for n in _children(nodes, subdiv["resource"])
                               if n["dim"] == "item_id" and (n["item_id"] or "") == ""]
@@ -848,9 +864,9 @@ def enable(record_id: int) -> Dict[str, Any]:
                     temp = _Temp()
                     ca = t.get("leaf_custom_attr") or {
                         "index": t["leaf"]["index"], "value": t["leaf"]["value"] or ""}
+                    bid = t.get("original_bid") or _ad_group_cpc(client, customer_id, ad_group_id) or None
                     unit_op, _ = _unit_op(client, customer_id, ad_group_id, temp, subdiv["parent"],
-                                          custom_attr=ca, negative=False,
-                                          bid=(t.get("original_bid") or None))
+                                          custom_attr=ca, negative=False, bid=bid)
                     ops.append(unit_op)
 
             if ops:
@@ -1100,7 +1116,7 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
             m = row.metrics
             a = agg.setdefault(iid, {"clicks": 0, "impr": 0, "cost": 0,
                                      "conv": 0.0, "conv_value": 0.0, "campaigns": set(),
-                                     "cl0": None, "shop": None})
+                                     "cl0s": set(), "shops": set()})
             a["clicks"] += m.clicks
             a["impr"] += m.impressions
             a["cost"] += m.cost_micros
@@ -1110,9 +1126,9 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
                 a["campaigns"].add(row.campaign.name)
             cl0 = row.segments.product_custom_attribute0
             if cl0 and cl0.isdigit():
-                a["cl0"] = cl0
+                a["cl0s"].add(cl0)
             if row.segments.product_custom_attribute3:
-                a["shop"] = row.segments.product_custom_attribute3
+                a["shops"].add(row.segments.product_custom_attribute3)
 
     # which item ids are already excluded (so the UI can disable them)
     excluded = {r["item_id"] for r in list_exclusions()
@@ -1123,11 +1139,13 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
         camps = sorted(a["campaigns"])
         fams = {_campaign_family(c) for c in camps}
         cat = _pick_category([m.group("cat") for c in camps if (m := _CATEGORY_RE.match(c))])
+        cl0 = min(a["cl0s"]) if a["cl0s"] else None      # deterministic (sorted), not row-order
+        shop = min(a["shops"]) if a["shops"] else None
         # Pre-cache the resolution so a follow-up exclude skips the ~6s per-EAN
         # lookup() — this scan already paid for the (batched) serving query.
         _cache_resolution({
             "item_id": iid, "market": market.upper(), "found": True,
-            "category": cat, "cl0": a["cl0"], "shop": a["shop"],
+            "category": cat, "cl0": cl0, "shop": shop,
             "serving_campaigns": camps, "note": None,
         })
         candidates.append({
