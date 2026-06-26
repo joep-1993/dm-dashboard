@@ -312,6 +312,10 @@
                     </div>
                 </div>
 
+                <footer class="text-center py-4">
+                    <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+                </footer>
+
             </div>
         </div>
     </div>
@@ -324,6 +328,9 @@
             ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
         // Only allow http(s) URLs into an href (esc() doesn't block javascript: schemes).
         const safeUrl = u => (/^https?:\/\//i.test(u || "") ? u : "");
+        // Display label for a category: strip the " store" allow-list-campaign suffix
+        // (e.g. "Drogisterij store" -> "Drogisterij"). Stored value keeps the suffix.
+        const catLabel = c => (c || "").replace(/\s+store$/i, "");
         const busy = on => document.getElementById("busy").style.display = on ? "inline" : "none";
 
         function actionLabel(t) {
@@ -515,7 +522,7 @@
                             : esc(x.item_id)}</td>
                         <td>${esc(x.market)}</td>
                         <td>${x.source === "oos" ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e8730c; color:#e8730c;">OOS</span>' : '<span class="badge bg-transparent fw-bold" style="border:1px solid #5e4a90; color:#5e4a90;">MANUAL</span>'}</td>
-                        <td title="${esc(x.category) || ""}">${esc(x.category) || "—"}</td>
+                        <td title="${esc(x.category) || ""}">${esc(catLabel(x.category)) || "—"}</td>
                         <td title="${esc(x.shop) || ""}">${esc(x.shop) || "—"}</td>
                         <td>${statusBadge(x.status)}</td>
                         <td class="small text-muted">${x.applied_at ? esc(x.applied_at).replace("T", " ").slice(0, 16) : "—"}</td>
@@ -703,7 +710,7 @@
                 return `<tr class="${muted ? 'table-light text-muted' : ''}">
                     <td><input type="checkbox" ${checked} ${dis} onclick="toggleOos('${esc(c.item_id)}', this.checked)"></td>
                     <td class="mono">${esc(c.ean)}${c.already_excluded ? ' <span class="badge badge-excluded">excluded</span>' : ''}</td>
-                    <td>${esc(c.category) || "—"}</td>
+                    <td title="${esc(c.category) || ""}">${esc(catLabel(c.category)) || "—"}</td>
                     <td class="text-truncate" title="${esc(c.headline_shop) || ""}">${esc(c.headline_shop) || "—"}</td>
                     <td>${c.clicks.toLocaleString()}</td>
                     <td>€${c.cost_eur.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
