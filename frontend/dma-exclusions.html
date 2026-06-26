@@ -271,6 +271,7 @@
                             <span id="savedSelCount" class="small text-muted">0 selected</span>
                             <button id="savedEnableBtn" class="btn btn-sm btn-outline-secondary" onclick="enableSelected()" disabled>Enable selected</button>
                             <button class="btn btn-sm btn-outline-purple" onclick="exportExcel()">Export Excel</button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="cleanEnabled()" title="Remove resolved (enabled) rows — history cleanup, no Google Ads change">Clean enabled</button>
                         </div>
                     </div>
                     <div class="card-body p-0">
@@ -618,6 +619,20 @@
         }
 
         function exportExcel() { window.location.href = `${API}/export/xlsx`; }
+
+        async function cleanEnabled() {
+            const market = document.getElementById("market").value;
+            const n = savedData.filter(x => x.market === market && x.status === "enabled").length;
+            if (!n) { alert(`No enabled (resolved) exclusions to clean for ${market}.`); return; }
+            if (!confirm(`Remove ${n} enabled (already-reverted) exclusion(s) for ${market} from the list?\n\nThis only deletes the history rows — nothing changes in Google Ads.`)) return;
+            try {
+                const res = await fetch(`${API}/cleanup-enabled?market=${market}`, { method: "POST" });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || res.status);
+                alert(`Removed ${data.deleted} enabled exclusion(s) for ${market}.`);
+                await loadList();
+            } catch (e) { alert("Clean failed: " + e.message); }
+        }
 
         // ----- OOS section -----
         let oosData = null;          // last scan response

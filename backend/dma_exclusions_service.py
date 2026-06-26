@@ -1011,6 +1011,25 @@ def _update_status(record_id: int, status: str, result_patch: dict):
         return_db_connection(conn)
 
 
+def cleanup_enabled(market: str) -> Dict[str, Any]:
+    """Delete resolved (status='enabled') records for a market — bookkeeping only;
+    they're already reverted in Google Ads, so this just clears history rows."""
+    _ensure_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM dma_exclusions WHERE market = %s AND status = 'enabled'",
+                        (market.upper(),))
+            deleted = cur.rowcount
+        conn.commit()
+        return {"market": market.upper(), "deleted": deleted}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        return_db_connection(conn)
+
+
 def list_exclusions() -> List[dict]:
     _ensure_table()
     conn = get_db_connection()

@@ -16,6 +16,7 @@ from backend.dma_exclusions_service import (
     apply as svc_apply,
     enable as svc_enable,
     list_exclusions as svc_list,
+    cleanup_enabled as svc_cleanup_enabled,
     exclusion_targets as svc_exclusion_targets,
     oos_scan as svc_oos_scan,
     oos_exclude as svc_oos_exclude,
@@ -101,6 +102,16 @@ async def list_endpoint():
         return {"exclusions": await _run(svc_list)}
     except Exception as e:
         logger.exception("list failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cleanup-enabled")
+async def cleanup_enabled_endpoint(market: str = Query("NL", description="Market: NL or BE")):
+    """Delete resolved (status='enabled') records for a market — history cleanup only."""
+    try:
+        return await _run(svc_cleanup_enabled, market)
+    except Exception as e:
+        logger.exception("cleanup enabled failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
