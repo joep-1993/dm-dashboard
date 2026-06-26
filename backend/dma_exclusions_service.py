@@ -311,14 +311,22 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
     category = None
     cl0 = None
     shop = None
+    cat_candidates: List[str] = []
     for r in serving:
         m = _CATEGORY_RE.match(r["campaign"])
         if m:
-            category = m.group("cat")
+            cat_candidates.append(m.group("cat"))
             if r["cl0"] and r["cl0"].isdigit():
                 cl0 = r["cl0"]
             if r["shop"]:
                 shop = r["shop"]
+    # Prefer a real product-category trio (PLA/Koffiezetapparaten_a) over a
+    # "<shop> store" allow-list campaign (PLA/Koffie store_a): the store campaign
+    # also matches _CATEGORY_RE and would otherwise shadow the real category,
+    # leaving the product excluded only via APlus/bestsellers (its CL3-OTHERS
+    # leaf is negative, so the trio gets skipped). Store campaigns are deferred.
+    non_store = [c for c in cat_candidates if not c.lower().endswith(" store")]
+    category = (non_store or cat_candidates or [None])[0]
     # fall back to any serving row for the headline shop
     if shop is None:
         for r in serving:
@@ -721,11 +729,18 @@ def apply(item_id: str, market: str, shop: Optional[str] = None,
                            "ad_group_id": t["ad_group_id"], "error": str(e)})
 
     applied = [r for r in results if r.get("result") == "excluded"]
+    # Resolve the product PLP url (best-effort) so the Saved list can link the item id.
+    ean = item_id[len(DMA_ITEM_PREFIX):] if item_id.startswith(DMA_ITEM_PREFIX) else item_id
+    try:
+        plp_url = headline_offer(ean).get("plp_url")
+    except Exception:  # noqa: BLE001 - never fail an apply over the PLP lookup
+        plp_url = None
     record_id = _save_record(
         item_id=item_id, market=market.upper(), shop=shop,
         category=plan["resolution"].get("category"), cl0=plan["resolution"].get("cl0"),
         campaign_filter=campaign_filter,
         status="excluded" if applied else "failed",
+        plp_url=plp_url,
         targets=applied,
         last_result={"applied": len(applied), "errors": errors, "warnings": plan["warnings"]},
         source=source,
@@ -856,6 +871,7 @@ def _ensure_table():
                 )
             """)
             cur.execute("ALTER TABLE dma_exclusions ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'")
+            cur.execute("ALTER TABLE dma_exclusions ADD COLUMN IF NOT EXISTS plp_url TEXT")
             cur.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS dma_exclusions_item_market_uniq
                 ON dma_exclusions (item_id, market)
@@ -867,7 +883,7 @@ def _ensure_table():
 
 
 def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
-                 status, targets, last_result, source="manual") -> int:
+                 status, targets, last_result, source="manual", plp_url=None) -> int:
     _ensure_table()
     conn = get_db_connection()
     try:
@@ -875,8 +891,8 @@ def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
             cur.execute("""
                 INSERT INTO dma_exclusions
                     (item_id, market, shop, category, cl0, campaign_filter,
-                     status, targets, last_result, source, applied_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                     status, targets, last_result, source, plp_url, applied_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
                 ON CONFLICT (item_id, market) DO UPDATE SET
                     shop = EXCLUDED.shop,
                     category = EXCLUDED.category,
@@ -886,11 +902,12 @@ def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
                     targets = EXCLUDED.targets,
                     last_result = EXCLUDED.last_result,
                     source = EXCLUDED.source,
+                    plp_url = COALESCE(EXCLUDED.plp_url, dma_exclusions.plp_url),
                     applied_at = now(),
                     enabled_at = NULL
                 RETURNING id
             """, (item_id, market, shop, category, cl0, campaign_filter, status,
-                  json.dumps(targets), json.dumps(last_result), source))
+                  json.dumps(targets), json.dumps(last_result), source, plp_url))
             rid = cur.fetchone()["id"]
         conn.commit()
         return rid
@@ -932,7 +949,7 @@ def list_exclusions() -> List[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id, item_id, market, shop, category, cl0, campaign_filter,
-                       status, source, created_at, applied_at, enabled_at,
+                       status, source, plp_url, created_at, applied_at, enabled_at,
                        COALESCE(jsonb_array_length(targets), 0) AS target_count
                 FROM dma_exclusions
                 ORDER BY applied_at DESC NULLS LAST, id DESC

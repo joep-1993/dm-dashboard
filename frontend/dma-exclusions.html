@@ -488,7 +488,9 @@
                 return `
                     <tr id="excl-row-${x.id}" style="cursor:pointer;" onclick="toggleExclDetail(${x.id})" title="Click to see the campaigns this was added to">
                         <td>${cb}</td>
-                        <td class="mono" title="${esc(x.item_id)}">${esc(x.item_id)}</td>
+                        <td class="mono" title="${esc(x.plp_url) || esc(x.item_id)}">${x.plp_url
+                            ? `<a href="${esc(x.plp_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(x.item_id)}</a>`
+                            : esc(x.item_id)}</td>
                         <td>${esc(x.market)}</td>
                         <td>${x.source === "oos" ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e8730c; color:#e8730c;">OOS</span>' : '<span class="badge bg-secondary">manual</span>'}</td>
                         <td title="${esc(x.category) || ""}">${esc(x.category) || "—"}</td>
@@ -542,7 +544,7 @@
             document.getElementById("savedSelCount").textContent = `${savedSelected.size} selected`;
             const btn = document.getElementById("savedEnableBtn");
             btn.disabled = !has;
-            btn.classList.toggle("btn-outline-success", has);   // green when clickable
+            btn.classList.toggle("btn-fill-primary", has);       // orange (like Scan OOS) when clickable
             btn.classList.toggle("btn-outline-secondary", !has); // grey when disabled
         }
 
