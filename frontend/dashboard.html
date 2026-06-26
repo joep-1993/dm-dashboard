@@ -216,7 +216,7 @@
         /* Live tool search — sits centered just under the purple hero */
         .tool-search-wrap {
             max-width: 520px;
-            margin: -1.75rem auto 2.75rem;
+            margin: 1.5rem auto 2.5rem;
             position: relative;
             z-index: 5;
         }
@@ -702,8 +702,7 @@
       const _tiles = [...document.querySelectorAll('.tool-card')].map(card => {
           const col = card.closest('.col-lg-4');
           const title = (card.querySelector('.card-title')?.textContent || '').toLowerCase();
-          const text = (card.querySelector('.card-text')?.textContent || '').toLowerCase();
-          return { col, hay: title + ' ' + text };
+          return { col, hay: title };  // search tool names only, not descriptions
       });
       function filterTools() {
           const q = (document.getElementById('toolSearch').value || '').trim().toLowerCase();
