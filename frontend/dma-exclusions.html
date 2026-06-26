@@ -131,36 +131,35 @@
                                 <input type="text" id="campaignFilter" class="form-control" placeholder="limit to campaigns containing…">
                             </div>
                         </div>
-                        <div class="mt-5 d-flex gap-2 justify-content-end align-items-center">
+                        <div class="mt-4 d-flex gap-2 justify-content-end align-items-center">
                             <span id="busy" class="text-muted me-auto" style="display:none;">
                                 <span class="spinner-border spinner-border-sm"></span> working…</span>
                             <button id="previewBtn" class="btn btn-outline-primary" onclick="runPreview()">Preview</button>
-                            <button id="applyBtn" class="btn btn-primary" onclick="runApply()" disabled>Apply exclusion</button>
                         </div>
-                    </div>
-                </div>
 
-                <!-- Preview / result -->
-                <div class="card mb-4" id="planSection" style="display:none;">
-                    <div class="card-header bg-white">
-                        <h5 class="mb-0">Preview</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="resolve-box mb-3" id="resolveBox"></div>
-                        <div id="warningsBox"></div>
-                        <div class="table-responsive">
-                            <table class="table mb-0" id="planTable">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th style="padding: 8px 12px; text-align: center;">Type</th>
-                                        <th style="padding: 8px 12px; text-align: center;">Campaign</th>
-                                        <th style="padding: 8px 12px; text-align: center;">Ad group</th>
-                                        <th style="padding: 8px 12px; text-align: center;">Action</th>
-                                        <th style="padding: 8px 12px; text-align: center;">Result</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="planBody"></tbody>
-                            </table>
+                        <!-- Preview / result -->
+                        <div id="planSection" style="display:none;">
+                            <hr class="my-4">
+                            <h6 class="text-muted mb-3">Preview</h6>
+                            <div class="resolve-box mb-3" id="resolveBox"></div>
+                            <div id="warningsBox"></div>
+                            <div class="table-responsive">
+                                <table class="table mb-0" id="planTable">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="padding: 8px 12px; text-align: center;">Type</th>
+                                            <th style="padding: 8px 12px; text-align: center;">Campaign</th>
+                                            <th style="padding: 8px 12px; text-align: center;">Ad group</th>
+                                            <th style="padding: 8px 12px; text-align: center;">Action</th>
+                                            <th style="padding: 8px 12px; text-align: center;">Result</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="planBody"></tbody>
+                                </table>
+                            </div>
+                            <div class="mt-4 d-flex justify-content-end">
+                                <button id="applyBtn" class="btn btn-primary" onclick="runApply()" disabled>Apply exclusion</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -273,7 +272,7 @@
                  </div>` + (r.note ? `<div class="text-dark mt-2 small">${esc(r.note)}</div>` : "");
 
             document.getElementById("warningsBox").innerHTML =
-                (plan.warnings || []).map(w => `<div class="alert alert-warning py-2 mb-2 small">⚠️ ${esc(w)}</div>`).join("");
+                (plan.warnings || []).map(w => `<div class="alert alert-warning py-2 mb-4 small">⚠️ ${esc(w)}</div>`).join("");
 
             const rows = (plan.targets || []).map(t => {
                 let result = '<span class="text-muted">—</span>';
