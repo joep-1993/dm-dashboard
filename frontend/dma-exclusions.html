@@ -19,7 +19,7 @@
         .action-subdivide { color: #b8860b; }
         .action-append { color: #00867d; }
         .action-skip { color: #999; }
-        #applyBtn:disabled { opacity: .5; }
+        #applyBtn:disabled { background-color: #6c757d; border-color: #6c757d; opacity: 1; }
         .badge-excluded { background-color: #d63031 !important; }
         .badge-enabled { background-color: #00b894 !important; }
         .badge-partial { background-color: #e17055 !important; }
@@ -128,7 +128,7 @@
                                 <input type="text" id="campaignFilter" class="form-control" placeholder="limit to campaigns containing…">
                             </div>
                         </div>
-                        <div class="mt-4 d-flex gap-2 justify-content-end align-items-center">
+                        <div class="mt-5 d-flex gap-2 justify-content-end align-items-center">
                             <span id="busy" class="text-muted me-auto" style="display:none;">
                                 <span class="spinner-border spinner-border-sm"></span> working…</span>
                             <button id="previewBtn" class="btn btn-outline-primary" onclick="runPreview()">Preview</button>
