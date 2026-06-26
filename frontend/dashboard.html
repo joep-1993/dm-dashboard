@@ -212,6 +212,26 @@
             --bs-gutter-x: 1.5rem;
             --bs-gutter-y: 1.5rem;
         }
+
+        /* Live tool search — sits centered just under the purple hero */
+        .tool-search-wrap {
+            max-width: 520px;
+            margin: -1.75rem auto 2.75rem;
+            position: relative;
+            z-index: 5;
+        }
+        .tool-search {
+            border-radius: 999px;
+            border: 1px solid #e0e0e8;
+            padding: 0.7rem 1.25rem;
+            box-shadow: 0 4px 16px rgba(94, 74, 144, 0.12);
+            font-size: 1rem;
+        }
+        .tool-search:focus {
+            border-color: var(--purple-primary);
+            box-shadow: 0 4px 16px rgba(94, 74, 144, 0.22);
+            outline: none;
+        }
     </style>
 </head>
 <body>
@@ -222,6 +242,12 @@
     </div>
 
     <div class="container pb-5">
+        <!-- Live tool search -->
+        <div class="tool-search-wrap">
+            <input id="toolSearch" type="search" class="form-control tool-search" placeholder="Search tools…" autocomplete="off" oninput="filterTools()" aria-label="Search tools">
+            <div id="noToolsMsg" class="text-center text-muted py-4" style="display:none;">No tools match “<span id="noToolsQ"></span>”.</div>
+        </div>
+
         <!-- SEO Tools -->
         <h4 class="category-heading">SEO Tools</h4>
         <div class="row g-4 mb-5">
@@ -236,6 +262,34 @@
                         <h5 class="card-title">DM Review</h5>
                         <p class="card-text">Refresh the slide-2 data feeds in review_dm_seo.xlsx (visits, omzet, SERP) and extend pivot ranges so the linked DM Review pptx shows fresh charts.</p>
                         <a href="/static/dm-review.html" class="btn btn-tool" style="width: 50%;">Open Tool</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon" style="background: #00b894; --icon-color: #00b894;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                                <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                            </svg>
+                        </div>
+                        <h5 class="card-title">Index Checker</h5>
+                        <p class="card-text">Check Google index status via Search Console URL Inspection API with quota rotation.</p>
+                        <a href="/static/index-checker.html" class="btn btn-tool" style="width: 50%;">Open Tool</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="card tool-card">
+                    <div class="card-body">
+                        <div class="tool-icon" style="background: #00b894; --icon-color: #00b894;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                        </div>
+                        <h5 class="card-title">IndexNow</h5>
+                        <p class="card-text">Submit URLs to IndexNow API for rapid search engine indexing with deduplication.</p>
+                        <a href="/static/indexnow.html" class="btn btn-tool" style="width: 50%;">Open Tool</a>
                     </div>
                 </div>
             </div>
@@ -482,37 +536,6 @@
             </div>
         </div>
 
-        <!-- Indexation -->
-        <h4 class="category-heading">Indexation</h4>
-        <div class="row g-4 mb-5">
-            <div class="col-lg-4 col-md-6">
-                <div class="card tool-card">                    <div class="card-body">
-                        <div class="tool-icon" style="background: #2e86de; --icon-color: #2e86de;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-                                <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-                            </svg>
-                        </div>
-                        <h5 class="card-title">Index Checker</h5>
-                        <p class="card-text">Check Google index status via Search Console URL Inspection API with quota rotation.</p>
-                        <a href="/static/index-checker.html" class="btn btn-tool" style="width: 50%;">Open Tool</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col-lg-4 col-md-6">
-                <div class="card tool-card">                    <div class="card-body">
-                        <div class="tool-icon" style="background: #2e86de; --icon-color: #2e86de;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                        </div>
-                        <h5 class="card-title">IndexNow</h5>
-                        <p class="card-text">Submit URLs to IndexNow API for rapid search engine indexing with deduplication.</p>
-                        <a href="/static/indexnow.html" class="btn btn-tool" style="width: 50%;">Open Tool</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Google Ads -->
         <h4 class="category-heading">Google Ads</h4>
         <div class="row g-4 mb-5">
@@ -674,6 +697,34 @@
               if (s) s.style.display = '';
           }
       }).catch(() => {});
+
+      // Live tool search: filter cards as you type, hide emptied section headings.
+      const _tiles = [...document.querySelectorAll('.tool-card')].map(card => {
+          const col = card.closest('.col-lg-4');
+          const title = (card.querySelector('.card-title')?.textContent || '').toLowerCase();
+          const text = (card.querySelector('.card-text')?.textContent || '').toLowerCase();
+          return { col, hay: title + ' ' + text };
+      });
+      function filterTools() {
+          const q = (document.getElementById('toolSearch').value || '').trim().toLowerCase();
+          let anyShown = false;
+          _tiles.forEach(t => {
+              const show = !q || t.hay.includes(q);
+              t.col.style.display = show ? '' : 'none';
+              if (show) anyShown = true;
+          });
+          // hide a category heading + its row when none of its tiles are visible
+          document.querySelectorAll('.category-heading').forEach(h4 => {
+              const row = h4.nextElementSibling;
+              if (!row) return;
+              const visible = [...row.querySelectorAll('.col-lg-4')].some(c => c.style.display !== 'none');
+              h4.style.display = visible ? '' : 'none';
+              row.style.display = visible ? '' : 'none';
+          });
+          const msg = document.getElementById('noToolsMsg');
+          msg.style.display = (q && !anyShown) ? '' : 'none';
+          if (q && !anyShown) document.getElementById('noToolsQ').textContent = q;
+      }
     </script>
 </body>
 </html>
