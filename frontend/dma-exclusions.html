@@ -31,6 +31,14 @@
         /* Left-align Category (5) and Shop (6) */
         #savedTable th:nth-child(5), #savedTable td:nth-child(5),
         #savedTable th:nth-child(6), #savedTable td:nth-child(6) { text-align: left; }
+        /* Source (4) a bit wider; the space comes from Category (5) */
+        #savedTable th:nth-child(4), #savedTable td:nth-child(4) { width: 96px; white-space: nowrap; }
+        #savedTable th:nth-child(5), #savedTable td:nth-child(5) { width: 26%; }
+        /* Pagination controls — match Shop-campaigns */
+        .pagination-controls { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
+        .pagination-controls select { font-size: 0.85rem; width: auto; }
+        .pagination-controls .page-info { color: #636e72; }
+        .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
         /* table-layout:fixed clips column widths but not cell content — keep the
            Headline badge / PLP link / Shop name from spilling past their cell. */
         #oosTable tbody td { overflow: hidden; }
@@ -241,9 +249,10 @@
                 <div class="card">
                     <div class="card-header bg-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Saved exclusions</h5>
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-sm btn-outline-primary" onclick="exportExcel()">Export Excel</button>
-                            <button class="btn btn-sm btn-outline-purple" onclick="loadList()">↻ Refresh</button>
+                        <div class="d-flex gap-2 align-items-center">
+                            <button class="btn btn-sm btn-outline-purple" onclick="exportExcel()">Export Excel</button>
+                            <span id="savedSelCount" class="small text-muted">0 selected</span>
+                            <button id="savedEnableBtn" class="btn btn-sm btn-outline-success" onclick="enableSelected()" disabled>Enable selected</button>
                         </div>
                     </div>
                     <div class="card-body p-0">
@@ -268,18 +277,17 @@
                                 <div id="savedEnableBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%; background-color:#00b894;"></div>
                             </div>
                         </div>
-                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                            <div class="d-flex align-items-center gap-2">
-                                <span id="savedSelCount" class="small text-muted">0 selected</span>
-                                <button id="savedEnableBtn" class="btn btn-sm btn-outline-success" onclick="enableSelected()" disabled>Enable selected</button>
-                            </div>
-                            <div class="d-flex align-items-center gap-2">
-                                <span id="savedPageInfo" class="small text-muted"></span>
-                                <div class="btn-group btn-group-sm">
-                                    <button id="savedPrev" class="btn btn-outline-secondary" onclick="savedGoto(savedPage - 1)">‹ Prev</button>
-                                    <button id="savedNext" class="btn btn-outline-secondary" onclick="savedGoto(savedPage + 1)">Next ›</button>
-                                </div>
-                            </div>
+                        <div class="pagination-controls">
+                            <span>Per page:</span>
+                            <select class="form-select form-select-sm" id="savedPerPage" onchange="savedPage=1; renderSaved();">
+                                <option value="25">25</option>
+                                <option value="50" selected>50</option>
+                                <option value="100">100</option>
+                                <option value="all">Show all</option>
+                            </select>
+                            <button class="btn btn-outline-secondary btn-page" onclick="savedGoto(savedPage - 1)" id="savedPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                            <span class="page-info" id="savedPageInfo">-</span>
+                            <button class="btn btn-outline-secondary btn-page" onclick="savedGoto(savedPage + 1)" id="savedNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
                         </div>
                     </div>
                 </div>
@@ -431,9 +439,18 @@
         // ----- Saved exclusions: data + pagination + multi-select -----
         let savedData = [];
         let savedPage = 1;
-        const SAVED_PAGE_SIZE = 20;
         const savedSelected = new Set();
         const savedEnableable = (x) => x.status === "excluded" || x.status === "partial";
+        function savedPerPage() {
+            const v = document.getElementById("savedPerPage").value;
+            return v === "all" ? Infinity : parseInt(v);
+        }
+        function savedPageRows() {
+            const pp = savedPerPage();
+            const start = pp === Infinity ? 0 : (savedPage - 1) * pp;
+            const end = pp === Infinity ? savedData.length : start + pp;
+            return { start, end, rows: savedData.slice(start, end) };
+        }
 
         async function loadList() {
             try {
@@ -443,17 +460,16 @@
                 // drop selections that no longer exist / are no longer enable-able
                 const live = new Set(savedData.filter(savedEnableable).map(x => x.id));
                 [...savedSelected].forEach(id => { if (!live.has(id)) savedSelected.delete(id); });
-                const pages = Math.max(1, Math.ceil(savedData.length / SAVED_PAGE_SIZE));
-                if (savedPage > pages) savedPage = pages;
-                renderSaved();
+                renderSaved();  // clamps savedPage to the available pages itself
             } catch (e) { console.error(e); }
         }
 
         function renderSaved() {
             const total = savedData.length;
-            const pages = Math.max(1, Math.ceil(total / SAVED_PAGE_SIZE));
-            const start = (savedPage - 1) * SAVED_PAGE_SIZE;
-            const pageRows = savedData.slice(start, start + SAVED_PAGE_SIZE);
+            const pp = savedPerPage();
+            const pages = pp === Infinity ? 1 : Math.max(1, Math.ceil(total / pp));
+            if (savedPage > pages) savedPage = pages;
+            const { start, rows: pageRows } = savedPageRows();
             const rows = pageRows.map(x => {
                 const checkable = savedEnableable(x);
                 const cb = checkable
@@ -476,8 +492,9 @@
                 '<tr><td colspan="9" class="text-center text-muted py-3">No exclusions yet.</td></tr>';
 
             document.getElementById("savedFooter").style.display = total ? "block" : "none";
+            const end = pp === Infinity ? total : Math.min(start + pp, total);
             document.getElementById("savedPageInfo").textContent =
-                total ? `${start + 1}–${Math.min(start + SAVED_PAGE_SIZE, total)} of ${total}` : "";
+                total ? `${start + 1}-${end} of ${total.toLocaleString()}` : "0 of 0";
             document.getElementById("savedPrev").disabled = savedPage <= 1;
             document.getElementById("savedNext").disabled = savedPage >= pages;
             // select-all reflects the enable-able rows on this page
@@ -490,7 +507,8 @@
         }
 
         function savedGoto(page) {
-            const pages = Math.max(1, Math.ceil(savedData.length / SAVED_PAGE_SIZE));
+            const pp = savedPerPage();
+            const pages = pp === Infinity ? 1 : Math.max(1, Math.ceil(savedData.length / pp));
             savedPage = Math.min(Math.max(1, page), pages);
             renderSaved();
         }
@@ -499,15 +517,13 @@
             on ? savedSelected.add(id) : savedSelected.delete(id);
             updateSavedSel();
             // keep header select-all in sync without a full re-render
-            const start = (savedPage - 1) * SAVED_PAGE_SIZE;
-            const pageEnableable = savedData.slice(start, start + SAVED_PAGE_SIZE).filter(savedEnableable);
+            const pageEnableable = savedPageRows().rows.filter(savedEnableable);
             document.getElementById("savedSelectAll").checked =
                 pageEnableable.length > 0 && pageEnableable.every(x => savedSelected.has(x.id));
         }
 
         function toggleAllSaved(on) {
-            const start = (savedPage - 1) * SAVED_PAGE_SIZE;
-            savedData.slice(start, start + SAVED_PAGE_SIZE).filter(savedEnableable)
+            savedPageRows().rows.filter(savedEnableable)
                 .forEach(x => { on ? savedSelected.add(x.id) : savedSelected.delete(x.id); });
             renderSaved();
         }
