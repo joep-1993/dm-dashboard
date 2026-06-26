@@ -33,6 +33,7 @@ calls apply()/enable(); preview()/lookup() are strictly read-only.
 import os
 import re
 import json
+import time
 import logging
 import urllib.parse
 import urllib.request
@@ -320,13 +321,7 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
                 cl0 = r["cl0"]
             if r["shop"]:
                 shop = r["shop"]
-    # Prefer a real product-category trio (PLA/Koffiezetapparaten_a) over a
-    # "<shop> store" allow-list campaign (PLA/Koffie store_a): the store campaign
-    # also matches _CATEGORY_RE and would otherwise shadow the real category,
-    # leaving the product excluded only via APlus/bestsellers (its CL3-OTHERS
-    # leaf is negative, so the trio gets skipped). Store campaigns are deferred.
-    non_store = [c for c in cat_candidates if not c.lower().endswith(" store")]
-    category = (non_store or cat_candidates or [None])[0]
+    category = _pick_category(cat_candidates)
     # fall back to any serving row for the headline shop
     if shop is None:
         for r in serving:
@@ -348,6 +343,34 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
             "from Google Ads (Merchant Center fallback not yet enabled)."
         ),
     }
+
+
+def _pick_category(cands: List[str]) -> Optional[str]:
+    """Prefer a real product-category trio (PLA/Koffiezetapparaten_a) over a
+    "<shop> store" allow-list campaign (PLA/Koffie store_a): the store campaign
+    also matches _CATEGORY_RE and would otherwise shadow the real category,
+    leaving the product excluded only via APlus/bestsellers (its CL3-OTHERS leaf
+    is negative, so the trio gets skipped). Store campaigns are deferred."""
+    non_store = [c for c in cands if not c.lower().endswith(" store")]
+    return (non_store or cands or [None])[0]
+
+
+# Resolution cache: lookup() runs a ~6s shopping_performance_view query, and it
+# dominates each exclusion. oos_scan already does ONE batched query over all
+# candidates, so it pre-populates this cache; resolve_targets then skips the
+# per-EAN lookup. Short TTL + graceful fallback to lookup() keep it safe/fresh.
+_RES_CACHE: Dict[tuple, tuple] = {}
+_RES_TTL = 1800.0  # 30 min
+
+def _cache_resolution(res: dict) -> None:
+    _RES_CACHE[(res["market"], res["item_id"])] = (res, time.monotonic())
+
+def _cached_lookup(item_id: str, market: str) -> dict:
+    key = (market.upper(), (item_id or "").strip())
+    hit = _RES_CACHE.get(key)
+    if hit and time.monotonic() - hit[1] < _RES_TTL:
+        return hit[0]
+    return lookup(item_id, market)
 
 
 # ---------------------------------------------------------------------------
@@ -511,57 +534,78 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
     item_id = (item_id or "").strip()
     client = _get_client()
     customer_id = _customer_id(market)
-    res = resolution or lookup(item_id, market)
+    res = resolution or _cached_lookup(item_id, market)
     cf = (campaign_filter or "").strip().lower()
 
-    targets: List[dict] = []
-    warnings: List[str] = []
-
-    # --- category trio -----------------------------------------------------
-    if res.get("category"):
+    # The three branches below are independent READ-ONLY discovery passes
+    # (~13 sequential Google Ads queries total dominate the latency). They have
+    # no data dependency on each other, and within the category branch each
+    # ad-group tree read is independent too — so run them concurrently. All
+    # mutations still happen later, sequentially, in apply(), so there's no race.
+    def _category_branch():
+        out, warn = [], []
+        if not res.get("category"):
+            return out, ["Category not resolved; skipping category trio + APlus."]
         cat = res["category"]
         camps = _find_campaigns(client, customer_id, [f"PLA/{cat}_%"])
         trio = [c for c in camps if _CATEGORY_RE.match(c["campaign_name"])
                 and _CATEGORY_RE.match(c["campaign_name"]).group("cat") == cat]
         if not trio:
-            warnings.append(f"No PLA/{cat}_a/_b/_c campaigns found.")
-        for c in trio:
-            for ag in _ad_groups(client, customer_id, c["campaign_id"]):
-                nodes = _read_tree(client, customer_id, ag["ad_group_id"])
-                leaf = _leaf_for_category(nodes)
-                targets.append(_build_target(client, customer_id, item_id, "category", c, ag, nodes, leaf))
-    else:
-        warnings.append("Category not resolved; skipping category trio + APlus.")
+            warn.append(f"No PLA/{cat}_a/_b/_c campaigns found.")
+        pairs = [(c, ag) for c in trio
+                 for ag in _ad_groups(client, customer_id, c["campaign_id"])]
 
-    # --- Amazon bestsellers ------------------------------------------------
-    # Guard: the bestsellers campaign is a flat per-item-id list, so this branch
-    # used to run for ANY id — including a bogus/never-served one, whose append
-    # then fails because the id isn't in the tree. Only attempt it when the item
-    # actually resolved (has serving history; a real bestseller exclusion still
-    # has a serving row in PLA/Amazon bestsellers, so found is True there).
-    if res.get("found"):
+        def _build(pair):
+            c, ag = pair
+            nodes = _read_tree(client, customer_id, ag["ad_group_id"])
+            leaf = _leaf_for_category(nodes)
+            return _build_target(client, customer_id, item_id, "category", c, ag, nodes, leaf)
+
+        if pairs:
+            with ThreadPoolExecutor(max_workers=min(8, len(pairs))) as ex:
+                out = list(ex.map(_build, pairs))
+        return out, warn
+
+    def _bestsellers_branch():
+        # Guard: the bestsellers campaign is a flat per-item-id list, so this
+        # used to run for ANY id — including a bogus/never-served one, whose
+        # append then fails because the id isn't in the tree. Only attempt it
+        # when the item actually resolved (a real bestseller exclusion still has
+        # a serving row in PLA/Amazon bestsellers, so found is True there).
+        if not res.get("found"):
+            return [], ["Item id not resolved (no serving history); skipping Amazon bestsellers."]
+        out = []
         for c in _find_campaigns(client, customer_id, [BESTSELLERS_CAMPAIGN]):
             for ag in _ad_groups(client, customer_id, c["campaign_id"]):
                 nodes = _read_tree(client, customer_id, ag["ad_group_id"])
                 leaf = _bestsellers_subdiv(nodes)
-                targets.append(_build_target(client, customer_id, item_id, "bestsellers", c, ag, nodes, leaf))
-    else:
-        warnings.append("Item id not resolved (no serving history); skipping Amazon bestsellers.")
+                out.append(_build_target(client, customer_id, item_id, "bestsellers", c, ag, nodes, leaf))
+        return out, []
 
-    # --- APlus (needs cl0 to pick the right per-category ad group) ----------
-    if res.get("cl0"):
+    def _aplus_branch():
+        # needs cl0 to pick the right per-category ad group
+        if not res.get("cl0"):
+            return [], (["CL0 (deepest-cat-id) not resolved; skipping APlus."]
+                        if res.get("category") else [])
+        out, warn = [], []
         cl0 = res["cl0"]
-        aplus = _find_campaigns(client, customer_id, [APLUS_CAMPAIGN])
-        for c in aplus:
+        for c in _find_campaigns(client, customer_id, [APLUS_CAMPAIGN]):
             ag_rows = _aplus_adgroups_for_cl0(client, customer_id, c["campaign_id"], cl0)
             if not ag_rows:
-                warnings.append(f"No APlus ad group found for category id {cl0}.")
+                warn.append(f"No APlus ad group found for category id {cl0}.")
             for ag in ag_rows:
                 nodes = _read_tree(client, customer_id, ag["ad_group_id"])
                 leaf = _leaf_for_aplus(nodes, cl0)
-                targets.append(_build_target(client, customer_id, item_id, "aplus", c, ag, nodes, leaf))
-    elif res.get("category"):
-        warnings.append("CL0 (deepest-cat-id) not resolved; skipping APlus.")
+                out.append(_build_target(client, customer_id, item_id, "aplus", c, ag, nodes, leaf))
+        return out, warn
+
+    targets: List[dict] = []
+    warnings: List[str] = []
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        for fut in [ex.submit(b) for b in (_category_branch, _bestsellers_branch, _aplus_branch)]:
+            t, w = fut.result()
+            targets.extend(t)
+            warnings.extend(w)
 
     if cf:
         targets = [t for t in targets if cf in t["campaign_name"].lower()]
@@ -1034,9 +1078,11 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     for i in range(0, len(eans), 200):
         ids = [DMA_ITEM_PREFIX + e for e in eans[i:i + 200]]
         q = (
-            "SELECT segments.product_item_id, campaign.name, metrics.clicks, "
-            "metrics.impressions, metrics.cost_micros, metrics.conversions, "
-            "metrics.conversions_value FROM shopping_performance_view "
+            "SELECT segments.product_item_id, campaign.name, "
+            "segments.product_custom_attribute0, segments.product_custom_attribute3, "
+            "metrics.clicks, metrics.impressions, metrics.cost_micros, "
+            "metrics.conversions, metrics.conversions_value "
+            "FROM shopping_performance_view "
             f"WHERE segments.product_item_id IN ({','.join(repr(x) for x in ids)}) "
             "AND segments.date DURING LAST_30_DAYS"
         )
@@ -1044,7 +1090,8 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
             iid = row.segments.product_item_id
             m = row.metrics
             a = agg.setdefault(iid, {"clicks": 0, "impr": 0, "cost": 0,
-                                     "conv": 0.0, "conv_value": 0.0, "campaigns": set()})
+                                     "conv": 0.0, "conv_value": 0.0, "campaigns": set(),
+                                     "cl0": None, "shop": None})
             a["clicks"] += m.clicks
             a["impr"] += m.impressions
             a["cost"] += m.cost_micros
@@ -1052,6 +1099,11 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
             a["conv_value"] += m.conversions_value
             if row.campaign.name:
                 a["campaigns"].add(row.campaign.name)
+            cl0 = row.segments.product_custom_attribute0
+            if cl0 and cl0.isdigit():
+                a["cl0"] = cl0
+            if row.segments.product_custom_attribute3:
+                a["shop"] = row.segments.product_custom_attribute3
 
     # which item ids are already excluded (so the UI can disable them)
     excluded = {r["item_id"] for r in list_exclusions()
@@ -1061,7 +1113,14 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     for iid, a in agg.items():
         camps = sorted(a["campaigns"])
         fams = {_campaign_family(c) for c in camps}
-        cat = next((_CATEGORY_RE.match(c).group("cat") for c in camps if _CATEGORY_RE.match(c)), None)
+        cat = _pick_category([_CATEGORY_RE.match(c).group("cat") for c in camps if _CATEGORY_RE.match(c)])
+        # Pre-cache the resolution so a follow-up exclude skips the ~6s per-EAN
+        # lookup() — this scan already paid for the (batched) serving query.
+        _cache_resolution({
+            "item_id": iid, "market": market.upper(), "found": True,
+            "category": cat, "cl0": a["cl0"], "shop": a["shop"],
+            "serving_campaigns": camps, "note": None,
+        })
         candidates.append({
             "item_id": iid,
             "ean": iid[len(DMA_ITEM_PREFIX):],
