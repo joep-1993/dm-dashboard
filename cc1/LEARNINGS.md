@@ -1,6 +1,15 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools DMA Exclusions — exclusion was slow: it's the lookup() query, not the writes (2026-06-26)
+
+Profiled a slow exclusion: `_get_client()` is 0.1s and each tree `_read_tree` is ~0.5s, but **`lookup()` is ~6–8s** — the `shopping_performance_view` query filtered by `segments.product_item_id` over `LAST_30_DAYS` is just slow on Google's side (7d ~4.6s, 14d ~5.5s, 30d ~6s — shortening the window barely helps and risks missing the category). It runs **once per EAN**, so it dominated bulk excludes.
+- **Two safe speedups (mutations still run sequentially in `apply()` → no race):**
+  1. **Parallel reads** — `resolve_targets` runs its three independent READ-only branches (category trio / bestsellers / APlus) concurrently via `ThreadPoolExecutor`, and reads the trio's ad-group trees in parallel. `_build_target` + the read helpers are pure/read-only; the google-ads gRPC client is thread-safe for concurrent `search()`.
+  2. **Resolution cache** — `oos_scan` already does ONE *batched* `shopping_performance_view` query over all candidates, so it now also SELECTs `product_custom_attribute0/3` (cl0/shop) and pre-caches each resolution in a module-level `_RES_CACHE` (30-min TTL). `resolve_targets` uses `_cached_lookup()` → skips the per-EAN `lookup()`, falling back to a fresh lookup on miss. Measured `resolve_targets` **10.5s → 2.1s** on a scanned item, identical plan.
+- **Why NOT frontend concurrency:** every exclusion touches the *shared* `PLA/Amazon bestsellers` (and per-category APlus) ad-group trees, so running EANs concurrently would collide on the same tree → `CONCURRENT_MODIFICATION`. Server-side parallel *reads* + sequential writes avoids that.
+- Cache is in-process (cleared on the bare-uvicorn restart) → re-scan after a deploy. The `<shop> store` non-store category preference now lives in one shared `_pick_category()` used by both `lookup()` and `oos_scan`. Memory: `dma_exclusions_tool.md`.
+
 ## dm-tools DMA Exclusions — `<shop> store` campaign shadowed the real category trio (2026-06-26)
 
 **Bug:** a product that serves in BOTH a `<shop> store` allow-list campaign (e.g. `PLA/Koffie store_a/_b`) and its real category trio (`PLA/Koffiezetapparaten_a`) resolved to the **store** category, because `lookup()` regex-matched every serving campaign against `_CATEGORY_RE` and let the *last* match win. Store campaigns are allow-list (CL3-OTHERS is NEGATIVE), so `_build_target` skipped the trio → the product was excluded **only in APlus + bestsellers**, never in the real category trio.
