@@ -1,6 +1,14 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools DMA Exclusions — `<shop> store` campaign shadowed the real category trio (2026-06-26)
+
+**Bug:** a product that serves in BOTH a `<shop> store` allow-list campaign (e.g. `PLA/Koffie store_a/_b`) and its real category trio (`PLA/Koffiezetapparaten_a`) resolved to the **store** category, because `lookup()` regex-matched every serving campaign against `_CATEGORY_RE` and let the *last* match win. Store campaigns are allow-list (CL3-OTHERS is NEGATIVE), so `_build_target` skipped the trio → the product was excluded **only in APlus + bestsellers**, never in the real category trio.
+- **Fix:** `lookup()` collects all `_CATEGORY_RE` candidates and prefers one **not ending in " store"** (`non_store or cat_candidates`). `PLA/<shop> store_a` captures cat `"<shop> store"`, so the suffix test cleanly drops it. Verified `nl-nl-gold-4260083466902` → was `Koffie store`, now `Koffiezetapparaten` (cl0 9005311) → trio targeted.
+- **Audit + remediation:** re-ran the fixed `lookup()` over all 117 active exclusions → **33 had resolved to a store category and were missing the trio**; 38 already correct; 30 are genuinely store-only (no real product trio — nothing to add). Fixed the 33 with an **enable→re-exclude** round-trip (NOT a naive re-apply, which would re-add the existing APlus/bestsellers negatives and corrupt the reversal metadata). 31 picked up the `category` trio; 2 ("Free shops") have no biddable trio (store-only). 0 failures. Scripts in scratchpad (`audit2.py`, `reexclude.py`).
+- **PLP url:** new `plp_url` column on `dma_exclusions`, resolved via `headline_offer(ean)` at apply time and shown as a hyperlink on the item id in the Saved list. Backfilled all 84 pre-existing rows (ES-only, 0 misses) so every item id links. `_save_record` uses `COALESCE(EXCLUDED.plp_url, existing)` so a re-apply never nulls it.
+- **UI this session:** Saved table → fixed-layout colgroup (broad Item id/Timestamp, narrow Shop), pagination matching Shop-campaigns (Per-page select + chevrons + "X-Y of Z"), multi-select + bulk "Enable selected" (one `/enable/{id}` per row behind a progress bar; per-row Enable buttons removed), Applied→Timestamp, Targets column dropped, orange (`btn-fill-primary`, like Scan OOS) when clickable / grey when disabled. Dashboard tool-search now matches **names only** (not descriptions) and sits below the hero. Memory: `dma_exclusions_tool.md`.
+
 ## dm-tools DMA Exclusions — clickable Saved-exclusion rows reveal campaign/ad-group targets (2026-06-26)
 
 The Saved-exclusions table only showed a `target_count`; users couldn't see *which* campaigns/ad groups a product was excluded in. Made each saved row clickable to expand a detail table.
