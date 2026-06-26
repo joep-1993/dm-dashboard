@@ -250,10 +250,10 @@
                         <div class="table-responsive">
                             <table id="savedTable" class="table table-sm mb-0 align-middle">
                                 <thead>
-                                    <tr><th style="width:34px;"><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th>Item id</th><th>Country</th><th>Source</th><th>Category</th><th>Shop</th><th>Targets</th><th>Status</th><th>Applied</th><th></th></tr>
+                                    <tr><th style="width:34px;"><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th>Item id</th><th>Country</th><th>Source</th><th>Category</th><th>Shop</th><th>Targets</th><th>Status</th><th>Applied</th></tr>
                                 </thead>
                                 <tbody id="listBody">
-                                    <tr><td colspan="10" class="text-center text-muted py-3">No exclusions yet.</td></tr>
+                                    <tr><td colspan="9" class="text-center text-muted py-3">No exclusions yet.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -387,29 +387,13 @@
             } finally { busy(false); }
         }
 
-        async function enableExclusion(ev, id, item) {
-            ev.stopPropagation();  // don't toggle the row-detail
-            if (!confirm(`Re-enable ${item}? This removes the negative and prunes the tree back in Google Ads.`)) return;
-            const btn = ev.currentTarget;
-            const orig = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Re-enabling…';
-            try {
-                const res = await fetch(`${API}/enable/${id}`, { method: "POST" });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.detail || res.status);
-                if (data.errors && data.errors.length) { console.error(data.errors); alert(`Reverted with ${data.errors.length} error(s). See console.`); }
-                loadList();  // re-renders the row, replacing the button
-            } catch (e) { alert("Enable failed: " + e.message); btn.disabled = false; btn.innerHTML = orig; }
-        }
-
         async function toggleExclDetail(id) {
             const existing = document.getElementById(`excl-detail-${id}`);
             if (existing) { existing.remove(); return; }
             const row = document.getElementById(`excl-row-${id}`);
             if (!row) return;
             row.insertAdjacentHTML("afterend",
-                `<tr id="excl-detail-${id}"><td colspan="10" class="bg-light py-2"><span class="spinner-border spinner-border-sm"></span> loading campaigns…</td></tr>`);
+                `<tr id="excl-detail-${id}"><td colspan="9" class="bg-light py-2"><span class="spinner-border spinner-border-sm"></span> loading campaigns…</td></tr>`);
             const cell = document.querySelector(`#excl-detail-${id} td`);
             try {
                 const res = await fetch(`${API}/exclusion/${id}/targets`);
@@ -486,13 +470,10 @@
                         <td>${x.target_count}</td>
                         <td>${statusBadge(x.status)}</td>
                         <td class="small text-muted">${x.applied_at ? esc(x.applied_at).replace("T", " ").slice(0, 16) : "—"}</td>
-                        <td>${checkable
-                            ? `<button class="btn btn-sm btn-outline-success" onclick="enableExclusion(event, ${x.id}, '${esc(x.item_id)}')">Enable</button>`
-                            : ""}</td>
                     </tr>`;
             }).join("");
             document.getElementById("listBody").innerHTML = rows ||
-                '<tr><td colspan="10" class="text-center text-muted py-3">No exclusions yet.</td></tr>';
+                '<tr><td colspan="9" class="text-center text-muted py-3">No exclusions yet.</td></tr>';
 
             document.getElementById("savedFooter").style.display = total ? "block" : "none";
             document.getElementById("savedPageInfo").textContent =
