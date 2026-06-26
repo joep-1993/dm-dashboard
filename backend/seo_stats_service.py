@@ -295,7 +295,13 @@ def get_daily(start_date: Optional[str], end_date: Optional[str],
 # Per-date notes (Postgres-backed, shared across users)
 # ---------------------------------------------------------------------------
 
+_NOTES_TABLE_READY = False
+
+
 def _init_notes_table() -> None:
+    global _NOTES_TABLE_READY
+    if _NOTES_TABLE_READY:
+        return
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -310,6 +316,10 @@ def _init_notes_table() -> None:
         # Add color to pre-existing tables created before this column existed.
         cur.execute("ALTER TABLE pa.seo_stats_notes ADD COLUMN IF NOT EXISTS color VARCHAR(16)")
         conn.commit()
+        _NOTES_TABLE_READY = True
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         cur.close()
         return_db_connection(conn)

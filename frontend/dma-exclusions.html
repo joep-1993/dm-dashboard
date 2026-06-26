@@ -318,6 +318,8 @@
 
         const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
             ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+        // Only allow http(s) URLs into an href (esc() doesn't block javascript: schemes).
+        const safeUrl = u => (/^https?:\/\//i.test(u || "") ? u : "");
         const busy = on => document.getElementById("busy").style.display = on ? "inline" : "none";
 
         function actionLabel(t) {
@@ -495,8 +497,8 @@
                 return `
                     <tr id="excl-row-${x.id}" style="cursor:pointer;" onclick="toggleExclDetail(${x.id})" title="Click to see the campaigns this was added to">
                         <td>${cb}</td>
-                        <td class="mono" title="${esc(x.plp_url) || esc(x.item_id)}">${x.plp_url
-                            ? `<a href="${esc(x.plp_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(x.item_id)}</a>`
+                        <td class="mono" title="${esc(x.plp_url) || esc(x.item_id)}">${safeUrl(x.plp_url)
+                            ? `<a href="${esc(safeUrl(x.plp_url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(x.item_id)}</a>`
                             : esc(x.item_id)}</td>
                         <td>${esc(x.market)}</td>
                         <td>${x.source === "oos" ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e8730c; color:#e8730c;">OOS</span>' : '<span class="badge bg-secondary">manual</span>'}</td>
@@ -677,8 +679,8 @@
                     <td>${c.clicks.toLocaleString()}</td>
                     <td>€${c.cost_eur.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                     <td>${headlineBadge(c)}</td>
-                    <td>${c.plp_url
-                        ? `<a href="${esc(c.plp_url)}" target="_blank" rel="noopener" class="text-truncate d-inline-block" style="max-width:100%; vertical-align:bottom;" title="${esc(c.plp_url)}">${esc(c.plp_url.replace(/^https?:\/\/www\.beslist\.nl/, ""))}</a>`
+                    <td>${safeUrl(c.plp_url)
+                        ? `<a href="${esc(safeUrl(c.plp_url))}" target="_blank" rel="noopener" class="text-truncate d-inline-block" style="max-width:100%; vertical-align:bottom;" title="${esc(c.plp_url)}">${esc(c.plp_url.replace(/^https?:\/\/www\.beslist\.nl/, ""))}</a>`
                         : '<span class="text-muted">—</span>'}</td>
                 </tr>`;
             }).join("");
@@ -778,7 +780,7 @@
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || res.status);
                 alert(`Re-enabled ${data.recovered} recovered product(s).`);
-                loadList(); if (oosData) scanOos();
+                await loadList(); if (oosData) await scanOos();
             } catch (e) { alert("Re-enable failed: " + e.message); }
         }
 

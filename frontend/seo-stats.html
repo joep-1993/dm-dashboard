@@ -754,7 +754,7 @@
         }
 
         // Heatmap columns with a WoW hover tooltip → their precomputed wow-pct field.
-        const WOW_BY_KEY = { seo_visits: 'seo_visits_wow', dma_visits: 'dma_visits_wow', gsaas_visits: 'gsaas_visits_wow', seo_omzet: 'seo_omzet_wow' };
+        const WOW_BY_KEY = Object.fromEntries(TABLE_COLS.map(k => [k, k + '_wow']));  // derive from TABLE_COLS so it can't drift
         function wowText(pct) {
             if (pct === null || pct === undefined) return 'n/a';
             return (pct > 0 ? '+' : '') + pct.toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + '%';
@@ -961,7 +961,7 @@
             const byKey = k => chans.find(c => c.channel === k) || {};
 
             // Tiles: visit delta % per channel.
-            document.getElementById('standupTiles').innerHTML = ['seo', 'gsaas', 'dma'].map(k => {
+            document.getElementById('standupTiles').innerHTML = ['seo', 'dma', 'gsaas'].map(k => {
                 const ch = byKey(k);
                 return `<div class="stat-card"><h3>${pctText(ch.visits_pct)}</h3>` +
                        `<div class="label">${ch.label || k} visits Δ</div></div>`;
@@ -1112,8 +1112,9 @@
                     o['Revenue Δ'] = r.revenue_delta; o['Revenue Δ%'] = r.revenue_pct;
                     return o;
                 });
-                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.maincats.by_visits, false)), 'Top maincats');
-                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.subcats.by_visits, true)), 'Top subcats');
+                const catKey = catMetric === 'visits' ? 'by_visits' : 'by_revenue';  // match the on-screen ranking
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.maincats[catKey], false)), 'Top maincats');
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.subcats[catKey], true)), 'Top subcats');
             }
             XLSX.writeFile(wb, `seo-stats_${lastData.start_date}_${lastData.end_date}.xlsx`);
         }

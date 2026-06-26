@@ -292,7 +292,7 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
           segments.product_type_l1, segments.product_type_l2,
           metrics.impressions
         FROM shopping_performance_view
-        WHERE segments.product_item_id = '{item_id}'
+        WHERE segments.product_item_id = {item_id!r}
           AND segments.date DURING LAST_30_DAYS
     """
     serving: List[dict] = []
@@ -548,8 +548,8 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
             return out, ["Category not resolved; skipping category trio + APlus."]
         cat = res["category"]
         camps = _find_campaigns(client, customer_id, [f"PLA/{cat}_%"])
-        trio = [c for c in camps if _CATEGORY_RE.match(c["campaign_name"])
-                and _CATEGORY_RE.match(c["campaign_name"]).group("cat") == cat]
+        trio = [c for c in camps
+                if (m := _CATEGORY_RE.match(c["campaign_name"])) and m.group("cat") == cat]
         if not trio:
             warn.append(f"No PLA/{cat}_a/_b/_c campaigns found.")
         pairs = [(c, ag) for c in trio
@@ -922,6 +922,9 @@ def _ensure_table():
             """)
         conn.commit()
         _TABLE_READY = True
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         return_db_connection(conn)
 
@@ -955,6 +958,9 @@ def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
             rid = cur.fetchone()["id"]
         conn.commit()
         return rid
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         return_db_connection(conn)
 
@@ -982,6 +988,9 @@ def _update_status(record_id: int, status: str, result_patch: dict):
                 WHERE id = %s
             """, (status, status, json.dumps(result_patch), record_id))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         return_db_connection(conn)
 
@@ -1113,7 +1122,7 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     for iid, a in agg.items():
         camps = sorted(a["campaigns"])
         fams = {_campaign_family(c) for c in camps}
-        cat = _pick_category([_CATEGORY_RE.match(c).group("cat") for c in camps if _CATEGORY_RE.match(c)])
+        cat = _pick_category([m.group("cat") for c in camps if (m := _CATEGORY_RE.match(c))])
         # Pre-cache the resolution so a follow-up exclude skips the ~6s per-EAN
         # lookup() — this scan already paid for the (batched) serving query.
         _cache_resolution({
@@ -1180,10 +1189,15 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     not_found / no_headline / ES errors are allowed through (a gone product is a
     valid exclusion, and we don't fail-closed on a transient lookup).
     """
+    # Batch the headline re-check across a worker pool (one warm ES session)
+    # instead of a serial ~20s-timeout POST per EAN.
+    eans = [iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
+            for iid in item_ids]
+    headlines = _headline_offers(eans)
     results = []
     for iid in item_ids:
         ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
-        info = headline_offer(ean)
+        info = headlines.get(ean) or headline_offer(ean)
         if info["status"] == "differs":
             results.append({
                 "item_id": iid, "skipped": True, "headline_status": "differs",
