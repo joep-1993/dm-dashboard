@@ -230,9 +230,12 @@
                             </table>
                         </div>
                         <div id="oosProgress" class="mt-4 mb-3" style="display:none;">
-                            <div class="d-flex justify-content-between mb-1">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
                                 <span id="oosProgressLabel">Excluding…</span>
-                                <span id="oosProgressCount">0%</span>
+                                <span class="d-flex align-items-center gap-2">
+                                    <span id="oosProgressCount">0%</span>
+                                    <button id="oosCancelBtn" type="button" class="btn btn-sm btn-outline-secondary py-0" onclick="oosCancel = true; this.disabled = true; this.textContent = 'Cancelling…';">Cancel</button>
+                                </span>
                             </div>
                             <div class="progress" style="height:25px;">
                                 <div id="oosProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%; background-color:#e17055;"></div>
@@ -279,9 +282,12 @@
                     </div>
                     <div id="savedFooter" class="card-footer bg-white" style="display:none;">
                         <div id="savedEnableProgress" class="mb-3" style="display:none;">
-                            <div class="d-flex justify-content-between mb-1">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
                                 <span id="savedEnableLabel">Re-enabling…</span>
-                                <span id="savedEnableCount">0%</span>
+                                <span class="d-flex align-items-center gap-2">
+                                    <span id="savedEnableCount">0%</span>
+                                    <button id="savedEnableCancelBtn" type="button" class="btn btn-sm btn-outline-secondary py-0" onclick="savedEnableCancel = true; this.disabled = true; this.textContent = 'Cancelling…';">Cancel</button>
+                                </span>
                             </div>
                             <div class="progress" style="height:25px;">
                                 <div id="savedEnableBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%; background-color:#00b894;"></div>
@@ -449,6 +455,7 @@
         // ----- Saved exclusions: data + pagination + multi-select -----
         let savedData = [];
         let savedPage = 1;
+        let savedEnableCancel = false;   // set by the progress Cancel button
         const savedSelected = new Set();
         const savedEnableable = (x) => x.status === "excluded" || x.status === "partial";
         function savedPerPage() {
@@ -562,11 +569,16 @@
             };
             document.getElementById("savedEnableLabel").textContent = `Re-enabling ${ids.length} exclusion(s)…`;
             setProgress(0);
+            savedEnableCancel = false;
+            const cancelBtn = document.getElementById("savedEnableCancelBtn");
+            cancelBtn.disabled = false; cancelBtn.textContent = "Cancel";
             prog.style.display = "block";
             btn.disabled = true;
             const errors = [];
+            let processed = 0;
             try {
                 for (let i = 0; i < ids.length; i++) {
+                    if (savedEnableCancel) break;   // stop before the next; in-flight one already finished
                     try {
                         const res = await fetch(`${API}/enable/${ids[i]}`, { method: "POST" });
                         const data = await res.json();
@@ -575,9 +587,11 @@
                     } catch (e) {
                         errors.push({ id: ids[i], error: e.message });
                     }
+                    processed++;
                     setProgress(i + 1);
                 }
-                alert(`Re-enabled ${ids.length - errors.length} of ${ids.length} exclusion(s)`
+                alert((savedEnableCancel ? `Cancelled — ` : "")
+                    + `Re-enabled ${processed - errors.length} of ${ids.length} exclusion(s)`
                     + (errors.length ? `, ${errors.length} with errors (see console).` : "."));
                 if (errors.length) console.error(errors);
                 savedSelected.clear();
@@ -591,6 +605,7 @@
 
         // ----- OOS section -----
         let oosData = null;          // last scan response
+        let oosCancel = false;       // set by the progress Cancel button
         const oosSelected = new Set();
 
         function oosVisible() {
@@ -718,10 +733,14 @@
             };
             document.getElementById("oosProgressLabel").textContent = `Excluding ${ids.length} EAN(s) from DMA (${market})…`;
             setProgress(0);
+            oosCancel = false;
+            const cancelBtn = document.getElementById("oosCancelBtn");
+            cancelBtn.disabled = false; cancelBtn.textContent = "Cancel";
             prog.style.display = "block";
             const results = [];
             try {
                 for (let i = 0; i < ids.length; i++) {
+                    if (oosCancel) break;   // stop before the next EAN; in-flight one already finished
                     try {
                         const res = await fetch(`${API}/oos/exclude`, {
                             method: "POST", headers: { "Content-Type": "application/json" },
@@ -737,7 +756,7 @@
                 }
                 const failed = results.filter(r => r.error || (r.errors && r.errors.length));
                 const skipped = results.filter(r => r.skipped);
-                alert(`Processed ${results.length} product(s)`
+                alert((oosCancel ? `Cancelled — processed ${results.length} of ${ids.length} product(s)` : `Processed ${results.length} product(s)`)
                     + (skipped.length ? `, ${skipped.length} skipped (non-headline, kept live)` : "")
                     + (failed.length ? `, ${failed.length} with errors (see console).` : "."));
                 if (failed.length || skipped.length) console.log({ failed, skipped });
