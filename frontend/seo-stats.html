@@ -1083,7 +1083,10 @@
         function exportXlsx() {
             if (!lastData) return;
             const wb = XLSX.utils.book_new();
-            const dayRows = (perfRows.length ? perfRows : lastData.daily).map(r => {
+            // Export the Per-day sheet chronologically, regardless of the table's current sort.
+            const dayRows = [...(perfRows.length ? perfRows : lastData.daily)]
+                .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
+                .map(r => {
                 const o = { Date: r.date, Day: weekdayOf(r.date) };
                 TABLE_COLS.forEach(k => {
                     o[METRICS[k].label] = r[k];

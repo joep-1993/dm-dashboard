@@ -15,6 +15,7 @@ Category breakdowns use marketing_channel = 'SEO' (same as the standup
 comparison sheets).
 """
 
+import copy
 import time
 import logging
 from datetime import date, datetime, timedelta
@@ -54,7 +55,7 @@ _CACHE_TTL = 300  # seconds
 def _cache_get(key: str):
     hit = _CACHE.get(key)
     if hit and (time.time() - hit[0]) < _CACHE_TTL:
-        return hit[1]
+        return copy.deepcopy(hit[1])  # hand callers a private copy; never the cached object
     return None
 
 
@@ -121,7 +122,10 @@ def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
         out[d].update({f"{k}_omzet": 0.0 for k in CHANNELS.values()})
 
     for r in rows:
-        d = datetime.strptime(str(r["d"]), "%Y%m%d").date()
+        ds = str(r["d"])
+        if len(ds) != 8 or not ds.isdigit():
+            continue  # skip a malformed/NULL dim_date_key rather than 500 the request
+        d = datetime.strptime(ds, "%Y%m%d").date()
         key = CHANNELS.get(r["chan"])
         if not key or d not in out:
             continue
@@ -177,8 +181,10 @@ def _fetch_channel_deltas(conn, vis_p1: date, vis_p2: date,
 def _fetch_cat_deltas(conn, level: str, vis_p1: date, vis_p2: date,
                       rev_p1: date, rev_p2: date) -> Dict[str, List[Dict]]:
     """Top maincats or subcats (SEO channel) by most-positive delta.
-    `level` is 'main' or 'sub'. Returns {'by_visits': [...], 'by_revenue': [...]}.
+    `level` is 'main', 'sub' or 'deepest'. Returns {'by_visits': [...], 'by_revenue': [...]}.
     """
+    if level not in ("main", "sub", "deepest"):
+        raise ValueError(f"invalid level: {level!r}")
     vp1, vp2 = _date_key(vis_p1), _date_key(vis_p2)
     rp1, rp2 = _date_key(rev_p1), _date_key(rev_p2)
 
@@ -236,14 +242,16 @@ def _fetch_cat_deltas(conn, level: str, vis_p1: date, vis_p2: date,
             "revenue_delta": m2 - m1, "revenue_pct": _pct_delta(m1, m2),
         })
 
-    by_visits = sorted(rows, key=lambda x: x["visits_delta"], reverse=True)[:TOP_N]
-    by_revenue = sorted(rows, key=lambda x: x["revenue_delta"], reverse=True)[:TOP_N]
-    worst_by_visits = sorted(rows, key=lambda x: x["visits_delta"])[:TOP_N]
-    worst_by_revenue = sorted(rows, key=lambda x: x["revenue_delta"])[:TOP_N]
-    return {
-        "by_visits": by_visits, "by_revenue": by_revenue,
-        "worst_by_visits": worst_by_visits, "worst_by_revenue": worst_by_revenue,
+    out = {
+        "by_visits": sorted(rows, key=lambda x: x["visits_delta"], reverse=True)[:TOP_N],
+        "by_revenue": sorted(rows, key=lambda x: x["revenue_delta"], reverse=True)[:TOP_N],
     }
+    # Only the deepest level renders the "declining" (worst) lists; skip the two
+    # extra full sorts for main/sub where they're never read.
+    if level == "deepest":
+        out["worst_by_visits"] = sorted(rows, key=lambda x: x["visits_delta"])[:TOP_N]
+        out["worst_by_revenue"] = sorted(rows, key=lambda x: x["revenue_delta"])[:TOP_N]
+    return out
 
 
 # ---------------------------------------------------------------------------
