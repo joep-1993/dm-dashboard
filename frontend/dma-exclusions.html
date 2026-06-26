@@ -557,7 +557,8 @@
             const market = document.getElementById("oosMarket").value;
             if (!confirm(`Exclude ${ids.length} OOS product(s) from DMA (${market})? This writes to live Google Ads.`)) return;
             const btn = document.getElementById("oosExcludeBtn");
-            btn.disabled = true; btn.textContent = "Excluding…";
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Excluding ${ids.length}…`;
             try {
                 const res = await fetch(`${API}/oos/exclude`, {
                     method: "POST", headers: { "Content-Type": "application/json" },
@@ -575,7 +576,7 @@
                 await scanOos(); loadList();
             } catch (e) {
                 alert("Exclude failed: " + e.message);
-            } finally { btn.textContent = "Exclude selected"; updateOosSel(); }
+            } finally { btn.innerHTML = "Exclude selected"; updateOosSel(); }
         }
 
         async function reenableRecovered() {
