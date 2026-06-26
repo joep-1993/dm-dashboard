@@ -218,6 +218,15 @@
                                 <tbody id="oosBody"></tbody>
                             </table>
                         </div>
+                        <div id="oosProgress" class="mt-4" style="display:none;">
+                            <div class="d-flex justify-content-between small text-muted mb-1">
+                                <span id="oosProgressLabel">Excluding…</span>
+                                <span id="oosProgressCount">0 / 0</span>
+                            </div>
+                            <div class="progress" style="height:8px;">
+                                <div id="oosProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%; background-color:#e17055;"></div>
+                            </div>
+                        </div>
                         <div id="oosActions" class="d-flex justify-content-end align-items-center gap-2 mt-4" style="display:none !important;">
                             <span id="oosSelCount" class="small text-muted">0 selected</span>
                             <button id="oosExcludeBtn" class="btn btn-sm btn-primary" onclick="excludeSelectedOos()" disabled>Exclude selected</button>
@@ -551,16 +560,36 @@
             const btn = document.getElementById("oosExcludeBtn");
             btn.disabled = true;
             btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Excluding ${ids.length}…`;
+            // Per-EAN so we can show real progress: the Google Ads writes dominate
+            // the cost, so one request each is no slower than one batched request.
+            const prog = document.getElementById("oosProgress");
+            const bar = document.getElementById("oosProgressBar");
+            const setProgress = (done) => {
+                bar.style.width = `${Math.round(done / ids.length * 100)}%`;
+                document.getElementById("oosProgressCount").textContent = `${done} / ${ids.length}`;
+            };
+            document.getElementById("oosProgressLabel").textContent = `Excluding ${ids.length} EAN(s) from DMA (${market})…`;
+            setProgress(0);
+            prog.style.display = "block";
+            const results = [];
             try {
-                const res = await fetch(`${API}/oos/exclude`, {
-                    method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ market, item_ids: ids }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.detail || res.status);
-                const failed = (data.results || []).filter(r => r.error || (r.errors && r.errors.length));
-                const skipped = (data.results || []).filter(r => r.skipped);
-                alert(`Processed ${data.processed} product(s)`
+                for (let i = 0; i < ids.length; i++) {
+                    try {
+                        const res = await fetch(`${API}/oos/exclude`, {
+                            method: "POST", headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ market, item_ids: [ids[i]] }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.detail || res.status);
+                        results.push(...(data.results || []));
+                    } catch (e) {
+                        results.push({ item_id: ids[i], error: e.message });
+                    }
+                    setProgress(i + 1);
+                }
+                const failed = results.filter(r => r.error || (r.errors && r.errors.length));
+                const skipped = results.filter(r => r.skipped);
+                alert(`Processed ${results.length} product(s)`
                     + (skipped.length ? `, ${skipped.length} skipped (non-headline, kept live)` : "")
                     + (failed.length ? `, ${failed.length} with errors (see console).` : "."));
                 if (failed.length || skipped.length) console.log({ failed, skipped });
@@ -568,7 +597,7 @@
                 await scanOos(); loadList();
             } catch (e) {
                 alert("Exclude failed: " + e.message);
-            } finally { btn.innerHTML = "Exclude selected"; updateOosSel(); }
+            } finally { prog.style.display = "none"; btn.innerHTML = "Exclude selected"; updateOosSel(); }
         }
 
         async function reenableRecovered() {
