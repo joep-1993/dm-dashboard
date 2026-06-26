@@ -200,20 +200,18 @@
                                 <colgroup>
                                     <col style="width:34px">
                                     <col style="width:124px">
-                                    <col style="width:19%">
-                                    <col style="width:17%">
-                                    <col style="width:88px">
-                                    <col style="width:78px">
-                                    <col style="width:80px">
-                                    <col style="width:66px">
-                                    <col style="width:116px">
-                                    <col style="width:17%">
+                                    <col style="width:22%">
+                                    <col style="width:20%">
+                                    <col style="width:90px">
+                                    <col style="width:96px">
+                                    <col style="width:120px">
+                                    <col style="width:21%">
                                 </colgroup>
                                 <thead style="position:sticky; top:0;">
                                     <tr>
                                         <th><input type="checkbox" id="oosSelectAll" onclick="toggleAllOos(this.checked)"></th>
-                                        <th>EAN</th><th>Category</th><th>Shop</th><th>Campaigns</th>
-                                        <th>Clicks 30d</th><th>Spend 30d</th><th>Conv 30d</th>
+                                        <th>EAN</th><th>Category</th><th>Shop</th>
+                                        <th>Clicks 30d</th><th>Spend 30d</th>
                                         <th>Headline</th><th>PLP</th>
                                     </tr>
                                 </thead>
@@ -497,22 +495,16 @@
         function renderOos() {
             if (!oosData) return;
             const rows = oosVisible().map(c => {
-                const camps = c.campaigns.length;
-                const warn = c.uncovered_campaigns.length
-                    ? ` <span class="badge bg-warning text-dark" title="${c.uncovered_campaigns.length} other campaign(s) not covered by this tool: ${esc(c.uncovered_campaigns.join(', '))}">+${c.uncovered_campaigns.length}</span>` : "";
                 const checked = oosSelected.has(c.item_id) ? "checked" : "";
                 const dis = oosLocked(c) ? "disabled" : "";
-                const convCls = c.conversions > 0 ? "text-danger fw-semibold" : "text-muted";
                 const muted = c.already_excluded || c.headline_status === "differs";
                 return `<tr class="${muted ? 'table-light text-muted' : ''}">
                     <td><input type="checkbox" ${checked} ${dis} onclick="toggleOos('${esc(c.item_id)}', this.checked)"></td>
                     <td class="mono">${esc(c.ean)}${c.already_excluded ? ' <span class="badge badge-excluded">excluded</span>' : ''}</td>
                     <td>${esc(c.category) || "—"}</td>
                     <td class="text-truncate" title="${esc(c.headline_shop) || ""}">${esc(c.headline_shop) || "—"}</td>
-                    <td>${camps}${warn}</td>
                     <td>${c.clicks.toLocaleString()}</td>
                     <td>€${c.cost_eur.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                    <td class="${convCls}">${c.conversions}</td>
                     <td>${headlineBadge(c)}</td>
                     <td>${c.plp_url
                         ? `<a href="${esc(c.plp_url)}" target="_blank" rel="noopener" class="text-truncate d-inline-block" style="max-width:100%; vertical-align:bottom;" title="${esc(c.plp_url)}">${esc(c.plp_url.replace(/^https?:\/\/www\.beslist\.nl/, ""))}</a>`
@@ -520,7 +512,7 @@
                 </tr>`;
             }).join("");
             document.getElementById("oosBody").innerHTML = rows ||
-                '<tr><td colspan="10" class="text-center text-muted py-3">No matching rows.</td></tr>';
+                '<tr><td colspan="8" class="text-center text-muted py-3">No matching rows.</td></tr>';
             updateOosSel();
         }
 
