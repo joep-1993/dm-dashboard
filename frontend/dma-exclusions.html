@@ -28,6 +28,10 @@
         .badge-partial { background-color: #e17055 !important; }
         .badge-failed { background-color: #636e72 !important; }
         #savedTable th, #savedTable td { text-align: center; vertical-align: middle; }
+        /* table-layout:fixed clips column widths but not cell content — keep the
+           Headline badge / PLP link / Shop name from spilling past their cell. */
+        #oosTable tbody td { overflow: hidden; }
+        #oosTable tbody td .badge { max-width: 100%; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
     </style>
 </head>
 <body>
@@ -196,14 +200,14 @@
                                 <colgroup>
                                     <col style="width:34px">
                                     <col style="width:124px">
+                                    <col style="width:19%">
                                     <col style="width:17%">
-                                    <col style="width:16%">
-                                    <col style="width:18%">
+                                    <col style="width:58px">
                                     <col style="width:78px">
                                     <col style="width:80px">
                                     <col style="width:66px">
-                                    <col style="width:84px">
-                                    <col style="width:120px">
+                                    <col style="width:19%">
+                                    <col style="width:15%">
                                 </colgroup>
                                 <thead style="position:sticky; top:0;">
                                     <tr>
