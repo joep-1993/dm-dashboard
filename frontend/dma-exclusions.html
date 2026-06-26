@@ -7,7 +7,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
-        .run-card { border-left: 4px solid #5e4a90; }
         .result-table { font-size: 0.9rem; }
         .result-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.4px; }
         .result-table td { vertical-align: middle; }
@@ -20,6 +19,11 @@
         .action-append { color: #00867d; }
         .action-skip { color: #999; }
         #applyBtn:disabled { background-color: #6c757d; border-color: #6c757d; opacity: 1; }
+        /* inverted outline buttons: filled by default, outline on hover */
+        .btn-fill-primary { background-color: #CC5500; border: 1px solid #CC5500; color: #fff; }
+        .btn-fill-primary:hover { background-color: transparent; color: #CC5500; }
+        .btn-fill-purple { background-color: #5e4a90; border: 1px solid #5e4a90; color: #fff; }
+        .btn-fill-purple:hover { background-color: transparent; color: #5e4a90; }
         .badge-excluded { background-color: #d63031 !important; }
         .badge-enabled { background-color: #00b894 !important; }
         .badge-partial { background-color: #e17055 !important; }
@@ -96,7 +100,7 @@
             <div class="col-lg-11 mx-auto">
 
                 <!-- Input form -->
-                <div class="card run-card mb-4">
+                <div class="card mb-4">
                     <div class="card-header bg-white d-flex align-items-center gap-2">
                         <h5 class="mb-0">Exclude a product from DMA</h5>
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; flex: 0 0 auto;">
@@ -173,8 +177,8 @@
                     <div class="card-body">
                         <div id="oosSummary" class="text-muted mb-2">Click <strong>Scan OOS</strong> to pull the out-of-stock list and see which products are live in DMA.</div>
                         <div class="d-flex justify-content-end gap-2 mb-2">
-                            <button class="btn btn-sm btn-outline-primary" onclick="scanOos()">Scan OOS</button>
-                            <button class="btn btn-sm btn-outline-purple" onclick="reenableRecovered()" title="Re-enable OOS exclusions whose product is back in stock">↻ Re-enable recovered</button>
+                            <button class="btn btn-sm btn-fill-primary" onclick="scanOos()">Scan OOS</button>
+                            <button class="btn btn-sm btn-fill-purple" onclick="reenableRecovered()" title="Re-enable OOS exclusions whose product is back in stock">↻ Re-enable recovered</button>
                         </div>
                         <div id="oosWarn" class="alert alert-warning py-2 small" style="display:none;">
                             ⚠️ These products still showed conversions in the last 30 days — many remain buyable via other in-stock shops. Excluding an EAN removes it for <em>all</em> shops in DMA. Review the <strong>Conv</strong> column and prefer the high-spend / zero-conversion rows.
@@ -207,7 +211,7 @@
                     <div class="card-header bg-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Saved exclusions</h5>
                         <div class="d-flex gap-2">
-                            <button class="btn btn-sm btn-outline-purple" onclick="exportExcel()">Export Excel</button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="exportExcel()">Export Excel</button>
                             <button class="btn btn-sm btn-outline-purple" onclick="loadList()">↻ Refresh</button>
                         </div>
                     </div>
