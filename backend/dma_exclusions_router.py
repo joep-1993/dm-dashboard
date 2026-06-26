@@ -16,6 +16,7 @@ from backend.dma_exclusions_service import (
     apply as svc_apply,
     enable as svc_enable,
     list_exclusions as svc_list,
+    exclusion_targets as svc_exclusion_targets,
     oos_scan as svc_oos_scan,
     oos_exclude as svc_oos_exclude,
     oos_recovered as svc_oos_recovered,
@@ -100,6 +101,18 @@ async def list_endpoint():
         return {"exclusions": await _run(svc_list)}
     except Exception as e:
         logger.exception("list failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/exclusion/{record_id}/targets")
+async def exclusion_targets_endpoint(record_id: int):
+    """The campaigns/ad-groups a saved exclusion was added to as a negative."""
+    try:
+        return {"targets": await _run(svc_exclusion_targets, record_id)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("exclusion targets failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 

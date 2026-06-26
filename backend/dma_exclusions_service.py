@@ -102,10 +102,20 @@ def _norm_ean(ean: str) -> str:
     return e.zfill(13) if 0 < len(e) < 13 else e
 
 
+BESLIST_BASE = "https://www.beslist.nl"
+
+
+def _plp_url(plp: Optional[str]) -> Optional[str]:
+    """ES stores plpUrl as a relative path (/p/...); make it absolute."""
+    if not plp:
+        return None
+    return plp if plp.startswith("http") else BESLIST_BASE + plp
+
+
 def headline_offer(ean: str) -> Dict[str, Any]:
     """Resolve the headline (bestOffer) for the product carrying this EAN.
 
-    Returns {status, headline_ean, headline_shop, headline_stock} where status:
+    Returns {status, headline_ean, headline_shop, headline_stock, plp_url} where status:
       match       — the OOS EAN *is* the headline offer's EAN (safe to exclude)
       differs     — the headline is a different EAN/shop (do NOT exclude)
       no_headline — product found but no bestOffer (can't confirm)
@@ -113,7 +123,7 @@ def headline_offer(ean: str) -> Dict[str, Any]:
       error       — ES lookup failed (transient; don't fail-closed on it)
     """
     n = _norm_ean(ean)
-    q = {"query": {"term": {"eans": n}}, "size": 10, "_source": ["shops"]}
+    q = {"query": {"term": {"eans": n}}, "size": 10, "_source": ["shops", "plpUrl"]}
     try:
         r = _es_session.post(f"{ES_URL}/{ES_INDEX}/_search", json=q, timeout=20)
         r.raise_for_status()
@@ -121,33 +131,38 @@ def headline_offer(ean: str) -> Dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         logger.warning("ES headline lookup failed for %s: %s", ean, e)
         return {"status": "error", "headline_ean": None,
-                "headline_shop": None, "headline_stock": None}
+                "headline_shop": None, "headline_stock": None, "plp_url": None}
 
     if not hits:
         return {"status": "not_found", "headline_ean": None,
-                "headline_shop": None, "headline_stock": None}
+                "headline_shop": None, "headline_stock": None, "plp_url": None}
 
-    # An EAN can resolve to several productidv3 docs; collect every bestOffer.
+    # An EAN can resolve to several productidv3 docs; collect every bestOffer
+    # together with the PLP url of the doc it came from.
     headlines = []
     for h in hits:
-        for shop in h.get("_source", {}).get("shops", []) or []:
+        src = h.get("_source", {})
+        plp = src.get("plpUrl")
+        for shop in src.get("shops", []) or []:
             for off in shop.get("offers", []) or []:
                 if off.get("bestOffer"):
-                    headlines.append((off, shop))
+                    headlines.append((off, shop, plp))
 
     if not headlines:
         return {"status": "no_headline", "headline_ean": None,
-                "headline_shop": None, "headline_stock": None}
+                "headline_shop": None, "headline_stock": None,
+                "plp_url": _plp_url(hits[0].get("_source", {}).get("plpUrl"))}
 
     # Prefer a headline whose EAN equals the OOS EAN — that's a confirmed match.
-    match = next(((o, s) for (o, s) in headlines
+    match = next(((o, s, p) for (o, s, p) in headlines
                   if o.get("ean") and _norm_ean(o["ean"]) == n), None)
-    off, shop = match or headlines[0]
+    off, shop, plp = match or headlines[0]
     return {
         "status": "match" if match else "differs",
         "headline_ean": off.get("ean"),
         "headline_shop": shop.get("name"),
         "headline_stock": off.get("stock"),
+        "plp_url": _plp_url(plp),
     }
 
 
@@ -932,6 +947,22 @@ def list_exclusions() -> List[dict]:
         return_db_connection(conn)
 
 
+def exclusion_targets(record_id: int) -> List[dict]:
+    """The campaigns/ad-groups a saved exclusion added the negative to."""
+    _ensure_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT item_id, targets FROM dma_exclusions WHERE id = %s",
+                        (record_id,))
+            row = cur.fetchone()
+        if not row:
+            raise ValueError(f"exclusion {record_id} not found")
+        return row.get("targets") or []
+    finally:
+        return_db_connection(conn)
+
+
 # ---------------------------------------------------------------------------
 # OOS (out-of-stock) integration
 #
@@ -1040,6 +1071,7 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
         c["headline_shop"] = info.get("headline_shop")
         c["headline_stock"] = info.get("headline_stock")
         c["headline_match"] = info.get("status") == "match"
+        c["plp_url"] = info.get("plp_url")
 
     candidates.sort(key=lambda c: c["cost_eur"], reverse=True)
 

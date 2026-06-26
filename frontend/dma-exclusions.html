@@ -55,13 +55,6 @@
                     </div>
                 </div>
                 <div class="nav-dropdown">
-                    <button class="nav-dropdown-toggle">Indexation</button>
-                    <div class="nav-dropdown-menu">
-                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
-                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
-                    </div>
-                </div>
-                <div class="nav-dropdown">
                     <button class="nav-dropdown-toggle nav-dropdown-active">Google Ads</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
@@ -79,6 +72,8 @@
                     <button class="nav-dropdown-toggle">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
                         <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
@@ -190,30 +185,40 @@
                             <button class="btn btn-sm btn-outline-primary" onclick="reenableRecovered()" title="Re-enable OOS exclusions whose product is back in stock">Re-enable recovered</button>
                             <button class="btn btn-sm btn-fill-primary" onclick="scanOos()">Scan OOS</button>
                         </div>
-                        <div id="oosWarn" class="alert alert-warning py-2 small" style="display:none;">
-                            ⚠️ These products still showed conversions in the last 30 days — many remain buyable via other in-stock shops. Excluding an EAN removes it for <em>all</em> shops in DMA. Review the <strong>Conv</strong> column and prefer the high-spend / zero-conversion rows.
-                        </div>
                         <div id="oosControls" class="d-flex gap-2 align-items-center mb-2 flex-wrap" style="display:none !important;">
                             <input id="oosFilter" class="form-control form-control-sm" style="width:220px;" placeholder="filter EAN / category…" oninput="renderOos()">
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideExcluded" onchange="renderOos()"><label class="form-check-label small" for="oosHideExcluded">hide already-excluded</label></div>
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosZeroConv" onchange="renderOos()"><label class="form-check-label small" for="oosZeroConv">only 0-conversion</label></div>
-                            <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideKept" onchange="renderOos()"><label class="form-check-label small" for="oosHideKept">hide non-headline (kept)</label></div>
-                            <span class="ms-auto"></span>
-                            <span id="oosSelCount" class="small text-muted">0 selected</span>
-                            <button id="oosExcludeBtn" class="btn btn-sm btn-primary" onclick="excludeSelectedOos()" disabled>Exclude selected</button>
+                            <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideKept" onchange="renderOos()"><label class="form-check-label small" for="oosHideKept">hide non-headline</label></div>
                         </div>
                         <div class="table-responsive" style="max-height:460px; overflow-y:auto;">
-                            <table id="oosTable" class="table table-sm align-middle mb-0" style="display:none;">
+                            <table id="oosTable" class="table table-sm align-middle mb-0" style="display:none; table-layout:fixed; width:100%;">
+                                <colgroup>
+                                    <col style="width:34px">
+                                    <col style="width:124px">
+                                    <col style="width:11%">
+                                    <col style="width:12%">
+                                    <col style="width:72px">
+                                    <col style="width:72px">
+                                    <col style="width:80px">
+                                    <col style="width:62px">
+                                    <col style="width:16%">
+                                    <col>
+                                </colgroup>
                                 <thead style="position:sticky; top:0;">
                                     <tr>
                                         <th><input type="checkbox" id="oosSelectAll" onclick="toggleAllOos(this.checked)"></th>
-                                        <th>EAN</th><th>Category</th><th>Campaigns</th>
+                                        <th>EAN</th><th>Category</th><th>Shop</th><th>Campaigns</th>
                                         <th>Clicks 30d</th><th>Spend 30d</th><th>Conv 30d</th>
-                                        <th>Headline</th>
+                                        <th>Headline</th><th>PLP</th>
                                     </tr>
                                 </thead>
                                 <tbody id="oosBody"></tbody>
                             </table>
+                        </div>
+                        <div id="oosActions" class="d-flex justify-content-end align-items-center gap-2 mt-2" style="display:none !important;">
+                            <span id="oosSelCount" class="small text-muted">0 selected</span>
+                            <button id="oosExcludeBtn" class="btn btn-sm btn-primary" onclick="excludeSelectedOos()" disabled>Exclude selected</button>
                         </div>
                     </div>
                 </div>
@@ -344,15 +349,56 @@
             } finally { busy(false); }
         }
 
-        async function enableExclusion(id, item) {
+        async function enableExclusion(ev, id, item) {
+            ev.stopPropagation();  // don't toggle the row-detail
             if (!confirm(`Re-enable ${item}? This removes the negative and prunes the tree back in Google Ads.`)) return;
+            const btn = ev.currentTarget;
+            const orig = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Re-enabling…';
             try {
                 const res = await fetch(`${API}/enable/${id}`, { method: "POST" });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || res.status);
                 if (data.errors && data.errors.length) { console.error(data.errors); alert(`Reverted with ${data.errors.length} error(s). See console.`); }
-                loadList();
-            } catch (e) { alert("Enable failed: " + e.message); }
+                loadList();  // re-renders the row, replacing the button
+            } catch (e) { alert("Enable failed: " + e.message); btn.disabled = false; btn.innerHTML = orig; }
+        }
+
+        async function toggleExclDetail(id) {
+            const existing = document.getElementById(`excl-detail-${id}`);
+            if (existing) { existing.remove(); return; }
+            const row = document.getElementById(`excl-row-${id}`);
+            if (!row) return;
+            row.insertAdjacentHTML("afterend",
+                `<tr id="excl-detail-${id}"><td colspan="9" class="bg-light py-2"><span class="spinner-border spinner-border-sm"></span> loading campaigns…</td></tr>`);
+            const cell = document.querySelector(`#excl-detail-${id} td`);
+            try {
+                const res = await fetch(`${API}/exclusion/${id}/targets`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || res.status);
+                const targets = data.targets || [];
+                if (!targets.length) { cell.innerHTML = '<div class="px-3 py-1 small text-muted" style="text-align:left;">No campaigns recorded (nothing was applied).</div>'; return; }
+                const sorted = [...targets].sort((a, b) =>
+                    (a.campaign_name || "").localeCompare(b.campaign_name || "") ||
+                    (a.ad_group_name || "").localeCompare(b.ad_group_name || ""));
+                const campaignCount = new Set(targets.map(t => t.campaign_name)).size;
+                const body = sorted.map(t => `
+                    <tr>
+                        <td class="mono" style="text-align:left; padding:8px 18px;">${esc(t.campaign_name) || "—"}</td>
+                        <td style="text-align:left; padding:8px 18px;">${esc(t.ad_group_name) || "—"}</td>
+                    </tr>`).join("");
+                cell.innerHTML = `<div class="px-3 py-3" style="text-align:center;">
+                    <div class="small text-muted mb-2">Added as a negative in <strong>${targets.length}</strong> ad group(s) across <strong>${campaignCount}</strong> campaign(s):</div>
+                    <table class="table table-bordered bg-white mb-0 small" style="width:80%; min-width:520px; margin:0 auto;">
+                        <thead><tr>
+                            <th style="text-align:left; padding:8px 18px;">Campaign</th>
+                            <th style="text-align:left; padding:8px 18px;">Ad group</th>
+                        </tr></thead>
+                        <tbody>${body}</tbody>
+                    </table>
+                </div>`;
+            } catch (e) { cell.innerHTML = `<span class="text-danger small px-2">Failed to load campaigns: ${esc(e.message)}</span>`; }
         }
 
         function statusBadge(s) {
@@ -365,17 +411,17 @@
                 const res = await fetch(`${API}/list`);
                 const data = await res.json();
                 const rows = (data.exclusions || []).map(x => `
-                    <tr>
+                    <tr id="excl-row-${x.id}" style="cursor:pointer;" onclick="toggleExclDetail(${x.id})" title="Click to see the campaigns this was added to">
                         <td class="mono">${esc(x.item_id)}</td>
                         <td>${esc(x.market)}</td>
-                        <td>${x.source === "oos" ? '<span class="badge bg-warning text-dark">oos</span>' : '<span class="badge bg-secondary">manual</span>'}</td>
+                        <td>${x.source === "oos" ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e8730c; color:#e8730c;">OOS</span>' : '<span class="badge bg-secondary">manual</span>'}</td>
                         <td>${esc(x.category) || "—"}</td>
                         <td>${esc(x.shop) || "—"}</td>
                         <td>${x.target_count}</td>
                         <td>${statusBadge(x.status)}</td>
                         <td class="small text-muted">${x.applied_at ? esc(x.applied_at).replace("T", " ").slice(0, 16) : "—"}</td>
                         <td>${x.status === "excluded" || x.status === "partial"
-                            ? `<button class="btn btn-sm btn-outline-success" onclick="enableExclusion(${x.id}, '${esc(x.item_id)}')">Enable</button>`
+                            ? `<button class="btn btn-sm btn-outline-success" onclick="enableExclusion(event, ${x.id}, '${esc(x.item_id)}')">Enable</button>`
                             : ""}</td>
                     </tr>`).join("");
                 document.getElementById("listBody").innerHTML = rows ||
@@ -398,7 +444,7 @@
             return oosData.candidates.filter(c => {
                 if (hideEx && c.already_excluded) return false;
                 if (zeroOnly && c.conversions > 0) return false;
-                if (hideKept && c.headline_status === "differs") return false;
+                if (hideKept && !c.headline_match) return false;  // hide everything not confirmed OOS-headline
                 if (f && !(c.ean.toLowerCase().includes(f) || (c.category || "").toLowerCase().includes(f))) return false;
                 return true;
             });
@@ -458,15 +504,19 @@
                     <td><input type="checkbox" ${checked} ${dis} onclick="toggleOos('${esc(c.item_id)}', this.checked)"></td>
                     <td class="mono">${esc(c.ean)}${c.already_excluded ? ' <span class="badge badge-excluded">excluded</span>' : ''}</td>
                     <td>${esc(c.category) || "—"}</td>
+                    <td class="text-truncate" title="${esc(c.headline_shop) || ""}">${esc(c.headline_shop) || "—"}</td>
                     <td>${camps}${warn}</td>
                     <td>${c.clicks.toLocaleString()}</td>
                     <td>€${c.cost_eur.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                     <td class="${convCls}">${c.conversions}</td>
                     <td>${headlineBadge(c)}</td>
+                    <td>${c.plp_url
+                        ? `<a href="${esc(c.plp_url)}" target="_blank" rel="noopener" class="text-truncate d-inline-block" style="max-width:100%; vertical-align:bottom;" title="${esc(c.plp_url)}">${esc(c.plp_url.replace(/^https?:\/\/www\.beslist\.nl/, ""))}</a>`
+                        : '<span class="text-muted">—</span>'}</td>
                 </tr>`;
             }).join("");
             document.getElementById("oosBody").innerHTML = rows ||
-                '<tr><td colspan="8" class="text-center text-muted py-3">No matching rows.</td></tr>';
+                '<tr><td colspan="10" class="text-center text-muted py-3">No matching rows.</td></tr>';
             updateOosSel();
         }
 
@@ -488,8 +538,8 @@
                     `<span class="small"><span class="text-danger fw-semibold">${h.match.toLocaleString()}</span> OOS-headline (excludable) · ` +
                     `<span class="text-success fw-semibold">${h.differs.toLocaleString()}</span> non-headline (kept) · ` +
                     `<span class="text-secondary">${h.unknown.toLocaleString()}</span> unconfirmed</span>`;
-                document.getElementById("oosWarn").style.display = t.conversions > 0 ? "block" : "none";
                 document.getElementById("oosControls").style.removeProperty("display");
+                document.getElementById("oosActions").style.removeProperty("display");
                 document.getElementById("oosTable").style.display = "table";
                 renderOos();
             } catch (e) {
