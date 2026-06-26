@@ -28,6 +28,9 @@
         .badge-partial { background-color: #e17055 !important; }
         .badge-failed { background-color: #636e72 !important; }
         #savedTable th, #savedTable td { text-align: center; vertical-align: middle; }
+        /* Right-align Category (4) and Shop (5) */
+        #savedTable th:nth-child(4), #savedTable td:nth-child(4),
+        #savedTable th:nth-child(5), #savedTable td:nth-child(5) { text-align: right; }
         /* table-layout:fixed clips column widths but not cell content — keep the
            Headline badge / PLP link / Shop name from spilling past their cell. */
         #oosTable tbody td { overflow: hidden; }
