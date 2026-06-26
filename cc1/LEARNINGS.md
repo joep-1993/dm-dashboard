@@ -1,6 +1,13 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools DMA Exclusions — clickable Saved-exclusion rows reveal campaign/ad-group targets (2026-06-26)
+
+The Saved-exclusions table only showed a `target_count`; users couldn't see *which* campaigns/ad groups a product was excluded in. Made each saved row clickable to expand a detail table.
+- **Backend:** new `exclusion_targets(record_id)` (reads the stored `targets` JSONB straight from `dma_exclusions`; each element already carries `campaign_name` / `ad_group_name` / `kind` because `apply()` stores `applied` = the per-target `rev = dict(target)` reversal metadata). Exposed as `GET /api/dma-exclusions/exclusion/{record_id}/targets` (404 on ValueError). No Google Ads call — it's all persisted, so it works even for `enabled`/reverted rows (the targets stay in the row).
+- **Frontend:** `toggleExclDetail(id)` injects/removes a detail `<tr>` (lazy-fetch + spinner), rendering a small centered table of Campaign + Ad group. The Enable button gained `event.stopPropagation()` + a spinner so clicking it doesn't toggle the detail. **Gotcha:** the `#savedTable td` rule centers all cells → set `text-align:left` *inline* on the detail cells to beat the ID selector (and `margin:0 auto` to center the whole table block).
+- **Same session, OOS table:** added **Shop** + **PLP** columns. `plp_url` resolved from the ES product doc in `headline_offer` (`_source` now includes `plpUrl`; relative `/p/...` → absolute via `_plp_url`). OOS source tag in Saved exclusions is an orange-outlined **bold** badge (`bg-transparent`, `border/color #e8730c`); reverted the experimental full-width `.oos-card-wide` breakout (it made the card wider than the others). **Persistence confirmed:** exclusions live in PostgreSQL `dma_exclusions`, so they survive refreshes/restarts — a post-crash "empty Saved list" was just being off-VPN (`No route to host` to `10.1.32.9` + Redshift). Memory: `dma_exclusions_tool.md`.
+
 ## dm-tools DMA Exclusions — OOS headline-offer check (don't exclude non-headline variants) (2026-06-26)
 
 The OOS "waste" scan flagged EANs for exclusion purely on *being on the monitor's OOS list + serving in DMA*. Problem: apparel/footwear products carry **one EAN per size variant**, and the DMA gold ad rides the product's **headline (`bestOffer`) offer** while the PLP aggregates every shop/variant. The monitor flags individual variant EANs, so an OOS *non-headline* variant whose headline is a different **in-stock** variant/shop was being excluded — killing a live, buyable ad.
