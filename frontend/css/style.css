@@ -332,15 +332,10 @@ body {
     color: white;
 }
 
-/* In-progress Process URLs button: neutral grey outline, not brand orange */
+/* Disabled Process URLs / Process All URLs buttons: identical neutral grey outline */
+#processBtn:disabled,
 #processBtn.btn-outline-secondary,
-#processBtn.btn-outline-secondary:hover {
-    color: #6c757d;
-    border-color: #6c757d;
-    background-color: transparent;
-}
-
-/* Disabled Process All URLs button: neutral grey outline, not Bootstrap blue */
+#processBtn.btn-outline-secondary:hover,
 #processAllBtn:disabled {
     color: #6c757d;
     border-color: #6c757d;
