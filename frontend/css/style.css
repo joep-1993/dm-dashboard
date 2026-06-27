@@ -332,6 +332,14 @@ body {
     color: white;
 }
 
+/* In-progress Process URLs button: neutral grey outline, not brand orange */
+#processBtn.btn-outline-secondary,
+#processBtn.btn-outline-secondary:hover {
+    color: #6c757d;
+    border-color: #6c757d;
+    background-color: transparent;
+}
+
 /* Warning buttons - also orange */
 .btn-warning {
     background-color: var(--color-button);

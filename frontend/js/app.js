@@ -378,6 +378,8 @@ async function processAllUrls() {
 
     // Disable buttons and show stop button
     processBtn.disabled = true;
+    processBtn.classList.remove('btn-info');
+    processBtn.classList.add('btn-outline-secondary');
     processAllBtn.disabled = true;
     stopBtn.classList.remove('d-none');
     progressContainer.classList.remove('d-none');
@@ -505,6 +507,8 @@ async function processAllUrls() {
     } finally {
         processingActive = false;
         processBtn.disabled = false;
+        processBtn.classList.remove('btn-outline-secondary');
+        processBtn.classList.add('btn-info');
         processAllBtn.disabled = false;
         stopBtn.classList.add('d-none');
     }
