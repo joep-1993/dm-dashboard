@@ -340,6 +340,14 @@ body {
     background-color: transparent;
 }
 
+/* Disabled Process All URLs button: neutral grey outline, not Bootstrap blue */
+#processAllBtn:disabled {
+    color: #6c757d;
+    border-color: #6c757d;
+    background-color: transparent;
+    opacity: 1;
+}
+
 /* Warning buttons - also orange */
 .btn-warning {
     background-color: var(--color-button);
