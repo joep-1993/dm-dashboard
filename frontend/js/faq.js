@@ -272,6 +272,8 @@ async function processFaqUrls() {
 
     btn.disabled = true;
     btn.textContent = 'Processing...';
+    btn.classList.remove('btn-info');
+    btn.classList.add('btn-outline-secondary');
     resultDiv.innerHTML = `<div class="alert alert-warning">Processing ${batchSize} URL(s) with ${parallelWorkers} parallel worker(s), generating ${numFaqs} FAQs each...</div>`;
 
     try {
@@ -322,6 +324,8 @@ async function processFaqUrls() {
     } finally {
         btn.disabled = false;
         btn.textContent = 'Process URLs';
+        btn.classList.remove('btn-outline-secondary');
+        btn.classList.add('btn-info');
     }
 }
 
