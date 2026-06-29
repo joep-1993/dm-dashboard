@@ -38,7 +38,7 @@ import logging
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -74,6 +74,10 @@ _CATEGORY_RE = re.compile(r"^PLA/(?P<cat>.+)_(?P<tier>[abc])$")
 OOS_BASE = "https://googlemc-suc.bva-apps.aks.private.beslist.nl/api/v1/overrides"
 # DMA aggregated feed prefixes every offer id with this; suffix is the GTIN/EAN.
 DMA_ITEM_PREFIX = "nl-nl-gold-"
+# A 'match' whose Google crawl-OOS verdict hasn't been refreshed in this many
+# days is cautioned (kept selectable, but not auto-picked by Select-all): the
+# crawl may be stale and the offer already back in stock. Tune as needed.
+CRAWL_STALE_DAYS = 3
 
 # ---------------------------------------------------------------------------
 # Headline-offer check (Elasticsearch product index)
@@ -1147,9 +1151,21 @@ def _oos_offer(market: str, ean: str) -> List[dict]:
              "ean_offer_count": p.get("ean_offer_count"),
              "shop_name": _clean_shop(p.get("shop_name")),
              "beslist_served": p.get("beslist_served"),
-             "feed_stock": p.get("feed_stock")}
+             "feed_stock": p.get("feed_stock"),
+             "google_last_update": p.get("google_last_update")}
             for p in rows
             if _norm_ean(p.get("ean")) == n]
+
+
+def _crawl_age_days(iso: Optional[str]) -> Optional[float]:
+    """Days since Google last refreshed the crawl-OOS verdict (None if unknown)."""
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
 
 
 def _oos_offers(market: str, eans: List[str]) -> Dict[str, List[dict]]:
@@ -1322,6 +1338,13 @@ def _enrich_oos_headline(market: str, candidates: List[dict]) -> None:
             c["headline_stock"] = info.get("headline_stock")
         c["headline_status"] = status
         c["headline_match"] = status == "match"
+        # Flag a match that rests on a stale Google crawl with no contradicting
+        # stock signal (the irreducible residual) so the UI can caution + skip it
+        # from Select-all while keeping it individually excludable.
+        age = _crawl_age_days((win or {}).get("google_last_update"))
+        c["crawl_age_days"] = age
+        c["stale_crawl"] = bool(status == "match" and age is not None
+                                and age >= CRAWL_STALE_DAYS)
         c["plp_url"] = info.get("plp_url")
 
 
@@ -1415,6 +1438,7 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
         "live_in_dma": len(candidates),
         "headline_counts": {
             "match": sum(1 for c in candidates if c["headline_status"] == "match"),
+            "caution": sum(1 for c in candidates if c.get("stale_crawl")),
             "differs": sum(1 for c in candidates if c["headline_status"] == "differs"),
             "stale": sum(1 for c in candidates if c["headline_status"] == "stale"),
             "unknown": sum(1 for c in candidates
