@@ -1,6 +1,10 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools DMA Exclusions — OOS exclude progress bar lingered: cleanup was in a finally after a slow await (2026-06-29)
+
+`excludeSelectedOos` (frontend/dma-exclusions.html) tore down the progress bar / reset the button in a `finally`, but that `finally` wrapped the whole flow including the post-exclude `await scanOos()` — which became slow. So "Excluding X…" + the bar stayed up through the entire re-scan. **Gotcha: don't put per-op UI teardown in a finally that also awaits a slow follow-up op.** Fix (565fbe8): the `finally` now wraps ONLY the exclude loop, so the progress UI clears the instant the run ends, before the refresh. Also replaced the blocking `alert()` with a dismissible **done-banner** (`#oosDoneBanner`, `showOosDone`/`hideOosDone`): green on success / amber on errors / blue on cancel, summarising processed·excluded·skipped·errors. Cleared at the start of a new exclude run and on a manual Scan OOS (`onclick="hideOosDone(); scanOos()"`), but persists through the internal post-exclude `scanOos()` refresh (so don't add `hideOosDone()` inside `scanOos` itself).
+
 ## dm-tools DMA Exclusions — OOS scan performance: GA parallelization, caching, limit-as-matches, stale-crawl caution (2026-06-29)
 
 Follow-up to the same-day `is_cheapest_offer` switch. User reported "Scan OOS loads for a very long time"; measured the pipeline per phase (clean, uncontended): `_oos_eans` 0.3s; **GA `shopping_performance_view` batch (200 EANs) ~25s** even uncontended; OOS-monitor enrichment ~0.24s/EAN (pool 16); ES ~1.7s/373 (negligible). A full serial scan was ~20 min in GA alone. Fixes shipped:
