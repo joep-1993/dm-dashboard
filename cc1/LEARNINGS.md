@@ -1,6 +1,12 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## SEO Stats — WoW deltas added to the "Visits & revenue per day" chart tooltip (2026-06-29)
+
+The per-day chart's custom `externalTooltip` (in `frontend/seo-stats.html`) now appends a week-over-week delta pill to each metric row, reusing the table's `wowText()`/`wowColor()` helpers (same red→white→green fade, "n/a" when the prior week is missing) plus a "WoW vs. same day last week" sub-caption under the date. No backend change — the deltas come from the per-day `${k}_wow` fields already computed client-side in `initTable()` from `wowBase` (the 7 days before the range, fetched separately) + the in-range rows, comparing each day to the same weekday 7 days earlier.
+
+**Gotcha that drove a fix:** `initTable()` only computed `_wow` for `TABLE_COLS` (`seo_visits, dma_visits, gsaas_visits, seo_omzet` — 4 keys), but the chart can plot all 6 `ORDER` metrics. The two revenue series the table omits (`dma_omzet`, `gsaas_omzet`) had no `_wow`, so their tooltip would always read "n/a". Fix: loop the `_wow` computation over `ORDER` instead of `TABLE_COLS`; the table still renders only `TABLE_COLS`, so it's visually unchanged. `perfRows = lastData.daily.slice()` shares object refs with `lastData.daily`, so the `_wow` keys attached in `initTable()` are visible to the chart tooltip even though `renderChart()` runs one line earlier (the tooltip only fires on hover, well after `initTable()`). Shipped 2e83b68.
+
 ## dm-tools DMA Exclusions — OOS headline verdict moved from ES `bestOffer` to the monitor's `is_cheapest_offer` (+ stale-crawl guards) (2026-06-29)
 
 The OOS crawl-override monitor now exposes the headline signal directly, so the ES `bestOffer` cross-check (added 2026-06-26) was replaced as the *decision* source. Per the OOS owner, **`is_cheapest_offer:true` == the served headline offer, independent of stock** (an OOS offer can still be the served headline — that's the waste we catch). Mapping in `_oos_headline_status`: cheapest row (True, or sole offer = null + `ean_offer_count==1`) → `match`; explicit False → `differs`; contradicted → `stale`; else None → ES fallback. ES (`headline_offer`) kept ONLY for `plp_url` (`/oos-products` returns `beslist_plp_url` null) and as last-resort fallback. The displayed `headline_shop`/`headline_ean` are also OOS-sourced now (on a match show the cheapest OOS offer's shop; ES disagreed — e.g. showed in-stock Nedgame.nl while the OOS cheapest was Dreamland.nl).
