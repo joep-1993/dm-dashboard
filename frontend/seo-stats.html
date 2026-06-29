@@ -97,11 +97,14 @@
             font-size: 12.5px; opacity: 0; transition: opacity .12s ease;
             transform: translate(-50%, calc(-100% - 14px));
         }
-        .chart-tooltip .ct-title { font-weight: 700; font-size: 13px; margin-bottom: 9px; }
+        .chart-tooltip .ct-title { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+        .chart-tooltip .ct-sub { font-size: 10px; font-weight: 600; color: #9a9aa6; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 8px; }
         .chart-tooltip .ct-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
         .chart-tooltip .ct-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
         .chart-tooltip .ct-label { flex: 1 1 auto; color: #6a6a78; }
         .chart-tooltip .ct-val { font-weight: 600; margin-left: 16px; white-space: nowrap; }
+        .chart-tooltip .ct-wow { margin-left: 10px; font-weight: 700; font-size: 11px; padding: 1px 7px; border-radius: 20px; color: #2d2a3a; min-width: 52px; text-align: center; white-space: nowrap; }
+        .chart-tooltip .ct-wow.flat { background: #e3e3ea; color: #9a9aa6; }
         .info-note { background: #fff8ed; border: 1px solid #f0d9b5; color: #8a5a00; border-radius: 8px; padding: 10px 14px; font-size: 0.88rem; }
         /* Channel delta cards */
         .delta-card {
@@ -450,11 +453,18 @@
             const title = (tooltip.title && tooltip.title[0]) || '';
             const rows = (tooltip.dataPoints || []).map(dp => {
                 const key = keys[dp.datasetIndex];
+                const row = (lastData && lastData.daily[dp.dataIndex]) || {};
+                const wow = row[`${key}_wow`];
+                const wowHtml = (wow === null || wow === undefined)
+                    ? `<span class="ct-wow flat">n/a</span>`
+                    : `<span class="ct-wow" style="background:${wowColor(wow)}">${wowText(wow)}</span>`;
                 return `<div class="ct-row"><span class="ct-dot" style="background:${dp.dataset.borderColor}"></span>` +
                        `<span class="ct-label">${dp.dataset.label}</span>` +
-                       `<span class="ct-val">${fmt(key, dp.parsed.y)}</span></div>`;
+                       `<span class="ct-val">${fmt(key, dp.parsed.y)}</span>` +
+                       wowHtml + `</div>`;
             }).join('');
-            el.innerHTML = `<div class="ct-title">${title}</div>${rows}`;
+            el.innerHTML = `<div class="ct-title">${title}</div>` +
+                           `<div class="ct-sub">WoW vs. same day last week</div>${rows}`;
             el.style.opacity = 1;
             el.style.left = chart.canvas.offsetLeft + tooltip.caretX + 'px';
             el.style.top = chart.canvas.offsetTop + tooltip.caretY + 'px';
@@ -666,7 +676,9 @@
                 (prev === undefined || prev === null || prev === 0) ? null : ((cur - prev) / prev) * 100;
             perfRows.forEach(r => {
                 const prevRow = visBy[shiftDays(r.date, -7)];
-                TABLE_COLS.forEach(k => {
+                // Compute for every metric (not just TABLE_COLS) so the chart
+                // tooltip can show WoW for the revenue series the table omits.
+                ORDER.forEach(k => {
                     const prev = prevRow ? (Number(prevRow[k]) || 0) : undefined;
                     r[`${k}_wow`] = wowPct(Number(r[k]) || 0, prev);
                 });
