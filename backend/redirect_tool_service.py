@@ -995,9 +995,15 @@ def submit_rows(processed: list[dict], task: dict | None = None,
         # Override the preflight skip for replaceable rows when the
         # caller opted in. The original skip_reason is preserved as
         # `replaced_skip_reason` so the audit trail shows why we acted.
+        # Gate on existing_target, NOT existing_id: the small-batch lookup uses
+        # the singular /api/redirect?searchterm= endpoint, which returns the
+        # rule's url+statusCode but NOT its id, so existing_id is None for
+        # normal submissions (only the >2000-row /api/redirects index path
+        # carries an id). The replace itself deletes by fromUrl (input_old),
+        # never by id, so the id was never actually needed here.
         is_replaceable = (
             replace_existing
-            and item.get("existing_id")
+            and item.get("existing_target")
             and item.get("skip_reason") == SKIP_REASON_EXISTING
         )
         if item.get("skip_reason") and not is_replaceable:
@@ -1220,7 +1226,7 @@ def start_submit(processed: list[dict], label: str, input_method: str,
             return True
         return bool(
             replace_existing
-            and p.get("existing_id")
+            and p.get("existing_target")
             and p.get("skip_reason") == SKIP_REASON_EXISTING
         )
     preflight = {
