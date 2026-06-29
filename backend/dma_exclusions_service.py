@@ -79,6 +79,29 @@ DMA_ITEM_PREFIX = "nl-nl-gold-"
 # crawl may be stale and the offer already back in stock. Tune as needed.
 CRAWL_STALE_DAYS = 3
 
+# --- scan caches -----------------------------------------------------------
+# Re-scans are frequent and the underlying data is slow-moving (the monitor
+# refreshes ~every 2h; GA metrics are a rolling 30-day window), so cache the
+# expensive per-EAN GA / OOS / ES lookups in-process with a short TTL — a warm
+# re-scan within the window skips the network work entirely. Per-process; clears
+# on restart. Only successful fetches are cached (never transient failures).
+_SCAN_CACHE_TTL = 1800  # seconds (30 min)
+_CACHE_MISS = object()
+_GA_CACHE: Dict[str, tuple] = {}     # ean -> (agg|None, ts)   None = queried, not live in DMA
+_OOS_CACHE: Dict[tuple, tuple] = {}  # (market, norm_ean) -> (rows, ts)
+_ES_CACHE: Dict[str, tuple] = {}     # norm_ean -> (headline_offer dict, ts)
+
+
+def _cache_get(store: dict, key):
+    ent = store.get(key)
+    if ent is not None and (time.time() - ent[1]) < _SCAN_CACHE_TTL:
+        return ent[0]
+    return _CACHE_MISS
+
+
+def _cache_put(store: dict, key, value) -> None:
+    store[key] = (value, time.time())
+
 # ---------------------------------------------------------------------------
 # Headline-offer check (Elasticsearch product index)
 # ---------------------------------------------------------------------------
@@ -126,6 +149,19 @@ def _norm_shop(name: Optional[str]) -> Optional[str]:
 
 
 def headline_offer(ean: str) -> Dict[str, Any]:
+    """Cached wrapper around _headline_offer_uncached (TTL; skips transient ES
+    errors so a blip isn't cached for the whole window)."""
+    n = _norm_ean(ean)
+    hit = _cache_get(_ES_CACHE, n)
+    if hit is not _CACHE_MISS:
+        return hit
+    res = _headline_offer_uncached(ean)
+    if res.get("status") != "error":
+        _cache_put(_ES_CACHE, n, res)
+    return res
+
+
+def _headline_offer_uncached(ean: str) -> Dict[str, Any]:
     """Resolve the headline (bestOffer) for the product carrying this EAN.
 
     Returns {status, headline_ean, headline_shop, headline_stock, plp_url,
@@ -1147,12 +1183,17 @@ def _oos_offer(market: str, ean: str) -> List[dict]:
     computes is_cheapest_offer. Returns [] when the EAN isn't flagged at all.
     """
     country = (market or "NL").upper()
+    nrm = _norm_ean(ean)
+    hit = _cache_get(_OOS_CACHE, (country, nrm))
+    if hit is not _CACHE_MISS:
+        return hit
     qs = urllib.parse.urlencode({"country": country, "state": "active",
                                  "q": ean, "page_size": 50, "latest_batch": "true"})
     url = f"{OOS_BASE}?{qs}"
     # The monitor occasionally hangs/times out (esp. under our own concurrency).
     # Retry with a tight per-attempt timeout so a stall fails fast and re-tries
-    # rather than dropping the row to a stale ES fallback. Give up -> [] (no signal).
+    # rather than dropping the row to a stale ES fallback. Give up -> [] (no signal,
+    # NOT cached — a transient failure must not stick for the whole TTL).
     data = None
     for n in range(1, _OOS_LOOKUP_ATTEMPTS + 1):
         try:
@@ -1166,15 +1207,16 @@ def _oos_offer(market: str, ean: str) -> List[dict]:
                 return []
             time.sleep(0.4 * n)
     rows = data if isinstance(data, list) else (data.get("products") or [])
-    n = _norm_ean(ean)
-    return [{"is_cheapest_offer": p.get("is_cheapest_offer"),
-             "ean_offer_count": p.get("ean_offer_count"),
-             "shop_name": _clean_shop(p.get("shop_name")),
-             "beslist_served": p.get("beslist_served"),
-             "feed_stock": p.get("feed_stock"),
-             "google_last_update": p.get("google_last_update")}
-            for p in rows
-            if _norm_ean(p.get("ean")) == n]
+    out = [{"is_cheapest_offer": p.get("is_cheapest_offer"),
+            "ean_offer_count": p.get("ean_offer_count"),
+            "shop_name": _clean_shop(p.get("shop_name")),
+            "beslist_served": p.get("beslist_served"),
+            "feed_stock": p.get("feed_stock"),
+            "google_last_update": p.get("google_last_update")}
+           for p in rows
+           if _norm_ean(p.get("ean")) == nrm]
+    _cache_put(_OOS_CACHE, (country, nrm), out)
+    return out
 
 
 def _crawl_age_days(iso: Optional[str]) -> Optional[float]:
@@ -1305,10 +1347,23 @@ _OOS_BATCH = 200  # EANs per GA query (product_item_id IN (...))
 
 
 def _ga_batch_agg(ga, customer_id: str, batch: List[str]) -> Dict[str, dict]:
-    """Run one GA serving-metrics query for a batch of EANs and return
-    item_id -> aggregated 30d metrics + campaign/cl0/shop sets. Each EAN lives in
-    exactly one batch, so the per-batch agg fully aggregates it."""
-    ids = [DMA_ITEM_PREFIX + e for e in batch]
+    """Return item_id -> aggregated 30d metrics for the live-in-DMA EANs in this
+    batch. Each EAN lives in exactly one batch, so the agg fully aggregates it.
+    Cached per-EAN (TTL): only the uncached EANs are actually queried, and EANs
+    queried-but-not-live are cached as None so a re-scan skips them too."""
+    fresh: Dict[str, dict] = {}
+    to_query = []
+    for e in batch:
+        hit = _cache_get(_GA_CACHE, e)
+        if hit is _CACHE_MISS:
+            to_query.append(e)
+        elif hit is not None:
+            fresh[DMA_ITEM_PREFIX + e] = hit   # cached live
+        # hit is None -> cached not-live, skip
+    if not to_query:
+        return fresh
+
+    ids = [DMA_ITEM_PREFIX + e for e in to_query]
     q = (
         "SELECT segments.product_item_id, campaign.name, "
         "segments.product_custom_attribute0, segments.product_custom_attribute3, "
@@ -1337,7 +1392,11 @@ def _ga_batch_agg(ga, customer_id: str, batch: List[str]) -> Dict[str, dict]:
             a["cl0s"].add(cl0)
         if row.segments.product_custom_attribute3:
             a["shops"].add(row.segments.product_custom_attribute3)
-    return agg
+    # cache results for every queried EAN (live -> agg, not-live -> None)
+    for e in to_query:
+        _cache_put(_GA_CACHE, e, agg.get(DMA_ITEM_PREFIX + e))
+    fresh.update(agg)
+    return fresh
 
 
 def _build_oos_candidate(market: str, iid: str, a: dict, excluded: set) -> dict:
@@ -1432,27 +1491,38 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     excluded = {r["item_id"] for r in list_exclusions()
                 if r["market"] == market.upper() and r["status"] in ("excluded", "partial")}
 
-    # Run the slow GA serving queries in concurrent waves (the dominant cost),
-    # headline-checking each wave's live-in-DMA EANs, and stop once `limit`
-    # confirmed headline offers (status=match) are collected. A wave overshoots
-    # the limit by at most ~one wave's matches (trimmed below).
+    # Run the slow GA serving queries in concurrent waves and headline-check each
+    # wave's live EANs, stopping once `limit` confirmed headline offers are
+    # collected (trimmed below — a wave overshoots by at most ~one wave's matches).
+    # Pipeline: prefetch wave N+1's GA while wave N is being enriched. GA and the
+    # OOS monitor are different servers, so the ~24s GA fetch hides behind the
+    # ~90s enrichment on a cold scan. At most one wave's GA is in flight at a time.
     batches = [eans[i:i + _OOS_BATCH] for i in range(0, len(eans), _OOS_BATCH)]
+    waves = [batches[w:w + _GA_BATCH_CONCURRENCY]
+             for w in range(0, len(batches), _GA_BATCH_CONCURRENCY)]
     candidates: List[dict] = []
     matches = 0
     scanned = 0
-    for w in range(0, len(batches), _GA_BATCH_CONCURRENCY):
-        wave = batches[w:w + _GA_BATCH_CONCURRENCY]
-        scanned += sum(len(b) for b in wave)
-        with ThreadPoolExecutor(max_workers=len(wave)) as ex:
-            aggs = list(ex.map(lambda b: _ga_batch_agg(ga, customer_id, b), wave))
-        wave_cands = [_build_oos_candidate(market, iid, a, excluded)
-                      for agg in aggs for iid, a in agg.items()]
-        if wave_cands:
-            _enrich_oos_headline(market, wave_cands)
-            candidates.extend(wave_cands)
-            matches += sum(1 for c in wave_cands if c["headline_match"])
-        if limit and matches >= limit:
-            break
+    ga_pool = ThreadPoolExecutor(max_workers=_GA_BATCH_CONCURRENCY)
+    try:
+        def submit_wave(wv):  # submit a wave's batches as GA futures (non-blocking)
+            return [ga_pool.submit(_ga_batch_agg, ga, customer_id, b) for b in wv]
+
+        pending = submit_wave(waves[0]) if waves else []
+        for wi, wv in enumerate(waves):
+            aggs = [f.result() for f in pending]            # gather this wave's GA
+            pending = submit_wave(waves[wi + 1]) if wi + 1 < len(waves) else []
+            scanned += sum(len(b) for b in wv)
+            wave_cands = [_build_oos_candidate(market, iid, a, excluded)
+                          for agg in aggs for iid, a in agg.items()]
+            if wave_cands:
+                _enrich_oos_headline(market, wave_cands)    # OOS monitor; next GA wave overlaps
+                candidates.extend(wave_cands)
+                matches += sum(1 for c in wave_cands if c["headline_match"])
+            if limit and matches >= limit:
+                break
+    finally:
+        ga_pool.shutdown(wait=False, cancel_futures=True)   # drop any outstanding prefetch
 
     # Trim surplus matches beyond `limit` (the last batch may overshoot); keep all
     # non-match rows found so far for context.
