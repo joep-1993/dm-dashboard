@@ -198,7 +198,7 @@
                         <div id="oosSummary" class="text-muted mb-2">Click <strong>Scan OOS</strong> to pull the out-of-stock list and see which products are live in DMA.</div>
                         <div class="d-flex justify-content-end gap-2 mb-2">
                             <button class="btn btn-sm btn-outline-primary" onclick="reenableRecovered()" title="Re-enable OOS exclusions whose product is back in stock">Re-enable recovered</button>
-                            <button class="btn btn-sm btn-fill-primary" onclick="scanOos()">Scan OOS</button>
+                            <button class="btn btn-sm btn-fill-primary" onclick="hideOosDone(); scanOos()">Scan OOS</button>
                         </div>
                         <div id="oosControls" class="d-flex gap-2 align-items-center mb-2 flex-wrap" style="display:none !important;">
                             <input id="oosFilter" class="form-control form-control-sm" style="width:220px;" placeholder="filter EAN / category…" oninput="renderOos()">
@@ -249,6 +249,10 @@
                     <div class="progress" style="height:25px;">
                         <div id="oosProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%; background-color:#00b894;"></div>
                     </div>
+                </div>
+                <div id="oosDoneBanner" class="alert alert-dismissible fade show mb-3" style="display:none;" role="alert">
+                    <span id="oosDoneText"></span>
+                    <button type="button" class="btn-close" onclick="hideOosDone()" aria-label="Close"></button>
                 </div>
                 <div id="savedEnableProgress" class="mb-3" style="display:none;">
                     <div class="d-flex justify-content-between align-items-center mb-1">
@@ -794,6 +798,7 @@
             oosCancel = false;
             const cancelBtn = document.getElementById("oosCancelBtn");
             cancelBtn.disabled = false; cancelBtn.textContent = "Cancel";
+            hideOosDone();
             prog.style.display = "block";
             const results = [];
             try {
@@ -812,17 +817,44 @@
                     }
                     setProgress(i + 1);
                 }
-                const failed = results.filter(r => r.error || (r.errors && r.errors.length));
-                const skipped = results.filter(r => r.skipped);
-                alert((oosCancel ? `Cancelled — processed ${results.length} of ${ids.length} product(s)` : `Processed ${results.length} product(s)`)
-                    + (skipped.length ? `, ${skipped.length} skipped (non-headline, kept live)` : "")
-                    + (failed.length ? `, ${failed.length} with errors (see console).` : "."));
-                if (failed.length || skipped.length) console.log({ failed, skipped });
-                oosSelected.clear();
-                await scanOos(); loadList();
-            } catch (e) {
-                alert("Exclude failed: " + e.message);
-            } finally { prog.style.display = "none"; btn.innerHTML = "Exclude selected"; updateOosSel(); }
+            } finally {
+                // The run is over: tear the progress UI down immediately, BEFORE the
+                // (slow) refresh below — otherwise "Excluding…" + the bar linger
+                // through the post-exclude re-scan.
+                prog.style.display = "none";
+                btn.disabled = false; btn.innerHTML = "Exclude selected";
+                cancelBtn.disabled = true;
+            }
+            // Done-banner summary (replaces the old blocking alert).
+            const failed = results.filter(r => r.error || (r.errors && r.errors.length));
+            const skipped = results.filter(r => r.skipped);
+            const excluded = results.length - failed.length - skipped.length;
+            showOosDone({ ids: ids.length, processed: results.length, excluded,
+                          skipped: skipped.length, failed: failed.length, cancelled: oosCancel });
+            if (failed.length || skipped.length) console.log({ failed, skipped });
+            oosSelected.clear(); updateOosSel();
+            // Refresh candidate + saved lists so excluded rows reflect their new state.
+            // The progress UI is already gone and the banner stays put during this.
+            try { await scanOos(); loadList(); } catch (e) { console.warn("post-exclude refresh failed:", e); }
+        }
+
+        function hideOosDone() {
+            const b = document.getElementById("oosDoneBanner");
+            if (b) b.style.display = "none";
+        }
+
+        function showOosDone(s) {
+            const cls = s.failed ? "alert-warning" : s.cancelled ? "alert-info" : "alert-success";
+            const b = document.getElementById("oosDoneBanner");
+            b.className = `alert alert-dismissible fade show mb-3 ${cls}`;
+            const head = s.cancelled
+                ? `Cancelled — processed ${s.processed} of ${s.ids} selected`
+                : `Done — processed ${s.processed} product(s)`;
+            const parts = [`<strong>${head}.</strong>`, `<strong>${s.excluded}</strong> excluded`];
+            if (s.skipped) parts.push(`${s.skipped} skipped (non-headline / stale — kept live)`);
+            if (s.failed) parts.push(`<strong>${s.failed}</strong> with errors (see console)`);
+            document.getElementById("oosDoneText").innerHTML = parts.join(" · ");
+            b.style.display = "block";
         }
 
         async function reenableRecovered() {
