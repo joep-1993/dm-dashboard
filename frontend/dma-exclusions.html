@@ -683,7 +683,7 @@
                 case "match":
                     return '<span class="badge bg-danger-subtle text-danger border border-danger-subtle" title="OOS EAN is the advertised headline offer">OOS headline</span>';
                 case "stale":
-                    return `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Cheapest/headline offer, but the crawl OOS flag is contradicted (shop feed reports stock, or the offer is no longer served on beslist) — kept">stale OOS${c.headline_shop ? " @ " + esc(c.headline_shop) : ""}</span>`;
+                    return `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Cheapest/headline offer, but the crawl OOS flag is contradicted (offer in stock per beslist's index or the shop feed, or no longer served on beslist) — kept">stale OOS${c.headline_shop ? " @ " + esc(c.headline_shop) : ""}</span>`;
                 case "differs":
                     return c.headline_ean
                         ? `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Headline offer is a different, in-stock EAN — keep">live: ${esc(c.headline_ean)}${c.headline_shop ? " @ " + esc(c.headline_shop) : ""}</span>`

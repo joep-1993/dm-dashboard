@@ -113,15 +113,25 @@ def _plp_url(plp: Optional[str]) -> Optional[str]:
     return plp if plp.startswith("http") else BESLIST_BASE + plp
 
 
+def _norm_shop(name: Optional[str]) -> Optional[str]:
+    """Match shop names across sources: drop a trailing |COUNTRY, lowercase."""
+    if not name:
+        return None
+    return name.split("|", 1)[0].strip().lower()
+
+
 def headline_offer(ean: str) -> Dict[str, Any]:
     """Resolve the headline (bestOffer) for the product carrying this EAN.
 
-    Returns {status, headline_ean, headline_shop, headline_stock, plp_url} where status:
+    Returns {status, headline_ean, headline_shop, headline_stock, plp_url,
+    shop_stock} where status:
       match       — the OOS EAN *is* the headline offer's EAN (safe to exclude)
       differs     — the headline is a different EAN/shop (do NOT exclude)
       no_headline — product found but no bestOffer (can't confirm)
       not_found   — no product in ES for this EAN (likely gone)
       error       — ES lookup failed (transient; don't fail-closed on it)
+    shop_stock maps _norm_shop(name) -> max in-stock count seen for that shop in
+    beslist's index (used to veto a stale crawl-OOS match — see _es_shop_instock).
     """
     n = _norm_ean(ean)
     q = {"query": {"term": {"eans": n}}, "size": 10, "_source": ["shops", "plpUrl"]}
@@ -131,27 +141,32 @@ def headline_offer(ean: str) -> Dict[str, Any]:
         hits = r.json().get("hits", {}).get("hits", [])
     except Exception as e:  # noqa: BLE001
         logger.warning("ES headline lookup failed for %s: %s", ean, e)
-        return {"status": "error", "headline_ean": None,
-                "headline_shop": None, "headline_stock": None, "plp_url": None}
+        return {"status": "error", "headline_ean": None, "headline_shop": None,
+                "headline_stock": None, "plp_url": None, "shop_stock": {}}
 
     if not hits:
-        return {"status": "not_found", "headline_ean": None,
-                "headline_shop": None, "headline_stock": None, "plp_url": None}
+        return {"status": "not_found", "headline_ean": None, "headline_shop": None,
+                "headline_stock": None, "plp_url": None, "shop_stock": {}}
 
     # An EAN can resolve to several productidv3 docs; collect every bestOffer
-    # together with the PLP url of the doc it came from.
+    # together with the PLP url of the doc it came from, and tally per-shop stock.
     headlines = []
+    shop_stock: Dict[str, int] = {}
     for h in hits:
         src = h.get("_source", {})
         plp = src.get("plpUrl")
         for shop in src.get("shops", []) or []:
+            nm = _norm_shop(shop.get("name"))
             for off in shop.get("offers", []) or []:
                 if off.get("bestOffer"):
                     headlines.append((off, shop, plp))
+                st = off.get("stock")
+                if nm and isinstance(st, (int, float)):
+                    shop_stock[nm] = max(shop_stock.get(nm, 0), int(st))
 
     if not headlines:
-        return {"status": "no_headline", "headline_ean": None,
-                "headline_shop": None, "headline_stock": None,
+        return {"status": "no_headline", "headline_ean": None, "headline_shop": None,
+                "headline_stock": None, "shop_stock": shop_stock,
                 "plp_url": _plp_url(hits[0].get("_source", {}).get("plpUrl"))}
 
     # Prefer a headline whose EAN equals the OOS EAN — that's a confirmed match.
@@ -164,6 +179,7 @@ def headline_offer(ean: str) -> Dict[str, Any]:
         "headline_shop": shop.get("name"),
         "headline_stock": off.get("stock"),
         "plp_url": _plp_url(plp),
+        "shop_stock": shop_stock,
     }
 
 
@@ -1189,6 +1205,28 @@ def _oos_headline_status(offers: List[dict]) -> Optional[str]:
     return None
 
 
+def _es_shop_instock(info: dict, shop_name: Optional[str]) -> bool:
+    """beslist's product index shows this shop's offer in stock (>0). Used to
+    veto a 'match' whose Google crawl-OOS flag is contradicted by live stock
+    on the *same* shop (a different in-stock shop must NOT veto — the monitor
+    says the flagged shop is the served headline)."""
+    if not shop_name:
+        return False
+    st = (info.get("shop_stock") or {}).get(_norm_shop(shop_name))
+    return isinstance(st, int) and st > 0
+
+
+def _oos_verdict(offers: List[dict], info: dict) -> tuple:
+    """Final headline verdict: the monitor's OOS signal, with an ES same-shop
+    live-stock veto layered on top. Returns (status, win_row) where status is
+    match | stale | differs | None (None => caller falls back to ES status)."""
+    st = _oos_headline_status(offers)
+    win = _oos_cheapest_row(offers)
+    if st == "match" and _es_shop_instock(info, (win or {}).get("shop_name")):
+        st = "stale"  # beslist index shows the flagged shop in stock
+    return st, win
+
+
 def _campaign_family(name: str) -> str:
     if name == BESTSELLERS_CAMPAIGN:
         return "bestsellers"
@@ -1290,14 +1328,14 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     for c in candidates:
         info = hl.get(c["ean"], {})
         oos_rows = oos_offers.get(_norm_ean(c["ean"]), [])
-        oos_st = _oos_headline_status(oos_rows)
+        oos_st, win = _oos_verdict(oos_rows, info)
         if oos_st:
             # Verdict AND the shown headline come from the monitor, not stale ES.
             # match/stale = cheapest OOS offer itself (named); differs = cheaper
             # headline is a different offer we can't name from the OOS rows (leave
             # shop/ean blank). 'stale' = cheapest but the crawl OOS flag is
-            # contradicted (feed in stock / no longer served) — kept, not excluded.
-            win = _oos_cheapest_row(oos_rows)
+            # contradicted (feed/beslist shows it in stock, or no longer served) —
+            # kept, not excluded.
             status = oos_st
             c["headline_source"] = "oos"
             c["headline_shop"] = win["shop_name"] if win else None
@@ -1356,17 +1394,19 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     results = []
     for iid in item_ids:
         ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
-        oos_st = _oos_headline_status(oos_offers.get(_norm_ean(ean), []))
         info = headlines.get(ean) or headline_offer(ean)
+        oos_st, _ = _oos_verdict(oos_offers.get(_norm_ean(ean), []), info)
         status = oos_st or info["status"]
         if status in ("differs", "stale"):
-            reason = {
-                "stale": "OOS API: crawl OOS flag contradicted (shop feed in stock "
-                         "or offer no longer served on beslist); not excluded",
-                "differs": "OOS API: a cheaper (in-stock) offer is the headline for "
-                           "this EAN; not excluded",
-            }.get(oos_st) or (f"headline offer is a different EAN "
-                              f"({info['headline_ean']} @ {info['headline_shop']}); not excluded")
+            if status == "stale":
+                reason = ("OOS flag contradicted (offer in stock per beslist/feed, "
+                          "or no longer served on beslist); not excluded")
+            elif oos_st == "differs":
+                reason = ("OOS API: a cheaper (in-stock) offer is the headline for "
+                          "this EAN; not excluded")
+            else:
+                reason = (f"headline offer is a different EAN "
+                          f"({info['headline_ean']} @ {info['headline_shop']}); not excluded")
             results.append({
                 "item_id": iid, "skipped": True, "headline_status": status,
                 "headline_source": "oos" if oos_st else "es", "reason": reason,
