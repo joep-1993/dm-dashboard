@@ -1093,42 +1093,45 @@ def _oos_eans(market: str, state: str = "active") -> List[str]:
     return list(data.get("eans") or [])
 
 
-def _oos_offers(market: str, status: str = "open") -> Dict[str, List[dict]]:
-    """Offer-level OOS rows from the monitor (/oos-products), grouped by EAN.
-
-    Unlike /oos-eans (a flat EAN list), this endpoint returns one row per OOS
-    offer with the headline signal the monitor now computes for us:
-      - is_cheapest_offer  is this the cheapest (== headline) offer for the EAN?
+def _oos_offer(market: str, ean: str) -> List[dict]:
+    """OOS offer rows for one EAN, carrying the monitor's headline signal:
+      - is_cheapest_offer  is this the cheapest (== served headline) offer?
       - ean_offer_count    how many comparable offers exist for the EAN
 
-    We group by EAN because a DMA exclusion is GTIN-level: one EAN can carry
-    several OOS offers across shops, and we exclude the whole `nl-nl-gold-<ean>`.
-    Keyed by _norm_ean so lookups line up with the (zero-padded) DMA EANs.
+    Fetched via the /oos-products `q=` search rather than the plain list: the
+    unfiltered list is a priority worklist hard-capped at 2000 rows (the active
+    OOS set is ~10k), so paging it silently drops most EANs. The `q=` search is
+    uncapped and also forces the monitor to compute is_cheapest_offer for the
+    row. Returns [] when the EAN isn't on the open OOS list. One EAN can have
+    several OOS offers across shops (a DMA exclusion is GTIN-level).
     """
     country = (market or "NL").upper()
-    out: Dict[str, List[dict]] = {}
-    page, page_size = 1, 1000
-    while True:
-        qs = urllib.parse.urlencode({"country": country, "status": status,
-                                     "page": page, "page_size": page_size,
-                                     "format": "json"})
-        url = f"{OOS_BASE}/oos-products?{qs}"
-        with urllib.request.urlopen(url, timeout=30) as resp:
+    qs = urllib.parse.urlencode({"country": country, "status": "open",
+                                 "q": ean, "page_size": 50, "format": "json"})
+    url = f"{OOS_BASE}/oos-products?{qs}"
+    try:
+        with urllib.request.urlopen(url, timeout=20) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        products = data.get("products") or []
-        for p in products:
-            ean = p.get("ean")
-            if not ean:
-                continue
-            out.setdefault(_norm_ean(ean), []).append({
-                "is_cheapest_offer": p.get("is_cheapest_offer"),
-                "ean_offer_count": p.get("ean_offer_count"),
-                "shop_name": p.get("shop_name"),
-            })
-        if len(products) < page_size:
-            break
-        page += 1
-    return out
+    except Exception as e:  # noqa: BLE001 - transient; treat as "no signal"
+        logger.warning("OOS offer lookup failed for %s: %s", ean, e)
+        return []
+    n = _norm_ean(ean)
+    return [{"is_cheapest_offer": p.get("is_cheapest_offer"),
+             "ean_offer_count": p.get("ean_offer_count"),
+             "shop_name": p.get("shop_name")}
+            for p in (data.get("products") or [])
+            if _norm_ean(p.get("ean")) == n]
+
+
+def _oos_offers(market: str, eans: List[str]) -> Dict[str, List[dict]]:
+    """_oos_offer() for many EANs concurrently, keyed by _norm_ean so lookups
+    line up with the (zero-padded) DMA EANs."""
+    eans = list(dict.fromkeys(eans))  # dedupe, order-preserving
+    if not eans:
+        return {}
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        rows = ex.map(lambda e: _oos_offer(market, e), eans)
+    return {_norm_ean(e): r for e, r in zip(eans, rows)}
 
 
 def _oos_headline_status(offers: List[dict]) -> Optional[str]:
@@ -1247,8 +1250,9 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     # be kept. The monitor now computes this for us (is_cheapest_offer), so that
     # is the authority; ES stays for the PLP url and as a fallback for EANs the
     # monitor doesn't return an offer-level row for.
-    oos_offers = _oos_offers(market, "open")
-    hl = _headline_offers([c["ean"] for c in candidates])
+    cand_eans = [c["ean"] for c in candidates]
+    oos_offers = _oos_offers(market, cand_eans)
+    hl = _headline_offers(cand_eans)
     for c in candidates:
         info = hl.get(c["ean"], {})
         oos_st = _oos_headline_status(oos_offers.get(_norm_ean(c["ean"]), []))
@@ -1293,11 +1297,11 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     'differs' case is blocked; not_found / no_headline / unknown are allowed
     through (a gone product is a valid exclusion, and we don't fail-closed).
     """
-    # Pull the offer-level cheapest signal once, and batch the ES fallback across
-    # a worker pool (one warm session) instead of a serial ~20s POST per EAN.
-    oos_offers = _oos_offers(market, "open")
+    # Pull the offer-level cheapest signal and the ES fallback, each batched
+    # across a worker pool instead of a serial ~20s lookup per EAN.
     eans = [iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
             for iid in item_ids]
+    oos_offers = _oos_offers(market, eans)
     headlines = _headline_offers(eans)
     results = []
     for iid in item_ids:
