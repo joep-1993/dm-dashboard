@@ -46,6 +46,7 @@ from requests.adapters import HTTPAdapter
 
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from google.api_core import exceptions as google_exceptions
 
 from backend.database import get_db_connection, return_db_connection
 
@@ -1237,103 +1238,69 @@ def _campaign_family(name: str) -> str:
     return "other"
 
 
-def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
-    """Return OOS EANs that are live in DMA, with 30d clicks/spend/conversions
-    and the campaigns they serve in. READ-ONLY.
+# Transient Google Ads server-side errors — safe to retry the read-only query.
+_GA_TRANSIENT = (
+    google_exceptions.InternalServerError,
+    google_exceptions.ServiceUnavailable,
+    google_exceptions.DeadlineExceeded,
+    google_exceptions.TooManyRequests,
+)
 
-    `limit` caps how many *live-in-DMA* candidates to collect (handy for a quick
-    scan): OOS EANs are scanned in batches and we stop once `limit` of them turn
-    out to be live in DMA. Most OOS EANs aren't live in DMA, so the prefix
-    scanned is typically several × the limit. None scans the whole active list.
-    """
-    eans = _oos_eans(market, "active")
-    oos_total = len(eans)
-    client = _get_client()
-    customer_id = _customer_id(market)
-    ga = client.get_service("GoogleAdsService")
 
-    # item_id -> aggregated metrics + campaign set. Keep scanning batches until
-    # we've found `limit` distinct live-in-DMA EANs, then stop (see break below).
-    agg: Dict[str, dict] = {}
-    scanned = 0
-    for i in range(0, len(eans), 200):
-        batch = eans[i:i + 200]
-        scanned += len(batch)
-        ids = [DMA_ITEM_PREFIX + e for e in batch]
-        q = (
-            "SELECT segments.product_item_id, campaign.name, "
-            "segments.product_custom_attribute0, segments.product_custom_attribute3, "
-            "metrics.clicks, metrics.impressions, metrics.cost_micros, "
-            "metrics.conversions, metrics.conversions_value "
-            "FROM shopping_performance_view "
-            f"WHERE segments.product_item_id IN ({','.join(repr(x) for x in ids)}) "
-            "AND segments.date DURING LAST_30_DAYS"
-        )
-        for row in ga.search(customer_id=customer_id, query=q):
-            iid = row.segments.product_item_id
-            m = row.metrics
-            a = agg.setdefault(iid, {"clicks": 0, "impr": 0, "cost": 0,
-                                     "conv": 0.0, "conv_value": 0.0, "campaigns": set(),
-                                     "cl0s": set(), "shops": set()})
-            a["clicks"] += m.clicks
-            a["impr"] += m.impressions
-            a["cost"] += m.cost_micros
-            a["conv"] += m.conversions
-            a["conv_value"] += m.conversions_value
-            if row.campaign.name:
-                a["campaigns"].add(row.campaign.name)
-            cl0 = row.segments.product_custom_attribute0
-            if cl0 and cl0.isdigit():
-                a["cl0s"].add(cl0)
-            if row.segments.product_custom_attribute3:
-                a["shops"].add(row.segments.product_custom_attribute3)
-        if limit and len(agg) >= limit:
-            break
+def _ga_search_rows(ga, customer_id: str, query: str, attempts: int = 3) -> list:
+    """Run a GAQL search and materialise its rows, retrying transient 5xx/timeout
+    errors with backoff — a single batch 500 shouldn't crash a whole multi-batch
+    OOS scan (which now walks many batches to reach the headline-match limit)."""
+    for n in range(1, attempts + 1):
+        try:
+            return list(ga.search(customer_id=customer_id, query=query))
+        except _GA_TRANSIENT as e:
+            if n == attempts:
+                raise
+            logger.warning("GA search transient error (attempt %d/%d): %s", n, attempts, e)
+            time.sleep(1.5 * n)
 
-    # Cap to exactly `limit` live-in-DMA candidates (the last batch may overshoot),
-    # before the per-candidate headline checks so we don't pay for the overflow.
-    if limit and len(agg) > limit:
-        agg = dict(list(agg.items())[:limit])
 
-    # which item ids are already excluded (so the UI can disable them)
-    excluded = {r["item_id"] for r in list_exclusions()
-                if r["market"] == market.upper() and r["status"] in ("excluded", "partial")}
+def _build_oos_candidate(market: str, iid: str, a: dict, excluded: set) -> dict:
+    """Build one live-in-DMA candidate from its aggregated serving metrics, and
+    pre-cache the resolution so a follow-up exclude skips the ~6s lookup()."""
+    camps = sorted(a["campaigns"])
+    fams = {_campaign_family(c) for c in camps}
+    cat = _pick_category([m.group("cat") for c in camps if (m := _CATEGORY_RE.match(c))])
+    cl0 = min(a["cl0s"]) if a["cl0s"] else None      # deterministic (sorted), not row-order
+    shop = min(a["shops"]) if a["shops"] else None
+    _cache_resolution({
+        "item_id": iid, "market": market.upper(), "found": True,
+        "category": cat, "cl0": cl0, "shop": shop,
+        "serving_campaigns": camps, "note": None,
+    })
+    return {
+        "item_id": iid,
+        "ean": iid[len(DMA_ITEM_PREFIX):],
+        "category": cat,
+        "campaigns": camps,
+        "uncovered_campaigns": sorted(c for c in camps if _campaign_family(c) == "other"),
+        "fully_covered": "other" not in fams,
+        "clicks": int(a["clicks"]),
+        "impressions": int(a["impr"]),
+        "cost_eur": round(a["cost"] / 1e6, 2),
+        "conversions": round(a["conv"], 1),
+        "conv_value_eur": round(a["conv_value"], 2),
+        "already_excluded": iid in excluded,
+    }
 
-    candidates = []
-    for iid, a in agg.items():
-        camps = sorted(a["campaigns"])
-        fams = {_campaign_family(c) for c in camps}
-        cat = _pick_category([m.group("cat") for c in camps if (m := _CATEGORY_RE.match(c))])
-        cl0 = min(a["cl0s"]) if a["cl0s"] else None      # deterministic (sorted), not row-order
-        shop = min(a["shops"]) if a["shops"] else None
-        # Pre-cache the resolution so a follow-up exclude skips the ~6s per-EAN
-        # lookup() — this scan already paid for the (batched) serving query.
-        _cache_resolution({
-            "item_id": iid, "market": market.upper(), "found": True,
-            "category": cat, "cl0": cl0, "shop": shop,
-            "serving_campaigns": camps, "note": None,
-        })
-        candidates.append({
-            "item_id": iid,
-            "ean": iid[len(DMA_ITEM_PREFIX):],
-            "category": cat,
-            "campaigns": camps,
-            "uncovered_campaigns": sorted(c for c in camps if _campaign_family(c) == "other"),
-            "fully_covered": "other" not in fams,
-            "clicks": int(a["clicks"]),
-            "impressions": int(a["impr"]),
-            "cost_eur": round(a["cost"] / 1e6, 2),
-            "conversions": round(a["conv"], 1),
-            "conv_value_eur": round(a["conv_value"], 2),
-            "already_excluded": iid in excluded,
-        })
 
-    # Headline-offer check: the gold ad rides the product's headline (cheapest)
-    # offer. Only an OOS EAN that *is* that headline offer is a genuine
-    # exclusion; a flagged non-headline offer whose headline is still live must
-    # be kept. The monitor now computes this for us (is_cheapest_offer), so that
-    # is the authority; ES stays for the PLP url and as a fallback for EANs the
-    # monitor doesn't return an offer-level row for.
+def _enrich_oos_headline(market: str, candidates: List[dict]) -> None:
+    """Annotate each candidate in-place with the headline verdict. The gold ad
+    rides the product's headline (cheapest) offer; only an OOS EAN that IS that
+    headline is a genuine exclusion. The monitor's is_cheapest_offer is the
+    authority — match/stale shows the cheapest OOS offer itself (named), differs
+    leaves shop/ean blank (a cheaper offer we can't name from the OOS rows);
+    'stale' = cheapest but the crawl OOS flag is contradicted (feed/beslist in
+    stock, or no longer served) → kept. ES supplies the PLP url and a fallback
+    verdict for EANs with no monitor row."""
+    if not candidates:
+        return
     cand_eans = [c["ean"] for c in candidates]
     oos_offers = _oos_offers(market, cand_eans)
     hl = _headline_offers(cand_eans)                      # ES: PLP url (+ fallback verdict/shop)
@@ -1342,12 +1309,6 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
         oos_rows = oos_offers.get(_norm_ean(c["ean"]), [])
         oos_st, win = _oos_verdict(oos_rows, info)
         if oos_st:
-            # Verdict AND the shown headline come from the monitor, not stale ES.
-            # match/stale = cheapest OOS offer itself (named); differs = cheaper
-            # headline is a different offer we can't name from the OOS rows (leave
-            # shop/ean blank). 'stale' = cheapest but the crawl OOS flag is
-            # contradicted (feed/beslist shows it in stock, or no longer served) —
-            # kept, not excluded.
             status = oos_st
             c["headline_source"] = "oos"
             c["headline_shop"] = win["shop_name"] if win else None
@@ -1362,6 +1323,88 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
         c["headline_status"] = status
         c["headline_match"] = status == "match"
         c["plp_url"] = info.get("plp_url")
+
+
+def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
+    """Return OOS EANs that are live in DMA, with 30d clicks/spend/conversions,
+    the campaigns they serve in, and their headline verdict. READ-ONLY.
+
+    `limit` caps how many *headline-offer (match)* candidates to collect: OOS
+    EANs are scanned in batches and headline-checked per batch, stopping once
+    `limit` of them are confirmed headline offers (the excludable ones). The
+    differs/stale/unknown rows found along the way are kept for context. Most OOS
+    EANs aren't live in DMA, and only ~half of those are headline offers, so the
+    prefix scanned is typically many × the limit. None scans the whole list.
+    """
+    eans = _oos_eans(market, "active")
+    oos_total = len(eans)
+    client = _get_client()
+    customer_id = _customer_id(market)
+    ga = client.get_service("GoogleAdsService")
+
+    # which item ids are already excluded (so the UI can disable them)
+    excluded = {r["item_id"] for r in list_exclusions()
+                if r["market"] == market.upper() and r["status"] in ("excluded", "partial")}
+
+    # Scan batches, headline-checking each batch's live-in-DMA EANs as we go, and
+    # stop once `limit` confirmed headline offers (status=match) are collected.
+    candidates: List[dict] = []
+    matches = 0
+    scanned = 0
+    for i in range(0, len(eans), 200):
+        batch = eans[i:i + 200]
+        scanned += len(batch)
+        ids = [DMA_ITEM_PREFIX + e for e in batch]
+        q = (
+            "SELECT segments.product_item_id, campaign.name, "
+            "segments.product_custom_attribute0, segments.product_custom_attribute3, "
+            "metrics.clicks, metrics.impressions, metrics.cost_micros, "
+            "metrics.conversions, metrics.conversions_value "
+            "FROM shopping_performance_view "
+            f"WHERE segments.product_item_id IN ({','.join(repr(x) for x in ids)}) "
+            "AND segments.date DURING LAST_30_DAYS"
+        )
+        # Each EAN lives in exactly one batch, so per-batch agg fully aggregates it.
+        batch_agg: Dict[str, dict] = {}
+        for row in _ga_search_rows(ga, customer_id, q):
+            iid = row.segments.product_item_id
+            m = row.metrics
+            a = batch_agg.setdefault(iid, {"clicks": 0, "impr": 0, "cost": 0,
+                                           "conv": 0.0, "conv_value": 0.0, "campaigns": set(),
+                                           "cl0s": set(), "shops": set()})
+            a["clicks"] += m.clicks
+            a["impr"] += m.impressions
+            a["cost"] += m.cost_micros
+            a["conv"] += m.conversions
+            a["conv_value"] += m.conversions_value
+            if row.campaign.name:
+                a["campaigns"].add(row.campaign.name)
+            cl0 = row.segments.product_custom_attribute0
+            if cl0 and cl0.isdigit():
+                a["cl0s"].add(cl0)
+            if row.segments.product_custom_attribute3:
+                a["shops"].add(row.segments.product_custom_attribute3)
+        if not batch_agg:
+            continue
+        batch_cands = [_build_oos_candidate(market, iid, a, excluded)
+                       for iid, a in batch_agg.items()]
+        _enrich_oos_headline(market, batch_cands)
+        candidates.extend(batch_cands)
+        matches += sum(1 for c in batch_cands if c["headline_match"])
+        if limit and matches >= limit:
+            break
+
+    # Trim surplus matches beyond `limit` (the last batch may overshoot); keep all
+    # non-match rows found so far for context.
+    if limit and matches > limit:
+        kept, m = [], 0
+        for c in candidates:
+            if c["headline_match"]:
+                if m >= limit:
+                    continue
+                m += 1
+            kept.append(c)
+        candidates = kept
 
     candidates.sort(key=lambda c: c["cost_eur"], reverse=True)
 
