@@ -191,7 +191,7 @@
                                 <option value="NL">NL</option>
                                 <option value="BE">BE</option>
                             </select>
-                            <input id="oosLimit" type="number" min="1" class="form-control form-control-sm" style="width:130px;" placeholder="Limit" title="Cap the number of OOS EANs pulled from the monitor (blank = all)">
+                            <input id="oosLimit" type="number" min="1" class="form-control form-control-sm" style="width:130px;" placeholder="Limit" title="Cap the number of live-in-DMA candidates to collect — scans OOS EANs until this many are live in DMA (blank = scan all OOS EANs)">
                         </div>
                     </div>
                     <div class="card-body">
@@ -742,8 +742,10 @@
                 oosData = data; oosSelected.clear();
                 const t = data.totals;
                 const h = data.headline_counts || { match: 0, differs: 0, stale: 0, unknown: 0 };
+                const scannedNote = (data.scanned && data.scanned < data.oos_total)
+                    ? ` <span class="text-muted">(scanned ${data.scanned.toLocaleString()})</span>` : "";
                 document.getElementById("oosSummary").innerHTML =
-                    `<strong>${data.oos_total.toLocaleString()}</strong> OOS EANs · <strong>${data.live_in_dma.toLocaleString()}</strong> live in DMA · ` +
+                    `<strong>${data.oos_total.toLocaleString()}</strong> OOS EANs${scannedNote} · <strong>${data.live_in_dma.toLocaleString()}</strong> live in DMA · ` +
                     `last 30d in DMA: <strong>€${t.cost_eur.toLocaleString()}</strong> spend · ${t.clicks.toLocaleString()} clicks · ` +
                     `${t.conversions.toLocaleString()} conv (€${t.conv_value_eur.toLocaleString()})<br>` +
                     `<span class="small"><span class="text-danger fw-semibold">${h.match.toLocaleString()}</span> OOS-headline (excludable) · ` +

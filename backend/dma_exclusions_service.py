@@ -1241,20 +1241,25 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     """Return OOS EANs that are live in DMA, with 30d clicks/spend/conversions
     and the campaigns they serve in. READ-ONLY.
 
-    `limit` caps how many EANs are pulled from the monitor (handy for a quick
-    scan); None pulls the full list.
+    `limit` caps how many *live-in-DMA* candidates to collect (handy for a quick
+    scan): OOS EANs are scanned in batches and we stop once `limit` of them turn
+    out to be live in DMA. Most OOS EANs aren't live in DMA, so the prefix
+    scanned is typically several × the limit. None scans the whole active list.
     """
     eans = _oos_eans(market, "active")
-    if limit:
-        eans = eans[:limit]
+    oos_total = len(eans)
     client = _get_client()
     customer_id = _customer_id(market)
     ga = client.get_service("GoogleAdsService")
 
-    # item_id -> aggregated metrics + campaign set
+    # item_id -> aggregated metrics + campaign set. Keep scanning batches until
+    # we've found `limit` distinct live-in-DMA EANs, then stop (see break below).
     agg: Dict[str, dict] = {}
+    scanned = 0
     for i in range(0, len(eans), 200):
-        ids = [DMA_ITEM_PREFIX + e for e in eans[i:i + 200]]
+        batch = eans[i:i + 200]
+        scanned += len(batch)
+        ids = [DMA_ITEM_PREFIX + e for e in batch]
         q = (
             "SELECT segments.product_item_id, campaign.name, "
             "segments.product_custom_attribute0, segments.product_custom_attribute3, "
@@ -1282,6 +1287,13 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
                 a["cl0s"].add(cl0)
             if row.segments.product_custom_attribute3:
                 a["shops"].add(row.segments.product_custom_attribute3)
+        if limit and len(agg) >= limit:
+            break
+
+    # Cap to exactly `limit` live-in-DMA candidates (the last batch may overshoot),
+    # before the per-candidate headline checks so we don't pay for the overflow.
+    if limit and len(agg) > limit:
+        agg = dict(list(agg.items())[:limit])
 
     # which item ids are already excluded (so the UI can disable them)
     excluded = {r["item_id"] for r in list_exclusions()
@@ -1355,7 +1367,8 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
 
     return {
         "market": market.upper(),
-        "oos_total": len(eans),
+        "oos_total": oos_total,
+        "scanned": scanned,
         "live_in_dma": len(candidates),
         "headline_counts": {
             "match": sum(1 for c in candidates if c["headline_status"] == "match"),
