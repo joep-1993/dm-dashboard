@@ -205,6 +205,7 @@
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideExcluded" onchange="renderOos()"><label class="form-check-label small" for="oosHideExcluded">hide already-excluded</label></div>
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosZeroConv" onchange="renderOos()"><label class="form-check-label small" for="oosZeroConv">only 0-conversion</label></div>
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideKept" onchange="renderOos()"><label class="form-check-label small" for="oosHideKept">hide non-headline</label></div>
+                            <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideStale" onchange="renderOos()"><label class="form-check-label small" for="oosHideStale">hide stale crawl</label></div>
                         </div>
                         <div class="table-responsive" style="max-height:460px; overflow-y:auto;">
                             <table id="oosTable" class="table table-sm align-middle mb-0" style="display:none; table-layout:fixed; width:100%;">
@@ -652,10 +653,12 @@
             const hideEx = document.getElementById("oosHideExcluded").checked;
             const zeroOnly = document.getElementById("oosZeroConv").checked;
             const hideKept = document.getElementById("oosHideKept").checked;
+            const hideStale = document.getElementById("oosHideStale").checked;
             return oosData.candidates.filter(c => {
                 if (hideEx && c.already_excluded) return false;
                 if (zeroOnly && c.conversions > 0) return false;
                 if (hideKept && !c.headline_match) return false;  // hide everything not confirmed OOS-headline
+                if (hideStale && c.stale_crawl) return false;     // hide matches whose crawl-OOS verdict is too old
                 if (f && !(c.ean.toLowerCase().includes(f) || (c.category || "").toLowerCase().includes(f))) return false;
                 return true;
             });
@@ -683,9 +686,9 @@
                 case "match": {
                     const base = '<span class="badge bg-danger-subtle text-danger border border-danger-subtle" title="OOS EAN is the advertised headline offer">OOS headline</span>';
                     if (c.stale_crawl)
-                        return base + ` <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Google's crawl-OOS verdict is ${Math.round(c.crawl_age_days)}d old and nothing contradicts it — the offer may already be back in stock. Verify before excluding; not auto-selected.">⚠ crawl ${Math.round(c.crawl_age_days)}d</span>`;
+                        return base + ` <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Google's crawl-OOS verdict is ${Math.floor(c.crawl_age_days)}d old and nothing contradicts it — the offer may already be back in stock. Verify before excluding; not auto-selected.">⚠ crawl ${Math.floor(c.crawl_age_days)}d</span>`;
                     if (c.crawl_age_days != null)
-                        return base + ` <span class="text-muted small" title="Google's crawl-OOS verdict was refreshed ${Math.round(c.crawl_age_days)}d ago">crawl ${Math.round(c.crawl_age_days)}d</span>`;
+                        return base + ` <span class="text-muted small" title="Google's crawl-OOS verdict was refreshed ${Math.floor(c.crawl_age_days)}d ago">crawl ${Math.floor(c.crawl_age_days)}d</span>`;
                     return base;
                 }
                 case "stale":
