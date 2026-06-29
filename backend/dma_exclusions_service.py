@@ -1093,6 +1093,65 @@ def _oos_eans(market: str, state: str = "active") -> List[str]:
     return list(data.get("eans") or [])
 
 
+def _oos_offers(market: str, status: str = "open") -> Dict[str, List[dict]]:
+    """Offer-level OOS rows from the monitor (/oos-products), grouped by EAN.
+
+    Unlike /oos-eans (a flat EAN list), this endpoint returns one row per OOS
+    offer with the headline signal the monitor now computes for us:
+      - is_cheapest_offer  is this the cheapest (== headline) offer for the EAN?
+      - ean_offer_count    how many comparable offers exist for the EAN
+
+    We group by EAN because a DMA exclusion is GTIN-level: one EAN can carry
+    several OOS offers across shops, and we exclude the whole `nl-nl-gold-<ean>`.
+    Keyed by _norm_ean so lookups line up with the (zero-padded) DMA EANs.
+    """
+    country = (market or "NL").upper()
+    out: Dict[str, List[dict]] = {}
+    page, page_size = 1, 1000
+    while True:
+        qs = urllib.parse.urlencode({"country": country, "status": status,
+                                     "page": page, "page_size": page_size,
+                                     "format": "json"})
+        url = f"{OOS_BASE}/oos-products?{qs}"
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        products = data.get("products") or []
+        for p in products:
+            ean = p.get("ean")
+            if not ean:
+                continue
+            out.setdefault(_norm_ean(ean), []).append({
+                "is_cheapest_offer": p.get("is_cheapest_offer"),
+                "ean_offer_count": p.get("ean_offer_count"),
+                "shop_name": p.get("shop_name"),
+            })
+        if len(products) < page_size:
+            break
+        page += 1
+    return out
+
+
+def _oos_headline_status(offers: List[dict]) -> Optional[str]:
+    """Derive the headline status for an EAN from its OOS offer rows.
+
+    The monitor confirms headline == cheapest offer, so:
+      any is_cheapest_offer True                 -> 'match'   OOS offer IS the headline -> exclude
+      is_cheapest_offer None & ean_offer_count 1 -> 'match'   sole offer for the EAN = headline
+      else any explicit False                    -> 'differs' a cheaper offer is the headline -> keep
+      otherwise (no rows / undeterminable null)  -> None      fall back to the ES check
+    """
+    if not offers:
+        return None
+    if any(o.get("is_cheapest_offer") is True for o in offers):
+        return "match"
+    if any(o.get("is_cheapest_offer") is None and o.get("ean_offer_count") == 1
+           for o in offers):
+        return "match"
+    if any(o.get("is_cheapest_offer") is False for o in offers):
+        return "differs"
+    return None
+
+
 def _campaign_family(name: str) -> str:
     if name == BESTSELLERS_CAMPAIGN:
         return "bestsellers"
@@ -1182,17 +1241,24 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
             "already_excluded": iid in excluded,
         })
 
-    # Headline-offer check: the gold ad rides the product's bestOffer. Only an
-    # OOS EAN that *is* that headline offer is a genuine exclusion; a flagged
-    # non-headline variant whose headline is still live must be kept.
+    # Headline-offer check: the gold ad rides the product's headline (cheapest)
+    # offer. Only an OOS EAN that *is* that headline offer is a genuine
+    # exclusion; a flagged non-headline offer whose headline is still live must
+    # be kept. The monitor now computes this for us (is_cheapest_offer), so that
+    # is the authority; ES stays for the PLP url and as a fallback for EANs the
+    # monitor doesn't return an offer-level row for.
+    oos_offers = _oos_offers(market, "open")
     hl = _headline_offers([c["ean"] for c in candidates])
     for c in candidates:
         info = hl.get(c["ean"], {})
-        c["headline_status"] = info.get("status")        # match|differs|no_headline|not_found|error
+        oos_st = _oos_headline_status(oos_offers.get(_norm_ean(c["ean"]), []))
+        status = oos_st or info.get("status")             # match|differs|no_headline|not_found|error
+        c["headline_status"] = status
+        c["headline_source"] = "oos" if oos_st else "es"
         c["headline_ean"] = info.get("headline_ean")
         c["headline_shop"] = info.get("headline_shop")
         c["headline_stock"] = info.get("headline_stock")
-        c["headline_match"] = info.get("status") == "match"
+        c["headline_match"] = status == "match"
         c["plp_url"] = info.get("plp_url")
 
     candidates.sort(key=lambda c: c["cost_eur"], reverse=True)
@@ -1222,24 +1288,30 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
 
     Safety net: re-check the headline offer server-side and SKIP any EAN whose
     gold ad rides a different (live) offer, so a stale UI selection can't kill a
-    buyable product. Only the confidently-wrong 'differs' case is blocked;
-    not_found / no_headline / ES errors are allowed through (a gone product is a
-    valid exclusion, and we don't fail-closed on a transient lookup).
+    buyable product. The monitor's is_cheapest_offer is the authority; ES is the
+    fallback for EANs it has no offer-level row for. Only the confidently-wrong
+    'differs' case is blocked; not_found / no_headline / unknown are allowed
+    through (a gone product is a valid exclusion, and we don't fail-closed).
     """
-    # Batch the headline re-check across a worker pool (one warm ES session)
-    # instead of a serial ~20s-timeout POST per EAN.
+    # Pull the offer-level cheapest signal once, and batch the ES fallback across
+    # a worker pool (one warm session) instead of a serial ~20s POST per EAN.
+    oos_offers = _oos_offers(market, "open")
     eans = [iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
             for iid in item_ids]
     headlines = _headline_offers(eans)
     results = []
     for iid in item_ids:
         ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
+        oos_st = _oos_headline_status(oos_offers.get(_norm_ean(ean), []))
         info = headlines.get(ean) or headline_offer(ean)
-        if info["status"] == "differs":
+        if (oos_st or info["status"]) == "differs":
+            reason = ("OOS API: a cheaper (in-stock) offer is the headline for "
+                      "this EAN; not excluded") if oos_st == "differs" else (
+                      f"headline offer is a different EAN "
+                      f"({info['headline_ean']} @ {info['headline_shop']}); not excluded")
             results.append({
                 "item_id": iid, "skipped": True, "headline_status": "differs",
-                "reason": (f"headline offer is a different EAN "
-                           f"({info['headline_ean']} @ {info['headline_shop']}); not excluded"),
+                "headline_source": "oos" if oos_st else "es", "reason": reason,
             })
             continue
         try:
