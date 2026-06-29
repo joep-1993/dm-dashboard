@@ -393,6 +393,11 @@
             const [y, m, d] = iso.split('-').map(Number);
             return new Date(y, m - 1, d).toLocaleDateString('nl-NL', { weekday: 'short' });
         }
+        function weekdayLongOf(iso) {
+            if (!iso) return '';
+            const [y, m, d] = iso.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('nl-NL', { weekday: 'long' });
+        }
 
         function pctBadge(pct, digits = 1) {
             if (pct === null || pct === undefined) return '<span class="delta-badge flat">n/a</span>';
@@ -463,7 +468,9 @@
                        `<span class="ct-val">${fmt(key, dp.parsed.y)}</span>` +
                        wowHtml + `</div>`;
             }).join('');
-            el.innerHTML = `<div class="ct-title">${title}</div>` +
+            const wd = weekdayLongOf(title);
+            const titleHtml = wd ? `${title} (${wd})` : title;
+            el.innerHTML = `<div class="ct-title">${titleHtml}</div>` +
                            `<div class="ct-sub">WoW vs. same day last week</div>${rows}`;
             el.style.opacity = 1;
             el.style.left = chart.canvas.offsetLeft + tooltip.caretX + 'px';
