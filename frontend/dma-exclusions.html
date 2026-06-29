@@ -681,7 +681,9 @@
                 case "match":
                     return '<span class="badge bg-danger-subtle text-danger border border-danger-subtle" title="OOS EAN is the advertised headline offer">OOS headline</span>';
                 case "differs":
-                    return `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Headline offer is a different, in-stock EAN — keep">live: ${esc(c.headline_ean || "?")}${c.headline_shop ? " @ " + esc(c.headline_shop) : ""}</span>`;
+                    return c.headline_ean
+                        ? `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Headline offer is a different, in-stock EAN — keep">live: ${esc(c.headline_ean)}${c.headline_shop ? " @ " + esc(c.headline_shop) : ""}</span>`
+                        : '<span class="badge bg-success-subtle text-success border border-success-subtle" title="A cheaper offer is the served headline — keep">non-headline (cheaper offer serves)</span>';
                 case "not_found":
                     return '<span class="badge bg-secondary-subtle text-secondary" title="Not found in product index (likely gone)">not in index</span>';
                 case "no_headline":

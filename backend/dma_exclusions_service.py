@@ -1134,21 +1134,30 @@ def _oos_offers(market: str, eans: List[str]) -> Dict[str, List[dict]]:
     return {_norm_ean(e): r for e, r in zip(eans, rows)}
 
 
+def _oos_cheapest_row(offers: List[dict]) -> Optional[dict]:
+    """The served-headline (cheapest) OOS offer row for an EAN, if one is
+    confirmed: is_cheapest_offer True, or the sole offer (null + count 1)."""
+    for o in offers:
+        if o.get("is_cheapest_offer") is True:
+            return o
+    for o in offers:
+        if o.get("is_cheapest_offer") is None and o.get("ean_offer_count") == 1:
+            return o
+    return None
+
+
 def _oos_headline_status(offers: List[dict]) -> Optional[str]:
     """Derive the headline status for an EAN from its OOS offer rows.
 
-    The monitor confirms headline == cheapest offer, so:
-      any is_cheapest_offer True                 -> 'match'   OOS offer IS the headline -> exclude
-      is_cheapest_offer None & ean_offer_count 1 -> 'match'   sole offer for the EAN = headline
+    Per the monitor, is_cheapest_offer == the served headline offer (independent
+    of stock), so:
+      cheapest row present (True, or sole offer) -> 'match'   OOS offer IS the headline -> exclude
       else any explicit False                    -> 'differs' a cheaper offer is the headline -> keep
       otherwise (no rows / undeterminable null)  -> None      fall back to the ES check
     """
     if not offers:
         return None
-    if any(o.get("is_cheapest_offer") is True for o in offers):
-        return "match"
-    if any(o.get("is_cheapest_offer") is None and o.get("ean_offer_count") == 1
-           for o in offers):
+    if _oos_cheapest_row(offers):
         return "match"
     if any(o.get("is_cheapest_offer") is False for o in offers):
         return "differs"
@@ -1252,16 +1261,30 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     # monitor doesn't return an offer-level row for.
     cand_eans = [c["ean"] for c in candidates]
     oos_offers = _oos_offers(market, cand_eans)
-    hl = _headline_offers(cand_eans)
+    hl = _headline_offers(cand_eans)                      # ES: PLP url (+ fallback verdict/shop)
     for c in candidates:
         info = hl.get(c["ean"], {})
-        oos_st = _oos_headline_status(oos_offers.get(_norm_ean(c["ean"]), []))
-        status = oos_st or info.get("status")             # match|differs|no_headline|not_found|error
+        oos_rows = oos_offers.get(_norm_ean(c["ean"]), [])
+        oos_st = _oos_headline_status(oos_rows)
+        if oos_st:
+            # Verdict AND the shown headline come from the monitor, not stale ES.
+            # On a match the served headline is the cheapest OOS offer itself; on
+            # a differs the cheaper headline is a different offer we can't name
+            # from the OOS rows (leave shop/ean blank — the row is kept anyway).
+            win = _oos_cheapest_row(oos_rows)
+            status = oos_st
+            c["headline_source"] = "oos"
+            c["headline_shop"] = win["shop_name"] if win else None
+            c["headline_ean"] = c["ean"] if win else None
+            # status=open => still OOS & served, so the matched headline is OOS.
+            c["headline_stock"] = "out_of_stock" if win else None
+        else:
+            status = info.get("status")                   # no_headline|not_found|error
+            c["headline_source"] = "es"
+            c["headline_shop"] = info.get("headline_shop")
+            c["headline_ean"] = info.get("headline_ean")
+            c["headline_stock"] = info.get("headline_stock")
         c["headline_status"] = status
-        c["headline_source"] = "oos" if oos_st else "es"
-        c["headline_ean"] = info.get("headline_ean")
-        c["headline_shop"] = info.get("headline_shop")
-        c["headline_stock"] = info.get("headline_stock")
         c["headline_match"] = status == "match"
         c["plp_url"] = info.get("plp_url")
 
