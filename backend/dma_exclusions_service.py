@@ -1114,6 +1114,17 @@ def _oos_eans(market: str, state: str = "active") -> List[str]:
     return list(data.get("eans") or [])
 
 
+# Per-EAN OOS-monitor enrichment tuning. Each lookup is one HTTP round-trip and
+# is the scan's dominant cost after GA was parallelized. NB: raising the pool
+# above 16 does NOT help — measured 0.255s/EAN at 32 vs 0.241s/EAN at 16, i.e.
+# the monitor is server-bound (its own rate cap), not client-concurrency-bound,
+# and more threads only risk tipping the flaky server into timeouts. The retry
+# (not the concurrency) is the win here: a transient stall no longer drops the
+# row to a stale ES fallback. Real speedup needs a bulk endpoint from the monitor.
+_OOS_LOOKUP_CONCURRENCY = 16
+_OOS_LOOKUP_ATTEMPTS = 2
+
+
 def _clean_shop(name: Optional[str]) -> Optional[str]:
     """Override rows sometimes suffix the shop with the country (`Foo.nl|NL`)."""
     return name.split("|", 1)[0] if name else name
@@ -1139,12 +1150,21 @@ def _oos_offer(market: str, ean: str) -> List[dict]:
     qs = urllib.parse.urlencode({"country": country, "state": "active",
                                  "q": ean, "page_size": 50, "latest_batch": "true"})
     url = f"{OOS_BASE}?{qs}"
-    try:
-        with urllib.request.urlopen(url, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception as e:  # noqa: BLE001 - transient; treat as "no signal"
-        logger.warning("OOS offer lookup failed for %s: %s", ean, e)
-        return []
+    # The monitor occasionally hangs/times out (esp. under our own concurrency).
+    # Retry with a tight per-attempt timeout so a stall fails fast and re-tries
+    # rather than dropping the row to a stale ES fallback. Give up -> [] (no signal).
+    data = None
+    for n in range(1, _OOS_LOOKUP_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=12) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            break
+        except Exception as e:  # noqa: BLE001 - transient; retry then treat as "no signal"
+            if n == _OOS_LOOKUP_ATTEMPTS:
+                logger.warning("OOS offer lookup failed for %s after %d attempts: %s",
+                               ean, _OOS_LOOKUP_ATTEMPTS, e)
+                return []
+            time.sleep(0.4 * n)
     rows = data if isinstance(data, list) else (data.get("products") or [])
     n = _norm_ean(ean)
     return [{"is_cheapest_offer": p.get("is_cheapest_offer"),
@@ -1174,7 +1194,7 @@ def _oos_offers(market: str, eans: List[str]) -> Dict[str, List[dict]]:
     eans = list(dict.fromkeys(eans))  # dedupe, order-preserving
     if not eans:
         return {}
-    with ThreadPoolExecutor(max_workers=16) as ex:
+    with ThreadPoolExecutor(max_workers=min(_OOS_LOOKUP_CONCURRENCY, len(eans))) as ex:
         rows = ex.map(lambda e: _oos_offer(market, e), eans)
     return {_norm_ean(e): r for e, r in zip(eans, rows)}
 
