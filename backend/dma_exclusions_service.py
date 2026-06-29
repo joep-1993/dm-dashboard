@@ -1277,6 +1277,49 @@ def _ga_search_rows(ga, customer_id: str, query: str, attempts: int = 3) -> list
             time.sleep(1.5 * n)
 
 
+# How many GA batch queries to run concurrently. shopping_performance_view is
+# slow (~25s/batch), so this is the scan's dominant cost; a handful of parallel
+# searches cuts the GA phase ~N× without tripping GA's concurrency limits.
+_GA_BATCH_CONCURRENCY = 6
+_OOS_BATCH = 200  # EANs per GA query (product_item_id IN (...))
+
+
+def _ga_batch_agg(ga, customer_id: str, batch: List[str]) -> Dict[str, dict]:
+    """Run one GA serving-metrics query for a batch of EANs and return
+    item_id -> aggregated 30d metrics + campaign/cl0/shop sets. Each EAN lives in
+    exactly one batch, so the per-batch agg fully aggregates it."""
+    ids = [DMA_ITEM_PREFIX + e for e in batch]
+    q = (
+        "SELECT segments.product_item_id, campaign.name, "
+        "segments.product_custom_attribute0, segments.product_custom_attribute3, "
+        "metrics.clicks, metrics.impressions, metrics.cost_micros, "
+        "metrics.conversions, metrics.conversions_value "
+        "FROM shopping_performance_view "
+        f"WHERE segments.product_item_id IN ({','.join(repr(x) for x in ids)}) "
+        "AND segments.date DURING LAST_30_DAYS"
+    )
+    agg: Dict[str, dict] = {}
+    for row in _ga_search_rows(ga, customer_id, q):
+        iid = row.segments.product_item_id
+        m = row.metrics
+        a = agg.setdefault(iid, {"clicks": 0, "impr": 0, "cost": 0,
+                                 "conv": 0.0, "conv_value": 0.0, "campaigns": set(),
+                                 "cl0s": set(), "shops": set()})
+        a["clicks"] += m.clicks
+        a["impr"] += m.impressions
+        a["cost"] += m.cost_micros
+        a["conv"] += m.conversions
+        a["conv_value"] += m.conversions_value
+        if row.campaign.name:
+            a["campaigns"].add(row.campaign.name)
+        cl0 = row.segments.product_custom_attribute0
+        if cl0 and cl0.isdigit():
+            a["cl0s"].add(cl0)
+        if row.segments.product_custom_attribute3:
+            a["shops"].add(row.segments.product_custom_attribute3)
+    return agg
+
+
 def _build_oos_candidate(market: str, iid: str, a: dict, excluded: set) -> dict:
     """Build one live-in-DMA candidate from its aggregated serving metrics, and
     pre-cache the resolution so a follow-up exclude skips the ~6s lookup()."""
@@ -1369,51 +1412,25 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     excluded = {r["item_id"] for r in list_exclusions()
                 if r["market"] == market.upper() and r["status"] in ("excluded", "partial")}
 
-    # Scan batches, headline-checking each batch's live-in-DMA EANs as we go, and
-    # stop once `limit` confirmed headline offers (status=match) are collected.
+    # Run the slow GA serving queries in concurrent waves (the dominant cost),
+    # headline-checking each wave's live-in-DMA EANs, and stop once `limit`
+    # confirmed headline offers (status=match) are collected. A wave overshoots
+    # the limit by at most ~one wave's matches (trimmed below).
+    batches = [eans[i:i + _OOS_BATCH] for i in range(0, len(eans), _OOS_BATCH)]
     candidates: List[dict] = []
     matches = 0
     scanned = 0
-    for i in range(0, len(eans), 200):
-        batch = eans[i:i + 200]
-        scanned += len(batch)
-        ids = [DMA_ITEM_PREFIX + e for e in batch]
-        q = (
-            "SELECT segments.product_item_id, campaign.name, "
-            "segments.product_custom_attribute0, segments.product_custom_attribute3, "
-            "metrics.clicks, metrics.impressions, metrics.cost_micros, "
-            "metrics.conversions, metrics.conversions_value "
-            "FROM shopping_performance_view "
-            f"WHERE segments.product_item_id IN ({','.join(repr(x) for x in ids)}) "
-            "AND segments.date DURING LAST_30_DAYS"
-        )
-        # Each EAN lives in exactly one batch, so per-batch agg fully aggregates it.
-        batch_agg: Dict[str, dict] = {}
-        for row in _ga_search_rows(ga, customer_id, q):
-            iid = row.segments.product_item_id
-            m = row.metrics
-            a = batch_agg.setdefault(iid, {"clicks": 0, "impr": 0, "cost": 0,
-                                           "conv": 0.0, "conv_value": 0.0, "campaigns": set(),
-                                           "cl0s": set(), "shops": set()})
-            a["clicks"] += m.clicks
-            a["impr"] += m.impressions
-            a["cost"] += m.cost_micros
-            a["conv"] += m.conversions
-            a["conv_value"] += m.conversions_value
-            if row.campaign.name:
-                a["campaigns"].add(row.campaign.name)
-            cl0 = row.segments.product_custom_attribute0
-            if cl0 and cl0.isdigit():
-                a["cl0s"].add(cl0)
-            if row.segments.product_custom_attribute3:
-                a["shops"].add(row.segments.product_custom_attribute3)
-        if not batch_agg:
-            continue
-        batch_cands = [_build_oos_candidate(market, iid, a, excluded)
-                       for iid, a in batch_agg.items()]
-        _enrich_oos_headline(market, batch_cands)
-        candidates.extend(batch_cands)
-        matches += sum(1 for c in batch_cands if c["headline_match"])
+    for w in range(0, len(batches), _GA_BATCH_CONCURRENCY):
+        wave = batches[w:w + _GA_BATCH_CONCURRENCY]
+        scanned += sum(len(b) for b in wave)
+        with ThreadPoolExecutor(max_workers=len(wave)) as ex:
+            aggs = list(ex.map(lambda b: _ga_batch_agg(ga, customer_id, b), wave))
+        wave_cands = [_build_oos_candidate(market, iid, a, excluded)
+                      for agg in aggs for iid, a in agg.items()]
+        if wave_cands:
+            _enrich_oos_headline(market, wave_cands)
+            candidates.extend(wave_cands)
+            matches += sum(1 for c in wave_cands if c["headline_match"])
         if limit and matches >= limit:
             break
 
