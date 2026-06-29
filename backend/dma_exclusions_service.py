@@ -1093,33 +1093,45 @@ def _oos_eans(market: str, state: str = "active") -> List[str]:
     return list(data.get("eans") or [])
 
 
+def _clean_shop(name: Optional[str]) -> Optional[str]:
+    """Override rows sometimes suffix the shop with the country (`Foo.nl|NL`)."""
+    return name.split("|", 1)[0] if name else name
+
+
 def _oos_offer(market: str, ean: str) -> List[dict]:
-    """OOS offer rows for one EAN, carrying the monitor's headline signal:
+    """OOS override rows for one EAN, carrying the monitor's headline + freshness
+    signals:
       - is_cheapest_offer  is this the cheapest (== served headline) offer?
       - ean_offer_count    how many comparable offers exist for the EAN
+      - beslist_served     is the offer still served on beslist (False => gone)?
+      - feed_stock         the shop feed's own stock count (>0 contradicts OOS)
 
-    Fetched via the /oos-products `q=` search rather than the plain list: the
-    unfiltered list is a priority worklist hard-capped at 2000 rows (the active
-    OOS set is ~10k), so paging it silently drops most EANs. The `q=` search is
-    uncapped and also forces the monitor to compute is_cheapest_offer for the
-    row. Returns [] when the EAN isn't on the open OOS list. One EAN can have
-    several OOS offers across shops (a DMA exclusion is GTIN-level).
+    Fetched via the `q=` search on /api/v1/overrides — NOT /oos-products. The
+    /oos-products worklist is a served-only top-2000 list, so EANs that are
+    capped out OR whose offer has left beslist (beslist_served False) return
+    nothing there and used to fall through to a stale ES bestOffer guess (which
+    e.g. matched an in-stock offer from a different shop). The /api/v1/overrides
+    q= search is uncapped, returns the row regardless of served-state, and still
+    computes is_cheapest_offer. Returns [] when the EAN isn't flagged at all.
     """
     country = (market or "NL").upper()
-    qs = urllib.parse.urlencode({"country": country, "status": "open",
-                                 "q": ean, "page_size": 50, "format": "json"})
-    url = f"{OOS_BASE}/oos-products?{qs}"
+    qs = urllib.parse.urlencode({"country": country, "state": "active",
+                                 "q": ean, "page_size": 50, "latest_batch": "true"})
+    url = f"{OOS_BASE}?{qs}"
     try:
         with urllib.request.urlopen(url, timeout=20) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except Exception as e:  # noqa: BLE001 - transient; treat as "no signal"
         logger.warning("OOS offer lookup failed for %s: %s", ean, e)
         return []
+    rows = data if isinstance(data, list) else (data.get("products") or [])
     n = _norm_ean(ean)
     return [{"is_cheapest_offer": p.get("is_cheapest_offer"),
              "ean_offer_count": p.get("ean_offer_count"),
-             "shop_name": p.get("shop_name")}
-            for p in (data.get("products") or [])
+             "shop_name": _clean_shop(p.get("shop_name")),
+             "beslist_served": p.get("beslist_served"),
+             "feed_stock": p.get("feed_stock")}
+            for p in rows
             if _norm_ean(p.get("ean")) == n]
 
 
@@ -1146,19 +1158,32 @@ def _oos_cheapest_row(offers: List[dict]) -> Optional[dict]:
     return None
 
 
+def _row_contradicted(o: dict) -> bool:
+    """The monitor's own fresher signals contradict the (Google-crawl) OOS flag:
+    the offer has left beslist, or the shop feed itself reports stock. Excluding
+    on a stale crawl override would kill a buyable ad, so we keep these."""
+    if o.get("beslist_served") is False:
+        return True
+    fs = o.get("feed_stock")
+    return isinstance(fs, int) and fs > 0
+
+
 def _oos_headline_status(offers: List[dict]) -> Optional[str]:
     """Derive the headline status for an EAN from its OOS offer rows.
 
     Per the monitor, is_cheapest_offer == the served headline offer (independent
     of stock), so:
-      cheapest row present (True, or sole offer) -> 'match'   OOS offer IS the headline -> exclude
-      else any explicit False                    -> 'differs' a cheaper offer is the headline -> keep
-      otherwise (no rows / undeterminable null)  -> None      fall back to the ES check
+      cheapest row, signals agree   -> 'match'   OOS offer IS the headline -> exclude
+      cheapest row, contradicted    -> 'stale'   crawl OOS flag stale (feed in stock /
+                                                  no longer served) -> keep
+      else any explicit False       -> 'differs' a cheaper offer is the headline -> keep
+      otherwise (no rows / null)     -> None      fall back to the ES check
     """
     if not offers:
         return None
-    if _oos_cheapest_row(offers):
-        return "match"
+    win = _oos_cheapest_row(offers)
+    if win:
+        return "stale" if _row_contradicted(win) else "match"
     if any(o.get("is_cheapest_offer") is False for o in offers):
         return "differs"
     return None
@@ -1268,16 +1293,16 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
         oos_st = _oos_headline_status(oos_rows)
         if oos_st:
             # Verdict AND the shown headline come from the monitor, not stale ES.
-            # On a match the served headline is the cheapest OOS offer itself; on
-            # a differs the cheaper headline is a different offer we can't name
-            # from the OOS rows (leave shop/ean blank — the row is kept anyway).
+            # match/stale = cheapest OOS offer itself (named); differs = cheaper
+            # headline is a different offer we can't name from the OOS rows (leave
+            # shop/ean blank). 'stale' = cheapest but the crawl OOS flag is
+            # contradicted (feed in stock / no longer served) — kept, not excluded.
             win = _oos_cheapest_row(oos_rows)
             status = oos_st
             c["headline_source"] = "oos"
             c["headline_shop"] = win["shop_name"] if win else None
             c["headline_ean"] = c["ean"] if win else None
-            # status=open => still OOS & served, so the matched headline is OOS.
-            c["headline_stock"] = "out_of_stock" if win else None
+            c["headline_stock"] = "out_of_stock" if status == "match" else None
         else:
             status = info.get("status")                   # no_headline|not_found|error
             c["headline_source"] = "es"
@@ -1297,6 +1322,7 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
         "headline_counts": {
             "match": sum(1 for c in candidates if c["headline_status"] == "match"),
             "differs": sum(1 for c in candidates if c["headline_status"] == "differs"),
+            "stale": sum(1 for c in candidates if c["headline_status"] == "stale"),
             "unknown": sum(1 for c in candidates
                            if c["headline_status"] in ("no_headline", "not_found", "error")),
         },
@@ -1313,12 +1339,13 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
 def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     """Exclude a selected list of OOS item ids (source-tagged 'oos').
 
-    Safety net: re-check the headline offer server-side and SKIP any EAN whose
-    gold ad rides a different (live) offer, so a stale UI selection can't kill a
-    buyable product. The monitor's is_cheapest_offer is the authority; ES is the
-    fallback for EANs it has no offer-level row for. Only the confidently-wrong
-    'differs' case is blocked; not_found / no_headline / unknown are allowed
-    through (a gone product is a valid exclusion, and we don't fail-closed).
+    Safety net: re-check the headline offer server-side and SKIP any EAN that
+    shouldn't be killed, so a stale UI selection can't pull a buyable product.
+    The monitor's is_cheapest_offer is the authority; ES is the fallback for EANs
+    it has no offer-level row for. Blocked: 'differs' (a cheaper offer is the
+    headline) and 'stale' (the crawl OOS flag is contradicted — feed in stock /
+    no longer served on beslist). not_found / no_headline / unknown pass through
+    (a gone product is a valid exclusion, and we don't fail-closed).
     """
     # Pull the offer-level cheapest signal and the ES fallback, each batched
     # across a worker pool instead of a serial ~20s lookup per EAN.
@@ -1331,13 +1358,17 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
         ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
         oos_st = _oos_headline_status(oos_offers.get(_norm_ean(ean), []))
         info = headlines.get(ean) or headline_offer(ean)
-        if (oos_st or info["status"]) == "differs":
-            reason = ("OOS API: a cheaper (in-stock) offer is the headline for "
-                      "this EAN; not excluded") if oos_st == "differs" else (
-                      f"headline offer is a different EAN "
-                      f"({info['headline_ean']} @ {info['headline_shop']}); not excluded")
+        status = oos_st or info["status"]
+        if status in ("differs", "stale"):
+            reason = {
+                "stale": "OOS API: crawl OOS flag contradicted (shop feed in stock "
+                         "or offer no longer served on beslist); not excluded",
+                "differs": "OOS API: a cheaper (in-stock) offer is the headline for "
+                           "this EAN; not excluded",
+            }.get(oos_st) or (f"headline offer is a different EAN "
+                              f"({info['headline_ean']} @ {info['headline_shop']}); not excluded")
             results.append({
-                "item_id": iid, "skipped": True, "headline_status": "differs",
+                "item_id": iid, "skipped": True, "headline_status": status,
                 "headline_source": "oos" if oos_st else "es", "reason": reason,
             })
             continue
