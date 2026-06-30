@@ -1,6 +1,77 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Auto-Redirects V45/V46 — confidence scoring + in-subcat facet selection (2026-06-30)
+
+From user's `~/redirects.txt` (3 lists of flagged redirects). Branch
+`rurl-v45-confidence-scoring` on dm-dashboard (V45 + V46 commits, pushed).
+
+**V45 — search-derived scoring redesign (lists #2 & #3).** The search-derived
+branches each shipped a FLAT reliability constant (samecat=65, faceted=70,
+subcat-rescue=75, cross-maincat=65/45) blind to coverage + dominance — so
+poorly- and well-fitting redirects both landed on 65. New
+`score_search_derived()` in `reliability_scorer.py` adjusts the per-branch base
+by: query **coverage** (two-sided bands), category **dominance** (dom_cat_share,
+two-sided), and an absolute **product-count** guard — FULL penalty for
+bare-category redirects (a thin dominant cat is noise: motorhelm→Videocamera's,
+116 products), MILD for faceted targets (intentionally narrow: ici paris→merk, 4
+products is fine). Plumbed `dom_cat_count` through `search_derived.py`. Captured
+appended facet value names (the URL-override branch was CLEARING them →
+false 0% coverage on brand redirects). subcategory_name* rows re-score coverage
+AFTER the facet append (double-vowel collapse grote≈Groot + filler "mooie"
+exclusion), lift-only — `mooie_grote_vazen` 65→95. Score-only: 0 redirect URLs
+change. 300-URL regression: 0 production A/B fell to D, tier B +6, mean −0.6.
+
+**V46 — descriptor-aware in-subcat facet selection (list #1 bucket a).** The
+in-subcat (Stage 1.5) probe ALREADY existed; the bug was the over-strict
+`_value_matches_keyword` (every value token must be in the query), which
+discarded "USB oplaadbaar" (opties_ventilator~23795868) for "usb-ventilator"
+over the descriptor token "oplaadbaar". New `_value_distinctive_match` ignores a
+small generic-descriptor set (met/zonder/oplaadbaar/…) and requires only the
+value's DISTINCTIVE tokens to link. PROBE_SCHEMA_VERSION 6→7. Fixes the exact
+facets the user wanted: usb-ventilator→opties_ventilator~23795868,
+spikeball→merk~23864170, kinderbankje→opties_stoel~17094990,
+puree_stamper→type_stmp~6380575 (gardena→merk~1223 already fixed by V44).
+Surgical: 300 random corpus 0 changes; 120 option-heavy 4 appends, all sane.
+
+**Key cross-cutting finding for the REMAINING list-#1 cases:** the live facet
+probe (post-V46) frequently has the CORRECT facet/value, but redirect paths
+don't apply it — three failure modes:
+1. **Fix-D append gate too strict** (`_keep_fd` needs brand OR name_link OR
+   all_repr). 60_cm_breed: probe finds a_woonacc~"60 cm" (cov 0.89) but the
+   dimension-only query has no product noun bridging "Kussenhoezen", so it's
+   dropped. CANNOT naively loosen — `_value_distinctive_match` alone would
+   re-admit the waxinelicht→f_woonacc~Groot junk on Gedenkartikelen (the gate's
+   original purpose); the differentiator is whether the CATEGORY is on-topic.
+2. **Static facets.csv overrides the live probe with STALE value ids.**
+   tuinaarde "40 liter": the subcategory-qualifier path (`_qualifier_matches_value`,
+   reads the loaded facets.csv) picked inhoud_tuinaarde~23936743 — a value id
+   that ISN'T in the live facet at all (live has only ~23590378 "40 liter" +
+   ~23590374 "5 liter"). The live probe correctly picks 23590378. Fix = prefer
+   the live probe value over the stale static pick.
+3. **category_fallback / subcategory paths don't consult the probe.** pikachu
+   (probe finds merk~Pokémon), dubbele, vintage all ship as category_fallback
+   (score 0) without applying the probe's pick.
+Plus pure lexical/semantic gaps (peuter≠Kind, loungeset≠Loungebankhoezen — need
+synonyms) and cross-maincat routing (bedhekje→baby_peuter, tochtstopper→klussen,
+lampen→huis_tuin not klussen). Each fix needs its own OLD-vs-NEW corpus diff.
+
+Harness: `/tmp/redirects_baseline.csv` (30 flagged), `/tmp/regression_corpus.csv`
+(300 from indexnow), `/tmp/list1.csv` (all list-#1 + desired targets). Run engine
+via `venv/bin/python main_parallel_v2.py <in> -o <out> --enable-facet-probe`;
+OLD baseline via `git stash`. In-repo handoff: `rurl_optimizer_v2/SCORING_REDESIGN_PLAN.md`.
+
+## Redirect loop (ERR_TOO_MANY_REDIRECTS) on `/r/` URLs with a slash inside the search term (2026-06-30)
+
+User reported `https://www.beslist.nl/products/r/wasmachine/droger_kast/` failing with **ERR_TOO_MANY_REDIRECTS** in the browser; the `%2f`-encoded and decoded forms bounce to each other.
+
+- **Root cause is the frontend/CDN URL-canonicalization layer, NOT redirect.api.beslist.nl.** Live single-hop test (whitelisted UA `Beslist script voor SEO`): `/r/wasmachine/droger_kast/` → **301** → `/r/wasmachine%2fdroger_kast/`, and `/r/wasmachine%2fdroger_kast/` → **307** → `/r/wasmachine/droger_kast/` → infinite loop. The 301 encodes the literal slash; the 307 decodes it; they point at each other.
+- **The redirect API is innocent and was confirmed so:** the resolver returns **NO_REDIRECT** for the `%2f` form and a clean **301 → meubilair** (`/products/meubilair/meubilair_389371_395590/c/t_badkast~23813977`) for the literal-slash form — which never fires because the encoding-301 loops first. The loop **persisted after I deleted the redirect rows**, proving the rows weren't the cause.
+- **Trigger:** `/r/` search-redirect URLs expect a SINGLE slug term (`wasmachine_droger_kast`). This one has a slash INSIDE the term (two path segments), which the two canonicalization rules can't agree on a stable encoding for.
+- **Cleanup done:** deleted two malformed redirect rows that had embedded slashes (`id 8495904` `/products/r/wasmachine/droger_kast/`, `id 8495905` `/products/r/wasmachine/drogerkast/`) via `DELETE /api/redirect?fromUrl=…` with `X-User-Name: SEO_JOEP`; verified gone on the uncached list endpoint. The correct canonical `/products/r/wasmachine_droger_kast/` (`id 7968466`) already 301s cleanly to meubilair.
+- **Handed to teamsearch** (message saved `Downloads\claude\teamsearch_redirect_loop_wasmachine_droger.md`): make `%2f`↔`/` canonicalization idempotent (301 and 307 must not point at each other), stop emitting `/r/` links with raw/encoded slashes in the term, and sweep for other `/r/` URLs with embedded slashes hitting the same loop.
+- **Verification gotchas reused:** check the **uncached `GET /api/redirects?urlContains=` list endpoint**, not the resolver (the resolver Varnish-caches negatives for 1h — don't poison it with a pre-check). The live site needs the SEO UA or AWS-WAF returns a 202/405 challenge instead of the real redirect headers. See memory `redirect_api_behavior.md`.
+
 ## dm-tools DMA Exclusions — xlsx export: Item ID hyperlinks, column alignment, empty-Category "n/a" (2026-06-30)
 
 Three small export tweaks to `export_xlsx()` in `backend/dma_exclusions_router.py` (shipped `1da8a69`):
