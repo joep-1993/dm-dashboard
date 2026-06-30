@@ -34,7 +34,23 @@ land on 65 — the score is constant.
   exclusion "mooie"), lift-only. `mooie_grote_vazen` 65→95(A). Corpus regression:
   0 over-lift, 0 subcategory rows wrongly lifted (narrowly scoped to
   qualifier-faceted rows). 34 tests pass.
-- **Phase B (list #1 matcher): NOT STARTED.**
+- **Phase B bucket (a) — in-subcat facet append: DONE (V46).** Root cause was
+  NOT a missing probe (the Stage-1.5 subcat probe already exists) — it was the
+  over-strict `_value_matches_keyword` (every value token must be in the query),
+  which discarded "USB oplaadbaar" (opties_ventilator~23795868) for
+  "usb-ventilator" over the descriptor token "oplaadbaar". New
+  `_value_distinctive_match` ignores generic descriptor tokens. Fixes
+  usb-ventilator→opties_ventilator~23795868 (84/B), spikeball→merk~23864170,
+  kinderbankje→opties_stoel~17094990 — each the EXACT facet the user wanted.
+  gardena was already fixed by V44. Regression: 300 random corpus 0 changes;
+  120 option-heavy 4 appends, all sane. 39 tests pass.
+- **Phase B remaining:**
+  - pikachu: probe finds merk~Pokémon but row ships as category_fallback —
+    WIRING gap (found facet not applied). Not yet fixed.
+  - bucket (b) wrong-value-within-facet (tuinaarde 40L→wrong liter value,
+    dubbele→type_fietstas not aantal_fietsen). Not started.
+  - bucket (c) cross-maincat preference (bedhekje→baby_peuter,
+    tochtstopper→klussen). Not started.
 
 ## Phase A — scoring (lists #2 & #3). Conservative: penalty-only on weak fits, no auto-suppression.
 
