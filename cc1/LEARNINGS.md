@@ -56,10 +56,20 @@ Plus pure lexical/semantic gaps (peuter≠Kind, loungeset≠Loungebankhoezen —
 synonyms) and cross-maincat routing (bedhekje→baby_peuter, tochtstopper→klussen,
 lampen→huis_tuin not klussen). Each fix needs its own OLD-vs-NEW corpus diff.
 
-Harness: `/tmp/redirects_baseline.csv` (30 flagged), `/tmp/regression_corpus.csv`
-(300 from indexnow), `/tmp/list1.csv` (all list-#1 + desired targets). Run engine
-via `venv/bin/python main_parallel_v2.py <in> -o <out> --enable-facet-probe`;
-OLD baseline via `git stash`. In-repo handoff: `rurl_optimizer_v2/SCORING_REDESIGN_PLAN.md`.
+Harness (the CSVs were in /tmp — EPHEMERAL, regenerate next session):
+- engine env: `/home/joepvanschagen/projects/dm-tools/venv/bin/python`
+- run: `cd backend/rurl_optimizer_v2 && venv/bin/python main_parallel_v2.py <in.csv> -o <out.csv> --enable-facet-probe` (input col `r_url`; full beslist URLs)
+- flagged cases: copy the source `/r/` URLs from `~/redirects.txt` (lists 1/2/3) into a CSV.
+- regression corpus: `grep -oE 'https://www\.beslist\.nl/products/[^,"]*/r/[^,"]*' ~/indexnow_submitted_urls.csv | awk 'NR%47==0' | head -300` (14,208 real /r/ URLs there).
+- OLD-vs-NEW diff: `git stash` the rurl files → run OLD → `git stash pop` → run NEW → diff on `original_url`/`reliability_score`/`redirect_url`. Cache (`data/cache/search_derived.sqlite`) warms after first run so re-runs are 0-API (won't contend with a live job). Bumping a SCHEMA_VERSION invalidates the relevant cache.
+
+**RESUME HERE next session:** V45/V46/V47 are MERGED (PR #1). Pick up the
+"REMAINING cases" task in TASKS.md. Suggested order by tractability: (1) a
+TARGETED per-row dominance override for category_fallback rows (pikachu/vintage),
+gated on a query-NAMED probe value — NOT a global `DOMINANCE_THRESHOLD` drop;
+(2) cross-maincat routing (bedhekje/tochtstopper); (3) Fix-D gate discriminator
+(60_cm_breed); (4) synonyms (peuter≈Kind). Each needs its own corpus diff.
+In-repo design doc: `rurl_optimizer_v2/SCORING_REDESIGN_PLAN.md`.
 
 ## Redirect loop (ERR_TOO_MANY_REDIRECTS) on `/r/` URLs with a slash inside the search term (2026-06-30)
 
