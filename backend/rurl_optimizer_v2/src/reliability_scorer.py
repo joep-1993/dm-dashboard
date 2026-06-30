@@ -447,6 +447,137 @@ def calculate_reliability_score(
     return max(0, min(100, int(base_score)))
 
 
+# ==========================================================================
+# V45: SEARCH-DERIVED CONFIDENCE SCORING (2026-06-30)
+# ==========================================================================
+# The search-derived branches in main_parallel_v2 historically each shipped a
+# FLAT constant (samecat=65, faceted=70, subcat-rescue=75, fallback=65/45),
+# blind to the two signals that actually carry confidence:
+#   1. how much of the query is covered by the redirect (match_coverage)
+#   2. how dominant the chosen category is in product count (dom_cat_share),
+#      qualified by how many products that dominance rests on (dom_cat_count) —
+#      a 100% share over 80 products is noise, not signal.
+# score_search_derived() adjusts the per-branch base by those signals. Per the
+# 2026-06-30 product decision the count guard is PENALTY-ONLY (it never lifts a
+# thin-evidence row) and nothing here auto-suppresses a redirect — a weak row
+# just sinks toward tier D for the reviewer to catch.
+# Bands are module constants so the regression harness can sweep them.
+
+# Coverage adjustment (two-sided). match_coverage is 0-100. Coverage is the
+# PRIMARY confidence driver: a half-covered query (head noun matched, qualifier
+# dropped — e.g. "aftakdoos waterdicht" → all Aftakdozen) must not reach tier B
+# on dominance alone, so the low-coverage penalties outweigh the dominance bonus.
+COVERAGE_BANDS = (
+    (90.0, +8),    # query almost fully represented
+    (75.0, +3),
+    (60.0, 0),     # neutral
+    (40.0, -8),    # ~half the query dropped
+    (0.0, -18),    # almost nothing of the query is covered
+)
+# Dominance adjustment (two-sided). dom_share is 0-1. Secondary to coverage:
+# the bonus is deliberately small so it can't rescue a poorly-covered query.
+DOMINANCE_BANDS = (
+    (0.85, +6),
+    (0.65, +2),
+    (0.45, 0),
+    (0.30, -8),
+    (0.0, -15),
+)
+# Absolute-count guard (PENALTY ONLY). dom_cat_count = products under the chosen
+# category in the AND-match set. A high share over a tiny set is noise
+# (motorhelm → Videocamera's, share 1.0 over ~116 products), so thin sets are
+# penalised regardless of share.
+COUNT_PENALTY_BANDS = (
+    (1000, 0),     # enough products to trust the share
+    (500, -3),
+    (200, -8),
+    (100, -12),
+    (0, -15),      # a handful of products — share is meaningless
+)
+# Faceted targets are intentionally narrow, so most small counts are fine — only
+# a near-empty page (<50 products) is a churn/quality risk. Milder than the
+# bare-category bands, and tops out so a faceted row never nukes straight to D
+# (a thin faceted page lands in review-tier C). NB: count alone can't tell a
+# legit thin brand page (ici paris, 4) from a churny one (gardena toys, 3) —
+# that's a facet-SELECTION call; scoring just flags both for review.
+FACETED_COUNT_PENALTY_BANDS = (
+    (50, 0),
+    (20, -5),
+    (0, -10),
+)
+# Below this AND-match count a high dom_share is not trustworthy enough to earn
+# its dominance bonus (the bonus is zeroed; the count penalty still applies).
+DOMINANCE_MIN_COUNT = 300
+
+
+def _band(value, bands, default=0):
+    """Return the adjustment for the first (threshold, adj) pair whose
+    threshold `value` meets (bands are ordered high→low)."""
+    if value is None:
+        return default
+    for threshold, adj in bands:
+        if value >= threshold:
+            return adj
+    return bands[-1][1]
+
+
+def score_search_derived(
+    base: int,
+    match_coverage: Optional[float],
+    dom_share: Optional[float],
+    dom_count: Optional[int],
+    match_type: Optional[str] = None,
+    include_coverage: bool = True,
+    target_is_faceted: bool = False,
+) -> int:
+    """V45: adjust a score by query coverage and category product-count
+    dominance. See the band tables above.
+
+    Args:
+        base: the branch's historical flat score (e.g. 65/70/75), or the score
+            already produced by calculate_reliability_score.
+        match_coverage: % of (non-stopword) query tokens represented (0-100).
+        dom_share: fraction of AND-match products in the chosen category (0-1).
+        dom_count: absolute product count behind dom_share (for the count guard).
+        match_type: reserved for per-branch tuning; currently informational.
+        include_coverage: apply the coverage band. Set False for paths whose
+            base already folded coverage in (the subcategory_name / facet paths
+            of calculate_reliability_score) so coverage isn't double-counted —
+            only the new dominance + count signals are added there.
+        target_is_faceted: the redirect carries a /c/ facet. The count guard
+            (small product set = unreliable dominance) is meant for BARE-category
+            redirects, where a thin dominant cat is noise (motorhelm → bare
+            Videocamera's, 116 products). A faceted page is INTENTIONALLY narrow
+            (ici paris → merk~Ici Paris, 4 products is normal), so the count
+            penalty AND the count-based bonus suppression are skipped for it.
+
+    Returns:
+        int 0-100. Conservative: the count band only ever subtracts, and this
+        function never returns a hard 0 on its own (no auto-suppression) — it
+        clamps to [0,100] but weak rows simply fall to tier D.
+    """
+    score = float(base)
+    if include_coverage:
+        score += _band(match_coverage, COVERAGE_BANDS)
+    # Dominance only earns its full weight when it rests on enough products: a
+    # high share over a tiny set is the motorhelm→Videocamera's (116 products,
+    # share 1.0) failure mode, so we cap the dominance BONUS when the count is
+    # thin while still letting a low share penalise. Skipped for faceted targets
+    # (their small counts are by design, not thin evidence).
+    dom_adj = _band(dom_share, DOMINANCE_BANDS)
+    if (dom_adj > 0 and not target_is_faceted
+            and dom_count is not None and dom_count < DOMINANCE_MIN_COUNT):
+        dom_adj = 0  # don't reward dominance we can't trust
+    score += dom_adj
+    # Count penalty: full bands for bare-category redirects (thin dominant cat =
+    # noise); milder bands for faceted targets (narrow by design — only a
+    # near-empty page is penalised).
+    score += _band(dom_count,
+                   FACETED_COUNT_PENALTY_BANDS if target_is_faceted
+                   else COUNT_PENALTY_BANDS)
+    return max(0, min(100, int(round(score))))
+
+
 def get_reliability_tier(score: int) -> str:
     """
     Get reliability tier label.

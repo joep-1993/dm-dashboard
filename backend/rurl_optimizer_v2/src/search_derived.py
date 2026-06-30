@@ -312,6 +312,7 @@ def _classify(api_resp: Optional[dict], keyword: str = "") -> dict:
             "dom_cat_name": cat_name,
             "dom_cat_url_slug": cat_slug,
             "dom_cat_share": round(share, 2),
+            "dom_cat_count": count,
         })
     return out
 
