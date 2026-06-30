@@ -861,27 +861,70 @@
             const market = document.getElementById("oosMarket").value;
             const btn = document.getElementById("reenableBtn");
             const orig = btn.innerHTML;
-            // Phase-aware in-progress state: the recovered-check is a bulk monitor
-            // pass and the re-enable does Google Ads writes per product, so both
-            // can take a while — show a spinner and lock the button meanwhile.
-            const working = (label) => {
+            const prog = document.getElementById("oosProgress");
+            const bar = document.getElementById("oosProgressBar");
+            // Spinner on the button while we resolve the recovered set (a bulk
+            // monitor pass with no count yet); a real progress bar once we loop
+            // the per-product Google Ads writes (the slow part).
+            const setBtn = (label) => {
                 btn.disabled = true;
                 btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ${label}`;
             };
+            const setProgress = (done, total) => {
+                const pct = total ? Math.round(done / total * 100) : 0;
+                bar.style.width = `${pct}%`;
+                document.getElementById("oosProgressCount").textContent = `${pct}% (${done}/${total})`;
+            };
             try {
-                working("Checking…");
+                // Phase 1 — find the recovered set (no per-item progress possible yet)
+                setBtn("Checking…");
                 const chk = await (await fetch(`${API}/oos/recovered?market=${market}`)).json();
-                const n = (chk.recovered || []).length;
+                const rows = chk.recovered || [];
+                const n = rows.length;
                 if (!n) { alert("No recovered OOS products to re-enable."); return; }
                 if (!confirm(`${n} OOS product(s) recovered (back in stock). Re-enable them in DMA now?`)) return;
-                working(`Re-enabling ${n}…`);
-                const res = await fetch(`${API}/oos/reenable?market=${market}`, { method: "POST" });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.detail || res.status);
-                alert(`Re-enabled ${data.recovered} recovered product(s).`);
+                // Phase 2 — enable per item so the bar tracks the actual Ads writes
+                // (mirrors excludeSelectedOos / enableSelected). Drive the shared OOS
+                // progress bar + Cancel; stop before the next item on cancel.
+                document.getElementById("oosProgressLabel").textContent = `Re-enabling ${n} recovered product(s)…`;
+                setProgress(0, n);
+                oosCancel = false;
+                const cancelBtn = document.getElementById("oosCancelBtn");
+                cancelBtn.disabled = false; cancelBtn.textContent = "Cancel";
+                prog.style.display = "block";
+                setBtn(`Re-enabling ${n}…`);
+                const errors = [];
+                let processed = 0;
+                try {
+                    for (let i = 0; i < n; i++) {
+                        if (oosCancel) break;   // stop before the next; in-flight one already finished
+                        try {
+                            const res = await fetch(`${API}/enable/${rows[i].id}`, { method: "POST" });
+                            const data = await res.json();
+                            if (!res.ok) throw new Error(data.detail || res.status);
+                            if (data.errors && data.errors.length) errors.push({ id: rows[i].id, errors: data.errors });
+                        } catch (e) {
+                            errors.push({ id: rows[i].id, error: e.message });
+                        }
+                        processed++;
+                        setProgress(i + 1, n);
+                    }
+                } finally {
+                    // Tear the bar down the instant the loop ends, BEFORE the slow
+                    // post-run refresh (the lingering-bar lesson from excludeSelectedOos).
+                    prog.style.display = "none";
+                }
+                alert((oosCancel ? "Cancelled — " : "")
+                    + `Re-enabled ${processed - errors.length} of ${n} recovered product(s)`
+                    + (errors.length ? `, ${errors.length} with errors (see console).` : "."));
+                if (errors.length) console.error(errors);
                 await loadList(); if (oosData) await scanOos();
-            } catch (e) { alert("Re-enable failed: " + e.message); }
-            finally { btn.disabled = false; btn.innerHTML = orig; }
+            } catch (e) {
+                alert("Re-enable failed: " + e.message);
+            } finally {
+                prog.style.display = "none";
+                btn.disabled = false; btn.innerHTML = orig;
+            }
         }
 
         document.getElementById("itemId").addEventListener("keydown", e => { if (e.key === "Enter") runPreview(); });
