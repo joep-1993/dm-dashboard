@@ -293,7 +293,7 @@
                                     <col style="width:140px">
                                 </colgroup>
                                 <thead>
-                                    <tr><th><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th>Item id</th><th>Country</th><th>Source</th><th>Category</th><th>Shop</th><th>Status</th><th>Timestamp</th></tr>
+                                    <tr><th><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th class="sortable" data-sort="item_id" onclick="setSavedSort('item_id')" style="cursor:pointer; user-select:none;">Item id<span class="sort-ind"></span></th><th class="sortable" data-sort="market" onclick="setSavedSort('market')" style="cursor:pointer; user-select:none;">Country<span class="sort-ind"></span></th><th class="sortable" data-sort="source" onclick="setSavedSort('source')" style="cursor:pointer; user-select:none;">Source<span class="sort-ind"></span></th><th class="sortable" data-sort="category" onclick="setSavedSort('category')" style="cursor:pointer; user-select:none;">Category<span class="sort-ind"></span></th><th class="sortable" data-sort="shop" onclick="setSavedSort('shop')" style="cursor:pointer; user-select:none;">Shop<span class="sort-ind"></span></th><th class="sortable" data-sort="status" onclick="setSavedSort('status')" style="cursor:pointer; user-select:none;">Status<span class="sort-ind"></span></th><th class="sortable" data-sort="applied_at" onclick="setSavedSort('applied_at')" style="cursor:pointer; user-select:none;">Timestamp<span class="sort-ind"></span></th></tr>
                                 </thead>
                                 <tbody id="listBody">
                                     <tr><td colspan="8" class="text-center text-muted py-3">No exclusions yet.</td></tr>
@@ -480,13 +480,41 @@
             const v = document.getElementById("savedPerPage").value;
             return v === "all" ? Infinity : parseInt(v);
         }
+        // ----- click-to-sort on the exclusions table headers -----
+        let savedSort = { key: null, dir: 1 };   // dir: 1 asc, -1 desc
+        function savedSortVal(x, key) {
+            if (key === "applied_at") return x.applied_at || "";   // ISO strings sort lexically
+            if (key === "category") return (catLabel(x.category) || "").toLowerCase();
+            const v = x[key];
+            return (v == null ? "" : String(v)).toLowerCase();
+        }
+        function setSavedSort(key) {
+            if (savedSort.key === key) savedSort.dir = -savedSort.dir;
+            else { savedSort.key = key; savedSort.dir = 1; }
+            savedPage = 1;
+            renderSaved();
+        }
+        function updateSortIndicators() {
+            document.querySelectorAll('#savedTable thead th[data-sort]').forEach(th => {
+                const ind = th.querySelector('.sort-ind');
+                if (!ind) return;
+                ind.textContent = th.dataset.sort === savedSort.key
+                    ? (savedSort.dir === 1 ? ' ▲' : ' ▼') : '';
+            });
+        }
         function savedFiltered() {
             const f = (document.getElementById("savedFilter").value || "").trim().toLowerCase();
-            if (!f) return savedData;
-            return savedData.filter(x =>
+            let rows = !f ? savedData : savedData.filter(x =>
                 (x.item_id || "").toLowerCase().includes(f) ||
                 (x.category || "").toLowerCase().includes(f) ||
                 (x.shop || "").toLowerCase().includes(f));
+            if (savedSort.key) {
+                rows = rows.slice().sort((a, b) => {
+                    const av = savedSortVal(a, savedSort.key), bv = savedSortVal(b, savedSort.key);
+                    return (av < bv ? -1 : av > bv ? 1 : 0) * savedSort.dir;
+                });
+            }
+            return rows;
         }
         function savedPageRows() {
             const data = savedFiltered();
@@ -551,6 +579,7 @@
             sa.checked = allChecked;
             sa.disabled = pageEnableable.length === 0;
             updateSavedSel();
+            updateSortIndicators();
         }
 
         function savedGoto(page) {
