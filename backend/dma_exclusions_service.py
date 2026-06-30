@@ -1150,14 +1150,14 @@ def _oos_eans(market: str, state: str = "active") -> List[str]:
     return list(data.get("eans") or [])
 
 
-# Per-EAN OOS-monitor enrichment tuning. Each lookup is one HTTP round-trip and
-# is the scan's dominant cost after GA was parallelized. NB: raising the pool
-# above 16 does NOT help — measured 0.255s/EAN at 32 vs 0.241s/EAN at 16, i.e.
-# the monitor is server-bound (its own rate cap), not client-concurrency-bound,
-# and more threads only risk tipping the flaky server into timeouts. The retry
-# (not the concurrency) is the win here: a transient stall no longer drops the
-# row to a stale ES fallback. Real speedup needs a bulk endpoint from the monitor.
-_OOS_LOOKUP_CONCURRENCY = 16
+# OOS-monitor enrichment tuning. The monitor now exposes a bulk POST /by-eans
+# (up to 1000 EANs/call, uncapped, returns rows regardless of served-state), so
+# the whole worklist (~2350 EANs) is fetched in ~3 calls instead of ~2350 per-EAN
+# `q=` round-trips — the dominant scan cost collapses from ~10 min to seconds.
+# This is the bulk endpoint the old per-EAN note pined for. The retry is still the
+# win against a transient stall (a failed chunk drops to "no signal", uncached,
+# never to a stale ES guess).
+_OOS_BULK_CHUNK = 1000   # /by-eans hard cap; > 1000 -> HTTP 422
 _OOS_LOOKUP_ATTEMPTS = 2
 
 
@@ -1166,57 +1166,60 @@ def _clean_shop(name: Optional[str]) -> Optional[str]:
     return name.split("|", 1)[0] if name else name
 
 
-def _oos_offer(market: str, ean: str) -> List[dict]:
-    """OOS override rows for one EAN, carrying the monitor's headline + freshness
-    signals:
-      - is_cheapest_offer  is this the cheapest (== served headline) offer?
+def _oos_row(p: dict) -> dict:
+    """Project a raw /by-eans result into the offer row our verdict logic reads.
+      - is_cheapest_offer  this the cheapest (== served headline) offer? (null
+                           "by nature" when the offer has left beslist)
       - ean_offer_count    how many comparable offers exist for the EAN
-      - beslist_served     is the offer still served on beslist (False => gone)?
+      - beslist_served     still served on beslist (False => gone, not wasting
+                           DMA clicks)
       - feed_stock         the shop feed's own stock count (>0 contradicts OOS)
-
-    Fetched via the `q=` search on /api/v1/overrides — NOT /oos-products. The
-    /oos-products worklist is a served-only top-2000 list, so EANs that are
-    capped out OR whose offer has left beslist (beslist_served False) return
-    nothing there and used to fall through to a stale ES bestOffer guess (which
-    e.g. matched an in-stock offer from a different shop). The /api/v1/overrides
-    q= search is uncapped, returns the row regardless of served-state, and still
-    computes is_cheapest_offer. Returns [] when the EAN isn't flagged at all.
+      - status             open | recovered (drives the recovery re-enable pass)
     """
-    country = (market or "NL").upper()
-    nrm = _norm_ean(ean)
-    hit = _cache_get(_OOS_CACHE, (country, nrm))
-    if hit is not _CACHE_MISS:
-        return hit
-    qs = urllib.parse.urlencode({"country": country, "state": "active",
-                                 "q": ean, "page_size": 50, "latest_batch": "true"})
-    url = f"{OOS_BASE}?{qs}"
-    # The monitor occasionally hangs/times out (esp. under our own concurrency).
-    # Retry with a tight per-attempt timeout so a stall fails fast and re-tries
-    # rather than dropping the row to a stale ES fallback. Give up -> [] (no signal,
-    # NOT cached — a transient failure must not stick for the whole TTL).
-    data = None
-    for n in range(1, _OOS_LOOKUP_ATTEMPTS + 1):
-        try:
-            with urllib.request.urlopen(url, timeout=12) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            break
-        except Exception as e:  # noqa: BLE001 - transient; retry then treat as "no signal"
-            if n == _OOS_LOOKUP_ATTEMPTS:
-                logger.warning("OOS offer lookup failed for %s after %d attempts: %s",
-                               ean, _OOS_LOOKUP_ATTEMPTS, e)
-                return []
-            time.sleep(0.4 * n)
-    rows = data if isinstance(data, list) else (data.get("products") or [])
-    out = [{"is_cheapest_offer": p.get("is_cheapest_offer"),
+    return {"is_cheapest_offer": p.get("is_cheapest_offer"),
             "ean_offer_count": p.get("ean_offer_count"),
             "shop_name": _clean_shop(p.get("shop_name")),
             "beslist_served": p.get("beslist_served"),
             "feed_stock": p.get("feed_stock"),
-            "google_last_update": p.get("google_last_update")}
-           for p in rows
-           if _norm_ean(p.get("ean")) == nrm]
-    _cache_put(_OOS_CACHE, (country, nrm), out)
-    return out
+            "google_last_update": p.get("google_last_update"),
+            "status": p.get("status")}
+
+
+def _oos_by_eans(country: str, eans: List[str], state: str) -> Optional[Dict[str, dict]]:
+    """POST one chunk of <= _OOS_BULK_CHUNK EANs to the monitor's bulk
+    /by-eans endpoint. Returns {norm_ean: row} for the flagged EANs (the monitor
+    collapses each EAN to its cheapest/headline offer), or None if the call fails
+    after retries (caller treats as "no signal" and does NOT cache).
+
+    Unlike the served-only /oos-products worklist this returns rows regardless of
+    served-state (incl. beslist_served=False), so we no longer fall through to a
+    stale ES bestOffer guess for capped-out or no-longer-served EANs.
+    """
+    payload = json.dumps({"country": country, "state": state,
+                          "eans": list(eans)}).encode("utf-8")
+    url = f"{OOS_BASE}/by-eans"
+    # Retry a transient stall with a tight timeout rather than dropping the chunk
+    # to "no signal". Give up -> None (uncached; a transient failure must not
+    # stick for the whole TTL).
+    data = None
+    for n in range(1, _OOS_LOOKUP_ATTEMPTS + 1):
+        try:
+            req = urllib.request.Request(
+                url, data=payload, method="POST",
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            break
+        except Exception as e:  # noqa: BLE001 - transient; retry then treat as "no signal"
+            if n == _OOS_LOOKUP_ATTEMPTS:
+                logger.warning("OOS bulk /by-eans failed for %d EANs after %d attempts: %s",
+                               len(eans), _OOS_LOOKUP_ATTEMPTS, e)
+                return None
+            time.sleep(0.4 * n)
+    results = data.get("results") if isinstance(data, dict) else None
+    if results is None:
+        return None
+    return {_norm_ean(p.get("ean")): _oos_row(p) for p in results}
 
 
 def _crawl_age_days(iso: Optional[str]) -> Optional[float]:
@@ -1230,15 +1233,43 @@ def _crawl_age_days(iso: Optional[str]) -> Optional[float]:
     return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
 
 
-def _oos_offers(market: str, eans: List[str]) -> Dict[str, List[dict]]:
-    """_oos_offer() for many EANs concurrently, keyed by _norm_ean so lookups
-    line up with the (zero-padded) DMA EANs."""
+def _oos_offers(market: str, eans: List[str],
+                state: str = "active") -> Dict[str, List[dict]]:
+    """Monitor headline OOS signal for many EANs via the bulk /by-eans endpoint,
+    keyed by _norm_ean so lookups line up with the (zero-padded) DMA EANs. Each
+    value is a list (0 or 1 row) so it feeds the verdict helpers unchanged: an
+    EAN absent from the monitor response -> [] (not flagged).
+
+    Per-EAN results are cached under (country, state, norm_ean); cache hits are
+    served without a network call, the remaining misses are chunked at the
+    endpoint's 1000-EAN cap. Only successful chunks are cached.
+
+    state: "active" for the exclude (scan) pass; "problem" (open + recovered) for
+    the recovery re-enable pass.
+    """
+    country = (market or "NL").upper()
     eans = list(dict.fromkeys(eans))  # dedupe, order-preserving
     if not eans:
         return {}
-    with ThreadPoolExecutor(max_workers=min(_OOS_LOOKUP_CONCURRENCY, len(eans))) as ex:
-        rows = ex.map(lambda e: _oos_offer(market, e), eans)
-    return {_norm_ean(e): r for e, r in zip(eans, rows)}
+    out: Dict[str, List[dict]] = {}
+    misses: List[str] = []
+    for e in eans:
+        hit = _cache_get(_OOS_CACHE, (country, state, _norm_ean(e)))
+        if hit is not _CACHE_MISS:
+            out[_norm_ean(e)] = hit
+        else:
+            misses.append(e)
+    for i in range(0, len(misses), _OOS_BULK_CHUNK):
+        chunk = misses[i:i + _OOS_BULK_CHUNK]
+        rows = _oos_by_eans(country, chunk, state)   # {norm_ean: row} or None on failure
+        ok = rows is not None
+        for e in chunk:
+            ne = _norm_ean(e)
+            val = [rows[ne]] if (ok and ne in rows) else []
+            out[ne] = val
+            if ok:   # never cache a transient failure (would stick for the TTL)
+                _cache_put(_OOS_CACHE, (country, state, ne), val)
+    return out
 
 
 def _oos_cheapest_row(offers: List[dict]) -> Optional[dict]:
@@ -1272,6 +1303,9 @@ def _oos_headline_status(offers: List[dict]) -> Optional[str]:
       cheapest row, contradicted    -> 'stale'   crawl OOS flag stale (feed in stock /
                                                   no longer served) -> keep
       else any explicit False       -> 'differs' a cheaper offer is the headline -> keep
+      else any contradicted row     -> 'stale'   offer gone from beslist / feed in
+                                                  stock (is_cheapest_offer null "by
+                                                  nature") -> keep
       otherwise (no rows / null)     -> None      fall back to the ES check
     """
     if not offers:
@@ -1281,6 +1315,13 @@ def _oos_headline_status(offers: List[dict]) -> Optional[str]:
         return "stale" if _row_contradicted(win) else "match"
     if any(o.get("is_cheapest_offer") is False for o in offers):
         return "differs"
+    # No headline match and no rival-is-headline signal, but the monitor's own
+    # fresher signals contradict the crawl OOS flag — e.g. beslist_served=False
+    # (offer gone, so not wasting DMA clicks; is_cheapest_offer null by nature)
+    # or feed_stock>0. The bulk /by-eans endpoint returns these rows where the
+    # old served-only worklist dropped them to a stale ES guess. Keep, don't kill.
+    if any(_row_contradicted(o) for o in offers):
+        return "stale"
     return None
 
 
@@ -1612,46 +1653,50 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
 
 
 def oos_recovered(market: str) -> List[dict]:
-    """OOS-sourced exclusions that are safe to re-enable because the GTIN has
-    genuinely come back in stock.
+    """OOS-sourced exclusions that are safe to re-enable because the EAN is no
+    longer the served out-of-stock headline.
 
-    Recovery is judged at EAN level against the monitor's two states:
-      - ``active``    EANs still flagged OOS & live (an ``open`` offer remains).
-      - ``recovered`` EANs Google now reports back in stock (lingers 7 days).
+    Decided in ONE bulk /by-eans pass over our currently-excluded EANs in the
+    monitor's ``problem`` state (open + recovered). A DMA exclusion is GTIN-level
+    (``nl-nl-gold-<ean>``) and the monitor collapses each EAN to its headline
+    offer, so per the OOS owner's recipe:
+      * status ``open`` AND is_cheapest_offer True -> still the OOS headline
+                                                      -> KEEP excluded
+      * status ``recovered``                       -> back in stock   -> re-enable
+      * is_cheapest_offer False                    -> a rival is now the headline
+                                                      -> re-enable
+      * absent from the response                   -> recovered & aged past the
+                                                      monitor window, or the offer
+                                                      left beslist -> re-enable
 
-    A DMA exclusion is GTIN-level (``nl-nl-gold-<ean>``) while the monitor is
-    per shop-offer, so one EAN may map to several offers across shops. Applied
-    in precedence order:
-      * still in ``active``           -> an offer is still OOS    -> KEEP excluded
-      * in ``recovered`` (not active) -> genuinely back in stock  -> re-enable
-      * in neither                    -> offer vanished (we unpublished it or it
-                                         aged off, NOT a recovery) -> leave
-                                         excluded for manual review
-
-    This replaces the old "dropped off the active list => recovered" rule, which
-    could not tell a real recovery from an offer we pulled off the site.
+    Re-enabling is the safe direction (it restores a buyable ad; a product that
+    has genuinely gone won't serve anyway), so anything short of "still the open
+    OOS headline" is put back on. This replaces the old two-list set-membership
+    check (active vs recovered) that left vanished EANs excluded for manual review.
     """
-    active = set(_oos_eans(market, "active"))
-    recovered = set(_oos_eans(market, "recovered"))
+    country = market.upper()
+    rows = [r for r in list_exclusions()
+            if r["market"] == country and r.get("source") == "oos"
+            and r["status"] in ("excluded", "partial")]
+    if not rows:
+        return []
+    eans = [r["item_id"][len(DMA_ITEM_PREFIX):]
+            if r["item_id"].startswith(DMA_ITEM_PREFIX) else r["item_id"]
+            for r in rows]
+    sig = _oos_offers(market, eans, state="problem")   # {norm_ean: [row] or []}
     out: List[dict] = []
-    vanished = 0
-    for r in list_exclusions():
-        if not (r["market"] == market.upper() and r.get("source") == "oos"
-                and r["status"] in ("excluded", "partial")):
-            continue
+    kept = 0
+    for r in rows:
         iid = r["item_id"]
         ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
-        if ean in active:
-            continue  # still OOS on some offer -> keep excluded
-        if ean in recovered:
-            out.append(r)  # genuine recovery
+        offers = sig.get(_norm_ean(ean), [])
+        row = offers[0] if offers else None
+        if row and row.get("status") == "open" and row.get("is_cheapest_offer") is True:
+            kept += 1  # still the served OOS headline -> keep excluded
         else:
-            vanished += 1  # vanished / aged off -> needs manual review
-    if vanished:
-        logger.info(
-            "oos_recovered[%s]: %d OOS exclusion(s) left the active list without a "
-            "recovery signal (unpublished or aged off); left excluded for review",
-            market.upper(), vanished)
+            out.append(r)  # recovered / rival headline / gone -> re-enable
+    logger.info("oos_recovered[%s]: %d still OOS headline (kept), %d to re-enable",
+                country, kept, len(out))
     return out
 
 
