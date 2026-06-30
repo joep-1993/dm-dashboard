@@ -185,15 +185,30 @@ async def export_xlsx():
         ]
         df = pd.DataFrame([{label: r.get(key) for key, label in cols} for r in rows],
                           columns=[label for _, label in cols])
+        # Items excluded only via bestsellers/APlus have no resolvable category.
+        df["Category"] = df["Category"].fillna("").replace("", "n/a")
+        plp_urls = [r.get("plp_url") for r in rows]
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as w:
             df.to_excel(w, index=False, sheet_name="exclusions")
-            from openpyxl.styles import Alignment
+            from openpyxl.styles import Alignment, Font
             ws = w.sheets["exclusions"]
             center = Alignment(horizontal="center", vertical="center")
+            left = Alignment(horizontal="left", vertical="center")
+            labels = [label for _, label in cols]
+            left_cols = {labels.index("Category") + 1, labels.index("Shop") + 1}
+            itemid_col = labels.index("Item ID") + 1
+            link_font = Font(color="0563C1", underline="single")
             for row in ws.iter_rows():
                 for cell in row:
-                    cell.alignment = center
+                    cell.alignment = left if cell.column in left_cols else center
+            # Turn Item ID cells into hyperlinks to the product PLP url.
+            for i, url in enumerate(plp_urls):
+                if not url:
+                    continue
+                cell = ws.cell(row=i + 2, column=itemid_col)  # +2: header + 1-indexed
+                cell.hyperlink = url
+                cell.font = link_font
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         return Response(
             content=buf.getvalue(),
