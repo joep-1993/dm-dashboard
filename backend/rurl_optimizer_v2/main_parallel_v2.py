@@ -3150,6 +3150,61 @@ def process_url_v2(args):
         except Exception:
             pass  # enrichment is best-effort; never break a good redirect
 
+    # V47 (2026-06-30): correct a WRONG facet value against the live probe. The
+    # matcher selects values from the STATIC facets.csv, which can pick a value
+    # the query doesn't actually name — e.g. "tuinaarde 1 zak (40 liter)" matched
+    # inhoud_tuinaarde~"1200 liter" (23936743, not even on the live page) for a
+    # 40-liter query. When the live probe surfaces a value on that SAME axis whose
+    # name the query DISTINCTIVELY names ("40 liter" ⊆ query → ~23590378), and the
+    # URL pins a different value on that axis, override to the probe's value.
+    # Conservative: only overrides an axis ALREADY in the URL (never adds facets),
+    # and only when the query literally names the probe value; best-effort.
+    if final_redirect_url and '/c/' in final_redirect_url and has_matchable:
+        try:
+            from src.facet_probe import _value_distinctive_match as _vdm
+            _pp = derive_search_facet(parsed.main_category, parsed.keyword) or {}
+            _pv = list(_pp.get('multi_facets') or [])
+            if _pp.get('facet_name') and _pp.get('value_id') is not None:
+                _pv.append({'facet_name': _pp['facet_name'], 'value_id': _pp['value_id'],
+                            'value_name': _pp.get('value_name', '')})
+            # axis -> (live_id, live_name) for values the query distinctively names
+            _named = {}
+            for v in _pv:
+                _ax = str(v.get('facet_name', '')).lower()
+                _vn = str(v.get('value_name', '') or '')
+                if _ax and v.get('value_id') is not None and _vdm(parsed.keyword, _vn):
+                    _named[_ax] = (str(v['value_id']), _vn)
+            if _named:
+                _frag0 = final_redirect_url.split('/c/', 1)[1].rstrip('/')
+                _axpairs = [(p.split('~', 1)[0], p.split('~', 1)[1])
+                            for p in _frag0.split('~~') if '~' in p]
+                # axes appearing more than once (multi-brand, multi-materiaal)
+                # are skipped — overriding one occurrence to the probe's single
+                # value can collapse them into a duplicate (laser_360 →
+                # merk~488250~~merk~488250). merk/winkel are skipped entirely:
+                # brand-id correctness is sensitive and has its own guards, and
+                # the probe's query-named brand may differ from the (correct)
+                # matcher brand.
+                from collections import Counter as _Counter
+                _axcount = _Counter(_a.lower() for _a, _ in _axpairs)
+                _new, _names, _swapped = [], [], False
+                for _ax, _vid in _axpairs:
+                    _hit = _named.get(_ax.lower())
+                    _safe = (_ax.lower() not in ('merk', 'winkel')
+                             and _axcount[_ax.lower()] == 1)
+                    if _hit and _hit[0] != _vid and _safe:
+                        _new.append(f"{_ax}~{_hit[0]}"); _names.append(_hit[1]); _swapped = True
+                    else:
+                        _new.append(f"{_ax}~{_vid}")
+                if _swapped:
+                    final_redirect_url = (final_redirect_url.split('/c/', 1)[0]
+                                          + "/c/" + "~~".join(_new))
+                    if _names:  # reflect the corrected value name(s) in the output
+                        out_facet_value_names = ', '.join(_names)
+                    final_reason = (final_reason or '') + "; [V47] facet value corrected to query-named live value"
+        except Exception:
+            pass  # correction is best-effort; never break a good redirect
+
     # V41 (issue #2): normalise any multi-facet URL to canonical alphabetical
     # order. Several append paths prepend the existing_facet rather than merging
     # it into the alphabetical sort, so the emitted order could be non-canonical
