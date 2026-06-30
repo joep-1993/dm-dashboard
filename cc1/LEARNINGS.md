@@ -1,6 +1,15 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools DMA Exclusions — xlsx export: Item ID hyperlinks, column alignment, empty-Category "n/a" (2026-06-30)
+
+Three small export tweaks to `export_xlsx()` in `backend/dma_exclusions_router.py` (shipped `1da8a69`):
+- **Item ID → PLP hyperlink.** Each Item ID cell now hyperlinks to the product's PLP url. `plp_url` was already stored per row (added to `dma_exclusions` + selected in `list_exclusions`; `_plp_url()` makes the ES-relative `/p/…` path absolute against `https://www.beslist.nl`) but **was never in the export column map** — so the data was there, just not surfaced. Collected `plp_urls = [r.get("plp_url") for r in rows]` parallel to the DataFrame, then post-write set `cell.hyperlink = url` + blue underlined `Font(color="0563C1", underline="single")` on each Item ID cell (`ws.cell(row=i+2, column=itemid_col)` — +2 for header + 1-indexing). Rows with no `plp_url` stay plain text.
+- **Left-align Category + Shop** (rest stay centered). Column positions looked up **by label** (`labels.index("Category")+1`) not hardcoded, so they survive a column reorder.
+- **Empty Category → "n/a".** `df["Category"].fillna("").replace("", "n/a")`.
+
+**Why Category is empty for ~58/733 rows (NOT a bug).** Category/CL0 are resolved from where the item actually served in Google Ads over the last 30 days: `lookup()` queries `shopping_performance_view` and only fills Category when a campaign matches `_CATEGORY_RE = ^PLA/<cat>_[abc]$`. Empty in two cases: (1) **no serving rows** in the last 30 days (common for OOS items — `_pick_category([])`→None, note "category cannot be resolved from Google Ads"), or (2) **only served in non-category campaigns** (Amazon bestsellers / APlus / `<shop> store` — none match the regex). In both, the category trio is skipped and the item is excluded **only via the single bestsellers/APlus target**. Confirmed in DB: **all 58 empty-Category rows have exactly `Targets=1`**; every resolved-category row has 2–5 targets. CL0 follows the same NULL pattern (same serving source; `cat_empty ⇒ cl0_empty` always, but cl0 can be empty while category is set when CL0 isn't numeric). The memory `status!=REMOVED` gotcha is unrelated — it gates tree-reading, not category resolution.
+
 ## dm-tools DMA Exclusions — OOS bulk `/by-eans` migration: scan enrichment + recovery + re-enable loader (2026-06-30)
 
 The bulk endpoint requested 2026-06-29 (BACKLOG) shipped: the OOS monitor owner (Bram) built **`POST /api/v1/overrides/by-eans {country, state, eans:[...]}`** — up to **1000 EANs/call** (>1000 → HTTP 422), one **headline-collapsed row per EAN** (`is_cheapest_offer, ean_offer_count, beslist_served, feed_stock, google_last_update, shop_name, status`), uncapped and **returns `beslist_served=False` rows** (unlike the served-only `/oos-products`). Verified all four claims live before integrating. Shipped `d772355` (`backend/dma_exclusions_service.py` + `frontend/dma-exclusions.html`).
