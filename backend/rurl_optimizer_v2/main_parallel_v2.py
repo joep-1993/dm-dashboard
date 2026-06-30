@@ -108,6 +108,24 @@ RESCUE_INCLUDE_SIZE = True
 # flag so an A/B can toggle it off to compare against the prior behaviour.
 V39_BRAND_GUARD = True
 
+# V45 (2026-06-30): match types eligible for the coverage+dominance confidence
+# adjustment (score_search_derived). _COVERAGE_FLAT_TYPES are the SAME-maincat
+# search-derived branches that shipped a flat constant with NO coverage
+# handling, so coverage is added for them; the subcategory_name* types already
+# folded coverage into their score, so they get dominance+count ONLY. All of
+# these target the search-derived dominant category, so dom_share/dom_count
+# describe the chosen page. cross_maincat_fallback* is intentionally absent (its
+# dominance comes from a different maincat probe; it self-scores via `verified`).
+_V45_COVERAGE_FLAT_TYPES = {
+    'search_derived_samecat', 'search_derived_samecat_faceted',
+    'search_derived_subcat', 'search_derived_subcat_with_facet',
+    'search_derived_subcat_multi_facet',
+    'origin_subcat_name', 'cross_type_rejected_kept_origin',
+}
+_V45_DOM_SCORED_TYPES = _V45_COVERAGE_FLAT_TYPES | {
+    'subcategory_name', 'subcategory_name_with_qualifier',
+}
+
 
 def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=True,
                    rescue_include_size=True):
@@ -1156,7 +1174,11 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
                                             prefix_link=True)
         if _bad and not _covered_after_vowel_collapse(_bad, target_text, matcher):
             return None
-    score = 65 if verified else 45
+    # V45: a search-VERIFIED cross-maincat fallback (AND-mode, dom_cat_share
+    # >= 0.6, slug agreement) is stronger evidence than the old flat 65 implied —
+    # e.g. "miele stofzuiger borstels" → klussen/merk~Miele. Lift verified to 72
+    # (near tier B); unverified stays 45 (tier D, review-only).
+    score = 72 if verified else 45
     sub_id = extract_subcategory_id_from_url(res.redirect_url)
     dropped = getattr(parsed, 'existing_facet', '') or ''
     reason = (
@@ -2222,15 +2244,24 @@ def process_url_v2(args):
     final_score = reliability_score
     final_tier = reliability_tier
     flag_for_review = ''
+    # V45: facet value names appended by the search-derived branches below. The
+    # override branch (~line 3044) otherwise CLEARS out_facet_value_names because
+    # value names can't be reconstructed from the URL — so we collect them here
+    # to (a) keep the output column populated and (b) recompute a trustworthy
+    # coverage that credits the appended facet (fixes false 0%-coverage demotions
+    # of brand redirects like "bang en olufsen" → merk~Bang & Olufsen).
+    appended_value_names = []
     search_derived_total = None
     search_derived_dom_cat = ''
     search_derived_dom_share = None
+    search_derived_dom_count = None  # V45: products behind dom_share (count guard)
 
     if has_matchable and parsed.main_category and parsed.keyword:
         derived = derive_search_redirect(parsed.main_category, parsed.keyword)
         search_derived_total = derived.get('total')
         search_derived_dom_cat = derived.get('dom_cat_name', '') or ''
         search_derived_dom_share = derived.get('dom_cat_share')
+        search_derived_dom_count = derived.get('dom_cat_count')
 
         # V31 guard: when the matcher already produced a clean facet match in
         # the URL's own subcategory, do NOT let search-derived override it
@@ -2331,6 +2362,8 @@ def process_url_v2(args):
                         final_redirect_url = f"{base_redirect}/c/{fragment}"
                     final_match_type = 'search_derived_subcat_with_facet'
                     appended_value_name = pf_value_name
+                    if pf_value_name:
+                        appended_value_names.append(pf_value_name)  # V45
                     final_reason_extra = (
                         f"; appended {pf_name}~{pf_vid} ({pf_value_name!r}, "
                         f"matcher score {local_match.score})"
@@ -2379,6 +2412,8 @@ def process_url_v2(args):
                         final_redirect_url = f"{base_redirect}/c/{fragment}"
                     final_match_type = 'search_derived_subcat_with_facet'
                     appended_value_name = pf_value_name
+                    if pf_value_name:
+                        appended_value_names.append(pf_value_name)  # V45
                     final_reason_extra = (
                         f"; appended {pf_name}~{pf_vid} ({pf_value_name!r}, "
                         f"coverage {int(100*pf_cov)}%)"
@@ -2440,6 +2475,8 @@ def process_url_v2(args):
                     )
                 if _multi_frag and len(_multi) >= 2 and _still_unmatched is None:
                     _used_multi = True
+                    appended_value_names.extend(m['value_name'] for m in _multi  # V45
+                                                if m.get('value_name'))
                     final_redirect_url = f"{base_redirect}/c/{_multi_frag}"
                     final_match_type = 'search_derived_subcat_multi_facet'
                     final_reason_extra = (
@@ -2501,6 +2538,7 @@ def process_url_v2(args):
                         'search_derived_total': search_derived_total,
                         'search_derived_dom_cat': search_derived_dom_cat,
                         'search_derived_dom_share': search_derived_dom_share,
+                        'search_derived_dom_count': search_derived_dom_count,  # V45
                         'matched_keywords': matched_keywords_str,
                         'unmatched_keywords': unmatched_keywords_str,
                         'match_coverage': match_coverage,
@@ -2537,6 +2575,7 @@ def process_url_v2(args):
                     'search_derived_total': search_derived_total,
                     'search_derived_dom_cat': search_derived_dom_cat,
                     'search_derived_dom_share': search_derived_dom_share,
+                    'search_derived_dom_count': search_derived_dom_count,  # V45
                     'matched_keywords': matched_keywords_str,
                     'unmatched_keywords': unmatched_keywords_str,
                     'match_coverage': match_coverage,
@@ -2786,6 +2825,8 @@ def process_url_v2(args):
                         final_redirect_url = _canonicalize_facet_order(final_redirect_url)
                         _ex_part = final_redirect_url.split('/c/', 1)[1].rstrip('/')
                         _ex_axes.add(_ax.lower())
+                        if _hit.facet_value_name:
+                            appended_value_names.append(_hit.facet_value_name)  # V45
                         final_match_type = (final_match_type
                                             if 'qualifier' in (final_match_type or '')
                                             else f"{final_match_type}_with_qualifier")
@@ -2891,6 +2932,9 @@ def process_url_v2(args):
                     _keep_fd = [f"{_fn}~{_vid}" for _fn, _vid, _vn, _isb in _bridged_fd
                                 if _isb or _name_link or _all_repr]
                     if _keep_fd:
+                        appended_value_names.extend(  # V45
+                            _vn for _fn, _vid, _vn, _isb in _bridged_fd
+                            if (_isb or _name_link or _all_repr) and _vn)
                         _frags = ([_ef] if _ef else []) + _keep_fd
                         final_redirect_url = f"{_base}/c/" + "~~".join(sorted(set(_frags)))
                         final_match_type = 'search_derived_samecat_faceted'
@@ -3015,7 +3059,10 @@ def process_url_v2(args):
         _faxes = [p for p in _ffrag.split('~~') if '~' in p]
         out_facet_fragment = _ffrag
         out_facet_names = ', '.join(p.split('~', 1)[0] for p in _faxes)
-        out_facet_value_names = ''
+        # V45: keep the value names the search-derived branches appended (they
+        # can't be reconstructed from the URL's value IDs, but we captured them
+        # as they were appended). Falls back to '' when nothing was recorded.
+        out_facet_value_names = ', '.join(dict.fromkeys(v for v in appended_value_names if v))
         out_facet_count = len(_faxes)
 
     # V36: cross-maincat LAST-RESORT fallback. Only when the entire cascade —
@@ -3103,6 +3150,61 @@ def process_url_v2(args):
         except Exception:
             pass  # enrichment is best-effort; never break a good redirect
 
+    # V47 (2026-06-30): correct a WRONG facet value against the live probe. The
+    # matcher selects values from the STATIC facets.csv, which can pick a value
+    # the query doesn't actually name — e.g. "tuinaarde 1 zak (40 liter)" matched
+    # inhoud_tuinaarde~"1200 liter" (23936743, not even on the live page) for a
+    # 40-liter query. When the live probe surfaces a value on that SAME axis whose
+    # name the query DISTINCTIVELY names ("40 liter" ⊆ query → ~23590378), and the
+    # URL pins a different value on that axis, override to the probe's value.
+    # Conservative: only overrides an axis ALREADY in the URL (never adds facets),
+    # and only when the query literally names the probe value; best-effort.
+    if final_redirect_url and '/c/' in final_redirect_url and has_matchable:
+        try:
+            from src.facet_probe import _value_distinctive_match as _vdm
+            _pp = derive_search_facet(parsed.main_category, parsed.keyword) or {}
+            _pv = list(_pp.get('multi_facets') or [])
+            if _pp.get('facet_name') and _pp.get('value_id') is not None:
+                _pv.append({'facet_name': _pp['facet_name'], 'value_id': _pp['value_id'],
+                            'value_name': _pp.get('value_name', '')})
+            # axis -> (live_id, live_name) for values the query distinctively names
+            _named = {}
+            for v in _pv:
+                _ax = str(v.get('facet_name', '')).lower()
+                _vn = str(v.get('value_name', '') or '')
+                if _ax and v.get('value_id') is not None and _vdm(parsed.keyword, _vn):
+                    _named[_ax] = (str(v['value_id']), _vn)
+            if _named:
+                _frag0 = final_redirect_url.split('/c/', 1)[1].rstrip('/')
+                _axpairs = [(p.split('~', 1)[0], p.split('~', 1)[1])
+                            for p in _frag0.split('~~') if '~' in p]
+                # axes appearing more than once (multi-brand, multi-materiaal)
+                # are skipped — overriding one occurrence to the probe's single
+                # value can collapse them into a duplicate (laser_360 →
+                # merk~488250~~merk~488250). merk/winkel are skipped entirely:
+                # brand-id correctness is sensitive and has its own guards, and
+                # the probe's query-named brand may differ from the (correct)
+                # matcher brand.
+                from collections import Counter as _Counter
+                _axcount = _Counter(_a.lower() for _a, _ in _axpairs)
+                _new, _names, _swapped = [], [], False
+                for _ax, _vid in _axpairs:
+                    _hit = _named.get(_ax.lower())
+                    _safe = (_ax.lower() not in ('merk', 'winkel')
+                             and _axcount[_ax.lower()] == 1)
+                    if _hit and _hit[0] != _vid and _safe:
+                        _new.append(f"{_ax}~{_hit[0]}"); _names.append(_hit[1]); _swapped = True
+                    else:
+                        _new.append(f"{_ax}~{_vid}")
+                if _swapped:
+                    final_redirect_url = (final_redirect_url.split('/c/', 1)[0]
+                                          + "/c/" + "~~".join(_new))
+                    if _names:  # reflect the corrected value name(s) in the output
+                        out_facet_value_names = ', '.join(_names)
+                    final_reason = (final_reason or '') + "; [V47] facet value corrected to query-named live value"
+        except Exception:
+            pass  # correction is best-effort; never break a good redirect
+
     # V41 (issue #2): normalise any multi-facet URL to canonical alphabetical
     # order. Several append paths prepend the existing_facet rather than merging
     # it into the alphabetical sort, so the emitted order could be non-canonical
@@ -3116,6 +3218,83 @@ def process_url_v2(args):
             out_facet_fragment = _cfrag
             _caxes = [p for p in _cfrag.split('~~') if '~' in p]
             out_facet_names = ', '.join(p.split('~', 1)[0] for p in _caxes)
+
+    # V45 (2026-06-30): confidence adjustment by query coverage + category
+    # product-count dominance. The search-derived branches each shipped a flat
+    # constant (samecat=65, faceted=70, subcat-rescue=75, …) blind to how much
+    # of the query they cover or how dominant — and how well-populated — the
+    # chosen category is. score_search_derived folds in both. Scoped to the
+    # match types whose TARGET is the (same-maincat) search-derived dominant
+    # category, so dom_share/dom_count genuinely describe the chosen page:
+    #   * SAMECAT/SUBCAT flat-constant types had NO coverage handling -> add it.
+    #   * subcategory_name* already folded coverage into final_score in
+    #     calculate_reliability_score -> add ONLY dominance+count (no double-dock).
+    # cross_maincat_fallback is excluded (its dominance comes from a different
+    # maincat probe; it carries its own `verified` flag). Conservative: the
+    # count band only ever subtracts and nothing here suppresses a redirect.
+    if final_redirect_url and final_match_type in _V45_DOM_SCORED_TYPES:
+        from src.reliability_scorer import (score_search_derived as _score_sd,
+                                            calculate_reliability_score as _calc_rel)
+        from src.validation_rules import GENERIC_ADJECTIVES as _GEN_ADJ
+        # match_coverage + matched/unmatched were computed BEFORE the search-
+        # derived facet append, so a token the appended facet covers (the size
+        # "Groot" for "grote", the brand "Bang & Olufsen") reads as unmatched and
+        # coverage is falsely low. Recompute against the FINAL target text
+        # (dom_cat + appended value names) with the matcher's double-vowel
+        # collapse (grote≈groot) + stemming, and exclude pure filler/quality
+        # adjectives ("mooie") + generic size/colour adjectives from the
+        # denominator (they aren't product intent). Lift-only: coverage can rise,
+        # never fall, so this never invents a penalty.
+        _v45_cov = match_coverage
+        _v45_matched, _v45_unmatched = list(matched_keywords), list(unmatched_keywords)
+        _COV_FILLER = {'mooi', 'mooie', 'mooiste', 'leuk', 'leuke', 'handig',
+                       'handige', 'simpel', 'simpele', 'praktisch', 'praktische'}
+        if appended_value_names and non_stopword_keywords:
+            def _cv(s):
+                return matcher._collapse_double_vowels(s.rstrip('e').rstrip('s'))
+            _tgt_toks = [_cv(t) for t in re.findall(
+                r'[a-z0-9]+',
+                ' '.join([final_redirect_cat_name or ''] + appended_value_names).lower())]
+            _denom, _m2, _u2 = [], [], []
+            for _w in non_stopword_keywords:
+                if _w in _COV_FILLER:
+                    continue  # quality filler — not product intent, drop from denom
+                _denom.append(_w)
+                _wc = _cv(_w)
+                _ok = any(_wc == t or (len(_wc) >= 4 and (_wc in t or t in _wc))
+                          for t in _tgt_toks)
+                # a generic size/colour adjective the facet covers counts as
+                # matched but doesn't otherwise drive intent
+                (_m2 if (_ok or _w in matched_keywords) else _u2).append(_w)
+            if _denom:
+                _recomputed = round(100 * len(_m2) / len(_denom), 1)
+                if _recomputed > _v45_cov:
+                    _v45_cov, _v45_matched, _v45_unmatched = _recomputed, _m2, _u2
+        # subcategory_name* folded coverage into final_score via calculate_
+        # reliability_score using the STALE pre-append coverage. Re-run it with
+        # the corrected coverage and take the MAX (lift-only) before dominance.
+        if (final_match_type in ('subcategory_name', 'subcategory_name_with_qualifier')
+                and _v45_cov > match_coverage):
+            _re_base = _calc_rel(
+                match_score=r.match_score, facet_count=out_facet_count,
+                match_type='subcategory_name', is_cross_category=is_cross_category,
+                facet_value_names=out_facet_value_names, keyword=r.keyword,
+                reason=r.reason, match_coverage=_v45_cov, h1_similarity=h1_similarity,
+                matched_keywords=_v45_matched, unmatched_keywords=_v45_unmatched)
+            final_score = max(final_score, _re_base)
+        final_score = _score_sd(
+            final_score,
+            match_coverage=_v45_cov,
+            dom_share=search_derived_dom_share,
+            dom_count=search_derived_dom_count,
+            match_type=final_match_type,
+            include_coverage=(final_match_type in _V45_COVERAGE_FLAT_TYPES),
+            target_is_faceted=bool(final_redirect_url and '/c/' in final_redirect_url),
+        )
+        final_tier = get_reliability_tier(final_score)
+        # surface the corrected coverage in the output so the column matches the
+        # score (the early match_coverage predates the facet append).
+        match_coverage = _v45_cov
 
     return {
         'original_url': r.original_url,
@@ -3139,6 +3318,7 @@ def process_url_v2(args):
         'search_derived_total': search_derived_total,
         'search_derived_dom_cat': search_derived_dom_cat,
         'search_derived_dom_share': search_derived_dom_share,
+        'search_derived_dom_count': search_derived_dom_count,  # V45
         'matched_keywords': matched_keywords_str,
         'unmatched_keywords': unmatched_keywords_str,
         'match_coverage': match_coverage,

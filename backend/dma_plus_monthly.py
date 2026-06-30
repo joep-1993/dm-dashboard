@@ -736,7 +736,7 @@ def run_monthly_delta(task_id: str, wb_bytes: bytes, dry_run: bool = False,
         _history_append({
             "task_id": task_id, "operation": "monthly_delta", "country": "NL+BE",
             "status": "completed", "started_at": final.get("started_at"),
-            "finished_at": datetime.now().isoformat(),
+            "completed_at": datetime.now().isoformat(),
             "summary": summary,
             "output_path": str(out_path),
         })
@@ -826,7 +826,7 @@ def run_category_coverage(task_id: str, country: str):
         _history_append({
             "task_id": task_id, "operation": "coverage", "country": country,
             "status": "completed", "started_at": final.get("started_at"),
-            "finished_at": datetime.now().isoformat(),
+            "completed_at": datetime.now().isoformat(),
             "summary": final["summary"],
             "output_path": str(out_path),
         })

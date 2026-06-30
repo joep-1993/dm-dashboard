@@ -66,7 +66,10 @@ EARLY_STOP_COVERAGE = 0.9       # stop probing once a value covers ≥ this
 # (kills 1/1 flukes like "ivermectine" → dier~Paarden). v6: search_derived
 # SCHEMA_VERSION bumped to 4 (greedy dom_cat) — base_total/dom_slug change, so
 # re-derive probes against the new dom_cats rather than reusing stale picks.
-PROBE_SCHEMA_VERSION = 6
+# v7 (V46): Stage 1.5 subcat keyword probe now uses _value_distinctive_match,
+# so a value with extra descriptor tokens ("USB oplaadbaar" for "usb-ventilator")
+# is no longer rejected. Re-derive cached no_match picks under the new logic.
+PROBE_SCHEMA_VERSION = 7
 
 # Facet names that aren't useful for routing — operational / commercial
 # attributes that don't help the user pick a category-narrowed page.
@@ -195,6 +198,36 @@ def _value_consistent_with_keyword(keyword: str, value_name: str) -> bool:
         return False
     ktoks = _tokens(keyword)
     return all(any(_tok_links(vt, kt) for kt in ktoks) for vt in vtoks)
+
+
+# V46: generic qualifier tokens that decorate a facet value but don't carry its
+# identity. The strict matcher requires EVERY value token in the query, so a
+# value like "USB oplaadbaar" (opties_ventilator~23795868) is rejected for
+# query "usb-ventilator" because "oplaadbaar" isn't typed — even though the
+# query clearly names the distinctive token "usb". Stripping these descriptors
+# from the required-token set lets the distinctive token alone qualify the
+# value. Kept small and generic; a descriptor that IS the user's intent still
+# matches because it's then present in the query anyway.
+_VALUE_DESCRIPTOR_TOKENS = {
+    'met', 'zonder', 'voor', 'oplaadbaar', 'oplaadbar', 'extra', 'los', 'losse',
+    'incl', 'inclusief', 'inbouw', 'instelbaar', 'verstelbaar', 'draagbaar',
+}
+
+
+def _value_distinctive_match(keyword: str, value_name: str) -> bool:
+    """V46: True when the query names every DISTINCTIVE (non-descriptor) token
+    of the value. Looser than _value_matches_keyword (ignores generic qualifier
+    words like 'oplaadbaar'/'met') but still requires at least one distinctive
+    token AND that all distinctive tokens link to the query — so "USB oplaadbaar"
+    matches "usb-ventilator" while "Met timer" does NOT (its distinctive token
+    'timer' isn't in the query) and "Anti roos" does NOT match "ketoconazol
+    shampoo" (neither distinctive token links)."""
+    vtoks = _tokens(value_name)
+    distinctive = {t for t in vtoks if t not in _VALUE_DESCRIPTOR_TOKENS}
+    if not distinctive:
+        return False  # an all-descriptor value carries no identity to match on
+    ktoks = _tokens(keyword)
+    return all(any(_tok_links(vt, kt) for kt in ktoks) for vt in distinctive)
 
 
 # Size/quantity facets are excluded from multi-facet assembly: per-value
@@ -534,7 +567,7 @@ def _subcat_keyword_facet(dom_slug: str, keyword: str, bucket: _TokenBucket) -> 
             cnt = int(v.get("count") or 0)
             if vid is None or cnt <= 0:
                 continue
-            if _value_matches_keyword(keyword, vname):
+            if _value_distinctive_match(keyword, vname):
                 cand = (cnt, fname, int(vid), vname)
                 if best is None or cand > best:
                     best = cand
