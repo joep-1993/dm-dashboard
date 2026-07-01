@@ -180,7 +180,7 @@
                         <div class="d-flex align-items-center gap-2">
                             <h5 class="mb-0">Out-of-stock (OOS) waste</h5>
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; flex:0 0 auto;">
-                                <title>Products Google's crawl flagged out of stock that are still live on beslist.nl and advertised in DMA. Bridged by GTIN (nl-nl-gold-&lt;ean&gt;). Review the 30-day spend/clicks/conversions before excluding — many still convert via other in-stock shops. Excluding here is tagged 'oos'; "Re-enable recovered" puts back only EANs Google now reports back in stock (the monitor's recovered state) — items that merely vanished from the list (unpublished / aged off) are left excluded for review.</title>
+                                <title>Products on the OOS monitor's authoritative exclude list — each is guaranteed to be the cheapest, still-live offer on beslist.nl that Google currently flags out of stock (confirmed within ~2 days) — that are also live in DMA. Bridged by GTIN (nl-nl-gold-&lt;ean&gt;). Every listed candidate is safe to exclude; review the 30-day spend/clicks/conversions first. Excluding here is tagged 'oos'. "Re-enable recovered" is a separate action that puts back every excluded 'oos' EAN that has dropped off the current list (back in stock / a rival is now cheaper / gone from beslist).</title>
                                 <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
                                 <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
                                 <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
@@ -191,7 +191,7 @@
                                 <option value="NL">NL</option>
                                 <option value="BE">BE</option>
                             </select>
-                            <input id="oosLimit" type="number" min="1" value="100" class="form-control form-control-sm" style="width:130px;" placeholder="Limit" title="Cap the number of headline offers (excludable matches) to collect — scans OOS EANs until this many confirmed headline offers are found (~one ~2-min wave per ~100; blank = scan all OOS EANs)">
+                            <input id="oosLimit" type="number" min="1" value="100" class="form-control form-control-sm" style="width:130px;" placeholder="Limit" title="Cap the number of live-in-DMA candidates to collect — scans OOS EANs until this many are found (blank = scan the whole OOS list)">
                         </div>
                     </div>
                     <div class="card-body">
@@ -204,27 +204,21 @@
                             <input id="oosFilter" class="form-control form-control-sm" style="width:220px;" placeholder="filter EAN / category…" oninput="renderOos()">
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideExcluded" onchange="renderOos()"><label class="form-check-label small" for="oosHideExcluded">hide already-excluded</label></div>
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosZeroConv" onchange="renderOos()"><label class="form-check-label small" for="oosZeroConv">only 0-conversion</label></div>
-                            <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideKept" onchange="renderOos()"><label class="form-check-label small" for="oosHideKept">hide non-headline</label></div>
-                            <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideStale" onchange="renderOos()"><label class="form-check-label small" for="oosHideStale">hide stale crawl</label></div>
                         </div>
                         <div class="table-responsive" style="max-height:460px; overflow-y:auto;">
                             <table id="oosTable" class="table table-sm align-middle mb-0" style="display:none; table-layout:fixed; width:100%;">
                                 <colgroup>
                                     <col style="width:34px">
-                                    <col style="width:124px">
-                                    <col style="width:17%">
-                                    <col style="width:15%">
-                                    <col style="width:90px">
-                                    <col style="width:96px">
-                                    <col style="width:230px">
-                                    <col style="width:11%">
+                                    <col style="width:140px">
+                                    <col>
+                                    <col style="width:120px">
+                                    <col style="width:120px">
                                 </colgroup>
                                 <thead style="position:sticky; top:0;">
                                     <tr>
                                         <th><input type="checkbox" id="oosSelectAll" onclick="toggleAllOos(this.checked)"></th>
-                                        <th>EAN</th><th>Category</th><th>Shop</th>
+                                        <th>EAN</th><th>Category</th>
                                         <th>Clicks 30d</th><th>Spend 30d</th>
-                                        <th>Headline</th><th>PLP</th>
                                     </tr>
                                 </thead>
                                 <tbody id="oosBody"></tbody>
@@ -706,13 +700,9 @@
             const f = document.getElementById("oosFilter").value.trim().toLowerCase();
             const hideEx = document.getElementById("oosHideExcluded").checked;
             const zeroOnly = document.getElementById("oosZeroConv").checked;
-            const hideKept = document.getElementById("oosHideKept").checked;
-            const hideStale = document.getElementById("oosHideStale").checked;
             return oosData.candidates.filter(c => {
                 if (hideEx && c.already_excluded) return false;
                 if (zeroOnly && c.conversions > 0) return false;
-                if (hideKept && !c.headline_match) return false;  // hide everything not confirmed OOS-headline
-                if (hideStale && c.stale_crawl) return false;     // hide matches whose crawl-OOS verdict is too old
                 if (f && !(c.ean.toLowerCase().includes(f) || (c.category || "").toLowerCase().includes(f))) return false;
                 return true;
             });
@@ -728,46 +718,14 @@
             updateOosSel();
         }
 
-        // The gold ad rides the product's headline (cheapest) offer. 'differs' means
-        // the OOS EAN is NOT that offer, and 'stale' means the crawl OOS flag is
-        // contradicted (feed in stock / no longer served) — excluding either would
-        // kill a still-live ad, so both are locked out of selection (the backend also
-        // refuses them as a safety net).
-        const oosLocked = c => c.already_excluded || c.headline_status === "differs" || c.headline_status === "stale";
+        // Every candidate the scan returns is on the monitor's authoritative exclude
+        // list (guaranteed cheapest + still-live + Google-OOS + fresh), so all are
+        // safe to exclude. Only rows already excluded are locked out of selection.
+        const oosLocked = c => c.already_excluded;
 
-        function headlineBadge(c) {
-            switch (c.headline_status) {
-                case "match": {
-                    const base = '<span class="badge bg-danger-subtle text-danger border border-danger-subtle" title="OOS EAN is the advertised headline offer">OOS headline</span>';
-                    if (c.stale_crawl)
-                        return base + ` <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Google's crawl-OOS verdict is ${Math.floor(c.crawl_age_days)}d old and nothing contradicts it — the offer may already be back in stock. Verify before excluding; not auto-selected.">⚠ crawl ${Math.floor(c.crawl_age_days)}d</span>`;
-                    if (c.crawl_age_days != null)
-                        return base + ` <span class="text-muted small" title="Google's crawl-OOS verdict was refreshed ${Math.floor(c.crawl_age_days)}d ago">crawl ${Math.floor(c.crawl_age_days)}d</span>`;
-                    return base;
-                }
-                case "stale":
-                    return `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Cheapest/headline offer, but the crawl OOS flag is contradicted (offer in stock per beslist's index or the shop feed, or no longer served on beslist) — kept">stale OOS${c.headline_shop ? " @ " + esc(c.headline_shop) : ""}</span>`;
-                case "differs":
-                    return c.headline_ean
-                        ? `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Headline offer is a different, in-stock EAN — keep">live: ${esc(c.headline_ean)}${c.headline_shop ? " @ " + esc(c.headline_shop) : ""}</span>`
-                        : '<span class="badge bg-success-subtle text-success border border-success-subtle" title="A cheaper offer is the served headline — keep">non-headline (cheaper offer serves)</span>';
-                case "not_found":
-                    return '<span class="badge bg-secondary-subtle text-secondary" title="Not found in product index (likely gone)">not in index</span>';
-                case "no_headline":
-                    return '<span class="badge bg-secondary-subtle text-secondary" title="Product found but no headline offer">no headline</span>';
-                case "error":
-                    return '<span class="badge bg-warning text-dark" title="Headline lookup failed (transient)">check failed</span>';
-                default:
-                    return '<span class="text-muted">—</span>';
-            }
-        }
-
-        // "Select all" only picks confirmed, fresh OOS-headline rows. 'differs'/'stale'
-        // are locked; 'stale_crawl' matches (verdict rests on an old Google crawl) and
-        // unknown (not_found / no_headline / lookup error) stay manually checkable but
-        // are never auto-selected — we only bulk-exclude what's confirmed and current.
+        // "Select all" picks every visible, not-yet-excluded row.
         function toggleAllOos(on) {
-            oosVisible().forEach(c => { if (c.headline_match && !c.stale_crawl && !c.already_excluded) { on ? oosSelected.add(c.item_id) : oosSelected.delete(c.item_id); } });
+            oosVisible().forEach(c => { if (!c.already_excluded) { on ? oosSelected.add(c.item_id) : oosSelected.delete(c.item_id); } });
             renderOos();
         }
 
@@ -776,22 +734,17 @@
             const rows = oosVisible().map(c => {
                 const checked = oosSelected.has(c.item_id) ? "checked" : "";
                 const dis = oosLocked(c) ? "disabled" : "";
-                const muted = c.already_excluded || c.headline_status === "differs" || c.headline_status === "stale";
+                const muted = c.already_excluded;
                 return `<tr class="${muted ? 'table-light text-muted' : ''}">
                     <td><input type="checkbox" ${checked} ${dis} onclick="toggleOos('${esc(c.item_id)}', this.checked)"></td>
                     <td class="mono">${esc(c.ean)}${c.already_excluded ? ' <span class="badge badge-excluded">excluded</span>' : ''}</td>
                     <td title="${esc(c.category) || ""}">${esc(catLabel(c.category)) || "—"}</td>
-                    <td class="text-truncate" title="${esc(c.headline_shop) || ""}">${esc(c.headline_shop) || "—"}</td>
                     <td>${c.clicks.toLocaleString()}</td>
                     <td>€${c.cost_eur.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                    <td>${headlineBadge(c)}</td>
-                    <td>${safeUrl(c.plp_url)
-                        ? `<a href="${esc(safeUrl(c.plp_url))}" target="_blank" rel="noopener" class="text-truncate d-inline-block" style="max-width:100%; vertical-align:bottom;" title="${esc(c.plp_url)}">${esc(c.plp_url.replace(/^https?:\/\/www\.beslist\.nl/, ""))}</a>`
-                        : '<span class="text-muted">—</span>'}</td>
                 </tr>`;
             }).join("");
             document.getElementById("oosBody").innerHTML = rows ||
-                '<tr><td colspan="8" class="text-center text-muted py-3">No matching rows.</td></tr>';
+                '<tr><td colspan="5" class="text-center text-muted py-3">No matching rows.</td></tr>';
             updateOosSel();
         }
 
@@ -805,18 +758,14 @@
                 if (!res.ok) throw new Error(data.detail || res.status);
                 oosData = data; oosSelected.clear();
                 const t = data.totals;
-                const h = data.headline_counts || { match: 0, caution: 0, differs: 0, stale: 0, unknown: 0 };
-                const cautionNote = h.caution ? ` <span class="text-warning-emphasis">(${h.caution.toLocaleString()} ⚠ stale crawl — verify)</span>` : "";
                 const scannedNote = (data.scanned && data.scanned < data.oos_total)
                     ? ` <span class="text-muted">(scanned ${data.scanned.toLocaleString()})</span>` : "";
+                const unhealthyNote = (data.healthy === false)
+                    ? ` <span class="badge bg-warning text-dark" title="The OOS monitor reports its snapshot is stale/degraded — results may be incomplete.">⚠ monitor unhealthy</span>` : "";
                 document.getElementById("oosSummary").innerHTML =
-                    `<strong>${data.oos_total.toLocaleString()}</strong> OOS EANs${scannedNote} · <strong>${data.live_in_dma.toLocaleString()}</strong> live in DMA · ` +
+                    `<strong>${data.oos_total.toLocaleString()}</strong> OOS EANs${scannedNote} · <strong>${data.live_in_dma.toLocaleString()}</strong> live in DMA (all excludable)${unhealthyNote} · ` +
                     `last 30d in DMA: <strong>€${t.cost_eur.toLocaleString()}</strong> spend · ${t.clicks.toLocaleString()} clicks · ` +
-                    `${t.conversions.toLocaleString()} conv (€${t.conv_value_eur.toLocaleString()})<br>` +
-                    `<span class="small"><span class="text-danger fw-semibold">${h.match.toLocaleString()}</span> OOS-headline (excludable)${cautionNote} · ` +
-                    `<span class="text-success fw-semibold">${h.differs.toLocaleString()}</span> non-headline (kept) · ` +
-                    `<span class="text-warning-emphasis fw-semibold">${(h.stale || 0).toLocaleString()}</span> stale OOS (kept) · ` +
-                    `<span class="text-secondary">${h.unknown.toLocaleString()}</span> unconfirmed</span>`;
+                    `${t.conversions.toLocaleString()} conv (€${t.conv_value_eur.toLocaleString()})`;
                 document.getElementById("oosControls").style.removeProperty("display");
                 document.getElementById("oosActions").style.removeProperty("display");
                 document.getElementById("oosTable").style.display = "table";
@@ -877,11 +826,10 @@
             }
             // Done-banner summary (replaces the old blocking alert).
             const failed = results.filter(r => r.error || (r.errors && r.errors.length));
-            const skipped = results.filter(r => r.skipped);
-            const excluded = results.length - failed.length - skipped.length;
+            const excluded = results.length - failed.length;
             showOosDone({ ids: ids.length, processed: results.length, excluded,
-                          skipped: skipped.length, failed: failed.length, cancelled: oosCancel });
-            if (failed.length || skipped.length) console.log({ failed, skipped });
+                          failed: failed.length, cancelled: oosCancel });
+            if (failed.length) console.log({ failed });
             oosSelected.clear(); updateOosSel();
             // Refresh candidate + saved lists so excluded rows reflect their new state.
             // The progress UI is already gone and the banner stays put during this.
@@ -901,7 +849,6 @@
                 ? `Cancelled — processed ${s.processed} of ${s.ids} selected`
                 : `Done — processed ${s.processed} product(s)`;
             const parts = [`<strong>${head}.</strong>`, `<strong>${s.excluded}</strong> excluded`];
-            if (s.skipped) parts.push(`${s.skipped} skipped (non-headline / stale — kept live)`);
             if (s.failed) parts.push(`<strong>${s.failed}</strong> with errors (see console)`);
             document.getElementById("oosDoneText").innerHTML = parts.join(" · ");
             b.style.display = "block";
