@@ -1109,18 +1109,24 @@ def list_exclusions() -> List[dict]:
         return_db_connection(conn)
 
 
-def exclusion_targets(record_id: int) -> List[dict]:
-    """The campaigns/ad-groups a saved exclusion added the negative to."""
+def exclusion_targets(record_id: int) -> Dict[str, Any]:
+    """The campaigns/ad-groups a saved exclusion touched: the successful
+    `targets` plus any per-target `errors` from the last apply/enable run
+    (so the UI can flag which campaigns it failed on)."""
     _ensure_table()
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT item_id, targets FROM dma_exclusions WHERE id = %s",
+            cur.execute("SELECT item_id, targets, last_result FROM dma_exclusions WHERE id = %s",
                         (record_id,))
             row = cur.fetchone()
         if not row:
             raise ValueError(f"exclusion {record_id} not found")
-        return row.get("targets") or []
+        last_result = row.get("last_result") or {}
+        return {
+            "targets": row.get("targets") or [],
+            "errors": last_result.get("errors") or [],
+        }
     finally:
         return_db_connection(conn)
 

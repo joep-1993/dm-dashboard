@@ -119,7 +119,7 @@ async def cleanup_enabled_endpoint(market: str = Query("NL", description="Market
 async def exclusion_targets_endpoint(record_id: int):
     """The campaigns/ad-groups a saved exclusion was added to as a negative."""
     try:
-        return {"targets": await _run(svc_exclusion_targets, record_id)}
+        return await _run(svc_exclusion_targets, record_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

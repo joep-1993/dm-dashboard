@@ -442,7 +442,8 @@
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || res.status);
                 const targets = data.targets || [];
-                if (!targets.length) { cell.innerHTML = '<div class="px-3 py-1 small text-muted" style="text-align:left;">No campaigns recorded (nothing was applied).</div>'; return; }
+                const errors = data.errors || [];
+                if (!targets.length && !errors.length) { cell.innerHTML = '<div class="px-3 py-1 small text-muted" style="text-align:left;">No campaigns recorded (nothing was applied).</div>'; return; }
                 const sorted = [...targets].sort((a, b) =>
                     (a.campaign_name || "").localeCompare(b.campaign_name || "") ||
                     (a.ad_group_name || "").localeCompare(b.ad_group_name || ""));
@@ -452,7 +453,16 @@
                         <td style="text-align:left; padding:8px 18px;">${esc(t.campaign_name) || "—"}</td>
                         <td style="text-align:left; padding:8px 18px;">${esc(t.ad_group_name) || "—"}</td>
                     </tr>`).join("");
-                cell.innerHTML = `<div class="px-3 py-3" style="text-align:center;">
+                // Failed targets from the last apply/enable run: the negative did NOT
+                // land on these campaigns, so the product is still biddable there.
+                const shortErr = (m) => { m = String(m || "").split(" [")[0].trim(); return m.length > 160 ? m.slice(0, 160) + "…" : m; };
+                const failSorted = [...errors].sort((a, b) => (a.campaign_name || "").localeCompare(b.campaign_name || ""));
+                const failBody = failSorted.map(e => `
+                    <tr>
+                        <td style="text-align:left; padding:8px 18px;">${esc(e.campaign_name) || "—"}</td>
+                        <td style="text-align:left; padding:8px 18px; word-break:break-word;">${esc(shortErr(e.error))}</td>
+                    </tr>`).join("");
+                const okTable = targets.length ? `
                     <div class="small text-muted mb-2">Added as a negative in <strong>${targets.length}</strong> ad group(s) across <strong>${campaignCount}</strong> campaign(s):</div>
                     <table class="table table-bordered bg-white mb-0 small" style="width:80%; min-width:520px; margin:0 auto;">
                         <thead><tr>
@@ -460,8 +470,19 @@
                             <th style="text-align:left; padding:8px 18px;">Ad group</th>
                         </tr></thead>
                         <tbody>${body}</tbody>
-                    </table>
-                </div>`;
+                    </table>` : "";
+                const failTable = errors.length ? `
+                    <div class="alert alert-danger py-2 px-3 small mt-3 mb-2" style="width:80%; min-width:520px; margin:0 auto; text-align:left;">
+                        ⚠️ Failed to add the negative on <strong>${errors.length}</strong> campaign(s) — the product is <strong>still biddable</strong> there. Re-apply to retry.
+                    </div>
+                    <table class="table table-bordered bg-white mb-0 small" style="width:80%; min-width:520px; margin:0 auto;">
+                        <thead><tr>
+                            <th style="text-align:left; padding:8px 18px;">Failed campaign</th>
+                            <th style="text-align:left; padding:8px 18px;">Error</th>
+                        </tr></thead>
+                        <tbody>${failBody}</tbody>
+                    </table>` : "";
+                cell.innerHTML = `<div class="px-3 py-3" style="text-align:center;">${okTable}${failTable}</div>`;
             } catch (e) { cell.innerHTML = `<span class="text-danger small px-2">Failed to load campaigns: ${esc(e.message)}</span>`; }
         }
 
