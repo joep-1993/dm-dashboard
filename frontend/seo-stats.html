@@ -261,7 +261,7 @@
                         <tbody id="mainCatBody"></tbody>
                     </table>
                 </div>
-                <h6 class="text-muted mb-2">Top subcats</h6>
+                <h6 class="text-muted mb-2">Top deepest cats</h6>
                 <div class="table-responsive">
                     <table class="table table-hover perf-table mb-0">
                         <thead><tr id="subCatHead"></tr></thead>
@@ -365,7 +365,7 @@
         // Top-categories tables: independent sort state, default by Δ desc.
         const CAT_TABLES = {
             main: { headId: 'mainCatHead', bodyId: 'mainCatBody', withSub: false, src: 'maincats' },
-            sub:  { headId: 'subCatHead',  bodyId: 'subCatBody',  withSub: true,  src: 'subcats'  },
+            sub:  { headId: 'subCatHead',  bodyId: 'subCatBody',  withSub: true,  src: 'deepestcats' },
         };
         const catSort = { main: { col: 'delta', dir: 'desc' }, sub: { col: 'delta', dir: 'desc' } };
 
@@ -879,7 +879,7 @@
 
         function catColumns(withSub) {
             const cols = [{ key: 'maincat', label: 'Maincat', text: true }];
-            if (withSub) cols.push({ key: 'subcat', label: 'Subcat', text: true });
+            if (withSub) cols.push({ key: 'subcat', label: 'Deepest cat', text: true });
             cols.push({ key: 'p1', label: 'Week before' });
             cols.push({ key: 'p2', label: 'Selected day' });
             cols.push({ key: 'delta', label: 'Δ' });
@@ -941,7 +941,7 @@
             if (!lastDeltas) return;
             const key = catMetric === 'visits' ? 'by_visits' : 'by_revenue';
             renderCatTable('main', lastDeltas.maincats[key]);
-            renderCatTable('sub', lastDeltas.subcats[key]);
+            renderCatTable('sub', lastDeltas.deepestcats[key]);
             // Info tooltip: the two days being compared for the selected metric.
             const c = lastDeltas.comparison;
             const p1 = catMetric === 'visits' ? c.visits_p1 : c.revenue_p1;
@@ -1127,7 +1127,7 @@
             if (lastDeltas) {
                 const catSheet = (rows, withSub) => rows.map(r => {
                     const o = { Maincat: r.maincat };
-                    if (withSub) o.Subcat = r.subcat;
+                    if (withSub) o['Deepest cat'] = r.subcat;
                     o['Visits week before'] = r.visits_p1; o['Visits yesterday'] = r.visits_p2;
                     o['Visits Δ'] = r.visits_delta; o['Visits Δ%'] = r.visits_pct;
                     o['Revenue day-9'] = r.revenue_p1; o['Revenue day-2'] = r.revenue_p2;
@@ -1136,7 +1136,7 @@
                 });
                 const catKey = catMetric === 'visits' ? 'by_visits' : 'by_revenue';  // match the on-screen ranking
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.maincats[catKey], false)), 'Top maincats');
-                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.subcats[catKey], true)), 'Top subcats');
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.deepestcats[catKey], true)), 'Top deepest cats');
             }
             XLSX.writeFile(wb, `seo-stats_${lastData.start_date}_${lastData.end_date}.xlsx`);
         }
