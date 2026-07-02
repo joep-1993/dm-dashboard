@@ -3335,6 +3335,52 @@ def process_url_v2(args):
         except Exception:
             pass  # correction is best-effort; never break a good redirect
 
+    # V49 (RC4): in-subcat facet enrichment. When the settled redirect is a BARE
+    # category page (no /c/) that the query only partially covers, probe INSIDE
+    # that resolved subcategory (with query relaxation) for a distinctive non-brand
+    # facet the query names, and append it — never changing the category. This is
+    # the source-subcat probe: "pikachu" -> speelgoed_spelletjes_395615/c/
+    # personage~Pikachu, "geisoleerd tuinhuis" -> …/c/o_tuinhuis~Geïsoleerd,
+    # "2 persoons bed" (already at its source subcat via RC6) -> …/c/aantal_slaapplek.
+    # Enrichment-only + brand-excluded, so it can't misroute or pin a single-brand
+    # page (the 'peuter'->merk 'Peuterey' trap). Skipped when the source carried a
+    # facet (V41 owns that) or the query is already fully covered.
+    _RC4_ENRICH_TYPES = {
+        'category_fallback', 'suppressed_weak_to_source', 'search_derived_samecat',
+        'subcategory_name', 'subcategory_name_specific', 'origin_subcat_name',
+    }
+    if (final_redirect_url and '/c/' not in final_redirect_url
+            and not parsed.existing_facet
+            and final_match_type in _RC4_ENRICH_TYPES
+            and unmatched_keywords):
+        _r4_slug = ''
+        try:
+            _r4_seg = final_redirect_url.rstrip('/').split('/products/', 1)[1].split('/')
+            if len(_r4_seg) >= 2 and any(c.isdigit() for c in _r4_seg[1].split('_')):
+                _r4_slug = _r4_seg[1]
+        except Exception:
+            _r4_slug = ''
+        if _r4_slug:
+            from src.facet_probe import derive_insubcat_facet as _derive_insub
+            _r4_picks = _derive_insub(_r4_slug, parsed.keyword)[:3]
+            if _r4_picks:
+                _r4_frags = [f"{p['facet_name']}~{p['value_id']}" for p in _r4_picks]
+                final_redirect_url = (final_redirect_url.rstrip('/')
+                                      + "/c/" + "~~".join(_r4_frags))
+                appended_value_names.extend(p['value_name'] for p in _r4_picks
+                                            if p.get('value_name'))
+                final_match_type = 'search_derived_samecat_faceted'
+                # Reset to the faceted base so the V45 block (which follows) scores
+                # this by coverage/dominance from a sane starting point rather than
+                # inheriting a bare category_fallback's 0.
+                final_score = 70
+                is_cross_category = False
+                reject_reason = ''
+                flag_for_review = ''
+                final_reason = ((final_reason or '')
+                                + f"; [RC4] enriched bare category with in-subcat "
+                                + f"facet(s) {', '.join(_r4_frags)}")
+
     # V41 (issue #2): normalise any multi-facet URL to canonical alphabetical
     # order. Several append paths prepend the existing_facet rather than merging
     # it into the alphabetical sort, so the emitted order could be non-canonical

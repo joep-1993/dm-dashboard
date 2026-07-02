@@ -362,6 +362,94 @@ def _derive_multi_facets(dom_slug: str, keyword: str,
     return _extract_multi_facets(_fetch_subcat_facets(dom_slug, keyword, bucket), keyword)
 
 
+# --- RC4 (V49): in-subcat ENRICHMENT probe -----------------------------------
+# Enrich a bare category page with a facet the query distinctively names, probed
+# INSIDE the already-resolved subcategory. Kept entirely separate from the
+# _extract_multi_facets / Fix-D path so RC2 and the size rescue are untouched.
+import unicodedata as _ud
+
+
+def _fold(s: str) -> str:
+    """Strip diacritics so 'geisoleerd' matches the facet value 'Geïsoleerd'."""
+    return "".join(c for c in _ud.normalize("NFKD", s or "")
+                   if not _ud.combining(c))
+
+
+def _strip_parens(s: str) -> str:
+    """Drop parenthetical qualifiers: 'Pikachu (pokémon)' -> 'Pikachu '."""
+    return _re.sub(r"\([^)]*\)", " ", s or "")
+
+
+def _extract_enrichment_facets(api_facets, keyword: str) -> list[dict]:
+    """Like _extract_multi_facets but for ENRICHING a bare category: accent-folded
+    and paren-stripped so 'geisoleerd'~'Geïsoleerd' and 'pikachu'~'Pikachu
+    (pokémon)' match, and with brand/winkel EXCLUDED — a generic query token must
+    not pin a single-brand page, which also avoids the 'peuter'->merk 'Peuterey'
+    trap. Returns intent-first, count-desc picks."""
+    kw_f = _fold(keyword)
+    picks: list[dict] = []
+    for f in (api_facets or []):
+        fname = (f.get("urlName") or "").lower()
+        if (not fname or fname in ("merk", "winkel")
+                or fname in FACET_BLACKLIST or _is_size_facet(fname)):
+            continue
+        best = None
+        meta = None
+        for v in (f.get("values") or []):
+            vid = v.get("id")
+            vname = v.get("facetValue") or ""
+            cnt = int(v.get("count") or 0)
+            if vid is None or cnt <= 0:
+                continue
+            sv_f = _fold(_strip_parens(vname))
+            if not _value_distinctive_match(kw_f, sv_f):
+                continue
+            covered = {kt for kt in _tokens(kw_f)
+                       if any(_tok_links(vt, kt) for vt in _tokens(sv_f))}
+            rank = (len(covered), max((len(t) for t in covered), default=0), cnt)
+            if best is None or rank > best:
+                best = rank
+                meta = (int(vid), vname, cnt)
+        if meta:
+            picks.append({"facet_name": fname, "value_id": meta[0],
+                          "value_name": meta[1], "count": meta[2]})
+    picks.sort(key=lambda d: (
+        0 if (d["facet_name"] in _MULTI_FACET_INTENT_NAMES
+              or d["facet_name"].startswith(_MULTI_FACET_INTENT_PREFIXES)) else 1,
+        -d["count"]))
+    return picks
+
+
+def derive_insubcat_facet(subcat_slug: str, keyword: str,
+                          bucket: "Optional[_TokenBucket]" = None) -> list[dict]:
+    """RC4: probe INSIDE an already-resolved subcategory for a distinctive
+    non-brand facet the query names, with query relaxation (full query, then each
+    significant token longest-first — the exact multi-token query often has ~0
+    products in-subcat). Cached in facet_probe_cache under a 'rc4:' key so a full
+    run probes each (subcat, query) at most once; an empty result is cached too so
+    no-match rows don't re-probe. Returns a list of enrichment picks."""
+    if not subcat_slug or not keyword:
+        return []
+    ck = "rc4:" + keyword.strip().lower()
+    cached = _probe_get(subcat_slug, ck)
+    if cached is not None:
+        return cached.get("rc4_picks", [])
+    from src.validation_rules import STOPWORDS as _SW, SHOP_NAMES as _SN
+    toks = [t for t in _re.split(r"[\s\-_]+", keyword.lower())
+            if len(t) >= 3 and t not in _SW and t not in _SN and not t.isdigit()]
+    queries = [keyword] + sorted(set(toks), key=len, reverse=True)
+    if bucket is None:
+        bucket = _TokenBucket(SEARCH_QPS)
+    picks: list[dict] = []
+    for q in queries:
+        picks = _extract_enrichment_facets(
+            _fetch_subcat_facets(subcat_slug, q, bucket) or [], keyword)
+        if picks:
+            break
+    _probe_put(subcat_slug, ck, {"rc4_picks": picks})
+    return picks
+
+
 def _facets_df() -> pd.DataFrame:
     global _FACETS_CACHE
     if _FACETS_CACHE is None:
