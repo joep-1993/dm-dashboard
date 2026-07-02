@@ -32,11 +32,14 @@ calls apply()/enable(); preview()/lookup() are strictly read-only.
 """
 import os
 import re
+import heapq
 import json
 import time
 import logging
+import threading
 import urllib.parse
 import urllib.request
+from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -82,6 +85,7 @@ DMA_ITEM_PREFIX = "nl-nl-gold-"
 # network work entirely. Per-process; clears on restart. Only successful fetches
 # are cached (never transient failures).
 _SCAN_CACHE_TTL = 1800  # seconds (30 min)
+_SCAN_CACHE_MAX = 20000  # bound each scan cache; evict oldest ~10% past this
 _CACHE_MISS = object()
 _GA_CACHE: Dict[str, tuple] = {}     # ean -> (agg|None, ts)   None = queried, not live in DMA
 _ES_CACHE: Dict[str, tuple] = {}     # norm_ean -> (headline_offer dict, ts)
@@ -89,13 +93,19 @@ _ES_CACHE: Dict[str, tuple] = {}     # norm_ean -> (headline_offer dict, ts)
 
 def _cache_get(store: dict, key):
     ent = store.get(key)
-    if ent is not None and (time.time() - ent[1]) < _SCAN_CACHE_TTL:
+    if ent is not None and (time.monotonic() - ent[1]) < _SCAN_CACHE_TTL:
         return ent[0]
     return _CACHE_MISS
 
 
 def _cache_put(store: dict, key, value) -> None:
-    store[key] = (value, time.time())
+    # Long-lived uvicorn process: without a bound these caches retain every EAN
+    # ever scanned. Evict the oldest ~10% when full (amortized: once per ~2000 puts).
+    if len(store) >= _SCAN_CACHE_MAX and key not in store:
+        for k in [k for k, _ in heapq.nsmallest(_SCAN_CACHE_MAX // 10, store.items(),
+                                                 key=lambda kv: kv[1][1])]:
+            store.pop(k, None)
+    store[key] = (value, time.monotonic())
 
 # ---------------------------------------------------------------------------
 # Headline-offer check (Elasticsearch product index)
@@ -224,16 +234,28 @@ def _headline_offer_uncached(ean: str) -> Dict[str, Any]:
 # Client
 # ---------------------------------------------------------------------------
 
+# A GoogleAdsClient owns a gRPC channel + OAuth credentials; building one forces
+# a token refresh on first use. The config is market-agnostic (customer_id is
+# passed per-query, never baked in), so memoize a single process-wide instance
+# rather than rebuilding it on every lookup/resolve/apply/enable. The client's
+# channel is thread-safe, so sharing it across the ThreadPoolExecutor fan-outs
+# below is safe.
+_CLIENT: Optional[GoogleAdsClient] = None
+
+
 def _get_client() -> GoogleAdsClient:
-    config = {
-        "developer_token": os.environ.get("GOOGLE_DEVELOPER_TOKEN", ""),
-        "refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN", ""),
-        "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
-        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
-        "login_customer_id": os.environ.get("GOOGLE_LOGIN_CUSTOMER_ID", MCC_CUSTOMER_ID),
-        "use_proto_plus": True,
-    }
-    return GoogleAdsClient.load_from_dict(config)
+    global _CLIENT
+    if _CLIENT is None:
+        config = {
+            "developer_token": os.environ.get("GOOGLE_DEVELOPER_TOKEN", ""),
+            "refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN", ""),
+            "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+            "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+            "login_customer_id": os.environ.get("GOOGLE_LOGIN_CUSTOMER_ID", MCC_CUSTOMER_ID),
+            "use_proto_plus": True,
+        }
+        _CLIENT = GoogleAdsClient.load_from_dict(config)
+    return _CLIENT
 
 
 def _customer_id(market: str) -> str:
@@ -241,6 +263,27 @@ def _customer_id(market: str) -> str:
     if not cid:
         raise ValueError(f"Unknown market {market!r}; expected one of {list(ACCOUNTS)}")
     return cid
+
+
+# Per-ad-group write lock. Two exclusions/re-enables that touch the SAME ad group
+# must not mutate its criterion tree concurrently (they'd read a stale tree and
+# race: lost subdivisions / CONCURRENT_MODIFICATION). Bulk paths serialize per
+# ad group with this. Each write holds exactly one lock at a time (one ad group),
+# so there is no lock-ordering / deadlock concern.
+_AD_GROUP_LOCKS: Dict[str, threading.Lock] = {}
+_AD_GROUP_LOCKS_GUARD = threading.Lock()
+
+
+def _ad_group_lock(ad_group_id) -> threading.Lock:
+    key = str(ad_group_id)
+    lk = _AD_GROUP_LOCKS.get(key)
+    if lk is None:
+        with _AD_GROUP_LOCKS_GUARD:
+            lk = _AD_GROUP_LOCKS.get(key)
+            if lk is None:
+                lk = threading.Lock()
+                _AD_GROUP_LOCKS[key] = lk
+    return lk
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +418,7 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
         all_shops = {r["shop"] for r in serving if r["shop"]}
         shop = min(all_shops) if all_shops else None
 
-    return {
+    res = {
         "item_id": item_id,
         "market": market.upper(),
         "found": bool(serving),
@@ -389,6 +432,11 @@ def lookup(item_id: str, market: str) -> Dict[str, Any]:
             "from Google Ads (Merchant Center fallback not yet enabled)."
         ),
     }
+    # Warm the resolution cache so a follow-up resolve_targets/apply on the same
+    # id (the normal preview -> apply flow) skips this ~6s shopping_performance
+    # query. Short TTL + graceful fallback in _cached_lookup keep it fresh.
+    _cache_resolution(res)
+    return res
 
 
 def _pick_category(cands: List[str]) -> Optional[str]:
@@ -397,8 +445,11 @@ def _pick_category(cands: List[str]) -> Optional[str]:
     also matches _CATEGORY_RE and would otherwise shadow the real category,
     leaving the product excluded only via APlus/bestsellers (its CL3-OTHERS leaf
     is negative, so the trio gets skipped). Store campaigns are deferred."""
-    non_store = [c for c in cands if not c.lower().endswith(" store")]
-    return (non_store or cands or [None])[0]
+    # Pick deterministically (lowest sorted), matching the min() used for cl0/shop
+    # in lookup(): serving-row order is arbitrary, so [0] of the raw list gave a
+    # non-stable category (hence a different PLA/<cat>_a/_b/_c set) across runs.
+    non_store = sorted(c for c in cands if not c.lower().endswith(" store"))
+    return (non_store or sorted(cands) or [None])[0]
 
 
 # Resolution cache: lookup() runs a ~6s shopping_performance_view query, and it
@@ -411,7 +462,8 @@ _RES_MAX = 5000    # bound the cache; evict the oldest entries past this
 
 def _cache_resolution(res: dict) -> None:
     if len(_RES_CACHE) >= _RES_MAX:
-        for k in [k for k, _ in sorted(_RES_CACHE.items(), key=lambda kv: kv[1][1])[:_RES_MAX // 10]]:
+        for k in [k for k, _ in heapq.nsmallest(_RES_MAX // 10, _RES_CACHE.items(),
+                                                key=lambda kv: kv[1][1])]:
             _RES_CACHE.pop(k, None)
     _RES_CACHE[(res["market"], res["item_id"])] = (res, time.monotonic())
 
@@ -526,8 +578,11 @@ def _existing_negative(nodes: Dict[str, dict], subdiv_resource: str, item_id: st
     return None
 
 
-def _build_target(client, customer_id, item_id, kind, campaign, ad_group, nodes, leaf) -> dict:
-    """Assemble a per-ad-group target with the planned action, given its leaf node."""
+def _build_target(item_id, kind, campaign, ad_group, nodes, leaf) -> dict:
+    """Assemble a per-ad-group target with the planned action, given its leaf node.
+
+    Pure: works off the already-read `nodes`/`leaf`; no Google Ads client needed.
+    """
     t = {
         "kind": kind,
         "campaign_id": campaign["campaign_id"],
@@ -609,7 +664,7 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
             c, ag = pair
             nodes = _read_tree(client, customer_id, ag["ad_group_id"])
             leaf = _leaf_for_category(nodes)
-            return _build_target(client, customer_id, item_id, "category", c, ag, nodes, leaf)
+            return _build_target(item_id, "category", c, ag, nodes, leaf)
 
         if pairs:
             with ThreadPoolExecutor(max_workers=min(8, len(pairs))) as ex:
@@ -629,7 +684,7 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
             for ag in _ad_groups(client, customer_id, c["campaign_id"]):
                 nodes = _read_tree(client, customer_id, ag["ad_group_id"])
                 leaf = _bestsellers_subdiv(nodes)
-                out.append(_build_target(client, customer_id, item_id, "bestsellers", c, ag, nodes, leaf))
+                out.append(_build_target(item_id, "bestsellers", c, ag, nodes, leaf))
         return out, []
 
     def _aplus_branch():
@@ -646,7 +701,7 @@ def resolve_targets(item_id: str, market: str, campaign_filter: Optional[str] = 
             for ag in ag_rows:
                 nodes = _read_tree(client, customer_id, ag["ad_group_id"])
                 leaf = _leaf_for_aplus(nodes, cl0)
-                out.append(_build_target(client, customer_id, item_id, "aplus", c, ag, nodes, leaf))
+                out.append(_build_target(item_id, "aplus", c, ag, nodes, leaf))
         return out, warn
 
     targets: List[dict] = []
@@ -743,61 +798,112 @@ def _remove_op(client, resource_name):
 
 
 def _apply_one_target(client, customer_id, item_id, target) -> dict:
-    """Execute a single target's planned write. Returns reversal metadata."""
+    """Execute a single target's planned write. Returns reversal metadata.
+
+    Holds the ad group's write lock for the whole read+mutate so concurrent
+    exclusions touching the same ad group can't race on its criterion tree.
+    """
     agc = client.get_service("AdGroupCriterionService")
     ad_group_id = target["ad_group_id"]
-    temp = _Temp()
     rev = dict(target)  # carry kind/campaign/ad_group/leaf for enable
     leaf = target["leaf"]
 
-    if target["action"] == "append_negative":
-        op, neg_res = _unit_op(client, customer_id, ad_group_id, temp,
-                               leaf["resource"], item_id_value=item_id, negative=True)
-        resp = agc.mutate_ad_group_criteria(customer_id=customer_id, operations=[op])
-        rev["created_subdivision"] = False
-        rev["negative_resource"] = resp.results[0].resource_name
-        rev["status"] = "excluded"
-        return rev
+    with _ad_group_lock(ad_group_id):
+        temp = _Temp()
+        if target["action"] == "append_negative":
+            op, neg_res = _unit_op(client, customer_id, ad_group_id, temp,
+                                   leaf["resource"], item_id_value=item_id, negative=True)
+            resp = agc.mutate_ad_group_criteria(customer_id=customer_id, operations=[op])
+            rev["created_subdivision"] = False
+            rev["negative_resource"] = resp.results[0].resource_name
+            rev["status"] = "excluded"
+            return rev
 
-    if target["action"] == "subdivide_and_exclude":
-        # Atomic: remove biddable leaf, create subdivision in its place, add
-        # item-id OTHERS (positive, original bid) + the negative item id.
-        ca = {"index": leaf["index"], "value": leaf["value"] or ""}
-        # parent is the leaf's parent in the live tree
-        nodes = _read_tree(client, customer_id, ad_group_id)
-        live_leaf = nodes.get(leaf["resource"])
-        if live_leaf is None:
-            raise RuntimeError("leaf node disappeared before apply")
-        parent_resource = live_leaf["parent"]
-        # The biddable OTHERS unit needs a bid. Use the LIVE leaf's own bid (not
-        # the possibly-stale snapshot); if it inherits (0), fall back to the ad
-        # group's default CPC so a manual-CPC ad group doesn't reject the new
-        # unit (cpc_bid_micros REQUIRED). None is correct for auto-bidding groups.
-        bid = live_leaf["bid"] or _ad_group_cpc(client, customer_id, ad_group_id) or None
+        if target["action"] == "subdivide_and_exclude":
+            # Atomic: remove biddable leaf, create subdivision in its place, add
+            # item-id OTHERS (positive, original bid) + the negative item id.
+            ca = {"index": leaf["index"], "value": leaf["value"] or ""}
+            # parent is the leaf's parent in the live tree
+            nodes = _read_tree(client, customer_id, ad_group_id)
+            live_leaf = nodes.get(leaf["resource"])
+            if live_leaf is None:
+                raise RuntimeError("leaf node disappeared before apply")
+            parent_resource = live_leaf["parent"]
+            # The biddable OTHERS unit needs a bid. Use the LIVE leaf's own bid (not
+            # the possibly-stale snapshot); if it inherits (0), fall back to the ad
+            # group's default CPC so a manual-CPC ad group doesn't reject the new
+            # unit (cpc_bid_micros REQUIRED). None is correct for auto-bidding groups.
+            bid = live_leaf["bid"] or _ad_group_cpc(client, customer_id, ad_group_id) or None
 
-        ops = []
-        ops.append(_remove_op(client, leaf["resource"]))
-        sub_op, sub_res = _subdiv_op(client, customer_id, ad_group_id, temp, parent_resource, custom_attr=ca)
-        ops.append(sub_op)
-        others_op, others_res = _unit_op(client, customer_id, ad_group_id, temp, sub_res,
-                                         item_id_value="", negative=False, bid=bid)
-        ops.append(others_op)
-        neg_op, neg_res = _unit_op(client, customer_id, ad_group_id, temp, sub_res,
-                                   item_id_value=item_id, negative=True)
-        ops.append(neg_op)
-        resp = agc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops)
-        # resp.results order matches ops order: [remove, subdiv, others, negative]
-        rev["created_subdivision"] = True
-        rev["subdivision_resource"] = resp.results[1].resource_name
-        rev["others_resource"] = resp.results[2].resource_name
-        rev["negative_resource"] = resp.results[3].resource_name
-        rev["leaf_custom_attr"] = ca
-        rev["original_bid"] = live_leaf["bid"]
-        rev["status"] = "excluded"
-        return rev
+            ops = []
+            ops.append(_remove_op(client, leaf["resource"]))
+            sub_op, sub_res = _subdiv_op(client, customer_id, ad_group_id, temp, parent_resource, custom_attr=ca)
+            ops.append(sub_op)
+            others_op, others_res = _unit_op(client, customer_id, ad_group_id, temp, sub_res,
+                                             item_id_value="", negative=False, bid=bid)
+            ops.append(others_op)
+            neg_op, neg_res = _unit_op(client, customer_id, ad_group_id, temp, sub_res,
+                                       item_id_value=item_id, negative=True)
+            ops.append(neg_op)
+            resp = agc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops)
+            # resp.results order matches ops order: [remove, subdiv, others, negative]
+            rev["created_subdivision"] = True
+            rev["subdivision_resource"] = resp.results[1].resource_name
+            rev["others_resource"] = resp.results[2].resource_name
+            rev["negative_resource"] = resp.results[3].resource_name
+            rev["leaf_custom_attr"] = ca
+            rev["original_bid"] = live_leaf["bid"]
+            rev["status"] = "excluded"
+            return rev
 
     rev["status"] = "skipped"
     return rev
+
+
+def _persist_apply(*, item_id, market, shop, resolution, campaign_filter,
+                   results, errors, warnings, plp_url, source) -> Dict[str, Any]:
+    """Compute the exclusion status, persist the record, build the API result.
+
+    Shared tail of the single-item apply() and the bulk oos_exclude() path so
+    both produce identical records and response shapes.
+    """
+    applied = [r for r in results if r.get("result") == "excluded"]
+    # excluded = all actionable targets succeeded; partial = some applied but
+    # others errored (don't hide the failures); failed = a real error with nothing
+    # applied; already_excluded = no error, the item was already excluded wherever
+    # actionable; noop = no error, nothing actionable at all (e.g. every leaf is an
+    # allow-list negative bucket, or category unresolved). The last two used to be
+    # mislabelled "failed", prompting needless retries.
+    if applied and not errors:
+        status = "excluded"
+    elif applied:
+        status = "partial"
+    elif errors:
+        status = "failed"
+    elif any(r.get("already_excluded") for r in results):
+        status = "already_excluded"
+    else:
+        status = "noop"
+    record_id = _save_record(
+        item_id=item_id, market=market.upper(), shop=shop,
+        category=resolution.get("category"), cl0=resolution.get("cl0"),
+        campaign_filter=campaign_filter,
+        status=status,
+        plp_url=plp_url,
+        targets=applied,
+        last_result={"applied": len(applied), "errors": errors, "warnings": warnings},
+        source=source,
+    )
+    return {
+        "id": record_id,
+        "item_id": item_id,
+        "market": market.upper(),
+        "applied": len(applied),
+        "skipped": sum(1 for r in results if r.get("result") == "skipped"),
+        "errors": errors,
+        "warnings": warnings,
+        "targets": results,
+    }
 
 
 def apply(item_id: str, market: str, shop: Optional[str] = None,
@@ -809,50 +915,50 @@ def apply(item_id: str, market: str, shop: Optional[str] = None,
     plan = resolve_targets(item_id, market, campaign_filter)
     shop = shop or plan["resolution"].get("shop")
 
+    # Resolve the product PLP url (best-effort) so the Saved list can link the item
+    # id. It's an independent ES call with no bearing on the mutates, so run it
+    # concurrently with the write wave instead of serially after it.
+    ean = item_id[len(DMA_ITEM_PREFIX):] if item_id.startswith(DMA_ITEM_PREFIX) else item_id
+
+    def _plp_lookup():
+        try:
+            return headline_offer(ean).get("plp_url")
+        except Exception:  # noqa: BLE001 - never fail an apply over the PLP lookup
+            return None
+
     results: List[dict] = []
     errors: List[dict] = []
+    # Skipped targets are pure bookkeeping (no I/O); keep them out of the pool.
+    actionable: List[dict] = []
     for t in plan["targets"]:
-        if t["action"] not in ("append_negative", "subdivide_and_exclude"):
+        if t["action"] in ("append_negative", "subdivide_and_exclude"):
+            actionable.append(t)
+        else:
             results.append({**t, "result": "skipped", "reason": t.get("skip_reason")})
-            continue
+
+    def _do(t):
+        # Each target is a distinct ad group and _apply_one_target gets its own
+        # service handle, so these writes have no shared state and can run in
+        # parallel. (Cross-item bulk parallelism is NOT safe — see resolve/apply
+        # docs — but within one item the ad groups are disjoint.)
         try:
             rev = _apply_one_target(client, customer_id, item_id, t)
-            results.append({**rev, "result": "excluded"})
+            return ("ok", {**rev, "result": "excluded"})
         except Exception as e:  # noqa: BLE001 - surface per-target failures, keep going
             logger.exception("apply failed for %s", t.get("campaign_name"))
-            errors.append({"campaign_name": t["campaign_name"],
-                           "ad_group_id": t["ad_group_id"], "error": str(e)})
+            return ("err", {"campaign_name": t["campaign_name"],
+                            "ad_group_id": t["ad_group_id"], "error": str(e)})
 
-    applied = [r for r in results if r.get("result") == "excluded"]
-    # Resolve the product PLP url (best-effort) so the Saved list can link the item id.
-    ean = item_id[len(DMA_ITEM_PREFIX):] if item_id.startswith(DMA_ITEM_PREFIX) else item_id
-    try:
-        plp_url = headline_offer(ean).get("plp_url")
-    except Exception:  # noqa: BLE001 - never fail an apply over the PLP lookup
-        plp_url = None
-    # excluded = all actionable targets succeeded; partial = some applied but
-    # others errored (don't hide the failures); failed = nothing applied.
-    status = "excluded" if applied and not errors else "partial" if applied else "failed"
-    record_id = _save_record(
-        item_id=item_id, market=market.upper(), shop=shop,
-        category=plan["resolution"].get("category"), cl0=plan["resolution"].get("cl0"),
-        campaign_filter=campaign_filter,
-        status=status,
-        plp_url=plp_url,
-        targets=applied,
-        last_result={"applied": len(applied), "errors": errors, "warnings": plan["warnings"]},
-        source=source,
-    )
-    return {
-        "id": record_id,
-        "item_id": item_id,
-        "market": market.upper(),
-        "applied": len(applied),
-        "skipped": sum(1 for r in results if r.get("result") == "skipped"),
-        "errors": errors,
-        "warnings": plan["warnings"],
-        "targets": results,
-    }
+    with ThreadPoolExecutor(max_workers=min(8, len(actionable) + 1)) as ex:
+        plp_fut = ex.submit(_plp_lookup)
+        for status, payload in ex.map(_do, actionable):
+            (results if status == "ok" else errors).append(payload)
+        plp_url = plp_fut.result()
+
+    return _persist_apply(
+        item_id=item_id, market=market, shop=shop, resolution=plan["resolution"],
+        campaign_filter=campaign_filter, results=results, errors=errors,
+        warnings=plan["warnings"], plp_url=plp_url, source=source)
 
 
 def enable(record_id: int) -> Dict[str, Any]:
@@ -865,60 +971,70 @@ def enable(record_id: int) -> Dict[str, Any]:
 
     client = _get_client()
     customer_id = _customer_id(rec["market"])
-    agc = client.get_service("AdGroupCriterionService")
     item_id = rec["item_id"]
+
+    def _revert_one(t):
+        # Distinct ad groups within one item run in parallel; the per-ad-group
+        # lock also serializes this against any other item re-enabling the SAME
+        # ad group (bulk oos_reenable), so the fresh tree read below reflects the
+        # prior item's removal — that's what lets the sole-negative collapse work.
+        ad_group_id = t["ad_group_id"]
+        agc = client.get_service("AdGroupCriterionService")
+        try:
+            with _ad_group_lock(ad_group_id):
+                nodes = _read_tree(client, customer_id, ad_group_id)
+                # locate the subdivision the item lives under
+                if t.get("created_subdivision"):
+                    subdiv = nodes.get(t.get("subdivision_resource")) or _relocate_subdiv(nodes, t)
+                else:
+                    subdiv = nodes.get(t["leaf"]["resource"]) or _relocate_subdiv(nodes, t)
+                if subdiv is None:
+                    return ("err", {"campaign_name": t["campaign_name"], "error": "subdivision not found (already changed?)"})
+
+                neg = _existing_negative(nodes, subdiv["resource"], item_id)
+                ops = []
+                if neg:
+                    ops.append(_remove_op(client, neg["resource"]))
+
+                if t.get("created_subdivision"):
+                    # collapse only if our item was the sole negative AND there are no
+                    # other (hand-added) positive item leaves under the subdivision —
+                    # removing the subdivision would destroy them. The empty-value
+                    # OTHERS bucket we created doesn't count.
+                    other_negs = [n for n in _negative_item_children(nodes, subdiv["resource"])
+                                  if (n["item_id"] or "") != item_id]
+                    other_positives = [n for n in _children(nodes, subdiv["resource"])
+                                       if n["dim"] == "item_id" and not n["negative"]
+                                       and (n["item_id"] or "") not in ("", item_id)]
+                    if not other_negs and not other_positives:
+                        # remove item-id OTHERS + the subdivision, recreate biddable UNIT
+                        others = [n for n in _children(nodes, subdiv["resource"])
+                                  if n["dim"] == "item_id" and (n["item_id"] or "") == ""]
+                        for o in others:
+                            ops.append(_remove_op(client, o["resource"]))
+                        ops.append(_remove_op(client, subdiv["resource"]))
+                        temp = _Temp()
+                        ca = t.get("leaf_custom_attr") or {
+                            "index": t["leaf"]["index"], "value": t["leaf"]["value"] or ""}
+                        bid = t.get("original_bid") or _ad_group_cpc(client, customer_id, ad_group_id) or None
+                        unit_op, _ = _unit_op(client, customer_id, ad_group_id, temp, subdiv["parent"],
+                                              custom_attr=ca, negative=False, bid=bid)
+                        ops.append(unit_op)
+
+                if ops:
+                    agc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops)
+                return ("ok", {"campaign_name": t["campaign_name"], "ad_group_id": ad_group_id})
+        except Exception as e:  # noqa: BLE001
+            logger.exception("enable failed for %s", t.get("campaign_name"))
+            return ("err", {"campaign_name": t["campaign_name"], "error": str(e)})
 
     reverted: List[dict] = []
     errors: List[dict] = []
-    for t in rec.get("targets") or []:
-        ad_group_id = t["ad_group_id"]
-        try:
-            nodes = _read_tree(client, customer_id, ad_group_id)
-            # locate the subdivision the item lives under
-            if t.get("created_subdivision"):
-                subdiv = nodes.get(t.get("subdivision_resource")) or _relocate_subdiv(nodes, t)
-            else:
-                subdiv = nodes.get(t["leaf"]["resource"]) or _relocate_subdiv(nodes, t)
-            if subdiv is None:
-                errors.append({"campaign_name": t["campaign_name"], "error": "subdivision not found (already changed?)"})
-                continue
-
-            neg = _existing_negative(nodes, subdiv["resource"], item_id)
-            ops = []
-            if neg:
-                ops.append(_remove_op(client, neg["resource"]))
-
-            if t.get("created_subdivision"):
-                # collapse only if our item was the sole negative AND there are no
-                # other (hand-added) positive item leaves under the subdivision —
-                # removing the subdivision would destroy them. The empty-value
-                # OTHERS bucket we created doesn't count.
-                other_negs = [n for n in _negative_item_children(nodes, subdiv["resource"])
-                              if (n["item_id"] or "") != item_id]
-                other_positives = [n for n in _children(nodes, subdiv["resource"])
-                                   if n["dim"] == "item_id" and not n["negative"]
-                                   and (n["item_id"] or "") not in ("", item_id)]
-                if not other_negs and not other_positives:
-                    # remove item-id OTHERS + the subdivision, recreate biddable UNIT
-                    others = [n for n in _children(nodes, subdiv["resource"])
-                              if n["dim"] == "item_id" and (n["item_id"] or "") == ""]
-                    for o in others:
-                        ops.append(_remove_op(client, o["resource"]))
-                    ops.append(_remove_op(client, subdiv["resource"]))
-                    temp = _Temp()
-                    ca = t.get("leaf_custom_attr") or {
-                        "index": t["leaf"]["index"], "value": t["leaf"]["value"] or ""}
-                    bid = t.get("original_bid") or _ad_group_cpc(client, customer_id, ad_group_id) or None
-                    unit_op, _ = _unit_op(client, customer_id, ad_group_id, temp, subdiv["parent"],
-                                          custom_attr=ca, negative=False, bid=bid)
-                    ops.append(unit_op)
-
-            if ops:
-                agc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops)
-            reverted.append({"campaign_name": t["campaign_name"], "ad_group_id": ad_group_id})
-        except Exception as e:  # noqa: BLE001
-            logger.exception("enable failed for %s", t.get("campaign_name"))
-            errors.append({"campaign_name": t["campaign_name"], "error": str(e)})
+    targets = rec.get("targets") or []
+    if targets:
+        with ThreadPoolExecutor(max_workers=min(8, len(targets))) as ex:
+            for status, payload in ex.map(_revert_one, targets):
+                (reverted if status == "ok" else errors).append(payload)
 
     new_status = "enabled" if not errors else "partial"
     _update_status(record_id, new_status, {"reverted": len(reverted), "errors": errors})
@@ -1187,6 +1303,9 @@ def _ga_search_rows(ga, customer_id: str, query: str, attempts: int = 3) -> list
                 raise
             logger.warning("GA search transient error (attempt %d/%d): %s", n, attempts, e)
             time.sleep(1.5 * n)
+    # unreachable with attempts >= 1, but never silently return None (callers
+    # iterate the result, so None would raise an unhelpful TypeError downstream).
+    raise ValueError(f"_ga_search_rows called with attempts={attempts} (< 1)")
 
 
 # How many GA batch queries to run concurrently. shopping_performance_view is
@@ -1284,7 +1403,7 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     """Return OOS EANs that are live in DMA, with 30d clicks/spend/conversions
     and the campaigns they serve in. READ-ONLY (never re-enables).
 
-    The monitor's `active` list guarantees every EAN on it is the cheapest,
+    The monitor's exclude-eans list guarantees every EAN on it is the cheapest,
     still-live offer on beslist that Google currently flags OOS (confirmed within
     ~2 days), so every OOS EAN that is live in DMA is a safe exclusion candidate —
     no per-EAN headline re-verification is needed. `limit` caps how many candidates
@@ -1319,12 +1438,15 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
         pending = submit_wave(waves[0]) if waves else []
         for wi, wv in enumerate(waves):
             aggs = [f.result() for f in pending]            # gather this wave's GA
-            pending = submit_wave(waves[wi + 1]) if wi + 1 < len(waves) else []
             scanned += sum(len(b) for b in wv)
             candidates.extend(_build_oos_candidate(market, iid, a, excluded)
                               for agg in aggs for iid, a in agg.items())
             if limit and len(candidates) >= limit:
-                break
+                break                                       # don't prefetch a wave we won't use
+            # Prefetch the NEXT wave only once we know we still need it — keeps the
+            # GA pipeline full on a full scan, but on a capped scan avoids kicking
+            # off (and blocking on) a whole extra wave that cancel_futures can't stop.
+            pending = submit_wave(waves[wi + 1]) if wi + 1 < len(waves) else []
     finally:
         ga_pool.shutdown(wait=False, cancel_futures=True)   # drop any outstanding prefetch
 
@@ -1339,9 +1461,14 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     # source from the GA scan — the ES headline lookup — so it's fetched only for
     # the candidates we actually return, in parallel (cached, warm ~30ms each).
     if candidates:
+        def _plp_safe(c):
+            # A single ES hiccup must not discard the whole (minutes-long) GA scan.
+            try:
+                return headline_offer(c["ean"]).get("plp_url")
+            except Exception:  # noqa: BLE001
+                return None
         with ThreadPoolExecutor(max_workers=16) as es_pool:
-            plps = es_pool.map(lambda c: headline_offer(c["ean"]).get("plp_url"),
-                               candidates)
+            plps = es_pool.map(_plp_safe, candidates)
             for c, plp in zip(candidates, plps):
                 c["plp_url"] = plp
 
@@ -1362,22 +1489,137 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     }
 
 
+def _resolve_ad_group_target(client, customer_id, item_id, ref_target, cl0) -> dict:
+    """Re-read ONE ad group's tree and rebuild its target fresh.
+
+    Used when serializing several items through the same ad group: an earlier
+    item may have converted the leaf (biddable UNIT -> item-id SUBDIVISION), so a
+    later item must re-resolve to append its negative under the new subdivision
+    instead of trying to subdivide the (now-gone) unit again. Mirrors the per-ad-
+    group work resolve_targets() does inline, reusing the same leaf finders.
+    """
+    ad_group_id = ref_target["ad_group_id"]
+    nodes = _read_tree(client, customer_id, ad_group_id)
+    kind = ref_target["kind"]
+    if kind == "category":
+        leaf = _leaf_for_category(nodes)
+    elif kind == "bestsellers":
+        leaf = _bestsellers_subdiv(nodes)
+    elif kind == "aplus":
+        leaf = _leaf_for_aplus(nodes, cl0) if cl0 else None
+    else:
+        leaf = None
+    campaign = {"campaign_id": ref_target["campaign_id"], "campaign_name": ref_target["campaign_name"]}
+    ad_group = {"ad_group_id": ad_group_id, "ad_group_name": ref_target["ad_group_name"]}
+    return _build_target(item_id, kind, campaign, ad_group, nodes, leaf)
+
+
 def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     """Exclude a selected list of OOS item ids (source-tagged 'oos').
 
     The monitor's exclude list is authoritative — every EAN a Scan surfaced is
     guaranteed to be the cheapest, still-live, Google-OOS headline offer — so the
     selected ids are excluded directly, with no server-side re-verification.
+
+    Fast path (vs the old per-item serial apply() loop): resolve every item's
+    targets concurrently (read-only, safe), then execute grouped BY AD GROUP.
+    Distinct ad groups run in parallel; items sharing an ad group run serially
+    (the 2nd+ re-resolved against a fresh tree) so the shared bestsellers/APlus/
+    category trees never race. Each item's live mutation is identical to what the
+    old sequential apply() produced — only ordering/concurrency changed.
     """
-    results = []
+    client = _get_client()
+    customer_id = _customer_id(market)
+    # Dedup while preserving order; drop blanks.
+    seen: "OrderedDict[str, None]" = OrderedDict()
     for iid in item_ids:
+        iid = (iid or "").strip()
+        if iid:
+            seen.setdefault(iid, None)
+    ids = list(seen.keys())
+    if not ids:
+        return {"market": market.upper(), "processed": 0, "results": []}
+
+    # --- Phase A: resolve every item concurrently (READ-ONLY). resolve_targets
+    # hits _RES_CACHE warmed by oos_scan, so this is cheap after a scan. ----------
+    def _resolve(iid):
         try:
-            res = apply(iid, market, source="oos")
-            results.append({"item_id": iid, "id": res["id"], "applied": res["applied"],
-                            "errors": res["errors"]})
+            return iid, resolve_targets(iid, market), None
         except Exception as e:  # noqa: BLE001
-            logger.exception("oos_exclude failed for %s", iid)
-            results.append({"item_id": iid, "error": str(e)})
+            logger.exception("oos_exclude resolve failed for %s", iid)
+            return iid, None, str(e)
+
+    with ThreadPoolExecutor(max_workers=min(16, len(ids))) as ex:
+        resolved = list(ex.map(_resolve, ids))
+
+    per_item: "OrderedDict[str, dict]" = OrderedDict()
+    groups: Dict[str, list] = defaultdict(list)  # ad_group_id -> [(iid, target, cl0)]
+    for iid, plan, err in resolved:
+        pi = {"plan": plan, "resolve_error": err, "results": [], "errors": []}
+        per_item[iid] = pi
+        if plan is None:
+            continue
+        cl0 = plan["resolution"].get("cl0")
+        for t in plan["targets"]:
+            if t["action"] in ("append_negative", "subdivide_and_exclude"):
+                groups[t["ad_group_id"]].append((iid, t, cl0))
+            else:
+                pi["results"].append({**t, "result": "skipped", "reason": t.get("skip_reason")})
+
+    # --- Phase B: execute ad groups concurrently, items serial within a group ----
+    def _run_group(items):
+        out = []  # (iid, kind, payload) with kind in {"ok","err","skip"}
+        for i, (iid, ref_t, cl0) in enumerate(items):
+            try:
+                # 1st item's resolved target is still fresh (nothing has mutated
+                # this ad group yet); 2nd+ re-resolve to see the new subdivision.
+                t = ref_t if i == 0 else _resolve_ad_group_target(client, customer_id, iid, ref_t, cl0)
+                if t["action"] in ("append_negative", "subdivide_and_exclude"):
+                    rev = _apply_one_target(client, customer_id, iid, t)
+                    out.append((iid, "ok", {**rev, "result": "excluded"}))
+                else:
+                    out.append((iid, "skip", {**t, "result": "skipped", "reason": t.get("skip_reason")}))
+            except Exception as e:  # noqa: BLE001
+                logger.exception("oos_exclude apply failed for %s / %s", iid, ref_t.get("campaign_name"))
+                out.append((iid, "err", {"campaign_name": ref_t["campaign_name"],
+                                         "ad_group_id": ref_t["ad_group_id"], "error": str(e)}))
+        return out
+
+    if groups:
+        with ThreadPoolExecutor(max_workers=min(16, len(groups))) as ex:
+            for grp_out in ex.map(_run_group, list(groups.values())):
+                for iid, kind, payload in grp_out:
+                    per_item[iid]["errors" if kind == "err" else "results"].append(payload)
+
+    # --- PLP enrichment (best-effort, warm ES from scan), parallel --------------
+    live_ids = [iid for iid, pi in per_item.items() if pi["plan"] is not None]
+
+    def _plp(iid):
+        ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
+        try:
+            return iid, headline_offer(ean).get("plp_url")
+        except Exception:  # noqa: BLE001 - never fail an exclude over the PLP lookup
+            return iid, None
+
+    plps: Dict[str, Optional[str]] = {}
+    if live_ids:
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            plps = dict(ex.map(_plp, live_ids))
+
+    # --- Phase C: persist per item + build response -----------------------------
+    results = []
+    for iid, pi in per_item.items():
+        if pi["plan"] is None:
+            results.append({"item_id": iid, "error": pi["resolve_error"] or "resolution failed"})
+            continue
+        plan = pi["plan"]
+        out = _persist_apply(
+            item_id=iid, market=market, shop=plan["resolution"].get("shop"),
+            resolution=plan["resolution"], campaign_filter=None,
+            results=pi["results"], errors=pi["errors"],
+            warnings=plan["warnings"], plp_url=plps.get(iid), source="oos")
+        results.append({"item_id": iid, "id": out["id"], "applied": out["applied"],
+                        "errors": out["errors"]})
     return {"market": market.upper(), "processed": len(results), "results": results}
 
 
@@ -1424,13 +1666,24 @@ def oos_recovered(market: str) -> List[dict]:
 
 
 def oos_reenable(market: str) -> Dict[str, Any]:
-    """Re-enable every recovered OOS exclusion for a market."""
+    """Re-enable every recovered OOS exclusion for a market.
+
+    enable() calls run concurrently: each is independent, and _revert_one holds
+    the per-ad-group lock, so two records that share an ad group (e.g. Amazon
+    bestsellers) serialize on it and each reads a fresh tree — the sole-negative
+    collapse stays correct — while records on disjoint ad groups run in parallel.
+    """
     recovered = oos_recovered(market)
-    results = []
-    for r in recovered:
+    if not recovered:
+        return {"market": market.upper(), "recovered": 0, "results": []}
+
+    def _one(r):
         try:
-            results.append(enable(r["id"]))
+            return enable(r["id"])
         except Exception as e:  # noqa: BLE001
             logger.exception("oos_reenable failed for %s", r["id"])
-            results.append({"id": r["id"], "error": str(e)})
+            return {"id": r["id"], "error": str(e)}
+
+    with ThreadPoolExecutor(max_workers=min(8, len(recovered))) as ex:
+        results = list(ex.map(_one, recovered))
     return {"market": market.upper(), "recovered": len(recovered), "results": results}

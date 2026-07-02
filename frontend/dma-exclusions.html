@@ -27,6 +27,8 @@
         .badge-enabled { background-color: #00b894 !important; }
         .badge-partial { background-color: #e17055 !important; }
         .badge-failed { background-color: #636e72 !important; }
+        .badge-already { background-color: #0984e3 !important; }
+        .badge-noop { background-color: #d4a017 !important; color: #1a1a1a !important; }
         #savedTable th, #savedTable td { text-align: center; vertical-align: middle; }
         /* Left-align Category (5) and Shop (6) */
         #savedTable th:nth-child(5), #savedTable td:nth-child(5),
@@ -482,7 +484,7 @@
         }
 
         function statusBadge(s) {
-            const cls = { excluded: "badge-excluded", enabled: "badge-enabled", partial: "badge-partial", failed: "badge-failed" }[s] || "bg-secondary";
+            const cls = { excluded: "badge-excluded", enabled: "badge-enabled", partial: "badge-partial", failed: "badge-failed", already_excluded: "badge-already", noop: "badge-noop" }[s] || "bg-secondary";
             return `<span class="badge ${cls}">${esc(s)}</span>`;
         }
 
