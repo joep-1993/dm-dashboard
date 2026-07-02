@@ -41,7 +41,7 @@
         .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
         /* table-layout:fixed clips column widths but not cell content — keep the
            Headline badge / PLP link / Shop name from spilling past their cell. */
-        #oosTable tbody td { overflow: hidden; }
+        #oosTable tbody td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #oosTable tbody td .badge { max-width: 100%; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
     </style>
 </head>
@@ -201,24 +201,25 @@
                             <button class="btn btn-sm btn-fill-primary" onclick="hideOosDone(); scanOos()">Scan OOS</button>
                         </div>
                         <div id="oosControls" class="d-flex gap-2 align-items-center mb-2 flex-wrap" style="display:none !important;">
-                            <input id="oosFilter" class="form-control form-control-sm" style="width:220px;" placeholder="filter EAN / category…" oninput="renderOos()">
+                            <input id="oosFilter" class="form-control form-control-sm" style="width:220px;" placeholder="filter EAN / category / shop…" oninput="renderOos()">
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideExcluded" onchange="renderOos()"><label class="form-check-label small" for="oosHideExcluded">hide already-excluded</label></div>
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosZeroConv" onchange="renderOos()"><label class="form-check-label small" for="oosZeroConv">only 0-conversion</label></div>
                         </div>
                         <div class="table-responsive" style="max-height:460px; overflow-y:auto;">
-                            <table id="oosTable" class="table table-sm align-middle mb-0" style="display:none; table-layout:fixed; width:100%;">
+                            <table id="oosTable" class="table table-sm align-middle mb-0" style="display:none; table-layout:fixed; width:auto; min-width:820px;">
                                 <colgroup>
-                                    <col style="width:34px">
-                                    <col style="width:140px">
-                                    <col>
-                                    <col style="width:120px">
-                                    <col style="width:120px">
+                                    <col style="width:36px">
+                                    <col style="width:150px">
+                                    <col style="width:240px">
+                                    <col style="width:190px">
+                                    <col style="width:100px">
+                                    <col style="width:110px">
                                 </colgroup>
                                 <thead style="position:sticky; top:0;">
                                     <tr>
                                         <th><input type="checkbox" id="oosSelectAll" onclick="toggleAllOos(this.checked)"></th>
-                                        <th>EAN</th><th>Category</th>
-                                        <th>Clicks 30d</th><th>Spend 30d</th>
+                                        <th>EAN</th><th>Category</th><th>Shop</th>
+                                        <th class="text-end">Clicks 30d</th><th class="text-end">Spend 30d</th>
                                     </tr>
                                 </thead>
                                 <tbody id="oosBody"></tbody>
@@ -703,7 +704,7 @@
             return oosData.candidates.filter(c => {
                 if (hideEx && c.already_excluded) return false;
                 if (zeroOnly && c.conversions > 0) return false;
-                if (f && !(c.ean.toLowerCase().includes(f) || (c.category || "").toLowerCase().includes(f))) return false;
+                if (f && !(c.ean.toLowerCase().includes(f) || (c.category || "").toLowerCase().includes(f) || (c.shop || "").toLowerCase().includes(f))) return false;
                 return true;
             });
         }
@@ -737,14 +738,17 @@
                 const muted = c.already_excluded;
                 return `<tr class="${muted ? 'table-light text-muted' : ''}">
                     <td><input type="checkbox" ${checked} ${dis} onclick="toggleOos('${esc(c.item_id)}', this.checked)"></td>
-                    <td class="mono">${esc(c.ean)}${c.already_excluded ? ' <span class="badge badge-excluded">excluded</span>' : ''}</td>
+                    <td class="mono" title="${esc(c.plp_url) || esc(c.ean)}">${safeUrl(c.plp_url)
+                        ? `<a href="${esc(safeUrl(c.plp_url))}" target="_blank" rel="noopener">${esc(c.ean)}</a>`
+                        : esc(c.ean)}${c.already_excluded ? ' <span class="badge badge-excluded">excluded</span>' : ''}</td>
                     <td title="${esc(c.category) || ""}">${esc(catLabel(c.category)) || "—"}</td>
-                    <td>${c.clicks.toLocaleString()}</td>
-                    <td>€${c.cost_eur.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                    <td title="${esc(c.shop) || ""}">${esc(c.shop) || "—"}</td>
+                    <td class="text-end">${c.clicks.toLocaleString()}</td>
+                    <td class="text-end">€${c.cost_eur.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                 </tr>`;
             }).join("");
             document.getElementById("oosBody").innerHTML = rows ||
-                '<tr><td colspan="5" class="text-center text-muted py-3">No matching rows.</td></tr>';
+                '<tr><td colspan="6" class="text-center text-muted py-3">No matching rows.</td></tr>';
             updateOosSel();
         }
 

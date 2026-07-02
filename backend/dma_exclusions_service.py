@@ -1266,6 +1266,8 @@ def _build_oos_candidate(market: str, iid: str, a: dict, excluded: set) -> dict:
         "item_id": iid,
         "ean": iid[len(DMA_ITEM_PREFIX):],
         "category": cat,
+        "shop": shop,
+        "plp_url": None,   # filled in by oos_scan for the final (capped) candidate set
         "campaigns": camps,
         "uncovered_campaigns": sorted(c for c in camps if _campaign_family(c) == "other"),
         "fully_covered": "other" not in fams,
@@ -1332,6 +1334,16 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     candidates.sort(key=lambda c: c["cost_eur"], reverse=True)
     if limit:
         candidates = candidates[:limit]
+
+    # Enrich the final (capped) set with the product's PLP url. This is a separate
+    # source from the GA scan — the ES headline lookup — so it's fetched only for
+    # the candidates we actually return, in parallel (cached, warm ~30ms each).
+    if candidates:
+        with ThreadPoolExecutor(max_workers=16) as es_pool:
+            plps = es_pool.map(lambda c: headline_offer(c["ean"]).get("plp_url"),
+                               candidates)
+            for c, plp in zip(candidates, plps):
+                c["plp_url"] = plp
 
     return {
         "market": market.upper(),
