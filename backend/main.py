@@ -41,6 +41,7 @@ def _set_validation_task(task_id, data):
 from backend.database import get_db_connection, get_output_connection, return_db_connection, return_output_connection
 from backend.scraper_service import scrape_product_page, scrape_product_page_api, sanitize_content, is_main_category_url, MAIN_CATEGORY_H1
 from backend.gpt_service import generate_product_content, generate_main_category_content, check_content_has_valid_links
+from backend.gpt_service_v3 import generate_product_content_v3, resolve_maincat_from_url
 from backend.link_validator import validate_content_links, validate_and_fix_content_links
 from backend.faq_service import process_single_url_faq
 from backend.batch_api_service import start_faq_batch, start_kopteksten_batch, start_titles_batch, get_batch_status
@@ -196,6 +197,13 @@ app.include_router(seo_stats_router)
 
 # Include dma_exclusions router (exclude individual products from DMA campaigns)
 app.include_router(dma_exclusions_router)
+
+# Koptekst-promptversie voor NIEUW gegenereerde content. "v3" = per-maincat
+# informationele koopgids-prompts (gpt_service_v3); "v1" = originele promo-prompt
+# (gpt_service.generate_product_content). Zet KOPTEKST_PROMPT_VERSION=v1 om terug
+# te vallen op v1 zonder codewijziging.
+KOPTEKST_PROMPT_VERSION = os.getenv("KOPTEKST_PROMPT_VERSION", "v3").strip().lower()
+print(f"[startup] Koptekst-promptversie: {KOPTEKST_PROMPT_VERSION}")
 
 # Include task_scheduler router (env-gated — Windows-only, depends on schtasks)
 TASK_SCHEDULER_ENABLED = os.getenv("ENABLE_TASK_SCHEDULER", "false").lower() == "true"
@@ -374,18 +382,36 @@ def process_single_url(url: str, conservative_mode: bool = False):
                     main_cat_slug, _, _ = parse_beslist_url(url)
                     content_topic = MAIN_CATEGORY_H1.get(main_cat_slug, scraped_data['h1_title'])
                     print(f"[DEBUG] Main category detected: {url[:80]}... using H1 '{content_topic}' and {len(scraped_data['products'])} products")
-                    ai_content = generate_main_category_content(
-                        content_topic,
-                        scraped_data['products']
-                    )
+                    if KOPTEKST_PROMPT_VERSION == "v3":
+                        maincat = resolve_maincat_from_url(url)
+                        print(f"[DEBUG] v3 koptekst (main-cat), maincat='{maincat}'")
+                        ai_content = generate_product_content_v3(
+                            content_topic,
+                            scraped_data['products'],
+                            maincat,
+                        )
+                    else:
+                        ai_content = generate_main_category_content(
+                            content_topic,
+                            scraped_data['products']
+                        )
                 else:
                     # Use product_subject if available (from API), otherwise fall back to h1_title
                     content_topic = scraped_data.get('product_subject') or scraped_data['h1_title']
                     print(f"[DEBUG] Generating AI content for {url[:80]}... with topic '{content_topic}' and {len(scraped_data['products'])} products")
-                    ai_content = generate_product_content(
-                        content_topic,
-                        scraped_data['products']
-                    )
+                    if KOPTEKST_PROMPT_VERSION == "v3":
+                        maincat = resolve_maincat_from_url(url)
+                        print(f"[DEBUG] v3 koptekst, maincat='{maincat}'")
+                        ai_content = generate_product_content_v3(
+                            content_topic,
+                            scraped_data['products'],
+                            maincat,
+                        )
+                    else:
+                        ai_content = generate_product_content(
+                            content_topic,
+                            scraped_data['products']
+                        )
                 print(f"[DEBUG] AI content generated, length: {len(ai_content)}")
 
                 # Sanitize content for SQL
