@@ -167,23 +167,60 @@ def _v27_reject_reason(
     return None
 
 
+def _bridge_stem(w: str) -> str:
+    """Normalize a single token to a comparable Dutch stem for bridging.
+
+    Strips one plural suffix, then undoes the two spelling changes Dutch makes
+    when pluralizing so the singular and plural forms collapse to the same stem:
+      * final-consonant voicing:  dief -> dieven (f->v),  doos -> dozen (s->z),
+        huis -> huizen — map a trailing v/z back to f/s.
+      * open/closed-syllable double vowel:  doos/dozen, boot/boten — collapse
+        'aa','ee','oo','uu' to a single vowel.
+    So kruimeldief == kruimeldieven and aftakdoos == aftakdozen after stemming,
+    which the old `rstrip('s').rstrip('e')` could not reach (f/v, s/z, oo/o)."""
+    for suf in ('eren', 'en', 's'):
+        if w.endswith(suf) and len(w) - len(suf) >= 3:
+            w = w[:-len(suf)]
+            break
+    if w.endswith('v'):
+        w = w[:-1] + 'f'
+    elif w.endswith('z'):
+        w = w[:-1] + 's'
+    return re.sub(r'([aeou])\1+', r'\1', w)
+
+
 def _keyword_bridges_value(keyword: Optional[str], value_names: Optional[str]) -> bool:
     """Issue #3: True when at least one content token of the keyword lexically
     overlaps the facet value name(s) (exact, or a >=4-char stem appearing in
     either direction). Deliberately loose — it only gates a hard-floor, so a
     false 'bridge' just leaves the normal score in place. "vogelgeluiden" vs
-    "Keuken" has no bridge; "kunststof tuinstoel" vs "Kunststof" does."""
+    "Keuken" has no bridge; "kunststof tuinstoel" vs "Kunststof" does.
+
+    The stem comparison normalizes Dutch plural spelling changes (f/v, s/z,
+    double-vowel) so "kruimeldief"~"Kruimeldieven" and "aftakdoos"~"Aftakdozen"
+    bridge — without this the head noun fails to match its own category name and
+    an otherwise-good facet gets dropped from the redirect."""
     kt = [w for w in re.findall(r'[a-z0-9]+', (keyword or '').lower()) if len(w) >= 3]
     vt = re.findall(r'[a-z0-9]+', (value_names or '').lower())
     if not kt or not vt:
         return False
     for k in kt:
-        ks = k.rstrip('s').rstrip('e')
+        ks = k.rstrip('s').rstrip('e')          # original loose stem
+        kstem = _bridge_stem(k)                 # voicing + double-vowel stem
         for v in vt:
             if k == v:
                 return True
+            # original raw-stem containment (kept verbatim so nothing that
+            # bridged before stops bridging — the stem branch is additive only)
             if len(ks) >= 4 and (ks in v or (len(v) >= 4 and v.rstrip('s').rstrip('e') in k)):
                 return True
+            # additive: Dutch plural voicing / double-vowel (dief~dieven,
+            # doos~dozen). Guarded on ORIGINAL token length so an aggressive
+            # stem can't drop a match below the length floor.
+            if len(k) >= 4 and len(v) >= 4:
+                vstem = _bridge_stem(v)
+                if kstem in vstem or vstem in kstem:
+                    return True
     return False
 
 
@@ -558,7 +595,16 @@ def score_search_derived(
     """
     score = float(base)
     if include_coverage:
-        score += _band(match_coverage, COVERAGE_BANDS)
+        cov_adj = _band(match_coverage, COVERAGE_BANDS)
+        # A BARE-category redirect can't filter a dropped query token, so a
+        # partially-covered query is a poorer fit than the same coverage on a
+        # faceted page (whose /c/ value captures the extra token). Deepen the
+        # penalty for bare targets so a query with a real qualifier dropped falls
+        # to tier D. "aftakdoos waterdicht" -> bare Aftakdozen (cov 50%, the
+        # 'waterdicht' filter lost) should not sit in tier C on dominance alone.
+        if cov_adj < 0 and not target_is_faceted:
+            cov_adj -= 8
+        score += cov_adj
     # Dominance only earns its full weight when it rests on enough products: a
     # high share over a tiny set is the motorhelm→Videocamera's (116 products,
     # share 1.0) failure mode, so we cap the dominance BONUS when the count is
@@ -568,6 +614,12 @@ def score_search_derived(
     if (dom_adj > 0 and not target_is_faceted
             and dom_count is not None and dom_count < DOMINANCE_MIN_COUNT):
         dom_adj = 0  # don't reward dominance we can't trust
+    # Dominance must not rescue a poorly-covered BARE category: a query missing a
+    # real token sent to the whole (dominant) category is a weak fit regardless
+    # of how dominant that category is. Mirrors the band comment's stated intent.
+    if (dom_adj > 0 and not target_is_faceted
+            and match_coverage is not None and match_coverage < 60):
+        dom_adj = 0
     score += dom_adj
     # Count penalty: full bands for bare-category redirects (thin dominant cat =
     # noise); milder bands for faceted targets (narrow by design — only a

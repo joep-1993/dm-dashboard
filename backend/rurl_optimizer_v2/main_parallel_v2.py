@@ -126,6 +126,23 @@ _V45_DOM_SCORED_TYPES = _V45_COVERAGE_FLAT_TYPES | {
     'subcategory_name', 'subcategory_name_with_qualifier',
 }
 
+# V48 (RC8): curated overrides for the rare redirects whose correct target is a
+# semantic leap NO generic heuristic can reach — e.g. "wasmachine droger" in the
+# huis_tuin context means a FURNITURE cabinet to house a washer/dryer, not a
+# washing machine. Keyed by (main_category, normalized-space keyword); the value
+# is the fully-formed target URL. Kept deliberately tiny — add only cases
+# confirmed underivable, never as a substitute for a real matching rule.
+CURATED_OVERRIDES = {
+    ('huis_tuin', 'wasmachine droger'):
+        'https://www.beslist.nl/products/meubilair/meubilair_389371_395590'
+        '/c/t_badkast~23813977',
+    # tochtstopper == draft excluder; the klussen subcat is named "Tochtstrips",
+    # a synonym the query can't name-match, and there's no klussen search
+    # evidence to derive it — a curated synonym is the only reliable route.
+    ('huis_tuin', 'tochtstopper'):
+        'https://www.beslist.nl/products/klussen/klussen_486172_488847/',
+}
+
 
 def init_worker_v2(cache_file, fuzzy_threshold, use_token_coverage=True,
                    rescue_include_size=True):
@@ -1178,7 +1195,14 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
     # >= 0.6, slug agreement) is stronger evidence than the old flat 65 implied —
     # e.g. "miele stofzuiger borstels" → klussen/merk~Miele. Lift verified to 72
     # (near tier B); unverified stays 45 (tier D, review-only).
-    score = 72 if verified else 45
+    # V48 (RC7): an EXACT subcat-name match (score >= 99) that the Search API
+    # confirms with a high AND-share (>= 0.9) is as reliable as a same-maincat
+    # name match — earn tier B. "miele stofzuiger borstels" -> klussen 'Borstels'
+    # (name 100, AND 99%) was flagged as scored too low at 72.
+    if verified and (fb_m.get('score', 0) or 0) >= 99 and (pv.get('dom_cat_share') or 0) >= 0.9:
+        score = 80
+    else:
+        score = 72 if verified else 45
     sub_id = extract_subcategory_id_from_url(res.redirect_url)
     dropped = getattr(parsed, 'existing_facet', '') or ''
     reason = (
@@ -2929,12 +2953,32 @@ def process_url_v2(args):
                     _sig_toks = [_w for _w in re.split(r'[\s\-_]+', (parsed.keyword or '').lower())
                                  if len(_w) >= 3 and _w not in STOPWORDS and _w not in SHOP_NAMES]
                     _all_repr = bool(_sig_toks) and all(_bridge_l13(_w, _repr_text) for _w in _sig_toks)
-                    _keep_fd = [f"{_fn}~{_vid}" for _fn, _vid, _vn, _isb in _bridged_fd
-                                if _isb or _name_link or _all_repr]
+                    # V48 (RC2): a NON-brand facet whose value distinctively matches
+                    # the query — the query names every non-descriptor token of the
+                    # value — is a strong signal on its own, so keep it even without
+                    # name_link/all_repr. "asics gel-blast ff" -> populaire_serie
+                    # 'Asics Gel'. Brand facets keep the existing Q1 rule (append
+                    # only when the query literally names the brand, via _isb).
+                    from src.facet_probe import _value_distinctive_match as _distinct_fd
+                    _kept_fd = [(_fn, _vid, _vn, _isb) for _fn, _vid, _vn, _isb in _bridged_fd
+                                if _isb or _name_link or _all_repr
+                                or (not _isb and _distinct_fd(parsed.keyword, _vn))]
+                    # V48 (RC2): drop a brand facet a kept specific facet already
+                    # subsumes — populaire_serie 'Asics Gel' covers the brand token
+                    # 'asics', so merk~Asics is redundant noise on the same page.
+                    def _vtoks_fd(_s):
+                        return {_w for _w in re.split(r'[\s\-_]+', (_s or '').lower())
+                                if len(_w) >= 3 and _w not in STOPWORDS and _w not in SHOP_NAMES}
+                    _spec_toks = set()
+                    for _fn, _vid, _vn, _isb in _kept_fd:
+                        if not _isb:
+                            _spec_toks |= _vtoks_fd(_vn)
+                    _final_fd = [(_fn, _vid, _vn, _isb) for _fn, _vid, _vn, _isb in _kept_fd
+                                 if not (_isb and _spec_toks and _vtoks_fd(_vn) <= _spec_toks)]
+                    _keep_fd = [f"{_fn}~{_vid}" for _fn, _vid, _vn, _isb in _final_fd]
                     if _keep_fd:
                         appended_value_names.extend(  # V45
-                            _vn for _fn, _vid, _vn, _isb in _bridged_fd
-                            if (_isb or _name_link or _all_repr) and _vn)
+                            _vn for _fn, _vid, _vn, _isb in _final_fd if _vn)
                         _frags = ([_ef] if _ef else []) + _keep_fd
                         final_redirect_url = f"{_base}/c/" + "~~".join(sorted(set(_frags)))
                         final_match_type = 'search_derived_samecat_faceted'
@@ -3065,6 +3109,39 @@ def process_url_v2(args):
         out_facet_value_names = ', '.join(dict.fromkeys(v for v in appended_value_names if v))
         out_facet_count = len(_faxes)
 
+    # V48 (RC5): prefer a search-VERIFIED cross-maincat subcategory-name match
+    # over a WEAK same-maincat search-derived stray. Fix D can land a query on a
+    # same-maincat category whose name the query doesn't even bridge (bedhekje ->
+    # meubilair 'Kajuitbedden', share 0.61) while the query EXACTLY names a subcat
+    # in another maincat that the Search API confirms (baby_peuter 'Bedhekjes',
+    # name score 99, AND-share 0.99). Guarded tightly: only when the current
+    # result is a search-derived stray whose category name the query does NOT
+    # bridge, and the cross-maincat candidate is search-VERIFIED — so a genuine
+    # same-maincat name/facet match is never overridden. Skipped when the source
+    # carried a /c/ facet (facet ids are maincat-scoped; V41 owns that path).
+    if (final_redirect_url and (final_match_type or '').startswith('search_derived')
+            and not parsed.existing_facet):
+        from src.reliability_scorer import _keyword_bridges_value as _bridge_rc5
+        if not _bridge_rc5(parsed.keyword, final_redirect_cat_name or ''):
+            _rc5 = _cross_maincat_fallback_fields(
+                url, parsed, d.get('categories_df'), matcher, facet_filter,
+                builder, category_lookup)
+            if _rc5 and _rc5['match_type'] == 'cross_maincat_fallback_verified':
+                final_redirect_url = _rc5['redirect_url']
+                final_redirect_cat_name = _rc5['redirect_category']
+                final_match_type = _rc5['match_type']
+                final_score = _rc5['reliability_score']
+                final_tier = _rc5['reliability_tier']
+                final_reason = ('[RC5] verified cross-maincat name match preferred '
+                                'over weak same-maincat stray; ' + _rc5['reason'])
+                reject_reason = ''
+                flag_for_review = ''
+                is_cross_category = True
+                out_facet_fragment = _rc5['facet_fragment']
+                out_facet_names = _rc5['facet_names']
+                out_facet_value_names = _rc5['facet_value_names']
+                out_facet_count = _rc5['facet_count']
+
     # V36: cross-maincat LAST-RESORT fallback. Only when the entire cascade —
     # including Fix E (head-token + search-verified jump) — produced NO
     # redirect at all, scan every meaningful keyword token for a >= 95
@@ -3088,6 +3165,59 @@ def process_url_v2(args):
             out_facet_names = _xfb['facet_names']
             out_facet_value_names = _xfb['facet_value_names']
             out_facet_count = _xfb['facet_count']
+
+    # V48 (RC6): threshold-gated suppression of a WEAK jump away from the source
+    # subcategory. When the cascade lands a query on a same-maincat search-derived
+    # stray (Fix D) or an UNVERIFIED cross-maincat jump whose category the query
+    # doesn't bridge, and the evidence is thin (modest dominance OR a real query
+    # token dropped), the safest destination is the R-URL's OWN source subcategory
+    # page, not the weak guess. "muur" -> klussen Posterbehang (share .60) and
+    # "60 cm breed" -> Kussenhoezen (coverage 33%) both become the source subcat.
+    # Deliberately conservative to protect good product-dominance Fix-D redirects:
+    # a high-share (>=0.75) AND fully-covered stray is NOT suppressed, and neither
+    # is a legit drill-down INTO a child of the source subcat, a verified match,
+    # or a facet-carrying source URL (V41 owns that).
+    if (final_redirect_url and parsed.subcategory_id and parsed.subcategory_name
+            and not parsed.existing_facet
+            and ((final_match_type or '').startswith('search_derived_samecat')
+                 or final_match_type == 'cross_maincat_fallback')):
+        from src.reliability_scorer import _keyword_bridges_value as _bridge_rc6
+
+        def _rc6_cur_slug(u):
+            try:
+                seg = u.split('/c/')[0].split('/products/', 1)[1].strip('/').split('/')
+                return seg[1] if len(seg) >= 2 else ''
+            except Exception:
+                return ''
+
+        _cur_slug = _rc6_cur_slug(final_redirect_url)
+        _src_slug = parsed.subcategory_name
+        _is_self_or_child = bool(_cur_slug) and (
+            _cur_slug == _src_slug or _cur_slug.startswith(_src_slug + '_'))
+        _off_topic = not _bridge_rc6(parsed.keyword, final_redirect_cat_name or '')
+        _sv6 = derive_search_redirect(parsed.main_category, parsed.keyword) or {}
+        _share6 = _sv6.get('dom_cat_share') or 0
+        _thin = (_share6 < 0.75) or (match_coverage < 50)
+        _cross_unverified = final_match_type == 'cross_maincat_fallback'
+        if (not _is_self_or_child and _off_topic
+                and (_thin or _cross_unverified)):
+            final_redirect_url = (f"https://www.beslist.nl/products/"
+                                  f"{parsed.main_category}/{_src_slug}/")
+            final_redirect_cat_name = category_lookup.get(
+                str(parsed.subcategory_id), '') or final_redirect_cat_name
+            final_match_type = 'suppressed_weak_to_source'
+            final_score = 50
+            final_tier = get_reliability_tier(final_score)
+            final_reason = (f"[RC6] weak jump to '{_sv6.get('dom_cat_name', '') or 'off-topic category'}'"
+                            f" (share {_share6:.2f}, coverage {match_coverage:.0f}%) suppressed"
+                            f" to source subcategory")
+            is_cross_category = False
+            reject_reason = ''
+            flag_for_review = ''
+            out_facet_fragment = ''
+            out_facet_names = ''
+            out_facet_value_names = ''
+            out_facet_count = 0
 
     # V41 (issue #4 + tightened maincat rule + new facet-preservation rule).
     # When the source R-URL carried an appended /c/ facet, that facet value is
@@ -3295,6 +3425,30 @@ def process_url_v2(args):
         # surface the corrected coverage in the output so the column matches the
         # score (the early match_coverage predates the facet append).
         match_coverage = _v45_cov
+
+    # V48 (RC8): curated override — always wins, applied after the whole cascade.
+    _ov = CURATED_OVERRIDES.get(
+        (parsed.main_category, (parsed.keyword or '').strip().lower()))
+    if _ov:
+        final_redirect_url = _ov
+        _ov_frag = (_ov.split('/c/', 1)[1].rstrip('/') if '/c/' in _ov else '')
+        _ov_axes = [p for p in _ov_frag.split('~~') if '~' in p]
+        out_facet_fragment = _ov_frag
+        out_facet_names = ', '.join(p.split('~', 1)[0] for p in _ov_axes)
+        out_facet_value_names = ''
+        out_facet_count = len(_ov_axes)
+        final_match_type = 'curated_override'
+        final_score = 90
+        final_tier = get_reliability_tier(final_score)
+        final_reason = '[RC8] curated override (target not derivable from the query)'
+        reject_reason = ''
+        flag_for_review = ''
+        try:
+            _ovp = _facet_url_parts(_ov) or {}
+            is_cross_category = bool(_ovp.get('main_category')) and \
+                _ovp['main_category'] != parsed.main_category
+        except Exception:
+            is_cross_category = True
 
     return {
         'original_url': r.original_url,
