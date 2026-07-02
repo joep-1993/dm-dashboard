@@ -1,6 +1,138 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools DMA Exclusions — OOS "Scan failed: HTTP 410 Gone" + shop/PLP enrichment + table layout (2026-07-02)
+
+**The 410.** User hit `Scan failed: HTTP Error 410: Gone` on "Scan OOS". Root cause
+was upstream, not our code: the OOS monitor **removed** `GET /api/v1/overrides/oos-eans`,
+which now returns `410 {"detail":"This endpoint was removed. Use GET .../exclude-eans ..."}`.
+The `exclude-eans` migration (commit c8f5a9e, 2026-07-01) already fixed this; the live
+bare-uvicorn process (no `--reload`) was restarted at 09:18 that morning and picked up the
+fix. Verified live: `GET /api/dma-exclusions/oos/scan?market=NL` → 200 (5 candidates), BE → 200
+(empty). So the user's 410 was from the pre-restart process. **Lesson:** after any
+dma_exclusions edit, remember the backend needs a manual kill+relaunch (see "backend is bare
+uvicorn, no --reload") — a lingering old process serves stale code and surfaces upstream
+contract changes as raw errors.
+
+**Where category/shop/PLP come from (OOS scan enrichment).** The `exclude-eans` list carries
+ONLY EANs (`{healthy, as_of, count, eans}`) — no category, no shop, no URL. Enrichment sources:
+- **Category** — parsed from the GA `PLA/<cat>_a` campaign names (`_pick_category`). Already shown.
+- **Shop** — CL3 = `segments.product_custom_attribute3`, already fetched in the same
+  `shopping_performance_view` query in `_ga_batch_agg` and cached in the resolution; was just
+  never put in the candidate dict. Surfacing it cost nothing (`_build_oos_candidate`: `"shop": shop`).
+- **PLP url** — separate source: the ES `headline_offer(ean)['plp_url']` lookup. Fetched ONLY for
+  the final capped candidate set, in parallel (`ThreadPoolExecutor(16)`, cached ~30ms warm), AFTER
+  the cost-rank + `[:limit]` so we never look up candidates we drop.
+Frontend: new Shop column, EAN links to the PLP (reused the Saved-list `safeUrl` pattern), shop
+added to the filter.
+
+**OOS table layout.** `table-layout:fixed; width:100%` with only Category flexible → Category
+swallowed all slack on wide screens. Fix: `width:auto; min-width:820px` + fixed per-column widths
+(36/150/240/190/100/110) so the table sizes to content; numeric cols right-aligned; long cells
+ellipsize (`text-overflow:ellipsis; white-space:nowrap`) with full text on hover `title`.
+
+**Gotcha — `pkill -f "uvicorn backend.main:app"` self-matches.** The pattern matched my own bash
+command line, so `pkill` SIGTERM'd the shell mid-restart (exit 144) and the relaunch never ran,
+briefly taking the backend down. Restarted cleanly with `setsid uvicorn … &`. Don't `pkill -f`
+on a string that appears in the same command; use a narrower pattern or kill by PID.
+
+Shipped: `feat(dma-exclusions): show shop + PLP url in the OOS scan and tidy the table` (2a00e84).
+
+## dm-tools SEO stats — "Top subcats" → "Top deepest cats" (2026-07-02)
+
+User wanted the second Top-categories table to list **true leaf categories** (matching the
+Performance Standup), not subcats. **Frontend-only** change: the backend already computed
+`deepestcats` via `_fetch_cat_deltas(conn, "deepest", ...)` (filtered to `is_lowest_category=1`
+so overview/non-leaf pages don't leak in) and returned it alongside `subcats` in `get_deltas`.
+Pointed the `sub` table's `src` at `deepestcats`, relabelled heading + column + Excel sheet to
+"Top deepest cats" / "Deepest cat". Row shape is identical (`{maincat, subcat}` where `subcat`
+holds the level's cat name), so sort state + the `-` maincat-level row drop carry over unchanged.
+Shipped: `feat(seo-stats): show Top deepest cats instead of Top subcats` (736949f).
+
+## Kopteksten v3 — informational per-maincat prompts from Google-ranking analysis (2026-07-01)
+
+Reworked the Kopteksten prompt from a promotional one-paragraph blurb into an
+**informational mini-koopgids**, tailored per maincat, grounded in analysis of
+what actually ranks on google.nl. Bigger, evidence-based successor to the parked
+"Koptekst prompt v2" (see BACKLOG). **Staged in dm-tools, benchmarked, NOT wired,
+NOT committed** — user reviews the Excel output first.
+
+**Method.** Input `Downloads\claude\seo_urls_content_prompt.xlsx`, sheet `seo_urls`
+(162,367 rows: col A `main_cat_name`, B `deepest_subcat_name`, C `url`, D
+`page_heading` = the term to Google, E `visits`, F `revenue`; sheet `dt` is a
+pivot). Sampled 117 visit-weighted terms across all 31 maincats (5 for the biggest
+down to 2 for tiny ones), deduped across distinct deepest-subcats for variety.
+Fanned out **one research agent per maincat** (general-purpose, background); each
+WebSearch'd its terms, WebFetched the top informational pages, and returned
+evidence + a drafted per-maincat prompt. Assembly + extraction scripts ran in the
+session scratchpad.
+
+**Universal finding — ranking pages are koopgidsen, not blurbs.** 6 patterns recur
+in ALL 31 maincats: (1) kies-op-gebruik first (use-case before specs); (2)
+concrete measurable specs WITH their meaning (dB/mm/kg/liter/kWh/ampère/IP/dpi/
+warmteklasse/actieradius + "wat betekent dit voor jou"); (3) type/variant
+trade-offs explained; (4) compatibility ("past dit bij mij?") + legal/safety
+frames (RDW, ECE, EN/NEN, CE, receptplicht); (5) onderhoud/veiligheid/levensduur;
+(6) koperstaal (jargon) + scannable multi-section structure. Bonus winner across
+many cats: **honest myth-busting** (airco-zonder-slang = luchtkoeler ~3°C; A+++
+bestaat niet meer → kWh/jaar; passieve SCART→HDMI kabel werkt niet; 19-inch
+laptops bestaan niet meer) — price-neutral, so fully allowed for us.
+
+**The 31 prompts are genuinely distinct.** Avg pairwise similarity only ~9% (that
+9% ≈ the shared hard-constraint boilerplate); most-similar pair 17%, most-different
+3%. Each maincat's prompt carries 45-101 words that appear in no other maincat's
+prompt (its domain criteria/jargon). Architecture note for future wiring: cleaner
+as **one shared base + 31 short content-modules** than 31 full prompts (avoids 31
+copies of the boilerplate) — the shared base is written out in the deliverable md.
+
+**Key technical gotchas (important if wiring to production later):**
+- **The v1 USER prompt forces single-paragraph + 150 words.** `create_product_
+  recommendation_prompt` (backend/gpt_service.py:51) hard-codes "Schrijf de tekst
+  als EEN doorlopende alinea" and "max. 150 woorden". The model weights the USER
+  message above the system message, so a system-message structure/length change
+  does NOTHING on its own. v3 therefore ships its OWN user prompt
+  (`create_product_recommendation_prompt_v3` in gpt_service_v3.py) that lifts both
+  caps; product list + link rules kept identical so product context matches v1.
+  Only after this did multi-paragraph output appear (0% → 100% multi-para).
+- **Length had to be normalized by me.** Agents ranged 120→1100 words (Horloges
+  over-anchored on long-form guides). Enforced policy in a NORMALIZE_FOOTER appended
+  to every v3 system message: standard 160-240 words, complex-functional (meubels/
+  huishoudelijk/voertuigen/sanitair) up to 320, hard cap ~350. Overrides the
+  per-prompt length lines.
+- **Generic filler words are a MODEL-level problem, not a version problem.** "ideaal"
+  (×20), "uitstekend" (×10), "perfect" (×7) survive at ~63% in BOTH v1 and v3, even
+  though v1's prompt ALREADY bans them explicitly — gpt-4o-mini ignores the ban.
+  Not a v3 regression. User decided: leave it. Only reliable fix would be a
+  deterministic post-processing scrub (like the vague-anchor unwrap), but scrubbing
+  mid-sentence adjectives risks grammar.
+- **Numeric-spec metric under-measures v3.** The benchmark's spec regex only catches
+  number+unit; v3's real gains are often qualitative (materiaal trade-offs, use-case,
+  geurnoten), so the flat 44% spec rate hides a large qualitative improvement visible
+  in the side-by-sides.
+
+**Benchmark.** `scripts/koptekst_v3_comparison.py` (run under `./venv/bin/python`)
+samples N URLs/maincat from `backend/data/koptekst_v3_benchmark_urls.json`, scrapes
+products via `scrape_product_page_api` (same as production), generates v1
+(`generate_product_content`) and v3 (`generate_product_content_v3(h1, products,
+maincat)`) from IDENTICAL products, scores both, writes a grouped Excel. Run:
+`--per-maincat 2` → 62 URLs, 43 had products (18 category URLs currently return 0
+products → skipped, as production would). Result: v3 209 vs v1 112 words; 100% vs 0%
+multi-paragraph; both 0% prices/wij/exclamations. Output
+`Downloads\claude\koptekst_v1_vs_v3_2026-07-01.xlsx`.
+
+**Files (staged, uncommitted, in dm-tools working copy):** `backend/gpt_service_v3.py`
+(loads the JSON, builds system message = per-maincat prompt + normalize footer, has
+its own v3 user prompt, reuses MODEL/fix_truncated_urls from gpt_service), `backend/
+data/kopteksten_maincat_prompts_v3.json` (31 prompts), `backend/data/koptekst_v3_
+benchmark_urls.json`, `scripts/koptekst_v3_comparison.py`. Deliverables in
+`Downloads\claude\`: `kopteksten_informational_prompts_2026-07-01.md`,
+`kopteksten_prompts_per_maincat_2026-07-01.json`, `koptekst_v1_vs_v3_2026-07-01.xlsx`.
+
+**To wire to production later:** resolve `main_cat_name` for the URL (via
+category_lookup / deepest_category→maincat mapping) and route through
+`generate_product_content_v3` behind an env/query toggle for gradual cutover.
+Confirm content_top rendering handles multiple paragraphs (user says yes).
+
 ## Auto-Redirects V45/V46 — confidence scoring + in-subcat facet selection (2026-06-30)
 
 From user's `~/redirects.txt` (3 lists of flagged redirects). Branch
