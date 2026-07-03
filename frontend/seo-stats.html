@@ -952,7 +952,7 @@
 
         // ---- Performance standup section ----
 
-        function standupList(items, isVis) {
+        function standupList(items, isVis, up) {
             if (!items || !items.length) return '<div class="text-muted px-2 py-2">No data.</div>';
             const f = isVis ? fmtInt : fmtEuro;
             const rows = items.map(r => {
@@ -965,8 +965,15 @@
                     <td>${pctBadge(pct)}</td>
                 </tr>`;
             }).join('');
+            // Δ / Δ% headers toggle between most-positive (desc, ▼) and
+            // most-negative (asc, ▲) deltas. Both sort on the same magnitude.
+            const which = isVis ? 'visits' : 'revenue';
+            const sortCls = 'sortable ' + (up ? 'sort-desc' : 'sort-asc');
+            const next = up ? 'down' : 'up';
+            const th = label => `<th class="${sortCls}" onclick="setStandupSort('${which}','${next}')"`
+                + ` title="Click to show ${up ? 'most negative' : 'most positive'} first">${label}</th>`;
             return `<table class="table table-sm table-hover perf-table standup-table mb-0">
-                <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th><th>Δ</th><th>Δ%</th></tr></thead>
+                <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th>${th('Δ')}${th('Δ%')}</tr></thead>
                 <tbody>${rows}</tbody>
             </table>`;
         }
@@ -992,19 +999,27 @@
                 && r.subcat !== r.maincat;
             const dc = lastDeltas.deepestcats;
             const seo = byKey('seo');
-            // Visits list: gainers if SEO visits up, decliners if down.
-            const visUp = (seo.visits_delta || 0) >= 0;
+            // Visits list: user-chosen direction, else auto (gainers if SEO visits up).
+            const visUp = standupSort.visits ? standupSort.visits === 'up' : (seo.visits_delta || 0) >= 0;
             const visItems = (visUp ? dc.by_visits : dc.worst_by_visits)
                 .filter(realCat).slice(0, 3);
             document.getElementById('standupVisitsTitle').textContent = 'visits';
-            document.getElementById('standupVisitsList').innerHTML = standupList(visItems, true);
+            document.getElementById('standupVisitsList').innerHTML = standupList(visItems, true, visUp);
 
             // Revenue list: same logic on SEO revenue delta.
-            const revUp = (seo.revenue_delta || 0) >= 0;
+            const revUp = standupSort.revenue ? standupSort.revenue === 'up' : (seo.revenue_delta || 0) >= 0;
             const revItems = (revUp ? dc.by_revenue : dc.worst_by_revenue)
                 .filter(realCat).slice(0, 3);
             document.getElementById('standupRevenueTitle').textContent = 'revenue';
-            document.getElementById('standupRevenueList').innerHTML = standupList(revItems, false);
+            document.getElementById('standupRevenueList').innerHTML = standupList(revItems, false, revUp);
+        }
+
+        // Per-table sort override for the standup lists: null = auto (follow SEO
+        // delta sign), 'up' = most positive first, 'down' = most negative first.
+        let standupSort = { visits: null, revenue: null };
+        function setStandupSort(which, dir) {
+            standupSort[which] = dir;
+            renderStandup();
         }
 
         async function loadDeltas(force) {
