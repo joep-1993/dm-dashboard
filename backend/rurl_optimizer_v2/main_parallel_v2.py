@@ -3688,6 +3688,12 @@ def main():
                              "the V28 base response's facets[] (no extra calls); "
                              'stage 2 falls back to per-value filter probes. '
                              'Same SEARCH_QPS budget as V28 prefetch.')
+    parser.add_argument('--reuse-data-cache', action='store_true',
+                        dest='reuse_data_cache',
+                        help='Load the existing /tmp/r_url_optimizer_cache.pkl '
+                             'instead of rebuilding it from taxv2/Search API. Used '
+                             'by the Tier-A chunk loop for chunks after the first '
+                             'so a multi-chunk run pays the ~90s build only once.')
     parser.add_argument('--rescue-include-size',
                         dest='rescue_include_size',
                         action=argparse.BooleanOptionalAction, default=True,
@@ -3728,11 +3734,17 @@ def main():
         urls = _kept
         total = len(urls)
 
-    # Pre-load data and cache
-    data = preload_data(use_cache=True)
+    # Pre-load data and cache. --reuse-data-cache (used by the Tier-A chunk loop
+    # for chunks after the first) loads the existing pickle instead of rebuilding
+    # it from taxv2/Search API (~90s), so a multi-chunk run pays that build once.
     cache_file = '/tmp/r_url_optimizer_cache.pkl'
-    save_data_cache(data, cache_file)
-    print(f"Data cached to {cache_file}")
+    if getattr(args, 'reuse_data_cache', False) and os.path.exists(cache_file):
+        print(f"Reusing existing data cache {cache_file}")
+        data = load_data_cache(cache_file)
+    else:
+        data = preload_data(use_cache=True)
+        save_data_cache(data, cache_file)
+        print(f"Data cached to {cache_file}")
 
     # Default output
     if not args.output:

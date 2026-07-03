@@ -125,6 +125,9 @@ def _run_subprocess(task_id: str, argv: list[str], output_path: Path, script: st
     # Windows (default cp1252) — see UnicodeEncodeError on '✓' etc.
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    # Flush child print() immediately so pre-tqdm phases (data load, prefetch)
+    # stream to the log instead of buffering on the pipe.
+    env["PYTHONUNBUFFERED"] = "1"
 
     try:
         proc = subprocess.Popen(
@@ -527,7 +530,8 @@ def _fetch_redshift_rurls(lookback_days: int = 365, row_limit: Optional[int] = N
 
 
 def _optimizer_argv(input_path: Path, output_path: Path, url_column: str,
-                    threshold: int, workers: Optional[int], multi_facet: bool) -> list[str]:
+                    threshold: int, workers: Optional[int], multi_facet: bool,
+                    reuse_data_cache: bool = False) -> list[str]:
     argv = [
         sys.executable, "main_parallel_v2.py", str(input_path),
         "-o", str(output_path), "-c", url_column, "--threshold", str(threshold),
@@ -537,6 +541,8 @@ def _optimizer_argv(input_path: Path, output_path: Path, url_column: str,
     if multi_facet:
         argv.append("--multi-facet")
     argv.append("--enable-facet-probe")
+    if reuse_data_cache:
+        argv.append("--reuse-data-cache")
     return argv
 
 
@@ -550,6 +556,10 @@ def _run_optimizer_chunk(task_id: str, argv: list[str], output_path: Path,
     env["PYTHONWARNINGS"] = "ignore::DeprecationWarning,ignore::FutureWarning"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    # Unbuffered child stdio: the build + search-signal prefetch phases print()
+    # (block-buffered on a pipe) BEFORE the processing tqdm bar, so without this
+    # nothing reaches the parent for minutes and the run looks frozen.
+    env["PYTHONUNBUFFERED"] = "1"
     try:
         proc = subprocess.Popen(
             argv, cwd=str(PKG_DIR), env=env,
@@ -674,7 +684,8 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
         chunk_out = OUTPUT_DIR / f"redirects_{task_id}_tierA_{round_no}.csv"
         chunk.to_csv(chunk_in, index=False)
         argv = _optimizer_argv(chunk_in, chunk_out, url_column, threshold,
-                               workers, multi_facet)
+                               workers, multi_facet,
+                               reuse_data_cache=(round_no > 1))
         ok = _run_optimizer_chunk(task_id, argv, chunk_out, round_no)
         processed_urls |= set(chunk["r_url"].astype(str))
         total_processed += len(chunk)
