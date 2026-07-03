@@ -1,6 +1,15 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools Auto-Redirects — final "should be" rows: dimensions, audience, cross-subcat curation (2026-07-03)
+
+Closes the last tractable rows (commit `9de9244`). Final of the 22: **14 exact + 2 score-only + 2 partial (peuter, geleider); 4 left**.
+
+- **Dimension token match (`_split_dims`).** Enrichment missed `2 persoons bed 200x200` -> `afmeting_bedbodem~'200 x 200'` purely because the query token `200x200` and the value `200 x 200` tokenise differently (`x` glued vs spaced). `re.sub(r"(\d)\s*[xX×*]\s*(\d)", r"\1 x \2", …)` on BOTH sides fixes it — now enriches with BOTH `aantal_slaapplek~2-persoons` AND `afmeting_bedbodem~200x200` (exact).
+- **Audience synonyms.** `peuter`/`kleuter` (Dutch age words) -> the `Kind` doelgroep value via `_ENRICH_SYNONYMS`, so `peuter sjaal muts wanten` -> `doelgroep~Kind` instead of a bare Mutsen page. Dropped a speculative `dreumes->baby` (age-ambiguous, ~1-2yo straddles baby/peuter) — keep synonyms high-confidence, a wrong one appends a wrong facet.
+- **Cross-subcat facet-value routing is the real remaining RC (curated for now).** `slush ijsdrank` and `playmobil family fun` have clean, POPULATED targets — but the wanted facet value (`type_funcooking~'Slush Puppy machines'`, `playmobil_series~'Playmobil Family Fun'`) lives in a DIFFERENT subcat than product-dominance derives (IJsmachines / Poppenvoertuigen). Deriving the subcat FROM a type/series facet value is a large new mechanism; curated `CURATED_OVERRIDES` entries bridge them until that RC exists.
+- **Why the other 4 are genuinely left:** `geleider`->"Schuifdeursystemen" is semantic (guide-rail for sliding doors), not lexical, and RC6 already lands the safe parent Deuraccessoires; `japanse verlichting` has no huis_tuin verlichting subcat and the target (Woonaccessoires + Japans-style) is a stretch even by hand; `lampen boven eettafel` has no source subcat and needs a room-mapping (`eettafel`->ruimte~Eetkamer); `parkside`'s Excel target subcat (Zaagbladen) has **0 Parkside products** = empty page (current populated result is arguably better); `dubbele` has a contradictory review note (should-be empty + "score too low") and `dubbele`->`aantal_fietsen~'2 fietsen'` is a semantic 2==double leap.
+
 ## dm-tools Auto-Redirects — V49 RC4 phase-2: prefer-source routing + enrichment synonyms (2026-07-03)
 
 Follow-on to the RC4 enrichment (commit `5243f61`), closing 2 more `should be` rows.
