@@ -2704,6 +2704,7 @@ def process_url_v2(args):
         local_leftover_tokens = []
         if has_matchable and reliability_score >= 50 and final_redirect_url:
             from src.validation_rules import GENERIC_ADJECTIVES
+            from src.reliability_scorer import _keyword_bridges_value as _kbv_leftover
             target_text = ' '.join(filter(None, [
                 redirect_cat_name or '',
                 r.facet_value_names or '',
@@ -2721,6 +2722,14 @@ def process_url_v2(args):
                 # match if literal substring OR stem-stripped match
                 stem = w.rstrip('e').rstrip('s')
                 if w in target_text or (stem and stem in target_text):
+                    continue
+                # A token that morphologically IS the resolved category noun
+                # ("tochtstrippen" ~ category "Tochtstrips": the -pen/-ps plural
+                # the crude substring/stem check above misses) is already
+                # represented by the category — don't treat it as leftover and
+                # let it append a redundant facet whose value merely repeats the
+                # category word (t_tochtstrips 'Tochtstrips zelfklevend').
+                if redirect_cat_name and _kbv_leftover(w, redirect_cat_name):
                     continue
                 local_leftover_tokens.append(w)
 
