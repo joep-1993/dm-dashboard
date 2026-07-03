@@ -3605,6 +3605,53 @@ def process_url_v2(args):
                     f"'{_best[2].replace('_', ' ')}'; " + (_rel.get('reason') or ''))
                 return _rel
 
+    # V51: H1 + generic-descriptor guard on cross-category facet jumps. The
+    # url_builder "redirected to valid category" path lets a facet value living
+    # in a DIFFERENT subcategory pull the redirect there. That's right when the
+    # query names a real product type ("afkortzaag" -> Afkortzagen) but wrong
+    # when the jump rests on a generic ATTRIBUTE many categories share ("hoek" ->
+    # t_toilet~'Hoek', dragging Douchegordijnstangen -> Urinoirs). H1 similarity
+    # alone can't separate them (afkortzaag 50 < hoek 53), so combine: suppress
+    # when the target barely resembles the source (H1 < 45: wc/katoen/senioren)
+    # OR the jump rests only on generic descriptor token(s) at modest similarity
+    # (H1 < 65 & all-generic: hoek). Falls back to the source subcategory page.
+    if (final_redirect_url and is_cross_category
+            and 'redirected to valid category' in (final_reason or '')
+            and parsed.subcategory_name and parsed.subcategory_id
+            and not parsed.existing_facet):
+        _xc_cur = extract_subcategory_id_from_url(final_redirect_url)
+        if _xc_cur and _xc_cur != str(parsed.subcategory_id):
+            from src.validation_rules import (GENERIC_ADJECTIVES as _XGA,
+                                              GENERIC_NOUNS as _XGN,
+                                              GENERIC_FORM_WORDS as _XGF)
+            # shape/attribute nouns the generic sets miss (rond/ovaal/vierkant
+            # are already adjectives; 'hoek' is the noun form).
+            _XSHAPE = {'hoek', 'driehoek', 'rechthoek'}
+            _xgeneric = _XGA | _XGN | _XGF | _XSHAPE
+            _xmk = [w.lower() for w in (matched_keywords or []) if w]
+            _xall_generic = bool(_xmk) and all(w in _xgeneric for w in _xmk)
+            _xh1 = compute_h1_similarity(parsed.keyword, original_cat_name,
+                                         final_redirect_cat_name, out_facet_value_names)
+            if _xh1 < 45 or (_xh1 < 65 and _xall_generic):
+                final_redirect_url = (f"https://www.beslist.nl/products/"
+                                      f"{parsed.main_category}/{parsed.subcategory_name}/")
+                final_reason = (
+                    f"[V51] cross-category jump to '{final_redirect_cat_name}' "
+                    f"suppressed (H1 {_xh1}"
+                    + ("; jump rested only on generic descriptor(s)" if _xall_generic else "")
+                    + f"); kept source subcategory. Was: " + (final_reason or ''))
+                final_redirect_cat_name = (category_lookup.get(str(parsed.subcategory_id), '')
+                                           or final_redirect_cat_name)
+                final_match_type = 'xcat_h1_suppressed'
+                final_score = 45
+                final_tier = get_reliability_tier(final_score)
+                is_cross_category = False
+                h1_similarity = _xh1
+                out_facet_fragment = ''
+                out_facet_names = ''
+                out_facet_value_names = ''
+                out_facet_count = 0
+
     return {
         'original_url': r.original_url,
         'main_category': r.main_category,
