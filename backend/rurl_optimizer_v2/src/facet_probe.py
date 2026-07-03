@@ -380,13 +380,30 @@ def _strip_parens(s: str) -> str:
     return _re.sub(r"\([^)]*\)", " ", s or "")
 
 
+# A tiny synonym map for enrichment matching only: the facet value is a lexical
+# synonym of the query word, so a pure token match misses it. Kept minimal and
+# high-confidence (a bad synonym would append a wrong facet). Expanded into the
+# query token set before matching, never used to probe.
+_ENRICH_SYNONYMS = {
+    "vintage": "retro",
+    "retro": "vintage",
+}
+
+
+def _expand_synonyms(keyword: str) -> str:
+    kt = _tokens(keyword)
+    extra = [syn for word, syn in _ENRICH_SYNONYMS.items() if _stem(word) in kt]
+    return keyword + " " + " ".join(extra) if extra else keyword
+
+
 def _extract_enrichment_facets(api_facets, keyword: str) -> list[dict]:
     """Like _extract_multi_facets but for ENRICHING a bare category: accent-folded
     and paren-stripped so 'geisoleerd'~'Geïsoleerd' and 'pikachu'~'Pikachu
-    (pokémon)' match, and with brand/winkel EXCLUDED — a generic query token must
-    not pin a single-brand page, which also avoids the 'peuter'->merk 'Peuterey'
-    trap. Returns intent-first, count-desc picks."""
-    kw_f = _fold(keyword)
+    (pokémon)' match, a tiny synonym map so 'vintage'~'Retro', and with
+    brand/winkel EXCLUDED — a generic query token must not pin a single-brand
+    page, which also avoids the 'peuter'->merk 'Peuterey' trap. Returns
+    intent-first, count-desc picks."""
+    kw_f = _fold(_expand_synonyms(keyword))
     picks: list[dict] = []
     for f in (api_facets or []):
         fname = (f.get("urlName") or "").lower()

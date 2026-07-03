@@ -38,3 +38,11 @@ def test_unrelated_value_not_picked():
     facets = [_facet("kleur", (401049, "Geel", 19)),
               _facet("materiaal", (401167, "Plastic", 8))]
     assert _extract_enrichment_facets(facets, "pikachu") == []
+
+
+def test_synonym_vintage_matches_retro():
+    # 'vintage' is a lexical synonym of the facet value 'Retro'.
+    facets = [_facet("bouw_koelkast", (23593989, "Retro", 15),
+                     (106766, "Vrijstaand", 17))]
+    picks = _extract_enrichment_facets(facets, "vintage")
+    assert picks and picks[0]["value_id"] == 23593989

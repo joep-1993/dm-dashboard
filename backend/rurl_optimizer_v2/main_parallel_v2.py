@@ -3335,6 +3335,44 @@ def process_url_v2(args):
         except Exception:
             pass  # correction is best-effort; never break a good redirect
 
+    # V49 (RC4 phase 2): prefer-source routing. When the cascade JUMPS to a
+    # different main category but the R-URL's OWN source subcategory has a
+    # distinctive non-brand facet the query names, route back to that source
+    # subcat + facet instead. Cross-maincat only (the riskiest jumps), and never
+    # over a verified/curated result — so RC5's confirmed cross-maincat matches
+    # stay. "loungeset hoes 320" jumped to meubilair 'Loungesets' (40/D) while the
+    # source tuin_accessoires 'Tuinmeubelhoezen' has t_tuinmeubelhoes 'Loungeset-
+    # hoezen' (2314 products) — the query clearly belongs there.
+    if (final_redirect_url and parsed.subcategory_id and parsed.subcategory_name
+            and not parsed.existing_facet and unmatched_keywords
+            and final_match_type not in ('cross_maincat_fallback_verified',
+                                         'curated_override')):
+        _ps_rmain = ''
+        try:
+            _ps_rmain = final_redirect_url.split('/products/', 1)[1].split('/')[0]
+        except Exception:
+            _ps_rmain = ''
+        if _ps_rmain and _ps_rmain != parsed.main_category:  # cross-maincat jump
+            from src.facet_probe import derive_insubcat_facet as _derive_insub_ps
+            _ps_picks = _derive_insub_ps(parsed.subcategory_name, parsed.keyword)[:3]
+            if _ps_picks:
+                _ps_frags = [f"{p['facet_name']}~{p['value_id']}" for p in _ps_picks]
+                final_redirect_url = (f"https://www.beslist.nl/products/"
+                                      f"{parsed.main_category}/{parsed.subcategory_name}"
+                                      f"/c/" + "~~".join(_ps_frags))
+                appended_value_names.extend(p['value_name'] for p in _ps_picks
+                                            if p.get('value_name'))
+                final_redirect_cat_name = category_lookup.get(
+                    str(parsed.subcategory_id), '') or final_redirect_cat_name
+                final_match_type = 'search_derived_samecat_faceted'
+                final_score = 70
+                is_cross_category = False
+                reject_reason = ''
+                flag_for_review = ''
+                final_reason = ((final_reason or '')
+                                + f"; [RC4-source] cross-maincat jump replaced by source "
+                                + f"subcat + in-subcat facet(s) {', '.join(_ps_frags)}")
+
     # V49 (RC4): in-subcat facet enrichment. When the settled redirect is a BARE
     # category page (no /c/) that the query only partially covers, probe INSIDE
     # that resolved subcategory (with query relaxation) for a distinctive non-brand
