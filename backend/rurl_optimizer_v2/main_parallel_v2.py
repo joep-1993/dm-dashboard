@@ -141,18 +141,15 @@ CURATED_OVERRIDES = {
     # evidence to derive it — a curated synonym is the only reliable route.
     ('huis_tuin', 'tochtstopper'):
         'https://www.beslist.nl/products/klussen/klussen_486172_488847/',
-    # slush + playmobil: the correct facet VALUE ('Slush Puppy machines',
-    # 'Playmobil Family Fun') lives in a DIFFERENT subcategory than the one the
-    # product-dominance search derives (IJsmachines / Poppenvoertuigen). Routing
-    # by a type/series facet value that pins a sibling subcat is a large new RC
-    # (cross-subcat facet routing); until then these clean, populated targets are
-    # curated. See cc1 TASKS "remaining should-be rows".
+    # slush: IJsmachines genuinely has MORE slush products than Funcooking (186
+    # vs 91) — the target Funcooking is a taxonomy/business preference, not a
+    # product-dominance signal, so it can't be derived. (playmobil, by contrast,
+    # IS derived now via V50 relaxation: "playmobil family fun grote camping"
+    # collapses to 1 product, but the relaxed "playmobil family fun" dominates in
+    # Bouwstenen and the cascade finds the Playmobil Family Fun series there.)
     ('huishoudelijke_apparatuur', 'slush ijsdrank'):
         'https://www.beslist.nl/products/huishoudelijke_apparatuur'
         '/huishoudelijke_apparatuur_19968037_19970684/c/type_funcooking~23809479',
-    ('speelgoed_spelletjes', 'playmobil family fun grote camping'):
-        'https://www.beslist.nl/products/speelgoed_spelletjes'
-        '/speelgoed_spelletjes_395613/c/playmobil_series_bouwstenen~3761209',
 }
 
 
@@ -1246,7 +1243,8 @@ def process_url_v2(args):
     """Process single URL in worker."""
     global _worker_data
 
-    url, multi_facet = args
+    url, multi_facet = args[0], args[1]
+    _relax_depth = args[2] if len(args) > 2 else 0  # V50: over-specific relaxation
 
     import re  # Nodig voor DIMENSION_PATTERN + V30 coverage check (moet vóór gebruik staan)
     from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity, _v27_reject_reason
@@ -3545,6 +3543,58 @@ def process_url_v2(args):
                 _ovp['main_category'] != parsed.main_category
         except Exception:
             is_cross_category = True
+
+    # V50: over-specific query relaxation. A multi-token R-URL whose full query
+    # AND-collapses to a near-empty result (dom_count <= 2) has its category
+    # chosen from statistical noise — "playmobil family fun grote camping"
+    # (1 product) lands on Poppenvoertuigen, but dropping the trailing junk gives
+    # "playmobil family fun" -> Bouwstenen + the Playmobil Family Fun series (95).
+    # Re-run the WHOLE cascade on the query minus its last significant token and
+    # adopt the relaxed result ONLY if it scores much higher (>= +25) — so a
+    # low-count-but-correct pick ("hot wheels ultimate garage" -> Speelgoed
+    # garages) is never churned. Bounded to 2 steps; curated overrides win first.
+    _RELAX_MARGIN = 25
+    if (_relax_depth == 0 and not _ov
+            and final_match_type in ('category_fallback', 'search_derived_samecat',
+                                     'search_derived_samecat_faceted')
+            and search_derived_dom_count is not None
+            and search_derived_dom_count <= 2):
+        _sig = [w for w in re.split(r'[\s\-_]+', (parsed.keyword or '').lower())
+                if len(w) >= 3 and w not in STOPWORDS and w not in SHOP_NAMES
+                and not w.isdigit()]
+        if len(_sig) >= 4:
+            # Only include a subcat segment when the source URL actually has one
+            # (parser sets subcategory_name to the maincat when it doesn't, which
+            # would build a duplicated /products/mc/mc/r/... path).
+            _sub = (parsed.subcategory_name
+                    if (parsed.subcategory_id
+                        and parsed.subcategory_name != parsed.main_category)
+                    else None)
+            _best = None  # (score, result_dict)
+            # Try dropping 1..K trailing significant tokens; a single drop can
+            # stall on a mediocre intermediate ("playmobil family fun grote" ->
+            # Poppen 70), so evaluate each relaxation and keep the strongest.
+            for _k in range(1, min(3, len(_sig) - 1) + 1):
+                _rkw = '_'.join(_sig[:-_k])
+                _rbase = (f"/products/{parsed.main_category}/{_sub}/r/{_rkw}/"
+                          if _sub else f"/products/{parsed.main_category}/r/{_rkw}/")
+                try:
+                    _rel = process_url_v2((_rbase, multi_facet, _relax_depth + 1))
+                except Exception:
+                    _rel = None
+                if _rel and _rel.get('redirect_url'):
+                    _rs = _rel.get('reliability_score') or 0
+                    if _best is None or _rs > _best[0]:
+                        _best = (_rs, _rel, _rkw)
+            if _best and _best[0] >= final_score + _RELAX_MARGIN:
+                _rel = dict(_best[1])
+                _rel['original_url'] = r.original_url
+                _rel['keyword'] = r.keyword
+                _rel['reason'] = (
+                    f"[V50 relaxed] full query collapsed to "
+                    f"{search_derived_dom_count} product(s); relaxed to "
+                    f"'{_best[2].replace('_', ' ')}'; " + (_rel.get('reason') or ''))
+                return _rel
 
     return {
         'original_url': r.original_url,
