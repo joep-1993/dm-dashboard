@@ -574,6 +574,14 @@ def _run_optimizer_chunk(task_id: str, argv: list[str], output_path: Path,
             prefix = base.split(" — ", 1)[0] if " — " in base else ""
             _set(task_id, {"message": (prefix + " — " if prefix else "")
                            + f"chunk {round_no}: {cur:,}/{tot:,} URLs"})
+        elif "Prefetching" in line:
+            # The search/facet prefetch runs BEFORE the processing tqdm bar; without
+            # this the bar sits frozen at the pre-chunk message for the whole
+            # (throttled, API-bound) prefetch. Surface it so the UI shows life.
+            _set(task_id, {"message": f"Chunk {round_no}: prefetching search signals "
+                                      f"(no per-URL progress yet)..."})
+        elif "Pre-loading data" in line or "Data loaded" in line or "Data cached" in line:
+            _set(task_id, {"message": f"Chunk {round_no}: loading category data..."})
         if (_get(task_id) or {}).get("cancel_requested"):
             proc.terminate()
             try:
@@ -613,10 +621,18 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
     tier_a_frames: list = []
     tier_a_count = 0
     total_processed = 0
-    fetch_limit = min(max(tier_a_limit * 40, 100_000), _TIER_A_MAX_FETCH)
+    # Chunk size scales with the target: ~20 URLs per wanted tier-A (tier-A runs
+    # ~5-7% of processed), clamped to [1000, _TIER_A_CHUNK]. A fixed 20k chunk
+    # made a small target (e.g. 100) prefetch + process 20k URLs before ANY
+    # feedback — minutes-to-hours of "frozen at 1%". This keeps the first chunk
+    # roughly one target's worth so small runs finish in one quick pass.
+    chunk_size = min(max(tier_a_limit * 20, 1_000), _TIER_A_CHUNK)
+    # Fetch enough candidates for several chunks; grows on refill.
+    fetch_limit = min(max(tier_a_limit * 100, 20_000), _TIER_A_MAX_FETCH)
     pool = None                # candidate DataFrame not yet processed
     exhausted = False          # Redshift returned everything it has
     round_no = 0
+    _append_log(task_id, f"Chunk size: {chunk_size:,} URLs per pass.")
 
     def _cancelled() -> bool:
         return bool((_get(task_id) or {}).get("cancel_requested"))
@@ -652,7 +668,7 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
 
         # Take and process one chunk.
         round_no += 1
-        chunk = pool.head(_TIER_A_CHUNK)
+        chunk = pool.head(chunk_size)
         pool = pool.iloc[len(chunk):].reset_index(drop=True)
         chunk_in = INPUT_DIR / f"input_{task_id}_tierA_{round_no}.csv"
         chunk_out = OUTPUT_DIR / f"redirects_{task_id}_tierA_{round_no}.csv"
