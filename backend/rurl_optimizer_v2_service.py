@@ -72,6 +72,10 @@ _HISTORY: deque = _load_history_from_disk()
 
 # tqdm writes lines like "Processing:  42%|████▏     | 4200/10000 [00:15<00:20, ...]"
 _TQDM_RE = re.compile(r"(?P<pct>\d+)%\|.*?\|\s*(?P<cur>\d+)/(?P<tot>\d+)")
+# Prefetch progress lines, e.g. "[V28 prefetch]   300/663 fetched (...)" and
+# "[V29 facet-probe]   100/675 done (...)". Used to surface a real count during
+# the (throttled, API-bound) prefetch phases that precede per-URL processing.
+_PREFETCH_RE = re.compile(r"(?P<cur>\d+)/(?P<tot>\d+)\s+(?:fetched|done)")
 
 
 def _set(task_id: str, patch: Dict[str, Any]) -> None:
@@ -584,12 +588,15 @@ def _run_optimizer_chunk(task_id: str, argv: list[str], output_path: Path,
             prefix = base.split(" — ", 1)[0] if " — " in base else ""
             _set(task_id, {"message": (prefix + " — " if prefix else "")
                            + f"chunk {round_no}: {cur:,}/{tot:,} URLs"})
+        elif _PREFETCH_RE.search(line):
+            # Live count during the (slow) prefetch phases that run before the
+            # per-URL tqdm bar. Distinguish the two so it reads sensibly.
+            pm = _PREFETCH_RE.search(line)
+            phase = "facet probe" if "facet-probe" in line else "search signals"
+            _set(task_id, {"message": f"Chunk {round_no}: prefetching {phase} "
+                                      f"{int(pm.group('cur')):,}/{int(pm.group('tot')):,}..."})
         elif "Prefetching" in line:
-            # The search/facet prefetch runs BEFORE the processing tqdm bar; without
-            # this the bar sits frozen at the pre-chunk message for the whole
-            # (throttled, API-bound) prefetch. Surface it so the UI shows life.
-            _set(task_id, {"message": f"Chunk {round_no}: prefetching search signals "
-                                      f"(no per-URL progress yet)..."})
+            _set(task_id, {"message": f"Chunk {round_no}: prefetching search signals..."})
         elif "Pre-loading data" in line or "Data loaded" in line or "Data cached" in line:
             _set(task_id, {"message": f"Chunk {round_no}: loading category data..."})
         if (_get(task_id) or {}).get("cancel_requested"):
