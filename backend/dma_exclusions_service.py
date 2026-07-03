@@ -731,6 +731,20 @@ def preview(item_id: str, market: str, shop: Optional[str] = None,
     """Dry-run: exactly what apply() would change. No writes."""
     plan = resolve_targets(item_id, market, campaign_filter)
     plan["shop"] = shop or plan["resolution"].get("shop")
+    # Resolve the live headline (bestOffer) shop so the UI can show it alongside
+    # the DMA-feed shop (plan["shop"], from product_custom_attribute3). They
+    # legitimately differ when the cheapest/in-stock offer has moved to another
+    # shop since the gold item was built. Best-effort: an ES blip must never fail
+    # the preview.
+    item_id_s = (item_id or "").strip()
+    ean = item_id_s[len(DMA_ITEM_PREFIX):] if item_id_s.startswith(DMA_ITEM_PREFIX) else item_id_s
+    try:
+        ho = headline_offer(ean)
+        plan["headline_shop"] = ho.get("headline_shop")
+        plan["plp_url"] = ho.get("plp_url")
+    except Exception:  # noqa: BLE001
+        plan["headline_shop"] = None
+        plan["plp_url"] = None
     plan["dry_run"] = True
     return plan
 
@@ -861,7 +875,8 @@ def _apply_one_target(client, customer_id, item_id, target) -> dict:
 
 
 def _persist_apply(*, item_id, market, shop, resolution, campaign_filter,
-                   results, errors, warnings, plp_url, source) -> Dict[str, Any]:
+                   results, errors, warnings, plp_url, source,
+                   headline_shop=None) -> Dict[str, Any]:
     """Compute the exclusion status, persist the record, build the API result.
 
     Shared tail of the single-item apply() and the bulk oos_exclude() path so
@@ -890,6 +905,7 @@ def _persist_apply(*, item_id, market, shop, resolution, campaign_filter,
         campaign_filter=campaign_filter,
         status=status,
         plp_url=plp_url,
+        headline_shop=headline_shop,
         targets=applied,
         last_result={"applied": len(applied), "errors": errors, "warnings": warnings},
         source=source,
@@ -920,11 +936,11 @@ def apply(item_id: str, market: str, shop: Optional[str] = None,
     # concurrently with the write wave instead of serially after it.
     ean = item_id[len(DMA_ITEM_PREFIX):] if item_id.startswith(DMA_ITEM_PREFIX) else item_id
 
-    def _plp_lookup():
+    def _headline_lookup():
         try:
-            return headline_offer(ean).get("plp_url")
-        except Exception:  # noqa: BLE001 - never fail an apply over the PLP lookup
-            return None
+            return headline_offer(ean)
+        except Exception:  # noqa: BLE001 - never fail an apply over the ES lookup
+            return {}
 
     results: List[dict] = []
     errors: List[dict] = []
@@ -950,15 +966,18 @@ def apply(item_id: str, market: str, shop: Optional[str] = None,
                             "ad_group_id": t["ad_group_id"], "error": str(e)})
 
     with ThreadPoolExecutor(max_workers=min(8, len(actionable) + 1)) as ex:
-        plp_fut = ex.submit(_plp_lookup)
+        headline_fut = ex.submit(_headline_lookup)
         for status, payload in ex.map(_do, actionable):
             (results if status == "ok" else errors).append(payload)
-        plp_url = plp_fut.result()
+        headline = headline_fut.result() or {}
+        plp_url = headline.get("plp_url")
+        headline_shop = headline.get("headline_shop")
 
     return _persist_apply(
         item_id=item_id, market=market, shop=shop, resolution=plan["resolution"],
         campaign_filter=campaign_filter, results=results, errors=errors,
-        warnings=plan["warnings"], plp_url=plp_url, source=source)
+        warnings=plan["warnings"], plp_url=plp_url, headline_shop=headline_shop,
+        source=source)
 
 
 def enable(record_id: int) -> Dict[str, Any]:
@@ -1092,6 +1111,10 @@ def _ensure_table():
             """)
             cur.execute("ALTER TABLE dma_exclusions ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'")
             cur.execute("ALTER TABLE dma_exclusions ADD COLUMN IF NOT EXISTS plp_url TEXT")
+            # Live headline (bestOffer) shop from the ES product index — distinct
+            # from `shop` (the DMA feed's product_custom_attribute3). Stored so the
+            # Saved list can show both and flag mismatches.
+            cur.execute("ALTER TABLE dma_exclusions ADD COLUMN IF NOT EXISTS headline_shop TEXT")
             cur.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS dma_exclusions_item_market_uniq
                 ON dma_exclusions (item_id, market)
@@ -1106,7 +1129,8 @@ def _ensure_table():
 
 
 def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
-                 status, targets, last_result, source="manual", plp_url=None) -> int:
+                 status, targets, last_result, source="manual", plp_url=None,
+                 headline_shop=None) -> int:
     _ensure_table()
     conn = get_db_connection()
     try:
@@ -1114,8 +1138,9 @@ def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
             cur.execute("""
                 INSERT INTO dma_exclusions
                     (item_id, market, shop, category, cl0, campaign_filter,
-                     status, targets, last_result, source, plp_url, applied_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                     status, targets, last_result, source, plp_url, headline_shop,
+                     applied_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
                 ON CONFLICT (item_id, market) DO UPDATE SET
                     shop = EXCLUDED.shop,
                     category = EXCLUDED.category,
@@ -1126,11 +1151,13 @@ def _save_record(*, item_id, market, shop, category, cl0, campaign_filter,
                     last_result = EXCLUDED.last_result,
                     source = EXCLUDED.source,
                     plp_url = COALESCE(EXCLUDED.plp_url, dma_exclusions.plp_url),
+                    headline_shop = COALESCE(EXCLUDED.headline_shop, dma_exclusions.headline_shop),
                     applied_at = now(),
                     enabled_at = NULL
                 RETURNING id
             """, (item_id, market, shop, category, cl0, campaign_filter, status,
-                  json.dumps(targets), json.dumps(last_result), source, plp_url))
+                  json.dumps(targets), json.dumps(last_result), source, plp_url,
+                  headline_shop))
             rid = cur.fetchone()["id"]
         conn.commit()
         return rid
@@ -1197,7 +1224,8 @@ def list_exclusions() -> List[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id, item_id, market, shop, category, cl0, campaign_filter,
-                       status, source, plp_url, created_at, applied_at, enabled_at,
+                       status, source, plp_url, headline_shop, created_at,
+                       applied_at, enabled_at,
                        COALESCE(jsonb_array_length(targets), 0) AS target_count
                 FROM dma_exclusions
                 ORDER BY applied_at DESC NULLS LAST, id DESC
@@ -1210,6 +1238,55 @@ def list_exclusions() -> List[dict]:
         return rows
     finally:
         return_db_connection(conn)
+
+
+def backfill_headline_shops(only_missing: bool = True) -> Dict[str, Any]:
+    """Populate `headline_shop` for existing saved exclusions from the live ES
+    index — a one-shot fix for rows created before the column existed.
+
+    Caveat: headline_offer() returns the *current* bestOffer, so a backfilled
+    value reflects the headline as of the backfill, not as of the original
+    exclusion. That's the best we can reconstruct (ES keeps no history), and it's
+    still the honest "who holds the headline now vs the feed shop" comparison.
+
+    Best-effort per row: an ES miss (or a product gone from the index) leaves the
+    row unchanged rather than overwriting a good value with None. `only_missing`
+    (default) skips rows that already carry a headline shop.
+    """
+    _ensure_table()
+    rows = list_exclusions()
+    todo = [r for r in rows if not (only_missing and r.get("headline_shop"))]
+    if not todo:
+        return {"scanned": len(rows), "eligible": 0, "updated": 0, "unresolved": 0}
+
+    def _resolve(r):
+        iid = r["item_id"]
+        ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
+        try:
+            return r["id"], headline_offer(ean).get("headline_shop")
+        except Exception:  # noqa: BLE001 - one bad row must not sink the batch
+            return r["id"], None
+
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        resolved = list(ex.map(_resolve, todo))
+
+    updates = [(hs, rid) for rid, hs in resolved if hs]
+    if updates:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE dma_exclusions SET headline_shop = %s WHERE id = %s",
+                    updates)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            return_db_connection(conn)
+
+    return {"scanned": len(rows), "eligible": len(todo),
+            "updated": len(updates), "unresolved": len(todo) - len(updates)}
 
 
 def exclusion_targets(record_id: int) -> Dict[str, Any]:
@@ -1386,7 +1463,8 @@ def _build_oos_candidate(market: str, iid: str, a: dict, excluded: set) -> dict:
         "ean": iid[len(DMA_ITEM_PREFIX):],
         "category": cat,
         "shop": shop,
-        "plp_url": None,   # filled in by oos_scan for the final (capped) candidate set
+        "plp_url": None,       # filled in by oos_scan for the final (capped) candidate set
+        "headline_shop": None,  # same — the live bestOffer shop from ES
         "campaigns": camps,
         "uncovered_campaigns": sorted(c for c in camps if _campaign_family(c) == "other"),
         "fully_covered": "other" not in fams,
@@ -1461,16 +1539,18 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     # source from the GA scan — the ES headline lookup — so it's fetched only for
     # the candidates we actually return, in parallel (cached, warm ~30ms each).
     if candidates:
-        def _plp_safe(c):
+        def _headline_safe(c):
             # A single ES hiccup must not discard the whole (minutes-long) GA scan.
             try:
-                return headline_offer(c["ean"]).get("plp_url")
+                return headline_offer(c["ean"])
             except Exception:  # noqa: BLE001
-                return None
+                return {}
         with ThreadPoolExecutor(max_workers=16) as es_pool:
-            plps = es_pool.map(_plp_safe, candidates)
-            for c, plp in zip(candidates, plps):
-                c["plp_url"] = plp
+            hos = es_pool.map(_headline_safe, candidates)
+            for c, ho in zip(candidates, hos):
+                ho = ho or {}
+                c["plp_url"] = ho.get("plp_url")
+                c["headline_shop"] = ho.get("headline_shop")
 
     return {
         "market": market.upper(),
@@ -1594,17 +1674,17 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     # --- PLP enrichment (best-effort, warm ES from scan), parallel --------------
     live_ids = [iid for iid, pi in per_item.items() if pi["plan"] is not None]
 
-    def _plp(iid):
+    def _headline(iid):
         ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
         try:
-            return iid, headline_offer(ean).get("plp_url")
-        except Exception:  # noqa: BLE001 - never fail an exclude over the PLP lookup
-            return iid, None
+            return iid, headline_offer(ean)
+        except Exception:  # noqa: BLE001 - never fail an exclude over the ES lookup
+            return iid, {}
 
-    plps: Dict[str, Optional[str]] = {}
+    headlines: Dict[str, dict] = {}
     if live_ids:
         with ThreadPoolExecutor(max_workers=16) as ex:
-            plps = dict(ex.map(_plp, live_ids))
+            headlines = dict(ex.map(_headline, live_ids))
 
     # --- Phase C: persist per item + build response -----------------------------
     results = []
@@ -1613,11 +1693,13 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
             results.append({"item_id": iid, "error": pi["resolve_error"] or "resolution failed"})
             continue
         plan = pi["plan"]
+        ho = headlines.get(iid) or {}
         out = _persist_apply(
             item_id=iid, market=market, shop=plan["resolution"].get("shop"),
             resolution=plan["resolution"], campaign_filter=None,
             results=pi["results"], errors=pi["errors"],
-            warnings=plan["warnings"], plp_url=plps.get(iid), source="oos")
+            warnings=plan["warnings"], plp_url=ho.get("plp_url"),
+            headline_shop=ho.get("headline_shop"), source="oos")
         results.append({"item_id": iid, "id": out["id"], "applied": out["applied"],
                         "errors": out["errors"]})
     return {"market": market.upper(), "processed": len(results), "results": results}

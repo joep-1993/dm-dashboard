@@ -30,11 +30,11 @@
         .badge-already { background-color: #0984e3 !important; }
         .badge-noop { background-color: #d4a017 !important; color: #1a1a1a !important; }
         #savedTable th, #savedTable td { text-align: center; vertical-align: middle; }
-        /* Left-align Category (5) and Shop (6) */
+        /* Left-align Category (5) and Headline offer (6) */
         #savedTable th:nth-child(5), #savedTable td:nth-child(5),
         #savedTable th:nth-child(6), #savedTable td:nth-child(6) { text-align: left; }
         /* widths come from the colgroup (table-layout:fixed); clip long
-           Item id / Category / Shop with an ellipsis (full text on hover title) */
+           Item id / Category / Headline offer with an ellipsis (full text on hover title) */
         #savedTable tbody td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         /* Pagination controls — match Shop-campaigns */
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
@@ -203,7 +203,7 @@
                             <button class="btn btn-sm btn-fill-primary" onclick="hideOosDone(); scanOos()">Scan OOS</button>
                         </div>
                         <div id="oosControls" class="d-flex gap-2 align-items-center mb-2 flex-wrap" style="display:none !important;">
-                            <input id="oosFilter" class="form-control form-control-sm" style="width:220px;" placeholder="filter EAN / category / shop…" oninput="renderOos()">
+                            <input id="oosFilter" class="form-control form-control-sm" style="width:220px;" placeholder="filter EAN / category / headline offer…" oninput="renderOos()">
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosHideExcluded" onchange="renderOos()"><label class="form-check-label small" for="oosHideExcluded">hide already-excluded</label></div>
                             <div class="form-check"><input class="form-check-input" type="checkbox" id="oosZeroConv" onchange="renderOos()"><label class="form-check-label small" for="oosZeroConv">only 0-conversion</label></div>
                         </div>
@@ -220,7 +220,8 @@
                                 <thead style="position:sticky; top:0;">
                                     <tr>
                                         <th><input type="checkbox" id="oosSelectAll" onclick="toggleAllOos(this.checked)"></th>
-                                        <th>EAN</th><th>Category</th><th>Shop</th>
+                                        <th>EAN</th><th>Category</th>
+                                        <th title="Live bestOffer shop from Beslist's index — whichever shop currently holds the headline offer.">Headline offer</th>
                                         <th class="text-end">Clicks 30d</th><th class="text-end">Spend 30d</th>
                                     </tr>
                                 </thead>
@@ -268,7 +269,7 @@
                 <div class="card">
                     <div class="card-header bg-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Exclusions</h5>
-                        <input id="savedFilter" class="form-control form-control-sm" style="width:280px;" placeholder="filter item id / category / shop…" oninput="savedPage=1; renderSaved();">
+                        <input id="savedFilter" class="form-control form-control-sm" style="width:280px;" placeholder="filter item id / category / headline offer…" oninput="savedPage=1; renderSaved();">
                         <div class="d-flex gap-2 align-items-center">
                             <span id="savedSelCount" class="small text-muted">0 selected</span>
                             <button id="savedEnableBtn" class="btn btn-sm btn-outline-secondary" onclick="enableSelected()" disabled>Enable selected</button>
@@ -282,15 +283,15 @@
                                 <colgroup>
                                     <col style="width:36px">
                                     <col style="width:194px">
-                                    <col style="width:64px">
+                                    <col style="width:82px">
                                     <col style="width:88px">
-                                    <col style="width:21%">
-                                    <col style="width:16%">
+                                    <col style="width:24%">
+                                    <col style="width:22%">
                                     <col style="width:96px">
                                     <col style="width:140px">
                                 </colgroup>
                                 <thead>
-                                    <tr><th><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th class="sortable" data-sort="item_id" onclick="setSavedSort('item_id')" style="cursor:pointer; user-select:none;">Item id<span class="sort-ind"></span></th><th class="sortable" data-sort="market" onclick="setSavedSort('market')" style="cursor:pointer; user-select:none;">Country<span class="sort-ind"></span></th><th class="sortable" data-sort="source" onclick="setSavedSort('source')" style="cursor:pointer; user-select:none;">Source<span class="sort-ind"></span></th><th class="sortable" data-sort="category" onclick="setSavedSort('category')" style="cursor:pointer; user-select:none;">Category<span class="sort-ind"></span></th><th class="sortable" data-sort="shop" onclick="setSavedSort('shop')" style="cursor:pointer; user-select:none;">Shop<span class="sort-ind"></span></th><th class="sortable" data-sort="status" onclick="setSavedSort('status')" style="cursor:pointer; user-select:none;">Status<span class="sort-ind"></span></th><th class="sortable" data-sort="applied_at" onclick="setSavedSort('applied_at')" style="cursor:pointer; user-select:none;">Timestamp<span class="sort-ind"></span></th></tr>
+                                    <tr><th><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th class="sortable" data-sort="item_id" onclick="setSavedSort('item_id')" style="cursor:pointer; user-select:none;">Item id<span class="sort-ind"></span></th><th class="sortable" data-sort="market" onclick="setSavedSort('market')" style="cursor:pointer; user-select:none;">Country<span class="sort-ind"></span></th><th class="sortable" data-sort="source" onclick="setSavedSort('source')" style="cursor:pointer; user-select:none;">Source<span class="sort-ind"></span></th><th class="sortable" data-sort="category" onclick="setSavedSort('category')" style="cursor:pointer; user-select:none;">Category<span class="sort-ind"></span></th><th class="sortable" data-sort="headline_shop" onclick="setSavedSort('headline_shop')" style="cursor:pointer; user-select:none;" title="Live bestOffer shop from Beslist's index.">Headline offer<span class="sort-ind"></span></th><th class="sortable" data-sort="status" onclick="setSavedSort('status')" style="cursor:pointer; user-select:none;">Status<span class="sort-ind"></span></th><th class="sortable" data-sort="applied_at" onclick="setSavedSort('applied_at')" style="cursor:pointer; user-select:none;">Timestamp<span class="sort-ind"></span></th></tr>
                                 </thead>
                                 <tbody id="listBody">
                                     <tr><td colspan="8" class="text-center text-muted py-3">No exclusions yet.</td></tr>
@@ -352,7 +353,7 @@
                 `<div class="row g-3">
                     <div class="col-md-3"><div class="k">Category</div><div class="v">${esc(r.category) || '<span class="text-danger">not resolved</span>'}</div></div>
                     <div class="col-md-2"><div class="k">Cat id (CL0)</div><div class="v mono">${esc(r.cl0) || "—"}</div></div>
-                    <div class="col-md-3"><div class="k">Headline shop</div><div class="v">${esc(plan.shop || r.shop) || "—"}</div></div>
+                    <div class="col-md-3"><div class="k" title="Live bestOffer shop for this product from Beslist's index — whichever shop currently holds the headline offer.">Headline offer</div><div class="v">${esc(plan.headline_shop) || "—"}</div></div>
                     <div class="col-md-4"><div class="k">Currently serving in</div><div class="v">${(r.serving_campaigns || []).map(esc).join(", ") || "—"}</div></div>
                  </div>` + (r.note ? `<div class="text-dark mt-2 small">${esc(r.note)}</div>` : "");
 
@@ -525,7 +526,7 @@
             let rows = !f ? savedData : savedData.filter(x =>
                 (x.item_id || "").toLowerCase().includes(f) ||
                 (x.category || "").toLowerCase().includes(f) ||
-                (x.shop || "").toLowerCase().includes(f));
+                (x.headline_shop || "").toLowerCase().includes(f));
             if (savedSort.key) {
                 rows = rows.slice().sort((a, b) => {
                     const av = savedSortVal(a, savedSort.key), bv = savedSortVal(b, savedSort.key);
@@ -574,7 +575,7 @@
                         <td>${esc(x.market)}</td>
                         <td>${x.source === "oos" ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e8730c; color:#e8730c;">OOS</span>' : '<span class="badge bg-transparent fw-bold" style="border:1px solid #5e4a90; color:#5e4a90;">MANUAL</span>'}</td>
                         <td title="${esc(x.category) || ""}">${esc(catLabel(x.category)) || "—"}</td>
-                        <td title="${esc(x.shop) || ""}">${esc(x.shop) || "—"}</td>
+                        <td title="${esc(x.headline_shop) || ""}">${esc(x.headline_shop) || "—"}</td>
                         <td>${statusBadge(x.status)}</td>
                         <td class="small text-muted">${x.applied_at ? esc(x.applied_at).replace("T", " ").slice(0, 16) : "—"}</td>
                     </tr>`;
@@ -706,7 +707,7 @@
             return oosData.candidates.filter(c => {
                 if (hideEx && c.already_excluded) return false;
                 if (zeroOnly && c.conversions > 0) return false;
-                if (f && !(c.ean.toLowerCase().includes(f) || (c.category || "").toLowerCase().includes(f) || (c.shop || "").toLowerCase().includes(f))) return false;
+                if (f && !(c.ean.toLowerCase().includes(f) || (c.category || "").toLowerCase().includes(f) || (c.headline_shop || "").toLowerCase().includes(f))) return false;
                 return true;
             });
         }
@@ -744,7 +745,7 @@
                         ? `<a href="${esc(safeUrl(c.plp_url))}" target="_blank" rel="noopener">${esc(c.ean)}</a>`
                         : esc(c.ean)}${c.already_excluded ? ' <span class="badge badge-excluded">excluded</span>' : ''}</td>
                     <td title="${esc(c.category) || ""}">${esc(catLabel(c.category)) || "—"}</td>
-                    <td title="${esc(c.shop) || ""}">${esc(c.shop) || "—"}</td>
+                    <td title="${esc(c.headline_shop) || ""}">${esc(c.headline_shop) || "—"}</td>
                     <td class="text-end">${c.clicks.toLocaleString()}</td>
                     <td class="text-end">€${c.cost_eur.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                 </tr>`;

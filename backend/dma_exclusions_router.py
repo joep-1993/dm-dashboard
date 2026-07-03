@@ -16,6 +16,7 @@ from backend.dma_exclusions_service import (
     apply as svc_apply,
     enable as svc_enable,
     list_exclusions as svc_list,
+    backfill_headline_shops as svc_backfill_headline_shops,
     cleanup_enabled as svc_cleanup_enabled,
     exclusion_targets as svc_exclusion_targets,
     oos_scan as svc_oos_scan,
@@ -105,6 +106,19 @@ async def list_endpoint():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/backfill-headline-shops")
+async def backfill_headline_shops_endpoint(
+    only_missing: bool = Query(True, description="Only fill rows that have no headline offer yet"),
+):
+    """Populate the headline-offer shop for existing exclusions from the live ES
+    index (rows created before the column existed). Returns counts."""
+    try:
+        return await _run(svc_backfill_headline_shops, only_missing)
+    except Exception as e:
+        logger.exception("backfill headline shops failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/cleanup-enabled")
 async def cleanup_enabled_endpoint(market: str = Query("NL", description="Market: NL or BE")):
     """Delete resolved (status='enabled') records for a market — history cleanup only."""
@@ -179,7 +193,8 @@ async def export_xlsx():
         rows = await _run(svc_list)
         cols = [
             ("item_id", "Item ID"), ("market", "Market"), ("category", "Category"),
-            ("cl0", "Cat id (CL0)"), ("shop", "Shop"), ("campaign_filter", "Campaign filter"),
+            ("cl0", "Cat id (CL0)"), ("headline_shop", "Headline offer"),
+            ("campaign_filter", "Campaign filter"),
             ("status", "Status"), ("target_count", "Targets"),
             ("created_at", "Created"), ("applied_at", "Applied"), ("enabled_at", "Enabled"),
         ]
