@@ -1140,11 +1140,15 @@ def exclusion_targets(record_id: int) -> List[dict]:
 # pulled off the site ourselves. See oos_recovered() for the precedence rule.
 # ---------------------------------------------------------------------------
 
-def _oos_eans(market: str, state: str = "active") -> List[str]:
-    """Fetch the OOS EAN list for a market from the monitor API."""
+def _oos_eans(market: str) -> List[str]:
+    """Fetch the authoritative exclude-EAN list from the monitor.
+
+    The monitor's ``/exclude-eans`` endpoint replaced the old ``/oos-eans``
+    (removed, HTTP 410). It returns the single list of EANs that should be
+    excluded — no per-EAN headline check needed; the monitor pre-vets them.
+    """
     country = (market or "NL").upper()
-    qs = urllib.parse.urlencode({"country": country, "state": state})
-    url = f"{OOS_BASE}/oos-eans?{qs}"
+    url = f"{OOS_BASE}/exclude-eans?{urllib.parse.urlencode({'country': country})}"
     with urllib.request.urlopen(url, timeout=30) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     return list(data.get("eans") or [])
@@ -1470,44 +1474,27 @@ def _build_oos_candidate(market: str, iid: str, a: dict, excluded: set) -> dict:
 
 
 def _enrich_oos_headline(market: str, candidates: List[dict]) -> None:
-    """Annotate each candidate in-place with the headline verdict. The gold ad
-    rides the product's headline (cheapest) offer; only an OOS EAN that IS that
-    headline is a genuine exclusion. The monitor's is_cheapest_offer is the
-    authority — match/stale shows the cheapest OOS offer itself (named), differs
-    leaves shop/ean blank (a cheaper offer we can't name from the OOS rows);
-    'stale' = cheapest but the crawl OOS flag is contradicted (feed/beslist in
-    stock, or no longer served) → kept. ES supplies the PLP url and a fallback
-    verdict for EANs with no monitor row."""
+    """Annotate each candidate with headline info.
+
+    The monitor's ``/exclude-eans`` endpoint is the single authority — every EAN
+    it returns has been pre-vetted as an OOS headline that should be excluded.
+    No per-EAN ``/by-eans`` check is needed (that endpoint was removed).
+    ES still supplies the PLP url and shop info for the UI.
+    """
     if not candidates:
         return
     cand_eans = [c["ean"] for c in candidates]
-    oos_offers = _oos_offers(market, cand_eans)
-    hl = _headline_offers(cand_eans)                      # ES: PLP url (+ fallback verdict/shop)
+    hl = _headline_offers(cand_eans)                      # ES: PLP url + shop info
     for c in candidates:
         info = hl.get(c["ean"], {})
-        oos_rows = oos_offers.get(_norm_ean(c["ean"]), [])
-        oos_st, win = _oos_verdict(oos_rows, info)
-        if oos_st:
-            status = oos_st
-            c["headline_source"] = "oos"
-            c["headline_shop"] = win["shop_name"] if win else None
-            c["headline_ean"] = c["ean"] if win else None
-            c["headline_stock"] = "out_of_stock" if status == "match" else None
-        else:
-            status = info.get("status")                   # no_headline|not_found|error
-            c["headline_source"] = "es"
-            c["headline_shop"] = info.get("headline_shop")
-            c["headline_ean"] = info.get("headline_ean")
-            c["headline_stock"] = info.get("headline_stock")
-        c["headline_status"] = status
-        c["headline_match"] = status == "match"
-        # Flag a match that rests on a stale Google crawl with no contradicting
-        # stock signal (the irreducible residual) so the UI can caution + skip it
-        # from Select-all while keeping it individually excludable.
-        age = _crawl_age_days((win or {}).get("google_last_update"))
-        c["crawl_age_days"] = age
-        c["stale_crawl"] = bool(status == "match" and age is not None
-                                and age >= CRAWL_STALE_DAYS)
+        c["headline_status"] = "match"
+        c["headline_match"] = True
+        c["headline_source"] = "monitor"
+        c["headline_shop"] = info.get("headline_shop")
+        c["headline_ean"] = c["ean"]
+        c["headline_stock"] = "out_of_stock"
+        c["crawl_age_days"] = None
+        c["stale_crawl"] = False
         c["plp_url"] = info.get("plp_url")
 
 
@@ -1522,7 +1509,7 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
     EANs aren't live in DMA, and only ~half of those are headline offers, so the
     prefix scanned is typically many × the limit. None scans the whole list.
     """
-    eans = _oos_eans(market, "active")
+    eans = _oos_eans(market)
     oos_total = len(eans)
     client = _get_client()
     customer_id = _customer_id(market)
@@ -1605,41 +1592,13 @@ def oos_scan(market: str, limit: Optional[int] = None) -> Dict[str, Any]:
 def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
     """Exclude a selected list of OOS item ids (source-tagged 'oos').
 
-    Safety net: re-check the headline offer server-side and SKIP any EAN that
-    shouldn't be killed, so a stale UI selection can't pull a buyable product.
-    The monitor's is_cheapest_offer is the authority; ES is the fallback for EANs
-    it has no offer-level row for. Blocked: 'differs' (a cheaper offer is the
-    headline) and 'stale' (the crawl OOS flag is contradicted — feed in stock /
-    no longer served on beslist). not_found / no_headline / unknown pass through
-    (a gone product is a valid exclusion, and we don't fail-closed).
+    The monitor's ``/exclude-eans`` endpoint is the single authority: every EAN
+    it returns has been pre-vetted as an OOS headline that should be excluded.
+    No per-item headline re-check is needed (the old ``/by-eans`` safety net
+    was removed together with that endpoint).
     """
-    # Pull the offer-level cheapest signal and the ES fallback, each batched
-    # across a worker pool instead of a serial ~20s lookup per EAN.
-    eans = [iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
-            for iid in item_ids]
-    oos_offers = _oos_offers(market, eans)
-    headlines = _headline_offers(eans)
     results = []
     for iid in item_ids:
-        ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
-        info = headlines.get(ean) or headline_offer(ean)
-        oos_st, _ = _oos_verdict(oos_offers.get(_norm_ean(ean), []), info)
-        status = oos_st or info["status"]
-        if status in ("differs", "stale"):
-            if status == "stale":
-                reason = ("OOS flag contradicted (offer in stock per beslist/feed, "
-                          "or no longer served on beslist); not excluded")
-            elif oos_st == "differs":
-                reason = ("OOS API: a cheaper (in-stock) offer is the headline for "
-                          "this EAN; not excluded")
-            else:
-                reason = (f"headline offer is a different EAN "
-                          f"({info['headline_ean']} @ {info['headline_shop']}); not excluded")
-            results.append({
-                "item_id": iid, "skipped": True, "headline_status": status,
-                "headline_source": "oos" if oos_st else "es", "reason": reason,
-            })
-            continue
         try:
             res = apply(iid, market, source="oos")
             results.append({"item_id": iid, "id": res["id"], "applied": res["applied"],
@@ -1654,25 +1613,12 @@ def oos_exclude(item_ids: List[str], market: str) -> Dict[str, Any]:
 
 def oos_recovered(market: str) -> List[dict]:
     """OOS-sourced exclusions that are safe to re-enable because the EAN is no
-    longer the served out-of-stock headline.
+    longer on the monitor's authoritative exclude list.
 
-    Decided in ONE bulk /by-eans pass over our currently-excluded EANs in the
-    monitor's ``problem`` state (open + recovered). A DMA exclusion is GTIN-level
-    (``nl-nl-gold-<ean>``) and the monitor collapses each EAN to its headline
-    offer, so per the OOS owner's recipe:
-      * status ``open`` AND is_cheapest_offer True -> still the OOS headline
-                                                      -> KEEP excluded
-      * status ``recovered``                       -> back in stock   -> re-enable
-      * is_cheapest_offer False                    -> a rival is now the headline
-                                                      -> re-enable
-      * absent from the response                   -> recovered & aged past the
-                                                      monitor window, or the offer
-                                                      left beslist -> re-enable
-
-    Re-enabling is the safe direction (it restores a buyable ad; a product that
-    has genuinely gone won't serve anyway), so anything short of "still the open
-    OOS headline" is put back on. This replaces the old two-list set-membership
-    check (active vs recovered) that left vanished EANs excluded for manual review.
+    The ``/exclude-eans`` endpoint is the single source of truth: any EAN we
+    currently have excluded (source='oos') that is NOT on that list has
+    recovered and should be re-enabled. Re-enabling is the safe direction (it
+    restores a buyable ad; a product that has genuinely gone won't serve anyway).
     """
     country = market.upper()
     rows = [r for r in list_exclusions()
@@ -1680,22 +1626,18 @@ def oos_recovered(market: str) -> List[dict]:
             and r["status"] in ("excluded", "partial")]
     if not rows:
         return []
-    eans = [r["item_id"][len(DMA_ITEM_PREFIX):]
-            if r["item_id"].startswith(DMA_ITEM_PREFIX) else r["item_id"]
-            for r in rows]
-    sig = _oos_offers(market, eans, state="problem")   # {norm_ean: [row] or []}
+    # Fetch the current authoritative exclude list
+    exclude_set = {_norm_ean(e) for e in _oos_eans(market)}
     out: List[dict] = []
     kept = 0
     for r in rows:
         iid = r["item_id"]
         ean = iid[len(DMA_ITEM_PREFIX):] if iid.startswith(DMA_ITEM_PREFIX) else iid
-        offers = sig.get(_norm_ean(ean), [])
-        row = offers[0] if offers else None
-        if row and row.get("status") == "open" and row.get("is_cheapest_offer") is True:
-            kept += 1  # still the served OOS headline -> keep excluded
+        if _norm_ean(ean) in exclude_set:
+            kept += 1  # still on the exclude list -> keep excluded
         else:
-            out.append(r)  # recovered / rival headline / gone -> re-enable
-    logger.info("oos_recovered[%s]: %d still OOS headline (kept), %d to re-enable",
+            out.append(r)  # no longer on the list -> re-enable
+    logger.info("oos_recovered[%s]: %d still on exclude list (kept), %d to re-enable",
                 country, kept, len(out))
     return out
 
