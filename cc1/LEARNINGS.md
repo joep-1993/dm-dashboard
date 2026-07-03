@@ -1,6 +1,18 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools Auto-Redirects — V50: the "cross-subcat facet-value routing" RC is really query relaxation (2026-07-03)
+
+Investigated the RC that was meant to generalise the slush/playmobil curation. It does NOT exist as one "route by a facet value that pins a sibling subcat" mechanism — the two cases have different root causes:
+
+- **slush is NOT algorithmic — it's a business/taxonomy preference.** Maincat search for `slush`: IJsmachines has 186 products, Funcooking 91. The dominance pick (IJsmachines) is genuinely "correct" by count; the reviewer's target (Funcooking, where slush machines are *catalogued*) can't be derived from product signal. **Stays curated.** Lesson: before building an algorithm to hit a reviewer's target, check the target isn't just a catalogue-placement preference the data doesn't support.
+- **playmobil is query relaxation.** `playmobil family fun grote camping` AND-collapses to 1 product → Poppenvoertuigen noise. But the trailing junk is the problem: `playmobil family fun` dominates in **Bouwstenen**, where the normal cascade already finds the Playmobil Family Fun series (95). The engine just never relaxed the over-specific query.
+
+**V50 (main_parallel_v2.py, end of process_url_v2):** when the result is `category_fallback`/`search_derived_samecat[_faceted]` AND `search_derived_dom_count <= 2` (collapse-to-noise) AND the query has ≥4 significant tokens, re-run the WHOLE cascade on the query minus 1..3 trailing significant tokens and adopt the best relaxed result ONLY if it scores **≥ current + 25**. The big margin is the safety valve: on a 200-row collapse-to-noise sample only playmobil flipped (1%, to its correct target) — a low-count-but-correct pick like `hot wheels ultimate garage`→Speelgoed garages is never churned. Bounded to one relaxation pass (a `_relax_depth` arg on the recursion; depth-1 calls don't re-relax). Curated overrides still win first.
+
+- **Bug found + fixed:** the parser reports `subcategory_name == main_category` for a maincat-only R-URL (no real subcat), so rebuilding the relaxed URL from it produced a duplicated `/products/mc/mc/r/...` that failed to parse (recursion silently returned score 0). Guard on `subcategory_id` truthy AND `subcategory_name != main_category` before adding a subcat segment.
+- **Value/cost:** narrow (essentially playmobil today) but principled and self-maintaining — any future over-specific query that relaxes to a dramatically better result auto-fixes. Perf: relaxation re-runs (live probes) fire on the 2.2% collapse-to-noise rows even when nothing is adopted; a full global pass should warm those via the V28 prefetch. Removed the playmobil curated override (now derived); slush stays curated.
+
 ## dm-tools DMA Exclusions — the "Shop" column was the DMA feed shop, not the live headline offer (2026-07-03)
 
 User flagged that excluded item `nl-nl-gold-8806097002291` showed shop `azerty.nl` while the actual headline offer is `MediaMarkt.nl`. Root cause + fix shipped `0112c91` (`backend/dma_exclusions_service.py` + `_router.py` + `frontend/dma-exclusions.html`), deployed via manual uvicorn restart (new pid 390845).
