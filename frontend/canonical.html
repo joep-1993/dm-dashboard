@@ -764,7 +764,7 @@
             const footer = document.getElementById('pushModalFooter');
             footer.innerHTML = '';
             body.innerHTML = `<p>Submitting to production…</p>
-                <div class="progress"><div id="pushProg2" class="progress-bar bg-danger" role="progressbar" style="width:0%"></div></div>`;
+                <div class="progress"><div id="pushProg2" class="progress-bar" role="progressbar" style="width:0%"></div></div>`;
             try {
                 const start = await fetch(`${REDIRECT_API}/submit`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },

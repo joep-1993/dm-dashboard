@@ -300,7 +300,11 @@ body {
 }
 
 .progress-bar {
-    background-color: var(--color-button);
+    /* Uniform green progress bars across all tools (matches FAQ / DMA tools).
+       Was var(--color-button) (burnt orange). Bootstrap state classes
+       (.bg-danger/.bg-warning/.bg-success) still override this via !important,
+       so error/quota coloring keeps working. */
+    background-color: #00b894;
 }
 
 /* Secondary Color - Grey for headers, Orange for buttons */
