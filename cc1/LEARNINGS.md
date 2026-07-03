@@ -1,6 +1,16 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools Auto-Redirects — "Tier A limit" mode: process until N tier-A redirects (2026-07-03)
+
+New Redshift-only option (commit `6ad6a26`): a "Tier A limit" checkbox + "Tier A target" input. Instead of capping *input* URLs (the plain Limit / `row_limit`), it caps *tier-A output* — keep processing until N redirects with `reliability_tier == 'A'` (score ≥ 90) exist.
+
+- **Why a chunk loop:** the optimizer runs as a subprocess over an input file and can't early-stop mid-file, so "until N tier-A" requires running the subprocess repeatedly on chunks and counting. `_run_tier_a_loop` (backend/rurl_optimizer_v2_service.py): fetch a Redshift pool (LIMIT grows ×2 on refill; a `processed_urls` set paginates since the query has no OFFSET), filter cache/shopnames, process in 20k chunks via `_run_optimizer_chunk` (a subprocess runner that tails tqdm progress but does NOT set terminal task status — the loop owns the lifecycle), upsert every chunk to rurl_processed, collect tier-A rows. Stop at target / Redshift-exhausted / 300k-URL safety cap.
+- **Output = tier-A only, capped at N**, sorted by score (reuses `_write_xlsx_output`); all processed rows still cached. Progress = "Tier A X/N (M URLs processed)".
+- **Tier-A rate ≈ 5–7%** of processed URLs (test: 300 URLs → 20 tier-A, 6.7%), so a 10k target ≈ 150k URLs ≈ 8 chunks. The safety cap (300k) stops a too-high target running away.
+- **Footgun:** the frontend sends `tier_a_limit` and omits `row_limit` when the box is on. Before the backend restart the OLD router ignores `tier_a_limit` AND gets no `row_limit` → an UNBOUNDED Redshift run. So this needs the backend restart (bare uvicorn, no --reload) before use.
+- **Perf note:** pool refill re-downloads the top rows each grow (no OFFSET); fine for correctness, could use OFFSET later. Chunk subprocesses reuse the cached `/tmp/r_url_optimizer_cache.pkl` so only the first pays the cold build.
+
 ## dm-tools Auto-Redirects — V50: the "cross-subcat facet-value routing" RC is really query relaxation (2026-07-03)
 
 Investigated the RC that was meant to generalise the slush/playmobil curation. It does NOT exist as one "route by a facet value that pins a sibling subcat" mechanism — the two cases have different root causes:
