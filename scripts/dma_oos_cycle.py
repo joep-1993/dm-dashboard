@@ -28,7 +28,7 @@ VERIFY_SSL = os.getenv("DISABLE_SSL_VERIFY", "").lower() != "true"
 MARKETS = ["NL", "BE"]
 TIMEOUT_SCAN = 600      # scan can be slow (GA + OOS monitor)
 TIMEOUT_EXCLUDE = 1800  # bulk exclude is sequential per item (~3s each)
-TIMEOUT_REENABLE = 300
+TIMEOUT_REENABLE = 1800  # reenable is sequential per item (~6s each via GA API)
 
 logging.basicConfig(
     level=logging.INFO,
