@@ -380,6 +380,12 @@ def _strip_parens(s: str) -> str:
     return _re.sub(r"\([^)]*\)", " ", s or "")
 
 
+def _split_dims(s: str) -> str:
+    """Normalise a dimension so the query token and the facet value tokenise the
+    same way: '200x200' (query) and '200 x 200' (value) both -> '200 x 200'."""
+    return _re.sub(r"(\d)\s*[xX×*]\s*(\d)", r"\1 x \2", s or "")
+
+
 # A tiny synonym map for enrichment matching only: the facet value is a lexical
 # synonym of the query word, so a pure token match misses it. Kept minimal and
 # high-confidence (a bad synonym would append a wrong facet). Expanded into the
@@ -387,6 +393,9 @@ def _strip_parens(s: str) -> str:
 _ENRICH_SYNONYMS = {
     "vintage": "retro",
     "retro": "vintage",
+    # audience: Dutch age words -> the doelgroep facet value they belong to.
+    "peuter": "kind",
+    "kleuter": "kind",
 }
 
 
@@ -403,7 +412,7 @@ def _extract_enrichment_facets(api_facets, keyword: str) -> list[dict]:
     brand/winkel EXCLUDED — a generic query token must not pin a single-brand
     page, which also avoids the 'peuter'->merk 'Peuterey' trap. Returns
     intent-first, count-desc picks."""
-    kw_f = _fold(_expand_synonyms(keyword))
+    kw_f = _fold(_split_dims(_expand_synonyms(keyword)))
     picks: list[dict] = []
     for f in (api_facets or []):
         fname = (f.get("urlName") or "").lower()
@@ -418,7 +427,7 @@ def _extract_enrichment_facets(api_facets, keyword: str) -> list[dict]:
             cnt = int(v.get("count") or 0)
             if vid is None or cnt <= 0:
                 continue
-            sv_f = _fold(_strip_parens(vname))
+            sv_f = _fold(_split_dims(_strip_parens(vname)))
             if not _value_distinctive_match(kw_f, sv_f):
                 continue
             covered = {kt for kt in _tokens(kw_f)

@@ -46,3 +46,19 @@ def test_synonym_vintage_matches_retro():
                      (106766, "Vrijstaand", 17))]
     picks = _extract_enrichment_facets(facets, "vintage")
     assert picks and picks[0]["value_id"] == 23593989
+
+
+def test_dimension_x_separator():
+    # query '200x200' must match the facet value '200 x 200'.
+    facets = [_facet("afmeting_bedbodem_bed_matras",
+                     (4312336, "100 x 200", 1), (4312358, "200 x 200", 2))]
+    picks = _extract_enrichment_facets(facets, "2 persoons bed 200x200")
+    assert picks and picks[0]["value_id"] == 4312358
+
+
+def test_audience_synonym_peuter():
+    # 'peuter' (toddler) -> the 'Kind' doelgroep value, not 'Baby'.
+    facets = [_facet("doelgroep_mode_accessoires",
+                     (457524, "Baby", 1099), (457525, "Kind", 2218))]
+    picks = _extract_enrichment_facets(facets, "peuter sjaal muts")
+    assert picks and picks[0]["value_id"] == 457525

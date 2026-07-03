@@ -141,6 +141,18 @@ CURATED_OVERRIDES = {
     # evidence to derive it — a curated synonym is the only reliable route.
     ('huis_tuin', 'tochtstopper'):
         'https://www.beslist.nl/products/klussen/klussen_486172_488847/',
+    # slush + playmobil: the correct facet VALUE ('Slush Puppy machines',
+    # 'Playmobil Family Fun') lives in a DIFFERENT subcategory than the one the
+    # product-dominance search derives (IJsmachines / Poppenvoertuigen). Routing
+    # by a type/series facet value that pins a sibling subcat is a large new RC
+    # (cross-subcat facet routing); until then these clean, populated targets are
+    # curated. See cc1 TASKS "remaining should-be rows".
+    ('huishoudelijke_apparatuur', 'slush ijsdrank'):
+        'https://www.beslist.nl/products/huishoudelijke_apparatuur'
+        '/huishoudelijke_apparatuur_19968037_19970684/c/type_funcooking~23809479',
+    ('speelgoed_spelletjes', 'playmobil family fun grote camping'):
+        'https://www.beslist.nl/products/speelgoed_spelletjes'
+        '/speelgoed_spelletjes_395613/c/playmobil_series_bouwstenen~3761209',
 }
 
 
