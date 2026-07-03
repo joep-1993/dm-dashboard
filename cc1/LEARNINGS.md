@@ -1,6 +1,17 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools Auto-Redirects — V49 RC4 phase-2: prefer-source routing + enrichment synonyms (2026-07-03)
+
+Follow-on to the RC4 enrichment (commit `5243f61`), closing 2 more `should be` rows.
+
+- **Prefer-source routing (main_parallel_v2.py).** When the cascade JUMPS to a different main category but the R-URL's OWN source subcat has a distinctive non-brand facet the query names, route back to source subcat + facet. Deliberately narrow: **cross-maincat jumps only** and never over `cross_maincat_fallback_verified`/`curated_override` (so RC5's confirmed matches stay). Fixes `loungeset hoes 320` (jumped to meubilair 'Loungesets' 40/D) → tuin_accessoires 'Tuinmeubelhoezen'/c/`t_tuinmeubelhoes` 'Loungesethoezen' (2314 products). Blast radius: **1/120** on the cross-maincat risk surface, and that reroute was correct (`zonder alcohol en parfum` → its drogisterij source subcat + `k_drogisterij`). Cheap because it reuses `derive_insubcat_facet` (cached).
+- **`parkside` is a bad target, not a miss.** The Excel wanted `klussen_486173_4488335`(=Zaagbladen)`/c/merk~Parkside`, but that subcat has ZERO Parkside products (probe shows only Amboss/MotoTec) — the "should be" would be an empty page. So prefer-source is same-maincat-gated AND wouldn't help anyway. Lesson: validate a reviewer's target has products before chasing it.
+- **Tiny enrichment synonym map (facet_probe.py `_ENRICH_SYNONYMS`).** Some facet values are lexical synonyms of the query word but share no token: `vintage` ↔ value `Retro`. A minimal, high-confidence map expanded into the query token set (for matching only, never to probe) fixes `vintage` → `bouw_koelkast~Retro`. Kept tiny on purpose — a wrong synonym appends a wrong facet.
+- **Cache gotcha:** `derive_insubcat_facet` caches empty results under the `rc4:` key, so after changing the extractor logic (adding the synonym) you must `DELETE FROM facet_probe_cache WHERE keyword LIKE 'rc4:%'` or the stale empty result masks the fix.
+
+Final of the 22: **13 exact + 2 score-only + 2 partial** (geleider, 2_persoons_bed). Remaining 7 need bigger/ambiguous work: `slush`/`japanse` (wrong dominant category — RC1), `peuter` (audience semantics), `lampen`/`playmobil` (no source subcat), `parkside` (empty target), `dubbele` (contradictory note).
+
 ## dm-tools Auto-Redirects — V49 (RC4): in-subcat facet enrichment for bare category redirects (2026-07-03)
 
 Follow-on to V48 (commit `bfaa19c`). The largest remaining `should be` bucket: a query lands on a BARE category page but the wanted facet lives INSIDE that subcategory and the maincat-level probe never surfaced it. RC4 probes the resolved subcat directly and appends the facet — enrichment-only, never changes the category.
