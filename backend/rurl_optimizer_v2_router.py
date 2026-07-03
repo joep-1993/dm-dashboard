@@ -31,6 +31,7 @@ async def optimize(
     source: str = Form("upload"),
     lookback_days: int = Form(365),
     row_limit: Optional[int] = Form(None),
+    tier_a_limit: Optional[int] = Form(None),
     force_reprocess: bool = Form(False),
     exclude_shopnames: bool = Form(False),
 ):
@@ -60,6 +61,7 @@ async def optimize(
         source=source,
         lookback_days=lookback_days,
         row_limit=row_limit,
+        tier_a_limit=tier_a_limit,
         force_reprocess=force_reprocess,
         exclude_shopnames=exclude_shopnames,
     )

@@ -116,7 +116,11 @@
                             </div>
                             <div class="col-md-2 d-none" id="limitField">
                                 <label for="rowLimit" class="form-label">Limit</label>
-                                <input type="number" class="form-control" id="rowLimit" min="1" placeholder="no limit" title="Cap the number of URLs returned from Redshift. Empty = no limit.">
+                                <input type="number" class="form-control" id="rowLimit" min="1" placeholder="no limit" title="Cap the number of URLs returned from Redshift. Empty = no limit. Ignored when 'Tier A limit' is on.">
+                            </div>
+                            <div class="col-md-2 d-none" id="tierALimitField">
+                                <label for="tierALimitValue" class="form-label" style="white-space: nowrap;">Tier A target</label>
+                                <input type="number" class="form-control" id="tierALimitValue" value="1000" min="1" disabled title="Keep processing R-URLs (highest-visits first) in chunks until this many Tier A (score ≥ 90) redirects have been generated.">
                             </div>
                             <div class="col-md-2">
                                 <label for="workers" class="form-label">Workers</label>
@@ -140,6 +144,10 @@
                                 <div class="form-check form-check-inline">
                                     <input type="checkbox" class="form-check-input" id="excludeShopnames">
                                     <label for="excludeShopnames" class="form-check-label" title="Drop URLs whose keyword contains a SHOP_NAME (e.g. hema, hubo, kruidvat) before processing so they don't count toward the limit.">Exclude shopnames</label>
+                                </div>
+                                <div class="form-check form-check-inline d-none" id="tierAWrap" title="Redshift only: keep pulling + processing R-URLs (highest-visits first) in chunks until the 'Tier A target' number of Tier A (score ≥ 90) redirects have been generated, or Redshift is exhausted (safety cap ~300k URLs). The download contains only the Tier A redirects. Overrides the plain Limit.">
+                                    <input type="checkbox" class="form-check-input" id="tierALimitEnabled">
+                                    <label for="tierALimitEnabled" class="form-check-label">Tier A limit</label>
                                 </div>
                                 <div class="form-check form-check-inline">
                                     <input type="checkbox" class="form-check-input" id="useV2" checked>
@@ -243,11 +251,21 @@
                 document.getElementById('manualField').classList.toggle('d-none', !isManual);
                 document.getElementById('lookbackField').classList.toggle('d-none', !isRedshift);
                 document.getElementById('limitField').classList.toggle('d-none', !isRedshift);
+                document.getElementById('tierALimitField').classList.toggle('d-none', !isRedshift);
+                document.getElementById('tierAWrap').classList.toggle('d-none', !isRedshift);
                 // "Mainpage R-urls" only governs Redshift. Manual/upload auto-
                 // detect + process global R-URLs, so the toggle is hidden there.
                 document.getElementById('alsoGlobalWrap').classList.toggle('d-none', !isRedshift);
                 document.getElementById('csvFile').required = isUpload;
             });
+        });
+
+        // Tier A limit checkbox enables its target input (and greys out the plain
+        // Limit, which it overrides).
+        document.getElementById('tierALimitEnabled').addEventListener('change', (e) => {
+            const on = e.target.checked;
+            document.getElementById('tierALimitValue').disabled = !on;
+            document.getElementById('rowLimit').disabled = on;
         });
 
         document.getElementById('runForm').addEventListener('submit', async (e) => {
@@ -277,8 +295,16 @@
                 fd.append('file', blob, 'manual_input.csv');
             } else {
                 fd.append('lookback_days', document.getElementById('lookbackDays').value || '365');
-                const lim = document.getElementById('rowLimit').value;
-                if (lim && Number(lim) > 0) fd.append('row_limit', lim);
+                const tierAOn = document.getElementById('tierALimitEnabled').checked;
+                if (tierAOn) {
+                    const ta = document.getElementById('tierALimitValue').value;
+                    if (!ta || Number(ta) <= 0) { alert('Enter a Tier A target > 0.'); return; }
+                    fd.append('tier_a_limit', ta);
+                    // tier_a_limit overrides the plain row_limit on the backend.
+                } else {
+                    const lim = document.getElementById('rowLimit').value;
+                    if (lim && Number(lim) > 0) fd.append('row_limit', lim);
+                }
             }
             const w = document.getElementById('workers').value;
             if (w && Number(w) > 0) fd.append('workers', w);

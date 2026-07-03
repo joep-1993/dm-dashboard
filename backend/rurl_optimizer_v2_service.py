@@ -526,6 +526,223 @@ def _fetch_redshift_rurls(lookback_days: int = 365, row_limit: Optional[int] = N
     return buf.getvalue().encode("utf-8")
 
 
+def _optimizer_argv(input_path: Path, output_path: Path, url_column: str,
+                    threshold: int, workers: Optional[int], multi_facet: bool) -> list[str]:
+    argv = [
+        sys.executable, "main_parallel_v2.py", str(input_path),
+        "-o", str(output_path), "-c", url_column, "--threshold", str(threshold),
+    ]
+    if workers:
+        argv += ["-w", str(workers)]
+    if multi_facet:
+        argv.append("--multi-facet")
+    argv.append("--enable-facet-probe")
+    return argv
+
+
+def _run_optimizer_chunk(task_id: str, argv: list[str], output_path: Path,
+                         round_no: int) -> bool:
+    """Run one optimizer subprocess for a Tier-A-mode chunk. Unlike
+    _run_subprocess it does NOT set a terminal task status / append history —
+    the enclosing loop owns the task lifecycle. Returns True on success."""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(PKG_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONWARNINGS"] = "ignore::DeprecationWarning,ignore::FutureWarning"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    try:
+        proc = subprocess.Popen(
+            argv, cwd=str(PKG_DIR), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, encoding="utf-8", errors="replace",
+        )
+    except FileNotFoundError as e:
+        _append_log(task_id, f"[error] chunk {round_no} failed to start: {e}")
+        return False
+    _set(task_id, {"pid": proc.pid})
+    assert proc.stdout is not None
+    for raw_line in proc.stdout:
+        line = raw_line.rstrip()
+        if not line:
+            continue
+        _append_log(task_id, line)
+        m = _TQDM_RE.search(line)
+        if m and _get(task_id):
+            cur, tot = int(m.group("cur")), int(m.group("tot"))
+            base = _get(task_id).get("message", "")
+            # keep the running tier-A tally prefix if present
+            prefix = base.split(" — ", 1)[0] if " — " in base else ""
+            _set(task_id, {"message": (prefix + " — " if prefix else "")
+                           + f"chunk {round_no}: {cur:,}/{tot:,} URLs"})
+        if (_get(task_id) or {}).get("cancel_requested"):
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            return False
+    return proc.wait() == 0 and output_path.exists()
+
+
+# Tier-A mode tunables.
+_TIER_A_CHUNK = 20_000          # URLs processed per optimizer subprocess
+_TIER_A_MAX_URLS = 300_000      # safety cap on total URLs processed
+_TIER_A_MAX_FETCH = 2_000_000   # cap on a single Redshift LIMIT
+
+
+def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int,
+                     lookback_days: int, threshold: int, workers: Optional[int],
+                     multi_facet: bool, force_reprocess: bool,
+                     exclude_shopnames: bool, url_column: str) -> None:
+    """Process Redshift R-URLs (highest-visits first) in chunks until
+    `tier_a_limit` Tier-A (reliability_tier == 'A') redirects have been
+    generated, Redshift is exhausted, or the safety cap is hit. The output
+    contains only the Tier-A redirects (capped at the target); every processed
+    row is still upserted to rurl_processed."""
+    import io as _io
+    import pandas as _pd
+    from backend import rurl_optimizer_persistence as pers
+
+    _set(task_id, {"status": "running", "progress": 1,
+                   "message": f"Tier A 0/{tier_a_limit:,} (0 URLs processed)"})
+    _append_log(task_id,
+                f"--- Tier A mode: target {tier_a_limit:,} tier-A redirects "
+                f"(cap {_TIER_A_MAX_URLS:,} URLs) ---")
+
+    processed_urls: set[str] = set()
+    tier_a_frames: list = []
+    tier_a_count = 0
+    total_processed = 0
+    fetch_limit = min(max(tier_a_limit * 40, 100_000), _TIER_A_MAX_FETCH)
+    pool = None                # candidate DataFrame not yet processed
+    exhausted = False          # Redshift returned everything it has
+    round_no = 0
+
+    def _cancelled() -> bool:
+        return bool((_get(task_id) or {}).get("cancel_requested"))
+
+    while tier_a_count < tier_a_limit and total_processed < _TIER_A_MAX_URLS:
+        if _cancelled():
+            break
+        # (Re)fill the candidate pool from Redshift when empty.
+        if pool is None or len(pool) == 0:
+            if exhausted:
+                break
+            _append_log(task_id, f"Querying Redshift (limit {fetch_limit:,})...")
+            data = _fetch_redshift_rurls(lookback_days, fetch_limit)
+            df_full = _pd.read_csv(_io.BytesIO(data))
+            raw_n = len(df_full)
+            df = df_full[~df_full["r_url"].astype(str).isin(processed_urls)]
+            if not force_reprocess and len(df):
+                cached = pers.already_processed(df["r_url"].tolist())
+                df = df[~df["r_url"].isin(cached)]
+            if exclude_shopnames and len(df):
+                df = df[~df["r_url"].apply(_url_contains_shopname)]
+            pool = df.reset_index(drop=True)
+            if raw_n < fetch_limit:
+                exhausted = True
+            else:
+                fetch_limit = min(fetch_limit * 2, _TIER_A_MAX_FETCH)
+            _append_log(task_id,
+                        f"Pool: {raw_n:,} rows fetched, {len(pool):,} fresh candidates.")
+            if len(pool) == 0:
+                if exhausted:
+                    break
+                continue
+
+        # Take and process one chunk.
+        round_no += 1
+        chunk = pool.head(_TIER_A_CHUNK)
+        pool = pool.iloc[len(chunk):].reset_index(drop=True)
+        chunk_in = INPUT_DIR / f"input_{task_id}_tierA_{round_no}.csv"
+        chunk_out = OUTPUT_DIR / f"redirects_{task_id}_tierA_{round_no}.csv"
+        chunk.to_csv(chunk_in, index=False)
+        argv = _optimizer_argv(chunk_in, chunk_out, url_column, threshold,
+                               workers, multi_facet)
+        ok = _run_optimizer_chunk(task_id, argv, chunk_out, round_no)
+        processed_urls |= set(chunk["r_url"].astype(str))
+        total_processed += len(chunk)
+
+        added = 0
+        if ok and chunk_out.exists():
+            try:
+                cdf = _pd.read_csv(chunk_out)
+                try:
+                    pers.upsert_results(cdf)
+                except Exception as e:
+                    _append_log(task_id, f"[warn] upsert failed: {e}")
+                if "reliability_tier" in cdf.columns:
+                    a = cdf[cdf["reliability_tier"].astype(str).str.upper() == "A"]
+                    if len(a):
+                        tier_a_frames.append(a)
+                    added = len(a)
+                    tier_a_count += added
+            except Exception as e:
+                _append_log(task_id, f"[warn] chunk {round_no} read failed: {e}")
+        else:
+            _append_log(task_id, f"[warn] chunk {round_no} produced no output.")
+
+        _append_log(task_id,
+                    f"Chunk {round_no}: {len(chunk):,} URLs -> +{added:,} tier A "
+                    f"(total {tier_a_count:,}/{tier_a_limit:,}; {total_processed:,} URLs).")
+        _set(task_id, {
+            "progress": min(99, int(100 * tier_a_count / tier_a_limit)),
+            "message": f"Tier A {tier_a_count:,}/{tier_a_limit:,} "
+                       f"({total_processed:,} URLs processed)",
+        })
+        for p in (chunk_in, chunk_out):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+    if _cancelled():
+        _set(task_id, {"status": "cancelled", "message": "Cancelled by user",
+                       "finished_at": datetime.now().isoformat(), "script": "tier_a_limit"})
+        _history_append(task_id)
+        return
+
+    # Combine + cap the collected Tier-A rows and write the output.
+    if tier_a_frames:
+        allA = _pd.concat(tier_a_frames, ignore_index=True).head(tier_a_limit)
+    else:
+        allA = _pd.DataFrame()
+    stop_reason = ("target reached" if tier_a_count >= tier_a_limit
+                   else "Redshift exhausted" if exhausted
+                   else "safety cap reached" if total_processed >= _TIER_A_MAX_URLS
+                   else "stopped")
+    allA.to_csv(output_path, index=False)
+    _append_log(task_id,
+                f"==> Tier A run: {len(allA):,} tier-A redirects from "
+                f"{total_processed:,} URLs processed ({stop_reason}).")
+
+    xlsx_path = output_path
+    if len(allA):
+        try:
+            xlsx_path = _write_xlsx_output(allA, output_path)
+        except Exception as e:
+            _append_log(task_id, f"[warn] xlsx conversion failed: {e}")
+    _set(task_id, {
+        "status": "completed", "progress": 100,
+        "output_path": str(xlsx_path), "script": "tier_a_limit",
+        "message": f"Done. {len(allA):,} Tier A redirects ({stop_reason}); "
+                   f"{total_processed:,} URLs processed.",
+        "finished_at": datetime.now().isoformat(),
+    })
+    _history_append(task_id)
+
+    try:
+        fp = Path(xlsx_path)
+        if fp.exists():
+            mime = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    if fp.suffix.lower() == ".xlsx" else "text/csv")
+            pers.save_run_output(task_id, ENGINE_VERSION, fp.name, mime, fp.read_bytes())
+            _set(task_id, {"output_in_db": True})
+            _history_update_latest(task_id, {"output_in_db": True})
+    except Exception as e:
+        _append_log(task_id, f"[warn] save_run_output failed: {e}")
+
+
 def start_optimize(
     csv_bytes: Optional[bytes],
     filename: Optional[str],
@@ -537,6 +754,7 @@ def start_optimize(
     source: str = "upload",
     lookback_days: int = 365,
     row_limit: Optional[int] = None,
+    tier_a_limit: Optional[int] = None,
     force_reprocess: bool = False,
     exclude_shopnames: bool = False,
 ) -> str:
@@ -596,11 +814,27 @@ def start_optimize(
             "source": source,
             "lookback_days": lookback_days if source == "redshift" else None,
             "row_limit": row_limit if source == "redshift" else None,
+            "tier_a_limit": tier_a_limit if source == "redshift" else None,
             "force_reprocess": force_reprocess,
         },
     })
 
     def _runner():
+        # Tier-A mode: chunked fetch+process until N tier-A redirects. Owns its
+        # whole lifecycle (fetch, subprocess loop, output, save) and returns.
+        if source == "redshift" and tier_a_limit and tier_a_limit > 0:
+            try:
+                _run_tier_a_loop(
+                    task_id, ts, output_path, int(tier_a_limit), lookback_days,
+                    threshold, workers, multi_facet, force_reprocess,
+                    exclude_shopnames, url_column)
+            except Exception as e:
+                _set(task_id, {"status": "failed",
+                               "error": f"Tier A run failed: {e}",
+                               "finished_at": datetime.now().isoformat()})
+                _history_append(task_id)
+            return
+
         if source == "redshift":
             _set(task_id, {"status": "running", "progress": 1,
                            "message": f"Querying Redshift (last {lookback_days} days)..."})
