@@ -27,6 +27,11 @@ from backend.faq_service import (
 )
 from backend.scraper_service import scrape_product_page_api
 from backend.gpt_service import create_product_recommendation_prompt, MODEL
+from backend.gpt_service_v3 import (
+    create_product_recommendation_prompt_v3,
+    build_system_message_v3,
+    resolve_maincat_from_url,
+)
 from backend.database import get_db_connection, return_db_connection
 from backend.ai_titles_service import (
     generate_title_from_api, get_unprocessed_urls,
@@ -34,6 +39,12 @@ from backend.ai_titles_service import (
 )
 
 AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
+
+# Koptekst-promptversie voor de Batch-API-generatie. Deelt dezelfde env-toggle
+# als de real-time-generatie in main.py, zodat beide paden altijd dezelfde
+# promptversie gebruiken. "v3" (default) = per-maincat informationele koopgids;
+# "v1" = originele promo-prompt.
+KOPTEKST_PROMPT_VERSION = os.getenv("KOPTEKST_PROMPT_VERSION", "v3").strip().lower()
 
 # Global batch state (one per type)
 _batch_state = {
@@ -167,10 +178,24 @@ def _build_faq_prompt(page_data: Dict, num_faqs: int = 6) -> str:
     return build_faq_prompt(page_data, num_faqs)
 
 
-def _build_kopteksten_messages(page_data: Dict) -> List[Dict]:
-    """Build kopteksten generation messages (system + user)."""
+def _build_kopteksten_messages(page_data: Dict, url: str = "") -> List[Dict]:
+    """Build kopteksten generation messages (system + user).
+
+    Volgt KOPTEKST_PROMPT_VERSION zodat de Batch-API dezelfde prompt bouwt als de
+    real-time-generatie in main.py. Bij "v3" wordt de maincat uit de URL afgeleid
+    en de per-maincat informationele koopgids-prompt gebruikt; valt terug op de
+    generieke v3-basis als de maincat niet te bepalen is.
+    """
     h1_title = page_data.get("h1_title", "")
     products = page_data.get("products", [])
+
+    if KOPTEKST_PROMPT_VERSION == "v3":
+        maincat = resolve_maincat_from_url(url) if url else None
+        return [
+            {"role": "system", "content": build_system_message_v3(maincat)},
+            {"role": "user", "content": create_product_recommendation_prompt_v3(h1_title, products)},
+        ]
+
     user_prompt = create_product_recommendation_prompt(h1_title, products)
 
     system_message = """Je bent een online marketeer voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
@@ -553,7 +578,7 @@ def _run_kopteksten_batch():
                 return url, "error", page_data.get("error")
             if not page_data.get("products"):
                 return url, "skipped", "no_products_found"
-            messages = _build_kopteksten_messages(page_data)
+            messages = _build_kopteksten_messages(page_data, url)
             return url, "ok", messages
 
         with ThreadPoolExecutor(max_workers=50) as executor:
