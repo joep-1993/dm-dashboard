@@ -224,8 +224,10 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close long-lived HTTP sessions to prevent CLOSE_WAIT socket buildup."""
-    from backend import gpt_service, scraper_service, link_validator, faq_service, ai_titles_service
-    from backend.url_validator_service import _taxonomy
+    from backend import (
+        gpt_service, scraper_service, link_validator, faq_service,
+        ai_titles_service, url_validator_service,
+    )
 
     for label, session in [
         ("gpt_service", getattr(gpt_service, "_http_client", None)),
@@ -233,7 +235,10 @@ async def shutdown_event():
         ("link_validator", getattr(link_validator, "_es_session", None)),
         ("faq_service", getattr(faq_service, "_faq_session", None)),
         ("ai_titles_http", getattr(ai_titles_service, "_http_session", None)),
-        ("url_validator", getattr(_taxonomy, "_session", None)),
+        # The taxonomy HTTP session lives on the module-level TaxonomyCache
+        # instance (_cache._session). Look it up defensively so a rename can't
+        # crash the whole shutdown handler (as the old `_taxonomy` import did).
+        ("url_validator", getattr(getattr(url_validator_service, "_cache", None), "_session", None)),
     ]:
         if session is not None:
             try:
