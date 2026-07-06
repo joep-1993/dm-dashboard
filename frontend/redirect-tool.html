@@ -7,6 +7,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
+        /* grey out the Upload button while it's processing URLs (like SEO titles) */
+        #btnPreview:disabled { color:#6c757d; border-color:#6c757d; background-color:transparent; opacity:1; }
         .stat-box { text-align: center; padding: 12px; border-radius: 8px; background: #f8f9fa; border: 1px solid #e9ecef; }
         .stat-box .num { font-size: 1.6rem; font-weight: 700; line-height: 1; }
         .stat-box .label { font-size: 0.75rem; text-transform: uppercase; color: #6c757d; margin-top: 4px; }
@@ -74,6 +76,7 @@
                         <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
                         <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
                         <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/seo-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 6h11"/><path d="M3 12h8"/><path d="M3 18h8"/><circle cx="18" cy="16" r="3"/><path d="m22 20-1.8-1.8"/></svg> SEO titles</a>
                         <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
                     </div>
                 </div>
@@ -319,6 +322,8 @@
                 <!-- ============================================================ -->
                 <!-- RECENT RESULTS                                                -->
                 <!-- ============================================================ -->
+                <!-- Run detail renders ABOVE Recent results so View jumps to it -->
+                <div id="runDetail"></div>
                 <div class="card mb-3" id="runsCard">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Recent results</h5>
@@ -343,7 +348,6 @@
                         </table>
                     </div>
                 </div>
-                <div id="runDetail"></div>
 
             </div>
         </div>
@@ -803,7 +807,7 @@
             const warn = result.warnings || 0;
             const skipped = result.skipped || 0;
             const stats = result.stats || {};
-            const alertClass = fail > 0 ? 'danger' : (warn > 0 ? 'warning' : 'success');
+            const alertClass = fail > 0 ? 'danger' : 'warning';  // light yellow for a clean/skip run, red on failures
             const warnPart = warn > 0 ? ` ${warn} with warnings,` : '';
             const html = `
                 <div class="alert alert-${alertClass} mb-0">
@@ -997,6 +1001,8 @@
                 });
 
                 renderRunDetailTable();
+                // Detail now renders above Recent results — scroll up to it.
+                out.scrollIntoView({ behavior: 'smooth', block: 'start' });
             } catch (e) {
                 out.innerHTML = `<div class="alert alert-danger">${escapeHtml(e.message)}</div>`;
             }

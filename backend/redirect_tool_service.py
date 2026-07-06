@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import threading
+import time
 import urllib.parse
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -53,8 +54,12 @@ HTTP_TIMEOUT = 30
 # frees the worker in ~2×LOOKUP_TIMEOUT instead of 30s. Writes (POST/DELETE) and
 # the bulk prefetch pages keep the full HTTP_TIMEOUT — they're not on the hot
 # 24-wide path and a slow write should not be abandoned mid-flight.
-LOOKUP_TIMEOUT = 8
-LOOKUP_RETRIES = 1
+LOOKUP_TIMEOUT = 12
+LOOKUP_RETRIES = 3
+# Transient upstream statuses worth retrying (gateway/overload). 4xx are NOT
+# retried — they're meaningful (e.g. genuinely not-found), not a blip.
+LOOKUP_RETRY_STATUS = {502, 503, 504}
+LOOKUP_BACKOFF_BASE = 0.5  # seconds; exponential between attempts: 0.5, 1, 2, ...
 LIST_PAGE_SIZE = 50
 
 # When a preflight batch exceeds this row count, switch from per-row HTTP
@@ -221,20 +226,30 @@ def _has_multivalue_facet(url: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def _get_with_retry(url: str, params: dict) -> requests.Response:
-    """GET a read-only lookup with a tight timeout and one retry on read
-    timeout. Non-timeout errors (4xx/5xx/connection) propagate immediately —
-    only a slow-but-alive upstream is worth a second attempt."""
+    """GET a read-only lookup with a tight timeout, retrying TRANSIENT upstream
+    failures — read timeout, connection error, or a 502/503/504 overload — with
+    exponential backoff. A 4xx (or any other HTTPError) is meaningful and
+    propagates immediately; only a slow-or-overloaded-but-alive upstream is
+    worth another attempt. This keeps a flaky/loaded redirect API from turning
+    transient blips into skipped rows (the run #30/#31 class of 'preflight
+    error: 503 / Read timed out')."""
     last_exc: Exception | None = None
     for attempt in range(LOOKUP_RETRIES + 1):
         try:
             r = _HTTP.get(url, params=params, timeout=LOOKUP_TIMEOUT)
             r.raise_for_status()
             return r
-        except requests.exceptions.Timeout as exc:
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status not in LOOKUP_RETRY_STATUS:
+                raise  # 4xx / other non-transient — don't retry
             last_exc = exc
-            if attempt < LOOKUP_RETRIES:
-                logger.debug("lookup timed out (attempt %s), retrying: %s",
-                             attempt + 1, url)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            last_exc = exc
+        if attempt < LOOKUP_RETRIES:
+            time.sleep(LOOKUP_BACKOFF_BASE * (2 ** attempt))
+            logger.debug("lookup transient failure (attempt %s/%s), retrying %s: %s",
+                         attempt + 1, LOOKUP_RETRIES + 1, url, last_exc)
     raise last_exc  # type: ignore[misc]
 
 
