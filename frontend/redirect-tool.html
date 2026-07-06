@@ -807,7 +807,7 @@
             const warn = result.warnings || 0;
             const skipped = result.skipped || 0;
             const stats = result.stats || {};
-            const alertClass = fail > 0 ? 'danger' : 'warning';  // light yellow for a clean/skip run, red on failures
+            const alertClass = 'warning';  // always light yellow — the counts convey pass/fail in text
             const warnPart = warn > 0 ? ` ${warn} with warnings,` : '';
             const html = `
                 <div class="alert alert-${alertClass} mb-0">
