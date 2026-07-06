@@ -195,9 +195,15 @@ def _headline_offer_uncached(ean: str) -> Dict[str, Any]:
         return {"status": "not_found", "headline_ean": None, "headline_shop": None,
                 "headline_stock": None, "plp_url": None, "shop_stock": {}}
 
-    # An EAN can resolve to several productidv3 docs; collect every bestOffer
-    # together with the PLP url of the doc it came from, and tally per-shop stock.
-    headlines = []
+    # An EAN can resolve to several productidv3 docs; collect every offer together
+    # with the PLP url of the doc it came from, and tally per-shop stock.
+    #
+    # We do NOT trust ES's `bestOffer` flag to name the headline shop: once the
+    # cheapest offer goes out of stock the flag keeps pointing at it (stock=0),
+    # while the live PLP promotes the cheapest *in-stock* offer instead. So we
+    # replicate the site's choice — cheapest in-stock total price — and only fall
+    # back to the flagged/first offer when nothing is in stock.
+    offers = []          # (offer, shop, plp)
     shop_stock: Dict[str, int] = {}
     for h in hits:
         src = h.get("_source", {})
@@ -205,23 +211,46 @@ def _headline_offer_uncached(ean: str) -> Dict[str, Any]:
         for shop in src.get("shops", []) or []:
             nm = _norm_shop(shop.get("name"))
             for off in shop.get("offers", []) or []:
-                if off.get("bestOffer"):
-                    headlines.append((off, shop, plp))
+                offers.append((off, shop, plp))
                 st = off.get("stock")
                 if nm and isinstance(st, (int, float)):
                     shop_stock[nm] = max(shop_stock.get(nm, 0), int(st))
 
-    if not headlines:
+    if not offers:
         return {"status": "no_headline", "headline_ean": None, "headline_shop": None,
                 "headline_stock": None, "shop_stock": shop_stock,
                 "plp_url": _plp_url(hits[0].get("_source", {}).get("plpUrl"))}
 
-    # Prefer a headline whose EAN equals the OOS EAN — that's a confirmed match.
-    match = next(((o, s, p) for (o, s, p) in headlines
-                  if o.get("ean") and _norm_ean(o["ean"]) == n), None)
-    off, shop, plp = match or headlines[0]
+    # Restrict to offers for the exact EAN we looked up (the PLP is per-GTIN); a
+    # doc's other variant offers don't sit on this product's headline. Fall back
+    # to the whole pool if the EAN isn't carried as a per-offer field.
+    matching = [t for t in offers if t[0].get("ean") and _norm_ean(t[0]["ean"]) == n]
+    pool = matching or offers
+
+    def _total_price(o):
+        # Effective item price (sale beats regular) + delivery; None sorts last.
+        sp = o.get("salePrice")
+        rp = (o.get("regularPrice") or {}).get("price")
+        price = sp if isinstance(sp, (int, float)) and sp > 0 else rp
+        if not isinstance(price, (int, float)):
+            return float("inf")
+        deliv = o.get("deliveryCost")
+        return price + (deliv if isinstance(deliv, (int, float)) else 0.0)
+
+    def _rank(item):
+        off = item[0]
+        st = off.get("stock")
+        in_stock = isinstance(st, (int, float)) and st > 0
+        # in-stock first, then cheapest total, then ES bestOffer as a price tiebreak.
+        return (0 if in_stock else 1, _total_price(off), 0 if off.get("bestOffer") else 1)
+
+    off, shop, plp = min(pool, key=_rank)
+    st = off.get("stock")
     return {
-        "status": "match" if match else "differs",
+        # "match": the live headline is the EAN we looked up and it's in stock —
+        # i.e. a customer still sees this exact offer available. "differs": the
+        # headline moved (different EAN or now out of stock).
+        "status": "match" if (matching and isinstance(st, (int, float)) and st > 0) else "differs",
         "headline_ean": off.get("ean"),
         "headline_shop": shop.get("name"),
         "headline_stock": off.get("stock"),
