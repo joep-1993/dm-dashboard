@@ -3254,6 +3254,96 @@ async def ai_titles_flag_predicted_failures(request: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# SEO Titles (blueprint generator -> /page-titles)
+# ============================================================================
+
+from backend.seo_titles_service import (
+    init_seo_titles_table,
+    start_run as seo_titles_start_run,
+    get_run_status as seo_titles_run_status,
+    stop_run as seo_titles_stop_run,
+    publish_built as seo_titles_publish,
+    remove_blueprints as seo_titles_remove,
+    get_preview as seo_titles_preview,
+    get_recent as seo_titles_recent,
+    get_stats as seo_titles_stats,
+)
+
+try:
+    init_seo_titles_table()
+except Exception as e:
+    print(f"[STARTUP] Could not initialize seo_titles table: {e}")
+
+
+@app.post("/api/seo-titles/start")
+async def seo_titles_start(top_n: int = 100, date_from: str = None, date_to: str = None):
+    """Start a run: pull top-N SEO URLs, build blueprints for uncovered combos,
+    generate AI unique titles for their source URLs."""
+    try:
+        return seo_titles_start_run(top_n, date_from, date_to)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/seo-titles/status")
+async def seo_titles_status():
+    """In-memory progress of the current/last run."""
+    try:
+        return {"run": seo_titles_run_status(), "stats": seo_titles_stats()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/seo-titles/stop")
+async def seo_titles_stop():
+    try:
+        return seo_titles_stop_run()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/seo-titles/preview")
+async def seo_titles_preview_endpoint(limit: int = 100, status: str = "built"):
+    try:
+        return {"rows": seo_titles_preview(limit, status)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/seo-titles/publish")
+async def seo_titles_publish_endpoint(request: dict = None):
+    """Push built blueprints to /page-titles (default production) and the per-URL
+    AI titles via the unique-titles importer."""
+    request = request or {}
+    env = request.get("env", "production")
+    push_unique = request.get("push_unique_titles", True)
+    combos = request.get("combos")  # optional [{cat_id, key}]; None = all built
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: seo_titles_publish(env, push_unique, combos))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/seo-titles/remove")
+async def seo_titles_remove_endpoint(request: dict = None):
+    """Delete selected unpushed blueprints (combos = [{cat_id, key}])."""
+    request = request or {}
+    try:
+        return seo_titles_remove(request.get("combos") or [])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/seo-titles/recent")
+async def seo_titles_recent_endpoint(limit: int = 20):
+    try:
+        return {"results": seo_titles_recent(limit)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =============================================================================
 # CANONICAL URL GENERATOR
 # =============================================================================

@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO titles</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
+    <style>
+        .sortable { cursor: pointer; user-select: none; }
+        .sort-ind { font-size: 0.75em; color: #6c757d; }
+        .pagination-controls { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
+        .pagination-controls select { font-size: 0.85rem; width: auto; }
+        .pagination-controls .page-info { color: #636e72; }
+        .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+        #previewTable td, #previewTable th { white-space: nowrap; }
+        #previewTable td:first-child, #previewTable th:first-child { padding-left: 1.25rem; width: 36px; }
+        #previewTable td:nth-child(2), #previewTable th:nth-child(2) { padding-right: 1.5rem; min-width: 90px; }
+        .btn-orange { background:var(--color-button); border-color:var(--color-button); color:#fff; }
+        .btn-orange:hover, .btn-orange:focus { background:var(--color-button-hover); border-color:var(--color-button-hover); color:#fff; }
+        .hdr-btn { min-width: 120px; }  /* Publish — stays put as its label changes */
+        .hdr-btn-sm { min-width: 90px; }  /* Refresh & Remove — narrower, equal to each other */
+        #btnStop, #btnGenerate { flex: 1 1 0; }  /* Stop & Generate equal width regardless of label */
+        #previewSelCount { display: inline-block; min-width: 82px; text-align: right; }  /* stable width as the count changes */
+        /* theme makes .btn-outline-danger orange; force the Remove button truly red */
+        #btnRemove { color:#dc3545; border-color:#dc3545; background-color:transparent; }
+        #btnRemove:hover, #btnRemove:focus { background-color:#dc3545; border-color:#dc3545; color:#fff; }
+        /* grey out the Generate button while a run is going on (like FAQ's) */
+        #btnGenerate:disabled { color:#6c757d; border-color:#6c757d; background-color:transparent; opacity:1; }
+        /* flatpickr styling — same purple theme as SEO stats */
+        .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
+        .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
+        .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+        .flatpickr-month, .flatpickr-current-month, .flatpickr-weekday { color: #5e4a90 !important; fill: #5e4a90 !important; }
+        .flatpickr-monthDropdown-months, .numInput { color: #5e4a90 !important; font-weight: 600; }
+        .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #5e4a90 !important; }
+        .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
+        .flatpickr-day.today { border-color: #5e4a90; }
+        .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">SEO titles</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/seo-titles.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 6h11"/><path d="M3 12h8"/><path d="M3 18h8"/><circle cx="18" cy="16" r="3"/><path d="m22 20-1.8-1.8"/></svg> SEO titles</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Redirects</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rurl-optimizer.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Auto-Redirects</a>
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirect Generator</a>
+                        <a href="/static/redirect-tool.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 17V7a2 2 0 0 1 2-2h9"/><path d="M15 2l4 3-4 3"/><path d="M20 7v10a2 2 0 0 1-2 2H9"/><path d="M9 22l-4-3 4-3"/></svg> Redirect Tool</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/dma-plus.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="10"/></svg> DMA+</a>
+                        <a href="/static/dma-exclusions.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> DMA Exclusions</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C9.5 4 6 7.5 6 12s3.5 8 7.8 8c2 0 3.8-.8 5.2-2"/></svg> GSD Budgets</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/gsd-check.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> GSD Check</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                        <a href="/static/shop-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg> Shop-campaigns</a>
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                        <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
+                        <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
+                        <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO stats</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5 pb-5">
+        <div class="col-lg-11 mx-auto">
+
+            <!-- Stats -->
+            <div class="row g-3 mb-4" id="statsRow">
+                <div class="col"><div class="card text-center"><div class="card-body py-3">
+                    <div class="h4 mb-0" id="statExisting" style="color:#5e4a90; font-weight:700;">–</div><small class="text-dark">Existing combos</small>
+                </div></div></div>
+                <div class="col"><div class="card text-center"><div class="card-body py-3">
+                    <div class="h4 mb-0" id="statBuilt" style="color:#5e4a90; font-weight:700;">–</div><small class="text-dark">Built (not pushed)</small>
+                </div></div></div>
+                <div class="col"><div class="card text-center"><div class="card-body py-3">
+                    <div class="h4 mb-0" id="statPushed" style="color:#5e4a90; font-weight:700;">–</div><small class="text-dark">Pushed</small>
+                </div></div></div>
+                <div class="col"><div class="card text-center"><div class="card-body py-3">
+                    <div class="h4 mb-0" id="statFailed" style="color:#5e4a90; font-weight:700;">–</div><small class="text-dark">Failed</small>
+                </div></div></div>
+            </div>
+
+            <!-- Generate -->
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white d-flex align-items-center gap-2">
+                    <h5 class="mb-0">Retrieve URL data</h5>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" style="cursor: help;">
+                        <title>Pulls the top-X SEO-visited faceted /c/ URLs from Redshift, finds the (cat_id, key) combinations that don't have a page-title blueprint yet, builds a deterministic blueprint for each (and an AI unique title for the source URL), then lets you push the blueprints to /page-titles. Dedup is against the current tblPageTitles export plus everything this tool has already pushed.</title>
+                        <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
+                        <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                        <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                    </svg>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label">Top X URLs (by SEO visits)</label>
+                            <input type="number" class="form-control" id="topN" value="100" min="1" max="1000000">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Visits from</label>
+                            <input type="date" class="form-control" id="dateFrom" value="2025-01-01">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Visits to</label>
+                            <input type="date" class="form-control" id="dateTo">
+                        </div>
+                        <div class="col-md-3 d-flex gap-2">
+                            <button class="btn btn-outline-danger flex-fill" id="btnStop" onclick="stopRun()" disabled>Stop</button>
+                            <button class="btn btn-primary flex-fill" id="btnGenerate" onclick="startRun()">Generate</button>
+                        </div>
+                    </div>
+
+                    <div id="progressWrap" class="mt-3" style="display:none;">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="progressText">Processing...</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                        <div class="progress" id="progressBarOuter" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar"
+                                 id="progressBar"
+                                 style="width: 0%; background-color: #00b894;">
+                            </div>
+                        </div>
+                        <div class="row g-2 mt-2 small text-center" id="counters"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Preview + Publish -->
+            <div class="card mb-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <h5 class="mb-0">Built titles</h5>
+                    <input id="previewFilter" class="form-control form-control-sm" style="width:280px;" placeholder="filter" oninput="previewPage=1; renderPreview();">
+                    <div class="d-flex gap-2 align-items-center">
+                        <span id="previewSelCount" class="small text-muted">0 selected</span>
+                        <button class="btn btn-sm btn-outline-purple hdr-btn-sm" onclick="loadPreview()">↻ Refresh</button>
+                        <button class="btn btn-sm btn-outline-danger hdr-btn-sm" id="btnRemove" onclick="removeSelected()" disabled>Remove</button>
+                        <button class="btn btn-sm btn-orange hdr-btn" id="btnPublish" onclick="publish()">Publish</button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div id="publishResult" class="p-3 pb-0"></div>
+                    <div class="table-responsive">
+                        <table id="previewTable" class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th><input type="checkbox" id="previewSelectAll" onclick="toggleAllPreview(this.checked)" title="Select/unselect all on this page"></th>
+                                    <th class="sortable" data-sort="cat_id" onclick="setPreviewSort('cat_id')">cat_id<span class="sort-ind"></span></th>
+                                    <th class="sortable" data-sort="cat_name" onclick="setPreviewSort('cat_name')">cat_name<span class="sort-ind"></span></th>
+                                    <th class="sortable" data-sort="key" onclick="setPreviewSort('key')">facet combo<span class="sort-ind"></span></th>
+                                    <th class="sortable" data-sort="title" onclick="setPreviewSort('title')">title<span class="sort-ind"></span></th>
+                                    <th class="sortable" data-sort="example_title" onclick="setPreviewSort('example_title')">example title<span class="sort-ind"></span></th>
+                                    <th class="sortable" data-sort="source_url" onclick="setPreviewSort('source_url')">example url<span class="sort-ind"></span></th>
+                                </tr>
+                            </thead>
+                            <tbody id="previewBody"><tr><td colspan="7" class="text-muted text-center py-3">No built blueprints yet — run a generation.</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="previewFooter" class="card-footer bg-white" style="display:none;">
+                    <div class="pagination-controls">
+                        <span>Per page:</span>
+                        <select class="form-select form-select-sm" id="previewPerPage" onchange="previewPage=1; renderPreview();">
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="all">Show all</option>
+                        </select>
+                        <button class="btn btn-outline-secondary btn-page" onclick="previewGoto(previewPage - 1)" id="previewPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                        <span class="page-info" id="previewPageInfo">-</span>
+                        <button class="btn btn-outline-secondary btn-page" onclick="previewGoto(previewPage + 1)" id="previewNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="text-center py-4">
+                <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+            </footer>
+
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let pollTimer = null;
+        let sawRunning = false;  // true once a run has been observed running this page session
+
+        // default "to" = today
+        document.getElementById('dateTo').value = new Date().toISOString().slice(0, 10);
+
+        // date picker — same engine/theme as SEO stats (flatpickr)
+        if (window.flatpickr) {
+            const fpOpts = { dateFormat: 'Y-m-d', allowInput: true, disableMobile: true, locale: { firstDayOfWeek: 1 } };
+            flatpickr('#dateFrom', fpOpts);
+            flatpickr('#dateTo', fpOpts);
+        }
+
+        function esc(s) { const d = document.createElement('div'); d.textContent = (s == null ? '' : s); return d.innerHTML; }
+
+        async function loadStats() {
+            try {
+                const r = await fetch(`${API_BASE}/api/seo-titles/status`);
+                const d = await r.json();
+                renderStatus(d);
+            } catch (e) { /* ignore */ }
+        }
+
+        function renderStatus(d) {
+            const s = d.stats || {};
+            document.getElementById('statExisting').textContent = (s.existing_blueprints ?? 0).toLocaleString();
+            document.getElementById('statBuilt').textContent = (s.built ?? 0).toLocaleString();
+            document.getElementById('statPushed').textContent = (s.pushed ?? 0).toLocaleString();
+            document.getElementById('statFailed').textContent = (s.failed ?? 0).toLocaleString();
+
+            const run = d.run || {};
+            const running = run.status === 'running';
+            document.getElementById('btnGenerate').disabled = running;
+            document.getElementById('btnStop').disabled = !running;
+
+            const wrap = document.getElementById('progressWrap');
+            if (run.status === 'running') sawRunning = true;
+            // keep "Done" + counters visible while running, on error, and right after a
+            // run finishes in THIS session; hide on a fresh load of a past (done) run
+            const showProgress = run.status === 'running' || run.status === 'error'
+                                 || (run.status === 'done' && sawRunning);
+            wrap.style.display = showProgress ? 'block' : 'none';
+            if (showProgress) {
+                const bar = document.getElementById('progressBar');
+                const phaseNames = {
+                    starting: 'Starting…',
+                    fetching_urls: 'Fetching top URLs from Redshift…',
+                    building_blueprints: 'Building blueprints…',
+                    generating_titles: 'Generating unique titles…',
+                    done: 'Done', error: 'Error',
+                };
+                // real % only during the scan phase (scanned / urls_fetched); otherwise indeterminate
+                let pct = null;
+                if (run.phase === 'building_blueprints' && run.urls_fetched) {
+                    pct = Math.min(100, Math.round((run.scanned || 0) / run.urls_fetched * 100));
+                } else if (run.status === 'done') {
+                    pct = 100;
+                }
+                const isDone = run.status === 'done';
+                const isError = run.status === 'error';
+                const pt = document.getElementById('progressText');
+                pt.textContent = run.message || phaseNames[run.phase] || run.phase || run.status;
+                // "Done" renders as a green label/badge; error stays red bold text
+                pt.classList.toggle('badge', isDone);
+                pt.classList.toggle('bg-success', isDone);
+                pt.classList.toggle('text-danger', isError);
+                pt.classList.toggle('fw-bold', isError);
+                document.getElementById('progressPercent').textContent = (pct == null || isDone) ? '' : pct + '%';
+                // hide the bar once a run is finished; keep it (red) on error, animated while running
+                document.getElementById('progressBarOuter').style.display = isDone ? 'none' : '';
+                bar.style.width = (pct == null ? 100 : pct) + '%';
+                bar.classList.toggle('progress-bar-animated', running);
+                bar.classList.toggle('progress-bar-striped', running);
+                bar.style.backgroundColor = isError ? '#dc3545' : '#00b894';
+                const c = [
+                    ['URLs fetched', run.urls_fetched], ['Scanned', run.scanned],
+                    ['Dup', run.dup], ['No cat', run.no_cat], ['No facets', run.no_facets],
+                    ['Skipped (exist)', run.skipped_existing], ['New combos', run.new_combos],
+                    ['Created', run.titles_generated], ['Titles skipped', run.titles_skipped], ['Failed', run.titles_failed],
+                ];
+                document.getElementById('counters').innerHTML = c.map(([k, v]) =>
+                    `<div class="col"><div class="border rounded py-1"><div class="fw-bold" style="color:#5e4a90;">${(v ?? 0).toLocaleString()}</div><div class="text-muted">${k}</div></div></div>`).join('');
+            }
+
+            if (running && !pollTimer) {
+                pollTimer = setInterval(loadStats, 2000);
+            } else if (!running && pollTimer) {
+                clearInterval(pollTimer); pollTimer = null;
+                loadPreview();  // refresh table when a run finishes
+            }
+        }
+
+        async function startRun() {
+            const topN = parseInt(document.getElementById('topN').value) || 100;
+            const df = document.getElementById('dateFrom').value;
+            const dt = document.getElementById('dateTo').value;
+            const qs = new URLSearchParams({ top_n: topN, date_from: df, date_to: dt });
+            document.getElementById('btnGenerate').disabled = true;
+            const r = await fetch(`${API_BASE}/api/seo-titles/start?${qs}`, { method: 'POST' });
+            const d = await r.json();
+            if (!d.started) alert(d.message || 'Could not start');
+            setTimeout(loadStats, 300);
+        }
+
+        async function stopRun() {
+            await fetch(`${API_BASE}/api/seo-titles/stop`, { method: 'POST' });
+            setTimeout(loadStats, 300);
+        }
+
+        // ---- preview table: data + sort + filter + pagination (mirrors DMA Exclusions) ----
+        let previewData = [];
+        let previewPage = 1;
+        let previewSort = { key: 'visits', dir: -1 };  // dir: 1 asc, -1 desc
+
+        function previewPerPage() {
+            const v = document.getElementById('previewPerPage').value;
+            return v === 'all' ? Infinity : parseInt(v);
+        }
+        function setPreviewSort(key) {
+            if (previewSort.key === key) previewSort.dir = -previewSort.dir;
+            else { previewSort.key = key; previewSort.dir = 1; }
+            previewPage = 1; renderPreview();
+        }
+        function previewSortVal(x, key) {
+            if (key === 'cat_id' || key === 'visits') return Number(x[key]) || 0;
+            const v = x[key];
+            return (v == null ? '' : String(v)).toLowerCase();
+        }
+        function previewFiltered() {
+            const f = (document.getElementById('previewFilter').value || '').trim().toLowerCase();
+            let rows = !f ? previewData : previewData.filter(x =>
+                String(x.cat_id).includes(f) ||
+                (x.key || '').toLowerCase().includes(f) ||
+                (x.cat_name || '').toLowerCase().includes(f) ||
+                (x.title || '').toLowerCase().includes(f) ||
+                (x.example_title || '').toLowerCase().includes(f) ||
+                (x.source_url || '').toLowerCase().includes(f));
+            if (previewSort.key) {
+                rows = rows.slice().sort((a, b) => {
+                    const av = previewSortVal(a, previewSort.key), bv = previewSortVal(b, previewSort.key);
+                    return (av < bv ? -1 : av > bv ? 1 : 0) * previewSort.dir;
+                });
+            }
+            return rows;
+        }
+        function updatePreviewSortIndicators() {
+            document.querySelectorAll('#previewTable thead th[data-sort]').forEach(th => {
+                const ind = th.querySelector('.sort-ind');
+                if (!ind) return;
+                ind.textContent = th.dataset.sort === previewSort.key
+                    ? (previewSort.dir === 1 ? ' ▲' : ' ▼') : '';
+            });
+        }
+        function renderPreview() {
+            const data = previewFiltered();
+            const total = data.length;
+            const pp = previewPerPage();
+            const pages = pp === Infinity ? 1 : Math.max(1, Math.ceil(total / pp));
+            if (previewPage > pages) previewPage = pages;
+            const start = pp === Infinity ? 0 : (previewPage - 1) * pp;
+            const end = pp === Infinity ? total : Math.min(start + pp, total);
+            const body = data.slice(start, end).map(x => { const id = selId(x); return `<tr>
+                <td><input type="checkbox" ${previewSelected.has(id) ? 'checked' : ''} onclick="togglePreviewSel('${id}', this.checked)"></td>
+                <td>${esc(x.cat_id)}</td>
+                <td>${esc(x.cat_name)}</td>
+                <td><code>${esc(x.key)}</code></td>
+                <td class="small">${esc(x.title)}</td>
+                <td class="small">${esc(x.example_title)}</td>
+                <td class="small">${x.source_url && /^https?:/i.test(x.source_url) ? `<a href="${esc(x.source_url)}" target="_blank" rel="noopener">${esc(x.source_url)}</a>` : esc(x.source_url)}</td>
+            </tr>`; }).join('');
+            const filterActive = (document.getElementById('previewFilter').value || '').trim();
+            document.getElementById('previewBody').innerHTML = body ||
+                `<tr><td colspan="7" class="text-muted text-center py-3">${filterActive ? 'No matching blueprints.' : 'No built blueprints yet — run a generation.'}</td></tr>`;
+            document.getElementById('previewFooter').style.display = total ? 'block' : 'none';
+            document.getElementById('previewPageInfo').textContent = total ? `${start + 1}-${end} of ${total.toLocaleString()}` : '0 of 0';
+            document.getElementById('previewPrev').disabled = previewPage <= 1;
+            document.getElementById('previewNext').disabled = previewPage >= pages;
+            updatePreviewSortIndicators();
+            syncPreviewSelectAll();
+            updatePreviewSelUI();
+        }
+        function previewGoto(page) {
+            const pp = previewPerPage();
+            const pages = pp === Infinity ? 1 : Math.max(1, Math.ceil(previewFiltered().length / pp));
+            previewPage = Math.min(Math.max(1, page), pages);
+            renderPreview();
+        }
+        async function loadPreview() {
+            try {
+                const r = await fetch(`${API_BASE}/api/seo-titles/preview?limit=5000&status=built`);
+                const d = await r.json();
+                previewData = d.rows || [];
+                const live = new Set(previewData.map(selId));
+                [...previewSelected].forEach(id => { if (!live.has(id)) previewSelected.delete(id); });
+                renderPreview();
+            } catch (e) { /* ignore */ }
+        }
+
+        // ---- row selection ----
+        const previewSelected = new Set();
+        function selId(x) { return `${x.cat_id}|${x.key}`; }
+        function selectedCombos() {
+            return [...previewSelected].map(id => { const i = id.indexOf('|'); return { cat_id: parseInt(id.slice(0, i)), key: id.slice(i + 1) }; });
+        }
+        function previewPageData() {
+            const data = previewFiltered();
+            const pp = previewPerPage();
+            const start = pp === Infinity ? 0 : (previewPage - 1) * pp;
+            const end = pp === Infinity ? data.length : start + pp;
+            return data.slice(start, end);
+        }
+        function togglePreviewSel(id, on) {
+            if (on) previewSelected.add(id); else previewSelected.delete(id);
+            syncPreviewSelectAll(); updatePreviewSelUI();
+        }
+        function toggleAllPreview(on) {
+            previewPageData().forEach(x => { const id = selId(x); if (on) previewSelected.add(id); else previewSelected.delete(id); });
+            renderPreview();
+        }
+        function syncPreviewSelectAll() {
+            const sa = document.getElementById('previewSelectAll');
+            if (!sa) return;
+            const pr = previewPageData();
+            const sel = pr.filter(x => previewSelected.has(selId(x))).length;
+            sa.checked = pr.length > 0 && sel === pr.length;
+            sa.indeterminate = sel > 0 && sel < pr.length;
+        }
+        function updatePreviewSelUI() {
+            const n = previewSelected.size;
+            document.getElementById('previewSelCount').textContent = `${n} selected`;
+            document.getElementById('btnRemove').disabled = n === 0;
+            document.getElementById('btnPublish').textContent = n ? `Publish (${n})` : 'Publish';
+        }
+        async function removeSelected() {
+            const combos = selectedCombos();
+            if (!combos.length) return;
+            if (!confirm(`Remove ${combos.length} blueprint(s) from the list?\n(does not affect anything already pushed to production)`)) return;
+            try {
+                await fetch(`${API_BASE}/api/seo-titles/remove`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ combos })
+                });
+            } catch (e) { /* ignore */ }
+            previewSelected.clear();
+            await loadPreview(); loadStats();
+        }
+
+        async function publish() {
+            const combos = selectedCombos();
+            const n = combos.length;
+            const what = n ? `${n} selected blueprint(s)` : `ALL built blueprints`;
+            if (!confirm(`Push ${what} to PRODUCTION /page-titles (live)?\n\nThis also pushes the per-URL AI unique titles.`)) return;
+            const btn = document.getElementById('btnPublish');
+            btn.disabled = true; btn.textContent = 'Publishing…';
+            const res = document.getElementById('publishResult');
+            res.innerHTML = '<div class="alert alert-info">Publishing… this can take a while for large batches.</div>';
+            try {
+                const bodyReq = { env: 'production' };
+                if (n) bodyReq.combos = combos;
+                const r = await fetch(`${API_BASE}/api/seo-titles/publish`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(bodyReq)
+                });
+                const d = await r.json();
+                const cls = d.success ? 'alert-success' : 'alert-danger';
+                res.innerHTML = `<div class="alert ${cls}"><strong>Pushed ${d.pushed ?? 0}</strong>, failed ${d.failed ?? 0}.
+                    ${d.message ? esc(d.message) : ''}<pre class="mb-0 mt-2 small">${esc(JSON.stringify(d.batches || d, null, 2))}</pre></div>`;
+            } catch (e) {
+                res.innerHTML = `<div class="alert alert-danger">Publish error: ${esc(e.message)}</div>`;
+            } finally {
+                btn.disabled = false;
+                previewSelected.clear();
+                loadStats(); loadPreview();
+            }
+        }
+
+        // initial load
+        loadStats();
+        loadPreview();
+    </script>
+</body>
+</html>
