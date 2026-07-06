@@ -1,6 +1,31 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools DMA Exclusions — "Headline offer" was the STALE bestOffer (OOS) shop, not the live one; + is the OOS API faulty? (2026-07-06)
+
+User saw many exclusions with "—" as Headline offer, then (after a first backfill) spotted a WRONG one: `nl-nl-gold-8721398474489` showed **Drogistwereld.nl** but the live PLP's headline is **Drogist.nl, in stock**. Two separate issues fell out.
+
+**Why the "—" blanks.** The `headline_shop` column (added later, live bestOffer shop from ES) was NULL on 968/2503 rows. The OOS save path (`oos_exclude`) DOES pass `headline_shop`, but `headline_offer(ean)` returned an empty dict at save-time (transient ES timeout / product not indexed that instant) — `_persist_apply`'s `COALESCE(EXCLUDED.headline_shop, existing)` then leaves it NULL. Recoverable: re-resolving live succeeds. There is already a backfill — `backfill_headline_shops(only_missing=)` / `POST /api/dma-exclusions/backfill-headline-shops` — but **no UI button wires it in**, so it had never run. (Caveat baked into its docstring: ES keeps no history, so it fills the *current* bestOffer, not the value as-of the original exclusion.)
+
+**The real bug — ES `bestOffer` flag is stale once that offer goes OOS.** `_headline_offer_uncached` collected only offers with `bestOffer=True` and returned that shop. But when the cheapest offer sells out, ES keeps the flag on it (`stock=0`) while the live beslist PLP re-ranks to the cheapest **in-stock** offer. So for *every* OOS exclusion the tool showed the OOS shop as the "headline" — exactly backwards. Confirmed on the example (all four shops €24.95, differ only on stock+delivery):
+| shop | ES bestOffer | stock | delivery | total |
+|---|---|---|---|---|
+| Drogist.nl | false | 10 | €0 | €24.95 ← live headline |
+| Natuurlijkbesteld.nl | false | 12 | €3.95 | €28.90 |
+| Superfoodstore.nl | false | 12 | €4.95 | €29.90 |
+| Drogistwereld.nl | **true** | **0** | €7.95 | €32.90 ← what we showed |
+
+**Fix (`abf6283`).** Rewrote the selection in `_headline_offer_uncached`: collect ALL offers, restrict to the exact looked-up EAN (`matching`; PLP is per-GTIN, fall back to whole pool if per-offer `ean` absent), then `min` by rank `(in_stock first, cheapest total, bestOffer tiebreak)` where total = `salePrice or regularPrice.price` + `deliveryCost`. Only falls back to the flagged/first offer when nothing's in stock. `status` semantics changed to "live headline is this EAN and in stock" (match) vs "moved" (differs) — **display-only, safe**: grepped every caller, the sole consumer of `status` is the `!= "error"` cache-put guard (line ~164); all others read only `headline_shop`/`plp_url`. Verified: example now returns `Drogist.nl stock=10`. Ran the corrected backfill `only_missing=False`: 2503 scanned, **2450 updated**, 53 unresolved (gone from index). (First pass earlier with the OLD logic + `only_missing=True` had filled 899/968 with the WRONG shop — the `only_missing=False` re-run overwrote them.)
+
+**Investigation — "does the OOS API return faulty item ids?" (tested 10 `oos_scan` candidates).** Findings, in order of reliability:
+- **`stock=None` ≠ OOS (the trap).** Big shops (bol.com, Coolblue, Galaxus, Proshop) report `stock=None` but are genuinely buyable — the availability signal is `blockStatus==0 AND productValid AND debugInfo.display_online`, NOT the numeric stock. A first naive `stock>0` cut said 4/10 in stock; the correct signal says **10/10 products have ≥1 available offer for that EAN, and the ES bestOffer shop itself reads available in 10/10.**
+- **But ES is NOT trustworthy ground truth here:** offers are stale (per-offer `transformVersion` 7–25 days old, well past the monitor's "confirmed within ~2 days"); `stock=None` for many; and ES availability is a *different* model than Google Merchant's live per-shop crawl (what the monitor uses).
+- **Couldn't confirm live:** beslist PLPs are JS-rendered and block our scraper (WebFetch 405; `curl` w/ "Beslist script voor SEO" UA → 59–115 byte shells).
+- **Conceptual resolution:** the monitor answers *"is the advertised (cheapest) offer OOS per Google?"* — legitimately different from *"is the product buyable via some shop?"*. The gold/DMA ad rides ONE shop's offer, so excluding is defensible even when other shops stock it. So NOT obviously "faulty" — but also not necessarily dead products.
+- **Open question (worth chasing):** does the DMA gold ad deep-link to the specific (OOS) shop offer, or to the beslist PLP that re-ranks to an in-stock offer? If the PLP, these are false-positive exclusions (pulling ads for buyable products). Settle via the ad/feed landing URL or the monitor's per-offer Google-OOS detail — not ES.
+
+**Deploy.** Backend is bare uvicorn, no `--reload` (`start.sh` says `--reload` but the live process runs without it). Killed pid 75121, relaunched `setsid nohup ./venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8003 &` (pid 89946); verified `/api/dma-exclusions/list` 200 and served logic returns `Drogist.nl`. DB was already corrected by the backfill (ran in a fresh python process with new code); the restart only matters for future live scans/UI lookups.
+
 ## dm-tools Kopteksten — v3 per-maincat prompts wired into production (2026-07-02)
 
 The v3 informational koopgids prompts (built 2026-07-01, 31 per-maincat system prompts in `backend/data/kopteksten_maincat_prompts_v3.json`, generator `backend/gpt_service_v3.py`) are now the DEFAULT for newly generated kopteksten. Shipped `892027a` (`backend/main.py` + `backend/gpt_service_v3.py`), pushed to dm-dashboard. **NOT yet deployed** — a DMA Exclusion run was in progress, so the live uvicorn (pid 293, no `--reload`) still runs v1; v3 activates on the next manual restart.
