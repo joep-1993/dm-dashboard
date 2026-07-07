@@ -1,6 +1,20 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools Auto-Redirects Tier-A run — performance audit + Phase 1-3 speedups (2026-07-07)
+
+Audited `rurl_optimizer_v2` for a slow Tier-A Redshift run. Biggest find was a **bug, not a knob**: each per-chunk subprocess ended with an unconditional `os.remove(cache_file)` (`main_parallel_v2.py` ~end of `main()`), while the next chunk only reuses `if os.path.exists(cache_file)` — so `--reuse-data-cache` was silently defeated and the ~90s category/facet dataset was **rebuilt every chunk** (×N).
+
+Implemented (all behavior-preserving unless noted; 55/55 existing tests pass):
+- **#1 cache-delete guard** — added `--keep-data-cache`; the Tier-A loop sets it on every chunk (incl. round 1 which builds the pickle), and `rurl_optimizer_v2_service._run_tier_a_loop` deletes the shared pickle once after the loop. Standalone runs keep the old cleanup. This is the single biggest win.
+- **#3** `fetch_limit` clamped `tier_a_limit*100`→`*40`, capped `_TIER_A_MAX_URLS+100k` (was 1,000,000 for a 10k target vs a 300k processing cap; the refill loop still grows it if needed).
+- **#2** candidate window `head(remaining budget)` **before** the 137-shopname×17-regex `.apply` (was run over the whole ~1M pool; output-identical because the loop only ever consumes ≤`_TIER_A_MAX_URLS` head-first).
+- **#4** `facet_filter` filters now scan a **once-cached lowercased URL column** (`_url_lower()`), not `.astype(str)`+casefold of all 459k rows per call (5-10× per URL cascade) — the hottest per-URL op.
+- **#6** don't compute `_facet_value_numbers` twice per multi-word match (optional param); **#7** token-run regexes hoisted to module-level compiled constants; **#9** `_facet_id_to_name` memoized; **#11** pooled `requests.Session` in `search_derived`; **#13** `iterrows`→`to_dict("records")` in `upsert_results`/`get_facet_values`; **#14** `_DIMENSION_PATTERN` hoisted out of `process_url_v2`; **#15** deterministic `db_loader` row order (sort before writing `facets.csv`, was `as_completed` order → non-deterministic tie-breaks on cache rebuild); **#8** `already_processed` batched into 50k chunks (was one giant `ANY(%s)`); **#16** `SEARCH_QPS = float(os.getenv("RURL_SEARCH_QPS","20"))` — default unchanged, one-var lever.
+- **Deferred:** #12 per-worker sqlite connection (cross-thread SQLite-safety, unverifiable without a live concurrent run); #10 route `derive_insubcat_facet` through prefetch / shared bucket (behavior-changing, and the safe direction *adds* throttle, not speed).
+- **Caveats:** the 20-QPS prefetch is the true wall-clock floor of a big run — raising `RURL_SEARCH_QPS` hits the live Search API and needs IT sign-off first (it mirrors the FastAPI process cap). Phase 2/3 want an OLD-vs-NEW single-chunk output diff on a Redshift/API box before full production trust (the `tests/` harness — 55 pass — is the local gate).
+- **Operational:** orchestrator-side fixes (#1/#2/#3/#8, in the uvicorn process) need a **backend restart** to activate; the subprocess-side ones activate on the next chunk spawn. A live 5,000-target Tier-A run (`7c97e220`) was cancelled after ~13h at 60% (still old code) to restart and activate the fixes; a cancelled run still writes its collected tier-A rows + a history row. Reconfirms [[rurl_run_fragile_to_backend_restart]]: don't restart mid-run.
+
 ## dm-tools "SEO titles" generator + the /page-titles API + Redirect-Tool preflight hardening (2026-07-06)
 
 Shipped a new **Generators → "SEO titles"** tool that builds `(cat_id, key)` page-title blueprints for the top SEO-visited faceted URLs that don't have one yet, and pushes them to the website-configuration `/page-titles` API. New files: `backend/seo_titles_service.py`, `frontend/seo-titles.html`, `scripts/load_pagetitles_existing.py`; routes in `main.py` (`/api/seo-titles/{start,status,stop,preview,publish,recent,remove}`).
