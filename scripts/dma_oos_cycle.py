@@ -27,8 +27,8 @@ BASE = f"{_base_url}/api/dma-exclusions"
 VERIFY_SSL = os.getenv("DISABLE_SSL_VERIFY", "").lower() != "true"
 MARKETS = ["NL", "BE"]
 TIMEOUT_SCAN = 600      # scan can be slow (GA + OOS monitor)
-TIMEOUT_EXCLUDE = 1800  # bulk exclude is sequential per item (~3s each)
-TIMEOUT_REENABLE = 1800  # reenable is sequential per item (~6s each via GA API)
+TIMEOUT_EXCLUDE = 3600  # bulk exclude is sequential per item (~3s each); 380+ items need >30 min
+TIMEOUT_REENABLE = 3600  # reenable is sequential per item (~6s each via GA API); large backlogs need >30 min
 
 logging.basicConfig(
     level=logging.INFO,
