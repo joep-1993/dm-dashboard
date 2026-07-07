@@ -56,6 +56,11 @@ WEIGHT_RANGE_QUALIFIERS = {'max', 'min', 'maximaal', 'minimaal', 'vanaf', 'tot'}
 # numbers to actually be present in the query.
 _DIM_RE = re.compile(r'\d+(?:[.,]\d+)?\s*[x×]\s*\d+(?:[.,]\d+)?')
 _NUM_RE = re.compile(r'\d+(?:[.,]\d+)?')
+# Token-run patterns for _coverage_tokens / _facet_value_numbers — compiled once
+# at module scope (were `import re; re.findall(literal, ...)` inside per-token,
+# per-facet-value hot functions run millions of times across a 300k-URL run).
+_ALNUM_RUN_RE = re.compile(r"[a-zÀ-ž0-9]+")
+_ALPHA_RUN_RE = re.compile(r"[a-zÀ-ž]+")
 
 
 def _numeric_signature(text: str) -> set:
@@ -427,16 +432,15 @@ class KeywordMatcher:
         """
         if not text:
             return []
-        import re as _re
         keep_all = number_filter == "all"
         allowed = number_filter if isinstance(number_filter, (set, frozenset)) else None
         out: list[str] = []
-        for run in _re.findall(r"[a-zÀ-ž0-9]+", text.lower()):
+        for run in _ALNUM_RUN_RE.findall(text.lower()):
             if run.isdigit():
                 if len(run) >= 4 and (keep_all or (allowed is not None and run in allowed)):
                     out.append(run)
             else:
-                for sub in _re.findall(r"[a-zÀ-ž]+", run):
+                for sub in _ALPHA_RUN_RE.findall(run):
                     if len(sub) >= 3 and sub not in STOPWORDS and sub not in SHOP_NAMES:
                         out.append(sub)
         return out
@@ -446,10 +450,9 @@ class KeywordMatcher:
         candidate facet value names. Used to gate which keyword numbers count in
         match_by_token_coverage — a query number only matters when a real facet
         value carries it."""
-        import re as _re
         nums = set()
         for fv in facet_values:
-            for run in _re.findall(r"[a-zÀ-ž0-9]+", (fv.facet_value_name or "").lower()):
+            for run in _ALNUM_RUN_RE.findall((fv.facet_value_name or "").lower()):
                 if run.isdigit() and len(run) >= 4:
                     nums.add(run)
         return frozenset(nums)
@@ -497,7 +500,8 @@ class KeywordMatcher:
 
     def match_by_token_coverage(self, keyword: str,
                                 facet_values: list[FacetValue],
-                                exclude_winkel: bool = False) -> MatchResult:
+                                exclude_winkel: bool = False,
+                                fv_numbers=None) -> MatchResult:
         """V29 EXPERIMENTAL: facet-value-centric scorer.
 
         For each facet value, count how many of the keyword's content
@@ -522,7 +526,10 @@ class KeywordMatcher:
         # candidate facet values, so an unbacked code/size number can't inflate
         # the token set and steal/sink a match (see _coverage_tokens). Disabled
         # (alpha-only, baseline) when number_aware is off.
-        fv_numbers = self._facet_value_numbers(facet_values) if self.number_aware else frozenset()
+        # Caller (match_with_partial) may pass the already-computed set to avoid
+        # a second identical full scan of facet_values; else compute it here.
+        if fv_numbers is None:
+            fv_numbers = self._facet_value_numbers(facet_values) if self.number_aware else frozenset()
         fv_number_filter = "all" if self.number_aware else "none"
         kw_tokens = self._coverage_tokens(keyword, fv_numbers)
         if not kw_tokens:
@@ -666,7 +673,8 @@ class KeywordMatcher:
         if (self.use_token_coverage
                 and len(self._coverage_tokens(keyword, _gate_numbers)) >= 2):
             tc = self.match_by_token_coverage(keyword, facet_values,
-                                              exclude_winkel=exclude_winkel)
+                                              exclude_winkel=exclude_winkel,
+                                              fv_numbers=_gate_numbers)
             if tc.is_match:
                 return tc
 

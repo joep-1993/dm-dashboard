@@ -1239,6 +1239,17 @@ def _cross_maincat_fallback_fields(url, parsed, categories_df, matcher,
     }
 
 
+# V23.2/V40 dimension detector — compiled once at module scope (was re.compiled
+# inside process_url_v2, i.e. per URL). re's internal cache spared the recompile
+# but not the per-call compile() lookup across 20k URLs/chunk.
+_DIMENSION_PATTERN = re.compile(
+    r'\d+\s*x\s*\d+|\d+\s*cm\b|\d+\s*mm\b|\d+\s*meter\b|\d+\s*m\b|\d+\s*persoons\b'
+    r'|\d+\s*liter\b|\d+\s*(?:kg|gram|kilo|g)\b'
+    r'|\b(?:max|min|maximaal|minimaal|vanaf|tot)\.?\s*\d+',
+    re.IGNORECASE
+)
+
+
 def process_url_v2(args):
     """Process single URL in worker."""
     global _worker_data
@@ -2087,13 +2098,7 @@ def process_url_v2(args):
     # V40: added weight units (kg/g/gram/kilo) and the "max/min/vanaf/tot N <unit>"
     # range form so weight-class keywords like "max 30 kg" are recognised as
     # dimensional (was False, which let "max" get treated as a brand token).
-    DIMENSION_PATTERN = re.compile(
-        r'\d+\s*x\s*\d+|\d+\s*cm\b|\d+\s*mm\b|\d+\s*meter\b|\d+\s*m\b|\d+\s*persoons\b'
-        r'|\d+\s*liter\b|\d+\s*(?:kg|gram|kilo|g)\b'
-        r'|\b(?:max|min|maximaal|minimaal|vanaf|tot)\.?\s*\d+',
-        re.IGNORECASE
-    )
-    has_dims = bool(DIMENSION_PATTERN.search(r.keyword)) if r.keyword else False
+    has_dims = bool(_DIMENSION_PATTERN.search(r.keyword)) if r.keyword else False
 
     # Determine matched keywords from facet_value_names or redirect_category (for subcategory_name matches)
     matched_keywords = []
@@ -3750,6 +3755,13 @@ def main():
                              'instead of rebuilding it from taxv2/Search API. Used '
                              'by the Tier-A chunk loop for chunks after the first '
                              'so a multi-chunk run pays the ~90s build only once.')
+    parser.add_argument('--keep-data-cache', action='store_true',
+                        dest='keep_data_cache',
+                        help='Do NOT delete the data-cache pickle on exit. Set by '
+                             'the Tier-A chunk loop on every chunk (incl. round 1 '
+                             'which builds it) so later chunks can --reuse-data-cache; '
+                             'the loop deletes the pickle once after the final chunk. '
+                             'Without this flag a standalone run cleans up as before.')
     parser.add_argument('--rescue-include-size',
                         dest='rescue_include_size',
                         action=argparse.BooleanOptionalAction, default=True,
@@ -3962,8 +3974,16 @@ def main():
     print_summary(results_df)
     print(f"\nResults saved to: {args.output}")
 
-    # Cleanup cache (but keep progress file for safety)
-    os.remove(cache_file)
+    # Cleanup cache (but keep progress file for safety). In a Tier-A run the
+    # cache is SHARED across chunk subprocesses, so --keep-data-cache suppresses
+    # the delete here and the service deletes the pickle once after the loop.
+    # Deleting it here would force every chunk to rebuild the ~90s dataset,
+    # silently defeating --reuse-data-cache.
+    if not getattr(args, 'keep_data_cache', False):
+        try:
+            os.remove(cache_file)
+        except OSError:
+            pass
     print(f"Progress file kept at: {progress_file}")
 
 

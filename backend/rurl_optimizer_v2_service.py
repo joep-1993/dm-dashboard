@@ -535,7 +535,8 @@ def _fetch_redshift_rurls(lookback_days: int = 365, row_limit: Optional[int] = N
 
 def _optimizer_argv(input_path: Path, output_path: Path, url_column: str,
                     threshold: int, workers: Optional[int], multi_facet: bool,
-                    reuse_data_cache: bool = False) -> list[str]:
+                    reuse_data_cache: bool = False,
+                    keep_data_cache: bool = False) -> list[str]:
     argv = [
         sys.executable, "main_parallel_v2.py", str(input_path),
         "-o", str(output_path), "-c", url_column, "--threshold", str(threshold),
@@ -547,7 +548,14 @@ def _optimizer_argv(input_path: Path, output_path: Path, url_column: str,
     argv.append("--enable-facet-probe")
     if reuse_data_cache:
         argv.append("--reuse-data-cache")
+    if keep_data_cache:
+        argv.append("--keep-data-cache")
     return argv
+
+
+# Path of the shared data-cache pickle main_parallel_v2 builds (round 1) and
+# reuses (rounds 2+). Kept in sync with main_parallel_v2.main().
+_DATA_CACHE_PKL = Path("/tmp/r_url_optimizer_cache.pkl")
 
 
 def _run_optimizer_chunk(task_id: str, argv: list[str], output_path: Path,
@@ -644,8 +652,13 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
     # feedback — minutes-to-hours of "frozen at 1%". This keeps the first chunk
     # roughly one target's worth so small runs finish in one quick pass.
     chunk_size = min(max(tier_a_limit * 20, 1_000), _TIER_A_CHUNK)
-    # Fetch enough candidates for several chunks; grows on refill.
-    fetch_limit = min(max(tier_a_limit * 100, 20_000), _TIER_A_MAX_FETCH)
+    # Fetch enough candidates for several chunks; grows on refill. Sized against
+    # the processing cap (_TIER_A_MAX_URLS), not the target*100 — the loop can
+    # never process more than the cap, so a 1M fetch for a 10k target just
+    # transferred/parsed/filtered ~700k rows it would abandon. The refill loop
+    # below doubles this (up to _TIER_A_MAX_FETCH) if a fetch turns out mostly
+    # already-processed, so a smaller first fetch is safe.
+    fetch_limit = min(max(tier_a_limit * 40, 20_000), _TIER_A_MAX_URLS + 100_000)
     pool = None                # candidate DataFrame not yet processed
     exhausted = False          # Redshift returned everything it has
     round_no = 0
@@ -669,6 +682,13 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
             if not force_reprocess and len(df):
                 cached = pers.already_processed(df["r_url"].tolist())
                 df = df[~df["r_url"].isin(cached)]
+            # Cap the candidate window to what the loop can still process before
+            # the per-row shop check: rows are visits-desc, and the loop stops at
+            # _TIER_A_MAX_URLS total, so vetting rows beyond that window is pure
+            # waste (the 137-shopname × 17-regex check ran over the whole pool).
+            remaining = _TIER_A_MAX_URLS - total_processed
+            if remaining > 0 and len(df) > remaining:
+                df = df.head(remaining)
             if exclude_shopnames and len(df):
                 df = df[~df["r_url"].apply(_url_contains_shopname)]
             pool = df.reset_index(drop=True)
@@ -692,7 +712,8 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
         chunk.to_csv(chunk_in, index=False)
         argv = _optimizer_argv(chunk_in, chunk_out, url_column, threshold,
                                workers, multi_facet,
-                               reuse_data_cache=(round_no > 1))
+                               reuse_data_cache=(round_no > 1),
+                               keep_data_cache=True)
         ok = _run_optimizer_chunk(task_id, argv, chunk_out, round_no)
         processed_urls |= set(chunk["r_url"].astype(str))
         total_processed += len(chunk)
@@ -729,6 +750,13 @@ def _run_tier_a_loop(task_id: str, ts: str, output_path: Path, tier_a_limit: int
                 p.unlink()
             except OSError:
                 pass
+
+    # Chunks ran with --keep-data-cache so they shared one built dataset; delete
+    # the shared pickle now that the loop is done (both cancel + normal exit).
+    try:
+        _DATA_CACHE_PKL.unlink()
+    except OSError:
+        pass
 
     if _cancelled():
         _set(task_id, {"status": "cancelled", "message": "Cancelled by user",

@@ -305,6 +305,11 @@ class DataLoader:
             "Facet fetch complete: %d rows in %.1fs (errors=%d)",
             len(rows), time.time() - t0, errors,
         )
+        # Deterministic row order: rows were appended in thread-completion
+        # (as_completed) order, so a cache rebuild could reshuffle them and flip
+        # "first matching row wins" tie-breaks downstream. Sort by a stable key
+        # so the cached CSV is reproducible run-to-run.
+        rows.sort(key=lambda r: (r["category_id"], r["facet_id"], r["facet_value_id"]))
         df = pd.DataFrame(rows)
         df.to_csv(cache_path, index=False)
         return df

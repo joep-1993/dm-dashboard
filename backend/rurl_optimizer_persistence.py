@@ -211,19 +211,27 @@ def psycopg2_bytes(b: bytes):
 
 
 def already_processed(urls: Iterable[str]) -> set[str]:
-    """Return the subset of `urls` already present in rurl_processed."""
+    """Return the subset of `urls` already present in rurl_processed.
+
+    Batched: a Tier-A pool can pass hundreds of thousands of URLs, and a single
+    ``ANY(%s)`` with a giant array is slow to serialize driver-side and to match.
+    Chunking keeps each statement bounded; the union of results is identical."""
     ensure_table()
     url_list = [u for u in urls if u]
     if not url_list:
         return set()
+    found: set[str] = set()
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT original_url FROM rurl_processed WHERE original_url = ANY(%s)",
-                (url_list,),
-            )
-            return {r["original_url"] for r in cur.fetchall()}
+            BATCH = 50_000
+            for i in range(0, len(url_list), BATCH):
+                cur.execute(
+                    "SELECT original_url FROM rurl_processed WHERE original_url = ANY(%s)",
+                    (url_list[i:i + BATCH],),
+                )
+                found.update(r["original_url"] for r in cur.fetchall())
+        return found
     finally:
         return_db_connection(conn)
 
@@ -257,7 +265,7 @@ def upsert_results(df: pd.DataFrame) -> int:
             (None if (not has_reason or pd.isna(r["reason"])) else str(r["reason"])),
             pd.Timestamp.now(tz="UTC"),
         )
-        for _, r in df.iterrows()
+        for r in df.to_dict("records")
         if pd.notna(r["original_url"])
     ]
     if not rows:

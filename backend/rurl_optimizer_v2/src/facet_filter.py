@@ -102,6 +102,22 @@ class FacetFilter:
             )
         return self._url_set_cache
 
+    def _url_lower(self) -> pd.Series:
+        """Lowercased URL column, built once and cached. The per-subcategory
+        filters used to `.astype(str)` + casefold (case=False) the full 459k-row
+        column on EVERY call (per URL, 5-10x per fallback cascade); precomputing
+        it once turns each filter into a single vectorized substring scan against
+        already-lowercased data — behaviour-identical to the old case=False regex."""
+        cached = getattr(self, '_url_lower_cache', None)
+        if cached is not None:
+            return cached
+        url_col = self.col_mapping.get('url')
+        if url_col is None:
+            self._url_lower_cache = pd.Series([], dtype=str)
+        else:
+            self._url_lower_cache = self.facets_df[url_col].astype(str).str.lower()
+        return self._url_lower_cache
+
     def filter_by_subcategory(self, subcategory_id: str) -> pd.DataFrame:
         """
         Filter facets to only those valid for a subcategory.
@@ -125,10 +141,9 @@ class FacetFilter:
             # Return all facets if no filtering possible
             return self.facets_df.copy()
 
-        # Filter where URL contains the subcategory ID
-        mask = self.facets_df[url_col].astype(str).str.contains(
-            str(subcategory_id),
-            case=False,
+        # Filter where URL contains the subcategory ID (lowercased col cached)
+        mask = self._url_lower().str.contains(
+            str(subcategory_id).lower(),
             na=False
         )
         return self.facets_df[mask].copy()
@@ -148,9 +163,8 @@ class FacetFilter:
         if url_col is None:
             return self.facets_df.copy()
 
-        mask = self.facets_df[url_col].astype(str).str.contains(
-            subcategory_name,
-            case=False,
+        mask = self._url_lower().str.contains(
+            str(subcategory_name).lower(),
             na=False
         )
         return self.facets_df[mask].copy()
@@ -212,9 +226,8 @@ class FacetFilter:
         # V16: Try URL matching FIRST - more reliable than name matching
         # This ensures /products/mode/ matches Kleding, not Mode accessoires
         if url_col:
-            mask = self.facets_df[url_col].astype(str).str.contains(
-                f"/products/{main_category_name}/",
-                case=False,
+            mask = self._url_lower().str.contains(
+                f"/products/{main_category_name}/".lower(),
                 na=False
             )
             if mask.any():
@@ -288,7 +301,7 @@ class FacetFilter:
         """
         facet_values = []
 
-        for _, row in filtered_df.iterrows():
+        for row in filtered_df.to_dict("records"):
             try:
                 count_col = self.col_mapping.get('count')
                 count_val = 0

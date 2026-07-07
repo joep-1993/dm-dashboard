@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -56,7 +57,17 @@ TIMEOUT = 10
 # in-memory bucket), so it mirrors the cap here. The prefetch is parallelised
 # across MAX_PREFETCH_WORKERS threads — adding workers above the cap has no
 # effect because the local _TokenBucket below paces all requests.
-SEARCH_QPS = 20.0
+#
+# The prefetch (single global 20-QPS gate) is the dominant wall-clock cost of a
+# large Tier-A run, but raising it hammers the live Search API and must be
+# cleared with IT first. Left env-tunable so it's a one-var change once the real
+# rate limit is confirmed — default 20 keeps today's behaviour unchanged.
+SEARCH_QPS = float(os.getenv("RURL_SEARCH_QPS", "20"))
+
+# Pooled HTTP session — reuse the TCP+TLS connection across the many prefetch
+# calls instead of a fresh handshake per request. Thread-safe for concurrent
+# GETs from the prefetch worker pool.
+_SESSION = requests.Session()
 MAX_PREFETCH_WORKERS = 20
 CACHE_TTL_DAYS = 7
 AND_MODE_TOTAL_THRESHOLD = 10000
@@ -124,7 +135,7 @@ def _fetch_live(maincat: str, keyword: str) -> Optional[dict]:
     }
     url = f"{SEARCH_BASE_URL}/search/products?{urllib.parse.urlencode(params)}"
     try:
-        r = requests.get(url, timeout=TIMEOUT)
+        r = _SESSION.get(url, timeout=TIMEOUT)
         r.raise_for_status()
         return r.json()
     except Exception as e:

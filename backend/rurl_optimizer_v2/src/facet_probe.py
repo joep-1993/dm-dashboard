@@ -577,10 +577,17 @@ def _probe_one(category_slug: str, keyword: str, base_total: int,
         return None
 
 
+_FACET_ID_NAME_CACHE: Optional[dict] = None
+
+
 def _facet_id_to_name() -> dict:
-    """Build facet_id → facet_name slug map from cached facets.csv."""
-    fdf = _facets_df()
-    return dict(zip(fdf["facet_id"].astype(int), fdf["facet_name"]))
+    """Build facet_id → facet_name slug map from cached facets.csv (memoized —
+    was rebuilt from the full 459k-row frame on every probe pair)."""
+    global _FACET_ID_NAME_CACHE
+    if _FACET_ID_NAME_CACHE is None:
+        fdf = _facets_df()
+        _FACET_ID_NAME_CACHE = dict(zip(fdf["facet_id"].astype(int), fdf["facet_name"]))
+    return _FACET_ID_NAME_CACHE
 
 
 def _check_surfaced(v28_payload: dict, base_total: int,
