@@ -168,6 +168,69 @@ category_lookup / deepest_category→maincat mapping) and route through
 `generate_product_content_v3` behind an env/query toggle for gradual cutover.
 Confirm content_top rendering handles multiple paragraphs (user says yes).
 
+## Auto-Redirects V52 — fold the maincat facet-match path into dominance+count scoring (2026-07-08)
+
+Second `~/redirects.txt` batch (14 new cases). Lists #2 & #3 (the recurring
+"make the score reflect coverage AND product-count dominance" ask) traced to one
+root cause: the **`multi` / `*_with_probe_facet` paths** (the `[maincat] Matched N
+facet` matcher redirects) are scored by `calculate_reliability_score`, which folds
+in **coverage but is DOMINANCE-BLIND**. So a facet match on a thin, non-dominant
+category scored the same as one on a dominant, well-populated one — deurbel 24 volt
+(→ a_gereedschap "24 volt", **3 products**, head noun "deurbel" dropped) and
+windmolentje voor in de tuin (→ t_windvang, dom_share **1.0**, **1249 products**)
+both landed on 70/C.
+
+**Fix (V52, 1 line + comment):** add `'multi'`, `'multi_with_probe_facet'`,
+`'subcategory_name_with_probe_facet'` to `_V45_DOM_SCORED_TYPES` (NOT to
+`_V45_COVERAGE_FLAT_TYPES` — their base already folds coverage in via
+`calculate_reliability_score`, so `include_coverage=False` gives them
+dominance+count ONLY, no double-dock). Mirrors the V45 treatment of the
+search-derived branches. Results: **windmolentje 70→76/B** (#3, dom bonus),
+**deurbel 70→60/C** (#2, thin-count penalty), and as a side effect several list-#1
+"weird suggestions" self-deranked — **solar_buitenlamp 70→45/D** (dom 0.26 into an
+indoor woonaccessoires facet), **hekjes_voor_honden 70→62/C**.
+
+**Validation methodology — two traps burned real time, record them:**
+1. **The indexnow corpus is the WRONG test set for this change.** `~/indexnow_
+   submitted_urls.csv` is already-redirected OUTPUT — ~100% carry an existing `/c/`
+   facet, so they take the subtree-rescue / existing-facet path where dom_share
+   isn't wired into scoring (the user-pinned facet IS the confidence signal). V52
+   correctly leaves them untouched → a 1000-URL indexnow diff showed **0 changes**
+   and looked (wrongly) like the change was inert. The population V52 affects is
+   **bare `/r/query/` URLs**. Built a proper corpus by stripping `/c/…` off the
+   indexnow keywords (`sed 's#/c/.*$##'`) → 1200 bare URLs.
+2. **The engine RESUMES from `<output>_progress.csv`** (main_parallel_v2.py ~3844):
+   if a full progress file exists it copies it to the output WITHOUT recomputing.
+   Re-running NEW over the same output path silently reused a stale OLD result
+   (byte-identical output). Always run OLD vs NEW to **fresh, distinct filenames**
+   and `rm -f` the progress file first.
+
+**Bare-corpus blast radius (1200 URLs, OLD vs NEW):** 0 URL changes (scoring-only),
+**0 A/B→D** severe regressions; 54 tier demotions (C→D 30, A→B 14, B→C 10) + 33
+score increases. Demotions are all low-dominance weak redirects — C→D examples:
+tweedehands_fitness dom **0.01**, dikke_zool/lichte_schoenen/grote_maat_heren dom
+0.13–0.22 (generic-attribute queries that dropped head intent). A→B/B→C are cov-100
+BRAND/attribute queries with low dom_share (swarovski_sieraden 0.2, adidas_outlet
+0.23) — thinly spread across subcats; per the user's spec (coverage AS WELL AS
+dominance) a fully-covered but low-dominance redirect *should* sit below a
+fully-covered high-dominance one (espresso dom 0.99 → 87, Nilfisk 0.85 → 100), and
+worst case lands in still-usable B/C. 55 tests pass. Optimizer = subprocess, no
+uvicorn restart.
+
+**List #1 (12 "weird suggestions") — diagnosed, routing fixes DEFERRED** (each a
+separate hard increment; none is a scoring issue, and V52 already de-ranks the
+worst): subcat-selection family lego_kraan/swiffer_doekjes/accu_12v/kinder_auto
+(FacetFilter "representative subcat" problem — same class as V32 cross-depth); over-
+faceting relax_fauteuil (materiaal "Leer" duplicates bekleding) + smalle_kast
+(spurious kleurtint); cross-maincat solar_buitenlamp/hekjes_voor_honden; broekpak
+under-facet (missing populaire_themas "grote maat"); spy_camera_wifi value pick;
+koelkast-met-vriezer = maincat-less **global-pass** URL (parser returns invalid on
+`/products/r/<kw>/`, handled by process_global_rurls, out of the per-URL tool's
+scope). Also deferred: windmolentje's "voor in de tuin" filler (the user's
+suggestion) — would exclude maincat-name tokens from the coverage denominator, but
+that touches coverage for ALL match types → its own validation; V52 already lifts
+windmolentje to B without it.
+
 ## Auto-Redirects V51 — synonym-aware coverage for RC4-enriched rows (2026-07-08)
 
 Picked up the stale "list #1 category_fallback (pikachu/vintage)" task. **First lesson:
