@@ -3454,6 +3454,62 @@ def process_url_v2(args):
                                 + f"; [RC4] enriched bare category with in-subcat "
                                 + f"facet(s) {', '.join(_r4_frags)}")
 
+    # V53: align a maincat facet-match's SUBCATEGORY to the full-query search-derived
+    # dominant subcat. The '[maincat] Matched N facet' path takes the subcat where the
+    # FacetFilter parked the matched facet VALUE (chosen by that value's own product
+    # count), which ignores the query's unmatched head noun — so "swiffer doekjes"
+    # lands on the parent Schoonmaakartikelen (486260, most Swiffer products) not
+    # Schoonmaakdoeken (486260_488654, where "doekjes" belongs), and "accu 12v 72ah"
+    # on the wrong sibling 6340292 not Auto-accu's (6437006). The search-derived
+    # classifier picks the dominant category for the WHOLE query. When they disagree,
+    # prefer the search-derived subcat — provided (a) same maincat, (b) NOT an ancestor
+    # of the matcher's subcat (never go LESS specific), (c) the search-derived cat is
+    # genuinely dominant (dom_share >= 0.45) — dominance is the real safety signal, NOT
+    # the parent/child relationship: a low-dominance child is a WORSE pick than the
+    # parent ("adidas outlet" -> Hardloopschoenen @0.23, "led lamp" -> LED Strips @0.1
+    # are both wrong — the query names no such specialisation), and (d) every matched
+    # facet value exists there (checked in the in-memory facets.csv, so no live call and
+    # never a dead page). lego kraan is unaffected — its search-derived dom_cat IS the
+    # matcher pick (Bouwstenen), no disagreement.
+    if (final_redirect_url and '/c/' in final_redirect_url
+            and final_match_type == 'multi'
+            and '[maincat]' in (final_reason or '')
+            and not parsed.existing_facet
+            and derived.get('dom_cat_url_slug')):
+        _v53_der = derived['dom_cat_url_slug']
+        _v53_base = final_redirect_url.split('/c/', 1)[0].rstrip('/')
+        _v53_cur = _v53_base.rsplit('/', 1)[-1]
+        _v53_frag = final_redirect_url.split('/c/', 1)[1].rstrip('/')
+        _v53_desc = _v53_der.startswith(_v53_cur + '_')   # derived is more specific
+        _v53_anc = _v53_cur.startswith(_v53_der + '_')    # derived is less specific
+        if (_v53_der != _v53_cur
+                and _v53_der.startswith(parsed.main_category + '_')
+                and not _v53_anc
+                and (search_derived_dom_share or 0) >= 0.45):
+            _v53_ok = False
+            try:
+                _fdf = facet_filter.facets_df
+                _vcol = facet_filter.col_mapping.get('facet_value_id', 'facet_value_id')
+                if 'category_url_slug' in _fdf.columns:
+                    _present = set(
+                        _fdf.loc[_fdf['category_url_slug'] == _v53_der, _vcol]
+                        .astype('int64'))
+                    _want = {int(p.split('~', 1)[1]) for p in _v53_frag.split('~~')
+                             if '~' in p and p.split('~', 1)[1].lstrip('-').isdigit()}
+                    _v53_ok = bool(_want) and _want.issubset(_present)
+            except Exception:
+                _v53_ok = False
+            if _v53_ok:
+                final_redirect_url = (f"https://www.beslist.nl/products/"
+                                      f"{parsed.main_category}/{_v53_der}/c/{_v53_frag}")
+                final_redirect_cat_name = (derived.get('dom_cat_name')
+                                           or final_redirect_cat_name)
+                _v53_rel = 'child' if _v53_desc else 'sibling'
+                final_reason = ((final_reason or '')
+                                + f"; [V53] subcat aligned to full-query search-derived "
+                                + f"dominant cat '{derived.get('dom_cat_name','')}' "
+                                + f"({_v53_der}, {_v53_rel})")
+
     # V41 (issue #2): normalise any multi-facet URL to canonical alphabetical
     # order. Several append paths prepend the existing_facet rather than merging
     # it into the alphabetical sort, so the emitted order could be non-canonical
