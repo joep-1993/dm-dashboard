@@ -970,6 +970,7 @@ async function resetValidationHistory() {
 
     resetBtn.disabled = true;
     resetBtn.textContent = 'Resetting...';
+    resetBtn.classList.replace('btn-outline-danger', 'btn-outline-secondary');  // grey outline while in progress
     resultDiv.innerHTML = '<div class="alert alert-warning">Resetting validation history and skipped URLs...</div>';
 
     try {
@@ -1005,6 +1006,7 @@ async function resetValidationHistory() {
     } finally {
         resetBtn.disabled = false;
         resetBtn.textContent = 'Reset Validation';
+        resetBtn.classList.replace('btn-outline-secondary', 'btn-outline-danger');  // restore red outline
     }
 }
 
