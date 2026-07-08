@@ -350,12 +350,26 @@ def _cache_get(maincat_norm: str, keyword_norm: str) -> Optional[dict]:
         # re-classifying via categories[]).
         if payload.get("schema_version") != SCHEMA_VERSION:
             return None
+        # V54: a cached mode='error' is a POISONED transient fetch failure
+        # (_classify returns 'error' only when the API response was None). Serving
+        # it as a fresh hit permanently blocks re-fetching that pair — which
+        # silently kills cross-maincat verification (bedhekje -> baby_peuter
+        # 'Bedhekjes' never verifies because its probe stays error forever). Treat
+        # it as a miss so the next prefetch re-fetches it.
+        if payload.get("mode") == "error":
+            return None
         return payload
     finally:
         conn.close()
 
 
 def _cache_put(maincat_norm: str, keyword_norm: str, payload: dict) -> None:
+    # V54: never persist a transient fetch failure. Caching it would serve as a
+    # fresh hit and block re-fetching (see _cache_get). A None API response
+    # (mode='error') is a timeout/network blip, not a real "no dominant cat"
+    # answer — let the next run try again.
+    if payload.get("mode") == "error":
+        return
     conn = _connect(readonly=False)
     try:
         conn.execute(
