@@ -168,6 +168,45 @@ category_lookup / deepest_category→maincat mapping) and route through
 `generate_product_content_v3` behind an env/query toggle for gradual cutover.
 Confirm content_top rendering handles multiple paragraphs (user says yes).
 
+## Auto-Redirects V54 — stop caching transient probe failures that poison cross-maincat verification (2026-07-08)
+
+Cross-maincat routing cluster (solar/bedhekje/lampen/tochtstopper/hekjes). Re-diagnosis
+first (the recurring lesson): tochtstopper already done (RC8 curated), lampen already
+correct (klussen Hanglampen @0.79 verified — "lamps above dining table"→hanging lamps
+is right; the user's "stay in huis_tuin" is like lego, debatable), hekjes is
+same-maincat (dom_cat Hondenrekken @0.36, just below V53's 0.45 floor — not
+cross-maincat), solar has NO subcat-name candidate (its target is a `s_lamp` FACET in
+tuin_accessoires, not a subcat name — the name-match cross-maincat mechanism can't
+reach it; needs a dominant-MAINCAT product signal, still architectural/deferred;
+currently 45/D so safely de-ranked). **The one cleanly-fixable case was bedhekje.**
+
+**Root cause (a real cache bug, not a routing bug).** The cross-maincat machinery
+already exists: `_cross_maincat_any_token_match` nominates a candidate when a query
+token exactly names a subcat in another maincat (bedhekje → baby_peuter 'Bedhekjes',
+name score 99), the prefetch fetches `(candidate_maincat, keyword)`, and RC5 promotes
+it if the probe VERIFIES (AND-mode, share≥0.6). bedhekje's candidate was found and its
+gate satisfied (`_keyword_bridges_value('bedhekje','Kajuitbedden')` is False) — but
+verification returned `mode=error`. `_classify` returns `mode='error'` ONLY when the
+API response was `None` (a timeout/network blip); `_cache_put` PERSISTED it and
+`_cache_get` served it as a fresh hit — so one transient failure **permanently** blocked
+re-fetching that pair, silently killing its cross-maincat verification. (`_fetch_live`
+NOW returns 451 products, Bedhekjes 446 — the data was always fine.)
+
+**Fix (V54, `58d04de`):** `_cache_put` skips `mode='error'` payloads; `_cache_get`
+treats an already-cached error as a miss so it re-fetches. bedhekje →
+`baby_peuter_563182_5257400` (80/B, cross_maincat_fallback_verified). Only **36/55108
+(0.1%)** cache entries were poisoned, so tiny blast radius. Bare-corpus (1200) OLD-vs-NEW:
+**1 URL change, 0 tier changes, 0 A/B→D** — and the 1 change is an IMPROVEMENT
+("t-shirt 30 jaar": wrong `cadeaus 'Carnavalsblouses'` 58/C → correct `mode 'T-shirts'`
+72/C verified, another un-poisoned cross-maincat route). 55 tests pass.
+
+**Lesson (recurring — cf. redirect_tool_prefetch_bug):** never cache a transient
+fetch failure as if it were an answer. A `None`/error response must re-try next run,
+not persist as a fresh negative. Any probe cache needs an error≠miss distinction.
+**Follow-up:** solar-style cross-maincat (target is a facet, not a subcat name) still
+needs a dominant-MAINCAT product-count signal — probe candidate maincats and compare
+dominance. Deferred (expensive; solar is de-ranked to D so not urgent).
+
 ## Auto-Redirects V53 — align maincat facet-match subcat to full-query search-derived dom_cat (2026-07-08)
 
 redirects.txt batch2 list #1 subcat-selection family (lego_kraan / swiffer_doekjes
