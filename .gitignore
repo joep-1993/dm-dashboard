@@ -103,3 +103,8 @@ backend/rurl_optimizer_v2/data/
 
 # Runtime artifact — rurl optimizer run history (rewritten on every run)
 backend/data/rurl_optimizer_v2_history.json
+
+# Backup files (manual snapshots, not source) — e.g. dma_plus_history.json.bak,
+# ai_titles_service.py.bak.2026-05-19_pre_facet_position_rules
+*.bak
+*.bak.*
