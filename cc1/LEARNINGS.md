@@ -168,6 +168,55 @@ category_lookup / deepest_category→maincat mapping) and route through
 `generate_product_content_v3` behind an env/query toggle for gradual cutover.
 Confirm content_top rendering handles multiple paragraphs (user says yes).
 
+## Auto-Redirects V51 — synonym-aware coverage for RC4-enriched rows (2026-07-08)
+
+Picked up the stale "list #1 category_fallback (pikachu/vintage)" task. **First lesson:
+the task list predated RC4 (2026-07-03) — always re-run the flagged URLs against
+current HEAD before writing code.** Empirical current state of the 3 category_fallback
+cases:
+- **pikachu** → `speelgoed_spelletjes_395615/c/personage~23600616` **80/B** — already
+  fixed by RC4 (in-subcat facet enrichment). No work needed.
+- **vintage** → `huishoudelijke_apparatuur_19968036_19968046/c/bouw_koelkast~23593989`
+  ('Retro') — RC4 routes it CORRECTLY (the exact facet the user wanted) but it scored
+  **37/D**. Root cause was a SCORING bug, not routing.
+- **dubbele** → still bare `fietsen_484519_8973629/` (0/D). The wanted value
+  `aantal_fietsen~23588103` is literally named **"2 fietsen"**; "dubbele" links to it
+  only via a `dubbele`→"2"/quantity synonym. Fragile + niche → deferred.
+
+**The vintage scoring bug.** score = base 70 + coverage-band + dominance-band + count-band
+(`score_search_derived`, `target_is_faceted=True`). The V45 coverage RECOMPUTE (in
+`main_parallel_v2.py`, gated on `appended_value_names`) compares the query literally to
+the appended facet value NAME. RC4's probe matched "vintage"→"Retro" only through its
+curated `_ENRICH_SYNONYMS` map (`_expand_synonyms` folds "retro" into the query before
+matching) — so the recompute, which had no synonym awareness, read **0% coverage** for a
+value that genuinely captures the query. Math: 70 − 18 (cov 0%) − 15 (dom_share 0.23) + 0
+(faceted count) = **37**.
+
+**Fix (V51, commit `21f44f4`):** the recompute now expands each query word with the SAME
+`_ENRICH_SYNONYMS` + `_stem` the probe used — candidate forms = `[word] + [syn for
+key,syn in _ENRICH_SYNONYMS if _stem(key)==_stem(word)]` — and a value matched via
+synonym reads as covered. Lift-only (guarded `_recomputed > _v45_cov`, so it can only
+raise coverage, never invent a penalty). Uses the existing curated map (vintage↔retro,
+peuter/kleuter→kind), so no new synonym risk. vintage 37/D → **63/C** (cov 0→100).
+C — not B — is the honest tier: the Retro koelkast facet has only **15 products**
+(review-worthy per the existing faceted-count policy).
+
+**Latent follow-up (deferred, documented in TASKS):** RC4 rows are scored with
+`dom_share`/`dom_cat` from the *maincat-wide* probe, which describes a DIFFERENT category
+than the RC4 target subcat (vintage's dom_cat = Broodroosters 0.23, not koelkasten). The
+−15 dom penalty there is a wrong signal that happens to offset the too-lenient count
+guard (uses dom_count=67, not the facet's own 15) — net C is defensible but the inputs
+are mismatched. Proper fix = neutralize dominance + use the facet's own count for RC4
+rows; needs its own corpus diff.
+
+**Validation:** OLD-vs-NEW diff on 300 random /r/ URLs (`indexnow_submitted_urls.csv`,
+NR%47==0) = **0 URL/score/tier changes**; a 32-URL synonym-targeted set (queries
+containing vintage/retro/peuter/kleuter) = **0 changes** (those all carried an existing
+`/c/` facet → V41 path, not RC4). 55 tests pass. The change is precisely scoped: it only
+bites when a row has an appended facet AND a query word bridges to the value name through
+the tiny synonym map. Optimizer is a subprocess → next run picks it up, no uvicorn
+restart. File: `main_parallel_v2.py` (1 file).
+
 ## Auto-Redirects V45/V46 — confidence scoring + in-subcat facet selection (2026-06-30)
 
 From user's `~/redirects.txt` (3 lists of flagged redirects). Branch
