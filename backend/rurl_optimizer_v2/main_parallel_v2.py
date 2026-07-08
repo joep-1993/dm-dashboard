@@ -124,6 +124,17 @@ _V45_COVERAGE_FLAT_TYPES = {
 }
 _V45_DOM_SCORED_TYPES = _V45_COVERAGE_FLAT_TYPES | {
     'subcategory_name', 'subcategory_name_with_qualifier',
+    # V52: the maincat / subcat facet-match paths ('[maincat] Matched N facet')
+    # shipped a coverage-aware but DOMINANCE-BLIND score from
+    # calculate_reliability_score — so a facet match on a thin, non-dominant
+    # category scored the same ~70 as one on a dominant, well-populated category
+    # (redirects.txt lists #2 & #3: deurbel 24 volt @3 products vs windmolentje
+    # @1249 products both landed on 70). Fold them in so dom_share/dom_count
+    # adjust the score. NOT added to _V45_COVERAGE_FLAT_TYPES: their base already
+    # folded coverage in, so they get dominance + count ONLY (no double-dock).
+    # The _with_probe_facet variants are the same base match + an appended probe
+    # facet, so they belong to the same dom-scored family.
+    'multi', 'multi_with_probe_facet', 'subcategory_name_with_probe_facet',
 }
 
 # V48 (RC8): curated overrides for the rare redirects whose correct target is a
