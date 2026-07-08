@@ -168,6 +168,51 @@ category_lookup / deepest_category→maincat mapping) and route through
 `generate_product_content_v3` behind an env/query toggle for gradual cutover.
 Confirm content_top rendering handles multiple paragraphs (user says yes).
 
+## Auto-Redirects V53 — align maincat facet-match subcat to full-query search-derived dom_cat (2026-07-08)
+
+redirects.txt batch2 list #1 subcat-selection family (lego_kraan / swiffer_doekjes
+/ accu_12v_72ah). **Root cause:** the `[maincat] Matched N facet` path takes the
+subcat where the matcher's FacetFilter parked the matched facet VALUE — and
+FacetFilter picks by that value's own product COUNT (`_deduplicate_to_highest_level`
+/ CHILD_DOMINANCE_THRESHOLD), which ignores the query's unmatched HEAD NOUN. So
+merk~Swiffer parks at the parent Schoonmaakartikelen (486260, 234 Swiffer products)
+not Schoonmaakdoeken (486260_488654, 90) where "doekjes" belongs; voltage_accu~12V
+parks at sibling 6340292 (1690) not Auto-accu's (6437006, 1213) where "accu"
+belongs. The **search-derived classifier** already picks the dominant category for
+the WHOLE query — and it was RIGHT for both (swiffer→486260_488654 @0.48,
+accu→6437006 @1.0). It was even right for lego (Bouwstenen @0.55 = the matcher pick),
+so lego needs no change (the user's alt 395620_423617 is search-unjustified — 55% of
+"lego kraan" products are genuinely in Bouwstenen).
+
+**Fix (V53, post-processor):** for a bare-source `multi`/`[maincat]` facet-match,
+rewrite the SUBCAT to `derived['dom_cat_url_slug']` when (a) same maincat, (b) not an
+ANCESTOR of the matcher subcat (never go LESS specific), (c) **dom_share >= 0.45**,
+and (d) every matched facet value exists in the derived subcat (checked in the
+in-memory `facet_filter.facets_df` by `category_url_slug`+`facet_value_id` — no live
+call, never a dead page). Keeps match_type `multi` so V52 still scores it.
+
+**Key design lesson — dominance, NOT the parent/child relationship, is the safety
+signal.** My first cut let a strict DESCENDANT bypass the dominance floor ("refining
+parent→child is always safe"). WRONG: a low-dominance child is a WORSE pick than the
+parent — "adidas outlet" → Hardloopschoenen @0.23, "led lamp" → LED Strips @0.1 both
+fired and were both wrong (the query names no such specialisation). Requiring
+dom_share >= 0.45 for BOTH descendant and sibling cleanly separates the good fixes
+(swiffer 0.48, accu 1.0, birkenstock 0.55, gehaakt_vest 0.59) from the bad
+(adidas 0.23, led_lamp 0.1, grote_maat 0.42, toyota_yaris 0.42). swiffer's 0.48 is
+the anchor — the floor must sit in (0.42, 0.48]; 0.45 is the midpoint.
+
+**Validation:** swiffer → klussen_486260_488654, accu → autos_482566_6437006 (both
+exact wanted targets); lego unchanged. Bare-corpus (1200): **8 rewrites (0.67%), all
+dom>=0.47, all plausible** (mostly shoe type/gender disambiguation — asics_ahar→
+Hardloopschoenen, gabor_sleehakken→heels, nike_air_max_heren→men's), **0 tier
+changes, 0 A/B→D, 0 non-V53 URL changes**. 55 tests pass. NB: the search-derived
+dom_cat classification is mildly non-deterministic run-to-run (Search API
+`total`/facet-count variance), so the exact SET of V53 fires shifts between runs —
+but the pattern (only dom>=0.45 disagreements, all plausible) is stable, and V53
+consumes the same dom_cat signal the rest of the engine already relies on. No count
+floor: accu's correct target has only 2 products (dom 1.0), so a count floor would
+kill a user-requested fix. Optimizer = subprocess, no uvicorn restart.
+
 ## Auto-Redirects V52 — fold the maincat facet-match path into dominance+count scoring (2026-07-08)
 
 Second `~/redirects.txt` batch (14 new cases). Lists #2 & #3 (the recurring
