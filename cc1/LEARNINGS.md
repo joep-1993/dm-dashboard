@@ -1,6 +1,61 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## SEO investigation — June-vs-May 2026 non-PLP ranking decline: real regression, MOBILE-specific (2026-07-08)
+
+Question: MoM (May→June 2026) the average ranking of all url-types went UP (worse) except PLP —
+seasonality or real regression? **Verdict: real regression, concentrated on MOBILE**, in the
+home-&-garden/DIY cluster, on facet/search/browse (non-PLP) pages. Extends the parked "Kasten SEO
+ranking decline" backlog item (2026-06-22) — now confirmed at month scale and localised.
+
+**Method + gotchas (reusable for any GSC-ranking analysis — `bt.search_console`, country='nld',
+deleted_ind=0):**
+- Grain = (url, keyword, device, day); `avg_position` is per-row. `month` is a **zero-padded
+  varchar** ('05'/'06'); `year` varchar. `rows` is a **reserved word** in Redshift — alias counts.
+- **NEVER use unweighted `avg(avg_position)`** — it inflates as the long-tail keyword set grows
+  (cf. memory [[search_console_visits_column_not_traffic]]). Use **impression-weighted**
+  `sum(avg_position*impressions)/sum(impressions)`. Here the unweighted mean actually *improved*
+  while the weighted worsened → the damage is in the **high-impression HEAD terms**, long-tail fine.
+- **Seasonality test = within-year May→June DELTA direction, NOT YoY levels.** May→June normally
+  *improves* rankings (held in both 2024 and 2025 for every url-type); in 2026 the non-PLP types
+  *reversed* and worsened → not seasonal. YoY *levels* are unreliable (a 2026 definitional shift —
+  PLP weighted pos jumped ~6 (2025) → ~25 (2026)); the within-year delta is robust to that. (User
+  also asked to drop YoY going forward — SEO has changed too much.)
+- **Always split by device** — it was the key structural clue. Split by category via
+  `JOIN datamart.dim_category` on `deepest_category_id` (has `main_category_name`, `deepest_category_name`;
+  dedupe with `min()` per deepest_category_id to avoid fan-out).
+
+**Findings:**
+- **Mobile-specific.** DESKTOP rankings *improved* for every type; **MOBILE worsened**. Mobile is
+  ~83% of non-PLP clicks so it drives the aggregate. Desktop-up/mobile-down + broad-across-categories
+  ⇒ a mobile cause (Google mobile core-update reshuffle, or a mobile page-experience/rendering
+  regression on these templates), not a per-page break.
+- **By url-type (mobile weighted-pos Δ / total clicks Δ):** PLP slightly worse / +18% (demand surge;
+  its "improvement" was desktop + a +71% mobile-impression mix-shift, NOT a mobile rank gain) ·
+  C-url +0.38 / **flat** (rising impressions cushioned the rank slip) · R-url +0.25 / **−6%** ·
+  **Browse/"cat-url" +0.50 / −10% (worst)** — biggest mobile slip AND impressions fell too, no cushion.
+- **Category concentration:** home-&-garden/DIY — **Tuinartikelen, Meubels, Woonaccessoires, Klussen**.
+  The four maincat *hub* leaf pages alone ≈ **−28k clicks**; broad across subcats with an
+  **outdoor-furniture** lean (Plantenbakken, Loungesets, Tuinbanken, Overkappingen, Pergola's…).
+  **Kasten itself is ~FLAT at month scale (3.97→4.00)** — the earlier WoW Kasten alarm doesn't
+  dominate the month; damage is cluster-wide, esp. the hubs.
+- **Retailer-brand navigational queries** (`/r/…action|ikea|jysk|gamma|lidl|karwei…`) dropped
+  *harder* (−21.5% vs −16.9%) and cluster among the worst URLs (e.g. `/r/lidl_schoonmaakazijn/`
+  2.2→6.4) — a brand-navigational-demotion signature — but only ~17% of the absolute loss; the bulk
+  (~83%) is generic category/product queries.
+- **cat-url (Browse) losses are IMPRESSION-driven, not rank-driven.** The biggest Browse losers had
+  impressions −45% to −85% with **flat or IMPROVED** position (e.g. `meubilair_389370_4891584`
+  4.2→2.6 but impr −73%; `tuin_accessoires_4906804` 6.5→5.5 but impr −79%) → Google surfacing them
+  for fewer queries (coverage/demand loss), NOT demotion. R-url losses, by contrast, ARE rank-driven.
+- **Timing:** gradual through June, accelerating in the last week — consistent with a rolling
+  Google update, not a one-day cliff.
+
+**Open next steps:** keyword-level *mobile* head-term trends for the four hub pages (competitor
+overtake vs uniform drop); mobile CWV/rendering on the `/c/`+browse templates (mid–late June deploys);
+correlate the late-June acceleration with known Google update dates; for cat-urls specifically,
+impressions-trend vs indexed-query-count to split seasonal-demand from coverage-loss. Weighted-position
+method saved as memory [[seo_weighted_avg_position_method]].
+
 ## dm-tools DMA Exclusions — "Headline offer" was the STALE bestOffer (OOS) shop, not the live one; + is the OOS API faulty? (2026-07-06)
 
 User saw many exclusions with "—" as Headline offer, then (after a first backfill) spotted a WRONG one: `nl-nl-gold-8721398474489` showed **Drogistwereld.nl** but the live PLP's headline is **Drogist.nl, in stock**. Two separate issues fell out.
