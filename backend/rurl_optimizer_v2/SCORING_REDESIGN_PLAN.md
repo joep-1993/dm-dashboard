@@ -44,11 +44,18 @@ land on 65 — the score is constant.
   kinderbankje→opties_stoel~17094990 — each the EXACT facet the user wanted.
   gardena was already fixed by V44. Regression: 300 random corpus 0 changes;
   120 option-heavy 4 appends, all sane. 39 tests pass.
-- **Phase B remaining:**
-  - pikachu: probe finds merk~Pokémon but row ships as category_fallback —
-    WIRING gap (found facet not applied). Not yet fixed.
-  - bucket (b) wrong-value-within-facet (tuinaarde 40L→wrong liter value,
-    dubbele→type_fietstas not aantal_fietsen). Not started.
+- **Phase B remaining (UPDATED 2026-07-08):**
+  - pikachu: DONE by RC4 (2026-07-03, in-subcat enrichment) →
+    personage~23600616, 80/B.
+  - vintage: DONE — RC4 routes it to bouw_koelkast~'Retro' correctly; the
+    residual 37/D was a coverage bug (recompute was blind to RC4's synonym
+    match vintage↔Retro). **V51 (2026-07-08)** makes the coverage recompute
+    reuse `_ENRICH_SYNONYMS`, lift-only → 63/C. C is honest (15-product facet).
+  - dubbele: value is literally "2 fietsen"; needs dubbele→"2"/quantity
+    synonym — fragile & niche, DEFERRED.
+  - LATENT: RC4 rows scored with maincat-wide dom_share/dom_cat (often a
+    different category than the RC4 target subcat). Deferred — neutralize
+    dominance + use the facet's own count for RC4 rows; own corpus diff needed.
   - bucket (c) cross-maincat preference (bedhekje→baby_peuter,
     tochtstopper→klussen). Not started.
 

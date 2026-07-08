@@ -3488,6 +3488,13 @@ def process_url_v2(args):
         _COV_FILLER = {'mooi', 'mooie', 'mooiste', 'leuk', 'leuke', 'handig',
                        'handige', 'simpel', 'simpele', 'praktisch', 'praktische'}
         if appended_value_names and non_stopword_keywords:
+            # V51: mirror the RC4/probe synonym map here. A facet value the probe
+            # matched THROUGH a synonym (vintage -> bouw_koelkast 'Retro') has a
+            # value name that shares no literal token with the query, so a pure
+            # token match reads 0% coverage and the correct facet is scored to
+            # tier D. Expand each query word with the SAME curated _ENRICH_SYNONYMS
+            # the probe used, so the appended value reads as covered. Lift-only.
+            from src.facet_probe import _ENRICH_SYNONYMS as _ESYN, _stem as _esyn_stem
             def _cv(s):
                 return matcher._collapse_double_vowels(s.rstrip('e').rstrip('s'))
             _tgt_toks = [_cv(t) for t in re.findall(
@@ -3498,9 +3505,13 @@ def process_url_v2(args):
                 if _w in _COV_FILLER:
                     continue  # quality filler — not product intent, drop from denom
                 _denom.append(_w)
-                _wc = _cv(_w)
+                # candidate surface forms: the word itself + any enrichment
+                # synonym whose key stems to it (vintage->retro), so a value the
+                # probe matched via that synonym also reads as covered here.
+                _cands = [_cv(_w)] + [_cv(_syn) for _k, _syn in _ESYN.items()
+                                      if _esyn_stem(_k) == _esyn_stem(_w)]
                 _ok = any(_wc == t or (len(_wc) >= 4 and (_wc in t or t in _wc))
-                          for t in _tgt_toks)
+                          for _wc in _cands for t in _tgt_toks)
                 # a generic size/colour adjective the facet covers counts as
                 # matched but doesn't otherwise drive intent
                 (_m2 if (_ok or _w in matched_keywords) else _u2).append(_w)
