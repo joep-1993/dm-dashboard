@@ -938,11 +938,30 @@
             }).join('') + '</tr>').join('');
         }
 
+        // Backend truncates each cat list to the TOP_N most-positive deltas, so for
+        // levels with >TOP_N rows (subcats) the declining tail never reaches us.
+        // Merge the positive (by_*) and negative (worst_*) ends — deduped — so
+        // client-side ascending sort can surface negative deltas too. Maincats have
+        // no worst_* list but already carry the full set, so this is a no-op there.
+        function catSourceRows(which) {
+            const src = lastDeltas[CAT_TABLES[which].src] || {};
+            const pos = catMetric === 'visits' ? 'by_visits' : 'by_revenue';
+            const neg = catMetric === 'visits' ? 'worst_by_visits' : 'worst_by_revenue';
+            const seen = new Set();
+            const merged = [];
+            for (const r of (src[pos] || []).concat(src[neg] || [])) {
+                const k = (r.maincat || '') + '|' + (r.subcat || '');
+                if (seen.has(k)) continue;
+                seen.add(k);
+                merged.push(r);
+            }
+            return merged;
+        }
+
         function renderCats() {
             if (!lastDeltas) return;
-            const key = catMetric === 'visits' ? 'by_visits' : 'by_revenue';
-            renderCatTable('main', lastDeltas.maincats[key]);
-            renderCatTable('sub', lastDeltas.deepestcats[key]);
+            renderCatTable('main', catSourceRows('main'));
+            renderCatTable('sub', catSourceRows('sub'));
             // Info tooltip: the two days being compared for the selected metric.
             const c = lastDeltas.comparison;
             const p1 = catMetric === 'visits' ? c.visits_p1 : c.revenue_p1;
@@ -1150,9 +1169,9 @@
                     o['Revenue Δ'] = r.revenue_delta; o['Revenue Δ%'] = r.revenue_pct;
                     return o;
                 });
-                const catKey = catMetric === 'visits' ? 'by_visits' : 'by_revenue';  // match the on-screen ranking
-                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.maincats[catKey], false)), 'Top maincats');
-                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.deepestcats[catKey], true)), 'Top deepest cats');
+                // Match the on-screen tables: merged positive+negative ends, deduped.
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(catSourceRows('main'), false)), 'Top maincats');
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(catSourceRows('sub'), true)), 'Top deepest cats');
             }
             XLSX.writeFile(wb, `seo-stats_${lastData.start_date}_${lastData.end_date}.xlsx`);
         }

@@ -1,6 +1,18 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## dm-tools SEO Stats — Top subcats couldn't sort to negative deltas (2026-07-08)
+
+User reported: in **SEO Stats**, sorting the **Top subcats** table by visits low→high showed **no negative deltas**, while **Top maincats** low→high did. Root cause is a **backend TOP_N truncation the frontend can't see past**, not a sort bug:
+
+- `seo_stats_service._fetch_cat_deltas` returns `by_visits`/`by_revenue` **sorted most-positive-first and sliced to `TOP_N = 100`**. It only also computes `worst_by_visits`/`worst_by_revenue` (the negative end) for `level == "deepest"` — the standup lists' declining view uses those.
+- The Top-subcats table is fed `deepestcats.by_visits` (feature-branch frontend binds `src: 'deepestcats'`). With **>100** leaf categories, `by_visits` is the top-100 *most-positive* only → the declining tail is dropped **server-side** before the frontend ever sees it. Client-side ascending sort just reorders those 100 positives → no negatives.
+- **Maincats works only by luck of scale**: ~31 maincats < 100, so `by_visits` already holds the full set incl. negatives.
+
+**Fix (frontend-only, `frontend/seo-stats.html`):** new `catSourceRows(which)` merges the positive (`by_*`) + negative (`worst_*`) lists, deduped on `maincat|subcat`, and feeds that to both the on-screen table (`renderCats`) and the XLSX export. Maincats has no `worst_*` list but already carries the full set → no-op there. Works because the deepest-level backend already ships the negative lists; **no backend change needed**.
+- **Coverage caveat:** the merged list is the ~100 strongest risers + ~100 strongest fallers per metric; near-zero mid-distribution subcats are intentionally absent. To ever sort the full middle, raise/remove the backend `TOP_N` cap.
+- **Branch gotcha discovered while pushing:** `origin/main`'s `seo-stats.html` is **behind** — it still binds the Top-subcats table to `src: 'subcats'` (level `sub`, for which the backend computes **no** `worst_*` list), so the fix does NOT work there. The current seo-stats frontend (deepestcats + sortable standup headers) lives only on the `rurl-v45-confidence-scoring` branch (commits `736949f`, `382914e`), which is what runs live. Committed the fix there, not main. The two dm-dashboard checkouts (`~/projects/dm-tools` on the feature branch, `~/projects/dm-dashboard` on main) are separate working copies of the same GitHub repo and have diverged on seo-stats.
+
 ## dm-tools Auto-Redirects Tier-A run — performance audit + Phase 1-3 speedups (2026-07-07)
 
 Audited `rurl_optimizer_v2` for a slow Tier-A Redshift run. Biggest find was a **bug, not a knob**: each per-chunk subprocess ended with an unconditional `os.remove(cache_file)` (`main_parallel_v2.py` ~end of `main()`), while the next chunk only reuses `if os.path.exists(cache_file)` — so `--reuse-data-cache` was silently defeated and the ~90s category/facet dataset was **rebuilt every chunk** (×N).
