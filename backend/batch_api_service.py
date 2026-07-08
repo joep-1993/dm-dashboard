@@ -25,8 +25,8 @@ from backend.faq_service import (
     fetch_products_api, generate_faqs_for_page, FAQPage, FAQItem,
     get_openai_client, extract_selected_facets, build_faq_prompt
 )
-from backend.scraper_service import scrape_product_page_api
-from backend.gpt_service import create_product_recommendation_prompt, MODEL
+from backend.scraper_service import scrape_product_page_api, is_main_category_url, MAIN_CATEGORY_H1, parse_beslist_url
+from backend.gpt_service import create_product_recommendation_prompt, create_main_category_prompt, MODEL
 from backend.database import get_db_connection, return_db_connection
 from backend.ai_titles_service import (
     generate_title_from_api, get_unprocessed_urls,
@@ -167,13 +167,37 @@ def _build_faq_prompt(page_data: Dict, num_faqs: int = 6) -> str:
     return build_faq_prompt(page_data, num_faqs)
 
 
-def _build_kopteksten_messages(page_data: Dict) -> List[Dict]:
-    """Build kopteksten generation messages (system + user)."""
-    h1_title = page_data.get("h1_title", "")
-    products = page_data.get("products", [])
-    user_prompt = create_product_recommendation_prompt(h1_title, products)
+def _build_kopteksten_messages(page_data: Dict, url: str = "") -> List[Dict]:
+    """Build kopteksten generation messages (system + user).
 
-    system_message = """Je bent een online marketeer voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
+    Checks whether *url* is a main-category page and switches to the
+    broader, introductory prompt (matching the real-time flow in main.py).
+    """
+    products = page_data.get("products", [])
+
+    if url and is_main_category_url(url):
+        # Use the dedicated H1 mapping (same logic as main.py:372-380)
+        main_cat_slug, _, _ = parse_beslist_url(url)
+        h1_title = MAIN_CATEGORY_H1.get(main_cat_slug, page_data.get("h1_title", ""))
+        user_prompt = create_main_category_prompt(h1_title, products)
+
+        system_message = """Je bent een online marketeer voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
+- Spreek de lezer aan met "je," in een toegankelijke, optimistische toon.
+- Noem nooit prijzen.
+- Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
+- Dit is een hoofdcategoriepagina, dus schrijf een breed, uitnodigend overzicht - niet te specifiek op één producttype.
+- Begin NOOIT met "Welkom op de ... pagina" of vergelijkbare welkomstformuleringen. Vermijd ook om te vaak te openen met "Bij het kiezen van" — gebruik dit hooguit af en toe.
+- Gebruik NOOIT "ons", "onze", "wij" of "we" - schrijf vanuit het perspectief van de bezoeker, niet vanuit het bedrijf.
+- BELANGRIJK: Link ALLEEN naar producten die in de meegeleverde lijst staan. Verzin NOOIT producten of URLs.
+- Als je linkt, gebruik de tag <a href> en kies de juiste url uit de lijst. Maak nooit zelf een andere url.
+- HOUD DE LINKTEKST KORT (max 3-5 woorden).
+- VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text): "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link". Linktekst MOET de productnaam of een logische zoekterm zijn. Als dat niet natuurlijk past, maak dan GEEN hyperlink - herschrijf liever de zin zonder link.
+- Gebruik nooit andere URLs dan degene die voorkomen in de lijst van producten."""
+    else:
+        h1_title = page_data.get("h1_title", "")
+        user_prompt = create_product_recommendation_prompt(h1_title, products)
+
+        system_message = """Je bent een online marketeer voor beslist.nl met als doel om de bezoeker te helpen in zijn buyer journey.
 - Spreek de lezer aan met "je," in een toegankelijke, informatieve toon.
 - Noem nooit prijzen.
 - Schrijf ALTIJD als één doorlopende alinea zonder witregels of meerdere paragrafen.
@@ -553,7 +577,7 @@ def _run_kopteksten_batch():
                 return url, "error", page_data.get("error")
             if not page_data.get("products"):
                 return url, "skipped", "no_products_found"
-            messages = _build_kopteksten_messages(page_data)
+            messages = _build_kopteksten_messages(page_data, url)
             return url, "ok", messages
 
         with ThreadPoolExecutor(max_workers=50) as executor:
