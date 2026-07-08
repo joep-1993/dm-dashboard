@@ -108,3 +108,8 @@ backend/data/rurl_optimizer_v2_history.json
 # ai_titles_service.py.bak.2026-05-19_pre_facet_position_rules
 *.bak
 *.bak.*
+
+# Standalone Google Ads scripts + local notes/analysis (not part of the app)
+scripts/google_ads/
+notes/bothits.txt
+scripts/analysis/compare_prompts.py
