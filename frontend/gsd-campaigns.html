@@ -283,42 +283,60 @@
                     <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
                 </svg>
             </div>
-            <div class="card-body p-0">
-                <div class="p-3">
-                    <div class="row g-3">
-                        <div class="col-md-3">
-                            <label for="llDate" class="form-label">Date (optional)</label>
-                            <input type="date" class="form-control" id="llDate" placeholder="Leave empty for most recent">
-                        </div>
-                        <div class="col-md-5">
-                            <label for="llShopNames" class="form-label">Shop names (optional, one per line)</label>
-                            <textarea class="form-control" id="llShopNames" rows="3" placeholder="shop_name_1&#10;shop_name_2" oninput="toggleLLShopMode()"></textarea>
-                        </div>
-                        <div class="col-md-4 d-flex flex-column">
-                            <label class="form-label">Shop filter mode</label>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="llShopMode" id="llModeExclude" value="exclude" checked disabled>
-                                <label class="form-check-label" for="llModeExclude">Exclude these shops</label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="llShopMode" id="llModeInclude" value="include" disabled>
-                                <label class="form-check-label" for="llModeInclude">Include only these shops</label>
-                            </div>
-                            <div class="mt-auto d-flex justify-content-end gap-2">
-                                <button class="btn" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="runLowLinkage(true)" id="llPreviewBtn">Preview</button>
-                                <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runLowLinkage(false)" id="llRunBtn">Run</button>
-                            </div>
-                        </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label for="llDate" class="form-label">Date (optional)</label>
+                        <input type="date" class="form-control" id="llDate" placeholder="Leave empty for most recent">
                     </div>
-                    <div class="progress-area mt-3" id="llProgressArea" style="display: none;">
-                        <div id="llProgressContent"></div>
+                    <div class="col-md-5">
+                        <label for="llShopNames" class="form-label">Shop names (optional, one per line)</label>
+                        <textarea class="form-control" id="llShopNames" rows="3" placeholder="shop_name_1&#10;shop_name_2" oninput="toggleLLShopMode()"></textarea>
+                    </div>
+                    <div class="col-md-4 d-flex flex-column">
+                        <label class="form-label">Shop filter mode</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="llShopMode" id="llModeExclude" value="exclude" checked disabled>
+                            <label class="form-check-label" for="llModeExclude">Exclude these shops</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="llShopMode" id="llModeInclude" value="include" disabled>
+                            <label class="form-check-label" for="llModeInclude">Include only these shops</label>
+                        </div>
+                        <div class="mt-auto d-flex justify-content-end gap-2">
+                            <button class="btn" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="runLowLinkage(true)" id="llPreviewBtn">Preview</button>
+                            <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runLowLinkage(false)" id="llRunBtn">Run</button>
+                        </div>
                     </div>
                 </div>
+                <div class="progress-area mt-3" id="llProgressArea" style="display: none;">
+                    <div id="llProgressContent"></div>
+                </div>
+            </div>
+        </div>
 
-                <h6 class="mt-3 mx-3 mb-0" style="color: #5e4a90;">Enabled / Paused history</h6>
+        <!-- Enabled / Paused history -->
+        <div class="card mb-4">
+            <div class="card-header" style="background: #5e4a90; color: white;">
+                <h5 class="mb-0">Enabled / Paused history</h5>
+            </div>
+            <div class="card-body p-0">
                 <div class="filter-row d-flex gap-2 align-items-center m-3">
-                    <input type="text" class="form-control form-control-sm" id="llFilter" placeholder="Filter shop, campaign, country..." oninput="applyLLFilter()" style="max-width: 280px;">
-                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="loadLLHistory()">&#8635; Refresh</button>
+                    <select class="form-select form-select-sm" id="llFilterCountry" style="max-width: 120px;" onchange="applyLLFilter()">
+                        <option value="">All Countries</option>
+                        <option value="NL">NL</option>
+                        <option value="BE">BE</option>
+                        <option value="DE">DE</option>
+                    </select>
+                    <select class="form-select form-select-sm" id="llFilterStatus" style="max-width: 120px;" onchange="applyLLFilter()">
+                        <option value="">All Statuses</option>
+                        <option value="Enabled">Enabled</option>
+                        <option value="Paused">Paused</option>
+                    </select>
+                    <input type="text" class="form-control form-control-sm" id="llFilter" placeholder="Search shop or campaign..." oninput="applyLLFilter()" style="max-width: 250px;">
+                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="loadLLHistory()">↻ Refresh</button>
+                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportLLXlsx()">Export Excel</button>
+                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyLLForExcel()">Copy for Excel</button>
                 </div>
                 <div class="table-responsive" style="max-height: 340px; overflow-y: auto;">
                     <table class="table table-hover ll-history-table mb-0">
@@ -751,16 +769,58 @@
         }
 
         function applyLLFilter() {
+            const country = document.getElementById('llFilterCountry').value;
+            const status = document.getElementById('llFilterStatus').value;
             const q = document.getElementById('llFilter').value.toLowerCase();
-            llFiltered = !q ? llHistory.slice() : llHistory.filter(r =>
-                (r.shop_name || '').toLowerCase().includes(q) ||
-                (r.campaign_name || '').toLowerCase().includes(q) ||
-                (r.country || '').toLowerCase().includes(q) ||
-                (r.action || '').toLowerCase().includes(q) ||
-                String(r.shop_id || '').includes(q)
-            );
+
+            llFiltered = llHistory.filter(r => {
+                if (country && (r.country || '').toUpperCase() !== country.toUpperCase()) return false;
+                if (status && (r.action || '').toLowerCase() !== status.toLowerCase()) return false;
+                if (q && !(
+                    (r.shop_name || '').toLowerCase().includes(q) ||
+                    (r.campaign_name || '').toLowerCase().includes(q) ||
+                    (r.country || '').toLowerCase().includes(q) ||
+                    (r.action || '').toLowerCase().includes(q) ||
+                    String(r.shop_id || '').includes(q)
+                )) return false;
+                return true;
+            });
             sortLLHistory();
             renderLLHistory();
+        }
+
+        // Export / copy the filtered Enabled/Paused history — mirrors the Campaigns buttons.
+        function getLLRows() {
+            return llFiltered.map(r => ({
+                Date: r.created_at ? new Date(r.created_at).toLocaleString('nl-NL') : '',
+                Shop: r.shop_name || '',
+                'Shop ID': r.shop_id || '',
+                Country: r.country || '',
+                Action: r.action || '',
+                Campaign: r.campaign_name || '',
+            }));
+        }
+
+        function exportLLXlsx() {
+            const rows = getLLRows();
+            if (!rows.length) return alert('No history to export.');
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Enabled-Paused history');
+            XLSX.writeFile(wb, `gsd_ll_history_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        function copyLLForExcel() {
+            const rows = getLLRows();
+            if (!rows.length) return alert('No history to copy.');
+            const headers = Object.keys(rows[0]);
+            const tsv = [headers.join('\t'), ...rows.map(r => headers.map(h => r[h]).join('\t'))].join('\n');
+            navigator.clipboard.writeText(tsv).then(() => {
+                const btn = document.querySelector('[onclick="copyLLForExcel()"]');
+                const orig = btn.textContent;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = orig, 1500);
+            });
         }
 
         function sortLLBy(column) {
