@@ -11,7 +11,11 @@ from backend.gsd_campaigns_service import (
     get_redshift_shop_changes,
     run_gsd_script,
 )
-from backend.gsd_ll_service import run_low_linkage, get_history as get_ll_history
+from backend.gsd_ll_service import (
+    start_ll_run,
+    get_ll_progress,
+    get_history as get_ll_history,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,17 +134,19 @@ async def run_low_linkage_endpoint(
     shop_names: Optional[str] = Query(None, description="Comma-separated feed shop names to scope the run"),
     included: bool = Query(False, description="With shop_names: True = only these shops, False = all except"),
 ):
-    """Pause/Enable low-linkage GSD shops based on the pixel-monitor feed."""
+    """Start a low-linkage run in the background; poll /ll/progress for status."""
     try:
-        loop = asyncio.get_event_loop()
         shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
-        result = await loop.run_in_executor(
-            executor, run_low_linkage, dry_run, date, shop_list, included
-        )
-        return result
+        return start_ll_run(dry_run, date, shop_list, included)
     except Exception as e:
-        logger.error(f"Error running GSD low-linkage process: {e}")
+        logger.error(f"Error starting GSD low-linkage process: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ll/progress")
+def ll_progress_endpoint():
+    """Return the current/last low-linkage run progress for the UI to poll."""
+    return get_ll_progress()
 
 
 @router.get("/ll/history")

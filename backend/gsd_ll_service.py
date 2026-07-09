@@ -25,6 +25,7 @@ gsd_campaigns_service so this stays in sync with the rest of GSD Campaigns.
 import csv
 import io
 import logging
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
@@ -67,6 +68,73 @@ def _country_customer_ids() -> Dict[str, Set[str]]:
 
 
 COUNTRY_CUSTOMER_IDS = _country_customer_ids()
+
+
+# ---------------------------------------------------------------------------
+# Progress state (single in-process run at a time, polled by the frontend)
+# ---------------------------------------------------------------------------
+
+_LL_LOCK = threading.Lock()
+_LL_PROGRESS: Dict[str, Any] = {
+    "running": False, "phase": "idle", "total": 0, "processed": 0,
+    "paused": 0, "enabled": 0, "skipped": 0, "errors": 0,
+    "dry_run": False, "done": False, "result": None, "error": None,
+    "started_at": None, "finished_at": None,
+}
+
+
+def _progress_set(**kw: Any) -> None:
+    with _LL_LOCK:
+        _LL_PROGRESS.update(kw)
+
+
+def get_ll_progress() -> Dict[str, Any]:
+    """Snapshot of the current/last low-linkage run for the UI to poll."""
+    with _LL_LOCK:
+        return dict(_LL_PROGRESS)
+
+
+def start_ll_run(
+    dry_run: bool = False,
+    date_str: Optional[str] = None,
+    shop_names: Optional[List[str]] = None,
+    included: bool = False,
+) -> Dict[str, Any]:
+    """Kick off a low-linkage run in a background thread and return immediately.
+
+    Returns {"started": True} or {"started": False, "busy": True} if a run is
+    already in flight (only one at a time).
+    """
+    with _LL_LOCK:
+        if _LL_PROGRESS["running"]:
+            return {"started": False, "busy": True}
+        _LL_PROGRESS.update({
+            "running": True, "phase": "Starting…", "total": 0, "processed": 0,
+            "paused": 0, "enabled": 0, "skipped": 0, "errors": 0,
+            "dry_run": dry_run, "done": False, "result": None, "error": None,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+            "finished_at": None,
+        })
+
+    def _worker() -> None:
+        try:
+            res = run_low_linkage(dry_run, date_str, shop_names, included)
+            _progress_set(
+                result=res, done=True, phase="Done",
+                processed=_LL_PROGRESS.get("total", 0),
+                paused=res.get("paused_count", len(res.get("paused", []))),
+                enabled=res.get("enabled_count", len(res.get("enabled", []))),
+                skipped=len(res.get("skipped", [])),
+                errors=len(res.get("errors", [])),
+            )
+        except Exception as ex:  # pragma: no cover - defensive
+            logger.exception("GSD LL run crashed")
+            _progress_set(error=str(ex), done=True, phase="Error")
+        finally:
+            _progress_set(running=False, finished_at=datetime.now().isoformat(timespec="seconds"))
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return {"started": True, "dry_run": dry_run}
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +474,7 @@ def run_low_linkage(
     }
 
     # 1. Feed
+    _progress_set(phase="Fetching linkage feed…")
     try:
         feed = fetch_feed()
     except Exception as ex:
@@ -421,6 +490,7 @@ def run_low_linkage(
                     if (r["shop_name"].lower() in wanted) == bool(included)]
 
     result["feed_rows"] = len(feed)
+    _progress_set(total=len(feed), phase="Reading shop GSD flags…")
     if not feed:
         return result
 
@@ -431,6 +501,8 @@ def run_low_linkage(
         logger.error("GSD LL: failed to fetch shop flags: %s", ex)
         result["errors"].append({"step": "shop_flags", "error": str(ex)})
         return result
+
+    _progress_set(phase="Processing shops…")
 
     # 3. Shared Google Ads client + per-account label cache
     client = _get_client()
@@ -446,7 +518,12 @@ def run_low_linkage(
     db_conn = None if dry_run else get_db_connection()
 
     try:
-        for row in feed:
+        for idx, row in enumerate(feed):
+            _progress_set(
+                processed=idx,
+                paused=len(result["paused"]), enabled=len(result["enabled"]),
+                skipped=len(result["skipped"]), errors=len(result["errors"]),
+            )
             shop_id = row["shop_id"]
             shop_name = row["shop_name"]
             gsd = row["gsd"]

@@ -91,6 +91,16 @@
         .ll-history-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .ll-history-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .ll-history-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+
+        /* Preview results table — same header layout as the history table */
+        .ll-preview-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .ll-preview-table td { vertical-align: middle; font-size: 0.9rem; }
+        .ll-preview-table .col-country { text-align: center; }
+        .ll-preview-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+        .ll-preview-table th.sortable:hover { opacity: 0.85; }
+        .ll-preview-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .ll-preview-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
+        .ll-preview-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
     </style>
 </head>
 <body>
@@ -154,30 +164,6 @@
     </nav>
 
     <div class="container mt-5 pb-5">
-        <!-- Stats Cards -->
-        <div class="d-flex flex-wrap gap-3 mb-4 justify-content-center" id="statsRow">
-            <div class="stat-card">
-                <h3 id="statNL">-</h3>
-                <div class="label">NL</div>
-                <div class="detail" id="statNLDetail"></div>
-            </div>
-            <div class="stat-card">
-                <h3 id="statBE">-</h3>
-                <div class="label">BE</div>
-                <div class="detail" id="statBEDetail"></div>
-            </div>
-            <div class="stat-card">
-                <h3 id="statDE">-</h3>
-                <div class="label">DE</div>
-                <div class="detail" id="statDEDetail"></div>
-            </div>
-            <div class="stat-card">
-                <h3 id="statTotal">-</h3>
-                <div class="label">Total</div>
-                <div class="detail" id="statTotalDetail"></div>
-            </div>
-        </div>
-
         <!-- Run Script -->
         <div class="card run-card mb-4">
             <div class="card-header" style="background: #5e4a90; color: white;">
@@ -260,7 +246,8 @@
                 <div class="pagination-controls" id="paginationControls">
                     <span>Per page:</span>
                     <select class="form-select form-select-sm" id="perPage" onchange="currentPage=1; applyFilters();">
-                        <option value="25" selected>25</option>
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
                         <option value="50">50</option>
                         <option value="100">100</option>
                         <option value="all">Show all</option>
@@ -275,7 +262,7 @@
         <!-- Pause/Enable low linkage shops -->
         <div class="card mb-4">
             <div class="card-header d-flex align-items-center gap-2" style="background: #5e4a90; color: white;">
-                <h5 class="mb-0">Pause/Enable low linkage shops</h5>
+                <h5 class="mb-0">Pause / Enable low linkage shops</h5>
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; flex: 0 0 auto;">
                     <title>Reads the GSD linkage feed and, only for shops flagged as GSD shops in shop_list (most recent date): pauses the ENABLED campaigns of shops with GSD = 0 (tagging them GSD_LL_PAUSED), and re-enables previously-paused campaigns of shops with GSD = 1 (removing the label). Every action is logged to pa.jvs_gsd_ll_campaigns.</title>
                     <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
@@ -310,6 +297,15 @@
                     </div>
                 </div>
                 <div class="progress-area mt-3" id="llProgressArea" style="display: none;">
+                    <div id="llProgressBarWrap" class="mb-3 d-none">
+                        <div class="d-flex justify-content-between mb-1" style="font-size: 0.85rem;">
+                            <span id="llProgressText">Processing…</span>
+                            <span id="llProgressPercent">0%</span>
+                        </div>
+                        <div class="progress" style="height: 22px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" id="llProgressBar" style="width: 0%; background-color: #00b894;"></div>
+                        </div>
+                    </div>
                     <div id="llProgressContent"></div>
                 </div>
             </div>
@@ -338,7 +334,7 @@
                     <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportLLXlsx()">Export Excel</button>
                     <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyLLForExcel()">Copy for Excel</button>
                 </div>
-                <div class="table-responsive" style="max-height: 340px; overflow-y: auto;">
+                <div class="table-responsive">
                     <table class="table table-hover ll-history-table mb-0">
                         <thead>
                             <tr>
@@ -354,6 +350,19 @@
                             <tr><td colspan="6" class="text-center text-muted py-3">Loading history...</td></tr>
                         </tbody>
                     </table>
+                </div>
+                <div class="pagination-controls" id="llPaginationControls">
+                    <span>Per page:</span>
+                    <select class="form-select form-select-sm" id="llPerPage" onchange="llCurrentPage=1; renderLLHistory();">
+                        <option value="10">10</option>
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">Show all</option>
+                    </select>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changeLLPage(-1)" id="llPrevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                    <span class="page-info" id="llPageInfo">-</span>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changeLLPage(1)" id="llNextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
                 </div>
             </div>
         </div>
@@ -426,6 +435,8 @@
 
         // --- Stats ---
         async function loadStats() {
+            // Counter tiles were removed; nothing to update.
+            if (!document.getElementById('statTotal')) return;
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/stats`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -678,21 +689,24 @@
         let llFiltered = [];
         let llSortColumn = 'created_at';
         let llSortDirection = 'desc';
+        let llCurrentPage = 1;
+
+        function setLLProgressBar(pct, text) {
+            document.getElementById('llProgressBar').style.width = pct + '%';
+            document.getElementById('llProgressPercent').textContent = pct + '%';
+            document.getElementById('llProgressText').textContent = text;
+        }
 
         async function runLowLinkage(dryRun) {
             const previewBtn = document.getElementById('llPreviewBtn');
             const runBtn = document.getElementById('llRunBtn');
             const area = document.getElementById('llProgressArea');
             const content = document.getElementById('llProgressContent');
+            const barWrap = document.getElementById('llProgressBarWrap');
 
             if (!dryRun && !confirm('Run for real? This will PAUSE and RE-ENABLE live GSD campaigns based on the current linkage feed.')) {
                 return;
             }
-
-            previewBtn.disabled = true;
-            runBtn.disabled = true;
-            area.style.display = 'block';
-            content.innerHTML = `<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> ${dryRun ? 'Previewing' : 'Running'} low-linkage process...</div>`;
 
             const params = new URLSearchParams();
             params.set('dry_run', dryRun);
@@ -702,11 +716,48 @@
             if (shopText) params.set('shop_names', shopText.split('\n').map(s => s.trim()).filter(Boolean).join(','));
             params.set('included', document.getElementById('llModeInclude').checked);
 
+            previewBtn.disabled = true;
+            runBtn.disabled = true;
+            area.style.display = 'block';
+            content.innerHTML = '';
+            barWrap.classList.remove('d-none');
+            setLLProgressBar(0, dryRun ? 'Starting preview…' : 'Starting…');
+
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/ll/run?${params.toString()}`, { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
+                const started = await res.json();
+                if (started.busy) {
+                    barWrap.classList.add('d-none');
+                    content.innerHTML = '<div class="text-warning fw-bold">A low-linkage run is already in progress — wait for it to finish.</div>';
+                    return;
+                }
+
+                // Poll progress until the background run reports done.
+                let prog = {};
+                while (true) {
+                    await new Promise(r => setTimeout(r, 800));
+                    const pr = await fetch(`${API_BASE}/api/gsd-campaigns/ll/progress`);
+                    if (!pr.ok) throw new Error(`HTTP ${pr.status}`);
+                    prog = await pr.json();
+                    const total = prog.total || 0;
+                    const pct = prog.done ? 100 : (total > 0 ? Math.round((prog.processed / total) * 100) : 0);
+                    const label = prog.done ? 'Done'
+                        : `${prog.phase || 'Processing…'}${total ? ` — ${prog.processed}/${total} shops` : ''} · ${prog.paused || 0} paused, ${prog.enabled || 0} enabled`;
+                    setLLProgressBar(pct, label);
+                    if (prog.done) break;
+                }
+
+                barWrap.classList.add('d-none');
+                if (prog.error) {
+                    content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(prog.error)}</div>`;
+                    logActivity(dryRun ? 'LL Preview' : 'LL Run', `Error: ${prog.error}`, false);
+                    return;
+                }
+
+                const data = prog.result || {};
                 content.innerHTML = renderLLSummary(data);
+                applyPreviewFilter();
                 logActivity(dryRun ? 'LL Preview' : 'LL Run',
                     `${data.paused_count ?? (data.paused || []).length} paused / ${data.enabled_count ?? (data.enabled || []).length} enabled${dryRun ? ' (dry run)' : ''}`,
                     (data.errors || []).length === 0);
@@ -716,6 +767,7 @@
                     loadStats();
                 }
             } catch (err) {
+                barWrap.classList.add('d-none');
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
                 logActivity(dryRun ? 'LL Preview' : 'LL Run', `Error: ${err.message}`, false);
             } finally {
@@ -723,6 +775,13 @@
                 runBtn.disabled = false;
             }
         }
+
+        // --- Preview results table (sortable / filterable / paginated / exportable) ---
+        let llPreviewRows = [];
+        let llPreviewFiltered = [];
+        let llPreviewSortColumn = null;
+        let llPreviewSortDirection = 'asc';
+        let llPreviewPage = 1;
 
         function renderLLSummary(data) {
             const pausedN = data.paused_count ?? (data.paused || []).length;
@@ -740,19 +799,162 @@
                 <span class="text-muted ms-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows</span>
             </div>`;
 
-            const combined = [...(data.paused || []).map(c => [c, 'Paused']), ...(data.enabled || []).map(c => [c, 'Enabled'])];
-            if (combined.length) {
-                html += `<div class="table-responsive" style="max-height:220px;overflow:auto;">
-                    <table class="table table-sm mb-0" style="font-size:0.8rem;">
-                    <thead><tr><th>Shop</th><th>Shop ID</th><th>Country</th><th>Action</th><th>Campaign</th></tr></thead>
-                    <tbody>${combined.map(([c, a]) =>
-                        `<tr><td>${escapeHtml(c.shop_name || '')}</td><td>${c.shop_id ?? ''}</td><td>${c.country || ''}</td><td>${a}</td><td>${escapeHtml(c.campaign_name || '')}</td></tr>`
-                    ).join('')}</tbody></table></div>`;
+            llPreviewRows = [
+                ...(data.paused || []).map(c => ({ ...c, action: 'Paused' })),
+                ...(data.enabled || []).map(c => ({ ...c, action: 'Enabled' })),
+            ];
+            llPreviewSortColumn = null;
+            llPreviewSortDirection = 'asc';
+            llPreviewPage = 1;
+
+            if (llPreviewRows.length) {
+                const chevL = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>';
+                const chevR = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>';
+                html += `
+                <div class="filter-row d-flex gap-2 align-items-center mt-2 mb-2">
+                    <input type="text" class="form-control form-control-sm" id="llPreviewFilter" placeholder="Filter shop, campaign, country..." oninput="applyPreviewFilter()" style="max-width: 260px;">
+                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportPreviewXlsx()">Export Excel</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover ll-preview-table mb-0">
+                        <thead>
+                            <tr>
+                                <th class="sortable" data-sort="shop_name" onclick="sortPreviewBy('shop_name')">Shop</th>
+                                <th class="sortable" data-sort="shop_id" onclick="sortPreviewBy('shop_id')">Shop ID</th>
+                                <th class="col-country sortable" data-sort="country" onclick="sortPreviewBy('country')">Country</th>
+                                <th class="sortable" data-sort="action" onclick="sortPreviewBy('action')">Action</th>
+                                <th class="sortable" data-sort="campaign_name" onclick="sortPreviewBy('campaign_name')">Campaign</th>
+                            </tr>
+                        </thead>
+                        <tbody id="llPreviewBody"></tbody>
+                    </table>
+                </div>
+                <div class="pagination-controls" id="llPreviewPagination">
+                    <span>Per page:</span>
+                    <select class="form-select form-select-sm" id="llPreviewPerPage" onchange="llPreviewPage=1; renderPreviewPage();">
+                        <option value="10">10</option>
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">Show all</option>
+                    </select>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changePreviewPage(-1)" id="llPreviewPrevBtn">${chevL}</button>
+                    <span class="page-info" id="llPreviewPageInfo">-</span>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changePreviewPage(1)" id="llPreviewNextBtn">${chevR}</button>
+                </div>`;
             }
             if (errorsN) {
                 html += `<pre class="mt-2 mb-0 text-danger" style="font-size:0.78rem;max-height:150px;overflow:auto;">${escapeHtml(JSON.stringify(data.errors, null, 2))}</pre>`;
             }
             return html;
+        }
+
+        function applyPreviewFilter() {
+            const inp = document.getElementById('llPreviewFilter');
+            if (!inp) return;
+            const q = inp.value.toLowerCase();
+            llPreviewFiltered = !q ? llPreviewRows.slice() : llPreviewRows.filter(r =>
+                (r.shop_name || '').toLowerCase().includes(q) ||
+                (r.campaign_name || '').toLowerCase().includes(q) ||
+                (r.country || '').toLowerCase().includes(q) ||
+                (r.action || '').toLowerCase().includes(q) ||
+                String(r.shop_id || '').includes(q)
+            );
+            llPreviewPage = 1;
+            sortPreviewRows();
+            renderPreviewPage();
+        }
+
+        function sortPreviewBy(column) {
+            if (llPreviewSortColumn === column) {
+                llPreviewSortDirection = llPreviewSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                llPreviewSortColumn = column;
+                llPreviewSortDirection = 'asc';
+            }
+            document.querySelectorAll('.ll-preview-table th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === column) {
+                    th.classList.add(llPreviewSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+            llPreviewPage = 1;
+            sortPreviewRows();
+            renderPreviewPage();
+        }
+
+        function sortPreviewRows() {
+            if (!llPreviewSortColumn) return;
+            const numericCols = ['shop_id'];
+            llPreviewFiltered.sort((a, b) => {
+                let valA = a[llPreviewSortColumn] ?? '';
+                let valB = b[llPreviewSortColumn] ?? '';
+                if (numericCols.includes(llPreviewSortColumn)) {
+                    valA = Number(valA) || 0; valB = Number(valB) || 0;
+                } else {
+                    valA = String(valA).toLowerCase(); valB = String(valB).toLowerCase();
+                }
+                if (valA < valB) return llPreviewSortDirection === 'asc' ? -1 : 1;
+                if (valA > valB) return llPreviewSortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        function getPreviewPerPage() {
+            const el = document.getElementById('llPreviewPerPage');
+            if (!el) return 25;
+            return el.value === 'all' ? Infinity : parseInt(el.value);
+        }
+
+        function changePreviewPage(delta) {
+            llPreviewPage += delta;
+            renderPreviewPage();
+        }
+
+        function renderPreviewPage() {
+            const tbody = document.getElementById('llPreviewBody');
+            if (!tbody) return;
+            const total = llPreviewFiltered.length;
+            const perPage = getPreviewPerPage();
+            const totalPages = perPage === Infinity ? 1 : (Math.ceil(total / perPage) || 1);
+            if (llPreviewPage > totalPages) llPreviewPage = totalPages;
+            const start = perPage === Infinity ? 0 : (llPreviewPage - 1) * perPage;
+            const end = perPage === Infinity ? total : start + perPage;
+
+            tbody.innerHTML = total ? llPreviewFiltered.slice(start, end).map(r => {
+                const badge = r.action === 'Paused'
+                    ? '<span class="badge bg-warning text-dark">Paused</span>'
+                    : '<span class="badge badge-active">Enabled</span>';
+                return `<tr>
+                    <td>${escapeHtml(r.shop_name || '')}</td>
+                    <td>${r.shop_id ?? ''}</td>
+                    <td class="col-country">${escapeHtml(r.country || '')}</td>
+                    <td>${badge}</td>
+                    <td>${escapeHtml(r.campaign_name || '')}</td>
+                </tr>`;
+            }).join('') : '<tr><td colspan="5" class="text-center text-muted py-3">No rows.</td></tr>';
+
+            const prev = document.getElementById('llPreviewPrevBtn');
+            const next = document.getElementById('llPreviewNextBtn');
+            const info = document.getElementById('llPreviewPageInfo');
+            if (prev) prev.disabled = llPreviewPage <= 1;
+            if (next) next.disabled = llPreviewPage >= totalPages;
+            if (info) info.textContent = total ? `${start + 1}-${Math.min(end, total)} of ${total.toLocaleString()}` : '0 of 0';
+        }
+
+        function exportPreviewXlsx() {
+            const rows = llPreviewFiltered.map(r => ({
+                Shop: r.shop_name || '',
+                'Shop ID': r.shop_id || '',
+                Country: r.country || '',
+                Action: r.action || '',
+                Campaign: r.campaign_name || '',
+            }));
+            if (!rows.length) return alert('No preview rows to export.');
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'GSD LL preview');
+            XLSX.writeFile(wb, `gsd_ll_preview_${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
         async function loadLLHistory() {
@@ -785,6 +987,7 @@
                 )) return false;
                 return true;
             });
+            llCurrentPage = 1;
             sortLLHistory();
             renderLLHistory();
         }
@@ -836,6 +1039,7 @@
                     th.classList.add(llSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
                 }
             });
+            llCurrentPage = 1;
             sortLLHistory();
             renderLLHistory();
         }
@@ -860,13 +1064,35 @@
             });
         }
 
+        function getLLPerPage() {
+            const val = document.getElementById('llPerPage').value;
+            return val === 'all' ? Infinity : parseInt(val);
+        }
+
+        function changeLLPage(delta) {
+            llCurrentPage += delta;
+            renderLLHistory();
+        }
+
         function renderLLHistory() {
             const tbody = document.getElementById('llHistoryBody');
-            if (!llFiltered.length) {
+            const total = llFiltered.length;
+
+            if (!total) {
                 tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No pause/enable actions logged yet.</td></tr>';
+                document.getElementById('llPrevBtn').disabled = true;
+                document.getElementById('llNextBtn').disabled = true;
+                document.getElementById('llPageInfo').textContent = '0 of 0';
                 return;
             }
-            tbody.innerHTML = llFiltered.map(r => {
+
+            const perPage = getLLPerPage();
+            const totalPages = perPage === Infinity ? 1 : Math.ceil(total / perPage);
+            if (llCurrentPage > totalPages) llCurrentPage = totalPages || 1;
+            const start = perPage === Infinity ? 0 : (llCurrentPage - 1) * perPage;
+            const end = perPage === Infinity ? total : start + perPage;
+
+            tbody.innerHTML = llFiltered.slice(start, end).map(r => {
                 const dt = r.created_at ? new Date(r.created_at).toLocaleString('nl-NL') : '';
                 const isPaused = (r.action || '') === 'Paused';
                 const badge = isPaused
@@ -881,6 +1107,10 @@
                     <td>${escapeHtml(r.campaign_name || '')}</td>
                 </tr>`;
             }).join('');
+
+            document.getElementById('llPrevBtn').disabled = llCurrentPage <= 1;
+            document.getElementById('llNextBtn').disabled = llCurrentPage >= totalPages;
+            document.getElementById('llPageInfo').textContent = `${start + 1}-${Math.min(end, total)} of ${total.toLocaleString()}`;
         }
 
         // --- Run Script ---
