@@ -147,6 +147,85 @@ Off a `/audit` of the exclusion flow, made it faster without behavior change. Sh
 - **Phase 3 (correctness):** `_pick_category` now `sorted(...)[0]` — was `[0]` of arbitrary serving-row order, so a multi-category product got a NON-stable category (hence a different `PLA/<cat>_a/_b/_c` set) across runs; `cl0`/`shop` already used `min()`. Added `already_excluded`/`noop` statuses (all-skipped applies were mislabelled `"failed"`) + matching frontend badges (blue/amber, not grey per the label-color rule). Deduped `item_ids`; guarded `_ga_search_rows` against `attempts<1`.
 - **Phase 4 (cosmetic):** dropped dead `client,customer_id` params from `_build_target` (pure); `heapq.nsmallest` for cache eviction; unified TTL clocks on `time.monotonic()`. **Skipped** enable's inherit-vs-explicit bid restore (`original_bid or _ad_group_cpc or None`) — effective bid is identical and the cpc fallback is what stops a manual-CPC ad group rejecting a bid-less unit; "fixing" it needs a bidding-strategy query, not worth the live-bidding risk.
 - **How to verify mutation-logic changes without touching prod:** an OLD-vs-NEW offline harness (in-memory tree simulator with the real append/subdivide semantics) asserting byte-identical trees + records incl. the shared-ad-group subdivide→append case, THEN a live self-reversing apply→enable round-trip on `nl-nl-gold-6941057404028` (5 targets, 0 errors, full restoration; ran the NEW code via `./venv/bin/python` before restarting the server, so it validated pre-deploy). Note: the bestsellers ad group's node count drifts between snapshots (other exclusions on the shared tree) — assert on OUR item's negatives==0, not total node count.
+## SEO investigation — June-vs-May 2026 non-PLP ranking decline: real regression, MOBILE-specific (2026-07-08)
+
+Question: MoM (May→June 2026) the average ranking of all url-types went UP (worse) except PLP —
+seasonality or real regression? **Verdict: real regression, concentrated on MOBILE**, in the
+home-&-garden/DIY cluster, on facet/search/browse (non-PLP) pages. Extends the parked "Kasten SEO
+ranking decline" backlog item (2026-06-22) — now confirmed at month scale and localised.
+
+**Method + gotchas (reusable for any GSC-ranking analysis — `bt.search_console`, country='nld',
+deleted_ind=0):**
+- Grain = (url, keyword, device, day); `avg_position` is per-row. `month` is a **zero-padded
+  varchar** ('05'/'06'); `year` varchar. `rows` is a **reserved word** in Redshift — alias counts.
+- **NEVER use unweighted `avg(avg_position)`** — it inflates as the long-tail keyword set grows
+  (cf. memory [[search_console_visits_column_not_traffic]]). Use **impression-weighted**
+  `sum(avg_position*impressions)/sum(impressions)`. Here the unweighted mean actually *improved*
+  while the weighted worsened → the damage is in the **high-impression HEAD terms**, long-tail fine.
+- **Seasonality test = within-year May→June DELTA direction, NOT YoY levels.** May→June normally
+  *improves* rankings (held in both 2024 and 2025 for every url-type); in 2026 the non-PLP types
+  *reversed* and worsened → not seasonal. YoY *levels* are unreliable (a 2026 definitional shift —
+  PLP weighted pos jumped ~6 (2025) → ~25 (2026)); the within-year delta is robust to that. (User
+  also asked to drop YoY going forward — SEO has changed too much.)
+- **Always split by device** — it was the key structural clue. Split by category via
+  `JOIN datamart.dim_category` on `deepest_category_id` (has `main_category_name`, `deepest_category_name`;
+  dedupe with `min()` per deepest_category_id to avoid fan-out).
+
+**Findings:**
+- **Mobile-specific.** DESKTOP rankings *improved* for every type; **MOBILE worsened**. Mobile is
+  ~83% of non-PLP clicks so it drives the aggregate. Desktop-up/mobile-down + broad-across-categories
+  ⇒ a mobile cause (Google mobile core-update reshuffle, or a mobile page-experience/rendering
+  regression on these templates), not a per-page break.
+- **By url-type (mobile weighted-pos Δ / total clicks Δ):** PLP slightly worse / +18% (demand surge;
+  its "improvement" was desktop + a +71% mobile-impression mix-shift, NOT a mobile rank gain) ·
+  C-url +0.38 / **flat** (rising impressions cushioned the rank slip) · R-url +0.25 / **−6%** ·
+  **Browse/"cat-url" +0.50 / −10% (worst)** — biggest mobile slip AND impressions fell too, no cushion.
+- **Category concentration:** home-&-garden/DIY — **Tuinartikelen, Meubels, Woonaccessoires, Klussen**.
+  The four maincat *hub* leaf pages alone ≈ **−28k clicks**; broad across subcats with an
+  **outdoor-furniture** lean (Plantenbakken, Loungesets, Tuinbanken, Overkappingen, Pergola's…).
+  **Kasten itself is ~FLAT at month scale (3.97→4.00)** — the earlier WoW Kasten alarm doesn't
+  dominate the month; damage is cluster-wide, esp. the hubs.
+- **Retailer-brand navigational queries** (`/r/…action|ikea|jysk|gamma|lidl|karwei…`) dropped
+  *harder* (−21.5% vs −16.9%) and cluster among the worst URLs (e.g. `/r/lidl_schoonmaakazijn/`
+  2.2→6.4) — a brand-navigational-demotion signature — but only ~17% of the absolute loss; the bulk
+  (~83%) is generic category/product queries.
+- **cat-url (Browse) losses are IMPRESSION-driven, not rank-driven.** The biggest Browse losers had
+  impressions −45% to −85% with **flat or IMPROVED** position (e.g. `meubilair_389370_4891584`
+  4.2→2.6 but impr −73%; `tuin_accessoires_4906804` 6.5→5.5 but impr −79%) → Google surfacing them
+  for fewer queries (coverage/demand loss), NOT demotion. R-url losses, by contrast, ARE rank-driven.
+- **Timing:** gradual through June, accelerating in the last week — consistent with a rolling
+  Google update, not a one-day cliff.
+
+**Open next steps:** keyword-level *mobile* head-term trends for the four hub pages (competitor
+overtake vs uniform drop); mobile CWV/rendering on the `/c/`+browse templates (mid–late June deploys);
+correlate the late-June acceleration with known Google update dates; for cat-urls specifically,
+impressions-trend vs indexed-query-count to split seasonal-demand from coverage-loss. Weighted-position
+method saved as memory [[seo_weighted_avg_position_method]].
+
+## dm-tools DMA Exclusions — "Headline offer" was the STALE bestOffer (OOS) shop, not the live one; + is the OOS API faulty? (2026-07-06)
+
+User saw many exclusions with "—" as Headline offer, then (after a first backfill) spotted a WRONG one: `nl-nl-gold-8721398474489` showed **Drogistwereld.nl** but the live PLP's headline is **Drogist.nl, in stock**. Two separate issues fell out.
+
+**Why the "—" blanks.** The `headline_shop` column (added later, live bestOffer shop from ES) was NULL on 968/2503 rows. The OOS save path (`oos_exclude`) DOES pass `headline_shop`, but `headline_offer(ean)` returned an empty dict at save-time (transient ES timeout / product not indexed that instant) — `_persist_apply`'s `COALESCE(EXCLUDED.headline_shop, existing)` then leaves it NULL. Recoverable: re-resolving live succeeds. There is already a backfill — `backfill_headline_shops(only_missing=)` / `POST /api/dma-exclusions/backfill-headline-shops` — but **no UI button wires it in**, so it had never run. (Caveat baked into its docstring: ES keeps no history, so it fills the *current* bestOffer, not the value as-of the original exclusion.)
+
+**The real bug — ES `bestOffer` flag is stale once that offer goes OOS.** `_headline_offer_uncached` collected only offers with `bestOffer=True` and returned that shop. But when the cheapest offer sells out, ES keeps the flag on it (`stock=0`) while the live beslist PLP re-ranks to the cheapest **in-stock** offer. So for *every* OOS exclusion the tool showed the OOS shop as the "headline" — exactly backwards. Confirmed on the example (all four shops €24.95, differ only on stock+delivery):
+| shop | ES bestOffer | stock | delivery | total |
+|---|---|---|---|---|
+| Drogist.nl | false | 10 | €0 | €24.95 ← live headline |
+| Natuurlijkbesteld.nl | false | 12 | €3.95 | €28.90 |
+| Superfoodstore.nl | false | 12 | €4.95 | €29.90 |
+| Drogistwereld.nl | **true** | **0** | €7.95 | €32.90 ← what we showed |
+
+**Fix (`abf6283`).** Rewrote the selection in `_headline_offer_uncached`: collect ALL offers, restrict to the exact looked-up EAN (`matching`; PLP is per-GTIN, fall back to whole pool if per-offer `ean` absent), then `min` by rank `(in_stock first, cheapest total, bestOffer tiebreak)` where total = `salePrice or regularPrice.price` + `deliveryCost`. Only falls back to the flagged/first offer when nothing's in stock. `status` semantics changed to "live headline is this EAN and in stock" (match) vs "moved" (differs) — **display-only, safe**: grepped every caller, the sole consumer of `status` is the `!= "error"` cache-put guard (line ~164); all others read only `headline_shop`/`plp_url`. Verified: example now returns `Drogist.nl stock=10`. Ran the corrected backfill `only_missing=False`: 2503 scanned, **2450 updated**, 53 unresolved (gone from index). (First pass earlier with the OLD logic + `only_missing=True` had filled 899/968 with the WRONG shop — the `only_missing=False` re-run overwrote them.)
+
+**Investigation — "does the OOS API return faulty item ids?" (tested 10 `oos_scan` candidates).** Findings, in order of reliability:
+- **`stock=None` ≠ OOS (the trap).** Big shops (bol.com, Coolblue, Galaxus, Proshop) report `stock=None` but are genuinely buyable — the availability signal is `blockStatus==0 AND productValid AND debugInfo.display_online`, NOT the numeric stock. A first naive `stock>0` cut said 4/10 in stock; the correct signal says **10/10 products have ≥1 available offer for that EAN, and the ES bestOffer shop itself reads available in 10/10.**
+- **But ES is NOT trustworthy ground truth here:** offers are stale (per-offer `transformVersion` 7–25 days old, well past the monitor's "confirmed within ~2 days"); `stock=None` for many; and ES availability is a *different* model than Google Merchant's live per-shop crawl (what the monitor uses).
+- **Couldn't confirm live:** beslist PLPs are JS-rendered and block our scraper (WebFetch 405; `curl` w/ "Beslist script voor SEO" UA → 59–115 byte shells).
+- **Conceptual resolution:** the monitor answers *"is the advertised (cheapest) offer OOS per Google?"* — legitimately different from *"is the product buyable via some shop?"*. The gold/DMA ad rides ONE shop's offer, so excluding is defensible even when other shops stock it. So NOT obviously "faulty" — but also not necessarily dead products.
+- **Open question (worth chasing):** does the DMA gold ad deep-link to the specific (OOS) shop offer, or to the beslist PLP that re-ranks to an in-stock offer? If the PLP, these are false-positive exclusions (pulling ads for buyable products). Settle via the ad/feed landing URL or the monitor's per-offer Google-OOS detail — not ES.
+
+**Deploy.** Backend is bare uvicorn, no `--reload` (`start.sh` says `--reload` but the live process runs without it). Killed pid 75121, relaunched `setsid nohup ./venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8003 &` (pid 89946); verified `/api/dma-exclusions/list` 200 and served logic returns `Drogist.nl`. DB was already corrected by the backfill (ran in a fresh python process with new code); the restart only matters for future live scans/UI lookups.
 
 ## dm-tools Kopteksten — v3 per-maincat prompts wired into production (2026-07-02)
 
@@ -168,6 +247,416 @@ The OOS monitor owner replaced the old `/oos-eans` (active list) + `/by-eans` (b
 - **Re-enable recovered (`oos_recovered`) reverted to pure set-membership** — the exact approach the 2026-06-30 `/by-eans` rewrite had abandoned; the new guarantee inverts that reasoning. Excluded `oos` EAN **absent** from the current list → re-enable; present → keep. **Safety guard: if `healthy` is false, re-enable NOTHING** (a degraded snapshot can't be trusted to mean "recovered" → would wrongly restore a still-OOS ad). Stays a SEPARATE button/action from Scan; `oos_reenable` unchanged.
 - **Frontend:** scan table trimmed 8→5 cols (dropped Shop / Headline-verdict / PLP — all verdict-derived); Select-all picks every non-excluded row; removed the "hide non-headline"/"hide stale crawl" filters + `headlineBadge`; summary shows "N live in DMA (all excludable)" + a **⚠ monitor unhealthy** badge when `healthy:false`. Saved-list PLP link (fed by `apply()`) untouched.
 - **Cold-scan win (side effect):** enrichment is gone entirely, so a cold scan is now just GA batches over the list — the "cold full scan ~13-15 min, enrichment server-capped" residual (2026-06-29 LEARNINGS / BACKLOG) is moot. See memory `dma_exclusions_tool.md`.
+- **Shared working copy caveat.** dm-tools tree had unrelated in-progress edits (dma_exclusions, rurl). Staged ONLY the 6 v3 files; `git diff main.py` confirmed it held nothing but my hunks. `git pull --rebase` refused (unstaged changes present) but the push was a clean FF anyway (branch was 0/0 after fetch) — did NOT stash/disturb the other work. NB: `cc1/` is **gitignored in the dm-tools clone**; the tracked cc1 lives in the separate `~/projects/dm-dashboard` clone (branch `main`) — edit LEARNINGS/TASKS there.
+
+## dm-tools DMA Exclusions — OOS "Scan failed: HTTP 410 Gone" + shop/PLP enrichment + table layout (2026-07-02)
+
+**The 410.** User hit `Scan failed: HTTP Error 410: Gone` on "Scan OOS". Root cause
+was upstream, not our code: the OOS monitor **removed** `GET /api/v1/overrides/oos-eans`,
+which now returns `410 {"detail":"This endpoint was removed. Use GET .../exclude-eans ..."}`.
+The `exclude-eans` migration (commit c8f5a9e, 2026-07-01) already fixed this; the live
+bare-uvicorn process (no `--reload`) was restarted at 09:18 that morning and picked up the
+fix. Verified live: `GET /api/dma-exclusions/oos/scan?market=NL` → 200 (5 candidates), BE → 200
+(empty). So the user's 410 was from the pre-restart process. **Lesson:** after any
+dma_exclusions edit, remember the backend needs a manual kill+relaunch (see "backend is bare
+uvicorn, no --reload") — a lingering old process serves stale code and surfaces upstream
+contract changes as raw errors.
+
+**Where category/shop/PLP come from (OOS scan enrichment).** The `exclude-eans` list carries
+ONLY EANs (`{healthy, as_of, count, eans}`) — no category, no shop, no URL. Enrichment sources:
+- **Category** — parsed from the GA `PLA/<cat>_a` campaign names (`_pick_category`). Already shown.
+- **Shop** — CL3 = `segments.product_custom_attribute3`, already fetched in the same
+  `shopping_performance_view` query in `_ga_batch_agg` and cached in the resolution; was just
+  never put in the candidate dict. Surfacing it cost nothing (`_build_oos_candidate`: `"shop": shop`).
+- **PLP url** — separate source: the ES `headline_offer(ean)['plp_url']` lookup. Fetched ONLY for
+  the final capped candidate set, in parallel (`ThreadPoolExecutor(16)`, cached ~30ms warm), AFTER
+  the cost-rank + `[:limit]` so we never look up candidates we drop.
+Frontend: new Shop column, EAN links to the PLP (reused the Saved-list `safeUrl` pattern), shop
+added to the filter.
+
+**OOS table layout.** `table-layout:fixed; width:100%` with only Category flexible → Category
+swallowed all slack on wide screens. Fix: `width:auto; min-width:820px` + fixed per-column widths
+(36/150/240/190/100/110) so the table sizes to content; numeric cols right-aligned; long cells
+ellipsize (`text-overflow:ellipsis; white-space:nowrap`) with full text on hover `title`.
+
+**Gotcha — `pkill -f "uvicorn backend.main:app"` self-matches.** The pattern matched my own bash
+command line, so `pkill` SIGTERM'd the shell mid-restart (exit 144) and the relaunch never ran,
+briefly taking the backend down. Restarted cleanly with `setsid uvicorn … &`. Don't `pkill -f`
+on a string that appears in the same command; use a narrower pattern or kill by PID.
+
+Shipped: `feat(dma-exclusions): show shop + PLP url in the OOS scan and tidy the table` (2a00e84).
+
+## dm-tools SEO stats — "Top subcats" → "Top deepest cats" (2026-07-02)
+
+User wanted the second Top-categories table to list **true leaf categories** (matching the
+Performance Standup), not subcats. **Frontend-only** change: the backend already computed
+`deepestcats` via `_fetch_cat_deltas(conn, "deepest", ...)` (filtered to `is_lowest_category=1`
+so overview/non-leaf pages don't leak in) and returned it alongside `subcats` in `get_deltas`.
+Pointed the `sub` table's `src` at `deepestcats`, relabelled heading + column + Excel sheet to
+"Top deepest cats" / "Deepest cat". Row shape is identical (`{maincat, subcat}` where `subcat`
+holds the level's cat name), so sort state + the `-` maincat-level row drop carry over unchanged.
+Shipped: `feat(seo-stats): show Top deepest cats instead of Top subcats` (736949f).
+
+## Kopteksten v3 — informational per-maincat prompts from Google-ranking analysis (2026-07-01)
+
+Reworked the Kopteksten prompt from a promotional one-paragraph blurb into an
+**informational mini-koopgids**, tailored per maincat, grounded in analysis of
+what actually ranks on google.nl. Bigger, evidence-based successor to the parked
+"Koptekst prompt v2" (see BACKLOG). **Staged in dm-tools, benchmarked, NOT wired,
+NOT committed** — user reviews the Excel output first.
+
+**Method.** Input `Downloads\claude\seo_urls_content_prompt.xlsx`, sheet `seo_urls`
+(162,367 rows: col A `main_cat_name`, B `deepest_subcat_name`, C `url`, D
+`page_heading` = the term to Google, E `visits`, F `revenue`; sheet `dt` is a
+pivot). Sampled 117 visit-weighted terms across all 31 maincats (5 for the biggest
+down to 2 for tiny ones), deduped across distinct deepest-subcats for variety.
+Fanned out **one research agent per maincat** (general-purpose, background); each
+WebSearch'd its terms, WebFetched the top informational pages, and returned
+evidence + a drafted per-maincat prompt. Assembly + extraction scripts ran in the
+session scratchpad.
+
+**Universal finding — ranking pages are koopgidsen, not blurbs.** 6 patterns recur
+in ALL 31 maincats: (1) kies-op-gebruik first (use-case before specs); (2)
+concrete measurable specs WITH their meaning (dB/mm/kg/liter/kWh/ampère/IP/dpi/
+warmteklasse/actieradius + "wat betekent dit voor jou"); (3) type/variant
+trade-offs explained; (4) compatibility ("past dit bij mij?") + legal/safety
+frames (RDW, ECE, EN/NEN, CE, receptplicht); (5) onderhoud/veiligheid/levensduur;
+(6) koperstaal (jargon) + scannable multi-section structure. Bonus winner across
+many cats: **honest myth-busting** (airco-zonder-slang = luchtkoeler ~3°C; A+++
+bestaat niet meer → kWh/jaar; passieve SCART→HDMI kabel werkt niet; 19-inch
+laptops bestaan niet meer) — price-neutral, so fully allowed for us.
+
+**The 31 prompts are genuinely distinct.** Avg pairwise similarity only ~9% (that
+9% ≈ the shared hard-constraint boilerplate); most-similar pair 17%, most-different
+3%. Each maincat's prompt carries 45-101 words that appear in no other maincat's
+prompt (its domain criteria/jargon). Architecture note for future wiring: cleaner
+as **one shared base + 31 short content-modules** than 31 full prompts (avoids 31
+copies of the boilerplate) — the shared base is written out in the deliverable md.
+
+**Key technical gotchas (important if wiring to production later):**
+- **The v1 USER prompt forces single-paragraph + 150 words.** `create_product_
+  recommendation_prompt` (backend/gpt_service.py:51) hard-codes "Schrijf de tekst
+  als EEN doorlopende alinea" and "max. 150 woorden". The model weights the USER
+  message above the system message, so a system-message structure/length change
+  does NOTHING on its own. v3 therefore ships its OWN user prompt
+  (`create_product_recommendation_prompt_v3` in gpt_service_v3.py) that lifts both
+  caps; product list + link rules kept identical so product context matches v1.
+  Only after this did multi-paragraph output appear (0% → 100% multi-para).
+- **Length had to be normalized by me.** Agents ranged 120→1100 words (Horloges
+  over-anchored on long-form guides). Enforced policy in a NORMALIZE_FOOTER appended
+  to every v3 system message: standard 160-240 words, complex-functional (meubels/
+  huishoudelijk/voertuigen/sanitair) up to 320, hard cap ~350. Overrides the
+  per-prompt length lines.
+- **Generic filler words are a MODEL-level problem, not a version problem.** "ideaal"
+  (×20), "uitstekend" (×10), "perfect" (×7) survive at ~63% in BOTH v1 and v3, even
+  though v1's prompt ALREADY bans them explicitly — gpt-4o-mini ignores the ban.
+  Not a v3 regression. User decided: leave it. Only reliable fix would be a
+  deterministic post-processing scrub (like the vague-anchor unwrap), but scrubbing
+  mid-sentence adjectives risks grammar.
+- **Numeric-spec metric under-measures v3.** The benchmark's spec regex only catches
+  number+unit; v3's real gains are often qualitative (materiaal trade-offs, use-case,
+  geurnoten), so the flat 44% spec rate hides a large qualitative improvement visible
+  in the side-by-sides.
+
+**Benchmark.** `scripts/koptekst_v3_comparison.py` (run under `./venv/bin/python`)
+samples N URLs/maincat from `backend/data/koptekst_v3_benchmark_urls.json`, scrapes
+products via `scrape_product_page_api` (same as production), generates v1
+(`generate_product_content`) and v3 (`generate_product_content_v3(h1, products,
+maincat)`) from IDENTICAL products, scores both, writes a grouped Excel. Run:
+`--per-maincat 2` → 62 URLs, 43 had products (18 category URLs currently return 0
+products → skipped, as production would). Result: v3 209 vs v1 112 words; 100% vs 0%
+multi-paragraph; both 0% prices/wij/exclamations. Output
+`Downloads\claude\koptekst_v1_vs_v3_2026-07-01.xlsx`.
+
+**Files (staged, uncommitted, in dm-tools working copy):** `backend/gpt_service_v3.py`
+(loads the JSON, builds system message = per-maincat prompt + normalize footer, has
+its own v3 user prompt, reuses MODEL/fix_truncated_urls from gpt_service), `backend/
+data/kopteksten_maincat_prompts_v3.json` (31 prompts), `backend/data/koptekst_v3_
+benchmark_urls.json`, `scripts/koptekst_v3_comparison.py`. Deliverables in
+`Downloads\claude\`: `kopteksten_informational_prompts_2026-07-01.md`,
+`kopteksten_prompts_per_maincat_2026-07-01.json`, `koptekst_v1_vs_v3_2026-07-01.xlsx`.
+
+**To wire to production later:** resolve `main_cat_name` for the URL (via
+category_lookup / deepest_category→maincat mapping) and route through
+`generate_product_content_v3` behind an env/query toggle for gradual cutover.
+Confirm content_top rendering handles multiple paragraphs (user says yes).
+
+## Auto-Redirects V54 — stop caching transient probe failures that poison cross-maincat verification (2026-07-08)
+
+Cross-maincat routing cluster (solar/bedhekje/lampen/tochtstopper/hekjes). Re-diagnosis
+first (the recurring lesson): tochtstopper already done (RC8 curated), lampen already
+correct (klussen Hanglampen @0.79 verified — "lamps above dining table"→hanging lamps
+is right; the user's "stay in huis_tuin" is like lego, debatable), hekjes is
+same-maincat (dom_cat Hondenrekken @0.36, just below V53's 0.45 floor — not
+cross-maincat), solar has NO subcat-name candidate (its target is a `s_lamp` FACET in
+tuin_accessoires, not a subcat name — the name-match cross-maincat mechanism can't
+reach it; needs a dominant-MAINCAT product signal, still architectural/deferred;
+currently 45/D so safely de-ranked). **The one cleanly-fixable case was bedhekje.**
+
+**Root cause (a real cache bug, not a routing bug).** The cross-maincat machinery
+already exists: `_cross_maincat_any_token_match` nominates a candidate when a query
+token exactly names a subcat in another maincat (bedhekje → baby_peuter 'Bedhekjes',
+name score 99), the prefetch fetches `(candidate_maincat, keyword)`, and RC5 promotes
+it if the probe VERIFIES (AND-mode, share≥0.6). bedhekje's candidate was found and its
+gate satisfied (`_keyword_bridges_value('bedhekje','Kajuitbedden')` is False) — but
+verification returned `mode=error`. `_classify` returns `mode='error'` ONLY when the
+API response was `None` (a timeout/network blip); `_cache_put` PERSISTED it and
+`_cache_get` served it as a fresh hit — so one transient failure **permanently** blocked
+re-fetching that pair, silently killing its cross-maincat verification. (`_fetch_live`
+NOW returns 451 products, Bedhekjes 446 — the data was always fine.)
+
+**Fix (V54, `58d04de`):** `_cache_put` skips `mode='error'` payloads; `_cache_get`
+treats an already-cached error as a miss so it re-fetches. bedhekje →
+`baby_peuter_563182_5257400` (80/B, cross_maincat_fallback_verified). Only **36/55108
+(0.1%)** cache entries were poisoned, so tiny blast radius. Bare-corpus (1200) OLD-vs-NEW:
+**1 URL change, 0 tier changes, 0 A/B→D** — and the 1 change is an IMPROVEMENT
+("t-shirt 30 jaar": wrong `cadeaus 'Carnavalsblouses'` 58/C → correct `mode 'T-shirts'`
+72/C verified, another un-poisoned cross-maincat route). 55 tests pass.
+
+**Lesson (recurring — cf. redirect_tool_prefetch_bug):** never cache a transient
+fetch failure as if it were an answer. A `None`/error response must re-try next run,
+not persist as a fresh negative. Any probe cache needs an error≠miss distinction.
+**Follow-up:** solar-style cross-maincat (target is a facet, not a subcat name) still
+needs a dominant-MAINCAT product-count signal — probe candidate maincats and compare
+dominance. Deferred (expensive; solar is de-ranked to D so not urgent).
+
+## Auto-Redirects V53 — align maincat facet-match subcat to full-query search-derived dom_cat (2026-07-08)
+
+redirects.txt batch2 list #1 subcat-selection family (lego_kraan / swiffer_doekjes
+/ accu_12v_72ah). **Root cause:** the `[maincat] Matched N facet` path takes the
+subcat where the matcher's FacetFilter parked the matched facet VALUE — and
+FacetFilter picks by that value's own product COUNT (`_deduplicate_to_highest_level`
+/ CHILD_DOMINANCE_THRESHOLD), which ignores the query's unmatched HEAD NOUN. So
+merk~Swiffer parks at the parent Schoonmaakartikelen (486260, 234 Swiffer products)
+not Schoonmaakdoeken (486260_488654, 90) where "doekjes" belongs; voltage_accu~12V
+parks at sibling 6340292 (1690) not Auto-accu's (6437006, 1213) where "accu"
+belongs. The **search-derived classifier** already picks the dominant category for
+the WHOLE query — and it was RIGHT for both (swiffer→486260_488654 @0.48,
+accu→6437006 @1.0). It was even right for lego (Bouwstenen @0.55 = the matcher pick),
+so lego needs no change (the user's alt 395620_423617 is search-unjustified — 55% of
+"lego kraan" products are genuinely in Bouwstenen).
+
+**Fix (V53, post-processor):** for a bare-source `multi`/`[maincat]` facet-match,
+rewrite the SUBCAT to `derived['dom_cat_url_slug']` when (a) same maincat, (b) not an
+ANCESTOR of the matcher subcat (never go LESS specific), (c) **dom_share >= 0.45**,
+and (d) every matched facet value exists in the derived subcat (checked in the
+in-memory `facet_filter.facets_df` by `category_url_slug`+`facet_value_id` — no live
+call, never a dead page). Keeps match_type `multi` so V52 still scores it.
+
+**Key design lesson — dominance, NOT the parent/child relationship, is the safety
+signal.** My first cut let a strict DESCENDANT bypass the dominance floor ("refining
+parent→child is always safe"). WRONG: a low-dominance child is a WORSE pick than the
+parent — "adidas outlet" → Hardloopschoenen @0.23, "led lamp" → LED Strips @0.1 both
+fired and were both wrong (the query names no such specialisation). Requiring
+dom_share >= 0.45 for BOTH descendant and sibling cleanly separates the good fixes
+(swiffer 0.48, accu 1.0, birkenstock 0.55, gehaakt_vest 0.59) from the bad
+(adidas 0.23, led_lamp 0.1, grote_maat 0.42, toyota_yaris 0.42). swiffer's 0.48 is
+the anchor — the floor must sit in (0.42, 0.48]; 0.45 is the midpoint.
+
+**Validation:** swiffer → klussen_486260_488654, accu → autos_482566_6437006 (both
+exact wanted targets); lego unchanged. Bare-corpus (1200): **8 rewrites (0.67%), all
+dom>=0.47, all plausible** (mostly shoe type/gender disambiguation — asics_ahar→
+Hardloopschoenen, gabor_sleehakken→heels, nike_air_max_heren→men's), **0 tier
+changes, 0 A/B→D, 0 non-V53 URL changes**. 55 tests pass. NB: the search-derived
+dom_cat classification is mildly non-deterministic run-to-run (Search API
+`total`/facet-count variance), so the exact SET of V53 fires shifts between runs —
+but the pattern (only dom>=0.45 disagreements, all plausible) is stable, and V53
+consumes the same dom_cat signal the rest of the engine already relies on. No count
+floor: accu's correct target has only 2 products (dom 1.0), so a count floor would
+kill a user-requested fix. Optimizer = subprocess, no uvicorn restart.
+
+## Auto-Redirects V52 — fold the maincat facet-match path into dominance+count scoring (2026-07-08)
+
+Second `~/redirects.txt` batch (14 new cases). Lists #2 & #3 (the recurring
+"make the score reflect coverage AND product-count dominance" ask) traced to one
+root cause: the **`multi` / `*_with_probe_facet` paths** (the `[maincat] Matched N
+facet` matcher redirects) are scored by `calculate_reliability_score`, which folds
+in **coverage but is DOMINANCE-BLIND**. So a facet match on a thin, non-dominant
+category scored the same as one on a dominant, well-populated one — deurbel 24 volt
+(→ a_gereedschap "24 volt", **3 products**, head noun "deurbel" dropped) and
+windmolentje voor in de tuin (→ t_windvang, dom_share **1.0**, **1249 products**)
+both landed on 70/C.
+
+**Fix (V52, 1 line + comment):** add `'multi'`, `'multi_with_probe_facet'`,
+`'subcategory_name_with_probe_facet'` to `_V45_DOM_SCORED_TYPES` (NOT to
+`_V45_COVERAGE_FLAT_TYPES` — their base already folds coverage in via
+`calculate_reliability_score`, so `include_coverage=False` gives them
+dominance+count ONLY, no double-dock). Mirrors the V45 treatment of the
+search-derived branches. Results: **windmolentje 70→76/B** (#3, dom bonus),
+**deurbel 70→60/C** (#2, thin-count penalty), and as a side effect several list-#1
+"weird suggestions" self-deranked — **solar_buitenlamp 70→45/D** (dom 0.26 into an
+indoor woonaccessoires facet), **hekjes_voor_honden 70→62/C**.
+
+**Validation methodology — two traps burned real time, record them:**
+1. **The indexnow corpus is the WRONG test set for this change.** `~/indexnow_
+   submitted_urls.csv` is already-redirected OUTPUT — ~100% carry an existing `/c/`
+   facet, so they take the subtree-rescue / existing-facet path where dom_share
+   isn't wired into scoring (the user-pinned facet IS the confidence signal). V52
+   correctly leaves them untouched → a 1000-URL indexnow diff showed **0 changes**
+   and looked (wrongly) like the change was inert. The population V52 affects is
+   **bare `/r/query/` URLs**. Built a proper corpus by stripping `/c/…` off the
+   indexnow keywords (`sed 's#/c/.*$##'`) → 1200 bare URLs.
+2. **The engine RESUMES from `<output>_progress.csv`** (main_parallel_v2.py ~3844):
+   if a full progress file exists it copies it to the output WITHOUT recomputing.
+   Re-running NEW over the same output path silently reused a stale OLD result
+   (byte-identical output). Always run OLD vs NEW to **fresh, distinct filenames**
+   and `rm -f` the progress file first.
+
+**Bare-corpus blast radius (1200 URLs, OLD vs NEW):** 0 URL changes (scoring-only),
+**0 A/B→D** severe regressions; 54 tier demotions (C→D 30, A→B 14, B→C 10) + 33
+score increases. Demotions are all low-dominance weak redirects — C→D examples:
+tweedehands_fitness dom **0.01**, dikke_zool/lichte_schoenen/grote_maat_heren dom
+0.13–0.22 (generic-attribute queries that dropped head intent). A→B/B→C are cov-100
+BRAND/attribute queries with low dom_share (swarovski_sieraden 0.2, adidas_outlet
+0.23) — thinly spread across subcats; per the user's spec (coverage AS WELL AS
+dominance) a fully-covered but low-dominance redirect *should* sit below a
+fully-covered high-dominance one (espresso dom 0.99 → 87, Nilfisk 0.85 → 100), and
+worst case lands in still-usable B/C. 55 tests pass. Optimizer = subprocess, no
+uvicorn restart.
+
+**List #1 (12 "weird suggestions") — diagnosed, routing fixes DEFERRED** (each a
+separate hard increment; none is a scoring issue, and V52 already de-ranks the
+worst): subcat-selection family lego_kraan/swiffer_doekjes/accu_12v/kinder_auto
+(FacetFilter "representative subcat" problem — same class as V32 cross-depth); over-
+faceting relax_fauteuil (materiaal "Leer" duplicates bekleding) + smalle_kast
+(spurious kleurtint); cross-maincat solar_buitenlamp/hekjes_voor_honden; broekpak
+under-facet (missing populaire_themas "grote maat"); spy_camera_wifi value pick;
+koelkast-met-vriezer = maincat-less **global-pass** URL (parser returns invalid on
+`/products/r/<kw>/`, handled by process_global_rurls, out of the per-URL tool's
+scope). Also deferred: windmolentje's "voor in de tuin" filler (the user's
+suggestion) — would exclude maincat-name tokens from the coverage denominator, but
+that touches coverage for ALL match types → its own validation; V52 already lifts
+windmolentje to B without it.
+
+## Auto-Redirects V51 — synonym-aware coverage for RC4-enriched rows (2026-07-08)
+
+Picked up the stale "list #1 category_fallback (pikachu/vintage)" task. **First lesson:
+the task list predated RC4 (2026-07-03) — always re-run the flagged URLs against
+current HEAD before writing code.** Empirical current state of the 3 category_fallback
+cases:
+- **pikachu** → `speelgoed_spelletjes_395615/c/personage~23600616` **80/B** — already
+  fixed by RC4 (in-subcat facet enrichment). No work needed.
+- **vintage** → `huishoudelijke_apparatuur_19968036_19968046/c/bouw_koelkast~23593989`
+  ('Retro') — RC4 routes it CORRECTLY (the exact facet the user wanted) but it scored
+  **37/D**. Root cause was a SCORING bug, not routing.
+- **dubbele** → still bare `fietsen_484519_8973629/` (0/D). The wanted value
+  `aantal_fietsen~23588103` is literally named **"2 fietsen"**; "dubbele" links to it
+  only via a `dubbele`→"2"/quantity synonym. Fragile + niche → deferred.
+
+**The vintage scoring bug.** score = base 70 + coverage-band + dominance-band + count-band
+(`score_search_derived`, `target_is_faceted=True`). The V45 coverage RECOMPUTE (in
+`main_parallel_v2.py`, gated on `appended_value_names`) compares the query literally to
+the appended facet value NAME. RC4's probe matched "vintage"→"Retro" only through its
+curated `_ENRICH_SYNONYMS` map (`_expand_synonyms` folds "retro" into the query before
+matching) — so the recompute, which had no synonym awareness, read **0% coverage** for a
+value that genuinely captures the query. Math: 70 − 18 (cov 0%) − 15 (dom_share 0.23) + 0
+(faceted count) = **37**.
+
+**Fix (V51, commit `21f44f4`):** the recompute now expands each query word with the SAME
+`_ENRICH_SYNONYMS` + `_stem` the probe used — candidate forms = `[word] + [syn for
+key,syn in _ENRICH_SYNONYMS if _stem(key)==_stem(word)]` — and a value matched via
+synonym reads as covered. Lift-only (guarded `_recomputed > _v45_cov`, so it can only
+raise coverage, never invent a penalty). Uses the existing curated map (vintage↔retro,
+peuter/kleuter→kind), so no new synonym risk. vintage 37/D → **63/C** (cov 0→100).
+C — not B — is the honest tier: the Retro koelkast facet has only **15 products**
+(review-worthy per the existing faceted-count policy).
+
+**Latent follow-up (deferred, documented in TASKS):** RC4 rows are scored with
+`dom_share`/`dom_cat` from the *maincat-wide* probe, which describes a DIFFERENT category
+than the RC4 target subcat (vintage's dom_cat = Broodroosters 0.23, not koelkasten). The
+−15 dom penalty there is a wrong signal that happens to offset the too-lenient count
+guard (uses dom_count=67, not the facet's own 15) — net C is defensible but the inputs
+are mismatched. Proper fix = neutralize dominance + use the facet's own count for RC4
+rows; needs its own corpus diff.
+
+**Validation:** OLD-vs-NEW diff on 300 random /r/ URLs (`indexnow_submitted_urls.csv`,
+NR%47==0) = **0 URL/score/tier changes**; a 32-URL synonym-targeted set (queries
+containing vintage/retro/peuter/kleuter) = **0 changes** (those all carried an existing
+`/c/` facet → V41 path, not RC4). 55 tests pass. The change is precisely scoped: it only
+bites when a row has an appended facet AND a query word bridges to the value name through
+the tiny synonym map. Optimizer is a subprocess → next run picks it up, no uvicorn
+restart. File: `main_parallel_v2.py` (1 file).
+
+## Auto-Redirects V45/V46 — confidence scoring + in-subcat facet selection (2026-06-30)
+
+From user's `~/redirects.txt` (3 lists of flagged redirects). Branch
+`rurl-v45-confidence-scoring` on dm-dashboard (V45 + V46 commits, pushed).
+
+**V45 — search-derived scoring redesign (lists #2 & #3).** The search-derived
+branches each shipped a FLAT reliability constant (samecat=65, faceted=70,
+subcat-rescue=75, cross-maincat=65/45) blind to coverage + dominance — so
+poorly- and well-fitting redirects both landed on 65. New
+`score_search_derived()` in `reliability_scorer.py` adjusts the per-branch base
+by: query **coverage** (two-sided bands), category **dominance** (dom_cat_share,
+two-sided), and an absolute **product-count** guard — FULL penalty for
+bare-category redirects (a thin dominant cat is noise: motorhelm→Videocamera's,
+116 products), MILD for faceted targets (intentionally narrow: ici paris→merk, 4
+products is fine). Plumbed `dom_cat_count` through `search_derived.py`. Captured
+appended facet value names (the URL-override branch was CLEARING them →
+false 0% coverage on brand redirects). subcategory_name* rows re-score coverage
+AFTER the facet append (double-vowel collapse grote≈Groot + filler "mooie"
+exclusion), lift-only — `mooie_grote_vazen` 65→95. Score-only: 0 redirect URLs
+change. 300-URL regression: 0 production A/B fell to D, tier B +6, mean −0.6.
+
+**V46 — descriptor-aware in-subcat facet selection (list #1 bucket a).** The
+in-subcat (Stage 1.5) probe ALREADY existed; the bug was the over-strict
+`_value_matches_keyword` (every value token must be in the query), which
+discarded "USB oplaadbaar" (opties_ventilator~23795868) for "usb-ventilator"
+over the descriptor token "oplaadbaar". New `_value_distinctive_match` ignores a
+small generic-descriptor set (met/zonder/oplaadbaar/…) and requires only the
+value's DISTINCTIVE tokens to link. PROBE_SCHEMA_VERSION 6→7. Fixes the exact
+facets the user wanted: usb-ventilator→opties_ventilator~23795868,
+spikeball→merk~23864170, kinderbankje→opties_stoel~17094990,
+puree_stamper→type_stmp~6380575 (gardena→merk~1223 already fixed by V44).
+Surgical: 300 random corpus 0 changes; 120 option-heavy 4 appends, all sane.
+
+**Key cross-cutting finding for the REMAINING list-#1 cases:** the live facet
+probe (post-V46) frequently has the CORRECT facet/value, but redirect paths
+don't apply it — three failure modes:
+1. **Fix-D append gate too strict** (`_keep_fd` needs brand OR name_link OR
+   all_repr). 60_cm_breed: probe finds a_woonacc~"60 cm" (cov 0.89) but the
+   dimension-only query has no product noun bridging "Kussenhoezen", so it's
+   dropped. CANNOT naively loosen — `_value_distinctive_match` alone would
+   re-admit the waxinelicht→f_woonacc~Groot junk on Gedenkartikelen (the gate's
+   original purpose); the differentiator is whether the CATEGORY is on-topic.
+2. **Static facets.csv overrides the live probe with STALE value ids.**
+   tuinaarde "40 liter": the subcategory-qualifier path (`_qualifier_matches_value`,
+   reads the loaded facets.csv) picked inhoud_tuinaarde~23936743 — a value id
+   that ISN'T in the live facet at all (live has only ~23590378 "40 liter" +
+   ~23590374 "5 liter"). The live probe correctly picks 23590378. Fix = prefer
+   the live probe value over the stale static pick.
+3. **category_fallback / subcategory paths don't consult the probe.** pikachu
+   (probe finds merk~Pokémon), dubbele, vintage all ship as category_fallback
+   (score 0) without applying the probe's pick.
+Plus pure lexical/semantic gaps (peuter≠Kind, loungeset≠Loungebankhoezen — need
+synonyms) and cross-maincat routing (bedhekje→baby_peuter, tochtstopper→klussen,
+lampen→huis_tuin not klussen). Each fix needs its own OLD-vs-NEW corpus diff.
+
+Harness (the CSVs were in /tmp — EPHEMERAL, regenerate next session):
+- engine env: `/home/joepvanschagen/projects/dm-tools/venv/bin/python`
+- run: `cd backend/rurl_optimizer_v2 && venv/bin/python main_parallel_v2.py <in.csv> -o <out.csv> --enable-facet-probe` (input col `r_url`; full beslist URLs)
+- flagged cases: copy the source `/r/` URLs from `~/redirects.txt` (lists 1/2/3) into a CSV.
+- regression corpus: `grep -oE 'https://www\.beslist\.nl/products/[^,"]*/r/[^,"]*' ~/indexnow_submitted_urls.csv | awk 'NR%47==0' | head -300` (14,208 real /r/ URLs there).
+- OLD-vs-NEW diff: `git stash` the rurl files → run OLD → `git stash pop` → run NEW → diff on `original_url`/`reliability_score`/`redirect_url`. Cache (`data/cache/search_derived.sqlite`) warms after first run so re-runs are 0-API (won't contend with a live job). Bumping a SCHEMA_VERSION invalidates the relevant cache.
+
+**RESUME HERE next session:** V45/V46/V47 are MERGED (PR #1). Pick up the
+"REMAINING cases" task in TASKS.md. Suggested order by tractability: (1) a
+TARGETED per-row dominance override for category_fallback rows (pikachu/vintage),
+gated on a query-NAMED probe value — NOT a global `DOMINANCE_THRESHOLD` drop;
+(2) cross-maincat routing (bedhekje/tochtstopper); (3) Fix-D gate discriminator
+(60_cm_breed); (4) synonyms (peuter≈Kind). Each needs its own corpus diff.
+In-repo design doc: `rurl_optimizer_v2/SCORING_REDESIGN_PLAN.md`.
+
+## Redirect loop (ERR_TOO_MANY_REDIRECTS) on `/r/` URLs with a slash inside the search term (2026-06-30)
+
+User reported `https://www.beslist.nl/products/r/wasmachine/droger_kast/` failing with **ERR_TOO_MANY_REDIRECTS** in the browser; the `%2f`-encoded and decoded forms bounce to each other.
+
+- **Root cause is the frontend/CDN URL-canonicalization layer, NOT redirect.api.beslist.nl.** Live single-hop test (whitelisted UA `Beslist script voor SEO`): `/r/wasmachine/droger_kast/` → **301** → `/r/wasmachine%2fdroger_kast/`, and `/r/wasmachine%2fdroger_kast/` → **307** → `/r/wasmachine/droger_kast/` → infinite loop. The 301 encodes the literal slash; the 307 decodes it; they point at each other.
+- **The redirect API is innocent and was confirmed so:** the resolver returns **NO_REDIRECT** for the `%2f` form and a clean **301 → meubilair** (`/products/meubilair/meubilair_389371_395590/c/t_badkast~23813977`) for the literal-slash form — which never fires because the encoding-301 loops first. The loop **persisted after I deleted the redirect rows**, proving the rows weren't the cause.
+- **Trigger:** `/r/` search-redirect URLs expect a SINGLE slug term (`wasmachine_droger_kast`). This one has a slash INSIDE the term (two path segments), which the two canonicalization rules can't agree on a stable encoding for.
+- **Cleanup done:** deleted two malformed redirect rows that had embedded slashes (`id 8495904` `/products/r/wasmachine/droger_kast/`, `id 8495905` `/products/r/wasmachine/drogerkast/`) via `DELETE /api/redirect?fromUrl=…` with `X-User-Name: SEO_JOEP`; verified gone on the uncached list endpoint. The correct canonical `/products/r/wasmachine_droger_kast/` (`id 7968466`) already 301s cleanly to meubilair.
+- **Handed to teamsearch** (message saved `Downloads\claude\teamsearch_redirect_loop_wasmachine_droger.md`): make `%2f`↔`/` canonicalization idempotent (301 and 307 must not point at each other), stop emitting `/r/` links with raw/encoded slashes in the term, and sweep for other `/r/` URLs with embedded slashes hitting the same loop.
+- **Verification gotchas reused:** check the **uncached `GET /api/redirects?urlContains=` list endpoint**, not the resolver (the resolver Varnish-caches negatives for 1h — don't poison it with a pre-check). The live site needs the SEO UA or AWS-WAF returns a 202/405 challenge instead of the real redirect headers. See memory `redirect_api_behavior.md`.
 
 ## dm-tools DMA Exclusions — xlsx export: Item ID hyperlinks, column alignment, empty-Category "n/a" (2026-06-30)
 
