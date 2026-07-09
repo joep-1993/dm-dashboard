@@ -6,6 +6,8 @@
     <title>GSD Campaigns</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <style>
         .stat-card {
             border-radius: 12px;
@@ -49,7 +51,24 @@
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
-        .run-card { border-left: 4px solid #5e4a90; }
+        #runDate {
+            border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
+            box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+        #runDate:hover { border-color: #b9b0d8; }
+        #runDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
+        #runDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
+        #runDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
+        .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
+        .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
+        .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+        .flatpickr-month, .flatpickr-current-month, .flatpickr-weekday { color: #5e4a90 !important; fill: #5e4a90 !important; }
+        .flatpickr-monthDropdown-months, .numInput { color: #5e4a90 !important; font-weight: 600; }
+        .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #5e4a90 !important; }
+        .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
+        .flatpickr-day.today { border-color: #5e4a90; }
+        .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
         .activity-log { max-height: 300px; overflow-y: auto; font-size: 0.82rem; }
         .activity-log .log-entry { padding: 0.4rem 0; border-bottom: 1px solid #f1f2f6; }
         .activity-log .log-time { color: #636e72; min-width: 140px; display: inline-block; }
@@ -162,16 +181,16 @@
                     </div>
                     <div class="col-md-5">
                         <label for="shopNames" class="form-label">Shop names (optional, one per line)</label>
-                        <textarea class="form-control" id="shopNames" rows="3" placeholder="shop_name_1&#10;shop_name_2"></textarea>
+                        <textarea class="form-control" id="shopNames" rows="3" placeholder="shop_name_1&#10;shop_name_2" oninput="toggleShopMode()"></textarea>
                     </div>
                     <div class="col-md-4 d-flex flex-column">
                         <label class="form-label">Shop filter mode</label>
                         <div class="form-check">
-                            <input class="form-check-input" type="radio" name="shopMode" id="modeExclude" value="exclude" checked>
+                            <input class="form-check-input" type="radio" name="shopMode" id="modeExclude" value="exclude" checked disabled>
                             <label class="form-check-label" for="modeExclude">Exclude these shops</label>
                         </div>
                         <div class="form-check">
-                            <input class="form-check-input" type="radio" name="shopMode" id="modeInclude" value="include">
+                            <input class="form-check-input" type="radio" name="shopMode" id="modeInclude" value="include" disabled>
                             <label class="form-check-label" for="modeInclude">Include only these shops</label>
                         </div>
                         <div class="mt-auto d-flex justify-content-end">
@@ -207,8 +226,8 @@
                     </select>
                     <input type="text" class="form-control form-control-sm" id="filterCampaignName" placeholder="Search campaign name..." oninput="applyFilters()" style="max-width: 250px;">
                     <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="newCampaignIds.clear(); loadCampaigns(); loadStats();">↻ Refresh</button>
-                    <button class="btn btn-sm btn-outline-success" onclick="exportXlsx()">Export .xlsx</button>
-                    <button class="btn btn-sm btn-outline-primary" onclick="copyForExcel()">Copy</button>
+                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportXlsx()">Export Excel</button>
+                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyForExcel()">Copy for Excel</button>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover campaign-table mb-0">
@@ -248,7 +267,7 @@
             <div class="card-header" style="background: #5e4a90; color: white;">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center">
                     Activity Log
-                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="clearLog()">Clear</button>
+                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="clearLog()">Clear</button>
                 </h5>
             </div>
             <div class="card-body p-0">
@@ -275,10 +294,25 @@
         let newCampaignIds = new Set();
 
         window.addEventListener('DOMContentLoaded', () => {
+            if (window.flatpickr) {
+                flatpickr('#runDate', { dateFormat: 'Y-m-d', allowInput: true,
+                                        disableMobile: true, locale: { firstDayOfWeek: 1 } });
+            }
+            toggleShopMode();
             loadStats();
             loadCampaigns();
             renderLog();
         });
+
+        // Shop filter mode is only meaningful with shop names entered — grey out otherwise.
+        function toggleShopMode() {
+            const hasShops = document.getElementById('shopNames').value.trim().length > 0;
+            document.querySelectorAll('input[name="shopMode"]').forEach(r => {
+                r.disabled = !hasShops;
+                const lbl = r.closest('.form-check');
+                if (lbl) lbl.style.opacity = hasShops ? '1' : '0.5';
+            });
+        }
 
         // --- Stats ---
         async function loadStats() {
