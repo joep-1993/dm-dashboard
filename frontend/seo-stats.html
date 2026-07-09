@@ -140,6 +140,7 @@
                         <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
                         <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
                         <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/seo-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 6h11"/><path d="M3 12h8"/><path d="M3 18h8"/><circle cx="18" cy="16" r="3"/><path d="m22 20-1.8-1.8"/></svg> SEO titles</a>
                         <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
                     </div>
                 </div>
@@ -261,7 +262,7 @@
                         <tbody id="mainCatBody"></tbody>
                     </table>
                 </div>
-                <h6 class="text-muted mb-2">Top subcats</h6>
+                <h6 class="text-muted mb-2">Top deepest cats</h6>
                 <div class="table-responsive">
                     <table class="table table-hover perf-table mb-0">
                         <thead><tr id="subCatHead"></tr></thead>
@@ -365,7 +366,7 @@
         // Top-categories tables: independent sort state, default by Δ desc.
         const CAT_TABLES = {
             main: { headId: 'mainCatHead', bodyId: 'mainCatBody', withSub: false, src: 'maincats' },
-            sub:  { headId: 'subCatHead',  bodyId: 'subCatBody',  withSub: true,  src: 'subcats'  },
+            sub:  { headId: 'subCatHead',  bodyId: 'subCatBody',  withSub: true,  src: 'deepestcats' },
         };
         const catSort = { main: { col: 'delta', dir: 'desc' }, sub: { col: 'delta', dir: 'desc' } };
 
@@ -879,7 +880,7 @@
 
         function catColumns(withSub) {
             const cols = [{ key: 'maincat', label: 'Maincat', text: true }];
-            if (withSub) cols.push({ key: 'subcat', label: 'Subcat', text: true });
+            if (withSub) cols.push({ key: 'subcat', label: 'Deepest cat', text: true });
             cols.push({ key: 'p1', label: 'Week before' });
             cols.push({ key: 'p2', label: 'Selected day' });
             cols.push({ key: 'delta', label: 'Δ' });
@@ -937,11 +938,30 @@
             }).join('') + '</tr>').join('');
         }
 
+        // Backend truncates each cat list to the TOP_N most-positive deltas, so for
+        // levels with >TOP_N rows (subcats) the declining tail never reaches us.
+        // Merge the positive (by_*) and negative (worst_*) ends — deduped — so
+        // client-side ascending sort can surface negative deltas too. Maincats have
+        // no worst_* list but already carry the full set, so this is a no-op there.
+        function catSourceRows(which) {
+            const src = lastDeltas[CAT_TABLES[which].src] || {};
+            const pos = catMetric === 'visits' ? 'by_visits' : 'by_revenue';
+            const neg = catMetric === 'visits' ? 'worst_by_visits' : 'worst_by_revenue';
+            const seen = new Set();
+            const merged = [];
+            for (const r of (src[pos] || []).concat(src[neg] || [])) {
+                const k = (r.maincat || '') + '|' + (r.subcat || '');
+                if (seen.has(k)) continue;
+                seen.add(k);
+                merged.push(r);
+            }
+            return merged;
+        }
+
         function renderCats() {
             if (!lastDeltas) return;
-            const key = catMetric === 'visits' ? 'by_visits' : 'by_revenue';
-            renderCatTable('main', lastDeltas.maincats[key]);
-            renderCatTable('sub', lastDeltas.subcats[key]);
+            renderCatTable('main', catSourceRows('main'));
+            renderCatTable('sub', catSourceRows('sub'));
             // Info tooltip: the two days being compared for the selected metric.
             const c = lastDeltas.comparison;
             const p1 = catMetric === 'visits' ? c.visits_p1 : c.revenue_p1;
@@ -952,7 +972,7 @@
 
         // ---- Performance standup section ----
 
-        function standupList(items, isVis) {
+        function standupList(items, isVis, up) {
             if (!items || !items.length) return '<div class="text-muted px-2 py-2">No data.</div>';
             const f = isVis ? fmtInt : fmtEuro;
             const rows = items.map(r => {
@@ -965,8 +985,15 @@
                     <td>${pctBadge(pct)}</td>
                 </tr>`;
             }).join('');
+            // Δ / Δ% headers toggle between most-positive (desc, ▼) and
+            // most-negative (asc, ▲) deltas. Both sort on the same magnitude.
+            const which = isVis ? 'visits' : 'revenue';
+            const sortCls = 'sortable ' + (up ? 'sort-desc' : 'sort-asc');
+            const next = up ? 'down' : 'up';
+            const th = label => `<th class="${sortCls}" onclick="setStandupSort('${which}','${next}')"`
+                + ` title="Click to show ${up ? 'most negative' : 'most positive'} first">${label}</th>`;
             return `<table class="table table-sm table-hover perf-table standup-table mb-0">
-                <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th><th>Δ</th><th>Δ%</th></tr></thead>
+                <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th>${th('Δ')}${th('Δ%')}</tr></thead>
                 <tbody>${rows}</tbody>
             </table>`;
         }
@@ -992,19 +1019,27 @@
                 && r.subcat !== r.maincat;
             const dc = lastDeltas.deepestcats;
             const seo = byKey('seo');
-            // Visits list: gainers if SEO visits up, decliners if down.
-            const visUp = (seo.visits_delta || 0) >= 0;
+            // Visits list: user-chosen direction, else auto (gainers if SEO visits up).
+            const visUp = standupSort.visits ? standupSort.visits === 'up' : (seo.visits_delta || 0) >= 0;
             const visItems = (visUp ? dc.by_visits : dc.worst_by_visits)
                 .filter(realCat).slice(0, 3);
             document.getElementById('standupVisitsTitle').textContent = 'visits';
-            document.getElementById('standupVisitsList').innerHTML = standupList(visItems, true);
+            document.getElementById('standupVisitsList').innerHTML = standupList(visItems, true, visUp);
 
             // Revenue list: same logic on SEO revenue delta.
-            const revUp = (seo.revenue_delta || 0) >= 0;
+            const revUp = standupSort.revenue ? standupSort.revenue === 'up' : (seo.revenue_delta || 0) >= 0;
             const revItems = (revUp ? dc.by_revenue : dc.worst_by_revenue)
                 .filter(realCat).slice(0, 3);
             document.getElementById('standupRevenueTitle').textContent = 'revenue';
-            document.getElementById('standupRevenueList').innerHTML = standupList(revItems, false);
+            document.getElementById('standupRevenueList').innerHTML = standupList(revItems, false, revUp);
+        }
+
+        // Per-table sort override for the standup lists: null = auto (follow SEO
+        // delta sign), 'up' = most positive first, 'down' = most negative first.
+        let standupSort = { visits: null, revenue: null };
+        function setStandupSort(which, dir) {
+            standupSort[which] = dir;
+            renderStandup();
         }
 
         async function loadDeltas(force) {
@@ -1127,16 +1162,16 @@
             if (lastDeltas) {
                 const catSheet = (rows, withSub) => rows.map(r => {
                     const o = { Maincat: r.maincat };
-                    if (withSub) o.Subcat = r.subcat;
+                    if (withSub) o['Deepest cat'] = r.subcat;
                     o['Visits week before'] = r.visits_p1; o['Visits yesterday'] = r.visits_p2;
                     o['Visits Δ'] = r.visits_delta; o['Visits Δ%'] = r.visits_pct;
                     o['Revenue day-9'] = r.revenue_p1; o['Revenue day-2'] = r.revenue_p2;
                     o['Revenue Δ'] = r.revenue_delta; o['Revenue Δ%'] = r.revenue_pct;
                     return o;
                 });
-                const catKey = catMetric === 'visits' ? 'by_visits' : 'by_revenue';  // match the on-screen ranking
-                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.maincats[catKey], false)), 'Top maincats');
-                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(lastDeltas.subcats[catKey], true)), 'Top subcats');
+                // Match the on-screen tables: merged positive+negative ends, deduped.
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(catSourceRows('main'), false)), 'Top maincats');
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catSheet(catSourceRows('sub'), true)), 'Top deepest cats');
             }
             XLSX.writeFile(wb, `seo-stats_${lastData.start_date}_${lastData.end_date}.xlsx`);
         }
