@@ -1,6 +1,16 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## GSD Campaigns — low-linkage run progress bar + interactive Preview table (2026-07-09)
+
+Follow-up to the low-linkage tool: added a live progress bar (FAQ/Kopteksten pattern) and turned the Preview results into a full table. Commit `ed700e7`.
+
+- **Background run + poll pattern (mirrors FAQ/Kopteksten):** `POST /ll/run` no longer blocks — `start_ll_run()` spawns a `threading.Thread(daemon=True)` and returns `{started:true}` (or `{busy:true}` if a run is already in flight; single run at a time, guarded by a module-level `threading.Lock`). `run_low_linkage` streams progress into `_LL_PROGRESS` (`phase/total/processed/paused/enabled/skipped/errors/done/result/error`); new `GET /ll/progress` snapshots it. Frontend polls every 0.8s in a `while(true)` loop, updates a Bootstrap `progress-bar-striped progress-bar-animated` bar (`width = processed/total*100`), breaks on `done`, then renders the result. Progress is updated at the **top** of each feed-row loop iteration (`processed=idx`) so `continue`-skipped rows still advance the bar.
+- **Verified end-to-end (dry-run, live Google Ads reads):** feed 58 rows → 235 campaigns *would* pause, 0 enable, 17 skipped, 0 errors. Confirms creds load from `.env` via `load_dotenv()` in `main.py` (a bare `venv/bin/python -c` that imports `gsd_campaigns_service` directly has NO creds — only the uvicorn app / anything importing `main`/`database` runs `load_dotenv`).
+- **Interactive Preview table:** the results table is now sortable (own `.ll-preview-table` class = copy of `.ll-history-table` so sort-arrow state doesn't cross-contaminate the two tables), text-filterable, paginated (10·25·50·100·Show all), with an Export Excel button. Built inside `#llProgressContent` (replaced each run) — state lives in JS globals (`llPreviewRows/Filtered/SortColumn/Page`), and `renderLLSummary()` returns the skeleton while the caller runs `applyPreviewFilter()` after `innerHTML` is set. Guards (`if (!el) return`) because the controls only exist when rows > 0.
+- **Added a "10" page-size option to all three tables**; Campaigns-created now defaults to 10. **Removed the four top counter tiles** — `loadStats()` early-returns when `#statTotal` is absent so its many callers (pause/enable/remove/run) don't throw.
+- **`pkill -f "uvicorn backend.main:app"` self-matched the running bash command and SIGTERM'd my own shell mid-restart** (exit 144) — exactly the gotcha noted in the DMA-Exclusions learnings. Recover/avoid by killing the specific PID or launching with `setsid venv/bin/uvicorn … >log 2>&1 </dev/null & disown`.
+
 ## GSD Campaigns — low-linkage Pause/Enable tool (2026-07-09)
 
 New GSD Campaigns feature: read the pixel-monitor GSD feed and pause/re-enable GSD Shopping campaigns by linkage status. Files: `backend/gsd_ll_service.py`, endpoints in `gsd_campaigns_router.py` (`POST /ll/run`, `GET /ll/history`), UI in `frontend/gsd-campaigns.html`.
