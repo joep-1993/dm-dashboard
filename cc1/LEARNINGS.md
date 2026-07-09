@@ -1,6 +1,19 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## GSD Campaigns — low-linkage Pause/Enable tool (2026-07-09)
+
+New GSD Campaigns feature: read the pixel-monitor GSD feed and pause/re-enable GSD Shopping campaigns by linkage status. Files: `backend/gsd_ll_service.py`, endpoints in `gsd_campaigns_router.py` (`POST /ll/run`, `GET /ll/history`), UI in `frontend/gsd-campaigns.html`.
+
+- **Feed** `https://pixel-monitor.aks.beslist.nl/api/gsd/feed.csv` is `;`-delimited **with a UTF-8 BOM** — decode `utf-8-sig`. Columns `ShopId;ShopNaam;LinkagePercentage;GSD;UitgezetOp;AangezetOp`; `ShopNaam` is TLD-qualified (`Babista.nl` vs `Babista.de` = separate shop_ids), `GSD` is 0/1.
+- **`is_gsd_nl/be/de_shop` live in BOTH `beslistbi.bt.shop_list` AND `shop_main_attributes_by_day`** — the GSD Check tool reads them from the latter, but the feature request pointed at `shop_list` and it does carry them. "Most recent date" = `ROW_NUMBER() OVER (PARTITION BY shop_id ORDER BY dim_date_key DESC)`, rn=1 (same pattern as gsd_check_service). Optional as-of date = add `dim_date_key <= CAST(TO_CHAR(CAST(%s AS DATE),'YYYYMMDD') AS BIGINT)`.
+- **Country→account mapping is derived from the shared `ACCOUNTS` map** (dedup by customer_id into a set): NL `{7938980174}`, BE `{2454295509, 7565255758}` (two accounts!), DE `{4192567576}`. A shop's flags decide which countries to act on.
+- **Pause** = for GSD=0 shops still flagged GSD, find `status='ENABLED'` campaigns whose name `LIKE '%ShopNaam%'` in that country's account(s), set PAUSED + apply label **`GSD_LL_PAUSED`**. **Enable** = for GSD=1 shops, find campaigns carrying that label (scoped to ShopNaam), set ENABLED + remove the label. Both are naturally idempotent (pause queries only ENABLED; enable only labeled). A shared `GoogleAdsClient` + per-account label-resource cache avoids re-auth per row.
+- **Audit table `pa.jvs_gsd_ll_campaigns`** (n8n-vector-db, created lazily via `CREATE TABLE IF NOT EXISTS`): one row per campaign action (shop_id, shop_name, country, action, campaign_id/name, customer_id, linkage, created_at). Unquoted name folds to lowercase — reference it lowercased. Powers the "Enabled / Paused history" UI section (own card, country+status filters, sortable columns, Refresh/Export/Copy — mirrors "Campaigns created").
+- **Dry-run first**: `POST /ll/run?dry_run=true` does the lookups but no Ads mutations / DB writes — the UI "Preview" button. Against the live feed this session: 27 shops eligible to pause, 14 to re-enable.
+- **Two-headed-workflow hazards this session**: (1) uncommitted working-tree edits to tracked files (`gsd-campaigns.html`, `gsd_campaigns_router.py`) got **reverted** by the concurrent session's git ops — but the **untracked** `gsd_ll_service.py` survived (`git checkout`/rebase don't touch untracked files); had to re-apply the tracked edits. (2) The concurrent reconcile committed the whole feature as `620b19d` and pushed to **both** `main` and `rurl-v45-confidence-scoring`, so `HEAD == origin/main` — nothing left to push for the base feature. Always `git fetch` + check `rev-list --left-right --count` before assuming divergence; the `pull --rebase` remote-tracking ref can be stale mid-abort.
+- **Deploy**: bare `uvicorn` has **no `--reload`** → backend `.py` changes need a manual kill+relaunch (`nohup … &` to detach); static HTML/JS is served from disk, so frontend-only changes are live on browser refresh (no restart).
+
 ## dm-tools SEO Stats — Top subcats couldn't sort to negative deltas (2026-07-08)
 
 User reported: in **SEO Stats**, sorting the **Top subcats** table by visits low→high showed **no negative deltas**, while **Top maincats** low→high did. Root cause is a **backend TOP_N truncation the frontend can't see past**, not a sort bug:
