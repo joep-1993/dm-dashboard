@@ -5085,3 +5085,12 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 - **DATABASE_URL**: `.env` must point to remote DB (`10.1.32.9`) instead of Docker's `db:5432`
 - **Auto-start**: Windows Task Scheduler task "DM Tools Dashboard" runs `wsl.exe -d Ubuntu -e bash -c "cd ... && source venv/bin/activate && uvicorn ..."` at logon
 - **Date**: 2026-04-03
+
+## GSD Campaigns UI polish + shared conventions
+- **Change**: 7 UI tweaks to `frontend/gsd-campaigns.html` (commit `26fd39e`, branch `rurl-v45-confidence-scoring`).
+- **Date picker**: reused the SEO-stats flatpickr setup verbatim (flatpickr@4.6.13 CDN CSS+JS in `<head>`, `#runDate` border/box-shadow CSS, `.flatpickr-*` purple calendar CSS, and `flatpickr('#runDate', {dateFormat:'Y-m-d', allowInput:true, disableMobile:true, locale:{firstDayOfWeek:1}})`). Works on a native `type="date"` input — that's how seo-stats does it too.
+- **Gated radios**: Shop-filter-mode radios start `disabled`; `toggleShopMode()` (on textarea `oninput` + on load) enables them + sets `.form-check` opacity 1/0.5 based on whether `#shopNames` has content.
+- **Header-button convention** (project-wide): outlined-purple / transparent buttons are `style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;"` with `onmouseover` → fill `#5e4a90`/white, `onmouseout` → back to transparent. Used for Export Excel / Copy for Excel / Clear. Matches seo-stats' Export button (line ~284). Canonical label is **"Export Excel"** (not "Export .xlsx") and **"Copy for Excel"** (not "Copy").
+- **Removed** the `.run-card { border-left:4px solid #5e4a90 }` vertical accent bar.
+- **cc1 gotcha**: the LIVE/current cc1 is `dm-tools/cc1` (tracked in the repo, on the working branch) — the separate `dm-dashboard/main` clone's cc1 is stale (tail dated 2026-04). Update `dm-tools/cc1` so learnings travel with the code push.
+- **Date**: 2026-07-09
