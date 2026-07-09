@@ -11,6 +11,7 @@ from backend.gsd_campaigns_service import (
     get_redshift_shop_changes,
     run_gsd_script,
 )
+from backend.gsd_ll_service import run_low_linkage, get_history as get_ll_history
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,40 @@ async def get_shop_changes(
         return result
     except Exception as e:
         logger.error(f"Error fetching shop changes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ll/run")
+async def run_low_linkage_endpoint(
+    dry_run: bool = Query(False, description="If true, preview only — no Ads mutations or DB writes"),
+    date: Optional[str] = Query(None, description="Evaluate shop_list GSD flags as of this date (YYYY-MM-DD)"),
+    shop_names: Optional[str] = Query(None, description="Comma-separated feed shop names to scope the run"),
+    included: bool = Query(False, description="With shop_names: True = only these shops, False = all except"),
+):
+    """Pause/Enable low-linkage GSD shops based on the pixel-monitor feed."""
+    try:
+        loop = asyncio.get_event_loop()
+        shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
+        result = await loop.run_in_executor(
+            executor, run_low_linkage, dry_run, date, shop_list, included
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error running GSD low-linkage process: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ll/history")
+async def ll_history_endpoint(
+    limit: int = Query(500, ge=1, le=5000, description="Max audit rows to return"),
+):
+    """Return the pause/enable audit trail from pa.jvs_gsd_ll_campaigns."""
+    try:
+        loop = asyncio.get_event_loop()
+        rows = await loop.run_in_executor(executor, get_ll_history, limit)
+        return {"rows": rows, "total": len(rows)}
+    except Exception as e:
+        logger.error(f"Error fetching GSD LL history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

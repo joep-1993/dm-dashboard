@@ -51,15 +51,15 @@
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
-        #runDate {
+        #runDate, #llDate {
             border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
             box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
             transition: border-color .15s ease, box-shadow .15s ease;
         }
-        #runDate:hover { border-color: #b9b0d8; }
-        #runDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
-        #runDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
-        #runDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
+        #runDate:hover, #llDate:hover { border-color: #b9b0d8; }
+        #runDate:focus, #llDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
+        #runDate::-webkit-calendar-picker-indicator, #llDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
+        #runDate:hover::-webkit-calendar-picker-indicator, #llDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
         .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
         .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
         .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
@@ -81,6 +81,16 @@
 
         .progress-area { background: #f8f9fc; border-radius: 8px; padding: 1rem; min-height: 60px; }
         .spinner-border-sm { width: 1rem; height: 1rem; }
+
+        /* Enabled/Paused history table — mirrors the Campaigns table look */
+        .ll-history-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .ll-history-table td { vertical-align: middle; font-size: 0.9rem; }
+        .ll-history-table .col-country { text-align: center; }
+        .ll-history-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+        .ll-history-table th.sortable:hover { opacity: 0.85; }
+        .ll-history-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .ll-history-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
+        .ll-history-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
     </style>
 </head>
 <body>
@@ -171,7 +181,7 @@
         <!-- Run Script -->
         <div class="card run-card mb-4">
             <div class="card-header" style="background: #5e4a90; color: white;">
-                <h5 class="mb-0">Run GSD Script</h5>
+                <h5 class="mb-0">Create GSD-campaigns</h5>
             </div>
             <div class="card-body">
                 <div class="row g-3">
@@ -209,7 +219,7 @@
         <!-- Campaign Table -->
         <div class="card mb-4">
             <div class="card-header" style="background: #5e4a90; color: white;">
-                <h5 class="mb-0">Campaigns</h5>
+                <h5 class="mb-0">Campaigns created</h5>
             </div>
             <div class="card-body p-0">
                 <div class="filter-row d-flex gap-2 align-items-center m-3">
@@ -250,14 +260,82 @@
                 <div class="pagination-controls" id="paginationControls">
                     <span>Per page:</span>
                     <select class="form-select form-select-sm" id="perPage" onchange="currentPage=1; applyFilters();">
-                        <option value="25">25</option>
-                        <option value="50" selected>50</option>
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
                         <option value="100">100</option>
                         <option value="all">Show all</option>
                     </select>
                     <button class="btn btn-outline-secondary btn-page" onclick="changePage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
                     <span class="page-info" id="pageInfo">-</span>
                     <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pause/Enable low linkage shops -->
+        <div class="card mb-4">
+            <div class="card-header d-flex align-items-center gap-2" style="background: #5e4a90; color: white;">
+                <h5 class="mb-0">Pause/Enable low linkage shops</h5>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; flex: 0 0 auto;">
+                    <title>Reads the GSD linkage feed and, only for shops flagged as GSD shops in shop_list (most recent date): pauses the ENABLED campaigns of shops with GSD = 0 (tagging them GSD_LL_PAUSED), and re-enables previously-paused campaigns of shops with GSD = 1 (removing the label). Every action is logged to pa.jvs_gsd_ll_campaigns.</title>
+                    <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
+                    <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                    <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                </svg>
+            </div>
+            <div class="card-body p-0">
+                <div class="p-3">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label for="llDate" class="form-label">Date (optional)</label>
+                            <input type="date" class="form-control" id="llDate" placeholder="Leave empty for most recent">
+                        </div>
+                        <div class="col-md-5">
+                            <label for="llShopNames" class="form-label">Shop names (optional, one per line)</label>
+                            <textarea class="form-control" id="llShopNames" rows="3" placeholder="shop_name_1&#10;shop_name_2" oninput="toggleLLShopMode()"></textarea>
+                        </div>
+                        <div class="col-md-4 d-flex flex-column">
+                            <label class="form-label">Shop filter mode</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="llShopMode" id="llModeExclude" value="exclude" checked disabled>
+                                <label class="form-check-label" for="llModeExclude">Exclude these shops</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="llShopMode" id="llModeInclude" value="include" disabled>
+                                <label class="form-check-label" for="llModeInclude">Include only these shops</label>
+                            </div>
+                            <div class="mt-auto d-flex justify-content-end gap-2">
+                                <button class="btn" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="runLowLinkage(true)" id="llPreviewBtn">Preview</button>
+                                <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runLowLinkage(false)" id="llRunBtn">Run</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="progress-area mt-3" id="llProgressArea" style="display: none;">
+                        <div id="llProgressContent"></div>
+                    </div>
+                </div>
+
+                <h6 class="mt-3 mx-3 mb-0" style="color: #5e4a90;">Enabled / Paused history</h6>
+                <div class="filter-row d-flex gap-2 align-items-center m-3">
+                    <input type="text" class="form-control form-control-sm" id="llFilter" placeholder="Filter shop, campaign, country..." oninput="applyLLFilter()" style="max-width: 280px;">
+                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="loadLLHistory()">&#8635; Refresh</button>
+                </div>
+                <div class="table-responsive" style="max-height: 340px; overflow-y: auto;">
+                    <table class="table table-hover ll-history-table mb-0">
+                        <thead>
+                            <tr>
+                                <th class="sortable" data-sort="created_at" onclick="sortLLBy('created_at')">Date</th>
+                                <th class="sortable" data-sort="shop_name" onclick="sortLLBy('shop_name')">Shop</th>
+                                <th class="sortable" data-sort="shop_id" onclick="sortLLBy('shop_id')">Shop ID</th>
+                                <th class="col-country sortable" data-sort="country" onclick="sortLLBy('country')">Country</th>
+                                <th class="sortable" data-sort="action" onclick="sortLLBy('action')">Action</th>
+                                <th class="sortable" data-sort="campaign_name" onclick="sortLLBy('campaign_name')">Campaign</th>
+                            </tr>
+                        </thead>
+                        <tbody id="llHistoryBody">
+                            <tr><td colspan="6" class="text-center text-muted py-3">Loading history...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -297,10 +375,14 @@
             if (window.flatpickr) {
                 flatpickr('#runDate', { dateFormat: 'Y-m-d', allowInput: true,
                                         disableMobile: true, locale: { firstDayOfWeek: 1 } });
+                flatpickr('#llDate', { dateFormat: 'Y-m-d', allowInput: true,
+                                       disableMobile: true, locale: { firstDayOfWeek: 1 } });
             }
             toggleShopMode();
+            toggleLLShopMode();
             loadStats();
             loadCampaigns();
+            loadLLHistory();
             renderLog();
         });
 
@@ -308,6 +390,16 @@
         function toggleShopMode() {
             const hasShops = document.getElementById('shopNames').value.trim().length > 0;
             document.querySelectorAll('input[name="shopMode"]').forEach(r => {
+                r.disabled = !hasShops;
+                const lbl = r.closest('.form-check');
+                if (lbl) lbl.style.opacity = hasShops ? '1' : '0.5';
+            });
+        }
+
+        // Same grey-out behaviour for the Pause/Enable low linkage shops card.
+        function toggleLLShopMode() {
+            const hasShops = document.getElementById('llShopNames').value.trim().length > 0;
+            document.querySelectorAll('input[name="llShopMode"]').forEach(r => {
                 r.disabled = !hasShops;
                 const lbl = r.closest('.form-check');
                 if (lbl) lbl.style.opacity = hasShops ? '1' : '0.5';
@@ -561,6 +653,174 @@
             } catch (err) {
                 logActivity('Remove', `${name} - Error: ${err.message}`, false);
             }
+        }
+
+        // --- Pause/Enable low linkage shops ---
+        let llHistory = [];
+        let llFiltered = [];
+        let llSortColumn = 'created_at';
+        let llSortDirection = 'desc';
+
+        async function runLowLinkage(dryRun) {
+            const previewBtn = document.getElementById('llPreviewBtn');
+            const runBtn = document.getElementById('llRunBtn');
+            const area = document.getElementById('llProgressArea');
+            const content = document.getElementById('llProgressContent');
+
+            if (!dryRun && !confirm('Run for real? This will PAUSE and RE-ENABLE live GSD campaigns based on the current linkage feed.')) {
+                return;
+            }
+
+            previewBtn.disabled = true;
+            runBtn.disabled = true;
+            area.style.display = 'block';
+            content.innerHTML = `<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> ${dryRun ? 'Previewing' : 'Running'} low-linkage process...</div>`;
+
+            const params = new URLSearchParams();
+            params.set('dry_run', dryRun);
+            const date = document.getElementById('llDate').value || '';
+            if (date) params.set('date', date);
+            const shopText = document.getElementById('llShopNames').value.trim();
+            if (shopText) params.set('shop_names', shopText.split('\n').map(s => s.trim()).filter(Boolean).join(','));
+            params.set('included', document.getElementById('llModeInclude').checked);
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/ll/run?${params.toString()}`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                content.innerHTML = renderLLSummary(data);
+                logActivity(dryRun ? 'LL Preview' : 'LL Run',
+                    `${data.paused_count ?? (data.paused || []).length} paused / ${data.enabled_count ?? (data.enabled || []).length} enabled${dryRun ? ' (dry run)' : ''}`,
+                    (data.errors || []).length === 0);
+                if (!dryRun) {
+                    loadLLHistory();
+                    loadCampaigns();
+                    loadStats();
+                }
+            } catch (err) {
+                content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
+                logActivity(dryRun ? 'LL Preview' : 'LL Run', `Error: ${err.message}`, false);
+            } finally {
+                previewBtn.disabled = false;
+                runBtn.disabled = false;
+            }
+        }
+
+        function renderLLSummary(data) {
+            const pausedN = data.paused_count ?? (data.paused || []).length;
+            const enabledN = data.enabled_count ?? (data.enabled || []).length;
+            const skippedN = (data.skipped || []).length;
+            const errorsN = (data.errors || []).length;
+            const tag = data.dry_run ? ' <span class="badge bg-info text-dark">dry run — nothing changed</span>' : '';
+
+            let html = `<div class="fw-bold mb-2">Done${tag}</div>`;
+            html += `<div class="mb-2">
+                <span class="badge bg-warning text-dark me-1">${pausedN} paused</span>
+                <span class="badge badge-active me-1">${enabledN} enabled</span>
+                <span class="badge bg-light text-dark me-1">${skippedN} skipped</span>
+                <span class="badge ${errorsN ? 'bg-danger' : 'bg-light text-dark'}">${errorsN} errors</span>
+                <span class="text-muted ms-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows</span>
+            </div>`;
+
+            const combined = [...(data.paused || []).map(c => [c, 'Paused']), ...(data.enabled || []).map(c => [c, 'Enabled'])];
+            if (combined.length) {
+                html += `<div class="table-responsive" style="max-height:220px;overflow:auto;">
+                    <table class="table table-sm mb-0" style="font-size:0.8rem;">
+                    <thead><tr><th>Shop</th><th>Shop ID</th><th>Country</th><th>Action</th><th>Campaign</th></tr></thead>
+                    <tbody>${combined.map(([c, a]) =>
+                        `<tr><td>${escapeHtml(c.shop_name || '')}</td><td>${c.shop_id ?? ''}</td><td>${c.country || ''}</td><td>${a}</td><td>${escapeHtml(c.campaign_name || '')}</td></tr>`
+                    ).join('')}</tbody></table></div>`;
+            }
+            if (errorsN) {
+                html += `<pre class="mt-2 mb-0 text-danger" style="font-size:0.78rem;max-height:150px;overflow:auto;">${escapeHtml(JSON.stringify(data.errors, null, 2))}</pre>`;
+            }
+            return html;
+        }
+
+        async function loadLLHistory() {
+            const tbody = document.getElementById('llHistoryBody');
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/ll/history?limit=500`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                llHistory = data.rows || [];
+                applyLLFilter();
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">Failed to load history: ${escapeHtml(err.message)}</td></tr>`;
+            }
+        }
+
+        function applyLLFilter() {
+            const q = document.getElementById('llFilter').value.toLowerCase();
+            llFiltered = !q ? llHistory.slice() : llHistory.filter(r =>
+                (r.shop_name || '').toLowerCase().includes(q) ||
+                (r.campaign_name || '').toLowerCase().includes(q) ||
+                (r.country || '').toLowerCase().includes(q) ||
+                (r.action || '').toLowerCase().includes(q) ||
+                String(r.shop_id || '').includes(q)
+            );
+            sortLLHistory();
+            renderLLHistory();
+        }
+
+        function sortLLBy(column) {
+            if (llSortColumn === column) {
+                llSortDirection = llSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                llSortColumn = column;
+                llSortDirection = 'asc';
+            }
+            document.querySelectorAll('.ll-history-table th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === column) {
+                    th.classList.add(llSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+            sortLLHistory();
+            renderLLHistory();
+        }
+
+        function sortLLHistory() {
+            const numericCols = ['shop_id'];
+            const dateCols = ['created_at'];
+            llFiltered.sort((a, b) => {
+                let valA = a[llSortColumn] ?? '';
+                let valB = b[llSortColumn] ?? '';
+                if (numericCols.includes(llSortColumn)) {
+                    valA = Number(valA) || 0; valB = Number(valB) || 0;
+                } else if (dateCols.includes(llSortColumn)) {
+                    valA = valA ? new Date(valA).getTime() : 0;
+                    valB = valB ? new Date(valB).getTime() : 0;
+                } else {
+                    valA = String(valA).toLowerCase(); valB = String(valB).toLowerCase();
+                }
+                if (valA < valB) return llSortDirection === 'asc' ? -1 : 1;
+                if (valA > valB) return llSortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        function renderLLHistory() {
+            const tbody = document.getElementById('llHistoryBody');
+            if (!llFiltered.length) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No pause/enable actions logged yet.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = llFiltered.map(r => {
+                const dt = r.created_at ? new Date(r.created_at).toLocaleString('nl-NL') : '';
+                const isPaused = (r.action || '') === 'Paused';
+                const badge = isPaused
+                    ? '<span class="badge bg-warning text-dark">Paused</span>'
+                    : '<span class="badge badge-active">Enabled</span>';
+                return `<tr>
+                    <td style="white-space:nowrap;">${escapeHtml(dt)}</td>
+                    <td>${escapeHtml(r.shop_name || '')}</td>
+                    <td>${r.shop_id ?? ''}</td>
+                    <td class="col-country">${escapeHtml(r.country || '')}</td>
+                    <td>${badge}</td>
+                    <td>${escapeHtml(r.campaign_name || '')}</td>
+                </tr>`;
+            }).join('');
         }
 
         // --- Run Script ---
