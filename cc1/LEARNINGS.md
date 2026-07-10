@@ -1,6 +1,16 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Google Ads API v23 — `client.get_type("FieldMask")` no longer exists (2026-07-10)
+
+GSD Campaigns "Pause / Enable low-linkage shops" threw **"Specified type 'FieldMask' does not exist in Google Ads Api v23"** from `_set_status`. Under the v23 mapping, `client.get_type()` only resolves **Google-Ads-specific** message types — protobuf well-known types like `FieldMask` are no longer exposed through it (this used to work on older library versions).
+
+- **Fix (no get_type, no import):** the operation's `update_mask` is *already* a `FieldMask` sub-message, so append the path directly: `op.update_mask.paths.append("status")` — replacing the old `field_mask = client.get_type("FieldMask"); field_mask.paths.append("status"); op.update_mask.CopyFrom(field_mask)`.
+- Applied in **both** `gsd_ll_service._set_status` *and* the identical latent copy in `gsd_campaigns_service` (line ~347) — the Create/pause flow had the same bug, just never exercised under v23.
+- **Verified live end-to-end:** paused campaign `18924665689` (sneakers.nl GSD directshopping) ENABLED→PAUSED→ENABLED, restored to original. Repro of the failure confirmed first: `GoogleAdsClient(...,version="v23").get_type("FieldMask")` raises the exact ValueError.
+- **Alternative** if a mask must be derived from set fields: `client.copy_from(op.update_mask, protobuf_helpers.field_mask(None, obj._pb))` — but that includes `resource_name`; the explicit `"status"` path is cleaner for a status-only update.
+- Test harness pattern: a bare `venv/bin/python script.py` importing `backend.*` needs `PYTHONPATH=<dm-tools>` AND `load_dotenv()` first (creds only load via `main.py`'s `load_dotenv`, cf. the GSD low-linkage creds note).
+
 ## SEO Stats — revenue re-sourced to transactional "onze omzet" (Qlik-matching) + Per-day toggle (2026-07-10)
 
 Changed what "revenue" means across the whole SEO Stats tool, and reconciled it to the Qlik "Beslist omzet en clicks" report.
