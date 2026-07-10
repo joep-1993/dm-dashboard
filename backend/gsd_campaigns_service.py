@@ -14,6 +14,7 @@ from typing import List, Dict, Optional, Any
 import psycopg2
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from google.protobuf import field_mask_pb2
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
@@ -344,9 +345,9 @@ def _mutate_campaign_status(customer_id: str, campaign_id: str, status: str) -> 
     status_enum = client.enums.CampaignStatusEnum
     campaign.status = getattr(status_enum, status)
 
-    field_mask = client.get_type("FieldMask")
-    field_mask.paths.append("status")
-    campaign_op.update_mask.CopyFrom(field_mask)
+    campaign_op.update_mask.CopyFrom(
+        field_mask_pb2.FieldMask(paths=["status"])
+    )
 
     try:
         response = campaign_service.mutate_campaigns(
