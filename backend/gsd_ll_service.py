@@ -373,9 +373,7 @@ def _set_status(client, customer_id: str, campaign_id: str, status: str) -> None
     campaign = op.update
     campaign.resource_name = campaign_service.campaign_path(customer_id, campaign_id)
     campaign.status = getattr(client.enums.CampaignStatusEnum, status)
-    op.update_mask.CopyFrom(
-        field_mask_pb2.FieldMask(paths=["status"])
-    )
+    op.update_mask = field_mask_pb2.FieldMask(paths=["status"])
     campaign_service.mutate_campaigns(customer_id=customer_id, operations=[op])
 
 
