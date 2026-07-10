@@ -29,6 +29,8 @@
         .badge-failed { background-color: #636e72 !important; }
         .badge-already { background-color: #0984e3 !important; }
         .badge-noop { background-color: #d4a017 !important; color: #1a1a1a !important; }
+        /* Light-yellow "Done" banner (theme overrides Bootstrap alerts to grey). */
+        .alert-done-yellow { background-color: #fff8e1 !important; border-color: #f3e2a0 !important; color: #6b5900 !important; }
         #savedTable th, #savedTable td { text-align: center; vertical-align: middle; }
         /* Left-align Category (5) and Headline offer (6) */
         #savedTable th:nth-child(5), #savedTable td:nth-child(5),
@@ -841,7 +843,12 @@
             oosSelected.clear(); updateOosSel();
             // Refresh candidate + saved lists so excluded rows reflect their new state.
             // The progress UI is already gone and the banner stays put during this.
-            try { await scanOos(); loadList(); } catch (e) { console.warn("post-exclude refresh failed:", e); }
+            // If nothing is left to show, collapse the empty table/filters/actions.
+            try {
+                await scanOos();
+                if (!oosVisible().length) hideOosResults();
+                loadList();
+            } catch (e) { console.warn("post-exclude refresh failed:", e); }
         }
 
         function hideOosDone() {
@@ -849,8 +856,17 @@
             if (b) b.style.display = "none";
         }
 
+        // Collapse the results UI (table + filters/checkboxes + actions) — used
+        // after a run when the refreshed scan has nothing left to show, so the
+        // empty "No matching rows." table doesn't linger under the done banner.
+        function hideOosResults() {
+            document.getElementById("oosControls").style.setProperty("display", "none", "important");
+            document.getElementById("oosActions").style.setProperty("display", "none", "important");
+            document.getElementById("oosTable").style.display = "none";
+        }
+
         function showOosDone(s) {
-            const cls = s.failed ? "alert-warning" : s.cancelled ? "alert-info" : "alert-success";
+            const cls = s.failed ? "alert-warning" : s.cancelled ? "alert-info" : "alert-done-yellow";
             const b = document.getElementById("oosDoneBanner");
             b.className = `alert alert-dismissible fade show mb-3 ${cls}`;
             const head = s.cancelled
