@@ -1,18 +1,24 @@
 """
 SEO stats — read-only dashboard data for the "SEO stats" tool.
 
-Serves the same numbers the Performance Standup writes to Excel, but as JSON
-for a live web UI:
+Serves a live web UI:
   - per-day visits + revenue for SEO / DMA organic / GSAAS  (chart + table)
   - channel %-deltas and top maincats/subcats with the most positive deltas
+
+Two grains, merged in Python:
+  - VISITS  come from datamart.fct_visits (is_real_visit=1), channel via chan_deriv.
+  - REVENUE is Beslist's OWN revenue (click_revenue, "onze omzet") from
+    bt.cpa_outclicks_transactional — the figure the Qlik "Beslist omzet en clicks"
+    app reports (covers CPR + WW + affiliate). See REV_TABLE_FILTERS below.
 
 Comparison logic (matches performance_standup_service):
   - visits  : yesterday          vs the week before (yesterday - 7d)
   - revenue : day-2 (yesterday-1) vs day-9 (yesterday-8)
-Revenue lags one extra day because it settles later than visit counts.
+Revenue lags one extra day because it settles later than visit counts; on top of
+that, click_revenue keeps settling for up to ~180 days after the conversion date,
+so the most recent 1-2 days undercount until conversions land.
 
-Category breakdowns use marketing_channel = 'SEO' (same as the standup
-comparison sheets).
+Category breakdowns use marketing_channel = 'SEO'.
 """
 
 import copy
@@ -38,12 +44,20 @@ CHANNEL_LABELS = {"seo": "SEO", "dma": "DMA Organic", "gsaas": "GSAAS"}
 
 TOP_N = 100  # rows returned per top-cat table (frontend slices to the chosen Top X)
 
-# Revenue (cpc + ww) counted ONLY from visits that registered a product click.
-# A visit carrying revenue but zero cpc/ww product clicks is a data glitch
-# (e.g. Veiligheidshelmen: €217 cpc on a 0-click visit) and is excluded.
-REV_EXPR = ("(CASE WHEN COALESCE(fv.number_of_cpc_productclicks,0)=0 "
-            "AND COALESCE(fv.number_of_ww_productclicks,0)=0 "
-            "THEN 0 ELSE fv.cpc_revenue + fv.ww_revenue END)")
+# Revenue = Beslist's OWN revenue ("onze omzet") from bt.cpa_outclicks_transactional
+# (click_revenue), the same figure the Qlik "Beslist omzet en clicks" app reports.
+# It covers CPR (cpa / cpa_cpc / t3_fallback), WW (shoppingcart) AND affiliate
+# commission — broader than the old visit-grain cpc+ww metric, which excluded
+# affiliate. Visits still come from datamart.fct_visits (visit grain); only the
+# revenue source changed, so the two are merged per (date/category, channel).
+#
+# NOTE: click_revenue is attributed by CONVERSION date and keeps settling for up
+# to ~180 days, so the most recent 1-2 days undercount until conversions land
+# (same reason the Qlik number keeps moving). The UI carries a settling caveat.
+REV_TABLE_FILTERS = (
+    "tac.actual_ind = 1 AND tac.deleted_ind = 0 "
+    "AND tac.label NOT IN ('cpa_after_180_days','rejected_click')"
+)
 
 # ---------------------------------------------------------------------------
 # Tiny in-process TTL cache (Redshift is slow; the data is daily-grained)
@@ -89,19 +103,23 @@ def _pct_delta(p1: float, p2: float) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
-    """One pass over the date range: visits + revenue per (date, channel)
-    for SEO / DMA organic / GSAAS. Returns {date: {seo_visits, dma_visits, ...}}.
+    """Visits + revenue per (date, channel) for SEO / DMA organic / GSAAS.
+
+    Visits come from datamart.fct_visits (visit grain); revenue from
+    bt.cpa_outclicks_transactional (conversion grain). The two live in
+    different tables, so they are queried separately and merged by (date,
+    channel). Returns {date: {seo_visits, dma_visits, ..., seo_omzet, ...}}.
     """
     if not dates:
         return {}
     keys = [_date_key(d) for d in dates]
     placeholders = ",".join(["%s"] * len(keys))
     chan_placeholders = ",".join(["%s"] * len(CHANNELS))
-    sql = f"""
-        SELECT fv.dim_date_key            AS d,
-               c.marketing_channel        AS chan,
-               COUNT(*)                   AS visits,
-               SUM({REV_EXPR}) AS omzet
+
+    vis_sql = f"""
+        SELECT fv.dim_date_key     AS d,
+               c.marketing_channel AS chan,
+               COUNT(*)            AS visits
         FROM datamart.fct_visits fv
         JOIN datamart.dim_visit dv  ON fv.dim_visit_key = dv.dim_visit_key
         JOIN chan_deriv.ref_channel_derivation_stats c
@@ -111,9 +129,24 @@ def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
           AND dv.is_real_visit = 1
         GROUP BY 1, 2
     """
+    rev_sql = f"""
+        SELECT tac.date            AS d,
+               c.marketing_channel AS chan,
+               SUM(tac.click_revenue) AS omzet
+        FROM bt.cpa_outclicks_transactional tac
+        JOIN chan_deriv.ref_channel_derivation_stats c
+          ON tac.aff_id = c.aff_id AND tac.channel_id = c.channel_id
+         AND c.deleted_ind = 0
+        WHERE tac.date BETWEEN %s AND %s
+          AND c.marketing_channel IN ({chan_placeholders})
+          AND {REV_TABLE_FILTERS}
+        GROUP BY 1, 2
+    """
     with conn.cursor() as cur:
-        cur.execute(sql, keys + list(CHANNELS.keys()))
-        rows = cur.fetchall()
+        cur.execute(vis_sql, keys + list(CHANNELS.keys()))
+        vis_rows = cur.fetchall()
+        cur.execute(rev_sql, [dates[0], dates[-1]] + list(CHANNELS.keys()))
+        rev_rows = cur.fetchall()
 
     # Seed every date with zeros so the chart has a continuous series.
     out: Dict[date, Dict] = {}
@@ -121,7 +154,7 @@ def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
         out[d] = {f"{k}_visits": 0 for k in CHANNELS.values()}
         out[d].update({f"{k}_omzet": 0.0 for k in CHANNELS.values()})
 
-    for r in rows:
+    for r in vis_rows:
         ds = str(r["d"])
         if len(ds) != 8 or not ds.isdigit():
             continue  # skip a malformed/NULL dim_date_key rather than 500 the request
@@ -130,6 +163,14 @@ def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
         if not key or d not in out:
             continue
         out[d][f"{key}_visits"] = int(r["visits"] or 0)
+
+    for r in rev_rows:
+        d = r["d"]
+        if isinstance(d, datetime):  # normalize a DATE/TIMESTAMP column to date
+            d = d.date()
+        key = CHANNELS.get(r["chan"])
+        if not key or d not in out:
+            continue
         out[d][f"{key}_omzet"] = float(r["omzet"] or 0.0)
     return out
 
@@ -138,35 +179,47 @@ def _fetch_channel_deltas(conn, vis_p1: date, vis_p2: date,
                           rev_p1: date, rev_p2: date) -> List[Dict]:
     """Per-channel visits (vis dates) and revenue (rev dates) for the delta cards."""
     vp1, vp2 = _date_key(vis_p1), _date_key(vis_p2)
-    rp1, rp2 = _date_key(rev_p1), _date_key(rev_p2)
     chan_placeholders = ",".join(["%s"] * len(CHANNELS))
-    sql = f"""
+    vis_sql = f"""
         SELECT c.marketing_channel AS chan,
                SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p1,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p2,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN {REV_EXPR} ELSE 0 END) AS rev_p1,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN {REV_EXPR} ELSE 0 END) AS rev_p2
+               SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p2
         FROM datamart.fct_visits fv
         JOIN datamart.dim_visit dv ON fv.dim_visit_key = dv.dim_visit_key
         JOIN chan_deriv.ref_channel_derivation_stats c
           ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
-        WHERE fv.dim_date_key IN (%s, %s, %s, %s)
+        WHERE fv.dim_date_key IN (%s, %s)
           AND c.marketing_channel IN ({chan_placeholders})
           AND dv.is_real_visit = 1
         GROUP BY 1
     """
-    params = [vp1, vp2, rp1, rp2, vp1, vp2, rp1, rp2] + list(CHANNELS.keys())
+    rev_sql = f"""
+        SELECT c.marketing_channel AS chan,
+               SUM(CASE WHEN tac.date = %s THEN tac.click_revenue ELSE 0 END) AS rev_p1,
+               SUM(CASE WHEN tac.date = %s THEN tac.click_revenue ELSE 0 END) AS rev_p2
+        FROM bt.cpa_outclicks_transactional tac
+        JOIN chan_deriv.ref_channel_derivation_stats c
+          ON tac.aff_id = c.aff_id AND tac.channel_id = c.channel_id
+         AND c.deleted_ind = 0
+        WHERE tac.date IN (%s, %s)
+          AND c.marketing_channel IN ({chan_placeholders})
+          AND {REV_TABLE_FILTERS}
+        GROUP BY 1
+    """
     with conn.cursor() as cur:
-        cur.execute(sql, params)
-        by_chan = {r["chan"]: r for r in cur.fetchall()}
+        cur.execute(vis_sql, [vp1, vp2, vp1, vp2] + list(CHANNELS.keys()))
+        vis_by_chan = {r["chan"]: r for r in cur.fetchall()}
+        cur.execute(rev_sql, [rev_p1, rev_p2, rev_p1, rev_p2] + list(CHANNELS.keys()))
+        rev_by_chan = {r["chan"]: r for r in cur.fetchall()}
 
     result: List[Dict] = []
     for chan_name, key in CHANNELS.items():
-        r = by_chan.get(chan_name)
-        v1 = int(r["vis_p1"] or 0) if r else 0
-        v2 = int(r["vis_p2"] or 0) if r else 0
-        m1 = float(r["rev_p1"] or 0.0) if r else 0.0
-        m2 = float(r["rev_p2"] or 0.0) if r else 0.0
+        rv = vis_by_chan.get(chan_name)
+        rr = rev_by_chan.get(chan_name)
+        v1 = int(rv["vis_p1"] or 0) if rv else 0
+        v2 = int(rv["vis_p2"] or 0) if rv else 0
+        m1 = float(rr["rev_p1"] or 0.0) if rr else 0.0
+        m2 = float(rr["rev_p2"] or 0.0) if rr else 0.0
         result.append({
             "channel": key,
             "label": CHANNEL_LABELS[key],
@@ -186,18 +239,13 @@ def _fetch_cat_deltas(conn, level: str, vis_p1: date, vis_p2: date,
     if level not in ("main", "sub", "deepest"):
         raise ValueError(f"invalid level: {level!r}")
     vp1, vp2 = _date_key(vis_p1), _date_key(vis_p2)
-    rp1, rp2 = _date_key(rev_p1), _date_key(rev_p2)
 
-    # The deepest level lists only true leaf categories (is_lowest_category=1).
-    # Without this, visits that land on a non-leaf subcategory overview page
-    # (e.g. "Zwembaden", which has child categories) would show up as their own
-    # row and outrank real leaves like "Parasols".
-    lowest_clause = ""
+    # Category name columns (identical on both grains — both resolve via
+    # datamart.dim_category, so the (maincat, cat) tuple is a stable merge key).
     if level == "deepest":
         select_cols = ("COALESCE(cat.main_category_name,'-') AS maincat, "
                        "COALESCE(cat.deepest_category_name,'-') AS cat")
         group_by = "1, 2"
-        lowest_clause = "AND cat.is_lowest_category = 1"
     elif level == "sub":
         select_cols = ("COALESCE(cat.main_category_name,'-') AS maincat, "
                        "COALESCE(cat.sub_category_name,'-')  AS cat")
@@ -207,35 +255,74 @@ def _fetch_cat_deltas(conn, level: str, vis_p1: date, vis_p2: date,
                        "NULL::varchar AS cat")
         group_by = "1"
 
-    sql = f"""
+    # The deepest level lists only true leaf categories (is_lowest_category=1) on
+    # the visits side. Without this, visits landing on a non-leaf subcategory
+    # overview page (e.g. "Zwembaden", which has child categories) would show up
+    # as their own row and outrank real leaves like "Parasols". The revenue side
+    # joins on deepest_category_id, which is already a leaf, so no extra clause.
+    lowest_clause = "AND cat.is_lowest_category = 1" if level == "deepest" else ""
+
+    vis_sql = f"""
         SELECT {select_cols},
                SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p1,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p2,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN {REV_EXPR} ELSE 0 END) AS rev_p1,
-               SUM(CASE WHEN fv.dim_date_key = %s THEN {REV_EXPR} ELSE 0 END) AS rev_p2
+               SUM(CASE WHEN fv.dim_date_key = %s THEN 1 ELSE 0 END) AS vis_p2
         FROM datamart.fct_visits fv
         JOIN datamart.dim_visit dv ON fv.dim_visit_key = dv.dim_visit_key
         JOIN chan_deriv.ref_channel_derivation_stats c
           ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
         JOIN datamart.dim_category cat ON fv.dim_category_key = cat.dim_category_key
-        WHERE fv.dim_date_key IN (%s, %s, %s, %s)
+        WHERE fv.dim_date_key IN (%s, %s)
           AND c.marketing_channel = 'SEO'
           AND dv.is_real_visit = 1
           {lowest_clause}
         GROUP BY {group_by}
     """
-    params = (vp1, vp2, rp1, rp2, vp1, vp2, rp1, rp2)
+    rev_sql = f"""
+        SELECT {select_cols},
+               SUM(CASE WHEN tac.date = %s THEN tac.click_revenue ELSE 0 END) AS rev_p1,
+               SUM(CASE WHEN tac.date = %s THEN tac.click_revenue ELSE 0 END) AS rev_p2
+        FROM bt.cpa_outclicks_transactional tac
+        JOIN chan_deriv.ref_channel_derivation_stats c
+          ON tac.aff_id = c.aff_id AND tac.channel_id = c.channel_id
+         AND c.deleted_ind = 0
+        JOIN datamart.dim_category cat
+          ON tac.deepest_category_id = cat.deepest_category_id AND cat.deleted_ind = 0
+        WHERE tac.date IN (%s, %s)
+          AND c.marketing_channel = 'SEO'
+          AND {REV_TABLE_FILTERS}
+        GROUP BY {group_by}
+    """
     with conn.cursor() as cur:
-        cur.execute(sql, params)
-        raw = [dict(r) for r in cur.fetchall()]
+        cur.execute(vis_sql, (vp1, vp2, vp1, vp2))
+        vis_raw = [dict(r) for r in cur.fetchall()]
+        cur.execute(rev_sql, (rev_p1, rev_p2, rev_p1, rev_p2))
+        rev_raw = [dict(r) for r in cur.fetchall()]
+
+    # Merge the two grains on the (maincat, cat) tuple. A category may appear on
+    # only one side (visits but no conversions, or vice versa) — union the keys.
+    def _blank(maincat, cat):
+        return {"maincat": maincat, "cat": cat,
+                "vis_p1": 0, "vis_p2": 0, "rev_p1": 0.0, "rev_p2": 0.0}
+
+    merged: Dict[Tuple, Dict] = {}
+    for r in vis_raw:
+        k = (r["maincat"], r.get("cat"))
+        m = merged.setdefault(k, _blank(*k))
+        m["vis_p1"] += int(r["vis_p1"] or 0)
+        m["vis_p2"] += int(r["vis_p2"] or 0)
+    for r in rev_raw:
+        k = (r["maincat"], r.get("cat"))
+        m = merged.setdefault(k, _blank(*k))
+        m["rev_p1"] += float(r["rev_p1"] or 0.0)
+        m["rev_p2"] += float(r["rev_p2"] or 0.0)
 
     rows: List[Dict] = []
-    for r in raw:
-        v1, v2 = int(r["vis_p1"] or 0), int(r["vis_p2"] or 0)
-        m1, m2 = float(r["rev_p1"] or 0.0), float(r["rev_p2"] or 0.0)
+    for m in merged.values():
+        v1, v2 = m["vis_p1"], m["vis_p2"]
+        m1, m2 = m["rev_p1"], m["rev_p2"]
         rows.append({
-            "maincat": r["maincat"],
-            "subcat": r.get("cat"),
+            "maincat": m["maincat"],
+            "subcat": m["cat"],
             "visits_p1": v1, "visits_p2": v2,
             "visits_delta": v2 - v1, "visits_pct": _pct_delta(v1, v2),
             "revenue_p1": m1, "revenue_p2": m2,
