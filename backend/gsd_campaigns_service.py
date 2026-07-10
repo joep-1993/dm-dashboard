@@ -386,9 +386,10 @@ def get_redshift_shop_changes(
     included: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Query Redshift for shops that changed GSD status.
-    CPR shops: shop_deelt_data = 1
-    CPC shops: shop_shares_data = 0
+    Query Redshift for shops whose GSD status flipped between `date_str` and the
+    day before (day-over-day diff of is_gsd_{nl,be,de}_shop in bt.shop_list).
+    actie = 'aan' (0->1) or 'uit' (1->0); model = 'CPR' when the shop is a
+    wecantrack or pixel shop, else 'CPC'; branded = hda.efficy_shop_catman.f_branded.
 
     Parameters
     ----------
@@ -401,33 +402,56 @@ def get_redshift_shop_changes(
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
 
+    # Compute the changes on the fly by diffing the is_gsd_*_shop flags in
+    # bt.shop_list between `date_str` and the day before (ported from the
+    # standalone create-GSD script's getRedShiftData). The dashboard used to read
+    # a pre-materialized pa.gsd_shop_changes table, but nothing populates it, so
+    # we derive the same rows directly. Flag names are hard-coded (not user
+    # input); only the date and shop names are parameterised.
+    if shop_names:
+        placeholders = ",".join(["%s"] * len(shop_names))
+        name_clause = (f" AND today.shop_name IN ({placeholders})" if included
+                       else f" AND today.shop_name NOT IN ({placeholders})")
+    else:
+        name_clause = ""
+
+    def _block(flag: str):
+        sql = f"""
+            SELECT today.shop_id,
+                   today.shop_name,
+                   '{flag}' AS kolom,
+                   CASE WHEN COALESCE(y.{flag},0)=0 AND COALESCE(today.{flag},0)=1 THEN 'aan'
+                        WHEN COALESCE(y.{flag},0)=1 AND COALESCE(today.{flag},0)=0 THEN 'uit'
+                   END AS actie,
+                   c.f_branded AS branded,
+                   CASE WHEN COALESCE(today.is_wecantrack_shop,0)=1
+                          OR COALESCE(today.is_pixel_shop,0)=1
+                        THEN 'CPR' ELSE 'CPC' END AS model
+            FROM bt.shop_list today
+            JOIN bt.shop_list y
+              ON today.shop_id = y.shop_id
+             AND y.date = today.date - 1
+             AND y.deleted_ind = 0
+            LEFT JOIN hda.efficy_shops s
+              ON s.f_shop_id = today.shop_id AND s.actual_ind = 1 AND s.deleted_ind = 0
+            LEFT JOIN hda.efficy_shop_catman c
+              ON c.k_shop = s.k_shop AND c.actual_ind = 1 AND c.deleted_ind = 0
+            WHERE today.deleted_ind = 0
+              AND today.date = %s::date
+              AND COALESCE(today.{flag},0) <> COALESCE(y.{flag},0)
+              {name_clause}
+        """
+        return sql, [date_str] + list(shop_names or [])
+
+    blocks = [_block(f) for f in ("is_gsd_nl_shop", "is_gsd_be_shop", "is_gsd_de_shop")]
+    query = "\nUNION ALL\n".join(b[0] for b in blocks) + "\nORDER BY shop_name, kolom"
+    params: list = []
+    for _, bp in blocks:
+        params.extend(bp)
+
     conn = _get_redshift_connection()
     try:
         with conn.cursor() as cur:
-            # Base query for shops that changed GSD status
-            query = """
-                SELECT
-                    shop_id,
-                    shop_name,
-                    kolom,
-                    actie,
-                    branded,
-                    model
-                FROM pa.gsd_shop_changes
-                WHERE datum = %s
-            """
-            params: list = [date_str]
-
-            if not included:
-                query += " AND actie IN ('aan', 'uit')"
-
-            if shop_names:
-                placeholders = ",".join(["%s"] * len(shop_names))
-                query += f" AND shop_name IN ({placeholders})"
-                params.extend(shop_names)
-
-            query += " ORDER BY shop_name, kolom"
-
             cur.execute(query, params)
             columns = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
