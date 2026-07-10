@@ -1,6 +1,13 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Reconciliation note — merged origin/main (other session) 2026-07-10 (merge a0b3d4c)
+
+A parallel session fixed the SAME two GSD bugs on `main` and also upgraded the Google Ads API **v20→v24**. Merged `origin/main` into `rurl-v45-confidence-scoring`, taking **main's** `gsd_campaigns_service.py` + `gsd_ll_service.py` wholesale (superset: both fixes + v24) and dropping this branch's redundant duplicates. So the LIVE code for the two fixes below is main's approach, not mine:
+- **FieldMask v23:** live code uses `from google.protobuf import field_mask_pb2` (protobuf FieldMask), not my `op.update_mask.paths.append("status")`. Both work; theirs is the one on the branch now.
+- **pa.gsd_shop_changes:** both sessions wrote an equivalent live day-over-day `bt.shop_list` diff; main's version is the one retained.
+- Also pulled in main's `dma_oos_cycle.py` change (`headline_counts` → `live_in_dma`) and the **v24** upgrade. My unique seo-stats + DMA-exclusions work was untouched by the merge.
+
 ## GSD Create-campaigns — restore the shop-changes query (`pa.gsd_shop_changes` never existed) (2026-07-10)
 
 Create GSD-campaigns failed at the `redshift_query` step: `relation "pa.gsd_shop_changes" does not exist`. The table is absent from **both** Redshift (`beslistbi`, all schemas) **and** the Postgres `n8n-vector-db` — nothing in dm-tools/dm-dashboard/any local project creates or populates it; the only reference anywhere was the read in `get_redshift_shop_changes`.
