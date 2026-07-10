@@ -14,6 +14,7 @@ from typing import List, Dict, Optional, Any
 import psycopg2
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from google.protobuf import field_mask_pb2
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
@@ -344,10 +345,7 @@ def _mutate_campaign_status(customer_id: str, campaign_id: str, status: str) -> 
     status_enum = client.enums.CampaignStatusEnum
     campaign.status = getattr(status_enum, status)
 
-    # update_mask is already a FieldMask sub-message; append directly.
-    # (client.get_type("FieldMask") 404s under Google Ads API v23 — it only
-    # resolves Ads-specific types, not protobuf well-known types.)
-    campaign_op.update_mask.paths.append("status")
+    campaign_op.update_mask = field_mask_pb2.FieldMask(paths=["status"])
 
     try:
         response = campaign_service.mutate_campaigns(
@@ -386,10 +384,10 @@ def get_redshift_shop_changes(
     included: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Query Redshift for shops whose GSD status flipped between `date_str` and the
-    day before (day-over-day diff of is_gsd_{nl,be,de}_shop in bt.shop_list).
-    actie = 'aan' (0->1) or 'uit' (1->0); model = 'CPR' when the shop is a
-    wecantrack or pixel shop, else 'CPC'; branded = hda.efficy_shop_catman.f_branded.
+    Compute GSD shop changes live by diffing bt.shop_list for the chosen date
+    vs. the day before.  Emits actie='aan' (flag 0->1) or 'uit' (1->0).
+    Joins hda.efficy_shop_catman for branded, and derives model (CPR/CPC)
+    from the is_wecantrack_shop / is_pixel_shop flags.
 
     Parameters
     ----------
@@ -402,52 +400,57 @@ def get_redshift_shop_changes(
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
 
-    # Compute the changes on the fly by diffing the is_gsd_*_shop flags in
-    # bt.shop_list between `date_str` and the day before (ported from the
-    # standalone create-GSD script's getRedShiftData). The dashboard used to read
-    # a pre-materialized pa.gsd_shop_changes table, but nothing populates it, so
-    # we derive the same rows directly. Flag names are hard-coded (not user
-    # input); only the date and shop names are parameterised.
+    # Each UNION ALL leg needs the date parameter once
+    _LEG = """
+                  SELECT today.shop_id,
+                         today.shop_name,
+                         '{flag}' AS kolom,
+                         CASE WHEN COALESCE(y.{flag},0)=0 AND COALESCE(today.{flag},0)=1 THEN 'aan'
+                              WHEN COALESCE(y.{flag},0)=1 AND COALESCE(today.{flag},0)=0 THEN 'uit' END AS actie,
+                         c.f_branded AS branded,
+                         CASE WHEN COALESCE(today.is_wecantrack_shop,0)=1
+                                OR COALESCE(today.is_pixel_shop,0)=1
+                              THEN 'CPR' ELSE 'CPC' END AS model
+                  FROM bt.shop_list today
+                  JOIN bt.shop_list y
+                    ON today.shop_id = y.shop_id
+                   AND y.date = today.date - 1
+                   AND y.deleted_ind = 0
+                  LEFT JOIN hda.efficy_shops s
+                    ON s.f_shop_id = today.shop_id
+                   AND s.actual_ind = 1 AND s.deleted_ind = 0
+                  LEFT JOIN hda.efficy_shop_catman c
+                    ON c.k_shop = s.k_shop
+                   AND c.actual_ind = 1 AND c.deleted_ind = 0
+                  WHERE today.deleted_ind = 0
+                    AND today.date = %s::date
+                    AND COALESCE(today.{flag},0) <> COALESCE(y.{flag},0)"""
+
+    flags = ["is_gsd_nl_shop", "is_gsd_be_shop", "is_gsd_de_shop"]
+    legs = "\n\n                  UNION ALL\n".join(_LEG.format(flag=f) for f in flags)
+
+    query = f"""
+                WITH changes AS (
+{legs}
+                )
+                SELECT * FROM changes"""
+
+    # date_str once per leg
+    params: list = [date_str] * len(flags)
+
+    conditions: list = []
+    if not included:
+        conditions.append("actie IN ('aan', 'uit')")
+
     if shop_names:
         placeholders = ",".join(["%s"] * len(shop_names))
-        name_clause = (f" AND today.shop_name IN ({placeholders})" if included
-                       else f" AND today.shop_name NOT IN ({placeholders})")
-    else:
-        name_clause = ""
+        conditions.append(f"shop_name IN ({placeholders})")
+        params.extend(shop_names)
 
-    def _block(flag: str):
-        sql = f"""
-            SELECT today.shop_id,
-                   today.shop_name,
-                   '{flag}' AS kolom,
-                   CASE WHEN COALESCE(y.{flag},0)=0 AND COALESCE(today.{flag},0)=1 THEN 'aan'
-                        WHEN COALESCE(y.{flag},0)=1 AND COALESCE(today.{flag},0)=0 THEN 'uit'
-                   END AS actie,
-                   c.f_branded AS branded,
-                   CASE WHEN COALESCE(today.is_wecantrack_shop,0)=1
-                          OR COALESCE(today.is_pixel_shop,0)=1
-                        THEN 'CPR' ELSE 'CPC' END AS model
-            FROM bt.shop_list today
-            JOIN bt.shop_list y
-              ON today.shop_id = y.shop_id
-             AND y.date = today.date - 1
-             AND y.deleted_ind = 0
-            LEFT JOIN hda.efficy_shops s
-              ON s.f_shop_id = today.shop_id AND s.actual_ind = 1 AND s.deleted_ind = 0
-            LEFT JOIN hda.efficy_shop_catman c
-              ON c.k_shop = s.k_shop AND c.actual_ind = 1 AND c.deleted_ind = 0
-            WHERE today.deleted_ind = 0
-              AND today.date = %s::date
-              AND COALESCE(today.{flag},0) <> COALESCE(y.{flag},0)
-              {name_clause}
-        """
-        return sql, [date_str] + list(shop_names or [])
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
 
-    blocks = [_block(f) for f in ("is_gsd_nl_shop", "is_gsd_be_shop", "is_gsd_de_shop")]
-    query = "\nUNION ALL\n".join(b[0] for b in blocks) + "\nORDER BY shop_name, kolom"
-    params: list = []
-    for _, bp in blocks:
-        params.extend(bp)
+    query += " ORDER BY shop_name, kolom"
 
     conn = _get_redshift_connection()
     try:
@@ -550,14 +553,25 @@ def check_campaign(client: GoogleAdsClient, customer_id: str, campaign_name: str
 def get_mc_id(mc_parent_id: str, shop_name: str) -> Optional[str]:
     """
     Look up a Merchant Center sub-account by name.
+    Paginates through all sub-accounts (Content API returns them in
+    the ``resources`` key, max 250 per page).
     Returns the account ID if found, else None.
     """
     service = _get_mc_service()
+    target = shop_name.lower()
+    page_token = None
     try:
-        response = service.accounts().list(merchantId=mc_parent_id).execute()
-        for account in response.get("accounts", []):
-            if account.get("name", "").lower() == shop_name.lower():
-                return str(account["id"])
+        while True:
+            kwargs: Dict[str, Any] = {"merchantId": mc_parent_id, "maxResults": 250}
+            if page_token:
+                kwargs["pageToken"] = page_token
+            response = service.accounts().list(**kwargs).execute()
+            for account in response.get("resources", []):
+                if account.get("name", "").lower() == target:
+                    return str(account["id"])
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
     except Exception as ex:
         logger.error("Error looking up MC account for '%s': %s", shop_name, ex)
     return None
@@ -584,6 +598,11 @@ def create_merchant_id(mc_parent_id: str, shop_name: str) -> Optional[str]:
 def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: str) -> bool:
     """
     Link a Merchant Center account to a Google Ads account.
+
+    Two-step process:
+    1. MC side: add an adsLink on the sub-account (creates a pending invitation).
+    2. Ads side: accept the pending ProductLinkInvitation so campaigns can
+       reference the merchant_id.
     """
     service = _get_mc_service()
     try:
@@ -593,9 +612,17 @@ def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: s
         # Add Google Ads link if not already present
         ads_links = account.get("adsLinks", [])
         ads_id_str = str(ads_customer_id)
-        already_linked = any(str(link.get("adsId", "")) == ads_id_str for link in ads_links)
+        already_linked = any(
+            str(link.get("adsId", "")) == ads_id_str and link.get("status") == "active"
+            for link in ads_links
+        )
 
         if not already_linked:
+            # Remove any stale pending link for this Ads account first
+            ads_links = [
+                link for link in ads_links
+                if str(link.get("adsId", "")) != ads_id_str
+            ]
             ads_links.append({
                 "adsId": ads_id_str,
                 "status": "active",
@@ -604,12 +631,53 @@ def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: s
             service.accounts().update(
                 merchantId=mc_parent_id, accountId=mc_account_id, body=account
             ).execute()
-            logger.info("Linked MC %s to Google Ads %s", mc_account_id, ads_customer_id)
-
-        return True
+            logger.info("MC side: linked MC %s to Google Ads %s", mc_account_id, ads_customer_id)
     except Exception as ex:
-        logger.error("Error linking MC %s to Ads %s: %s", mc_account_id, ads_customer_id, ex)
+        logger.error("Error linking MC %s to Ads %s (MC side): %s", mc_account_id, ads_customer_id, ex)
         return False
+
+    # Step 2: accept the pending invitation from the Google Ads side
+    try:
+        _accept_mc_invitation(ads_customer_id, int(mc_account_id))
+    except Exception as ex:
+        logger.error("Error accepting MC invitation for %s in Ads %s: %s", mc_account_id, ads_customer_id, ex)
+        return False
+
+    return True
+
+
+def _accept_mc_invitation(ads_customer_id: str, mc_account_id: int) -> None:
+    """Find and accept a pending ProductLinkInvitation for the given MC account."""
+    client = _get_client()
+    ga_service = client.get_service("GoogleAdsService")
+
+    query = """
+        SELECT product_link_invitation.resource_name,
+               product_link_invitation.merchant_center.merchant_center_id,
+               product_link_invitation.status
+        FROM product_link_invitation
+        WHERE product_link_invitation.status = 'PENDING_APPROVAL'
+    """
+    response = ga_service.search(customer_id=ads_customer_id, query=query)
+
+    for row in response:
+        inv = row.product_link_invitation
+        if inv.merchant_center.merchant_center_id == mc_account_id:
+            invitation_service = client.get_service("ProductLinkInvitationService")
+            invitation_service.update_product_link_invitation(
+                customer_id=ads_customer_id,
+                product_link_invitation_status=(
+                    client.enums.ProductLinkInvitationStatusEnum.ACCEPTED
+                ),
+                resource_name=inv.resource_name,
+            )
+            logger.info(
+                "Ads side: accepted MC invitation %s for MC %s",
+                inv.resource_name, mc_account_id,
+            )
+            return
+
+    logger.info("No pending MC invitation found for MC %s in Ads %s", mc_account_id, ads_customer_id)
 
 
 def get_merchant_id_for_campaign(
@@ -697,9 +765,14 @@ def add_standard_shopping_campaign(
 
     # Shopping settings
     campaign.shopping_setting.merchant_id = int(merchant_id)
-    campaign.shopping_setting.sales_country = country.upper()
+    campaign.shopping_setting.feed_label = country.upper()
     campaign.shopping_setting.campaign_priority = 0
     campaign.shopping_setting.enable_local = False
+
+    # Required in API v24+ for EU campaigns
+    campaign.contains_eu_political_advertising = (
+        client.enums.EuPoliticalAdvertisingStatusEnum.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING
+    )
 
     # Tracking template
     campaign.tracking_url_template = tracking_template
@@ -776,9 +849,7 @@ def add_shopping_product_ad_group_ad(
     ad_group_ad = op.create
     ad_group_ad.ad_group = ad_group_resource_name
     ad_group_ad.status = client.enums.AdGroupAdStatusEnum.ENABLED
-    ad_group_ad.ad.shopping_product_ad.CopyFrom(
-        client.get_type("ShoppingProductAdInfo")
-    )
+    ad_group_ad.ad.shopping_product_ad = client.get_type("ShoppingProductAdInfo")
 
     try:
         response = ad_group_ad_service.mutate_ad_group_ads(
@@ -870,7 +941,7 @@ def create_listing_group_subdivision(
         criterion.listing_group.parent_ad_group_criterion = parent_resource_name
 
     if dimension is not None:
-        criterion.listing_group.case_value.CopyFrom(dimension)
+        criterion.listing_group.case_value = dimension
 
     return op, criterion.resource_name
 
@@ -896,7 +967,7 @@ def create_listing_group_unit_biddable(
     criterion.cpc_bid_micros = cpc_bid_micros
 
     if dimension is not None:
-        criterion.listing_group.case_value.CopyFrom(dimension)
+        criterion.listing_group.case_value = dimension
 
     return op
 

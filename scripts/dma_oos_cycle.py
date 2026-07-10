@@ -61,13 +61,12 @@ def run_market(market: str) -> dict:
     log.info("[%s] Scanning OOS products…", market)
     scan = _get("/oos/scan", {"market": market}, timeout=TIMEOUT_SCAN)
     candidates = scan.get("candidates", [])
-    log.info("[%s] Scan done – %d live in DMA, %d headline matches",
-             market, scan["live_in_dma"],
-             scan["headline_counts"]["match"])
+    log.info("[%s] Scan done – %d live in DMA (%d OOS total)",
+             market, scan["live_in_dma"], scan["oos_total"])
     summary["scan"] = {
         "oos_total": scan["oos_total"],
         "live_in_dma": scan["live_in_dma"],
-        "headline_matches": scan["headline_counts"]["match"],
+        "headline_matches": scan["live_in_dma"],
     }
 
     # ── 2. Exclude headline matches that aren't already excluded ─────────

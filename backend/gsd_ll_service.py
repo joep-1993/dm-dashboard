@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import requests
 from google.ads.googleads.errors import GoogleAdsException
+from google.protobuf import field_mask_pb2
 
 from backend.database import get_db_connection, return_db_connection, get_redshift_connection, return_redshift_connection
 from backend.gsd_campaigns_service import _get_client, ACCOUNTS
@@ -372,10 +373,7 @@ def _set_status(client, customer_id: str, campaign_id: str, status: str) -> None
     campaign = op.update
     campaign.resource_name = campaign_service.campaign_path(customer_id, campaign_id)
     campaign.status = getattr(client.enums.CampaignStatusEnum, status)
-    # update_mask is already a FieldMask sub-message; append directly.
-    # (client.get_type("FieldMask") 404s under Google Ads API v23 — it only
-    # resolves Ads-specific types, not protobuf well-known types.)
-    op.update_mask.paths.append("status")
+    op.update_mask = field_mask_pb2.FieldMask(paths=["status"])
     campaign_service.mutate_campaigns(customer_id=customer_id, operations=[op])
 
 
