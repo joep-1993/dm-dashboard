@@ -1,6 +1,17 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## GSD Create-campaigns — restore the shop-changes query (`pa.gsd_shop_changes` never existed) (2026-07-10)
+
+Create GSD-campaigns failed at the `redshift_query` step: `relation "pa.gsd_shop_changes" does not exist`. The table is absent from **both** Redshift (`beslistbi`, all schemas) **and** the Postgres `n8n-vector-db` — nothing in dm-tools/dm-dashboard/any local project creates or populates it; the only reference anywhere was the read in `get_redshift_shop_changes`.
+
+- **Root cause:** the dashboard port replaced the original standalone `create GSD-campaigns.py`'s `getRedShiftData()` (which *computes* the changes with SQL) with a read from a pre-materialized `pa.gsd_shop_changes` table that was never built. An empty table would NOT help — the flow would then find zero changes and create nothing; the data has to be computed.
+- **Fix:** ported the original diff query into `get_redshift_shop_changes` — a day-over-day diff of `is_gsd_{nl,be,de}_shop` in `bt.shop_list` (today vs today-1), 3 UNION ALL blocks. `actie` = 'aan' (0→1) / 'uit' (1→0); `branded` = `hda.efficy_shop_catman.f_branded` (LEFT JOIN via `efficy_shops`); `model` = 'CPR' if `is_wecantrack_shop` OR `is_pixel_shop` else 'CPC'. Uses the pooled `_get_redshift_connection()` + proper DATE arithmetic (`today.date = %s::date`, `y.date = today.date - 1`) instead of the original's fragile `YYYYMMDD` string compare. Dropped the unused wecantrack_tool/advertiser columns (`run_gsd_script` only needs shop_id/shop_name/kolom/actie/branded/model).
+- **included/shop_names** kept per the UI/router contract: `included=True` → `shop_name IN (...)` (only these), `False` → `NOT IN (...)` (exclude these). No `actie IN ('aan','uit')` filter needed — the diff intrinsically yields only aan/uit rows.
+- **`bt.shop_list.date` is DATE** (not int YYYYMMDD) — the original's `today.date = '20250726'` + `yesterday.date + 1` worked only by implicit-cast luck; DATE arithmetic is correct and month-boundary-safe.
+- **Verified read-only:** 5 real changes for 2026-07-10 (Tikamoon.nl aan, Superfoodsonline.nl aan, 3× uit), exclude/include filters correct, no fan-out (5 rows = 5 distinct shop+kolom). Did **NOT** run the full create — the Create `/run` endpoint has **no dry-run** (writes live campaigns immediately, unlike the low-linkage tool). Backend restarted (pid 123389).
+- **Follow-up:** add a dry-run/preview to the Create `/run` endpoint so it's as safe as Pause/Enable.
+
 ## Google Ads API v23 — `client.get_type("FieldMask")` no longer exists (2026-07-10)
 
 GSD Campaigns "Pause / Enable low-linkage shops" threw **"Specified type 'FieldMask' does not exist in Google Ads Api v23"** from `_set_status`. Under the v23 mapping, `client.get_type()` only resolves **Google-Ads-specific** message types — protobuf well-known types like `FieldMask` are no longer exposed through it (this used to work on older library versions).
