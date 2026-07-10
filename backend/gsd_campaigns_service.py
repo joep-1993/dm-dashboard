@@ -344,9 +344,10 @@ def _mutate_campaign_status(customer_id: str, campaign_id: str, status: str) -> 
     status_enum = client.enums.CampaignStatusEnum
     campaign.status = getattr(status_enum, status)
 
-    field_mask = client.get_type("FieldMask")
-    field_mask.paths.append("status")
-    campaign_op.update_mask.CopyFrom(field_mask)
+    # update_mask is already a FieldMask sub-message; append directly.
+    # (client.get_type("FieldMask") 404s under Google Ads API v23 — it only
+    # resolves Ads-specific types, not protobuf well-known types.)
+    campaign_op.update_mask.paths.append("status")
 
     try:
         response = campaign_service.mutate_campaigns(
