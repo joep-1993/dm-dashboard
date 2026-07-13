@@ -935,8 +935,8 @@
             html += `<div class="mb-2">
                 <span class="badge bg-warning text-dark me-1">${pausedN} paused</span>
                 <span class="badge badge-active me-1">${enabledN} enabled</span>
-                <span class="badge bg-light text-dark me-1">${skippedN} skipped</span>
-                <span class="badge ${errorsN ? 'bg-danger' : 'bg-light text-dark'}">${errorsN} errors</span>
+                <span class="badge me-1" style="background:#5e4a90;color:#fff;">${skippedN} skipped</span>
+                <span class="badge bg-danger">${errorsN} errors</span>
                 <span class="text-muted ms-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows</span>
             </div>`;
 
