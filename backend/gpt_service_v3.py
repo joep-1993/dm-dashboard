@@ -68,7 +68,7 @@ NORMALIZE_FOOTER = """
 
 BELANGRIJK — onderstaande instructies zijn bindend en overschrijven alles hierboven wat ermee botst:
 
-STRUCTUUR: schrijf 2 tot 4 korte, scanbare alinea's in koopgids-vorm (gebruiksdoel -> keuzecriteria -> onderhoud/veiligheid/vergelijken). Scheid elke alinea met een witregel (een lege regel). Schrijf minstens 2 alinea's; gebruik geen opsommingstekens, maar vloeiende zinnen. Korte tussenkopjes met <h3> mogen, maar zijn optioneel.
+STRUCTUUR: schrijf 2 tot 4 korte, scanbare alinea's in koopgids-vorm (gebruiksdoel -> keuzecriteria -> onderhoud/veiligheid/vergelijken). Scheid elke alinea met een witregel (een lege regel). Schrijf minstens 2 alinea's; gebruik geen opsommingstekens, maar vloeiende zinnen. Korte tussenkopjes met <h3> mogen, maar zijn optioneel. Begin de tekst NOOIT met een heading (<h2> of <h3>); de eerste alinea moet altijd gewone lopende tekst zijn.
 
 LENGTE: standaard 160 tot 240 woorden. Eenvoudige/impulsieve onderwerpen 120 tot 170 woorden. Complexe, functionele onderwerpen (meubels, huishoudelijke apparaten, voertuigen, sanitair) tot maximaal 320 woorden. Nooit meer dan 350 woorden.
 
