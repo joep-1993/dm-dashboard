@@ -13,19 +13,22 @@ $apiUrl  = "$baseUrl/api/seo-rulings/run"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 
 # Trust all certs for internal server (Windows PowerShell 5.1 compatible)
-# Compile the C# type only once per session — skips if already loaded
-$needsCompile = -not ([System.Management.Automation.PSTypeName]'TrustAll').Type
+# Uses a compiled C# callback — PowerShell scriptblock callbacks fail in
+# Task Scheduler because there is no runspace on the callback thread.
+$needsCompile = -not ([System.Management.Automation.PSTypeName]'TrustAllCerts').Type
 if ($needsCompile) {
 Add-Type @"
 using System.Net;
+using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
-public class TrustAll : ICertificatePolicy {
+public class TrustAllCerts : ICertificatePolicy {
     public bool CheckValidationResult(ServicePoint sp, X509Certificate cert, WebRequest req, int problem) { return true; }
+    public static bool Callback(object sender, X509Certificate cert, X509Chain chain, SslPolicyErrors errors) { return true; }
 }
 "@
 }
-[System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAll
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+[System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCerts
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = [System.Net.Security.RemoteCertificateValidationCallback]::new([TrustAllCerts], 'Callback')
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
 function Log($msg) {
@@ -38,14 +41,9 @@ Log "=== SEO Rulings scheduled run start ==="
 if ($needsCompile) { Log "TLS trust helper compiled" }
 Log "TLS configured"
 
-# Read password from .env file
+# Read password from .env file (auth is optional — server skips it when unset)
 $envFile = "C:\Users\l.davidowski\dm-dashboard\.env"
 $password = (Get-Content $envFile | Where-Object { $_ -match "^DASHBOARD_PASSWORD=" }) -replace "^DASHBOARD_PASSWORD=", ""
-if (-not $password) {
-    Log "ERROR: DASHBOARD_PASSWORD not found in .env"
-    exit 1
-}
-Log "Password loaded"
 
 # Retry helper
 function Invoke-WithRetry($Label, $MaxAttempts, $DelaySec, $ScriptBlock) {
@@ -64,39 +62,45 @@ function Invoke-WithRetry($Label, $MaxAttempts, $DelaySec, $ScriptBlock) {
     }
 }
 
-# 1. Login and get session cookie
+# 1. Login and get session cookie (skip when auth is disabled)
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-$loginUrl = "$baseUrl/login"
-$body = "password=$password"
 
-Log "Logging in..."
-$loginOk = $false
-for ($attempt = 1; $attempt -le 3; $attempt++) {
-    try {
-        $null = Invoke-WebRequest -Uri $loginUrl -Method POST -Body $body `
-            -ContentType "application/x-www-form-urlencoded" `
-            -WebSession $session -MaximumRedirection 0 -TimeoutSec 30 `
-            -UseBasicParsing -ErrorAction SilentlyContinue
-        $loginOk = $true
-        break
-    } catch {
-        # A 303 redirect is expected on successful login - check if we got the cookie
-        if ($session.Cookies.Count -gt 0) {
+if ($password) {
+    Log "Password loaded"
+    $loginUrl = "$baseUrl/login"
+    $body = "password=$password"
+
+    Log "Logging in..."
+    $loginOk = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $null = Invoke-WebRequest -Uri $loginUrl -Method POST -Body $body `
+                -ContentType "application/x-www-form-urlencoded" `
+                -WebSession $session -MaximumRedirection 0 -TimeoutSec 30 `
+                -UseBasicParsing -ErrorAction SilentlyContinue
             $loginOk = $true
             break
-        }
-        Log "WARN: Login attempt $attempt/3 failed: $_"
-        if ($attempt -lt 3) {
-            Log "       Retrying in 30s..."
-            Start-Sleep -Seconds 30
+        } catch {
+            # A 303 redirect is expected on successful login - check if we got the cookie
+            if ($session.Cookies.Count -gt 0) {
+                $loginOk = $true
+                break
+            }
+            Log "WARN: Login attempt $attempt/3 failed: $_"
+            if ($attempt -lt 3) {
+                Log "       Retrying in 30s..."
+                Start-Sleep -Seconds 30
+            }
         }
     }
-}
-if ($loginOk) {
-    Log "Authenticated with dashboard"
+    if ($loginOk) {
+        Log "Authenticated with dashboard"
+    } else {
+        Log "ERROR: Failed to authenticate after 3 attempts"
+        exit 1
+    }
 } else {
-    Log "ERROR: Failed to authenticate after 3 attempts"
-    exit 1
+    Log "Auth disabled (no DASHBOARD_PASSWORD set) - skipping login"
 }
 
 # 2. Trigger the SEO Rulings checks (can take ~30-60s)
