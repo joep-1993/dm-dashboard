@@ -383,27 +383,37 @@ def _ensure_label(client, customer_id: str, label_name: str) -> str:
     return response.results[0].resource_name
 
 
-def _apply_label(client, customer_id: str, campaign_resource: str, label_resource: str) -> None:
-    """Attach a label to a campaign (idempotent-ish; logs if already applied)."""
+def _apply_label(client, customer_id: str, campaign_resource: str, label_resource: str) -> bool:
+    """Attach a label to a campaign. Returns True on success, False on failure.
+
+    The return value matters: if a campaign is PAUSED but the GSD_LL_PAUSED
+    label fails to attach, it becomes invisible to the re-enable lookup forever,
+    so callers must be able to detect and compensate for the failure.
+    """
     service = client.get_service("CampaignLabelService")
     op = client.get_type("CampaignLabelOperation")
     op.create.campaign = campaign_resource
     op.create.label = label_resource
     try:
         service.mutate_campaign_labels(customer_id=customer_id, operations=[op])
+        return True
     except GoogleAdsException as ex:
         logger.warning("Could not apply label to %s: %s", campaign_resource, ex)
+        return False
 
 
-def _remove_campaign_label(client, customer_id: str, campaign_label_resource: str) -> None:
-    """Detach a label from a campaign given the campaign_label resource name."""
+def _remove_campaign_label(client, customer_id: str, campaign_label_resource: str) -> bool:
+    """Detach a label from a campaign given the campaign_label resource name.
+    Returns True on success, False on failure."""
     service = client.get_service("CampaignLabelService")
     op = client.get_type("CampaignLabelOperation")
     op.remove = campaign_label_resource
     try:
         service.mutate_campaign_labels(customer_id=customer_id, operations=[op])
+        return True
     except GoogleAdsException as ex:
         logger.warning("Could not remove label %s: %s", campaign_label_resource, ex)
+        return False
 
 
 def _set_status(client, customer_id: str, campaign_id: str, status: str) -> None:
@@ -422,14 +432,22 @@ def _set_status(client, customer_id: str, campaign_id: str, status: str) -> None
 # ---------------------------------------------------------------------------
 
 
-def _find_enabled_campaigns(client, customer_id: str, shop_name: str) -> List[Dict[str, str]]:
-    """ENABLED campaigns in the account whose name contains the shop name."""
+def _find_enabled_campaigns(client, customer_id: str, shop_id: int) -> List[Dict[str, str]]:
+    """ENABLED GSD Shopping campaigns in the account for this shop.
+
+    Matches on the exact ``[shop_id:{id}]`` token that every GSD campaign name
+    carries (verified across the full audit history) — a numeric, delimited
+    match that avoids the false positives of a bare ``LIKE '%shopname%'``
+    substring (e.g. "Bol" hitting "Bol.com"/"Carbol") — and restricts to
+    ``SHOPPING`` so no Search/PMax/Display campaign is ever paused.
+    """
     ga_service = client.get_service("GoogleAdsService")
     query = f"""
         SELECT campaign.id, campaign.name, campaign.resource_name
         FROM campaign
         WHERE campaign.status = 'ENABLED'
-          AND campaign.name LIKE '%{_escape_gaql(shop_name)}%'
+          AND campaign.advertising_channel_type = 'SHOPPING'
+          AND campaign.name LIKE '%[shop_id:{int(shop_id)}]%'
     """
     out: List[Dict[str, str]] = []
     try:
@@ -440,14 +458,18 @@ def _find_enabled_campaigns(client, customer_id: str, shop_name: str) -> List[Di
                 "resource_name": row.campaign.resource_name,
             })
     except GoogleAdsException as ex:
-        logger.error("Enabled-campaign lookup failed (%s, %s): %s", customer_id, shop_name, ex)
+        logger.error("Enabled-campaign lookup failed (%s, shop_id=%s): %s", customer_id, shop_id, ex)
         raise
     return out
 
 
-def _find_labeled_campaigns(client, customer_id: str, shop_name: str) -> List[Dict[str, str]]:
-    """Non-removed campaigns carrying the GSD_LL_PAUSED label whose name
-    contains the shop name. Returns campaign + campaign_label resource names."""
+def _find_labeled_campaigns(client, customer_id: str, shop_id: int) -> List[Dict[str, str]]:
+    """Non-removed GSD Shopping campaigns carrying the GSD_LL_PAUSED label for
+    this shop. Returns campaign + campaign_label resource names.
+
+    Same exact ``[shop_id:{id}]`` token + ``SHOPPING`` guard as
+    _find_enabled_campaigns (see its docstring).
+    """
     ga_service = client.get_service("GoogleAdsService")
     query = f"""
         SELECT campaign.id, campaign.name, campaign.resource_name,
@@ -455,7 +477,8 @@ def _find_labeled_campaigns(client, customer_id: str, shop_name: str) -> List[Di
         FROM campaign_label
         WHERE label.name = '{LL_LABEL}'
           AND campaign.status != 'REMOVED'
-          AND campaign.name LIKE '%{_escape_gaql(shop_name)}%'
+          AND campaign.advertising_channel_type = 'SHOPPING'
+          AND campaign.name LIKE '%[shop_id:{int(shop_id)}]%'
     """
     out: List[Dict[str, str]] = []
     try:
@@ -467,7 +490,7 @@ def _find_labeled_campaigns(client, customer_id: str, shop_name: str) -> List[Di
                 "campaign_label_resource": row.campaign_label.resource_name,
             })
     except GoogleAdsException as ex:
-        logger.error("Labeled-campaign lookup failed (%s, %s): %s", customer_id, shop_name, ex)
+        logger.error("Labeled-campaign lookup failed (%s, shop_id=%s): %s", customer_id, shop_id, ex)
         raise
     return out
 
@@ -590,9 +613,9 @@ def run_low_linkage(
                 for customer_id in sorted(COUNTRY_CUSTOMER_IDS.get(country, set())):
                     try:
                         if gsd == 0:
-                            campaigns = _find_enabled_campaigns(client, customer_id, shop_name)
+                            campaigns = _find_enabled_campaigns(client, customer_id, shop_id)
                         else:
-                            campaigns = _find_labeled_campaigns(client, customer_id, shop_name)
+                            campaigns = _find_labeled_campaigns(client, customer_id, shop_id)
                     except Exception as ex:
                         result["errors"].append({
                             "shop_id": shop_id, "shop_name": shop_name,
@@ -624,26 +647,41 @@ def run_low_linkage(
                         try:
                             if gsd == 0:
                                 _set_status(client, customer_id, camp["campaign_id"], "PAUSED")
-                                _apply_label(client, customer_id, camp["resource_name"],
-                                             label_resource(customer_id))
+                                if not _apply_label(client, customer_id, camp["resource_name"],
+                                                    label_resource(customer_id)):
+                                    # Paused-but-untagged is invisible to the re-enable
+                                    # lookup forever — roll the pause back and error out.
+                                    _set_status(client, customer_id, camp["campaign_id"], "ENABLED")
+                                    raise RuntimeError("label apply failed after pause; pause rolled back")
                             else:
                                 _set_status(client, customer_id, camp["campaign_id"], "ENABLED")
                                 _remove_campaign_label(client, customer_id,
                                                        camp["campaign_label_resource"])
+                        except Exception as ex:
+                            logger.error("GSD LL: %s failed for shop_id=%s / %s: %s",
+                                         action, shop_id, camp["campaign_id"], ex)
+                            result["errors"].append({**entry, "step": action.lower(),
+                                                     "error": str(ex)})
+                            continue
 
+                        # Ads mutation succeeded. A failed audit write must NOT
+                        # reclassify a real live mutation as an error — the
+                        # campaign IS changed. Count it, then best-effort audit.
+                        (result["paused"] if gsd == 0 else result["enabled"]).append(entry)
+                        try:
                             _record_action(
                                 db_conn, shop_id, shop_name, country, action,
                                 camp["campaign_id"], camp["campaign_name"],
                                 customer_id, linkage,
                             )
                             db_conn.commit()
-                            (result["paused"] if gsd == 0 else result["enabled"]).append(entry)
                         except Exception as ex:
                             db_conn.rollback()
-                            logger.error("GSD LL: %s failed for %s / %s: %s",
-                                         action, shop_name, camp["campaign_id"], ex)
-                            result["errors"].append({**entry, "step": action.lower(),
-                                                     "error": str(ex)})
+                            logger.error("GSD LL: audit-write failed for %s / %s "
+                                         "(mutation already applied): %s",
+                                         action, camp["campaign_id"], ex)
+                            result.setdefault("audit_failures", []).append(
+                                {**entry, "error": str(ex)})
     finally:
         if db_conn is not None:
             return_db_connection(db_conn)
@@ -690,7 +728,7 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     client = _get_client()
     campaign_service = client.get_service("CampaignService")
     label_cache: Dict[str, str] = {}
-    # Cache of labeled-campaign lookups per (customer_id, shop_name) so the
+    # Cache of labeled-campaign lookups per (customer_id, shop_id) so the
     # enable fallback doesn't re-query the same account/shop repeatedly.
     labeled_cache: Dict[tuple, Dict[str, str]] = {}
 
@@ -699,11 +737,14 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
             label_cache[customer_id] = _ensure_label(client, customer_id, LL_LABEL)
         return label_cache[customer_id]
 
-    def campaign_label_for(customer_id: str, shop_name: str, campaign_id: str) -> Optional[str]:
-        key = (customer_id, shop_name)
+    def campaign_label_for(customer_id: str, shop_id: Any, campaign_id: str) -> Optional[str]:
+        key = (customer_id, str(shop_id))
         if key not in labeled_cache:
-            found = {c["campaign_id"]: c.get("campaign_label_resource")
-                     for c in _find_labeled_campaigns(client, customer_id, shop_name)}
+            try:
+                found = {c["campaign_id"]: c.get("campaign_label_resource")
+                         for c in _find_labeled_campaigns(client, customer_id, int(shop_id))}
+            except (ValueError, TypeError):
+                found = {}  # non-numeric shop_id — can't run the fallback lookup
             labeled_cache[key] = found
         return labeled_cache[key].get(campaign_id)
 
@@ -734,29 +775,41 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
             try:
                 if action == "Paused":
                     _set_status(client, customer_id, campaign_id, "PAUSED")
-                    _apply_label(
+                    if not _apply_label(
                         client, customer_id,
                         campaign_service.campaign_path(customer_id, campaign_id),
                         label_resource(customer_id),
-                    )
+                    ):
+                        # Paused-but-untagged is invisible to re-enable forever —
+                        # roll the pause back and error out (see run_low_linkage).
+                        _set_status(client, customer_id, campaign_id, "ENABLED")
+                        raise RuntimeError("label apply failed after pause; pause rolled back")
                 else:
                     _set_status(client, customer_id, campaign_id, "ENABLED")
                     label_link = e.get("campaign_label_resource") or \
-                        campaign_label_for(customer_id, shop_name, campaign_id)
+                        campaign_label_for(customer_id, shop_id, campaign_id)
                     if label_link:
                         _remove_campaign_label(client, customer_id, label_link)
+            except Exception as ex:
+                logger.error("GSD LL apply: %s failed for shop_id=%s / %s: %s",
+                             action, shop_id, campaign_id, ex)
+                result["errors"].append({**e, "step": action.lower(), "error": str(ex)})
+                continue
 
+            # Ads mutation succeeded — count it, then best-effort audit so a DB
+            # failure doesn't misreport a real live mutation as an error.
+            (result["paused"] if action == "Paused" else result["enabled"]).append(e)
+            try:
                 _record_action(
                     db_conn, shop_id, shop_name, country, action,
                     campaign_id, campaign_name, customer_id, linkage,
                 )
                 db_conn.commit()
-                (result["paused"] if action == "Paused" else result["enabled"]).append(e)
             except Exception as ex:
                 db_conn.rollback()
-                logger.error("GSD LL apply: %s failed for %s / %s: %s",
-                             action, shop_name, campaign_id, ex)
-                result["errors"].append({**e, "step": action.lower(), "error": str(ex)})
+                logger.error("GSD LL apply: audit-write failed for %s / %s "
+                             "(mutation already applied): %s", action, campaign_id, ex)
+                result.setdefault("audit_failures", []).append({**e, "error": str(ex)})
     finally:
         return_db_connection(db_conn)
 
