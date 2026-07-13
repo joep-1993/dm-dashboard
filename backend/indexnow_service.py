@@ -2,14 +2,19 @@
 IndexNow Service
 
 Submits URLs to the IndexNow API for rapid search engine indexing.
-Deduplicates against previously submitted URLs stored in local PostgreSQL.
+Deduplicates against previously submitted URLs stored in Redshift
+(pa.index_now_joep) — the same table the daily n8n indexnow_submitter flow
+writes to, so the manual path and the automated flow share one source of truth.
 """
 import math
 import json
 import requests
 from datetime import datetime
 from typing import List, Dict
-from backend.database import get_db_connection, return_db_connection
+from backend.database import (
+    get_redshift_connection,
+    return_redshift_connection,
+)
 
 # IndexNow settings
 KEY = "2e11f87f415a492294eaf378a8a52004"
@@ -21,29 +26,34 @@ TABLE = "pa.index_now_joep"
 
 
 def ensure_table_exists():
-    """Create the tracking table if it doesn't exist."""
-    conn = get_db_connection()
+    """Ensure the tracking table exists on Redshift.
+
+    The whole IndexNow path (manual submit + the daily n8n flow) shares one
+    table: pa.index_now_joep on Redshift. It already exists and is maintained
+    by n8n, so this is normally a no-op; the CREATE guards a fresh environment.
+    Redshift has no CREATE INDEX, so none are declared here. `id` is an IDENTITY
+    column, so inserts omit it.
+    """
+    conn = get_redshift_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {TABLE} (
-                id SERIAL PRIMARY KEY,
+                id BIGINT IDENTITY(1,1),
                 url VARCHAR(2000) NOT NULL,
                 submitted_date DATE NOT NULL,
                 response_code INTEGER
             )
         """)
-        cur.execute(f"CREATE INDEX IF NOT EXISTS idx_indexnow_url ON {TABLE}(url)")
-        cur.execute(f"CREATE INDEX IF NOT EXISTS idx_indexnow_date ON {TABLE}(submitted_date)")
         conn.commit()
         cur.close()
     finally:
-        return_db_connection(conn)
+        return_redshift_connection(conn)
 
 
 def get_existing_urls() -> set:
-    """Get all previously submitted URLs."""
-    conn = get_db_connection()
+    """Get all previously submitted URLs (from Redshift)."""
+    conn = get_redshift_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT DISTINCT url FROM {TABLE}")
@@ -51,7 +61,7 @@ def get_existing_urls() -> set:
         cur.close()
         return urls
     finally:
-        return_db_connection(conn)
+        return_redshift_connection(conn)
 
 
 def _send_batch(urls: List[str]) -> int:
@@ -72,26 +82,39 @@ def _send_batch(urls: List[str]) -> int:
 
 
 def _save_submissions(urls: List[str], response_code: int):
-    """Write submitted URLs to the tracking table."""
-    conn = get_db_connection()
+    """Write submitted URLs to the tracking table on Redshift.
+
+    Redshift is columnar — single-row INSERTs are pathologically slow, so we
+    write multi-row VALUES statements in chunks (matching how the n8n flow
+    bulk-inserts).
+    """
+    if not urls:
+        return
+    conn = get_redshift_connection()
     try:
         cur = conn.cursor()
         today = datetime.today().date()
-        for url in urls:
+        CHUNK = 1000
+        for start in range(0, len(urls), CHUNK):
+            chunk = urls[start : start + CHUNK]
+            placeholders = ",".join(["(%s, %s, %s)"] * len(chunk))
+            params = []
+            for url in chunk:
+                params.extend([url, today, response_code])
             cur.execute(
-                f"INSERT INTO {TABLE} (url, submitted_date, response_code) VALUES (%s, %s, %s)",
-                (url, today, response_code),
+                f"INSERT INTO {TABLE} (url, submitted_date, response_code) VALUES {placeholders}",
+                params,
             )
         conn.commit()
         cur.close()
     finally:
-        return_db_connection(conn)
+        return_redshift_connection(conn)
 
 
 def get_today_count() -> int:
-    """Get the number of URLs submitted today."""
+    """Get the number of URLs submitted today (from Redshift)."""
     ensure_table_exists()
-    conn = get_db_connection()
+    conn = get_redshift_connection()
     try:
         cur = conn.cursor()
         today = datetime.today().date()
@@ -103,7 +126,7 @@ def get_today_count() -> int:
         cur.close()
         return row["cnt"] if row else 0
     finally:
-        return_db_connection(conn)
+        return_redshift_connection(conn)
 
 
 def submit_urls(urls: List[str]) -> Dict:
@@ -185,9 +208,16 @@ def submit_urls(urls: List[str]) -> Dict:
 
 
 def get_submission_history(limit: int = 100) -> List[Dict]:
-    """Get recent submission history."""
-    ensure_table_exists()
-    conn = get_db_connection()
+    """Get recent submission history.
+
+    Reads from the Redshift copy of pa.index_now_joep — that is where the
+    daily n8n `indexnow_submitter` flow logs its runs (it fetches candidate
+    URLs from Redshift's datamart.* and reuses that same connection to log).
+    The PostgreSQL copy that the manual submit path writes to stopped being
+    fed on 2026-03-27, so history must come from Redshift to reflect the live
+    (n8n-driven) submissions.
+    """
+    conn = get_redshift_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"""
@@ -208,4 +238,4 @@ def get_submission_history(limit: int = 100) -> List[Dict]:
             for row in rows
         ]
     finally:
-        return_db_connection(conn)
+        return_redshift_connection(conn)
