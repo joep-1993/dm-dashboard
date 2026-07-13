@@ -13,6 +13,7 @@ from backend.gsd_campaigns_service import (
 )
 from backend.gsd_ll_service import (
     start_ll_run,
+    start_ll_apply,
     get_ll_progress,
     get_history as get_ll_history,
 )
@@ -140,6 +141,26 @@ async def run_low_linkage_endpoint(
         return start_ll_run(dry_run, date, shop_list, included)
     except Exception as e:
         logger.error(f"Error starting GSD low-linkage process: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ll/apply")
+async def apply_low_linkage_endpoint(payload: dict):
+    """Apply pause/enable for an explicit selection of preview rows.
+
+    Body: {"entries": [ {action, customer_id, campaign_id, shop_id, shop_name,
+    country, campaign_name, linkage, campaign_label_resource?}, ... ]}.
+    Starts a background run; poll /ll/progress for status.
+    """
+    try:
+        entries = payload.get("entries") if isinstance(payload, dict) else None
+        if not isinstance(entries, list) or not entries:
+            raise HTTPException(status_code=400, detail="No entries provided.")
+        return start_ll_apply(entries)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting GSD low-linkage apply: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

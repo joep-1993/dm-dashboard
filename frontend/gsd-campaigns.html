@@ -101,6 +101,19 @@
         .ll-preview-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .ll-preview-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .ll-preview-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+
+        /* Loading skeleton rows — keep the Campaigns table at full height while
+           campaigns load so the layout below doesn't shift on first paint. */
+        /* Bar height ≈ the .btn-action height (0.8rem text + 0.5rem padding) so
+           a skeleton row is the same height as a loaded row → no grow on load. */
+        .skel-row td { vertical-align: middle; }
+        .skel-bar {
+            display: block; height: 1.45rem; border-radius: 4px;
+            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
+            background-size: 400% 100%;
+            animation: skelShimmer 1.4s ease infinite;
+        }
+        @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
     </style>
 </head>
 <body>
@@ -238,11 +251,20 @@
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="campaignTableBody">
-                            <tr><td colspan="7" class="text-center text-muted py-4">Loading campaigns...</td></tr>
-                        </tbody>
+                        <tbody id="campaignTableBody"></tbody>
                     </table>
                 </div>
+                <script>
+                    // Render N placeholder rows (7 cells each) so the Campaigns
+                    // table holds its height while data loads — prevents the
+                    // layout below from jumping when campaigns arrive. Defined
+                    // here so it paints during parse; reused by loadCampaigns().
+                    function campaignSkeletonRows(n = 10) {
+                        const cell = '<td><span class="skel-bar"></span></td>';
+                        return ('<tr class="skel-row">' + cell.repeat(7) + '</tr>').repeat(n);
+                    }
+                    document.getElementById('campaignTableBody').innerHTML = campaignSkeletonRows();
+                </script>
                 <div class="pagination-controls" id="paginationControls">
                     <span>Per page:</span>
                     <select class="form-select form-select-sm" id="perPage" onchange="currentPage=1; applyFilters();">
@@ -468,6 +490,11 @@
 
         // --- Campaigns ---
         async function loadCampaigns() {
+            // Hold the current table height with skeleton rows while reloading so
+            // neither first load nor Refresh shifts the layout below.
+            const tbodyEl = document.getElementById('campaignTableBody');
+            const holdRows = tbodyEl.querySelectorAll('tr').length || 10;
+            tbodyEl.innerHTML = campaignSkeletonRows(Math.min(holdRows, 50));
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/campaigns`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -697,6 +724,25 @@
             document.getElementById('llProgressText').textContent = text;
         }
 
+        // Poll /ll/progress every 800ms until the background run reports done,
+        // updating the progress bar. Shared by the full run and "Run selected".
+        async function pollLLUntilDone() {
+            let prog = {};
+            while (true) {
+                await new Promise(r => setTimeout(r, 800));
+                const pr = await fetch(`${API_BASE}/api/gsd-campaigns/ll/progress`);
+                if (!pr.ok) throw new Error(`HTTP ${pr.status}`);
+                prog = await pr.json();
+                const total = prog.total || 0;
+                const pct = prog.done ? 100 : (total > 0 ? Math.round((prog.processed / total) * 100) : 0);
+                const label = prog.done ? 'Done'
+                    : `${prog.phase || 'Processing…'}${total ? ` — ${prog.processed}/${total}` : ''} · ${prog.paused || 0} paused, ${prog.enabled || 0} enabled`;
+                setLLProgressBar(pct, label);
+                if (prog.done) break;
+            }
+            return prog;
+        }
+
         async function runLowLinkage(dryRun) {
             const previewBtn = document.getElementById('llPreviewBtn');
             const runBtn = document.getElementById('llRunBtn');
@@ -734,19 +780,7 @@
                 }
 
                 // Poll progress until the background run reports done.
-                let prog = {};
-                while (true) {
-                    await new Promise(r => setTimeout(r, 800));
-                    const pr = await fetch(`${API_BASE}/api/gsd-campaigns/ll/progress`);
-                    if (!pr.ok) throw new Error(`HTTP ${pr.status}`);
-                    prog = await pr.json();
-                    const total = prog.total || 0;
-                    const pct = prog.done ? 100 : (total > 0 ? Math.round((prog.processed / total) * 100) : 0);
-                    const label = prog.done ? 'Done'
-                        : `${prog.phase || 'Processing…'}${total ? ` — ${prog.processed}/${total} shops` : ''} · ${prog.paused || 0} paused, ${prog.enabled || 0} enabled`;
-                    setLLProgressBar(pct, label);
-                    if (prog.done) break;
-                }
+                const prog = await pollLLUntilDone();
 
                 barWrap.classList.add('d-none');
                 if (prog.error) {
@@ -776,9 +810,90 @@
             }
         }
 
+        // Apply only the rows the user left checked in the preview.
+        async function runSelectedLowLinkage() {
+            const previewBtn = document.getElementById('llPreviewBtn');
+            const runBtn = document.getElementById('llRunBtn');
+            const runSelBtn = document.getElementById('llRunSelectedBtn');
+            const area = document.getElementById('llProgressArea');
+            const content = document.getElementById('llProgressContent');
+            const barWrap = document.getElementById('llProgressBarWrap');
+
+            const entries = llPreviewRows
+                .filter(r => llPreviewSelected.has(r._key))
+                .map(r => ({
+                    action: r.action,
+                    customer_id: r.customer_id,
+                    campaign_id: r.campaign_id,
+                    shop_id: r.shop_id,
+                    shop_name: r.shop_name,
+                    country: r.country,
+                    campaign_name: r.campaign_name,
+                    linkage: r.linkage,
+                    campaign_label_resource: r.campaign_label_resource,
+                }));
+
+            if (!entries.length) { alert('No rows selected.'); return; }
+            const pausedN = entries.filter(e => e.action === 'Paused').length;
+            const enabledN = entries.length - pausedN;
+            if (!confirm(`Run for real on ${entries.length} selected campaign(s) — ${pausedN} to PAUSE, ${enabledN} to ENABLE? This changes live GSD campaigns.`)) {
+                return;
+            }
+
+            previewBtn.disabled = true;
+            runBtn.disabled = true;
+            runSelBtn.disabled = true;
+            area.style.display = 'block';
+            content.innerHTML = '';
+            barWrap.classList.remove('d-none');
+            setLLProgressBar(0, 'Starting…');
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/ll/apply`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entries }),
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const started = await res.json();
+                if (started.busy) {
+                    barWrap.classList.add('d-none');
+                    content.innerHTML = '<div class="text-warning fw-bold">A low-linkage run is already in progress — wait for it to finish.</div>';
+                    return;
+                }
+
+                const prog = await pollLLUntilDone();
+                barWrap.classList.add('d-none');
+                if (prog.error) {
+                    content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(prog.error)}</div>`;
+                    logActivity('LL Run selected', `Error: ${prog.error}`, false);
+                    return;
+                }
+
+                const data = prog.result || {};
+                content.innerHTML = renderLLSummary(data);
+                applyPreviewFilter();
+                logActivity('LL Run selected',
+                    `${data.paused_count ?? (data.paused || []).length} paused / ${data.enabled_count ?? (data.enabled || []).length} enabled`,
+                    (data.errors || []).length === 0);
+                loadLLHistory();
+                loadCampaigns();
+                loadStats();
+            } catch (err) {
+                barWrap.classList.add('d-none');
+                content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
+                logActivity('LL Run selected', `Error: ${err.message}`, false);
+            } finally {
+                previewBtn.disabled = false;
+                runBtn.disabled = false;
+                runSelBtn.disabled = false;
+            }
+        }
+
         // --- Preview results table (sortable / filterable / paginated / exportable) ---
         let llPreviewRows = [];
         let llPreviewFiltered = [];
+        let llPreviewSelected = new Set();   // _key values of checked rows
         let llPreviewSortColumn = null;
         let llPreviewSortDirection = 'asc';
         let llPreviewPage = 1;
@@ -802,7 +917,10 @@
             llPreviewRows = [
                 ...(data.paused || []).map(c => ({ ...c, action: 'Paused' })),
                 ...(data.enabled || []).map(c => ({ ...c, action: 'Enabled' })),
-            ];
+            ].map((r, i) => ({ ...r, _key: i }));
+            // Preview shows the full set a plain "Run" would touch, so start
+            // every row checked; the user unchecks the ones to skip.
+            llPreviewSelected = new Set(llPreviewRows.map(r => r._key));
             llPreviewSortColumn = null;
             llPreviewSortDirection = 'asc';
             llPreviewPage = 1;
@@ -813,12 +931,15 @@
                 html += `
                 <div class="filter-row d-flex gap-2 align-items-center mt-2 mb-2">
                     <input type="text" class="form-control form-control-sm" id="llPreviewFilter" placeholder="Filter shop, campaign, country..." oninput="applyPreviewFilter()" style="max-width: 260px;">
+                    <span class="text-muted" id="llPreviewSelectedInfo" style="font-size: 0.85rem;"></span>
                     <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportPreviewXlsx()">Export Excel</button>
+                    <button class="btn btn-sm" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover ll-preview-table mb-0">
                         <thead>
                             <tr>
+                                <th style="width: 2.5rem; text-align: center;"><input type="checkbox" id="llPreviewSelectAll" title="Select all (filtered)" onclick="togglePreviewSelectAll(this.checked)"></th>
                                 <th class="sortable" data-sort="shop_name" onclick="sortPreviewBy('shop_name')">Shop</th>
                                 <th class="sortable" data-sort="shop_id" onclick="sortPreviewBy('shop_id')">Shop ID</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortPreviewBy('country')">Country</th>
@@ -925,14 +1046,16 @@
                 const badge = r.action === 'Paused'
                     ? '<span class="badge bg-warning text-dark">Paused</span>'
                     : '<span class="badge badge-active">Enabled</span>';
+                const checked = llPreviewSelected.has(r._key) ? 'checked' : '';
                 return `<tr>
+                    <td style="text-align: center;"><input type="checkbox" ${checked} onchange="togglePreviewRow(${r._key}, this.checked)"></td>
                     <td>${escapeHtml(r.shop_name || '')}</td>
                     <td>${r.shop_id ?? ''}</td>
                     <td class="col-country">${escapeHtml(r.country || '')}</td>
                     <td>${badge}</td>
                     <td>${escapeHtml(r.campaign_name || '')}</td>
                 </tr>`;
-            }).join('') : '<tr><td colspan="5" class="text-center text-muted py-3">No rows.</td></tr>';
+            }).join('') : '<tr><td colspan="6" class="text-center text-muted py-3">No rows.</td></tr>';
 
             const prev = document.getElementById('llPreviewPrevBtn');
             const next = document.getElementById('llPreviewNextBtn');
@@ -940,6 +1063,44 @@
             if (prev) prev.disabled = llPreviewPage <= 1;
             if (next) next.disabled = llPreviewPage >= totalPages;
             if (info) info.textContent = total ? `${start + 1}-${Math.min(end, total)} of ${total.toLocaleString()}` : '0 of 0';
+            updatePreviewSelectionUI();
+        }
+
+        // --- Preview row selection ---
+        function togglePreviewRow(key, checked) {
+            if (checked) llPreviewSelected.add(key);
+            else llPreviewSelected.delete(key);
+            updatePreviewSelectionUI();
+        }
+
+        // Select-all toggles the currently-filtered rows (selection persists
+        // across filtering for the rows not shown).
+        function togglePreviewSelectAll(checked) {
+            llPreviewFiltered.forEach(r => {
+                if (checked) llPreviewSelected.add(r._key);
+                else llPreviewSelected.delete(r._key);
+            });
+            renderPreviewPage();
+        }
+
+        function updatePreviewSelectionUI() {
+            const selAll = document.getElementById('llPreviewSelectAll');
+            if (selAll) {
+                const filteredKeys = llPreviewFiltered.map(r => r._key);
+                const selInFiltered = filteredKeys.filter(k => llPreviewSelected.has(k)).length;
+                selAll.checked = filteredKeys.length > 0 && selInFiltered === filteredKeys.length;
+                selAll.indeterminate = selInFiltered > 0 && selInFiltered < filteredKeys.length;
+            }
+            const n = llPreviewSelected.size;
+            const info = document.getElementById('llPreviewSelectedInfo');
+            if (info) info.textContent = `${n} selected`;
+            const btn = document.getElementById('llRunSelectedBtn');
+            if (btn) {
+                btn.disabled = n === 0;
+                btn.style.opacity = n === 0 ? '0.5' : '1';
+                btn.style.cursor = n === 0 ? 'not-allowed' : 'pointer';
+                btn.textContent = `Run selected${n ? ` (${n})` : ''}`;
+            }
         }
 
         function exportPreviewXlsx() {
