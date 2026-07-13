@@ -5606,3 +5606,13 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 - **Removed** the `.run-card { border-left:4px solid #5e4a90 }` vertical accent bar.
 - **cc1 gotcha**: the LIVE/current cc1 is `dm-tools/cc1` (tracked in the repo, on the working branch) — the separate `dm-dashboard/main` clone's cc1 is stale (tail dated 2026-04). Update `dm-tools/cc1` so learnings travel with the code push.
 - **Date**: 2026-07-09
+
+## IndexNow tool: two copies of pa.index_now_joep (Redshift = source of truth)
+- **Symptom**: dm-tools IndexNow "Submission History" showed nothing after 2026-03-27, even though URLs were still being submitted daily.
+- **Root cause**: There are TWO `pa.index_now_joep` tables. The daily n8n `indexnow_submitter` flow fetches candidate URLs from Redshift `datamart.fct_visits`/`dim_visit` and reuses that same Redshift connection to log its runs → writes land on **Redshift** (`beslistbi`), 10k/day, current. dm-tools `indexnow_service.py` used `get_db_connection()` (the **PostgreSQL** `10.1.32.9` / n8n-vector-db pool), whose copy stopped being fed on 2026-03-27 (~70k rows). So history read the wrong DB, and manual-submit dedup ran against a stale set instead of the live ~1.56M URLs already submitted.
+- **Fix**: Repointed the whole service (`get_submission_history`, `get_existing_urls`, `_save_submissions`, `get_today_count`, `ensure_table_exists`) at Redshift via `get_redshift_connection()`. Now the manual path + n8n flow share one source of truth (history, dedup, and the 10k/day cap).
+- **Redshift gotchas hit**: no `CREATE INDEX` (dropped the two index statements); `id SERIAL` → `id BIGINT IDENTITY(1,1)` (inserts omit `id`, it auto-populates); single-row INSERTs are pathologically slow on columnar Redshift → `_save_submissions` now does chunked multi-row `VALUES` inserts (1000/stmt).
+- **Verified**: dm-tools Redshift user `j_vanschagen` has INSERT on `pa.index_now_joep` (tested via rolled-back insert); `get_submission_history` returns live daily 10k@200 rows through 2026-07-12; dedup set = 1,556,645; submitting an already-sent URL correctly skips (no API call, no insert).
+- **Deploy note**: live uvicorn runs WITHOUT `--reload` — kill + relaunch the dm-tools backend for this to take effect.
+- **Commit**: `bda88bd` (branch rurl-v45-confidence-scoring). n8n flow itself unchanged.
+- **Date**: 2026-07-13
