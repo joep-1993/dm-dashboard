@@ -5665,3 +5665,13 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 - **Deploy note**: live uvicorn runs WITHOUT `--reload` — kill + relaunch the dm-tools backend for this to take effect.
 - **Commit**: `bda88bd` (this branch, rurl-v45-confidence-scoring). n8n flow itself unchanged.
 - **Date**: 2026-07-13
+
+## GSD Campaigns: selectable low-linkage preview + loading skeleton
+- **Selectable preview**: the low-linkage dry-run preview table now has a per-row checkbox + a filtered select-all (all rows checked by default), plus a "Run selected (N)" button that applies ONLY the checked rows for real. The original feed-driven **Run** button is unchanged.
+- **Backend**: new `POST /api/gsd-campaigns/ll/apply` → `start_ll_apply` / `apply_selected` in `gsd_ll_service.py`. Applies only the posted entries (no feed re-derivation), reusing `_set_status` / `_apply_label` / `_remove_campaign_label` / `_record_action`, the audit table, the single-run `_LL_LOCK`, and the same progress polling as a normal run. Enable rows carry `campaign_label_resource` from the preview so the label detaches without a re-lookup; falls back to `_find_labeled_campaigns` (per customer_id+shop_name, cached) if absent. Pause rows reconstruct the campaign resource via `campaign_service.campaign_path(customer_id, campaign_id)` — no extra data needed.
+- **Preview entry change**: `run_low_linkage` now also puts `campaign_label_resource` on each dry-run entry (from `_find_labeled_campaigns`) so the frontend can round-trip it.
+- **Frontend**: `llPreviewSelected` (Set of per-row `_key`), `togglePreviewRow` / `togglePreviewSelectAll` / `updatePreviewSelectionUI`, `runSelectedLowLinkage` (POSTs checked rows to /ll/apply). Extracted the poll loop into shared `pollLLUntilDone()` used by both run paths.
+- **Loading skeleton**: the "Campaigns created" table replaced its single "Loading campaigns..." row with 10 shimmer skeleton rows (`.skel-bar`, `campaignSkeletonRows(n)`), rendered during parse via an inline `<script>` right after the `<tbody>` AND at the start of every `loadCampaigns()` (sized to the current row count, capped 50). Bar height tuned to **1.45rem** to match the `.btn-action` row height so the table doesn't grow/shrink when real rows load → no layout shift below.
+- **Deploy note**: backend endpoints need a uvicorn kill+relaunch (no `--reload`); the HTML/CSS/JS is served statically so it's live on save. Both were restarted+verified 2026-07-13 (`/ll/apply` 400s on empty; skeleton served; syntax via node --check + ast).
+- **Commit**: `1a8ab52` (branch rurl-v45-confidence-scoring).
+- **Date**: 2026-07-13
