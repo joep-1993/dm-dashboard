@@ -138,6 +138,46 @@ def start_ll_run(
     return {"started": True, "dry_run": dry_run}
 
 
+def start_ll_apply(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Kick off a background run that applies ONLY the given preview entries.
+
+    Used by the "Run selected" button: the frontend sends back the exact rows
+    the user left checked in a dry-run preview, and this applies just those
+    pause / enable mutations. Shares the single-run lock + progress state with
+    start_ll_run, so a normal run and a selection apply can't overlap.
+    """
+    with _LL_LOCK:
+        if _LL_PROGRESS["running"]:
+            return {"started": False, "busy": True}
+        _LL_PROGRESS.update({
+            "running": True, "phase": "Starting…", "total": len(entries), "processed": 0,
+            "paused": 0, "enabled": 0, "skipped": 0, "errors": 0,
+            "dry_run": False, "done": False, "result": None, "error": None,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+            "finished_at": None,
+        })
+
+    def _worker() -> None:
+        try:
+            res = apply_selected(entries)
+            _progress_set(
+                result=res, done=True, phase="Done",
+                processed=_LL_PROGRESS.get("total", 0),
+                paused=res.get("paused_count", len(res.get("paused", []))),
+                enabled=res.get("enabled_count", len(res.get("enabled", []))),
+                skipped=len(res.get("skipped", [])),
+                errors=len(res.get("errors", [])),
+            )
+        except Exception as ex:  # pragma: no cover - defensive
+            logger.exception("GSD LL apply crashed")
+            _progress_set(error=str(ex), done=True, phase="Error")
+        finally:
+            _progress_set(running=False, finished_at=datetime.now().isoformat(timespec="seconds"))
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return {"started": True, "dry_run": False}
+
+
 # ---------------------------------------------------------------------------
 # Feed
 # ---------------------------------------------------------------------------
@@ -571,6 +611,11 @@ def run_low_linkage(
                             "campaign_name": camp["campaign_name"],
                             "linkage": linkage,
                         }
+                        # Carry the campaign_label resource on enable rows so a
+                        # later "Run selected" can detach the label without a
+                        # re-lookup (falls back to re-query if absent).
+                        if camp.get("campaign_label_resource"):
+                            entry["campaign_label_resource"] = camp["campaign_label_resource"]
 
                         if dry_run:
                             (result["paused"] if gsd == 0 else result["enabled"]).append(entry)
@@ -608,5 +653,117 @@ def run_low_linkage(
     result["enabled_count"] = len(result["enabled"])
     logger.info("GSD LL done (dry_run=%s): %d paused, %d enabled, %d skipped, %d errors",
                 dry_run, result["paused_count"], result["enabled_count"],
+                len(result["skipped"]), len(result["errors"]))
+    return result
+
+
+def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Apply pause / enable for an explicit list of preview entries.
+
+    Each entry is a row the user left checked in a dry-run preview and carries:
+    action ('Paused' | 'Enabled'), customer_id, campaign_id, shop_id, shop_name,
+    country, campaign_name, linkage, and — for 'Enabled' rows — optionally
+    campaign_label_resource (re-queried if missing). No feed fetch happens; only
+    the selected campaigns are touched. Every applied action is audited exactly
+    like run_low_linkage.
+    """
+    started = datetime.now()
+    result: Dict[str, Any] = {
+        "started_at": started.isoformat(timespec="seconds"),
+        "dry_run": False,
+        "date": None,
+        "feed_rows": len(entries),
+        "paused": [],
+        "enabled": [],
+        "skipped": [],
+        "errors": [],
+    }
+
+    if not entries:
+        result["finished_at"] = datetime.now().isoformat(timespec="seconds")
+        result["paused_count"] = 0
+        result["enabled_count"] = 0
+        return result
+
+    _progress_set(phase="Applying selection…", total=len(entries))
+
+    client = _get_client()
+    campaign_service = client.get_service("CampaignService")
+    label_cache: Dict[str, str] = {}
+    # Cache of labeled-campaign lookups per (customer_id, shop_name) so the
+    # enable fallback doesn't re-query the same account/shop repeatedly.
+    labeled_cache: Dict[tuple, Dict[str, str]] = {}
+
+    def label_resource(customer_id: str) -> str:
+        if customer_id not in label_cache:
+            label_cache[customer_id] = _ensure_label(client, customer_id, LL_LABEL)
+        return label_cache[customer_id]
+
+    def campaign_label_for(customer_id: str, shop_name: str, campaign_id: str) -> Optional[str]:
+        key = (customer_id, shop_name)
+        if key not in labeled_cache:
+            found = {c["campaign_id"]: c.get("campaign_label_resource")
+                     for c in _find_labeled_campaigns(client, customer_id, shop_name)}
+            labeled_cache[key] = found
+        return labeled_cache[key].get(campaign_id)
+
+    ensure_admin_table()
+    db_conn = get_db_connection()
+
+    try:
+        for idx, e in enumerate(entries):
+            _progress_set(
+                processed=idx,
+                paused=len(result["paused"]), enabled=len(result["enabled"]),
+                skipped=len(result["skipped"]), errors=len(result["errors"]),
+            )
+
+            action = (e.get("action") or "").strip()
+            customer_id = str(e.get("customer_id") or "").strip()
+            campaign_id = str(e.get("campaign_id") or "").strip()
+            shop_id = e.get("shop_id")
+            shop_name = e.get("shop_name") or ""
+            country = e.get("country") or ""
+            campaign_name = e.get("campaign_name") or ""
+            linkage = e.get("linkage")
+
+            if action not in ("Paused", "Enabled") or not customer_id or not campaign_id:
+                result["skipped"].append({**e, "reason": "invalid_entry"})
+                continue
+
+            try:
+                if action == "Paused":
+                    _set_status(client, customer_id, campaign_id, "PAUSED")
+                    _apply_label(
+                        client, customer_id,
+                        campaign_service.campaign_path(customer_id, campaign_id),
+                        label_resource(customer_id),
+                    )
+                else:
+                    _set_status(client, customer_id, campaign_id, "ENABLED")
+                    label_link = e.get("campaign_label_resource") or \
+                        campaign_label_for(customer_id, shop_name, campaign_id)
+                    if label_link:
+                        _remove_campaign_label(client, customer_id, label_link)
+
+                _record_action(
+                    db_conn, shop_id, shop_name, country, action,
+                    campaign_id, campaign_name, customer_id, linkage,
+                )
+                db_conn.commit()
+                (result["paused"] if action == "Paused" else result["enabled"]).append(e)
+            except Exception as ex:
+                db_conn.rollback()
+                logger.error("GSD LL apply: %s failed for %s / %s: %s",
+                             action, shop_name, campaign_id, ex)
+                result["errors"].append({**e, "step": action.lower(), "error": str(ex)})
+    finally:
+        return_db_connection(db_conn)
+
+    result["finished_at"] = datetime.now().isoformat(timespec="seconds")
+    result["paused_count"] = len(result["paused"])
+    result["enabled_count"] = len(result["enabled"])
+    logger.info("GSD LL apply done: %d paused, %d enabled, %d skipped, %d errors",
+                result["paused_count"], result["enabled_count"],
                 len(result["skipped"]), len(result["errors"]))
     return result
