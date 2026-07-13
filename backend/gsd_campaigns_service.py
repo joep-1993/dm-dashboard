@@ -340,18 +340,22 @@ def get_all_gsd_stats() -> Dict[str, Any]:
 
 
 def _mutate_campaign_status(customer_id: str, campaign_id: str, status: str) -> Dict[str, Any]:
-    """Set campaign status (ENABLED, PAUSED, REMOVED)."""
+    """Set campaign status (ENABLED, PAUSED) or remove it (REMOVED)."""
     client = _get_client()
     campaign_service = client.get_service("CampaignService")
+    resource_name = campaign_service.campaign_path(customer_id, campaign_id)
 
     campaign_op = client.get_type("CampaignOperation")
-    campaign = campaign_op.update
-    campaign.resource_name = campaign_service.campaign_path(customer_id, campaign_id)
-
-    status_enum = client.enums.CampaignStatusEnum
-    campaign.status = getattr(status_enum, status)
-
-    campaign_op.update_mask = field_mask_pb2.FieldMask(paths=["status"])
+    if status == "REMOVED":
+        # Removal uses the dedicated REMOVE operation. Setting status=REMOVED via
+        # an update is rejected by the API (INVALID_ENUM_VALUE: "Enum value
+        # 'REMOVED' cannot be used.").
+        campaign_op.remove = resource_name
+    else:
+        campaign = campaign_op.update
+        campaign.resource_name = resource_name
+        campaign.status = getattr(client.enums.CampaignStatusEnum, status)
+        campaign_op.update_mask = field_mask_pb2.FieldMask(paths=["status"])
 
     try:
         response = campaign_service.mutate_campaigns(
