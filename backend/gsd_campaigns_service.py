@@ -176,14 +176,6 @@ def _build_campaign_name(
     return base
 
 
-def _detect_country_for_account(customer_id: str) -> str:
-    """Detect country from customer_id by checking ACCOUNTS."""
-    for info in ACCOUNTS.values():
-        if info["customer_id"] == customer_id:
-            return info["country"]
-    return "NL"
-
-
 # ---------------------------------------------------------------------------
 # Negative keywords helper
 # ---------------------------------------------------------------------------
@@ -206,12 +198,15 @@ def get_negatives(shop_name: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
-def get_gsd_campaigns(customer_id: str) -> List[Dict[str, Any]]:
+def get_gsd_campaigns(customer_id: str, client: Optional[GoogleAdsClient] = None) -> List[Dict[str, Any]]:
     """
     Query all non-REMOVED campaigns with the GSD_SCRIPT label for a given
     customer account. Returns last-30-day metrics.
+
+    Pass a shared ``client`` to avoid rebuilding one per account (get_all_gsd_stats
+    queries several accounts in a row).
     """
-    client = _get_client()
+    client = client or _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
     # Step 1: Get campaign IDs with the GSD_SCRIPT label
@@ -287,10 +282,21 @@ def get_all_gsd_stats() -> Dict[str, Any]:
     all_campaigns: List[Dict[str, Any]] = []
     errors: List[str] = []
 
+    client = _get_client()  # build once, reuse across every account (#14)
+
+    # NL_CPR and NL_CPC share one customer_id, and get_gsd_campaigns returns
+    # ALL GSD_SCRIPT campaigns in an account regardless of type — so querying
+    # per ACCOUNTS entry would fetch (and count) the NL account twice. Query
+    # each DISTINCT customer_id once (#4).
+    seen_customer_ids: set = set()
     for account_key, info in ACCOUNTS.items():
+        customer_id = info["customer_id"]
+        if customer_id in seen_customer_ids:
+            continue
+        seen_customer_ids.add(customer_id)
         try:
-            camps = get_gsd_campaigns(info["customer_id"])
-            # Enrich with account info
+            camps = get_gsd_campaigns(customer_id, client=client)
+            # Enrich with account info (metadata only; not used in the totals)
             for c in camps:
                 c["account_key"] = account_key
                 c["account_type"] = info["type"]
@@ -556,24 +562,26 @@ def get_mc_id(mc_parent_id: str, shop_name: str) -> Optional[str]:
     Paginates through all sub-accounts (Content API returns them in
     the ``resources`` key, max 250 per page).
     Returns the account ID if found, else None.
+
+    Raises on API error rather than returning None: the caller must be able to
+    tell a genuine "shop not found" (safe to create) apart from a transient
+    lookup failure (creating would spawn a DUPLICATE sub-account for a shop that
+    may already have one).
     """
     service = _get_mc_service()
     target = shop_name.lower()
     page_token = None
-    try:
-        while True:
-            kwargs: Dict[str, Any] = {"merchantId": mc_parent_id, "maxResults": 250}
-            if page_token:
-                kwargs["pageToken"] = page_token
-            response = service.accounts().list(**kwargs).execute()
-            for account in response.get("resources", []):
-                if account.get("name", "").lower() == target:
-                    return str(account["id"])
-            page_token = response.get("nextPageToken")
-            if not page_token:
-                break
-    except Exception as ex:
-        logger.error("Error looking up MC account for '%s': %s", shop_name, ex)
+    while True:
+        kwargs: Dict[str, Any] = {"merchantId": mc_parent_id, "maxResults": 250}
+        if page_token:
+            kwargs["pageToken"] = page_token
+        response = service.accounts().list(**kwargs).execute()
+        for account in response.get("resources", []):
+            if account.get("name", "").lower() == target:
+                return str(account["id"])
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
     return None
 
 
@@ -680,25 +688,6 @@ def _accept_mc_invitation(ads_customer_id: str, mc_account_id: int) -> None:
     logger.info("No pending MC invitation found for MC %s in Ads %s", mc_account_id, ads_customer_id)
 
 
-def get_merchant_id_for_campaign(
-    client: GoogleAdsClient, customer_id: str, campaign_resource_name: str
-) -> Optional[str]:
-    """Get the Merchant Center ID from an existing campaign's shopping setting."""
-    ga_service = client.get_service("GoogleAdsService")
-    query = f"""
-        SELECT campaign.shopping_setting.merchant_id
-        FROM campaign
-        WHERE campaign.resource_name = '{campaign_resource_name}'
-    """
-    try:
-        response = ga_service.search(customer_id=customer_id, query=query)
-        for row in response:
-            return str(row.campaign.shopping_setting.merchant_id)
-    except GoogleAdsException as ex:
-        logger.error("Error getting merchant ID for campaign: %s", ex)
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Campaign creation helpers
 # ---------------------------------------------------------------------------
@@ -760,7 +749,10 @@ def add_standard_shopping_campaign(
     campaign.name = campaign_name
     campaign.campaign_budget = budget_resource
     campaign.advertising_channel_type = client.enums.AdvertisingChannelTypeEnum.SHOPPING
-    campaign.status = client.enums.CampaignStatusEnum.ENABLED
+    # Create PAUSED; the caller flips it to ENABLED only after the ad group,
+    # product ad and listing-group tree have all succeeded, so a failure partway
+    # can never leave a live, budgeted campaign with no products / no bid tree.
+    campaign.status = client.enums.CampaignStatusEnum.PAUSED
     campaign.manual_cpc.enhanced_cpc_enabled = False
 
     # Shopping settings
@@ -933,8 +925,14 @@ def create_listing_group_subdivision(
     )
 
     if temp_id is not None:
+        # ad_group_criterion_path needs THREE components
+        # (customer_id, ad_group_id, criterion_id); the ad group already exists,
+        # so pull its id out of the resource name. temp_id is negative (a temp
+        # criterion id) so children can reference this root within the same
+        # atomic mutate.
+        ad_group_id = ad_group_resource_name.split("/")[-1]
         criterion.resource_name = ad_group_criterion_service.ad_group_criterion_path(
-            customer_id, str(temp_id)
+            customer_id, ad_group_id, str(temp_id)
         )
 
     if parent_resource_name is not None:
@@ -970,20 +968,6 @@ def create_listing_group_unit_biddable(
         criterion.listing_group.case_value = dimension
 
     return op
-
-
-def _create_price_dimension(client: GoogleAdsClient, low: int, high: Optional[int], currency: str = "EUR"):
-    """Create a ProductCustomAttribute dimension for a price bucket."""
-    dimension = client.get_type("ListingDimensionInfo")
-    # Use custom_attribute for price buckets
-    dimension.product_custom_attribute.index = (
-        client.enums.ProductCustomAttributeIndexEnum.INDEX0
-    )
-    if high is not None:
-        dimension.product_custom_attribute.value = f"{low}-{high}"
-    else:
-        dimension.product_custom_attribute.value = f"{low}-Onbeperkt"
-    return dimension
 
 
 def add_sub_cpr(
@@ -1028,7 +1012,11 @@ def add_sub_cpc(
     """
     ad_group_criterion_service = client.get_service("AdGroupCriterionService")
 
-    bids = BIDS_AB if "a" in label.lower() else BIDS_C
+    # LABELS_CPC = ["a,b", "c,no_data,no_ean"]. Test the FIRST token, not a bare
+    # `"a" in label` substring — the latter is always true for "c,no_data,no_ean"
+    # ("no_data" contains an 'a'), so BIDS_C was never selected and the c bucket
+    # got the higher AB bids.
+    bids = BIDS_AB if label.split(",")[0].strip().lower() == "a" else BIDS_C
 
     reset_temp_ids()
     ops = []
@@ -1061,11 +1049,19 @@ def add_sub_cpc(
         )
         ops.append(unit_op)
 
-    # "Everything else" unit (no dimension = catch-all)
+    # "Everything else" (OTHERS) unit. The subdivision partitions on
+    # product_custom_attribute INDEX0, so the catch-all leaf must carry a
+    # ListingDimensionInfo of the SAME dimension type with the index set and no
+    # value — passing dimension=None leaves case_value unset and the API rejects
+    # the whole atomic mutate.
+    other_dimension = client.get_type("ListingDimensionInfo")
+    other_dimension.product_custom_attribute.index = (
+        client.enums.ProductCustomAttributeIndexEnum.INDEX0
+    )
     other_op = create_listing_group_unit_biddable(
         client, customer_id, ad_group_resource_name,
         parent_resource_name=root_resource,
-        dimension=None,
+        dimension=other_dimension,
         cpc_bid_micros=int(bids[0] * 1_000_000),
     )
     ops.append(other_op)
@@ -1096,13 +1092,39 @@ def _get_or_create_mc_account(
     mc_parent_id: str, shop_name: str, ads_customer_id: str
 ) -> Optional[str]:
     """Find or create a Merchant Center sub-account and link to Google Ads."""
-    mc_id = get_mc_id(mc_parent_id, shop_name)
+    try:
+        mc_id = get_mc_id(mc_parent_id, shop_name)
+    except Exception as ex:
+        # Lookup failed — abort rather than create, or we risk a duplicate
+        # sub-account for a shop that may already have one.
+        logger.error("MC lookup failed for '%s'; skipping create to avoid a duplicate: %s",
+                     shop_name, ex)
+        return None
     if mc_id is None:
         mc_id = create_merchant_id(mc_parent_id, shop_name)
         if mc_id is None:
             return None
     link_to_google_ads(mc_parent_id, mc_id, ads_customer_id)
     return mc_id
+
+
+def _set_campaign_status_by_resource(
+    client: GoogleAdsClient, customer_id: str, campaign_resource: str, status: str
+) -> bool:
+    """Set an existing campaign's status via its resource name, reusing the
+    shared client (unlike _mutate_campaign_status, which builds a fresh one).
+    Returns True on success."""
+    campaign_service = client.get_service("CampaignService")
+    op = client.get_type("CampaignOperation")
+    op.update.resource_name = campaign_resource
+    op.update.status = getattr(client.enums.CampaignStatusEnum, status)
+    op.update_mask = field_mask_pb2.FieldMask(paths=["status"])
+    try:
+        campaign_service.mutate_campaigns(customer_id=customer_id, operations=[op])
+        return True
+    except GoogleAdsException as ex:
+        logger.error("Failed to set %s to %s: %s", campaign_resource, status, ex)
+        return False
 
 
 def _create_campaigns_for_shop(
@@ -1168,19 +1190,47 @@ def _create_campaigns_for_shop(
             })
             continue
 
-        # Create product ad
-        add_shopping_product_ad_group_ad(client, customer_id, ad_group_resource)
+        # Create product ad. The campaign was created PAUSED, so a failure here
+        # leaves a paused (non-spending) shell we report as an error rather than
+        # a live campaign with no product ad.
+        product_ad = add_shopping_product_ad_group_ad(client, customer_id, ad_group_resource)
+        if product_ad is None:
+            results.append({
+                "campaign_name": campaign_name,
+                "action": "error",
+                "reason": "product_ad_creation_failed",
+                "campaign_resource": campaign_resource,
+            })
+            continue
 
         # Create listing group tree
         if campaign_type == "CPR":
-            add_sub_cpr(client, customer_id, ad_group_resource)
+            tree_ok = add_sub_cpr(client, customer_id, ad_group_resource)
         else:
-            add_sub_cpc(client, customer_id, ad_group_resource, label)
+            tree_ok = add_sub_cpc(client, customer_id, ad_group_resource, label)
+        if not tree_ok:
+            results.append({
+                "campaign_name": campaign_name,
+                "action": "error",
+                "reason": "listing_group_creation_failed",
+                "campaign_resource": campaign_resource,
+            })
+            continue
 
-        # Add negative keywords
+        # Add negative keywords (best-effort; not fatal to going live)
         negatives = get_negatives(shop_name)
         if negatives:
             add_negative_keywords(client, customer_id, campaign_resource, negatives)
+
+        # All required pieces landed — now flip the campaign live.
+        if not _set_campaign_status_by_resource(client, customer_id, campaign_resource, "ENABLED"):
+            results.append({
+                "campaign_name": campaign_name,
+                "action": "error",
+                "reason": "enable_failed",
+                "campaign_resource": campaign_resource,
+            })
+            continue
 
         results.append({
             "campaign_name": campaign_name,
@@ -1255,6 +1305,9 @@ def run_gsd_script(
     Returns a results dict summarizing what was done.
     """
     client = _get_client()
+    # Labels are per-account and stable across a run — resolve each customer_id
+    # once instead of per shop × country (#14).
+    label_cache: Dict[str, str] = {}
     overall_results: Dict[str, Any] = {
         "date": date_str or datetime.now().strftime("%Y-%m-%d"),
         "created": [],
@@ -1307,9 +1360,11 @@ def run_gsd_script(
             mc_parent_id = account_info["mc_id"]
 
             if actie == "aan":
-                # Ensure label exists
+                # Ensure label exists (cached per account)
                 try:
-                    label_resource = ensure_campaign_label_exists(client, customer_id)
+                    if customer_id not in label_cache:
+                        label_cache[customer_id] = ensure_campaign_label_exists(client, customer_id)
+                    label_resource = label_cache[customer_id]
                 except Exception as ex:
                     overall_results["errors"].append({
                         "shop_name": shop_name,
