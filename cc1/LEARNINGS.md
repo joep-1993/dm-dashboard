@@ -5675,3 +5675,23 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 - **Deploy note**: backend endpoints need a uvicorn kill+relaunch (no `--reload`); the HTML/CSS/JS is served statically so it's live on save. Both were restarted+verified 2026-07-13 (`/ll/apply` 400s on empty; skeleton served; syntax via node --check + ast).
 - **Commit**: `1a8ab52` (branch rurl-v45-confidence-scoring).
 - **Date**: 2026-07-13
+
+## GSD Campaigns audit + fixes (phases 1–4) — 2026-07-13
+Fanned-out audit (4 slices: creation, queries/MC, low-linkage, router/frontend), then implemented fixes. Commits on rurl-v45-confidence-scoring: `3bbe60a` (gsd-ll), `7e01c99` (gsd service), `b9b44e2` (frontend).
+
+**Creation path (`gsd_campaigns_service.py`) — was broken:**
+- `ad_group_criterion_path` needs THREE args (customer_id, ad_group_id, criterion_id); it was called with two → TypeError on every CPC create. Parse ad_group_id from the ad_group_resource_name.
+- OTHERS listing-group unit must carry an **index-only** ProductCustomAttribute dimension (index set, value UNSET), not `dimension=None` (which leaves case_value unset → API rejects the atomic mutate).
+- Bid selection was `"a" in label.lower()` — always true for `"c,no_data,no_ean"` ("no_data" has an 'a'), so BIDS_C was dead and the c bucket overspent on AB bids. Test the first token: `label.split(",")[0].strip().lower() == "a"`.
+- Campaign now created PAUSED and flipped ENABLED only after ad group + product ad + tree all succeed (return values checked) → no live empty campaigns. New helper `_set_campaign_status_by_resource` (shared client).
+- `get_mc_id` now RAISES on API error (was returning None → duplicate MC sub-accounts); `_get_or_create_mc_account` aborts instead of creating on lookup failure.
+
+**Stats (#4/#14):** `get_all_gsd_stats` double-counted NL because NL_CPR and NL_CPC share customer_id 7938980174 and `get_gsd_campaigns` has no type filter — now queries each DISTINCT customer_id once (live-verified: 0 dup (customer_id,campaign_id) pairs, NL 1247 not ~2494), reuses one client; `run_gsd_script` memoizes the per-account label.
+
+**Low-linkage (`gsd_ll_service.py`):** match campaigns on the exact `[shop_id:{id}]` token + `advertising_channel_type='SHOPPING'` (gate: 277/277 audited names carry `[shop_id:N]`) instead of `LIKE '%shopname%'` substring (hit wrong shops / non-Shopping). Roll back the pause when GSD_LL_PAUSED label fails to attach (paused-but-untagged is invisible to re-enable forever); `_apply_label`/`_remove_campaign_label` return bool. Audit write decoupled from the success tally. Applied to both run_low_linkage and apply_selected.
+
+**Frontend:** `pollLLUntilDone` tolerates transient poll errors + 30-min ceiling + terminal-on-error; "Run selected" result renders read-only (checkboxes only in dry-run preview) and warns about filter-hidden selected rows; disable stale Run-selected during full run; `sortBy` no longer mutates the master list (copy in applyFilters); error-row colspan 9→7.
+
+**Phase 3 live validation (2026-07-13):** created a real PAUSED test campaign in NL (merchant_id from an existing campaign), ran the actual builders through the CPC listing tree — the atomic mutate was ACCEPTED (proves the 3-arg path + OTHERS index-only dimension work live), campaign stayed PAUSED, then removed it. To create a validation campaign safely: skip the ENABLE flip, use a `[TEST-DELETEME-…]` name (no `[shop_id:]` so LL won't match it), clean up in finally.
+
+**NEW BUG found during that test (not yet fixed):** `remove_campaign` → `_mutate_campaign_status(customer_id, campaign_id, "REMOVED")` sets `status=REMOVED` via a field-mask UPDATE, which the API rejects (`INVALID_ENUM_VALUE: "Enum value 'REMOVED' cannot be used."`). Campaign removal requires the dedicated **REMOVE operation** (`op.remove = resource_name`), not a status update. The frontend "Remove" button (`DELETE /campaigns/{cid}/{campaign_id}` → remove_campaign) is therefore almost certainly broken — fix `_mutate_campaign_status`/`remove_campaign` to use `op.remove`.
