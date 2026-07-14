@@ -1346,7 +1346,6 @@
 
             btn.disabled = true;
             runBtn.disabled = true;
-            btn.textContent = 'Previewing...';
             area.style.display = 'block';
             content.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Checking what would be created and paused...</div>';
 
@@ -1379,7 +1378,6 @@
             } finally {
                 btn.disabled = false;
                 runBtn.disabled = false;
-                btn.textContent = 'Preview';
             }
         }
 
