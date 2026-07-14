@@ -61,6 +61,11 @@
         .perf-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .perf-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .perf-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        /* Standup tables: fixed layout so column widths don't jump when the Δ/Δ%
+           direction toggle swaps in different rows. Numeric columns get an
+           explicit inline width; text columns absorb the rest and wrap. */
+        .perf-table.fixed-cols { table-layout: fixed; }
+        .perf-table.fixed-cols td.text-col, .perf-table.fixed-cols th.text-col { white-space: normal; }
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
         .pagination-controls select { font-size: 0.85rem; width: auto; }
         .pagination-controls .page-info { color: #636e72; }
@@ -1017,10 +1022,12 @@
             const which = isVis ? 'visits' : 'revenue';
             const sortCls = 'sortable ' + (up ? 'sort-desc' : 'sort-asc');
             const next = up ? 'down' : 'up';
-            const th = label => `<th class="${sortCls}" onclick="setStandupSort('${which}','${next}')"`
+            // `w` fixes the numeric column widths (table-layout: fixed) so they
+            // don't jump when the Δ/Δ% direction toggle swaps in different rows.
+            const th = (label, w) => `<th class="${sortCls}" style="width:${w}" onclick="setStandupSort('${which}','${next}')"`
                 + ` title="Click to show ${up ? 'most negative' : 'most positive'} first">${label}</th>`;
-            return `<table class="table table-sm table-hover perf-table standup-table mb-0">
-                <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th>${th('Δ')}${th('Δ%')}</tr></thead>
+            return `<table class="table table-sm table-hover perf-table standup-table fixed-cols mb-0">
+                <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th>${th('Δ', '110px')}${th('Δ%', '80px')}</tr></thead>
                 <tbody>${rows}</tbody>
             </table>`;
         }
