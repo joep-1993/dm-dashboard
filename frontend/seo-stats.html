@@ -202,8 +202,14 @@
 
         <!-- Chart -->
         <div class="card mb-4">
-            <div class="card-header" style="background:#5e4a90; color:#fff;">
+            <div class="card-header d-flex align-items-center gap-2" style="background:#5e4a90; color:#fff;">
                 <h5 class="mb-0">Visits & revenue per day</h5>
+                <svg id="revInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
+                    <title>Revenue = Beslist's own revenue (onze omzet, incl. affiliate) attributed by conversion date, matching the Qlik "Beslist omzet en clicks" report. The most recent 1–2 days undercount because conversions keep settling for up to ~180 days. Visits remain visit-based (real visits only).</title>
+                    <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
+                    <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                    <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                </svg>
             </div>
             <div class="card-body">
                 <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
@@ -227,11 +233,6 @@
                     </div>
                 </div>
                 <div id="infoNote" class="info-note mb-3" style="display:none;"></div>
-                <div class="text-muted small mb-3" style="line-height:1.4;">
-                    Revenue = Beslist's own revenue (<em>onze omzet</em>, incl. affiliate) attributed by conversion date,
-                    matching the Qlik "Beslist omzet en clicks" report. The most recent 1&ndash;2 days undercount because
-                    conversions keep settling for up to ~180 days. Visits remain visit-based (real visits only).
-                </div>
                 <div class="d-flex flex-wrap gap-2 mb-3" id="metricToggles"></div>
                 <div class="chart-wrap"><canvas id="chart"></canvas></div>
             </div>
@@ -680,11 +681,14 @@
             return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
         }
 
-        // When on, every column gets an extra WoW % delta column.
+        // When on, every column except the derived rate metrics (CTR / Bounce)
+        // gets an extra WoW % delta column.
         let showDeltas = false;
+        // Rate metrics (percent) are excluded from the WoW % delta columns.
+        function hasWow(k) { return METRICS[k].unit !== 'percent'; }
 
         function deltaHeaderFor(k) {
-            if (!showDeltas) return '';
+            if (!showDeltas || !hasWow(k)) return '';
             return `<th class="sortable" data-sort="${k}_wow" onclick="sortBy('${k}_wow')">${METRICS[k].label} WoW %</th>`;
         }
         function renderHead() {
@@ -702,7 +706,7 @@
             return `<td><span class="delta-badge" style="background:${wowColor(pct)};color:#2d2a3a">${sign}${pct.toLocaleString('nl-NL', { maximumFractionDigits: 1 })}%</span></td>`;
         }
         function deltaBodyCell(k, r) {
-            if (!showDeltas) return '';
+            if (!showDeltas || !hasWow(k)) return '';
             return wowBadgeCell(r[`${k}_wow`]);
         }
 
@@ -817,8 +821,11 @@
         // independently per column across the full range (not just the visible page).
         const VISIT_KEYS = ORDER.filter(k => METRICS[k].unit === 'count');
         // Columns that get the diverging red→green heatmap in the per-day table:
-        // all visit counts plus SEO revenue and SEO CTR.
-        const HEAT_KEYS = [...VISIT_KEYS, 'seo_omzet', 'seo_ctr'];
+        // all visit counts plus SEO revenue, SEO CTR and SEO Bounce.
+        const HEAT_KEYS = [...VISIT_KEYS, 'seo_omzet', 'seo_ctr', 'seo_bounce'];
+        // Heatmap columns where high = bad: their scale is inverted so a high value
+        // fades red (not green). Bounce rate is the "lower is better" case.
+        const HEAT_INVERT_KEYS = ['seo_bounce'];
 
         function heatColor(t) {
             // Diverging scale: low = red fades, high = green fades, neutral white midpoint.
@@ -865,7 +872,7 @@
         function renderBody(rows) {
             const body = document.getElementById('tableBody');
             if (!rows.length) {
-                const span = 2 + TABLE_COLS.length + (showDeltas ? TABLE_COLS.length : 0) + 1;
+                const span = 2 + TABLE_COLS.length + (showDeltas ? TABLE_COLS.filter(hasWow).length : 0) + 1;
                 body.innerHTML = `<tr><td colspan="${span}" class="text-center text-muted py-4">No data.</td></tr>`;
                 return;
             }
@@ -875,7 +882,8 @@
                     let cell;
                     if (HEAT_KEYS.includes(k)) {
                         const s = sc[k];
-                        const t = s.mx > s.mn ? (Number(r[k]) - s.mn) / (s.mx - s.mn) : 0.5;
+                        let t = s.mx > s.mn ? (Number(r[k]) - s.mn) / (s.mx - s.mn) : 0.5;
+                        if (HEAT_INVERT_KEYS.includes(k)) t = 1 - t;   // high bounce = red
                         const wk = WOW_BY_KEY[k];
                         const attrs = wk ? ` title="WoW: ${wowText(r[wk])}" style="background:${heatColor(t)};cursor:help"` : ` style="background:${heatColor(t)}"`;
                         cell = `<td${attrs}>${fmt(k, r[k])}</td>`;
@@ -905,7 +913,7 @@
         function renderFoot() {
             const foot = document.getElementById('tableFoot');
             const t = computeTotals();
-            foot.innerHTML = '<td>Total</td><td></td>' + TABLE_COLS.map(k => `<td>${fmt(k, t[k])}</td>` + (showDeltas ? '<td></td>' : '')).join('') + '<td></td>';
+            foot.innerHTML = '<td>Total</td><td></td>' + TABLE_COLS.map(k => `<td>${fmt(k, t[k])}</td>` + ((showDeltas && hasWow(k)) ? '<td></td>' : '')).join('') + '<td></td>';
         }
 
         function renderMeta() {
@@ -1207,7 +1215,7 @@
                 const o = { Date: r.date, Day: weekdayOf(r.date) };
                 TABLE_COLS.forEach(k => {
                     o[METRICS[k].label] = r[k];
-                    if (showDeltas) {
+                    if (showDeltas && hasWow(k)) {
                         const w = r[`${k}_wow`];
                         o[`${METRICS[k].label} WoW %`] = (w === null || w === undefined) ? '' : Math.round(w * 10) / 10;
                     }
