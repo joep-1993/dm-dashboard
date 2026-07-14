@@ -939,6 +939,7 @@
         let llPreviewSortColumn = null;
         let llPreviewSortDirection = 'asc';
         let llPreviewPage = 1;
+        let llPreviewActionFilter = null;   // null=all | 'Paused' | 'Enabled' | 'Skipped' | 'Error'
 
         function renderLLSummary(data) {
             const pausedN = data.paused_count ?? (data.paused || []).length;
@@ -947,14 +948,26 @@
             const errorsN = (data.errors || []).length;
             const tag = data.dry_run ? ' <span class="badge bg-info text-dark">dry run — nothing changed</span>' : '';
 
+            const llTile = (act, count, label, color, bg, border) => {
+                const active = llPreviewActionFilter === act;
+                return `<div id="llTile-${act}" data-border="${border}" class="p-2 px-3 rounded" style="background:${bg}; border:1px solid ${border}; cursor:pointer;${active ? ` box-shadow:0 0 0 2px ${border} inset;` : ''}" onclick="selectLLTile('${act}')" title="Click to filter the table">
+                    <div style="font-size:1.5rem; font-weight:700; color:${color};">${count}</div>
+                    <div style="font-size:0.8rem; color:${color};">${label}</div>
+                </div>`;
+            };
+            const allActive = !llPreviewActionFilter;
             let html = `<div class="fw-bold mb-2">Done${tag}</div>`;
-            html += `<div class="mb-2">
-                <span class="badge bg-warning text-dark me-1">${pausedN} paused</span>
-                <span class="badge badge-active me-1">${enabledN} enabled</span>
-                <span class="badge me-1" style="background:#5e4a90;color:#fff;">${skippedN} skipped</span>
-                <span class="badge bg-danger">${errorsN} errors</span>
-                <span class="text-muted ms-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows</span>
-            </div>`;
+            html += `<div class="d-flex flex-wrap gap-3 mb-2">
+                <div id="llTile-all" data-border="#adb5bd" class="p-2 px-3 rounded" style="background:#f1f3f5; border:1px solid #adb5bd; cursor:pointer;${allActive ? ' box-shadow:0 0 0 2px #adb5bd inset;' : ''}" onclick="selectLLTile('all')" title="Show all rows">
+                    <div style="font-size:1.5rem; font-weight:700; color:#495057;">${pausedN + enabledN + skippedN + errorsN}</div>
+                    <div style="font-size:0.8rem; color:#495057;">all rows</div>
+                </div>
+                ${llTile('Paused', pausedN, 'paused', '#e65100', '#fff3e0', '#fb8c00')}
+                ${llTile('Enabled', enabledN, 'enabled', '#00b894', '#e8f7f3', '#00b894')}
+                ${llTile('Skipped', skippedN, 'skipped', '#5e4a90', '#f3f0fa', '#5e4a90')}
+                ${llTile('Error', errorsN, 'errors', '#d63031', '#fdecea', '#d63031')}
+            </div>
+            <div class="text-muted mb-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows</div>`;
 
             // Checkboxes/apply only make sense for a dry-run PREVIEW. After a real
             // run (full or "Run selected") the result is shown read-only so it
@@ -963,14 +976,18 @@
             llPreviewSelectable = selectable;
 
             llPreviewRows = [
-                ...(data.paused || []).map(c => ({ ...c, action: 'Paused' })),
-                ...(data.enabled || []).map(c => ({ ...c, action: 'Enabled' })),
+                ...(data.paused || []).map(c => ({ ...c, action: 'Paused', _selectable: true })),
+                ...(data.enabled || []).map(c => ({ ...c, action: 'Enabled', _selectable: true })),
+                ...(data.skipped || []).map(c => ({ ...c, action: 'Skipped', _selectable: false, campaign_name: c.reason ? `(${c.reason})` : (c.campaign_name || '') })),
+                ...(data.errors || []).map(c => ({ ...c, action: 'Error', _selectable: false, shop_name: c.shop_name || c.step || '', campaign_name: c.error ? String(c.error).slice(0, 140) : (c.campaign_name || '') })),
             ].map((r, i) => ({ ...r, _key: i }));
-            // Preview shows the full set a plain "Run" would touch, so start
-            // every row checked; the user unchecks the ones to skip.
-            llPreviewSelected = selectable ? new Set(llPreviewRows.map(r => r._key)) : new Set();
+            // Preview shows the full set a plain "Run" would touch, so start every
+            // actionable (paused/enabled) row checked; skipped/error rows are not
+            // selectable. The user unchecks the ones to skip.
+            llPreviewSelected = selectable ? new Set(llPreviewRows.filter(r => r._selectable).map(r => r._key)) : new Set();
             llPreviewSortColumn = null;
             llPreviewSortDirection = 'asc';
+            llPreviewActionFilter = null;
             llPreviewPage = 1;
 
             if (llPreviewRows.length) {
@@ -1023,18 +1040,37 @@
 
         function applyPreviewFilter() {
             const inp = document.getElementById('llPreviewFilter');
-            if (!inp) return;
-            const q = inp.value.toLowerCase();
-            llPreviewFiltered = !q ? llPreviewRows.slice() : llPreviewRows.filter(r =>
+            const q = inp ? inp.value.toLowerCase() : '';
+            let rows = llPreviewRows;
+            if (llPreviewActionFilter) rows = rows.filter(r => r.action === llPreviewActionFilter);
+            if (q) rows = rows.filter(r =>
                 (r.shop_name || '').toLowerCase().includes(q) ||
                 (r.campaign_name || '').toLowerCase().includes(q) ||
                 (r.country || '').toLowerCase().includes(q) ||
                 (r.action || '').toLowerCase().includes(q) ||
                 String(r.shop_id || '').includes(q)
             );
+            llPreviewFiltered = rows.slice();
             llPreviewPage = 1;
             sortPreviewRows();
             renderPreviewPage();
+        }
+
+        function selectLLTile(act) {
+            if (act === 'all') llPreviewActionFilter = null;
+            else llPreviewActionFilter = (llPreviewActionFilter === act) ? null : act;
+            updateLLTileActive();
+            applyPreviewFilter();
+        }
+
+        function updateLLTileActive() {
+            ['all', 'Paused', 'Enabled', 'Skipped', 'Error'].forEach(act => {
+                const el = document.getElementById(`llTile-${act}`);
+                if (!el) return;
+                const isActive = act === 'all' ? !llPreviewActionFilter : llPreviewActionFilter === act;
+                const border = el.dataset.border || '#adb5bd';
+                el.style.boxShadow = isActive ? `0 0 0 2px ${border} inset` : 'none';
+            });
         }
 
         function sortPreviewBy(column) {
@@ -1094,12 +1130,18 @@
             const end = perPage === Infinity ? total : start + perPage;
 
             const cols = llPreviewSelectable ? 6 : 5;
+            const badgeMap = {
+                Paused: '<span class="badge bg-warning text-dark">Paused</span>',
+                Enabled: '<span class="badge badge-active">Enabled</span>',
+                Skipped: '<span class="badge" style="background:#5e4a90;color:#fff;">Skipped</span>',
+                Error: '<span class="badge bg-danger">Error</span>',
+            };
             tbody.innerHTML = total ? llPreviewFiltered.slice(start, end).map(r => {
-                const badge = r.action === 'Paused'
-                    ? '<span class="badge bg-warning text-dark">Paused</span>'
-                    : '<span class="badge badge-active">Enabled</span>';
+                const badge = badgeMap[r.action] || escapeHtml(r.action || '');
                 const checkboxCell = llPreviewSelectable
-                    ? `<td style="text-align: center;"><input type="checkbox" ${llPreviewSelected.has(r._key) ? 'checked' : ''} onchange="togglePreviewRow(${r._key}, this.checked)"></td>`
+                    ? (r._selectable
+                        ? `<td style="text-align: center;"><input type="checkbox" ${llPreviewSelected.has(r._key) ? 'checked' : ''} onchange="togglePreviewRow(${r._key}, this.checked)"></td>`
+                        : '<td></td>')
                     : '';
                 return `<tr>
                     ${checkboxCell}
@@ -1131,6 +1173,7 @@
         // across filtering for the rows not shown).
         function togglePreviewSelectAll(checked) {
             llPreviewFiltered.forEach(r => {
+                if (!r._selectable) return;
                 if (checked) llPreviewSelected.add(r._key);
                 else llPreviewSelected.delete(r._key);
             });
@@ -1140,7 +1183,7 @@
         function updatePreviewSelectionUI() {
             const selAll = document.getElementById('llPreviewSelectAll');
             if (selAll) {
-                const filteredKeys = llPreviewFiltered.map(r => r._key);
+                const filteredKeys = llPreviewFiltered.filter(r => r._selectable).map(r => r._key);
                 const selInFiltered = filteredKeys.filter(k => llPreviewSelected.has(k)).length;
                 selAll.checked = filteredKeys.length > 0 && selInFiltered === filteredKeys.length;
                 selAll.indeterminate = selInFiltered > 0 && selInFiltered < filteredKeys.length;
@@ -1492,7 +1535,7 @@
                         </tbody>
                     </table>
                 </div>
-                <div class="text-muted mt-1" style="font-size:0.75rem;">${rows.length} row(s)${previewFilterText ? ' (filtered)' : ''}</div>`;
+                <div class="text-muted mt-2" style="font-size:0.75rem;">${rows.length} row(s)${previewFilterText ? ' (filtered)' : ''}</div>`;
         }
 
         function sortPreview(col) {
