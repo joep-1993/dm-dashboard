@@ -1646,19 +1646,19 @@
                 }
                 return `<tr>
                     <td style="text-align:center; white-space:nowrap;">${time}</td>
-                    <td style="text-align:center;">${escapeHtml(entry.action)}</td>
-                    <td style="text-align:center;" class="${cls}">${escapeHtml(entry.details)}</td>
+                    <td style="text-align:left;">${escapeHtml(entry.action)}</td>
+                    <td style="text-align:left;" class="${cls}">${escapeHtml(entry.details)}</td>
                     <td style="text-align:center;">${resetHtml}</td>
                 </tr>`;
             }).join('');
             el.innerHTML = `
-                <table class="table table-hover mb-0" id="gsdActivityTable" style="width:95%; margin:0 auto;">
+                <table class="table table-sm table-hover mb-0" id="gsdActivityTable" style="width:95%; margin:0 auto; font-size:0.82rem;">
                     <thead class="table-light">
                         <tr>
-                            <th style="padding:8px 12px; text-align:center; width:26%;">Time</th>
-                            <th style="padding:8px 12px; text-align:center; width:18%;">Action</th>
-                            <th style="padding:8px 12px; text-align:center; width:41%;">Details</th>
-                            <th style="padding:8px 12px; text-align:center; width:15%;">Reset</th>
+                            <th style="padding:5px 10px; text-align:center; width:26%;">Time</th>
+                            <th style="padding:5px 10px; text-align:left; width:18%;">Action</th>
+                            <th style="padding:5px 10px; text-align:left; width:41%;">Details</th>
+                            <th style="padding:5px 10px; text-align:center; width:15%;">Reset</th>
                         </tr>
                     </thead>
                     <tbody>${rows}</tbody>
