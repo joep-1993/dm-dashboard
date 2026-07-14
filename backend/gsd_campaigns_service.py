@@ -44,6 +44,11 @@ SCRIPT_LABEL = "GSD_SCRIPT"
 LABELS_CPR = ["a", "b", "c", "no_data", "no_ean"]
 LABELS_CPC = ["a,b", "c,no_data,no_ean"]
 
+# A Redshift shop-change row is per-country: `kolom` is the GSD flag that flipped,
+# so it names the ONE country to act on. A shop flagged for NL only must not
+# create/pause BE/DE campaigns (e.g. Calcuso.com|NL -> NL only).
+KOLOM_COUNTRY = {"is_gsd_nl_shop": "NL", "is_gsd_be_shop": "BE", "is_gsd_de_shop": "DE"}
+
 TRACKING_TEMPLATES = {
     "NL": (
         "https://www.beslist.nl/outclick/redirect?aff_id=900"
@@ -1554,8 +1559,10 @@ def preview_gsd_script(
         if campaign_type not in ("CPR", "CPC"):
             campaign_type = "CPR"
 
-        # Same country/label expansion as run_gsd_script.
-        countries = ["NL", "BE", "DE"] if campaign_type == "CPR" else ["NL", "BE"]
+        # Same country/label expansion as run_gsd_script: only the country whose
+        # GSD flag flipped (from the feed's `kolom`), NOT every model country.
+        country = KOLOM_COUNTRY.get(change.get("kolom"))
+        countries = [country] if country else []
         labels = LABELS_CPR if campaign_type == "CPR" else LABELS_CPC
 
         shop_row: Dict[str, Any] = {
@@ -1710,9 +1717,11 @@ def run_gsd_script(
         if campaign_type not in ("CPR", "CPC"):
             campaign_type = "CPR"
 
-        # Process each country relevant to this change
-        # CPR: NL, BE, DE; CPC: NL, BE
-        countries = ["NL", "BE", "DE"] if campaign_type == "CPR" else ["NL", "BE"]
+        # Act only on the country whose GSD flag flipped (the feed's `kolom`),
+        # NOT every model country — a shop flagged for one country must not
+        # create/pause campaigns in the others.
+        country = KOLOM_COUNTRY.get(change.get("kolom"))
+        countries = [country] if country else []
 
         for country in countries:
             account_info = _find_account_info(country, campaign_type)
