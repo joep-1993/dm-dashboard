@@ -2021,17 +2021,17 @@
                     <table class="table table-sm table-hover mb-0 gsd-preview-table">
                         <thead class="table-light">
                             <tr>
-                                ${th('action', 'Action', '90px')}
                                 ${th('name', 'Campaign / shop')}
                                 ${th('country', 'Country', '80px')}
+                                ${th('action', 'Action', '90px')}
                                 ${th('detail', 'Detail')}
                             </tr>
                         </thead>
                         <tbody>
                             ${rows.length ? rows.map(r => `<tr>
-                                <td>${runActionLabel(r.action)}</td>
                                 <td class="col-name" title="${escapeHtml(r.name || '')}">${escapeHtml(r.name || '')}</td>
                                 <td>${escapeHtml(r.country || '')}</td>
+                                <td>${runActionLabel(r.action)}</td>
                                 <td>${escapeHtml(r.detail || '')}</td>
                             </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No rows.</td></tr>'}
                         </tbody>
@@ -2049,7 +2049,7 @@
         function onRunResultFilter(v) { runResultFilterText = v; renderRunResultTable(); }
 
         function runResultViewRows() {
-            return getRunResultView().map(r => ({ Action: r.action, 'Campaign / shop': r.name, Country: r.country, Detail: r.detail }));
+            return getRunResultView().map(r => ({ 'Campaign / shop': r.name, Country: r.country, Action: r.action, Detail: r.detail }));
         }
 
         function exportRunResultXlsx() {
