@@ -1665,7 +1665,12 @@
             btn.disabled = true;
             btn.textContent = 'Running...';
             area.style.display = 'block';
-            content.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Running GSD script... This may take a while.</div>';
+            content.innerHTML = `
+                <div class="d-flex align-items-center gap-2">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <span>Running GSD script... This may take a while.</span>
+                    <button class="btn btn-sm ms-2" id="runCancelBtn" style="border:1px solid #d63031; color:#d63031; background:transparent;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelRun()">Cancel</button>
+                </div>`;
 
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/run?${params.toString()}`, { method: 'POST' });
@@ -1679,8 +1684,11 @@
                 newCampaignIds = new Set(undo.created.map(c => c.campaign_id));
 
                 const nC = undo.created.length, nP = undo.paused.length;
-                content.innerHTML = `<div class="text-success fw-bold">Done!</div><pre class="mt-2 mb-0" style="font-size:0.82rem; max-height:200px; overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
-                logActivity('Run Script', `${nC} created / ${nP} paused${date ? ' for ' + date : ''}`, true, { undo });
+                const heading = data.cancelled
+                    ? '<div class="text-warning fw-bold">Cancelled — stopped early.</div>'
+                    : '<div class="text-success fw-bold">Done!</div>';
+                content.innerHTML = `${heading}<pre class="mt-2 mb-0" style="font-size:0.82rem; max-height:200px; overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+                logActivity('Run Script', `${nC} created / ${nP} paused${data.cancelled ? ' (cancelled)' : ''}${date ? ' for ' + date : ''}`, true, { undo });
                 loadCampaigns();
                 loadStats();
             } catch (err) {
@@ -1690,6 +1698,13 @@
                 btn.disabled = false;
                 btn.textContent = 'Run';
             }
+        }
+
+        // Ask the backend to stop the active run at the next shop boundary.
+        async function cancelRun() {
+            const b = document.getElementById('runCancelBtn');
+            if (b) { b.disabled = true; b.textContent = 'Cancelling…'; }
+            try { await fetch(`${API_BASE}/api/gsd-campaigns/run/cancel`, { method: 'POST' }); } catch (e) { /* ignore */ }
         }
 
         // --- Activity Log ---

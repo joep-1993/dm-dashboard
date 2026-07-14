@@ -49,6 +49,15 @@ LABELS_CPC = ["a,b", "c,no_data,no_ean"]
 # create/pause BE/DE campaigns (e.g. Calcuso.com|NL -> NL only).
 KOLOM_COUNTRY = {"is_gsd_nl_shop": "NL", "is_gsd_be_shop": "BE", "is_gsd_de_shop": "DE"}
 
+# Cooperative cancel for an in-flight run_gsd_script — checked between shops, so
+# a cancel stops further creates/pauses (already-processed shops stay done).
+_run_cancel = {"cancel": False}
+
+
+def cancel_run() -> None:
+    """Request the active GSD run to stop at the next shop boundary."""
+    _run_cancel["cancel"] = True
+
 TRACKING_TEMPLATES = {
     "NL": (
         "https://www.beslist.nl/outclick/redirect?aff_id=900"
@@ -1690,7 +1699,9 @@ def run_gsd_script(
         "paused": [],
         "errors": [],
         "skipped": [],
+        "cancelled": False,
     }
+    _run_cancel["cancel"] = False  # fresh run
 
     # Get shop changes from Redshift
     try:
@@ -1706,7 +1717,11 @@ def run_gsd_script(
 
     logger.info("Processing %d shop changes", len(changes))
 
-    for change in changes:
+    for idx, change in enumerate(changes):
+        if _run_cancel["cancel"]:
+            overall_results["cancelled"] = True
+            logger.info("GSD run cancelled after %d/%d shop changes", idx, len(changes))
+            break
         shop_id = change.get("shop_id")
         shop_name = change.get("shop_name", "")
         actie = change.get("actie", "")
