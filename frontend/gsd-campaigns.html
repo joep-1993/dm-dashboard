@@ -48,6 +48,12 @@
         .campaign-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .campaign-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .campaign-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .gsd-preview-table thead th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; }
+        .gsd-preview-table thead th.sortable { cursor: pointer; user-select: none; }
+        .gsd-preview-table thead th.sortable:hover { background: #e9ecef; }
+        .gsd-preview-table .sort-arrow { opacity: 0.7; font-size: 0.7rem; }
+        .gsd-preview-table td { vertical-align: middle; }
+        .gsd-preview-table td.col-name { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
@@ -69,7 +75,7 @@
         .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
         .flatpickr-day.today { border-color: #5e4a90; }
         .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
-        .activity-log { max-height: 300px; overflow-y: auto; font-size: 0.82rem; }
+        .activity-log { font-size: 0.82rem; }
         .activity-log .log-entry { padding: 0.4rem 0; border-bottom: 1px solid #f1f2f6; }
         .activity-log .log-time { color: #636e72; min-width: 140px; display: inline-block; }
         .activity-log .log-action { font-weight: 600; }
@@ -93,11 +99,11 @@
         .ll-history-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
 
         /* Preview results table — same header layout as the history table */
-        .ll-preview-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .ll-preview-table th { white-space: nowrap; padding: 6px 14px; }
         .ll-preview-table td { vertical-align: middle; font-size: 0.9rem; }
         .ll-preview-table .col-country { text-align: center; }
         .ll-preview-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
-        .ll-preview-table th.sortable:hover { opacity: 0.85; }
+        .ll-preview-table th.sortable:hover { background: #e9ecef; }
         .ll-preview-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .ll-preview-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .ll-preview-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
@@ -202,7 +208,10 @@
                             <input class="form-check-input" type="radio" name="shopMode" id="modeInclude" value="include" disabled>
                             <label class="form-check-label" for="modeInclude">Include only these shops</label>
                         </div>
-                        <div class="mt-auto d-flex justify-content-end">
+                        <div class="mt-auto d-flex justify-content-end gap-2">
+                            <button class="btn" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; padding: 0.4rem 1.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="previewScript()" id="previewBtn">
+                                Preview
+                            </button>
                             <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runScript()" id="runBtn">
                                 Run
                             </button>
@@ -376,8 +385,8 @@
                 <div class="pagination-controls" id="llPaginationControls">
                     <span>Per page:</span>
                     <select class="form-select form-select-sm" id="llPerPage" onchange="llCurrentPage=1; renderLLHistory();">
-                        <option value="10">10</option>
-                        <option value="25" selected>25</option>
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
                         <option value="50">50</option>
                         <option value="100">100</option>
                         <option value="all">Show all</option>
@@ -398,8 +407,8 @@
                 </h5>
             </div>
             <div class="card-body p-0">
-                <div class="activity-log p-3" id="activityLog">
-                    <div class="text-muted text-center py-2">No activity yet.</div>
+                <div class="activity-log" id="activityLog">
+                    <div class="text-muted text-center py-3">No activity yet.</div>
                 </div>
             </div>
         </div>
@@ -419,6 +428,14 @@
         let sortColumn = null;
         let sortDirection = 'asc';
         let newCampaignIds = new Set();
+        let pendingReconstruct = null;  // {id, created, paused} awaiting confirmation
+        // GSD preview panel state (sort / filter / export)
+        let previewCampaigns = [];
+        let previewByShop = [];
+        let previewMeta = {};
+        let previewSort = { col: 'shop_name', dir: 'asc' };
+        let previewFilterText = '';
+        let previewActiveTile = null;  // null | 'create' | 'pause' | 'skip' | 'shops'
 
         window.addEventListener('DOMContentLoaded', () => {
             if (window.flatpickr) {
@@ -923,6 +940,7 @@
         let llPreviewSortColumn = null;
         let llPreviewSortDirection = 'asc';
         let llPreviewPage = 1;
+        let llPreviewActionFilter = null;   // null=all | 'Paused' | 'Enabled' | 'Skipped' | 'Error'
 
         function renderLLSummary(data) {
             const pausedN = data.paused_count ?? (data.paused || []).length;
@@ -931,14 +949,26 @@
             const errorsN = (data.errors || []).length;
             const tag = data.dry_run ? ' <span class="badge bg-info text-dark">dry run — nothing changed</span>' : '';
 
+            const llTile = (act, count, label, color, bg, border) => {
+                const active = llPreviewActionFilter === act;
+                return `<div id="llTile-${act}" data-border="${border}" class="p-2 px-3 rounded" style="background:${bg}; border:1px solid ${border}; cursor:pointer;${active ? ` box-shadow:0 0 0 2px ${border} inset;` : ''}" onclick="selectLLTile('${act}')" title="Click to filter the table">
+                    <div style="font-size:1.5rem; font-weight:700; color:${color};">${count}</div>
+                    <div style="font-size:0.8rem; color:${color};">${label}</div>
+                </div>`;
+            };
+            const allActive = !llPreviewActionFilter;
             let html = `<div class="fw-bold mb-2">Done${tag}</div>`;
-            html += `<div class="mb-2">
-                <span class="badge bg-warning text-dark me-1">${pausedN} paused</span>
-                <span class="badge badge-active me-1">${enabledN} enabled</span>
-                <span class="badge me-1" style="background:#5e4a90;color:#fff;">${skippedN} skipped</span>
-                <span class="badge bg-danger">${errorsN} errors</span>
-                <span class="text-muted ms-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows</span>
-            </div>`;
+            html += `<div class="d-flex flex-wrap gap-3 mb-2">
+                <div id="llTile-all" data-border="#adb5bd" class="p-2 px-3 rounded" style="background:#f1f3f5; border:1px solid #adb5bd; cursor:pointer;${allActive ? ' box-shadow:0 0 0 2px #adb5bd inset;' : ''}" onclick="selectLLTile('all')" title="Show all rows">
+                    <div style="font-size:1.5rem; font-weight:700; color:#495057;">${pausedN + enabledN + skippedN + errorsN}</div>
+                    <div style="font-size:0.8rem; color:#495057;">all rows</div>
+                </div>
+                ${llTile('Paused', pausedN, 'paused', '#e65100', '#fff3e0', '#fb8c00')}
+                ${llTile('Enabled', enabledN, 'enabled', '#00b894', '#e8f7f3', '#00b894')}
+                ${llTile('Skipped', skippedN, 'skipped', '#5e4a90', '#f3f0fa', '#5e4a90')}
+                ${llTile('Error', errorsN, 'errors', '#d63031', '#fdecea', '#d63031')}
+            </div>
+            <div class="text-muted mb-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows</div>`;
 
             // Checkboxes/apply only make sense for a dry-run PREVIEW. After a real
             // run (full or "Run selected") the result is shown read-only so it
@@ -947,32 +977,36 @@
             llPreviewSelectable = selectable;
 
             llPreviewRows = [
-                ...(data.paused || []).map(c => ({ ...c, action: 'Paused' })),
-                ...(data.enabled || []).map(c => ({ ...c, action: 'Enabled' })),
+                ...(data.paused || []).map(c => ({ ...c, action: 'Paused', _selectable: true })),
+                ...(data.enabled || []).map(c => ({ ...c, action: 'Enabled', _selectable: true })),
+                ...(data.skipped || []).map(c => ({ ...c, action: 'Skipped', _selectable: false, campaign_name: c.reason ? `(${c.reason})` : (c.campaign_name || '') })),
+                ...(data.errors || []).map(c => ({ ...c, action: 'Error', _selectable: false, shop_name: c.shop_name || c.step || '', campaign_name: c.error ? String(c.error).slice(0, 140) : (c.campaign_name || '') })),
             ].map((r, i) => ({ ...r, _key: i }));
-            // Preview shows the full set a plain "Run" would touch, so start
-            // every row checked; the user unchecks the ones to skip.
-            llPreviewSelected = selectable ? new Set(llPreviewRows.map(r => r._key)) : new Set();
+            // Preview shows the full set a plain "Run" would touch, so start every
+            // actionable (paused/enabled) row checked; skipped/error rows are not
+            // selectable. The user unchecks the ones to skip.
+            llPreviewSelected = selectable ? new Set(llPreviewRows.filter(r => r._selectable).map(r => r._key)) : new Set();
             llPreviewSortColumn = null;
             llPreviewSortDirection = 'asc';
+            llPreviewActionFilter = null;
             llPreviewPage = 1;
 
             if (llPreviewRows.length) {
                 const chevL = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>';
                 const chevR = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>';
                 const selInfo = selectable ? '<span class="text-muted" id="llPreviewSelectedInfo" style="font-size: 0.85rem;"></span>' : '';
-                const runSelBtnHtml = selectable ? `<button class="btn btn-sm" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>` : '';
+                const runSelBtnHtml = selectable ? `<button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>` : '';
                 const selectAllTh = selectable ? '<th style="width: 2.5rem; text-align: center;"><input type="checkbox" id="llPreviewSelectAll" title="Select all (filtered)" onclick="togglePreviewSelectAll(this.checked)"></th>' : '';
                 html += `
                 <div class="filter-row d-flex gap-2 align-items-center mt-2 mb-2">
                     <input type="text" class="form-control form-control-sm" id="llPreviewFilter" placeholder="Filter shop, campaign, country..." oninput="applyPreviewFilter()" style="max-width: 260px;">
                     ${selInfo}
-                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportPreviewXlsx()">Export Excel</button>
+                    <button class="btn ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportPreviewXlsx()">Export Excel</button>
                     ${runSelBtnHtml}
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover ll-preview-table mb-0">
-                        <thead>
+                        <thead class="table-light">
                             <tr>
                                 ${selectAllTh}
                                 <th class="sortable" data-sort="shop_name" onclick="sortPreviewBy('shop_name')">Shop</th>
@@ -1007,18 +1041,37 @@
 
         function applyPreviewFilter() {
             const inp = document.getElementById('llPreviewFilter');
-            if (!inp) return;
-            const q = inp.value.toLowerCase();
-            llPreviewFiltered = !q ? llPreviewRows.slice() : llPreviewRows.filter(r =>
+            const q = inp ? inp.value.toLowerCase() : '';
+            let rows = llPreviewRows;
+            if (llPreviewActionFilter) rows = rows.filter(r => r.action === llPreviewActionFilter);
+            if (q) rows = rows.filter(r =>
                 (r.shop_name || '').toLowerCase().includes(q) ||
                 (r.campaign_name || '').toLowerCase().includes(q) ||
                 (r.country || '').toLowerCase().includes(q) ||
                 (r.action || '').toLowerCase().includes(q) ||
                 String(r.shop_id || '').includes(q)
             );
+            llPreviewFiltered = rows.slice();
             llPreviewPage = 1;
             sortPreviewRows();
             renderPreviewPage();
+        }
+
+        function selectLLTile(act) {
+            if (act === 'all') llPreviewActionFilter = null;
+            else llPreviewActionFilter = (llPreviewActionFilter === act) ? null : act;
+            updateLLTileActive();
+            applyPreviewFilter();
+        }
+
+        function updateLLTileActive() {
+            ['all', 'Paused', 'Enabled', 'Skipped', 'Error'].forEach(act => {
+                const el = document.getElementById(`llTile-${act}`);
+                if (!el) return;
+                const isActive = act === 'all' ? !llPreviewActionFilter : llPreviewActionFilter === act;
+                const border = el.dataset.border || '#adb5bd';
+                el.style.boxShadow = isActive ? `0 0 0 2px ${border} inset` : 'none';
+            });
         }
 
         function sortPreviewBy(column) {
@@ -1078,12 +1131,18 @@
             const end = perPage === Infinity ? total : start + perPage;
 
             const cols = llPreviewSelectable ? 6 : 5;
+            const badgeMap = {
+                Paused: '<span class="badge bg-warning text-dark">Paused</span>',
+                Enabled: '<span class="badge badge-active">Enabled</span>',
+                Skipped: '<span class="badge" style="background:#5e4a90;color:#fff;">Skipped</span>',
+                Error: '<span class="badge bg-danger">Error</span>',
+            };
             tbody.innerHTML = total ? llPreviewFiltered.slice(start, end).map(r => {
-                const badge = r.action === 'Paused'
-                    ? '<span class="badge bg-warning text-dark">Paused</span>'
-                    : '<span class="badge badge-active">Enabled</span>';
+                const badge = badgeMap[r.action] || escapeHtml(r.action || '');
                 const checkboxCell = llPreviewSelectable
-                    ? `<td style="text-align: center;"><input type="checkbox" ${llPreviewSelected.has(r._key) ? 'checked' : ''} onchange="togglePreviewRow(${r._key}, this.checked)"></td>`
+                    ? (r._selectable
+                        ? `<td style="text-align: center;"><input type="checkbox" ${llPreviewSelected.has(r._key) ? 'checked' : ''} onchange="togglePreviewRow(${r._key}, this.checked)"></td>`
+                        : '<td></td>')
                     : '';
                 return `<tr>
                     ${checkboxCell}
@@ -1115,6 +1174,7 @@
         // across filtering for the rows not shown).
         function togglePreviewSelectAll(checked) {
             llPreviewFiltered.forEach(r => {
+                if (!r._selectable) return;
                 if (checked) llPreviewSelected.add(r._key);
                 else llPreviewSelected.delete(r._key);
             });
@@ -1124,7 +1184,10 @@
         function updatePreviewSelectionUI() {
             const selAll = document.getElementById('llPreviewSelectAll');
             if (selAll) {
-                const filteredKeys = llPreviewFiltered.map(r => r._key);
+                const filteredKeys = llPreviewFiltered.filter(r => r._selectable).map(r => r._key);
+                // Hide the select-all checkbox when the current filter has no
+                // selectable rows (e.g. the Skipped / Errors tiles).
+                selAll.style.display = filteredKeys.length ? '' : 'none';
                 const selInFiltered = filteredKeys.filter(k => llPreviewSelected.has(k)).length;
                 selAll.checked = filteredKeys.length > 0 && selInFiltered === filteredKeys.length;
                 selAll.indeterminate = selInFiltered > 0 && selInFiltered < filteredKeys.length;
@@ -1313,6 +1376,278 @@
         }
 
         // --- Run Script ---
+        async function previewScript() {
+            const btn = document.getElementById('previewBtn');
+            const runBtn = document.getElementById('runBtn');
+            const area = document.getElementById('progressArea');
+            const content = document.getElementById('progressContent');
+
+            const date = document.getElementById('runDate').value || '';
+            const shopText = document.getElementById('shopNames').value.trim();
+            const included = document.getElementById('modeInclude').checked;
+
+            const params = new URLSearchParams();
+            if (date) params.set('date', date);
+            if (shopText) params.set('shop_names', shopText.split('\n').map(s => s.trim()).filter(Boolean).join(','));
+            params.set('included', included);
+
+            btn.disabled = true;
+            runBtn.disabled = true;
+            area.style.display = 'block';
+            content.innerHTML = `
+                <div class="d-flex justify-content-between mb-1" style="font-size:0.85rem;">
+                    <span>Checking what would be created and paused…</span>
+                    <span id="gsdPreviewPercent">0%</span>
+                </div>
+                <div class="progress" style="height:22px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" id="gsdPreviewBar" style="width:0%; background-color:#00b894;"></div>
+                </div>`;
+
+            // Poll the backend for per-shop progress while the preview runs.
+            const pollProgress = async () => {
+                try {
+                    const pr = await fetch(`${API_BASE}/api/gsd-campaigns/preview/progress`);
+                    if (!pr.ok) return;
+                    const p = await pr.json();
+                    const pct = p.total > 0 ? Math.min(100, Math.round((p.current / p.total) * 100)) : 0;
+                    const bar = document.getElementById('gsdPreviewBar');
+                    const lbl = document.getElementById('gsdPreviewPercent');
+                    if (bar) bar.style.width = pct + '%';
+                    if (lbl) lbl.textContent = pct + '%';
+                } catch (e) { /* ignore transient poll errors */ }
+            };
+            const pollTimer = setInterval(pollProgress, 400);
+            pollProgress();
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/preview?${params.toString()}`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                const errCount = (data.errors || []).length;
+
+                // Stash for sort / filter / export.
+                previewCampaigns = (data.campaigns || []).map(c => ({
+                    action: c.action, campaign_name: c.campaign_name || '',
+                    shop_name: c.shop_name || '', country: c.country || '', type: c.type || ''
+                }));
+                previewMeta = {
+                    date: data.date || '', to_create: data.to_create ?? 0, to_pause: data.to_pause ?? 0,
+                    already_exists: data.already_exists ?? 0, shops_aan: data.shops_aan ?? 0,
+                    shops_uit: data.shops_uit ?? 0, errCount
+                };
+                previewSort = { col: 'shop_name', dir: 'asc' };
+                previewFilterText = '';
+                previewActiveTile = null;
+                previewByShop = data.by_shop || [];
+
+                renderPreviewPanel();
+                logActivity('Preview', `${previewMeta.to_create} to create / ${previewMeta.to_pause} to pause${date ? ' for ' + date : ''}`, true);
+            } catch (err) {
+                content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
+                logActivity('Preview', `Error: ${err.message}`, false);
+            } finally {
+                clearInterval(pollTimer);
+                btn.disabled = false;
+                runBtn.disabled = false;
+            }
+        }
+
+        // Outlined action pill (green create / orange pause / purple skip).
+        function previewActionLabel(a) {
+            const c = a === 'create' ? '#00b894' : a === 'pause' ? '#e65100' : '#5e4a90';
+            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c};">${escapeHtml(a || '')}</span>`;
+        }
+
+        function renderPreviewPanel() {
+            const content = document.getElementById('progressContent');
+            content.innerHTML = renderPreviewShell();
+            renderPreviewDetail();
+        }
+
+        // Compact bordered shops table (DMA-Exclusions expansion style).
+        function renderShopsSummary(byShop) {
+            const seen = new Set(), rows = [];
+            (byShop || []).forEach(s => {
+                const key = `${s.shop_name}|${s.actie}`;
+                if (seen.has(key)) return;
+                seen.add(key);
+                rows.push(s);
+            });
+            if (!rows.length) return '<div class="text-muted small mt-2 text-center">No shops.</div>';
+            rows.sort((a, b) => (a.actie === b.actie
+                ? (a.shop_name || '').localeCompare(b.shop_name || '')
+                : (a.actie === 'aan' ? -1 : 1)));
+            const lbl = (actie) => actie === 'aan'
+                ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #00b894; color:#00b894;">activate</span>'
+                : '<span class="badge bg-transparent fw-bold" style="border:1px solid #e65100; color:#e65100;">pause</span>';
+            const aanN = rows.filter(r => r.actie === 'aan').length;
+            const uitN = rows.filter(r => r.actie === 'uit').length;
+            // Countries actually acted on per shop, taken from the previewed
+            // campaigns (create/skip for 'aan', pause for 'uit') — this reflects
+            // exactly what the script will do, not a model-based guess.
+            const countriesFor = (s) => {
+                const want = s.actie === 'uit' ? ['pause'] : ['create', 'skip'];
+                const set = new Set();
+                previewCampaigns.forEach(c => {
+                    if (c.shop_name === s.shop_name && want.includes(c.action) && c.country) set.add(c.country);
+                });
+                return set.size ? [...set].sort().join(', ') : '—';
+            };
+            const body = rows.map(s => `<tr>
+                <td style="text-align:left; padding:6px 14px;">${escapeHtml(s.shop_name || '')}</td>
+                <td style="text-align:center; padding:6px 14px;">${countriesFor(s)}</td>
+                <td style="text-align:center; padding:6px 14px;">${lbl(s.actie)}</td>
+                <td style="text-align:center; padding:6px 14px;">${s.actie === 'aan' ? (s.to_create || 0) + ' to create' : (s.to_pause || 0) + ' to pause'}</td>
+            </tr>`).join('');
+            return `
+                <div class="mt-2" style="text-align:center;">
+                    <div class="small text-muted mb-2">${aanN} shop(s) to activate, ${uitN} to pause</div>
+                    <table class="table table-bordered bg-white mb-0 small" style="width:70%; min-width:420px; margin:0 auto;">
+                        <thead class="table-light"><tr>
+                            <th style="text-align:left; padding:6px 14px;">Shop</th>
+                            <th style="text-align:center; padding:6px 14px;">Country</th>
+                            <th style="text-align:center; padding:6px 14px;">Action</th>
+                            <th style="text-align:center; padding:6px 14px;">Campaigns</th>
+                        </tr></thead>
+                        <tbody>${body}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        function renderPreviewShell() {
+            const m = previewMeta;
+            const tile = (kind, count, label, color, bg, border) => {
+                const active = previewActiveTile === kind;
+                return `<div class="p-2 px-3 rounded" style="background:${bg}; border:1px solid ${border}; cursor:pointer;${active ? ` box-shadow:0 0 0 2px ${border} inset;` : ''}" onclick="selectPreviewTile('${kind}')" title="Click to see these campaigns">
+                    <div style="font-size:1.5rem; font-weight:700; color:${color};">${count}</div>
+                    <div style="font-size:0.8rem; color:${color};">${label}</div>
+                </div>`;
+            };
+            return `
+                <div class="fw-bold mb-2">Done <span class="badge bg-info text-dark">dry run — nothing changed</span></div>
+                <div class="d-flex flex-wrap gap-3 mb-2">
+                    ${tile('create', m.to_create, 'campaigns to create', '#00b894', '#e8f7f3', '#00b894')}
+                    ${tile('pause', m.to_pause, 'campaigns to pause', '#e65100', '#fff3e0', '#fb8c00')}
+                    ${tile('skip', m.already_exists, 'already exist (skipped)', '#5e4a90', '#f3f0fa', '#5e4a90')}
+                </div>
+                <div class="mb-2" style="font-size:0.82rem;">
+                    <span onclick="selectPreviewTile('shops')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; color:${previewActiveTile === 'shops' ? '#5e4a90' : '#636e72'}; font-weight:${previewActiveTile === 'shops' ? '600' : '400'};" title="Click to see which shops">
+                        ${m.shops_aan} shop(s) to activate, ${m.shops_uit} to pause
+                    </span>${m.errCount ? ` &middot; <span class="text-danger">${m.errCount} error(s)</span>` : ''}
+                </div>
+                <div id="gsdPreviewDetail"></div>`;
+        }
+
+        function selectPreviewTile(kind) {
+            previewActiveTile = (previewActiveTile === kind) ? null : kind;
+            renderPreviewPanel();
+        }
+
+        function renderPreviewDetail() {
+            const el = document.getElementById('gsdPreviewDetail');
+            if (!el) return;
+            const kind = previewActiveTile;
+            if (!kind) { el.innerHTML = ''; return; }
+            if (kind === 'shops') { el.innerHTML = renderShopsSummary(previewByShop); return; }
+            // create / pause / skip -> filtered campaigns table with controls
+            const hover = "onmouseover=\"this.style.background='#5e4a90';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#5e4a90'\"";
+            el.innerHTML = `
+                <div class="d-flex align-items-center gap-2 mt-3 mb-2">
+                    <input type="text" class="form-control form-control-sm" style="max-width:260px;" placeholder="Filter campaigns..." id="gsdPreviewFilter" value="${escapeHtml(previewFilterText || '')}" oninput="onPreviewFilter(this.value)">
+                    <div class="ms-auto d-flex gap-2">
+                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="exportGsdPreviewXlsx()">Export Excel</button>
+                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="copyPreviewForExcel()" id="gsdPreviewCopyBtn">Copy for Excel</button>
+                    </div>
+                </div>
+                <div id="gsdPreviewTableInner"></div>`;
+            renderPreviewCampaignsTable();
+        }
+
+        function getPreviewView() {
+            const q = (previewFilterText || '').toLowerCase();
+            let rows = previewCampaigns;
+            if (['create', 'pause', 'skip'].includes(previewActiveTile)) rows = rows.filter(c => c.action === previewActiveTile);
+            if (q) rows = rows.filter(c =>
+                (c.campaign_name || '').toLowerCase().includes(q) ||
+                (c.shop_name || '').toLowerCase().includes(q) ||
+                (c.country || '').toLowerCase().includes(q) ||
+                (c.action || '').toLowerCase().includes(q));
+            const rank = { pause: 0, create: 1, skip: 2 };
+            const { col, dir } = previewSort;
+            const mul = dir === 'asc' ? 1 : -1;
+            return rows.slice().sort((a, b) => {
+                let av, bv;
+                if (col === 'action') { av = rank[a.action] ?? 9; bv = rank[b.action] ?? 9; }
+                else { av = (a[col] || '').toLowerCase(); bv = (b[col] || '').toLowerCase(); }
+                if (av < bv) return -1 * mul;
+                if (av > bv) return 1 * mul;
+                return (a.campaign_name || '').localeCompare(b.campaign_name || '');
+            });
+        }
+
+        function renderPreviewCampaignsTable() {
+            const wrap = document.getElementById('gsdPreviewTableInner');
+            if (!wrap) return;
+            const rows = getPreviewView();
+            const arrow = (col) => previewSort.col === col ? (previewSort.dir === 'asc' ? '↑' : '↓') : '↕';
+            const th = (col, label, w) => `<th class="sortable" data-sort="${col}" onclick="sortPreview('${col}')"${w ? ` style="width:${w};"` : ''}>${label} <span class="sort-arrow">${arrow(col)}</span></th>`;
+            wrap.innerHTML = `
+                <div style="max-height:340px; overflow:auto; border:1px solid #eee; border-radius:4px;">
+                    <table class="table table-sm table-hover mb-0 gsd-preview-table">
+                        <thead class="table-light">
+                            <tr>
+                                ${th('shop_name', 'Shop', '160px')}
+                                ${th('campaign_name', 'Campaign name')}
+                                ${th('country', 'Country', '80px')}
+                                ${th('action', 'Action', '90px')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows.length ? rows.map(c => `<tr>
+                                <td>${escapeHtml(c.shop_name || '')}</td>
+                                <td class="col-name" title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '')}</td>
+                                <td>${escapeHtml(c.country || '')}</td>
+                                <td>${previewActionLabel(c.action)}</td>
+                            </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No matching campaigns.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="text-muted mt-2" style="font-size:0.75rem;">${rows.length} row(s)${previewFilterText ? ' (filtered)' : ''}</div>`;
+        }
+
+        function sortPreview(col) {
+            if (previewSort.col === col) previewSort.dir = previewSort.dir === 'asc' ? 'desc' : 'asc';
+            else previewSort = { col, dir: 'asc' };
+            renderPreviewCampaignsTable();
+        }
+
+        function onPreviewFilter(v) { previewFilterText = v; renderPreviewCampaignsTable(); }
+
+        function previewViewRows() {
+            return getPreviewView().map(c => ({ Shop: c.shop_name, Campaign: c.campaign_name, Country: c.country, Action: c.action }));
+        }
+
+        function exportGsdPreviewXlsx() {
+            const rows = previewViewRows();
+            if (!rows.length) return alert('No campaigns to export.');
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'GSD Preview');
+            XLSX.writeFile(wb, `gsd_preview_${previewMeta.date || new Date().toISOString().slice(0, 10)}.xlsx`);
+        }
+
+        function copyPreviewForExcel() {
+            const rows = previewViewRows();
+            if (!rows.length) return alert('No campaigns to copy.');
+            const headers = Object.keys(rows[0]);
+            const tsv = [headers.join('\t'), ...rows.map(r => headers.map(h => r[h]).join('\t'))].join('\n');
+            navigator.clipboard.writeText(tsv).then(() => {
+                const btn = document.getElementById('gsdPreviewCopyBtn');
+                if (btn) { const o = btn.textContent; btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = o, 1500); }
+            });
+        }
+
         async function runScript() {
             const btn = document.getElementById('runBtn');
             const area = document.getElementById('progressArea');
@@ -1336,17 +1671,16 @@
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/run?${params.toString()}`, { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                // Track newly created campaigns
-                newCampaignIds = new Set();
-                if (data.results) {
-                    (data.results || []).forEach(r => {
-                        if (r.campaigns_created) {
-                            (r.campaign_ids || []).forEach(id => newCampaignIds.add(String(id)));
-                        }
-                    });
-                }
+                // Undo payload + newly-created id tracking, from the run result.
+                const pick = (arr) => (arr || [])
+                    .filter(c => c.customer_id && c.campaign_id)
+                    .map(c => ({ customer_id: String(c.customer_id), campaign_id: String(c.campaign_id), campaign_name: c.campaign_name }));
+                const undo = { created: pick(data.created), paused: pick(data.paused) };
+                newCampaignIds = new Set(undo.created.map(c => c.campaign_id));
+
+                const nC = undo.created.length, nP = undo.paused.length;
                 content.innerHTML = `<div class="text-success fw-bold">Done!</div><pre class="mt-2 mb-0" style="font-size:0.82rem; max-height:200px; overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
-                logActivity('Run Script', `Completed${date ? ' for ' + date : ''}`, true);
+                logActivity('Run Script', `${nC} created / ${nP} paused${date ? ' for ' + date : ''}`, true, { undo });
                 loadCampaigns();
                 loadStats();
             } catch (err) {
@@ -1359,13 +1693,15 @@
         }
 
         // --- Activity Log ---
-        function logActivity(action, details, success) {
+        function logActivity(action, details, success, extra) {
             const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
             log.unshift({
+                id: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
                 time: new Date().toISOString(),
                 action,
                 details,
-                success
+                success,
+                ...(extra || {})
             });
             // Keep last 50
             if (log.length > 50) log.length = 50;
@@ -1373,22 +1709,199 @@
             renderLog();
         }
 
+        // Outlined, all-caps label for an Activity Log action, colored by type.
+        function activityActionLabel(action) {
+            const a = (action || '').toLowerCase();
+            let c = '#6c757d';
+            if (a.includes('preview')) c = '#0984e3';
+            else if (a.includes('run')) c = '#CC5500';
+            else if (a.includes('reset')) c = '#5e4a90';
+            else if (a === 'pause') c = '#e65100';
+            else if (a === 'enable') c = '#00b894';
+            else if (a === 'remove') c = '#d63031';
+            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; text-transform:uppercase; letter-spacing:0.4px;">${escapeHtml(action || '')}</span>`;
+        }
+
         function renderLog() {
             const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
             const el = document.getElementById('activityLog');
             if (!log.length) {
-                el.innerHTML = '<div class="text-muted text-center py-2">No activity yet.</div>';
+                el.innerHTML = '<div class="text-muted text-center py-3">No activity yet.</div>';
                 return;
             }
-            el.innerHTML = log.map(entry => {
+            const btnStyle = "border:1px solid #5e4a90; color:#5e4a90; background:transparent; padding:0.1rem 0.6rem; font-size:0.78rem;";
+            const btnHover = "onmouseover=\"this.style.background='#5e4a90';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#5e4a90'\"";
+            const rows = log.map(entry => {
                 const time = new Date(entry.time).toLocaleString('nl-NL');
                 const cls = entry.success ? 'log-success' : 'log-error';
-                return `<div class="log-entry">
-                    <span class="log-time">${time}</span>
-                    <span class="log-action">${escapeHtml(entry.action)}</span> -
-                    <span class="${cls}">${escapeHtml(entry.details)}</span>
-                </div>`;
+                const u = entry.undo || {};
+                const nCreated = (u.created || []).length;
+                const nPaused = (u.paused || []).length;
+                const hasUndo = (nCreated + nPaused) > 0;
+                let resetHtml = '';
+                if (entry.reset) {
+                    resetHtml = `<span class="text-muted" style="font-size:0.75rem;">reset</span>`;
+                } else if (hasUndo) {
+                    // Run performed after undo-tracking shipped — undo directly.
+                    resetHtml = `<button class="btn btn-sm" title="Pause the ${nCreated} created and re-enable the ${nPaused} paused campaign(s)" style="${btnStyle}" ${btnHover} onclick="resetRun('${entry.id}')">Reset</button>`;
+                } else if (entry.action === 'Run Script') {
+                    // Older run without a stored undo payload — reconstruct from
+                    // Google Ads change history around this entry's timestamp.
+                    resetHtml = `<button class="btn btn-sm" title="Reconstruct this run from Google Ads change history (around ${escapeHtml(time)}), review, then undo" style="${btnStyle}" ${btnHover} onclick="reconstructRun('${entry.id}')">Reset</button>`;
+                }
+                return `<tr>
+                    <td style="text-align:center; white-space:nowrap;">${time}</td>
+                    <td style="text-align:left;">${activityActionLabel(entry.action)}</td>
+                    <td style="text-align:left;" class="${cls}">${escapeHtml(entry.details)}</td>
+                    <td style="text-align:center;">${resetHtml}</td>
+                </tr>`;
             }).join('');
+            el.innerHTML = `
+                <table class="table table-sm table-hover mb-0" id="gsdActivityTable" style="width:100%; font-size:0.9rem;">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="padding:4px 8px; text-align:center; width:26%;">Time</th>
+                            <th style="padding:4px 8px; text-align:left; width:18%;">Action</th>
+                            <th style="padding:4px 8px; text-align:left; width:41%;">Details</th>
+                            <th style="padding:4px 8px; text-align:center; width:15%;">Reset</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
+        }
+
+        async function resetRun(id) {
+            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+            const entry = log.find(e => e.id === id);
+            if (!entry || !entry.undo) return;
+            const nCreated = (entry.undo.created || []).length;
+            const nPaused = (entry.undo.paused || []).length;
+            if (!confirm(`Undo this run?\n\nThis will PAUSE ${nCreated} campaign(s) it created and RE-ENABLE ${nPaused} campaign(s) it paused in Google Ads.`)) return;
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/undo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(entry.undo)
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const errN = (data.errors || []).length;
+
+                // Mark the original entry as reset so its button disappears.
+                const fresh = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+                const target = fresh.find(e => e.id === id);
+                if (target) { target.reset = true; }
+                localStorage.setItem('gsd_activity_log', JSON.stringify(fresh));
+
+                logActivity('Reset', `Paused ${data.paused_created ?? 0} created / re-enabled ${data.enabled_paused ?? 0} paused${errN ? ` · ${errN} error(s)` : ''}`, errN === 0);
+                loadCampaigns();
+                loadStats();
+            } catch (err) {
+                logActivity('Reset', `Error: ${err.message}`, false);
+            }
+        }
+
+        // Rebuild a past run's affected campaigns from Google Ads change history
+        // (keyed off the log entry's timestamp), show them, then undo on confirm.
+        async function reconstructRun(id) {
+            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+            const entry = log.find(e => e.id === id);
+            if (!entry) return;
+            const area = document.getElementById('progressArea');
+            const content = document.getElementById('progressContent');
+            area.style.display = 'block';
+            content.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Reconstructing this run from Google Ads change history…</div>';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/reconstruct`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ at: entry.time })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const created = data.created || [], paused = data.paused || [];
+                const errN = (data.errors || []).length;
+                const win = data.window || {};
+
+                if (created.length + paused.length === 0) {
+                    content.innerHTML = `<div class="text-warning fw-bold">No GSD campaign changes found</div>
+                        <div class="text-muted" style="font-size:0.82rem;">Window ${escapeHtml(win.start || '')} → ${escapeHtml(win.end || '')} (${escapeHtml(win.tz || '')}). The run may be older than ~30 days (change history is not retained beyond that)${errN ? `, or ${errN} account query error(s) occurred` : ''}.</div>`;
+                    pendingReconstruct = null;
+                    return;
+                }
+
+                pendingReconstruct = { id, created, paused };
+                // Each row shows the undo action: created -> pause, paused -> enable.
+                const rows = created.map(c => ({ ...c, act: 'pause' })).concat(paused.map(c => ({ ...c, act: 'enable' })));
+                const badge = (a) => a === 'pause'
+                    ? '<span style="color:#e65100; font-weight:600;">pause</span>'
+                    : '<span style="color:#2e7d32; font-weight:600;">enable</span>';
+                content.innerHTML = `
+                    <div class="fw-bold mb-1" style="color:#5e4a90;">Reconstructed run — review before undoing</div>
+                    <div class="text-muted mb-2" style="font-size:0.82rem;">
+                        Window ${escapeHtml(win.start || '')} → ${escapeHtml(win.end || '')} (${escapeHtml(win.tz || '')}) ·
+                        will PAUSE ${created.length} created, RE-ENABLE ${paused.length} paused${errN ? ` · <span class="text-danger">${errN} query error(s)</span>` : ''}
+                    </div>
+                    <div style="max-height:300px; overflow:auto; border:1px solid #eee; border-radius:4px;">
+                        <table class="table table-sm table-hover mb-0" style="font-size:0.8rem;">
+                            <thead style="position:sticky; top:0; background:#f8f9fa; z-index:1;">
+                                <tr><th style="width:80px;">Undo</th><th>Campaign name</th></tr>
+                            </thead>
+                            <tbody>
+                                ${rows.map(r => `<tr><td>${badge(r.act)}</td><td>${escapeHtml(r.campaign_name || '')}</td></tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 d-flex gap-2">
+                        <button class="btn btn-sm" style="background:#CC5500; color:white; border:none; padding:0.25rem 1rem;" onclick="applyReconstruct()">Undo these changes</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="cancelReconstruct()">Cancel</button>
+                    </div>`;
+            } catch (err) {
+                pendingReconstruct = null;
+                content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
+            }
+        }
+
+        async function applyReconstruct() {
+            if (!pendingReconstruct) return;
+            const { id, created, paused } = pendingReconstruct;
+            const content = document.getElementById('progressContent');
+            content.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Applying undo…</div>';
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/undo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ created, paused })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const errN = (data.errors || []).length;
+
+                // Mark the original entry reset and stash what was undone.
+                const fresh = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+                const target = fresh.find(e => e.id === id);
+                if (target) { target.reset = true; target.undo = { created, paused }; }
+                localStorage.setItem('gsd_activity_log', JSON.stringify(fresh));
+
+                pendingReconstruct = null;
+                content.innerHTML = `<div class="text-success fw-bold">Undo applied — paused ${data.paused_created ?? 0} created, re-enabled ${data.enabled_paused ?? 0} paused${errN ? ` · ${errN} error(s)` : ''}.</div>`;
+                logActivity('Reset', `Paused ${data.paused_created ?? 0} created / re-enabled ${data.enabled_paused ?? 0} paused (reconstructed)${errN ? ` · ${errN} error(s)` : ''}`, errN === 0);
+                loadCampaigns();
+                loadStats();
+            } catch (err) {
+                content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
+                logActivity('Reset', `Error: ${err.message}`, false);
+            }
+        }
+
+        function cancelReconstruct() {
+            pendingReconstruct = null;
+            const area = document.getElementById('progressArea');
+            const content = document.getElementById('progressContent');
+            content.innerHTML = '';
+            area.style.display = 'none';
         }
 
         function clearLog() {

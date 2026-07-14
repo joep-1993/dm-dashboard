@@ -871,6 +871,20 @@
         }
 
         // ---------------------- Recent runs ----------------------
+        // Outlined source pill (DMA-Exclusions style), colored per input method.
+        function redirectSourceBadge(method) {
+            const m = (method || '').toLowerCase();
+            const colors = {
+                file: '#5e4a90',    // purple
+                form: '#e8730c',    // orange
+                text: '#0984e3',    // blue
+                manual: '#0984e3',  // blue (legacy alias of text)
+                upload: '#5e4a90',  // purple (legacy alias of file)
+            };
+            const c = colors[m] || '#6c757d';  // grey fallback
+            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.4px;">${escapeHtml(method || '')}</span>`;
+        }
+
         async function loadRuns() {
             const body = document.getElementById('runsBody');
             body.innerHTML = '<tr><td colspan="9" class="text-center text-muted p-3">Loading…</td></tr>';
@@ -890,7 +904,7 @@
                     tr.innerHTML = `
                         <td style="padding: 6px 12px; text-align: center;">${escapeHtml(when)}</td>
                         <td style="padding: 6px 12px; text-align: center;">${escapeHtml(run.label || '')}</td>
-                        <td style="padding: 6px 12px; text-align: center;"><span class="badge" style="background-color: #5e4a90; color: #fff;">${escapeHtml(run.input_method)}</span></td>
+                        <td style="padding: 6px 12px; text-align: center;">${redirectSourceBadge(run.input_method)}</td>
                         <td style="padding: 6px 12px; text-align: center;">${run.total_rows}</td>
                         <td style="padding: 6px 12px; text-align: center;">${run.flattened}</td>
                         <td style="padding: 6px 12px; text-align: center;">${run.skipped_home}</td>

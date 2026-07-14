@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Dict, Any
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from backend.gsd_campaigns_service import _name_contains_regexp
 import openpyxl
 from openpyxl import load_workbook
 from dotenv import load_dotenv
@@ -481,8 +482,9 @@ def get_campaign_by_name_pattern(
     """
     ga_service = client.get_service("GoogleAdsService")
 
-    # Escape single quotes in name pattern for GAQL (replace ' with \')
-    escaped_name_pattern = name_pattern.replace("'", "\\'")
+    # REGEXP_MATCH (not LIKE): a name like "PLA/Electronics_A" contains '_',
+    # which LIKE treats as a single-char wildcard; the helper matches literally.
+    regexp_pattern = _name_contains_regexp(name_pattern)
 
     query = f"""
         SELECT
@@ -491,7 +493,7 @@ def get_campaign_by_name_pattern(
             campaign.resource_name,
             campaign.status
         FROM campaign
-        WHERE campaign.name LIKE '%{escaped_name_pattern}%'
+        WHERE campaign.name REGEXP_MATCH '{regexp_pattern}'
             AND campaign.status != 'REMOVED'
         LIMIT 1
     """
@@ -588,8 +590,9 @@ def get_campaign_and_ad_group_by_pattern(
     """
     ga_service = client.get_service("GoogleAdsService")
 
-    # Escape single quotes in name pattern for GAQL (replace ' with \')
-    escaped_name_pattern = name_pattern.replace("'", "\\'")
+    # REGEXP_MATCH (not LIKE): a name like "PLA/Electronics_A" contains '_',
+    # which LIKE treats as a single-char wildcard; the helper matches literally.
+    regexp_pattern = _name_contains_regexp(name_pattern)
 
     query = f"""
         SELECT
@@ -602,7 +605,7 @@ def get_campaign_and_ad_group_by_pattern(
             ad_group.resource_name,
             ad_group.status
         FROM ad_group
-        WHERE campaign.name LIKE '%{escaped_name_pattern}%'
+        WHERE campaign.name REGEXP_MATCH '{regexp_pattern}'
             AND campaign.status != 'REMOVED'
             AND ad_group.status != 'REMOVED'
         LIMIT 1
