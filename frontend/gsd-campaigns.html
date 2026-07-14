@@ -1696,6 +1696,19 @@
             renderLog();
         }
 
+        // Outlined, all-caps label for an Activity Log action, colored by type.
+        function activityActionLabel(action) {
+            const a = (action || '').toLowerCase();
+            let c = '#6c757d';
+            if (a.includes('preview')) c = '#0984e3';
+            else if (a.includes('run')) c = '#CC5500';
+            else if (a.includes('reset')) c = '#5e4a90';
+            else if (a === 'pause') c = '#e65100';
+            else if (a === 'enable') c = '#00b894';
+            else if (a === 'remove') c = '#d63031';
+            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; text-transform:uppercase; letter-spacing:0.4px;">${escapeHtml(action || '')}</span>`;
+        }
+
         function renderLog() {
             const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
             const el = document.getElementById('activityLog');
@@ -1725,13 +1738,13 @@
                 }
                 return `<tr>
                     <td style="text-align:center; white-space:nowrap;">${time}</td>
-                    <td style="text-align:left;">${escapeHtml(entry.action)}</td>
+                    <td style="text-align:left;">${activityActionLabel(entry.action)}</td>
                     <td style="text-align:left;" class="${cls}">${escapeHtml(entry.details)}</td>
                     <td style="text-align:center;">${resetHtml}</td>
                 </tr>`;
             }).join('');
             el.innerHTML = `
-                <table class="table table-sm table-hover mb-0" id="gsdActivityTable" style="width:72%; margin:0 auto; font-size:0.9rem;">
+                <table class="table table-sm table-hover mb-0" id="gsdActivityTable" style="width:100%; font-size:0.9rem;">
                     <thead class="table-light">
                         <tr>
                             <th style="padding:4px 8px; text-align:center; width:26%;">Time</th>
