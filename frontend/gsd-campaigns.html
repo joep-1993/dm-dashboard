@@ -437,6 +437,13 @@
         let previewFilterText = '';
         let previewActiveTile = null;  // null | 'create' | 'pause' | 'skip' | 'shops'
 
+        // GSD run-result panel state (table view of a completed run)
+        let runResultData = {};
+        let runResultRows = [];
+        let runResultFilterText = '';
+        let runResultActiveTile = null;  // null | 'created' | 'paused' | 'skipped' | 'error'
+        let runResultSort = { col: 'action', dir: 'asc' };
+
         window.addEventListener('DOMContentLoaded', () => {
             if (window.flatpickr) {
                 flatpickr('#runDate', { dateFormat: 'Y-m-d', allowInput: true,
@@ -1705,10 +1712,7 @@
                 newCampaignIds = new Set(undo.created.map(c => c.campaign_id));
 
                 const nC = undo.created.length, nP = undo.paused.length;
-                const heading = data.cancelled
-                    ? '<div class="text-warning fw-bold">Cancelled — stopped early.</div>'
-                    : '<div class="text-success fw-bold">Done!</div>';
-                content.innerHTML = `${heading}<pre class="mt-2 mb-0" style="font-size:0.82rem; max-height:200px; overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+                renderRunResultPanel(data);
                 logActivity('Run Script', `${nC} created / ${nP} paused${data.cancelled ? ' (cancelled)' : ''}${date ? ' for ' + date : ''}`, true, { undo });
                 loadCampaigns();
                 loadStats();
@@ -1727,6 +1731,167 @@
             const b = document.getElementById('runCancelBtn');
             if (b) { b.disabled = true; b.textContent = 'Cancelling…'; }
             try { await fetch(`${API_BASE}/api/gsd-campaigns/run/cancel`, { method: 'POST' }); } catch (e) { /* ignore */ }
+        }
+
+        // ---- Run-result table (mirrors the preview panel) ----
+        function runActionLabel(a) {
+            const c = a === 'created' ? '#00b894' : a === 'paused' ? '#e65100' : a === 'skipped' ? '#5e4a90' : '#d63031';
+            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c};">${escapeHtml(a)}</span>`;
+        }
+
+        function buildRunRows(data) {
+            const rows = [];
+            (data.created || []).forEach(c => rows.push({ action: 'created', name: c.campaign_name || '', country: c.country || '', detail: '' }));
+            (data.paused  || []).forEach(c => rows.push({ action: 'paused',  name: c.campaign_name || '', country: c.country || '', detail: '' }));
+            (data.skipped || []).forEach(c => rows.push({ action: 'skipped', name: c.campaign_name || '', country: c.country || '', detail: c.reason || '' }));
+            (data.errors  || []).forEach(c => rows.push({ action: 'error',   name: c.campaign_name || c.shop_name || '', country: c.country || '', detail: c.error || c.reason || c.step || '' }));
+            return rows;
+        }
+
+        function renderRunResultPanel(data) {
+            runResultData = data;
+            runResultRows = buildRunRows(data);
+            runResultActiveTile = null;
+            runResultFilterText = '';
+            runResultSort = { col: 'action', dir: 'asc' };
+            renderRunResultView();
+        }
+
+        function renderRunResultView() {
+            document.getElementById('progressContent').innerHTML = renderRunResultShell();
+            renderRunResultTable();
+        }
+
+        function renderRunResultShell() {
+            const d = runResultData;
+            const counts = {
+                created: (d.created || []).length,
+                paused:  (d.paused  || []).length,
+                skipped: (d.skipped || []).length,
+                error:   (d.errors  || []).length,
+            };
+            const tile = (kind, count, label, color, bg, border) => {
+                const active = runResultActiveTile === kind;
+                return `<div class="p-2 px-3 rounded" style="background:${bg}; border:1px solid ${border}; cursor:pointer;${active ? ` box-shadow:0 0 0 2px ${border} inset;` : ''}" onclick="selectRunTile('${kind}')" title="Click to filter">
+                    <div style="font-size:1.5rem; font-weight:700; color:${color};">${count}</div>
+                    <div style="font-size:0.8rem; color:${color};">${label}</div>
+                </div>`;
+            };
+            const allActive = !runResultActiveTile;
+            const heading = d.cancelled
+                ? '<div class="fw-bold mb-2 text-warning">Cancelled — stopped early.</div>'
+                : '<div class="fw-bold mb-2 text-success">Done!</div>';
+            const hover = "onmouseover=\"this.style.background='#5e4a90';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#5e4a90'\"";
+            return `
+                ${heading}
+                <div class="d-flex flex-wrap gap-3 mb-2">
+                    <div id="runTile-all" data-border="#adb5bd" class="p-2 px-3 rounded" style="background:#f1f3f5; border:1px solid #adb5bd; cursor:pointer;${allActive ? ' box-shadow:0 0 0 2px #adb5bd inset;' : ''}" onclick="selectRunTile('all')" title="Show all rows">
+                        <div style="font-size:1.5rem; font-weight:700; color:#495057;">${counts.created + counts.paused + counts.skipped + counts.error}</div>
+                        <div style="font-size:0.8rem; color:#495057;">all rows</div>
+                    </div>
+                    ${tile('created', counts.created, 'created', '#00b894', '#e8f7f3', '#00b894')}
+                    ${tile('paused',  counts.paused,  'paused',  '#e65100', '#fff3e0', '#fb8c00')}
+                    ${tile('skipped', counts.skipped, 'skipped', '#5e4a90', '#f3f0fa', '#5e4a90')}
+                    ${tile('error',   counts.error,   'errors',  '#d63031', '#fdecea', '#d63031')}
+                </div>
+                <div class="d-flex align-items-center gap-2 mt-3 mb-2">
+                    <input type="text" class="form-control form-control-sm" style="max-width:260px;" placeholder="Filter..." id="gsdRunFilter" value="${escapeHtml(runResultFilterText || '')}" oninput="onRunResultFilter(this.value)">
+                    <div class="ms-auto d-flex gap-2">
+                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="exportRunResultXlsx()">Export Excel</button>
+                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="copyRunResultForExcel()" id="gsdRunCopyBtn">Copy for Excel</button>
+                    </div>
+                </div>
+                <div id="gsdRunTableWrap"></div>`;
+        }
+
+        function selectRunTile(kind) {
+            if (kind === 'all') runResultActiveTile = null;
+            else runResultActiveTile = (runResultActiveTile === kind) ? null : kind;
+            renderRunResultView();
+        }
+
+        function getRunResultView() {
+            const q = (runResultFilterText || '').toLowerCase();
+            let rows = runResultRows;
+            if (runResultActiveTile) rows = rows.filter(r => r.action === runResultActiveTile);
+            if (q) rows = rows.filter(r =>
+                (r.name || '').toLowerCase().includes(q) ||
+                (r.country || '').toLowerCase().includes(q) ||
+                (r.action || '').toLowerCase().includes(q) ||
+                (r.detail || '').toLowerCase().includes(q));
+            const rank = { error: 0, created: 1, paused: 2, skipped: 3 };
+            const { col, dir } = runResultSort;
+            const mul = dir === 'asc' ? 1 : -1;
+            return rows.slice().sort((a, b) => {
+                let av, bv;
+                if (col === 'action') { av = rank[a.action] ?? 9; bv = rank[b.action] ?? 9; }
+                else { av = (a[col] || '').toLowerCase(); bv = (b[col] || '').toLowerCase(); }
+                if (av < bv) return -1 * mul;
+                if (av > bv) return 1 * mul;
+                return (a.name || '').localeCompare(b.name || '');
+            });
+        }
+
+        function renderRunResultTable() {
+            const wrap = document.getElementById('gsdRunTableWrap');
+            if (!wrap) return;
+            const rows = getRunResultView();
+            const arrow = (col) => runResultSort.col === col ? (runResultSort.dir === 'asc' ? '↑' : '↓') : '↕';
+            const th = (col, label, w) => `<th class="sortable" data-sort="${col}" onclick="sortRunResult('${col}')"${w ? ` style="width:${w};"` : ''}>${label} <span class="sort-arrow">${arrow(col)}</span></th>`;
+            wrap.innerHTML = `
+                <div style="max-height:340px; overflow:auto; border:1px solid #eee; border-radius:4px;">
+                    <table class="table table-sm table-hover mb-0 gsd-preview-table">
+                        <thead class="table-light">
+                            <tr>
+                                ${th('action', 'Action', '90px')}
+                                ${th('name', 'Campaign / shop')}
+                                ${th('country', 'Country', '80px')}
+                                ${th('detail', 'Detail')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows.length ? rows.map(r => `<tr>
+                                <td>${runActionLabel(r.action)}</td>
+                                <td class="col-name" title="${escapeHtml(r.name || '')}">${escapeHtml(r.name || '')}</td>
+                                <td>${escapeHtml(r.country || '')}</td>
+                                <td>${escapeHtml(r.detail || '')}</td>
+                            </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No rows.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="text-muted mt-2" style="font-size:0.75rem;">${rows.length} row(s)${runResultFilterText ? ' (filtered)' : ''}</div>`;
+        }
+
+        function sortRunResult(col) {
+            if (runResultSort.col === col) runResultSort.dir = runResultSort.dir === 'asc' ? 'desc' : 'asc';
+            else runResultSort = { col, dir: 'asc' };
+            renderRunResultTable();
+        }
+
+        function onRunResultFilter(v) { runResultFilterText = v; renderRunResultTable(); }
+
+        function runResultViewRows() {
+            return getRunResultView().map(r => ({ Action: r.action, 'Campaign / shop': r.name, Country: r.country, Detail: r.detail }));
+        }
+
+        function exportRunResultXlsx() {
+            const rows = runResultViewRows();
+            if (!rows.length) return alert('No rows to export.');
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'GSD Run');
+            XLSX.writeFile(wb, `gsd_run_${(runResultData.date || new Date().toISOString().slice(0, 10))}.xlsx`);
+        }
+
+        function copyRunResultForExcel() {
+            const rows = runResultViewRows();
+            if (!rows.length) return alert('No rows to copy.');
+            const headers = Object.keys(rows[0]);
+            const tsv = [headers.join('\t'), ...rows.map(r => headers.map(h => r[h]).join('\t'))].join('\n');
+            navigator.clipboard.writeText(tsv).then(() => {
+                const btn = document.getElementById('gsdRunCopyBtn');
+                if (btn) { const o = btn.textContent; btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = o, 1500); }
+            });
         }
 
         // --- Activity Log ---

@@ -1354,6 +1354,58 @@ def _set_campaign_status_by_resource(
         return False
 
 
+def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
+                     campaign_type, label) -> Dict[str, Any]:
+    """
+    An existing campaign was found. If it's COMPLETE (ad group + product ad +
+    listing group) leave it as-is and report 'skipped'. If it's an INCOMPLETE
+    shell (a prior run failed mid-build, leaving it PAUSED), create the missing
+    pieces and enable it — reported as 'created' with reason 'repaired'.
+    """
+    ga = client.get_service("GoogleAdsService")
+    campaign_id = campaign_resource.rstrip("/").split("/")[-1]
+
+    ags = list(ga.search(customer_id=customer_id, query=(
+        f"SELECT ad_group.resource_name FROM ad_group "
+        f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED'")))
+    ad_group_resource = ags[0].ad_group.resource_name if ags else None
+    has_ad = has_lg = False
+    if ad_group_resource:
+        has_ad = bool(list(ga.search(customer_id=customer_id, query=(
+            f"SELECT ad_group_ad.ad.id FROM ad_group_ad "
+            f"WHERE campaign.id = {campaign_id} AND ad_group_ad.status != 'REMOVED'"))))
+        has_lg = bool(list(ga.search(customer_id=customer_id, query=(
+            f"SELECT ad_group_criterion.criterion_id FROM ad_group_criterion "
+            f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP'"))))
+
+    if ad_group_resource and has_ad and has_lg:
+        return {"campaign_name": campaign_name, "action": "skipped", "reason": "already_exists"}
+
+    # Incomplete shell — complete the missing pieces, then enable.
+    logger.info("Repairing incomplete campaign '%s' (ad_group=%s ad=%s listing=%s)",
+                campaign_name, bool(ad_group_resource), has_ad, has_lg)
+    _last_gads_error["msg"] = None
+    if not ad_group_resource:
+        ad_group_resource = add_shopping_ad_group(
+            client, customer_id, campaign_resource, label)
+        if ad_group_resource is None:
+            return {"campaign_name": campaign_name, "action": "error", "reason": "repair_ad_group_failed",
+                    "error": _last_gads_error["msg"] or "ad group creation failed", "campaign_resource": campaign_resource}
+    if not has_ad and add_shopping_product_ad_group_ad(client, customer_id, ad_group_resource) is None:
+        return {"campaign_name": campaign_name, "action": "error", "reason": "repair_product_ad_failed",
+                "error": _last_gads_error["msg"] or "product ad creation failed", "campaign_resource": campaign_resource}
+    if not has_lg:
+        tree_ok = (add_sub_cpr(client, customer_id, ad_group_resource) if campaign_type == "CPR"
+                   else add_sub_cpc(client, customer_id, ad_group_resource, label))
+        if not tree_ok:
+            return {"campaign_name": campaign_name, "action": "error", "reason": "repair_listing_group_failed",
+                    "error": _last_gads_error["msg"] or "listing group creation failed", "campaign_resource": campaign_resource}
+    if not _set_campaign_status_by_resource(client, customer_id, campaign_resource, "ENABLED"):
+        return {"campaign_name": campaign_name, "action": "error", "reason": "repair_enable_failed",
+                "error": _last_gads_error["msg"] or "enable failed", "campaign_resource": campaign_resource}
+    return {"campaign_name": campaign_name, "action": "created", "reason": "repaired", "campaign_resource": campaign_resource}
+
+
 def _create_campaigns_for_shop(
     client: GoogleAdsClient,
     customer_id: str,
@@ -1376,15 +1428,11 @@ def _create_campaigns_for_shop(
         campaign_name = _build_campaign_name(country, shop_name, shop_id, label)
         _last_gads_error["msg"] = None  # cleared per label; helpers set it on failure
 
-        # Check if campaign already exists
+        # Existing campaign? Complete an incomplete shell, else skip.
         existing = check_campaign(client, customer_id, campaign_name)
         if existing:
-            logger.info("Campaign '%s' already exists, skipping.", campaign_name)
-            results.append({
-                "campaign_name": campaign_name,
-                "action": "skipped",
-                "reason": "already_exists",
-            })
+            results.append(_repair_campaign(
+                client, customer_id, existing, campaign_name, campaign_type, label))
             continue
 
         # Create campaign
@@ -1407,7 +1455,7 @@ def _create_campaigns_for_shop(
             continue
 
         # Create ad group
-        ad_group_name = f"{campaign_name} - Ad Group"
+        ad_group_name = label  # ad group is named after the label (a/b/c/no_data/no_ean), matching the original script
         ad_group_resource = add_shopping_ad_group(
             client, customer_id, campaign_resource, ad_group_name
         )
