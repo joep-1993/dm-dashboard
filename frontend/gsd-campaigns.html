@@ -1666,11 +1666,32 @@
             btn.textContent = 'Running...';
             area.style.display = 'block';
             content.innerHTML = `
-                <div class="d-flex align-items-center gap-2">
-                    <div class="spinner-border spinner-border-sm text-primary"></div>
-                    <span>Running GSD script... This may take a while.</span>
-                    <button class="btn btn-sm ms-2" id="runCancelBtn" style="border:1px solid #d63031; color:#d63031; background:transparent;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelRun()">Cancel</button>
+                <div class="d-flex justify-content-between mb-1" style="font-size:0.85rem;">
+                    <span>Running GSD script...</span>
+                    <span id="runPercent">0%</span>
+                </div>
+                <div class="progress" style="height:22px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" id="runBar" style="width:0%; background-color:#CC5500;"></div>
+                </div>
+                <div class="mt-2">
+                    <button class="btn btn-sm" id="runCancelBtn" style="border:1px solid #d63031; color:#d63031; background:transparent;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="cancelRun()">Cancel</button>
                 </div>`;
+
+            // Poll per-shop run progress while the run executes.
+            const pollRunProgress = async () => {
+                try {
+                    const pr = await fetch(`${API_BASE}/api/gsd-campaigns/run/progress`);
+                    if (!pr.ok) return;
+                    const p = await pr.json();
+                    const pct = p.total > 0 ? Math.min(100, Math.round((p.current / p.total) * 100)) : 0;
+                    const bar = document.getElementById('runBar');
+                    const lbl = document.getElementById('runPercent');
+                    if (bar) bar.style.width = pct + '%';
+                    if (lbl) lbl.textContent = pct + '%';
+                } catch (e) { /* ignore transient poll errors */ }
+            };
+            const runTimer = setInterval(pollRunProgress, 700);
+            pollRunProgress();
 
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/run?${params.toString()}`, { method: 'POST' });
@@ -1695,6 +1716,7 @@
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
                 logActivity('Run Script', `Error: ${err.message}`, false);
             } finally {
+                clearInterval(runTimer);
                 btn.disabled = false;
                 btn.textContent = 'Run';
             }

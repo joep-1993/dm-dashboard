@@ -53,10 +53,17 @@ KOLOM_COUNTRY = {"is_gsd_nl_shop": "NL", "is_gsd_be_shop": "BE", "is_gsd_de_shop
 # a cancel stops further creates/pauses (already-processed shops stay done).
 _run_cancel = {"cancel": False}
 
+# Per-shop progress of an in-flight run_gsd_script, polled by the frontend bar.
+_run_progress = {"current": 0, "total": 0, "running": False}
+
 
 def cancel_run() -> None:
     """Request the active GSD run to stop at the next shop boundary."""
     _run_cancel["cancel"] = True
+
+
+def get_run_progress() -> Dict[str, Any]:
+    return dict(_run_progress)
 
 TRACKING_TEMPLATES = {
     "NL": (
@@ -1702,6 +1709,7 @@ def run_gsd_script(
         "cancelled": False,
     }
     _run_cancel["cancel"] = False  # fresh run
+    _run_progress.update({"current": 0, "total": 0, "running": True})
 
     # Get shop changes from Redshift
     try:
@@ -1709,15 +1717,19 @@ def run_gsd_script(
     except Exception as ex:
         logger.error("Failed to get shop changes from Redshift: %s", ex)
         overall_results["errors"].append({"step": "redshift_query", "error": str(ex)})
+        _run_progress["running"] = False
         return overall_results
 
     if not changes:
         logger.info("No shop changes found for %s", overall_results["date"])
+        _run_progress["running"] = False
         return overall_results
 
     logger.info("Processing %d shop changes", len(changes))
+    _run_progress["total"] = len(changes)
 
     for idx, change in enumerate(changes):
+        _run_progress["current"] = idx
         if _run_cancel["cancel"]:
             overall_results["cancelled"] = True
             logger.info("GSD run cancelled after %d/%d shop changes", idx, len(changes))
@@ -1846,4 +1858,5 @@ def run_gsd_script(
                 c.get("shop_name"), c.get("country"), c.get("type"),
             )
 
+    _run_progress["running"] = False
     return overall_results

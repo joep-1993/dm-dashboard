@@ -11,6 +11,7 @@ from backend.gsd_campaigns_service import (
     get_redshift_shop_changes,
     run_gsd_script,
     cancel_run,
+    get_run_progress,
     preview_gsd_script,
     get_preview_progress,
     undo_run,
@@ -260,6 +261,12 @@ def cancel_run_endpoint():
     """Request the active GSD run to stop at the next shop boundary."""
     cancel_run()
     return {"ok": True}
+
+
+@router.get("/run/progress")
+def run_progress_endpoint():
+    """Current GSD run progress {current, total, running} for the progress bar."""
+    return get_run_progress()
 
 
 @router.post("/run")
