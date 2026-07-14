@@ -75,7 +75,7 @@
         .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
         .flatpickr-day.today { border-color: #5e4a90; }
         .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
-        .activity-log { max-height: 300px; overflow-y: auto; font-size: 0.82rem; }
+        .activity-log { font-size: 0.82rem; }
         .activity-log .log-entry { padding: 0.4rem 0; border-bottom: 1px solid #f1f2f6; }
         .activity-log .log-time { color: #636e72; min-width: 140px; display: inline-block; }
         .activity-log .log-action { font-weight: 600; }
@@ -407,8 +407,8 @@
                 </h5>
             </div>
             <div class="card-body p-0">
-                <div class="activity-log p-3" id="activityLog">
-                    <div class="text-muted text-center py-2">No activity yet.</div>
+                <div class="activity-log" id="activityLog">
+                    <div class="text-muted text-center py-3">No activity yet.</div>
                 </div>
             </div>
         </div>
@@ -1593,36 +1593,50 @@
             const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
             const el = document.getElementById('activityLog');
             if (!log.length) {
-                el.innerHTML = '<div class="text-muted text-center py-2">No activity yet.</div>';
+                el.innerHTML = '<div class="text-muted text-center py-3">No activity yet.</div>';
                 return;
             }
-            el.innerHTML = log.map(entry => {
+            const btnStyle = "border:1px solid #5e4a90; color:#5e4a90; background:transparent; padding:0.1rem 0.6rem; font-size:0.78rem;";
+            const btnHover = "onmouseover=\"this.style.background='#5e4a90';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#5e4a90'\"";
+            const rows = log.map(entry => {
                 const time = new Date(entry.time).toLocaleString('nl-NL');
                 const cls = entry.success ? 'log-success' : 'log-error';
                 const u = entry.undo || {};
                 const nCreated = (u.created || []).length;
                 const nPaused = (u.paused || []).length;
                 const hasUndo = (nCreated + nPaused) > 0;
-                const btnStyle = "border:1px solid #CC5500; color:#CC5500; background:transparent; padding:0.1rem 0.6rem; font-size:0.78rem;";
-                const btnHover = "onmouseover=\"this.style.background='#CC5500';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#CC5500'\"";
                 let resetHtml = '';
                 if (entry.reset) {
-                    resetHtml = `<span class="ms-auto text-muted" style="font-size:0.75rem;">reset</span>`;
+                    resetHtml = `<span class="text-muted" style="font-size:0.75rem;">reset</span>`;
                 } else if (hasUndo) {
                     // Run performed after undo-tracking shipped — undo directly.
-                    resetHtml = `<button class="btn btn-sm ms-auto" title="Pause the ${nCreated} created and re-enable the ${nPaused} paused campaign(s)" style="${btnStyle}" ${btnHover} onclick="resetRun('${entry.id}')">Reset</button>`;
+                    resetHtml = `<button class="btn btn-sm" title="Pause the ${nCreated} created and re-enable the ${nPaused} paused campaign(s)" style="${btnStyle}" ${btnHover} onclick="resetRun('${entry.id}')">Reset</button>`;
                 } else if (entry.action === 'Run Script') {
                     // Older run without a stored undo payload — reconstruct from
                     // Google Ads change history around this entry's timestamp.
-                    resetHtml = `<button class="btn btn-sm ms-auto" title="Reconstruct this run from Google Ads change history (around ${escapeHtml(time)}), review, then undo" style="${btnStyle}" ${btnHover} onclick="reconstructRun('${entry.id}')">Reset&nbsp;⟲</button>`;
+                    resetHtml = `<button class="btn btn-sm" title="Reconstruct this run from Google Ads change history (around ${escapeHtml(time)}), review, then undo" style="${btnStyle}" ${btnHover} onclick="reconstructRun('${entry.id}')">Reset</button>`;
                 }
-                return `<div class="log-entry d-flex align-items-center gap-2">
-                    <span class="log-time">${time}</span>
-                    <span class="log-action">${escapeHtml(entry.action)}</span> -
-                    <span class="${cls}">${escapeHtml(entry.details)}</span>
-                    ${resetHtml}
-                </div>`;
+                return `<tr>
+                    <td style="white-space:nowrap;">${time}</td>
+                    <td>${escapeHtml(entry.action)}</td>
+                    <td class="${cls}">${escapeHtml(entry.details)}</td>
+                    <td class="text-end">${resetHtml}</td>
+                </tr>`;
             }).join('');
+            el.innerHTML = `
+                <div style="max-height:340px; overflow:auto; border:1px solid #eee; border-radius:4px;">
+                    <table class="table table-sm table-hover mb-0 gsd-preview-table">
+                        <thead>
+                            <tr>
+                                <th style="width:150px;">Time</th>
+                                <th style="width:110px;">Action</th>
+                                <th>Details</th>
+                                <th style="width:90px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>`;
         }
 
         async function resetRun(id) {
