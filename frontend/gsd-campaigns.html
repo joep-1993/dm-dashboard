@@ -977,13 +977,13 @@
                 const chevL = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>';
                 const chevR = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>';
                 const selInfo = selectable ? '<span class="text-muted" id="llPreviewSelectedInfo" style="font-size: 0.85rem;"></span>' : '';
-                const runSelBtnHtml = selectable ? `<button class="btn btn-sm" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>` : '';
+                const runSelBtnHtml = selectable ? `<button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runSelectedLowLinkage()" id="llRunSelectedBtn">Run selected</button>` : '';
                 const selectAllTh = selectable ? '<th style="width: 2.5rem; text-align: center;"><input type="checkbox" id="llPreviewSelectAll" title="Select all (filtered)" onclick="togglePreviewSelectAll(this.checked)"></th>' : '';
                 html += `
                 <div class="filter-row d-flex gap-2 align-items-center mt-2 mb-2">
                     <input type="text" class="form-control form-control-sm" id="llPreviewFilter" placeholder="Filter shop, campaign, country..." oninput="applyPreviewFilter()" style="max-width: 260px;">
                     ${selInfo}
-                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportPreviewXlsx()">Export Excel</button>
+                    <button class="btn ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportPreviewXlsx()">Export Excel</button>
                     ${runSelBtnHtml}
                 </div>
                 <div class="table-responsive">
@@ -1347,7 +1347,11 @@
             btn.disabled = true;
             runBtn.disabled = true;
             area.style.display = 'block';
-            content.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Checking what would be created and paused...</div>';
+            content.innerHTML = `
+                <div class="mb-1" style="font-size:0.85rem;">Checking what would be created and paused…</div>
+                <div class="progress" style="height:22px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:100%; background-color:#00b894;"></div>
+                </div>`;
 
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/preview?${params.toString()}`, { method: 'POST' });
@@ -1383,7 +1387,7 @@
 
         // Outlined action pill (green create / orange pause / purple skip).
         function previewActionLabel(a) {
-            const c = a === 'create' ? '#2e7d32' : a === 'pause' ? '#e65100' : '#5e4a90';
+            const c = a === 'create' ? '#00b894' : a === 'pause' ? '#e65100' : '#5e4a90';
             return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c};">${escapeHtml(a || '')}</span>`;
         }
 
@@ -1405,7 +1409,7 @@
             return `
                 <div class="fw-bold mb-2" style="color:#5e4a90;">Preview${m.date ? ' for ' + escapeHtml(m.date) : ''} — no changes made</div>
                 <div class="d-flex flex-wrap gap-3 mb-2">
-                    ${tile('create', m.to_create, 'campaigns to create', '#2e7d32', '#e8f5e9', '#43a047')}
+                    ${tile('create', m.to_create, 'campaigns to create', '#00b894', '#e8f7f3', '#00b894')}
                     ${tile('pause', m.to_pause, 'campaigns to pause', '#e65100', '#fff3e0', '#fb8c00')}
                     ${tile('skip', m.already_exists, 'already exist (skipped)', '#5e4a90', '#f3f0fa', '#5e4a90')}
                 </div>
@@ -1431,7 +1435,7 @@
                 <div class="d-flex align-items-center gap-2 mb-2">
                     <input type="text" class="form-control form-control-sm" style="max-width:260px;" placeholder="Filter campaigns..." id="gsdPreviewFilter" value="${escapeHtml(previewFilterText || '')}" oninput="onPreviewFilter(this.value)">
                     <div class="ms-auto d-flex gap-2">
-                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="exportPreviewXlsx()">Export Excel</button>
+                        <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="exportGsdPreviewXlsx()">Export Excel</button>
                         <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="copyPreviewForExcel()" id="gsdPreviewCopyBtn">Copy for Excel</button>
                     </div>
                 </div>
@@ -1503,7 +1507,7 @@
             return getPreviewView().map(c => ({ Shop: c.shop_name, Campaign: c.campaign_name, Country: c.country, Action: c.action }));
         }
 
-        function exportPreviewXlsx() {
+        function exportGsdPreviewXlsx() {
             const rows = previewViewRows();
             if (!rows.length) return alert('No campaigns to export.');
             const ws = XLSX.utils.json_to_sheet(rows);
