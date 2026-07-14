@@ -1252,28 +1252,43 @@ def _pause_campaigns_for_shop(
 ) -> List[Dict[str, Any]]:
     """
     Pause all active GSD campaigns for a shop in a given account.
+    Only pauses campaigns that carry the GSD_SCRIPT label.
     Returns a list of result dicts.
     """
     results = []
 
-    # Find campaigns for this shop
+    # Find campaigns for this shop that have the GSD_SCRIPT label
     ga_service = client.get_service("GoogleAdsService")
     escaped_name = shop_name.replace("'", "\\'")
     query = f"""
         SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name
-        FROM campaign
+        FROM campaign_label
         WHERE campaign.name LIKE '%[shop:{escaped_name}]%'
           AND campaign.status = 'ENABLED'
+          AND label.name = '{SCRIPT_LABEL}'
     """
 
     try:
         response = ga_service.search(customer_id=customer_id, query=query)
         for row in response:
-            result = pause_campaign(customer_id, str(row.campaign.id))
+            campaign_id = str(row.campaign.id)
+            campaign_name = row.campaign.name
+            result = pause_campaign(customer_id, campaign_id)
+            action = "paused" if result["success"] else "error"
+            if action == "paused":
+                logger.info(
+                    "Paused campaign '%s' (id=%s) in account %s for shop '%s'",
+                    campaign_name, campaign_id, customer_id, shop_name,
+                )
+            else:
+                logger.error(
+                    "Failed to pause campaign '%s' (id=%s) in account %s: %s",
+                    campaign_name, campaign_id, customer_id, result,
+                )
             results.append({
-                "campaign_name": row.campaign.name,
-                "campaign_id": str(row.campaign.id),
-                "action": "paused" if result["success"] else "error",
+                "campaign_name": campaign_name,
+                "campaign_id": campaign_id,
+                "action": action,
                 "detail": result,
             })
     except GoogleAdsException as ex:
@@ -1435,5 +1450,19 @@ def run_gsd_script(
         len(overall_results["skipped"]),
         len(overall_results["errors"]),
     )
+    if overall_results["paused"]:
+        for p in overall_results["paused"]:
+            logger.info(
+                "  PAUSED: '%s' (id=%s) shop=%s country=%s type=%s",
+                p.get("campaign_name"), p.get("campaign_id"),
+                p.get("shop_name"), p.get("country"), p.get("type"),
+            )
+    if overall_results["created"]:
+        for c in overall_results["created"]:
+            logger.info(
+                "  CREATED: '%s' (id=%s) shop=%s country=%s type=%s",
+                c.get("campaign_name"), c.get("campaign_id"),
+                c.get("shop_name"), c.get("country"), c.get("type"),
+            )
 
     return overall_results
