@@ -48,6 +48,12 @@
         .campaign-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .campaign-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .campaign-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .gsd-preview-table thead th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+        .gsd-preview-table thead th.sortable { cursor: pointer; user-select: none; }
+        .gsd-preview-table thead th.sortable:hover { background: #6d58a3; }
+        .gsd-preview-table .sort-arrow { opacity: 0.7; font-size: 0.7rem; }
+        .gsd-preview-table td { vertical-align: middle; }
+        .gsd-preview-table td.col-name { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
@@ -379,8 +385,8 @@
                 <div class="pagination-controls" id="llPaginationControls">
                     <span>Per page:</span>
                     <select class="form-select form-select-sm" id="llPerPage" onchange="llCurrentPage=1; renderLLHistory();">
-                        <option value="10">10</option>
-                        <option value="25" selected>25</option>
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
                         <option value="50">50</option>
                         <option value="100">100</option>
                         <option value="all">Show all</option>
@@ -422,6 +428,12 @@
         let sortColumn = null;
         let sortDirection = 'asc';
         let newCampaignIds = new Set();
+        let pendingReconstruct = null;  // {id, created, paused} awaiting confirmation
+        // GSD preview panel state (sort / filter / export)
+        let previewCampaigns = [];
+        let previewMeta = {};
+        let previewSort = { col: 'action', dir: 'asc' };
+        let previewFilterText = '';
 
         window.addEventListener('DOMContentLoaded', () => {
             if (window.flatpickr) {
@@ -1344,49 +1356,22 @@
 
                 const errCount = (data.errors || []).length;
 
-                // Table of affected campaigns, grouped pause -> create -> skip.
-                const rank = { pause: 0, create: 1, skip: 2 };
-                const badge = (a) => a === 'create' ? '<span style="color:#2e7d32; font-weight:600;">create</span>'
-                    : a === 'pause' ? '<span style="color:#e65100; font-weight:600;">pause</span>'
-                    : '<span style="color:#8a8a8a; font-weight:600;">skip</span>';
-                const camps = (data.campaigns || []).slice().sort((a, b) =>
-                    (rank[a.action] - rank[b.action]) || (a.campaign_name || '').localeCompare(b.campaign_name || ''));
-                let tableHtml = '';
-                if (camps.length) {
-                    tableHtml = `
-                    <div class="mt-3" style="max-height:320px; overflow:auto; border:1px solid #eee; border-radius:4px;">
-                        <table class="table table-sm table-hover mb-0" style="font-size:0.8rem;">
-                            <thead style="position:sticky; top:0; background:#f8f9fa; z-index:1;">
-                                <tr><th style="width:80px;">Action</th><th>Campaign name</th><th style="width:70px;">Country</th></tr>
-                            </thead>
-                            <tbody>
-                                ${camps.map(c => `<tr><td>${badge(c.action)}</td><td>${escapeHtml(c.campaign_name || '')}</td><td>${escapeHtml(c.country || '')}</td></tr>`).join('')}
-                            </tbody>
-                        </table>
-                    </div>`;
-                }
+                // Stash for sort / filter / export.
+                previewCampaigns = (data.campaigns || []).map(c => ({
+                    action: c.action, campaign_name: c.campaign_name || '',
+                    shop_name: c.shop_name || '', country: c.country || '', type: c.type || ''
+                }));
+                previewMeta = {
+                    date: data.date || '', to_create: data.to_create ?? 0, to_pause: data.to_pause ?? 0,
+                    already_exists: data.already_exists ?? 0, shops_aan: data.shops_aan ?? 0,
+                    shops_uit: data.shops_uit ?? 0, errCount
+                };
+                previewSort = { col: 'action', dir: 'asc' };
+                previewFilterText = '';
 
-                content.innerHTML = `
-                    <div class="fw-bold mb-2" style="color:#5e4a90;">Preview${data.date ? ' for ' + escapeHtml(data.date) : ''} — no changes made</div>
-                    <div class="d-flex flex-wrap gap-3 mb-2">
-                        <div class="p-2 px-3 rounded" style="background:#e8f5e9; border:1px solid #43a047;">
-                            <div style="font-size:1.5rem; font-weight:700; color:#2e7d32;">${data.to_create ?? 0}</div>
-                            <div style="font-size:0.8rem; color:#2e7d32;">campaigns to create</div>
-                        </div>
-                        <div class="p-2 px-3 rounded" style="background:#fff3e0; border:1px solid #fb8c00;">
-                            <div style="font-size:1.5rem; font-weight:700; color:#e65100;">${data.to_pause ?? 0}</div>
-                            <div style="font-size:0.8rem; color:#e65100;">campaigns to pause</div>
-                        </div>
-                        <div class="p-2 px-3 rounded" style="background:#f3f0fa; border:1px solid #5e4a90;">
-                            <div style="font-size:1.5rem; font-weight:700; color:#5e4a90;">${data.already_exists ?? 0}</div>
-                            <div style="font-size:0.8rem; color:#5e4a90;">already exist (skipped)</div>
-                        </div>
-                    </div>
-                    <div class="text-muted" style="font-size:0.82rem;">
-                        ${data.shops_aan ?? 0} shop(s) to activate, ${data.shops_uit ?? 0} to pause${errCount ? ` &middot; <span class="text-danger">${errCount} error(s)</span>` : ''}
-                    </div>
-                    ${tableHtml}`;
-                logActivity('Preview', `${data.to_create ?? 0} to create / ${data.to_pause ?? 0} to pause${date ? ' for ' + date : ''}`, true);
+                content.innerHTML = renderPreviewShell(data.by_shop || []);
+                renderPreviewTable();
+                logActivity('Preview', `${previewMeta.to_create} to create / ${previewMeta.to_pause} to pause${date ? ' for ' + date : ''}`, true);
             } catch (err) {
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
                 logActivity('Preview', `Error: ${err.message}`, false);
@@ -1395,6 +1380,152 @@
                 runBtn.disabled = false;
                 btn.textContent = 'Preview';
             }
+        }
+
+        // Outlined action pill (green create / orange pause / purple skip).
+        function previewActionLabel(a) {
+            const c = a === 'create' ? '#2e7d32' : a === 'pause' ? '#e65100' : '#5e4a90';
+            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c};">${escapeHtml(a || '')}</span>`;
+        }
+
+        function renderShopsSummary(byShop) {
+            const seen = new Set(), rows = [];
+            (byShop || []).forEach(s => {
+                const key = `${s.shop_name}|${s.actie}`;
+                if (seen.has(key)) return;
+                seen.add(key);
+                rows.push(s);
+            });
+            if (!rows.length) return '';
+            rows.sort((a, b) => (a.actie === b.actie
+                ? (a.shop_name || '').localeCompare(b.shop_name || '')
+                : (a.actie === 'aan' ? -1 : 1)));
+            const lbl = (actie) => actie === 'aan'
+                ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #2e7d32; color:#2e7d32;">activate</span>'
+                : '<span class="badge bg-transparent fw-bold" style="border:1px solid #e65100; color:#e65100;">pause</span>';
+            return `
+                <div class="mb-1" style="font-size:0.8rem; font-weight:600; color:#5e4a90;">Shops (${rows.length})</div>
+                <div style="max-height:160px; overflow:auto; border:1px solid #eee; border-radius:4px;">
+                    <table class="table table-sm table-hover mb-0" style="font-size:0.8rem;">
+                        <thead class="table-light"><tr><th style="width:90px;">Action</th><th>Shop</th><th style="width:120px;">Campaigns</th></tr></thead>
+                        <tbody>
+                            ${rows.map(s => `<tr><td>${lbl(s.actie)}</td><td>${escapeHtml(s.shop_name || '')}</td><td>${s.actie === 'aan' ? (s.to_create || 0) + ' to create' : (s.to_pause || 0) + ' to pause'}</td></tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
+        }
+
+        function renderPreviewShell(byShop) {
+            const m = previewMeta;
+            return `
+                <div class="fw-bold mb-2" style="color:#5e4a90;">Preview${m.date ? ' for ' + escapeHtml(m.date) : ''} — no changes made</div>
+                <div class="d-flex flex-wrap gap-3 mb-2">
+                    <div class="p-2 px-3 rounded" style="background:#e8f5e9; border:1px solid #43a047;">
+                        <div style="font-size:1.5rem; font-weight:700; color:#2e7d32;">${m.to_create}</div>
+                        <div style="font-size:0.8rem; color:#2e7d32;">campaigns to create</div>
+                    </div>
+                    <div class="p-2 px-3 rounded" style="background:#fff3e0; border:1px solid #fb8c00;">
+                        <div style="font-size:1.5rem; font-weight:700; color:#e65100;">${m.to_pause}</div>
+                        <div style="font-size:0.8rem; color:#e65100;">campaigns to pause</div>
+                    </div>
+                    <div class="p-2 px-3 rounded" style="background:#f3f0fa; border:1px solid #5e4a90;">
+                        <div style="font-size:1.5rem; font-weight:700; color:#5e4a90;">${m.already_exists}</div>
+                        <div style="font-size:0.8rem; color:#5e4a90;">already exist (skipped)</div>
+                    </div>
+                </div>
+                <div class="text-muted mb-2" style="font-size:0.82rem;">
+                    ${m.shops_aan} shop(s) to activate, ${m.shops_uit} to pause${m.errCount ? ` &middot; <span class="text-danger">${m.errCount} error(s)</span>` : ''}
+                </div>
+                ${renderShopsSummary(byShop)}
+                <div class="d-flex align-items-center gap-2 mt-3 mb-2">
+                    <input type="text" class="form-control form-control-sm" style="max-width:260px;" placeholder="Filter campaigns..." id="gsdPreviewFilter" oninput="onPreviewFilter(this.value)">
+                    <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportPreviewXlsx()">Export Excel</button>
+                    <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyPreviewForExcel()" id="gsdPreviewCopyBtn">Copy for Excel</button>
+                </div>
+                <div id="gsdPreviewTableWrap"></div>`;
+        }
+
+        function getPreviewView() {
+            const q = (previewFilterText || '').toLowerCase();
+            let rows = previewCampaigns;
+            if (q) rows = rows.filter(c =>
+                (c.campaign_name || '').toLowerCase().includes(q) ||
+                (c.shop_name || '').toLowerCase().includes(q) ||
+                (c.country || '').toLowerCase().includes(q) ||
+                (c.action || '').toLowerCase().includes(q));
+            const rank = { pause: 0, create: 1, skip: 2 };
+            const { col, dir } = previewSort;
+            const mul = dir === 'asc' ? 1 : -1;
+            return rows.slice().sort((a, b) => {
+                let av, bv;
+                if (col === 'action') { av = rank[a.action] ?? 9; bv = rank[b.action] ?? 9; }
+                else { av = (a[col] || '').toLowerCase(); bv = (b[col] || '').toLowerCase(); }
+                if (av < bv) return -1 * mul;
+                if (av > bv) return 1 * mul;
+                return (a.campaign_name || '').localeCompare(b.campaign_name || '');
+            });
+        }
+
+        function renderPreviewTable() {
+            const wrap = document.getElementById('gsdPreviewTableWrap');
+            if (!wrap) return;
+            const rows = getPreviewView();
+            const arrow = (col) => previewSort.col === col ? (previewSort.dir === 'asc' ? '↑' : '↓') : '↕';
+            const th = (col, label, w) => `<th class="sortable" data-sort="${col}" onclick="sortPreview('${col}')"${w ? ` style="width:${w};"` : ''}>${label} <span class="sort-arrow">${arrow(col)}</span></th>`;
+            wrap.innerHTML = `
+                <div style="max-height:340px; overflow:auto; border:1px solid #eee; border-radius:4px;">
+                    <table class="table table-sm table-hover mb-0 gsd-preview-table">
+                        <thead>
+                            <tr>
+                                ${th('action', 'Action', '90px')}
+                                ${th('campaign_name', 'Campaign name')}
+                                ${th('shop_name', 'Shop', '160px')}
+                                ${th('country', 'Country', '80px')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows.length ? rows.map(c => `<tr>
+                                <td>${previewActionLabel(c.action)}</td>
+                                <td class="col-name" title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '')}</td>
+                                <td>${escapeHtml(c.shop_name || '')}</td>
+                                <td>${escapeHtml(c.country || '')}</td>
+                            </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No matching campaigns.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="text-muted mt-1" style="font-size:0.75rem;">${rows.length} row(s)${previewFilterText ? ' (filtered)' : ''}</div>`;
+        }
+
+        function sortPreview(col) {
+            if (previewSort.col === col) previewSort.dir = previewSort.dir === 'asc' ? 'desc' : 'asc';
+            else previewSort = { col, dir: 'asc' };
+            renderPreviewTable();
+        }
+
+        function onPreviewFilter(v) { previewFilterText = v; renderPreviewTable(); }
+
+        function previewViewRows() {
+            return getPreviewView().map(c => ({ Action: c.action, Campaign: c.campaign_name, Shop: c.shop_name, Country: c.country }));
+        }
+
+        function exportPreviewXlsx() {
+            const rows = previewViewRows();
+            if (!rows.length) return alert('No campaigns to export.');
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'GSD Preview');
+            XLSX.writeFile(wb, `gsd_preview_${previewMeta.date || new Date().toISOString().slice(0, 10)}.xlsx`);
+        }
+
+        function copyPreviewForExcel() {
+            const rows = previewViewRows();
+            if (!rows.length) return alert('No campaigns to copy.');
+            const headers = Object.keys(rows[0]);
+            const tsv = [headers.join('\t'), ...rows.map(r => headers.map(h => r[h]).join('\t'))].join('\n');
+            navigator.clipboard.writeText(tsv).then(() => {
+                const btn = document.getElementById('gsdPreviewCopyBtn');
+                if (btn) { const o = btn.textContent; btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = o, 1500); }
+            });
         }
 
         async function runScript() {
@@ -1471,12 +1602,19 @@
                 const u = entry.undo || {};
                 const nCreated = (u.created || []).length;
                 const nPaused = (u.paused || []).length;
-                const canReset = !entry.reset && (nCreated + nPaused) > 0;
+                const hasUndo = (nCreated + nPaused) > 0;
+                const btnStyle = "border:1px solid #CC5500; color:#CC5500; background:transparent; padding:0.1rem 0.6rem; font-size:0.78rem;";
+                const btnHover = "onmouseover=\"this.style.background='#CC5500';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#CC5500'\"";
                 let resetHtml = '';
-                if (canReset) {
-                    resetHtml = `<button class="btn btn-sm ms-auto" title="Pause the ${nCreated} created and re-enable the ${nPaused} paused campaign(s)" style="border:1px solid #CC5500; color:#CC5500; background:transparent; padding:0.1rem 0.6rem; font-size:0.78rem;" onmouseover="this.style.background='#CC5500';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#CC5500'" onclick="resetRun('${entry.id}')">Reset</button>`;
-                } else if (entry.reset) {
+                if (entry.reset) {
                     resetHtml = `<span class="ms-auto text-muted" style="font-size:0.75rem;">reset</span>`;
+                } else if (hasUndo) {
+                    // Run performed after undo-tracking shipped — undo directly.
+                    resetHtml = `<button class="btn btn-sm ms-auto" title="Pause the ${nCreated} created and re-enable the ${nPaused} paused campaign(s)" style="${btnStyle}" ${btnHover} onclick="resetRun('${entry.id}')">Reset</button>`;
+                } else if (entry.action === 'Run Script') {
+                    // Older run without a stored undo payload — reconstruct from
+                    // Google Ads change history around this entry's timestamp.
+                    resetHtml = `<button class="btn btn-sm ms-auto" title="Reconstruct this run from Google Ads change history (around ${escapeHtml(time)}), review, then undo" style="${btnStyle}" ${btnHover} onclick="reconstructRun('${entry.id}')">Reset&nbsp;⟲</button>`;
                 }
                 return `<div class="log-entry d-flex align-items-center gap-2">
                     <span class="log-time">${time}</span>
@@ -1517,6 +1655,108 @@
             } catch (err) {
                 logActivity('Reset', `Error: ${err.message}`, false);
             }
+        }
+
+        // Rebuild a past run's affected campaigns from Google Ads change history
+        // (keyed off the log entry's timestamp), show them, then undo on confirm.
+        async function reconstructRun(id) {
+            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+            const entry = log.find(e => e.id === id);
+            if (!entry) return;
+            const area = document.getElementById('progressArea');
+            const content = document.getElementById('progressContent');
+            area.style.display = 'block';
+            content.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Reconstructing this run from Google Ads change history…</div>';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/reconstruct`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ at: entry.time })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const created = data.created || [], paused = data.paused || [];
+                const errN = (data.errors || []).length;
+                const win = data.window || {};
+
+                if (created.length + paused.length === 0) {
+                    content.innerHTML = `<div class="text-warning fw-bold">No GSD campaign changes found</div>
+                        <div class="text-muted" style="font-size:0.82rem;">Window ${escapeHtml(win.start || '')} → ${escapeHtml(win.end || '')} (${escapeHtml(win.tz || '')}). The run may be older than ~30 days (change history is not retained beyond that)${errN ? `, or ${errN} account query error(s) occurred` : ''}.</div>`;
+                    pendingReconstruct = null;
+                    return;
+                }
+
+                pendingReconstruct = { id, created, paused };
+                // Each row shows the undo action: created -> pause, paused -> enable.
+                const rows = created.map(c => ({ ...c, act: 'pause' })).concat(paused.map(c => ({ ...c, act: 'enable' })));
+                const badge = (a) => a === 'pause'
+                    ? '<span style="color:#e65100; font-weight:600;">pause</span>'
+                    : '<span style="color:#2e7d32; font-weight:600;">enable</span>';
+                content.innerHTML = `
+                    <div class="fw-bold mb-1" style="color:#5e4a90;">Reconstructed run — review before undoing</div>
+                    <div class="text-muted mb-2" style="font-size:0.82rem;">
+                        Window ${escapeHtml(win.start || '')} → ${escapeHtml(win.end || '')} (${escapeHtml(win.tz || '')}) ·
+                        will PAUSE ${created.length} created, RE-ENABLE ${paused.length} paused${errN ? ` · <span class="text-danger">${errN} query error(s)</span>` : ''}
+                    </div>
+                    <div style="max-height:300px; overflow:auto; border:1px solid #eee; border-radius:4px;">
+                        <table class="table table-sm table-hover mb-0" style="font-size:0.8rem;">
+                            <thead style="position:sticky; top:0; background:#f8f9fa; z-index:1;">
+                                <tr><th style="width:80px;">Undo</th><th>Campaign name</th></tr>
+                            </thead>
+                            <tbody>
+                                ${rows.map(r => `<tr><td>${badge(r.act)}</td><td>${escapeHtml(r.campaign_name || '')}</td></tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 d-flex gap-2">
+                        <button class="btn btn-sm" style="background:#CC5500; color:white; border:none; padding:0.25rem 1rem;" onclick="applyReconstruct()">Undo these changes</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="cancelReconstruct()">Cancel</button>
+                    </div>`;
+            } catch (err) {
+                pendingReconstruct = null;
+                content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
+            }
+        }
+
+        async function applyReconstruct() {
+            if (!pendingReconstruct) return;
+            const { id, created, paused } = pendingReconstruct;
+            const content = document.getElementById('progressContent');
+            content.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Applying undo…</div>';
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/undo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ created, paused })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const errN = (data.errors || []).length;
+
+                // Mark the original entry reset and stash what was undone.
+                const fresh = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+                const target = fresh.find(e => e.id === id);
+                if (target) { target.reset = true; target.undo = { created, paused }; }
+                localStorage.setItem('gsd_activity_log', JSON.stringify(fresh));
+
+                pendingReconstruct = null;
+                content.innerHTML = `<div class="text-success fw-bold">Undo applied — paused ${data.paused_created ?? 0} created, re-enabled ${data.enabled_paused ?? 0} paused${errN ? ` · ${errN} error(s)` : ''}.</div>`;
+                logActivity('Reset', `Paused ${data.paused_created ?? 0} created / re-enabled ${data.enabled_paused ?? 0} paused (reconstructed)${errN ? ` · ${errN} error(s)` : ''}`, errN === 0);
+                loadCampaigns();
+                loadStats();
+            } catch (err) {
+                content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
+                logActivity('Reset', `Error: ${err.message}`, false);
+            }
+        }
+
+        function cancelReconstruct() {
+            pendingReconstruct = null;
+            const area = document.getElementById('progressArea');
+            const content = document.getElementById('progressContent');
+            content.innerHTML = '';
+            area.style.display = 'none';
         }
 
         function clearLog() {

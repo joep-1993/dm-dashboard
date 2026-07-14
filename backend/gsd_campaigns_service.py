@@ -8,8 +8,13 @@ Center for account linking and Redshift for shop change data.
 import os
 import re
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover - stdlib on py3.9+
+    ZoneInfo = None
 
 import psycopg2
 from google.ads.googleads.client import GoogleAdsClient
@@ -468,6 +473,92 @@ def undo_run(
 
     logger.info("Undo run: paused %d created, enabled %d paused, %d errors",
                 result["paused_created"], result["enabled_paused"], len(result["errors"]))
+    return result
+
+
+def reconstruct_run(
+    at_iso: str,
+    before_minutes: int = 60,
+    after_minutes: int = 10,
+) -> Dict[str, Any]:
+    """
+    Reconstruct what a past GSD run changed, from Google Ads change history, in a
+    window around a log entry's timestamp. `at_iso` is an ISO-8601 timestamp
+    (the browser sends UTC, e.g. "2026-07-14T09:20:14.000Z"). Read-only.
+
+    Returns campaigns to undo:
+      - created: campaigns CREATEd in the window                -> undo pauses them
+      - paused:  campaigns whose latest status change in the window is PAUSED and
+                 that were NOT created in it                    -> undo re-enables
+
+    Only GSD ("[channel:directshopping]") campaigns across the GSD accounts are
+    considered. change_event retains ~30 days, so older runs return nothing.
+    """
+    result: Dict[str, Any] = {"created": [], "paused": [], "errors": [], "window": {}}
+
+    # Build the window in the accounts' timezone (Europe/Amsterdam) — that's how
+    # change_event.change_date_time is expressed. The run's changes precede the
+    # log timestamp (it's written after the run completes), hence the asymmetric
+    # default window (mostly looking backwards).
+    try:
+        at = datetime.fromisoformat(at_iso.replace("Z", "+00:00"))
+    except ValueError as ex:
+        result["errors"].append({"step": "parse_time", "error": f"{at_iso}: {ex}"})
+        return result
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    tz = ZoneInfo("Europe/Amsterdam") if ZoneInfo else timezone.utc
+    start = (at - timedelta(minutes=before_minutes)).astimezone(tz)
+    end = (at + timedelta(minutes=after_minutes)).astimezone(tz)
+    start_s = start.strftime("%Y-%m-%d %H:%M:%S")
+    end_s = end.strftime("%Y-%m-%d %H:%M:%S")
+    result["window"] = {"start": start_s, "end": end_s, "tz": "Europe/Amsterdam"}
+
+    client = _get_client()
+    ga = client.get_service("GoogleAdsService")
+    customer_ids = sorted({info["customer_id"] for info in ACCOUNTS.values()})
+
+    created_ids: Dict[tuple, str] = {}        # (cid, camp_id) -> name
+    status_latest: Dict[tuple, tuple] = {}    # (cid, camp_id) -> (new_status, name), newest first
+
+    for cid in customer_ids:
+        query = f"""
+            SELECT change_event.change_date_time, change_event.resource_change_operation,
+                   change_event.changed_fields, change_event.old_resource,
+                   change_event.new_resource, campaign.id, campaign.name
+            FROM change_event
+            WHERE change_event.change_date_time BETWEEN '{start_s}' AND '{end_s}'
+              AND change_event.change_resource_type = 'CAMPAIGN'
+            ORDER BY change_event.change_date_time DESC
+            LIMIT 10000
+        """
+        try:
+            rows = list(ga.search(customer_id=cid, query=query))
+        except GoogleAdsException as ex:
+            logger.error("Reconstruct: change_event query failed for %s: %s", cid, ex)
+            result["errors"].append({"customer_id": cid, "error": str(ex)[:400]})
+            continue
+
+        for row in rows:
+            ce = row.change_event
+            name = row.campaign.name or ""
+            if "[channel:directshopping]" not in name:
+                continue  # keep to GSD campaigns only
+            key = (cid, str(row.campaign.id))
+            if ce.resource_change_operation.name == "CREATE":
+                created_ids.setdefault(key, name)
+            if "status" in list(ce.changed_fields.paths) and key not in status_latest:
+                status_latest[key] = (ce.new_resource.campaign.status.name, name)
+
+    for (cid, camp_id), name in created_ids.items():
+        result["created"].append({"customer_id": cid, "campaign_id": camp_id, "campaign_name": name})
+    for key, (st, name) in status_latest.items():
+        if st == "PAUSED" and key not in created_ids:
+            cid, camp_id = key
+            result["paused"].append({"customer_id": cid, "campaign_id": camp_id, "campaign_name": name})
+
+    logger.info("Reconstruct [%s..%s]: %d created, %d paused, %d errors",
+                start_s, end_s, len(result["created"]), len(result["paused"]), len(result["errors"]))
     return result
 
 

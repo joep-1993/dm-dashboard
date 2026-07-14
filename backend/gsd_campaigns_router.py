@@ -12,6 +12,7 @@ from backend.gsd_campaigns_service import (
     run_gsd_script,
     preview_gsd_script,
     undo_run,
+    reconstruct_run,
 )
 from backend.gsd_ll_service import (
     start_ll_run,
@@ -202,6 +203,29 @@ async def preview_gsd_script_endpoint(
         return result
     except Exception as e:
         logger.error(f"Error previewing GSD script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reconstruct")
+async def reconstruct_run_endpoint(payload: dict):
+    """
+    Reconstruct a past run's changes from Google Ads change history (read-only),
+    keyed off a log entry timestamp. Body: {"at": "<iso>", "before_minutes"?,
+    "after_minutes"?}. Returns {created, paused, window, errors} to feed /undo.
+    """
+    try:
+        at = payload.get("at")
+        if not at:
+            raise HTTPException(status_code=400, detail="Missing 'at' timestamp")
+        before = int(payload.get("before_minutes", 60))
+        after = int(payload.get("after_minutes", 10))
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, reconstruct_run, at, before, after)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reconstructing GSD run: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
