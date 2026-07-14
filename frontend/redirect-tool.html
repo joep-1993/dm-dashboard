@@ -882,7 +882,7 @@
                 upload: '#5e4a90',  // purple (legacy alias of file)
             };
             const c = colors[m] || '#6c757d';  // grey fallback
-            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c};">${escapeHtml(method || '')}</span>`;
+            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.4px;">${escapeHtml(method || '')}</span>`;
         }
 
         async function loadRuns() {
