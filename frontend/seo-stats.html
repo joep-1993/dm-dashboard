@@ -289,7 +289,7 @@
                 <div class="d-flex align-items-center gap-3">
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="showExtraRev" onchange="toggleExtraRev()">
-                        <label class="form-check-label" for="showExtraRev" style="font-size:0.85rem; cursor:pointer;">Show DMA Organic &amp; GSAAS revenue</label>
+                        <label class="form-check-label" for="showExtraRev" style="font-size:0.85rem; cursor:pointer;">Show DMA Organic &amp; GSAAS revenue, CTR &amp; Bounce</label>
                     </div>
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="showDeltas" onchange="toggleDeltas()">
@@ -364,16 +364,45 @@
             seo_omzet:    { label: 'SEO revenue',         unit: 'euro',  axis: 'euro',  color: '#6c5ce7' },
             dma_omzet:    { label: 'DMA Organic revenue', unit: 'euro',  axis: 'euro',  color: '#e17055' },
             gsaas_omzet:  { label: 'GSAAS revenue',       unit: 'euro',  axis: 'euro',  color: '#e84393' },
+            seo_ctr:      { label: 'SEO CTR',             unit: 'percent', axis: 'percent', color: '#e1b12c' },
+            dma_ctr:      { label: 'DMA Organic CTR',     unit: 'percent', axis: 'percent', color: '#e58e26' },
+            gsaas_ctr:    { label: 'GSAAS CTR',           unit: 'percent', axis: 'percent', color: '#c23616' },
+            seo_bounce:   { label: 'SEO Bounce',          unit: 'percent', axis: 'percent', color: '#b53471' },
+            dma_bounce:   { label: 'DMA Organic Bounce',  unit: 'percent', axis: 'percent', color: '#833471' },
+            gsaas_bounce: { label: 'GSAAS Bounce',        unit: 'percent', axis: 'percent', color: '#6d214f' },
         };
-        const ORDER = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','dma_omzet','gsaas_omzet'];
-        // Per-day overview columns. DMA Organic & GSAAS revenue are optional,
-        // shown via the "Show DMA Organic & GSAAS revenue" toggle (toggleExtraRev).
-        const TABLE_COLS_BASE = ['seo_visits','dma_visits','gsaas_visits','seo_omzet'];
-        const TABLE_COLS_EXTRA = ['dma_omzet','gsaas_omzet'];
+        const ORDER = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','dma_omzet','gsaas_omzet',
+                       'seo_ctr','dma_ctr','gsaas_ctr','seo_bounce','dma_bounce','gsaas_bounce'];
+        // Per-day overview columns. DMA Organic & GSAAS revenue + CTR + Bounce are
+        // optional, shown via the "Show DMA Organic & GSAAS…" toggle (toggleExtraRev).
+        const TABLE_COLS_BASE = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','seo_ctr','seo_bounce'];
+        const TABLE_COLS_EXTRA = ['dma_omzet','gsaas_omzet','dma_ctr','gsaas_ctr','dma_bounce','gsaas_bounce'];
         let TABLE_COLS = TABLE_COLS_BASE.slice();
+        // Derived ratio metrics: <key> = <num> / <den> * 100. Numerators (CTR: bvb +
+        // outclicks; Bounce: visits with no product click) are sent raw per row and
+        // kept raw so totals aggregate as Σnum / Σden — never a mean of daily ratios.
+        const RATIOS = [
+            { key: 'seo_ctr',      num: 'seo_clicks',   den: 'seo_visits' },
+            { key: 'dma_ctr',      num: 'dma_clicks',   den: 'dma_visits' },
+            { key: 'gsaas_ctr',    num: 'gsaas_clicks', den: 'gsaas_visits' },
+            { key: 'seo_bounce',   num: 'seo_noprod',   den: 'seo_visits' },
+            { key: 'dma_bounce',   num: 'dma_noprod',   den: 'dma_visits' },
+            { key: 'gsaas_bounce', num: 'gsaas_noprod', den: 'gsaas_visits' },
+        ];
+        const RATIO_NUMERATORS = [...new Set(RATIOS.map(r => r.num))];
+        // Additive metrics (everything except the derived percentage ratios).
+        const SUM_KEYS = ORDER.filter(k => METRICS[k].unit !== 'percent');
+        // Fill each derived ratio field (num / den * 100) for a set of rows.
+        function deriveRatios(rows) {
+            (rows || []).forEach(r => RATIOS.forEach(({ key, num, den }) => {
+                const d = Number(r[den]) || 0;
+                r[key] = d ? (Number(r[num]) || 0) / d * 100 : null;
+            }));
+        }
         const AXES = {
-            count: { title: 'Visits', position: 'left' },
-            euro:  { title: '€',      position: 'right' },
+            count:   { title: 'Visits', position: 'left' },
+            euro:    { title: '€',      position: 'right' },
+            percent: { title: '%',      position: 'right' },
         };
         let selected = new Set(['seo_visits', 'dma_visits', 'gsaas_visits']);
         let lastData = null;
@@ -402,6 +431,7 @@
             const u = METRICS[key].unit;
             if (u === 'euro') return '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             if (u === 'count') return Math.round(v).toLocaleString('nl-NL');
+            if (u === 'percent') return Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
             return Number(v).toLocaleString('nl-NL', { maximumFractionDigits: 2 });
         }
         function fmtInt(v) { return Math.round(v || 0).toLocaleString('nl-NL'); }
@@ -515,7 +545,7 @@
             });
             const scales = { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } } };
             let rightUsed = 0;
-            ['count','euro'].forEach(ax => {
+            ['count','euro','percent'].forEach(ax => {
                 if (!usedAxes.has(ax)) return;
                 const cfg = AXES[ax];
                 const isRight = cfg.position === 'right';
@@ -544,11 +574,21 @@
             else { chart = new Chart(document.getElementById('chart'), cfg); }
         }
 
-        function computeTotals() {
+        // Aggregate a set of rows: sum the additive metrics + ratio numerators,
+        // then derive each ratio total as Σnum / Σden (never a mean of ratios).
+        function aggregate(rows) {
             const t = {};
-            ORDER.forEach(k => { t[k] = 0; });
-            lastData.daily.forEach(r => ORDER.forEach(k => { t[k] += Number(r[k]) || 0; }));
+            const keys = SUM_KEYS.concat(RATIO_NUMERATORS);
+            keys.forEach(k => { t[k] = 0; });
+            (rows || []).forEach(r => keys.forEach(k => { t[k] += Number(r[k]) || 0; }));
+            RATIOS.forEach(({ key, num, den }) => {
+                t[key] = t[den] ? t[num] / t[den] * 100 : null;
+            });
             return t;
+        }
+
+        function computeTotals() {
+            return aggregate(lastData.daily);
         }
 
         // Period-vs-prior-period % per metric for the top tiles: the selected range vs
@@ -572,6 +612,7 @@
                 const res = await fetch(`${API}/daily?${params}`);
                 if (!res.ok) return;
                 const prev = await res.json();
+                deriveRatios(prev.daily);
                 (prev.daily || []).forEach(r => { wowBase[r.date] = r; });
             } catch (e) { wowBase = {}; }
         }
@@ -606,10 +647,7 @@
                 const res = await fetch(`${API}/daily?${params}`);
                 if (!res.ok) return null;
                 const data = await res.json();
-                const t = {};
-                ORDER.forEach(k => { t[k] = 0; });
-                (data.daily || []).forEach(r => ORDER.forEach(k => { t[k] += Number(r[k]) || 0; }));
-                return t;
+                return aggregate(data.daily || []);
             } catch (e) { return null; }
         }
 
@@ -625,9 +663,7 @@
             // Reuse wowBase when it already covers exactly the prior period (n === 7).
             let prevTot;
             if (n === 7 && Object.keys(wowBase).length) {
-                prevTot = {};
-                ORDER.forEach(k => { prevTot[k] = 0; });
-                Object.values(wowBase).forEach(r => ORDER.forEach(k => { prevTot[k] += Number(r[k]) || 0; }));
+                prevTot = aggregate(Object.values(wowBase));
             } else {
                 prevTot = await fetchTotals(prevStart, prevEnd);
             }
@@ -789,8 +825,8 @@
         // independently per column across the full range (not just the visible page).
         const VISIT_KEYS = ORDER.filter(k => METRICS[k].unit === 'count');
         // Columns that get the diverging red→green heatmap in the per-day table:
-        // all visit counts plus SEO revenue.
-        const HEAT_KEYS = [...VISIT_KEYS, 'seo_omzet'];
+        // all visit counts plus SEO revenue and SEO CTR.
+        const HEAT_KEYS = [...VISIT_KEYS, 'seo_omzet', 'seo_ctr'];
 
         function heatColor(t) {
             // Diverging scale: low = red fades, high = green fades, neutral white midpoint.
@@ -1110,6 +1146,7 @@
                 const res = await fetch(`${API}/daily?${params}`);
                 if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + (await res.text()));
                 lastData = await res.json();
+                deriveRatios(lastData.daily);
                 await loadNotes(lastData.start_date, lastData.end_date);
                 await loadWowBase();   // prior 7 days, for per-day + tile WoW deltas
                 tileDeltas = null;
