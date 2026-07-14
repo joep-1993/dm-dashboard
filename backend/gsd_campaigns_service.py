@@ -1536,6 +1536,8 @@ def _create_campaigns_for_shop(
     results = []
 
     for label in labels:
+        if _run_cancel["cancel"]:
+            break  # stop before the next campaign; run_gsd_script marks the run cancelled
         campaign_name = _build_campaign_name(country, shop_name, shop_id, label)
         _last_gads_error["msg"] = None  # cleared per label; helpers set it on failure
 
@@ -1930,6 +1932,9 @@ def run_gsd_script(
         countries = [country] if country else []
 
         for country in countries:
+            if _run_cancel["cancel"]:
+                overall_results["cancelled"] = True
+                break
             account_info = _find_account_info(country, campaign_type)
             if account_info is None:
                 overall_results["errors"].append({
@@ -2014,6 +2019,11 @@ def run_gsd_script(
                         overall_results["paused"].append(pr)
                     else:
                         overall_results["errors"].append(pr)
+
+    # Safety net: cancel may fire on the last shop/label, so the loops above
+    # end naturally without hitting a cancel check — flag it here regardless.
+    if _run_cancel["cancel"]:
+        overall_results["cancelled"] = True
 
     logger.info(
         "GSD script complete: %d created, %d paused, %d skipped, %d errors",
