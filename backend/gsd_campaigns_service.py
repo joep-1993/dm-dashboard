@@ -81,6 +81,26 @@ def _gads_err(ex) -> str:
     except Exception:
         return str(ex)[:400]
 
+
+# Merchant Center (Content API) errors are plain HttpErrors, not
+# GoogleAdsExceptions. Stash the real reason so a Merchant-Center failure
+# surfaces in the run result instead of a bare "failed_to_get_or_create_mc_account".
+_last_mc_error = {"msg": None}
+
+
+def _mc_err(ex) -> str:
+    """Concise message from a Content API HttpError (prefers the API reason+message)."""
+    try:
+        details = ex.error_details  # googleapiclient HttpError, list of dicts
+        if details:
+            d = details[0]
+            reason = d.get("reason", "")
+            msg = d.get("message", "")
+            return (f"{reason}: {msg}" if reason else msg or str(ex))[:400]
+    except Exception:
+        pass
+    return str(ex)[:400]
+
 TRACKING_TEMPLATES = {
     "NL": (
         "https://www.beslist.nl/outclick/redirect?aff_id=900"
@@ -820,6 +840,7 @@ def create_merchant_id(mc_parent_id: str, shop_name: str) -> Optional[str]:
         return str(response["id"])
     except Exception as ex:
         logger.error("Error creating MC sub-account for '%s': %s", shop_name, ex)
+        _last_mc_error["msg"] = _mc_err(ex)
         return None
 
 
@@ -1362,6 +1383,7 @@ def _get_or_create_mc_account(
     mc_parent_id: str, shop_name: str, ads_customer_id: str
 ) -> Optional[str]:
     """Find or create a Merchant Center sub-account and link to Google Ads."""
+    _last_mc_error["msg"] = None  # cleared per attempt; set on failure below
     try:
         mc_id = get_mc_id(mc_parent_id, shop_name)
     except Exception as ex:
@@ -1369,6 +1391,7 @@ def _get_or_create_mc_account(
         # sub-account for a shop that may already have one.
         logger.error("MC lookup failed for '%s'; skipping create to avoid a duplicate: %s",
                      shop_name, ex)
+        _last_mc_error["msg"] = _mc_err(ex)
         return None
     if mc_id is None:
         mc_id = create_merchant_id(mc_parent_id, shop_name)
@@ -1969,7 +1992,7 @@ def run_gsd_script(
                         "shop_name": shop_name,
                         "country": country,
                         "step": "mc_account",
-                        "error": "failed_to_get_or_create_mc_account",
+                        "error": _last_mc_error["msg"] or "failed_to_get_or_create_mc_account",
                     })
                     continue
 
