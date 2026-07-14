@@ -48,7 +48,7 @@
         .campaign-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .campaign-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .campaign-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
-        .gsd-preview-table thead th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+        .gsd-preview-table thead th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding-top: 0.7rem; padding-bottom: 0.7rem; }
         .gsd-preview-table thead th.sortable { cursor: pointer; user-select: none; }
         .gsd-preview-table thead th.sortable:hover { background: #6d58a3; }
         .gsd-preview-table .sort-arrow { opacity: 0.7; font-size: 0.7rem; }
@@ -431,9 +431,11 @@
         let pendingReconstruct = null;  // {id, created, paused} awaiting confirmation
         // GSD preview panel state (sort / filter / export)
         let previewCampaigns = [];
+        let previewByShop = [];
         let previewMeta = {};
-        let previewSort = { col: 'action', dir: 'asc' };
+        let previewSort = { col: 'shop_name', dir: 'asc' };
         let previewFilterText = '';
+        let previewActiveTile = null;  // null | 'create' | 'pause' | 'skip' | 'shops'
 
         window.addEventListener('DOMContentLoaded', () => {
             if (window.flatpickr) {
@@ -1366,11 +1368,12 @@
                     already_exists: data.already_exists ?? 0, shops_aan: data.shops_aan ?? 0,
                     shops_uit: data.shops_uit ?? 0, errCount
                 };
-                previewSort = { col: 'action', dir: 'asc' };
+                previewSort = { col: 'shop_name', dir: 'asc' };
                 previewFilterText = '';
+                previewActiveTile = null;
+                previewByShop = data.by_shop || [];
 
-                content.innerHTML = renderPreviewShell(data.by_shop || []);
-                renderPreviewTable();
+                renderPreviewPanel();
                 logActivity('Preview', `${previewMeta.to_create} to create / ${previewMeta.to_pause} to pause${date ? ' for ' + date : ''}`, true);
             } catch (err) {
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
@@ -1415,39 +1418,64 @@
                 </div>`;
         }
 
-        function renderPreviewShell(byShop) {
+        function renderPreviewPanel() {
+            const content = document.getElementById('progressContent');
+            content.innerHTML = renderPreviewShell();
+            renderPreviewDetail();
+        }
+
+        function renderPreviewShell() {
             const m = previewMeta;
+            const tile = (kind, count, label, color, bg, border) => {
+                const active = previewActiveTile === kind;
+                return `<div class="p-2 px-3 rounded" style="background:${bg}; border:1px solid ${border}; cursor:pointer;${active ? ` box-shadow:0 0 0 2px ${border} inset;` : ''}" onclick="selectPreviewTile('${kind}')" title="Click to see these campaigns">
+                    <div style="font-size:1.5rem; font-weight:700; color:${color};">${count}</div>
+                    <div style="font-size:0.8rem; color:${color};">${label}</div>
+                </div>`;
+            };
+            const shopsActive = previewActiveTile === 'shops';
             return `
                 <div class="fw-bold mb-2" style="color:#5e4a90;">Preview${m.date ? ' for ' + escapeHtml(m.date) : ''} — no changes made</div>
                 <div class="d-flex flex-wrap gap-3 mb-2">
-                    <div class="p-2 px-3 rounded" style="background:#e8f5e9; border:1px solid #43a047;">
-                        <div style="font-size:1.5rem; font-weight:700; color:#2e7d32;">${m.to_create}</div>
-                        <div style="font-size:0.8rem; color:#2e7d32;">campaigns to create</div>
-                    </div>
-                    <div class="p-2 px-3 rounded" style="background:#fff3e0; border:1px solid #fb8c00;">
-                        <div style="font-size:1.5rem; font-weight:700; color:#e65100;">${m.to_pause}</div>
-                        <div style="font-size:0.8rem; color:#e65100;">campaigns to pause</div>
-                    </div>
-                    <div class="p-2 px-3 rounded" style="background:#f3f0fa; border:1px solid #5e4a90;">
-                        <div style="font-size:1.5rem; font-weight:700; color:#5e4a90;">${m.already_exists}</div>
-                        <div style="font-size:0.8rem; color:#5e4a90;">already exist (skipped)</div>
-                    </div>
+                    ${tile('create', m.to_create, 'campaigns to create', '#2e7d32', '#e8f5e9', '#43a047')}
+                    ${tile('pause', m.to_pause, 'campaigns to pause', '#e65100', '#fff3e0', '#fb8c00')}
+                    ${tile('skip', m.already_exists, 'already exist (skipped)', '#5e4a90', '#f3f0fa', '#5e4a90')}
                 </div>
-                <div class="text-muted mb-2" style="font-size:0.82rem;">
-                    ${m.shops_aan} shop(s) to activate, ${m.shops_uit} to pause${m.errCount ? ` &middot; <span class="text-danger">${m.errCount} error(s)</span>` : ''}
+                <div class="mb-2" style="font-size:0.82rem;">
+                    <span onclick="selectPreviewTile('shops')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; color:${shopsActive ? '#5e4a90' : '#636e72'}; font-weight:${shopsActive ? '600' : '400'};" title="Click to see which shops">
+                        ${m.shops_aan} shop(s) to activate, ${m.shops_uit} to pause
+                    </span>${m.errCount ? ` &middot; <span class="text-danger">${m.errCount} error(s)</span>` : ''}
                 </div>
-                ${renderShopsSummary(byShop)}
-                <div class="d-flex align-items-center gap-2 mt-3 mb-2">
-                    <input type="text" class="form-control form-control-sm" style="max-width:260px;" placeholder="Filter campaigns..." id="gsdPreviewFilter" oninput="onPreviewFilter(this.value)">
-                    <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportPreviewXlsx()">Export Excel</button>
-                    <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyPreviewForExcel()" id="gsdPreviewCopyBtn">Copy for Excel</button>
+                <div id="gsdPreviewDetail"></div>`;
+        }
+
+        function selectPreviewTile(kind) {
+            previewActiveTile = (previewActiveTile === kind) ? null : kind;
+            renderPreviewPanel();
+        }
+
+        function renderPreviewDetail() {
+            const el = document.getElementById('gsdPreviewDetail');
+            if (!el) return;
+            const kind = previewActiveTile;
+            if (!kind) { el.innerHTML = ''; return; }
+            if (kind === 'shops') { el.innerHTML = renderShopsSummary(previewByShop); return; }
+            // create / pause / skip -> filtered campaigns table with controls
+            const hover = "onmouseover=\"this.style.background='#5e4a90';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#5e4a90'\"";
+            el.innerHTML = `
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <input type="text" class="form-control form-control-sm" style="max-width:260px;" placeholder="Filter campaigns..." id="gsdPreviewFilter" value="${escapeHtml(previewFilterText || '')}" oninput="onPreviewFilter(this.value)">
+                    <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="exportPreviewXlsx()">Export Excel</button>
+                    <button class="btn btn-sm" style="border:1px solid #5e4a90; color:#5e4a90; background:transparent;" ${hover} onclick="copyPreviewForExcel()" id="gsdPreviewCopyBtn">Copy for Excel</button>
                 </div>
-                <div id="gsdPreviewTableWrap"></div>`;
+                <div id="gsdPreviewTableInner"></div>`;
+            renderPreviewCampaignsTable();
         }
 
         function getPreviewView() {
             const q = (previewFilterText || '').toLowerCase();
             let rows = previewCampaigns;
+            if (['create', 'pause', 'skip'].includes(previewActiveTile)) rows = rows.filter(c => c.action === previewActiveTile);
             if (q) rows = rows.filter(c =>
                 (c.campaign_name || '').toLowerCase().includes(q) ||
                 (c.shop_name || '').toLowerCase().includes(q) ||
@@ -1466,8 +1494,8 @@
             });
         }
 
-        function renderPreviewTable() {
-            const wrap = document.getElementById('gsdPreviewTableWrap');
+        function renderPreviewCampaignsTable() {
+            const wrap = document.getElementById('gsdPreviewTableInner');
             if (!wrap) return;
             const rows = getPreviewView();
             const arrow = (col) => previewSort.col === col ? (previewSort.dir === 'asc' ? '↑' : '↓') : '↕';
@@ -1477,18 +1505,18 @@
                     <table class="table table-sm table-hover mb-0 gsd-preview-table">
                         <thead>
                             <tr>
-                                ${th('action', 'Action', '90px')}
-                                ${th('campaign_name', 'Campaign name')}
                                 ${th('shop_name', 'Shop', '160px')}
+                                ${th('campaign_name', 'Campaign name')}
                                 ${th('country', 'Country', '80px')}
+                                ${th('action', 'Action', '90px')}
                             </tr>
                         </thead>
                         <tbody>
                             ${rows.length ? rows.map(c => `<tr>
-                                <td>${previewActionLabel(c.action)}</td>
-                                <td class="col-name" title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '')}</td>
                                 <td>${escapeHtml(c.shop_name || '')}</td>
+                                <td class="col-name" title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '')}</td>
                                 <td>${escapeHtml(c.country || '')}</td>
+                                <td>${previewActionLabel(c.action)}</td>
                             </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No matching campaigns.</td></tr>'}
                         </tbody>
                     </table>
@@ -1499,13 +1527,13 @@
         function sortPreview(col) {
             if (previewSort.col === col) previewSort.dir = previewSort.dir === 'asc' ? 'desc' : 'asc';
             else previewSort = { col, dir: 'asc' };
-            renderPreviewTable();
+            renderPreviewCampaignsTable();
         }
 
-        function onPreviewFilter(v) { previewFilterText = v; renderPreviewTable(); }
+        function onPreviewFilter(v) { previewFilterText = v; renderPreviewCampaignsTable(); }
 
         function previewViewRows() {
-            return getPreviewView().map(c => ({ Action: c.action, Campaign: c.campaign_name, Shop: c.shop_name, Country: c.country }));
+            return getPreviewView().map(c => ({ Shop: c.shop_name, Campaign: c.campaign_name, Country: c.country, Action: c.action }));
         }
 
         function exportPreviewXlsx() {
@@ -1617,26 +1645,24 @@
                     resetHtml = `<button class="btn btn-sm" title="Reconstruct this run from Google Ads change history (around ${escapeHtml(time)}), review, then undo" style="${btnStyle}" ${btnHover} onclick="reconstructRun('${entry.id}')">Reset</button>`;
                 }
                 return `<tr>
-                    <td style="white-space:nowrap;">${time}</td>
-                    <td>${escapeHtml(entry.action)}</td>
-                    <td class="${cls}">${escapeHtml(entry.details)}</td>
-                    <td class="text-end">${resetHtml}</td>
+                    <td style="text-align:center; white-space:nowrap;">${time}</td>
+                    <td style="text-align:center;">${escapeHtml(entry.action)}</td>
+                    <td style="text-align:center;" class="${cls}">${escapeHtml(entry.details)}</td>
+                    <td style="text-align:center;">${resetHtml}</td>
                 </tr>`;
             }).join('');
             el.innerHTML = `
-                <div style="max-height:340px; overflow:auto; border:1px solid #eee; border-radius:4px;">
-                    <table class="table table-sm table-hover mb-0 gsd-preview-table">
-                        <thead>
-                            <tr>
-                                <th style="width:150px;">Time</th>
-                                <th style="width:110px;">Action</th>
-                                <th>Details</th>
-                                <th style="width:90px;"></th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>`;
+                <table class="table table-hover mb-0" id="gsdActivityTable" style="width:95%; margin:0 auto;">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="padding:8px 12px; text-align:center; width:26%;">Time</th>
+                            <th style="padding:8px 12px; text-align:center; width:18%;">Action</th>
+                            <th style="padding:8px 12px; text-align:center; width:41%;">Details</th>
+                            <th style="padding:8px 12px; text-align:center; width:15%;">Reset</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
         }
 
         async function resetRun(id) {
