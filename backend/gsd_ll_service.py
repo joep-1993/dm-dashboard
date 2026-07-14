@@ -34,7 +34,7 @@ from google.ads.googleads.errors import GoogleAdsException
 from google.protobuf import field_mask_pb2
 
 from backend.database import get_db_connection, return_db_connection, get_redshift_connection, return_redshift_connection
-from backend.gsd_campaigns_service import _get_client, ACCOUNTS
+from backend.gsd_campaigns_service import _get_client, ACCOUNTS, _name_contains_regexp
 
 logger = logging.getLogger(__name__)
 
@@ -442,12 +442,15 @@ def _find_enabled_campaigns(client, customer_id: str, shop_id: int) -> List[Dict
     ``SHOPPING`` so no Search/PMax/Display campaign is ever paused.
     """
     ga_service = client.get_service("GoogleAdsService")
+    # REGEXP_MATCH, not LIKE: brackets make LIKE match the whole account
+    # (see _name_contains_regexp).
+    name_pattern = _name_contains_regexp(f"[shop_id:{int(shop_id)}]")
     query = f"""
         SELECT campaign.id, campaign.name, campaign.resource_name
         FROM campaign
         WHERE campaign.status = 'ENABLED'
           AND campaign.advertising_channel_type = 'SHOPPING'
-          AND campaign.name LIKE '%[shop_id:{int(shop_id)}]%'
+          AND campaign.name REGEXP_MATCH '{name_pattern}'
     """
     out: List[Dict[str, str]] = []
     try:
@@ -471,6 +474,9 @@ def _find_labeled_campaigns(client, customer_id: str, shop_id: int) -> List[Dict
     _find_enabled_campaigns (see its docstring).
     """
     ga_service = client.get_service("GoogleAdsService")
+    # REGEXP_MATCH, not LIKE: brackets make LIKE match the whole account
+    # (see _name_contains_regexp).
+    name_pattern = _name_contains_regexp(f"[shop_id:{int(shop_id)}]")
     query = f"""
         SELECT campaign.id, campaign.name, campaign.resource_name,
                campaign.status, campaign_label.resource_name
@@ -478,7 +484,7 @@ def _find_labeled_campaigns(client, customer_id: str, shop_id: int) -> List[Dict
         WHERE label.name = '{LL_LABEL}'
           AND campaign.status != 'REMOVED'
           AND campaign.advertising_channel_type = 'SHOPPING'
-          AND campaign.name LIKE '%[shop_id:{int(shop_id)}]%'
+          AND campaign.name REGEXP_MATCH '{name_pattern}'
     """
     out: List[Dict[str, str]] = []
     try:

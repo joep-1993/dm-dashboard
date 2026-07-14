@@ -202,7 +202,10 @@
                             <input class="form-check-input" type="radio" name="shopMode" id="modeInclude" value="include" disabled>
                             <label class="form-check-label" for="modeInclude">Include only these shops</label>
                         </div>
-                        <div class="mt-auto d-flex justify-content-end">
+                        <div class="mt-auto d-flex justify-content-end gap-2">
+                            <button class="btn" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; padding: 0.4rem 1.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="previewScript()" id="previewBtn">
+                                Preview
+                            </button>
                             <button class="btn" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.4rem 2rem;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runScript()" id="runBtn">
                                 Run
                             </button>
@@ -1313,6 +1316,64 @@
         }
 
         // --- Run Script ---
+        async function previewScript() {
+            const btn = document.getElementById('previewBtn');
+            const runBtn = document.getElementById('runBtn');
+            const area = document.getElementById('progressArea');
+            const content = document.getElementById('progressContent');
+
+            const date = document.getElementById('runDate').value || '';
+            const shopText = document.getElementById('shopNames').value.trim();
+            const included = document.getElementById('modeInclude').checked;
+
+            const params = new URLSearchParams();
+            if (date) params.set('date', date);
+            if (shopText) params.set('shop_names', shopText.split('\n').map(s => s.trim()).filter(Boolean).join(','));
+            params.set('included', included);
+
+            btn.disabled = true;
+            runBtn.disabled = true;
+            btn.textContent = 'Previewing...';
+            area.style.display = 'block';
+            content.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm text-primary"></div> Checking what would be created and paused... (read-only)</div>';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/preview?${params.toString()}`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                const errCount = (data.errors || []).length;
+                content.innerHTML = `
+                    <div class="fw-bold mb-2" style="color:#5e4a90;">Preview${data.date ? ' for ' + escapeHtml(data.date) : ''} — no changes made</div>
+                    <div class="d-flex flex-wrap gap-3 mb-2">
+                        <div class="p-2 px-3 rounded" style="background:#e8f5e9; border:1px solid #43a047;">
+                            <div style="font-size:1.5rem; font-weight:700; color:#2e7d32;">${data.to_create ?? 0}</div>
+                            <div style="font-size:0.8rem; color:#2e7d32;">campaigns to create</div>
+                        </div>
+                        <div class="p-2 px-3 rounded" style="background:#fff3e0; border:1px solid #fb8c00;">
+                            <div style="font-size:1.5rem; font-weight:700; color:#e65100;">${data.to_pause ?? 0}</div>
+                            <div style="font-size:0.8rem; color:#e65100;">campaigns to pause</div>
+                        </div>
+                        <div class="p-2 px-3 rounded" style="background:#f3f0fa; border:1px solid #5e4a90;">
+                            <div style="font-size:1.5rem; font-weight:700; color:#5e4a90;">${data.already_exists ?? 0}</div>
+                            <div style="font-size:0.8rem; color:#5e4a90;">already exist (skipped)</div>
+                        </div>
+                    </div>
+                    <div class="text-muted" style="font-size:0.82rem;">
+                        ${data.shops_aan ?? 0} shop(s) to activate, ${data.shops_uit ?? 0} to pause${errCount ? ` &middot; <span class="text-danger">${errCount} error(s)</span>` : ''}
+                    </div>
+                    <pre class="mt-2 mb-0" style="font-size:0.78rem; max-height:220px; overflow:auto;">${escapeHtml(JSON.stringify(data.by_shop || [], null, 2))}</pre>`;
+                logActivity('Preview', `${data.to_create ?? 0} to create / ${data.to_pause ?? 0} to pause${date ? ' for ' + date : ''}`, true);
+            } catch (err) {
+                content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
+                logActivity('Preview', `Error: ${err.message}`, false);
+            } finally {
+                btn.disabled = false;
+                runBtn.disabled = false;
+                btn.textContent = 'Preview';
+            }
+        }
+
         async function runScript() {
             const btn = document.getElementById('runBtn');
             const area = document.getElementById('progressArea');
@@ -1336,17 +1397,16 @@
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/run?${params.toString()}`, { method: 'POST' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                // Track newly created campaigns
-                newCampaignIds = new Set();
-                if (data.results) {
-                    (data.results || []).forEach(r => {
-                        if (r.campaigns_created) {
-                            (r.campaign_ids || []).forEach(id => newCampaignIds.add(String(id)));
-                        }
-                    });
-                }
+                // Undo payload + newly-created id tracking, from the run result.
+                const pick = (arr) => (arr || [])
+                    .filter(c => c.customer_id && c.campaign_id)
+                    .map(c => ({ customer_id: String(c.customer_id), campaign_id: String(c.campaign_id), campaign_name: c.campaign_name }));
+                const undo = { created: pick(data.created), paused: pick(data.paused) };
+                newCampaignIds = new Set(undo.created.map(c => c.campaign_id));
+
+                const nC = undo.created.length, nP = undo.paused.length;
                 content.innerHTML = `<div class="text-success fw-bold">Done!</div><pre class="mt-2 mb-0" style="font-size:0.82rem; max-height:200px; overflow:auto;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
-                logActivity('Run Script', `Completed${date ? ' for ' + date : ''}`, true);
+                logActivity('Run Script', `${nC} created / ${nP} paused${date ? ' for ' + date : ''}`, true, { undo });
                 loadCampaigns();
                 loadStats();
             } catch (err) {
@@ -1359,13 +1419,15 @@
         }
 
         // --- Activity Log ---
-        function logActivity(action, details, success) {
+        function logActivity(action, details, success, extra) {
             const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
             log.unshift({
+                id: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
                 time: new Date().toISOString(),
                 action,
                 details,
-                success
+                success,
+                ...(extra || {})
             });
             // Keep last 50
             if (log.length > 50) log.length = 50;
@@ -1383,12 +1445,55 @@
             el.innerHTML = log.map(entry => {
                 const time = new Date(entry.time).toLocaleString('nl-NL');
                 const cls = entry.success ? 'log-success' : 'log-error';
-                return `<div class="log-entry">
+                const u = entry.undo || {};
+                const nCreated = (u.created || []).length;
+                const nPaused = (u.paused || []).length;
+                const canReset = !entry.reset && (nCreated + nPaused) > 0;
+                let resetHtml = '';
+                if (canReset) {
+                    resetHtml = `<button class="btn btn-sm ms-auto" title="Pause the ${nCreated} created and re-enable the ${nPaused} paused campaign(s)" style="border:1px solid #CC5500; color:#CC5500; background:transparent; padding:0.1rem 0.6rem; font-size:0.78rem;" onmouseover="this.style.background='#CC5500';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#CC5500'" onclick="resetRun('${entry.id}')">Reset</button>`;
+                } else if (entry.reset) {
+                    resetHtml = `<span class="ms-auto text-muted" style="font-size:0.75rem;">reset</span>`;
+                }
+                return `<div class="log-entry d-flex align-items-center gap-2">
                     <span class="log-time">${time}</span>
                     <span class="log-action">${escapeHtml(entry.action)}</span> -
                     <span class="${cls}">${escapeHtml(entry.details)}</span>
+                    ${resetHtml}
                 </div>`;
             }).join('');
+        }
+
+        async function resetRun(id) {
+            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+            const entry = log.find(e => e.id === id);
+            if (!entry || !entry.undo) return;
+            const nCreated = (entry.undo.created || []).length;
+            const nPaused = (entry.undo.paused || []).length;
+            if (!confirm(`Undo this run?\n\nThis will PAUSE ${nCreated} campaign(s) it created and RE-ENABLE ${nPaused} campaign(s) it paused in Google Ads.`)) return;
+
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/undo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(entry.undo)
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const errN = (data.errors || []).length;
+
+                // Mark the original entry as reset so its button disappears.
+                const fresh = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+                const target = fresh.find(e => e.id === id);
+                if (target) { target.reset = true; }
+                localStorage.setItem('gsd_activity_log', JSON.stringify(fresh));
+
+                logActivity('Reset', `Paused ${data.paused_created ?? 0} created / re-enabled ${data.enabled_paused ?? 0} paused${errN ? ` · ${errN} error(s)` : ''}`, errN === 0);
+                loadCampaigns();
+                loadStats();
+            } catch (err) {
+                logActivity('Reset', `Error: ${err.message}`, false);
+            }
         }
 
         function clearLog() {

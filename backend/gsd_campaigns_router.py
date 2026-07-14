@@ -10,6 +10,8 @@ from backend.gsd_campaigns_service import (
     remove_campaign,
     get_redshift_shop_changes,
     run_gsd_script,
+    preview_gsd_script,
+    undo_run,
 )
 from backend.gsd_ll_service import (
     start_ll_run,
@@ -181,6 +183,43 @@ async def ll_history_endpoint(
         return {"rows": rows, "total": len(rows)}
     except Exception as e:
         logger.error(f"Error fetching GSD LL history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/preview")
+async def preview_gsd_script_endpoint(
+    date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format"),
+    shop_names: Optional[str] = Query(None, description="Comma-separated shop names"),
+    included: bool = Query(False, description="If true, only include listed shops; if false, exclude them"),
+):
+    """Dry-run the GSD script: report how many campaigns would be created/paused. Read-only."""
+    try:
+        loop = asyncio.get_event_loop()
+        shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
+        result = await loop.run_in_executor(
+            executor, preview_gsd_script, date, shop_list, included
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error previewing GSD script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/undo")
+async def undo_run_endpoint(payload: dict):
+    """
+    Reverse a previous run: pause the campaigns it created and re-enable the
+    campaigns it paused. Body: {"created": [...], "paused": [...]} where each
+    item has customer_id and campaign_id.
+    """
+    try:
+        created = payload.get("created") or []
+        paused = payload.get("paused") or []
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, undo_run, created, paused)
+        return result
+    except Exception as e:
+        logger.error(f"Error undoing GSD run: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

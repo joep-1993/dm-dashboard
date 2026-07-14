@@ -176,6 +176,25 @@ def _build_campaign_name(
     return base
 
 
+def _name_contains_regexp(substring: str) -> str:
+    """
+    Build a GAQL REGEXP_MATCH pattern that matches names CONTAINING `substring`
+    literally. Use this instead of ``LIKE '%substring%'`` whenever the substring
+    can contain '[' or ']': GAQL's LIKE treats brackets as a character class, so
+    ``LIKE '%[shop:X]%'`` collapses to "contains any one of these characters" and
+    matches nearly every campaign in the account (it does NOT filter by shop).
+    It also treats '_' as a single-char wildcard, which this avoids too.
+
+    Regex metacharacters are escaped, then backslashes are doubled and single
+    quotes escaped so the result is safe to embed in a single-quoted GAQL
+    string literal.
+    """
+    pattern = re.escape(substring)          # escape regex specials incl. [ ] . _
+    pattern = pattern.replace("\\", "\\\\")  # double backslashes for the GAQL literal
+    pattern = pattern.replace("'", "\\'")    # escape any single quote for the GAQL literal
+    return f".*{pattern}.*"
+
+
 # ---------------------------------------------------------------------------
 # Negative keywords helper
 # ---------------------------------------------------------------------------
@@ -381,6 +400,75 @@ def enable_campaign(customer_id: str, campaign_id: str) -> Dict[str, Any]:
 def remove_campaign(customer_id: str, campaign_id: str) -> Dict[str, Any]:
     """Remove a campaign."""
     return _mutate_campaign_status(customer_id, campaign_id, "REMOVED")
+
+
+def undo_run(
+    created: Optional[List[Dict[str, Any]]] = None,
+    paused: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Reverse a GSD run: PAUSE the campaigns it created and re-ENABLE the campaigns
+    it paused. Both `created` and `paused` are lists of dicts with at least
+    ``customer_id`` and ``campaign_id``. Operations are grouped per account and
+    applied with partial failure, so one bad id doesn't sink the batch.
+
+    Pausing (not removing) created campaigns keeps the undo reversible.
+    Returns counts and any per-account errors.
+    """
+    result: Dict[str, Any] = {"paused_created": 0, "enabled_paused": 0, "errors": []}
+
+    # Group campaign ids by (customer_id, target_status). "created" -> PAUSED,
+    # "paused" -> ENABLED.
+    groups: Dict[str, List[str]] = {}
+
+    def _add(items, status):
+        for it in (items or []):
+            cid = str(it.get("customer_id") or "").strip()
+            camp = str(it.get("campaign_id") or "").strip()
+            if cid and camp:
+                groups.setdefault(f"{cid}|{status}", []).append(camp)
+
+    _add(created, "PAUSED")
+    _add(paused, "ENABLED")
+
+    if not groups:
+        return result
+
+    client = _get_client()
+    cs = client.get_service("CampaignService")
+
+    for key, camp_ids in groups.items():
+        cid, status = key.split("|", 1)
+        ops = []
+        for camp in camp_ids:
+            op = client.get_type("CampaignOperation")
+            op.update.resource_name = cs.campaign_path(cid, camp)
+            op.update.status = getattr(client.enums.CampaignStatusEnum, status)
+            op.update_mask = field_mask_pb2.FieldMask(paths=["status"])
+            ops.append(op)
+        try:
+            req = client.get_type("MutateCampaignsRequest")
+            req.customer_id = cid
+            req.operations.extend(ops)
+            req.partial_failure = True
+            resp = cs.mutate_campaigns(request=req)
+            ok = sum(1 for r in resp.results if r.resource_name)
+            if status == "PAUSED":
+                result["paused_created"] += ok
+            else:
+                result["enabled_paused"] += ok
+            if resp.partial_failure_error and resp.partial_failure_error.message:
+                result["errors"].append({
+                    "customer_id": cid, "status": status,
+                    "error": resp.partial_failure_error.message[:500],
+                })
+        except GoogleAdsException as ex:
+            logger.error("Undo failed (%s -> %s): %s", cid, status, ex)
+            result["errors"].append({"customer_id": cid, "status": status, "error": str(ex)[:500]})
+
+    logger.info("Undo run: paused %d created, enabled %d paused, %d errors",
+                result["paused_created"], result["enabled_paused"], len(result["errors"]))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1258,11 +1346,13 @@ def _pause_campaigns_for_shop(
 
     # Find campaigns for this shop
     ga_service = client.get_service("GoogleAdsService")
-    escaped_name = shop_name.replace("'", "\\'")
+    # Match the exact "[shop:NAME]" token. LIKE with brackets matches the whole
+    # account (see _name_contains_regexp), so use REGEXP_MATCH.
+    name_pattern = _name_contains_regexp(f"[shop:{shop_name}]")
     query = f"""
         SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name
         FROM campaign
-        WHERE campaign.name LIKE '%[shop:{escaped_name}]%'
+        WHERE campaign.name REGEXP_MATCH '{name_pattern}'
           AND campaign.status = 'ENABLED'
     """
 
@@ -1285,6 +1375,140 @@ def _pause_campaigns_for_shop(
         })
 
     return results
+
+
+def preview_gsd_script(
+    date_str: Optional[str] = None,
+    shop_names: Optional[List[str]] = None,
+    included: bool = False,
+) -> Dict[str, Any]:
+    """
+    Dry-run of run_gsd_script: report how many GSD campaigns WOULD be created
+    and how many WOULD be paused for the current shop changes, without changing
+    anything.
+
+    Mirrors run_gsd_script's shop -> country -> label expansion but issues only
+    read-only queries. No Merchant Center accounts, budgets, campaigns, ad
+    groups, or status changes are created or modified.
+
+    Returns a summary dict with totals (to_create, to_pause, already_exists) and
+    a per-shop breakdown.
+    """
+    client = _get_client()
+    summary: Dict[str, Any] = {
+        "date": date_str or datetime.now().strftime("%Y-%m-%d"),
+        "preview": True,
+        "to_create": 0,
+        "already_exists": 0,
+        "to_pause": 0,
+        "shops_aan": 0,
+        "shops_uit": 0,
+        "by_shop": [],
+        "errors": [],
+    }
+
+    try:
+        changes = get_redshift_shop_changes(date_str, shop_names, included)
+    except Exception as ex:
+        logger.error("Preview: failed to get shop changes from Redshift: %s", ex)
+        summary["errors"].append({"step": "redshift_query", "error": str(ex)})
+        return summary
+
+    if not changes:
+        logger.info("Preview: no shop changes found for %s", summary["date"])
+        return summary
+
+    ga_service = client.get_service("GoogleAdsService")
+
+    for change in changes:
+        shop_id = change.get("shop_id")
+        shop_name = change.get("shop_name", "")
+        actie = change.get("actie", "")
+        model = change.get("model", "CPR")
+
+        campaign_type = model.upper() if model else "CPR"
+        if campaign_type not in ("CPR", "CPC"):
+            campaign_type = "CPR"
+
+        # Same country/label expansion as run_gsd_script.
+        countries = ["NL", "BE", "DE"] if campaign_type == "CPR" else ["NL", "BE"]
+        labels = LABELS_CPR if campaign_type == "CPR" else LABELS_CPC
+
+        shop_row: Dict[str, Any] = {
+            "shop_name": shop_name,
+            "shop_id": shop_id,
+            "actie": actie,
+            "type": campaign_type,
+            "to_create": 0,
+            "already_exists": 0,
+            "to_pause": 0,
+        }
+        if actie == "aan":
+            summary["shops_aan"] += 1
+        elif actie == "uit":
+            summary["shops_uit"] += 1
+
+        for country in countries:
+            account_info = _find_account_info(country, campaign_type)
+            if account_info is None:
+                summary["errors"].append({
+                    "shop_name": shop_name,
+                    "country": country,
+                    "type": campaign_type,
+                    "error": "no_account_config",
+                })
+                continue
+            customer_id = account_info["customer_id"]
+
+            # One read-only lookup of this shop's existing (non-removed) campaigns
+            # in this account, reused for both the create and pause counts.
+            # REGEXP_MATCH (not LIKE) — see _name_contains_regexp for why.
+            name_pattern = _name_contains_regexp(f"[shop:{shop_name}]")
+            query = f"""
+                SELECT campaign.name, campaign.status
+                FROM campaign
+                WHERE campaign.name REGEXP_MATCH '{name_pattern}'
+                  AND campaign.status != 'REMOVED'
+            """
+            try:
+                rows = list(ga_service.search(customer_id=customer_id, query=query))
+            except GoogleAdsException as ex:
+                logger.error("Preview: campaign lookup failed for '%s' in %s: %s",
+                             shop_name, country, ex)
+                summary["errors"].append({
+                    "shop_name": shop_name,
+                    "country": country,
+                    "error": str(ex),
+                })
+                continue
+
+            if actie == "aan":
+                # A campaign is created only when its exact name doesn't exist yet
+                # (matches check_campaign in _create_campaigns_for_shop).
+                existing_names = {r.campaign.name for r in rows}
+                for label in labels:
+                    campaign_name = _build_campaign_name(country, shop_name, shop_id, label)
+                    if campaign_name in existing_names:
+                        shop_row["already_exists"] += 1
+                    else:
+                        shop_row["to_create"] += 1
+            elif actie == "uit":
+                # Pause hits every currently-ENABLED campaign for the shop
+                # (matches _pause_campaigns_for_shop).
+                shop_row["to_pause"] += sum(
+                    1 for r in rows if r.campaign.status.name == "ENABLED"
+                )
+
+        summary["to_create"] += shop_row["to_create"]
+        summary["already_exists"] += shop_row["already_exists"]
+        summary["to_pause"] += shop_row["to_pause"]
+        summary["by_shop"].append(shop_row)
+
+    logger.info(
+        "GSD preview: %d to create, %d to pause, %d already exist across %d shops",
+        summary["to_create"], summary["to_pause"], summary["already_exists"], len(changes),
+    )
+    return summary
 
 
 def run_gsd_script(
@@ -1404,6 +1628,12 @@ def run_gsd_script(
                     cr["shop_name"] = shop_name
                     cr["country"] = country
                     cr["type"] = campaign_type
+                    cr["customer_id"] = customer_id
+                    # Expose the numeric id (parsed from the resource name) so a
+                    # later "undo" can pause exactly what was created.
+                    res = cr.get("campaign_resource") or ""
+                    if res:
+                        cr["campaign_id"] = res.rstrip("/").split("/")[-1]
                     if cr["action"] == "created":
                         overall_results["created"].append(cr)
                     elif cr["action"] == "skipped":
@@ -1423,6 +1653,7 @@ def run_gsd_script(
                     pr["shop_name"] = shop_name
                     pr["country"] = country
                     pr["type"] = campaign_type
+                    pr["customer_id"] = customer_id
                     if pr["action"] == "paused":
                         overall_results["paused"].append(pr)
                     else:
