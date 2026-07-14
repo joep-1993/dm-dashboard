@@ -119,7 +119,12 @@ def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
     vis_sql = f"""
         SELECT fv.dim_date_key     AS d,
                c.marketing_channel AS chan,
-               COUNT(*)            AS visits
+               COUNT(*)            AS visits,
+               SUM(COALESCE(fv.number_of_bvb_clicks, 0)
+                   + COALESCE(fv.number_of_outclicks, 0)) AS clicks,
+               SUM(CASE WHEN COALESCE(fv.number_of_cpc_productclicks, 0) = 0
+                         AND COALESCE(fv.number_of_ww_productclicks, 0) = 0
+                        THEN 1 ELSE 0 END) AS noprod
         FROM datamart.fct_visits fv
         JOIN datamart.dim_visit dv  ON fv.dim_visit_key = dv.dim_visit_key
         JOIN chan_deriv.ref_channel_derivation_stats c
@@ -149,9 +154,14 @@ def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
         rev_rows = cur.fetchall()
 
     # Seed every date with zeros so the chart has a continuous series.
+    # `_clicks` is the CTR numerator (bvb + outclicks); `_noprod` is the Bounce
+    # numerator (visits with no cpc/ww product click). The frontend derives the
+    # ratios per row (num / visits) and as num-sum / visits-sum for totals.
     out: Dict[date, Dict] = {}
     for d in dates:
         out[d] = {f"{k}_visits": 0 for k in CHANNELS.values()}
+        out[d].update({f"{k}_clicks": 0 for k in CHANNELS.values()})
+        out[d].update({f"{k}_noprod": 0 for k in CHANNELS.values()})
         out[d].update({f"{k}_omzet": 0.0 for k in CHANNELS.values()})
 
     for r in vis_rows:
@@ -163,6 +173,8 @@ def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
         if not key or d not in out:
             continue
         out[d][f"{key}_visits"] = int(r["visits"] or 0)
+        out[d][f"{key}_clicks"] = int(r["clicks"] or 0)
+        out[d][f"{key}_noprod"] = int(r["noprod"] or 0)
 
     for r in rev_rows:
         d = r["d"]
