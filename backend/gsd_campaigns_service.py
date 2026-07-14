@@ -1175,9 +1175,12 @@ def create_listing_group_unit_biddable(
     parent_resource_name: str,
     dimension: Optional[Any] = None,
     cpc_bid_micros: int = 1_000_000,
+    negative: bool = False,
 ) -> Any:
     """
-    Create a listing group UNIT operation (leaf node) with a bid.
+    Create a listing group UNIT operation (leaf node). Biddable by default;
+    with negative=True it's an excluded leaf (no bid), used for the "other"
+    catch-all so only the targeted products serve.
     Returns the operation.
     """
     op = client.get_type("AdGroupCriterionOperation")
@@ -1186,7 +1189,10 @@ def create_listing_group_unit_biddable(
     criterion.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
     criterion.listing_group.type_ = client.enums.ListingGroupTypeEnum.UNIT
     criterion.listing_group.parent_ad_group_criterion = parent_resource_name
-    criterion.cpc_bid_micros = cpc_bid_micros
+    if negative:
+        criterion.negative = True
+    else:
+        criterion.cpc_bid_micros = cpc_bid_micros
 
     if dimension is not None:
         criterion.listing_group.case_value = dimension
@@ -1194,30 +1200,68 @@ def create_listing_group_unit_biddable(
     return op
 
 
+# The product custom-label (INDEX0) VALUE on the products uses spaces, not the
+# underscored campaign-label form (matches the original create GSD-campaigns.py
+# `labels = ["a","b","c","no data","no ean"]`).
+_CPR_LABEL_VALUE = {"no_data": "no data", "no_ean": "no ean"}
+
+
 def add_sub_cpr(
     client: GoogleAdsClient,
     customer_id: str,
     ad_group_resource_name: str,
-    cpc_bid_micros: int = 1_000_000,
+    label: str,
+    cpc_bid_micros: int = 50_000,
 ) -> bool:
     """
-    Create the listing group tree for a CPR campaign.
-    Simple: just a root UNIT that matches everything.
+    Create the CPR listing group tree, matching create GSD-campaigns.py `addSub`:
+    a SUBDIVISION root, a biddable UNIT for product_custom_attribute[INDEX0] equal
+    to this label's value (plus the invld_ean / nd_c / nd_cr nodes for no_data),
+    and an excluded ("other") catch-all so only this label's products serve.
     """
     ad_group_criterion_service = client.get_service("AdGroupCriterionService")
+    value = _CPR_LABEL_VALUE.get(label, label)
 
-    op = client.get_type("AdGroupCriterionOperation")
-    criterion = op.create
-    criterion.ad_group = ad_group_resource_name
-    criterion.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
-    criterion.listing_group.type_ = client.enums.ListingGroupTypeEnum.UNIT
-    criterion.cpc_bid_micros = cpc_bid_micros
+    def _dim(v):
+        d = client.get_type("ListingDimensionInfo")
+        d.product_custom_attribute.index = client.enums.ProductCustomAttributeIndexEnum.INDEX0
+        if v is not None:
+            d.product_custom_attribute.value = v
+        return d
+
+    reset_temp_ids()
+    ops = []
+    root_op, root_resource = create_listing_group_subdivision(
+        client, customer_id, ad_group_resource_name,
+        parent_resource_name=None, dimension=None, temp_id=next_id(),
+    )
+    ops.append(root_op)
+
+    # Biddable unit for this label's products.
+    ops.append(create_listing_group_unit_biddable(
+        client, customer_id, ad_group_resource_name,
+        parent_resource_name=root_resource, dimension=_dim(value),
+        cpc_bid_micros=cpc_bid_micros,
+    ))
+    # no_data also carries the invld_ean / nd_c / nd_cr custom-label values.
+    if label == "no_data":
+        for extra in ("invld_ean", "nd_c", "nd_cr"):
+            ops.append(create_listing_group_unit_biddable(
+                client, customer_id, ad_group_resource_name,
+                parent_resource_name=root_resource, dimension=_dim(extra),
+                cpc_bid_micros=cpc_bid_micros,
+            ))
+    # "other" catch-all — excluded so the campaign only serves its own label.
+    ops.append(create_listing_group_unit_biddable(
+        client, customer_id, ad_group_resource_name,
+        parent_resource_name=root_resource, dimension=_dim(None), negative=True,
+    ))
 
     try:
         ad_group_criterion_service.mutate_ad_group_criteria(
-            customer_id=customer_id, operations=[op]
+            customer_id=customer_id, operations=ops
         )
-        logger.info("Created CPR listing group tree for %s", ad_group_resource_name)
+        logger.info("Created CPR listing group tree (label=%s) for %s", label, ad_group_resource_name)
         return True
     except GoogleAdsException as ex:
         logger.error("Failed to create CPR listing group: %s", ex)
@@ -1395,14 +1439,13 @@ def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
         return {"campaign_name": campaign_name, "action": "error", "reason": "repair_product_ad_failed",
                 "error": _last_gads_error["msg"] or "product ad creation failed", "campaign_resource": campaign_resource}
     if not has_lg:
-        tree_ok = (add_sub_cpr(client, customer_id, ad_group_resource) if campaign_type == "CPR"
+        tree_ok = (add_sub_cpr(client, customer_id, ad_group_resource, label) if campaign_type == "CPR"
                    else add_sub_cpc(client, customer_id, ad_group_resource, label))
         if not tree_ok:
             return {"campaign_name": campaign_name, "action": "error", "reason": "repair_listing_group_failed",
                     "error": _last_gads_error["msg"] or "listing group creation failed", "campaign_resource": campaign_resource}
-    if not _set_campaign_status_by_resource(client, customer_id, campaign_resource, "ENABLED"):
-        return {"campaign_name": campaign_name, "action": "error", "reason": "repair_enable_failed",
-                "error": _last_gads_error["msg"] or "enable failed", "campaign_resource": campaign_resource}
+    # Leave PAUSED (GSD campaigns are created paused); repair only completes the
+    # missing structure so the shell is valid, it does not go live.
     return {"campaign_name": campaign_name, "action": "created", "reason": "repaired", "campaign_resource": campaign_resource}
 
 
@@ -1484,7 +1527,7 @@ def _create_campaigns_for_shop(
 
         # Create listing group tree
         if campaign_type == "CPR":
-            tree_ok = add_sub_cpr(client, customer_id, ad_group_resource)
+            tree_ok = add_sub_cpr(client, customer_id, ad_group_resource, label)
         else:
             tree_ok = add_sub_cpc(client, customer_id, ad_group_resource, label)
         if not tree_ok:
@@ -1497,22 +1540,13 @@ def _create_campaigns_for_shop(
             })
             continue
 
-        # Add negative keywords (best-effort; not fatal to going live)
+        # Add negative keywords (best-effort).
         negatives = get_negatives(shop_name)
         if negatives:
             add_negative_keywords(client, customer_id, campaign_resource, negatives)
 
-        # All required pieces landed — now flip the campaign live.
-        if not _set_campaign_status_by_resource(client, customer_id, campaign_resource, "ENABLED"):
-            results.append({
-                "campaign_name": campaign_name,
-                "action": "error",
-                "reason": "enable_failed",
-                "error": _last_gads_error["msg"] or "enable failed",
-                "campaign_resource": campaign_resource,
-            })
-            continue
-
+        # Leave the campaign PAUSED — the original script creates GSD campaigns
+        # paused and never enables them; enabling is done separately/manually.
         results.append({
             "campaign_name": campaign_name,
             "action": "created",
