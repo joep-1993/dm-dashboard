@@ -1483,8 +1483,11 @@
                 : '<span class="badge bg-transparent fw-bold" style="border:1px solid #e65100; color:#e65100;">pause</span>';
             const aanN = rows.filter(r => r.actie === 'aan').length;
             const uitN = rows.filter(r => r.actie === 'uit').length;
+            // Countries a shop targets follow its model: CPR -> NL/BE/DE, CPC -> NL/BE.
+            const countriesFor = (s) => (s.type === 'CPC') ? 'NL, BE' : 'NL, BE, DE';
             const body = rows.map(s => `<tr>
                 <td style="text-align:left; padding:6px 14px;">${escapeHtml(s.shop_name || '')}</td>
+                <td style="text-align:center; padding:6px 14px;">${countriesFor(s)}</td>
                 <td style="text-align:center; padding:6px 14px;">${lbl(s.actie)}</td>
                 <td style="text-align:center; padding:6px 14px;">${s.actie === 'aan' ? (s.to_create || 0) + ' to create' : (s.to_pause || 0) + ' to pause'}</td>
             </tr>`).join('');
@@ -1494,6 +1497,7 @@
                     <table class="table table-bordered bg-white mb-0 small" style="width:70%; min-width:420px; margin:0 auto;">
                         <thead class="table-light"><tr>
                             <th style="text-align:left; padding:6px 14px;">Shop</th>
+                            <th style="text-align:center; padding:6px 14px;">Country</th>
                             <th style="text-align:center; padding:6px 14px;">Action</th>
                             <th style="text-align:center; padding:6px 14px;">Campaigns</th>
                         </tr></thead>
