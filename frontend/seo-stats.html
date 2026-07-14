@@ -289,7 +289,7 @@
                 <div class="d-flex align-items-center gap-3">
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="showExtraRev" onchange="toggleExtraRev()">
-                        <label class="form-check-label" for="showExtraRev" style="font-size:0.85rem; cursor:pointer;">Show DMA Organic &amp; GSAAS revenue, CTR &amp; Bounce</label>
+                        <label class="form-check-label" for="showExtraRev" style="font-size:0.85rem; cursor:pointer;">Show DMA Organic &amp; GSAAS revenue</label>
                     </div>
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="showDeltas" onchange="toggleDeltas()">
@@ -365,29 +365,21 @@
             dma_omzet:    { label: 'DMA Organic revenue', unit: 'euro',  axis: 'euro',  color: '#e17055' },
             gsaas_omzet:  { label: 'GSAAS revenue',       unit: 'euro',  axis: 'euro',  color: '#e84393' },
             seo_ctr:      { label: 'SEO CTR',             unit: 'percent', axis: 'percent', color: '#e1b12c' },
-            dma_ctr:      { label: 'DMA Organic CTR',     unit: 'percent', axis: 'percent', color: '#e58e26' },
-            gsaas_ctr:    { label: 'GSAAS CTR',           unit: 'percent', axis: 'percent', color: '#c23616' },
             seo_bounce:   { label: 'SEO Bounce',          unit: 'percent', axis: 'percent', color: '#b53471' },
-            dma_bounce:   { label: 'DMA Organic Bounce',  unit: 'percent', axis: 'percent', color: '#833471' },
-            gsaas_bounce: { label: 'GSAAS Bounce',        unit: 'percent', axis: 'percent', color: '#6d214f' },
         };
         const ORDER = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','dma_omzet','gsaas_omzet',
-                       'seo_ctr','dma_ctr','gsaas_ctr','seo_bounce','dma_bounce','gsaas_bounce'];
-        // Per-day overview columns. DMA Organic & GSAAS revenue + CTR + Bounce are
+                       'seo_ctr','seo_bounce'];
+        // Per-day overview columns. DMA Organic & GSAAS revenue are
         // optional, shown via the "Show DMA Organic & GSAAS…" toggle (toggleExtraRev).
         const TABLE_COLS_BASE = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','seo_ctr','seo_bounce'];
-        const TABLE_COLS_EXTRA = ['dma_omzet','gsaas_omzet','dma_ctr','gsaas_ctr','dma_bounce','gsaas_bounce'];
+        const TABLE_COLS_EXTRA = ['dma_omzet','gsaas_omzet'];
         let TABLE_COLS = TABLE_COLS_BASE.slice();
         // Derived ratio metrics: <key> = <num> / <den> * 100. Numerators (CTR: bvb +
         // outclicks; Bounce: visits with no product click) are sent raw per row and
         // kept raw so totals aggregate as Σnum / Σden — never a mean of daily ratios.
         const RATIOS = [
             { key: 'seo_ctr',      num: 'seo_clicks',   den: 'seo_visits' },
-            { key: 'dma_ctr',      num: 'dma_clicks',   den: 'dma_visits' },
-            { key: 'gsaas_ctr',    num: 'gsaas_clicks', den: 'gsaas_visits' },
             { key: 'seo_bounce',   num: 'seo_noprod',   den: 'seo_visits' },
-            { key: 'dma_bounce',   num: 'dma_noprod',   den: 'dma_visits' },
-            { key: 'gsaas_bounce', num: 'gsaas_noprod', den: 'gsaas_visits' },
         ];
         const RATIO_NUMERATORS = [...new Set(RATIOS.map(r => r.num))];
         // Additive metrics (everything except the derived percentage ratios).
