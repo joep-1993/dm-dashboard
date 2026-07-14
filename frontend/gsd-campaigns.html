@@ -48,7 +48,7 @@
         .campaign-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .campaign-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .campaign-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
-        .gsd-preview-table thead th { background: #f8f9fa; color: #212529; font-weight: 600; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding-top: 0.7rem; padding-bottom: 0.7rem; border-bottom: 1px solid #dee2e6; }
+        .gsd-preview-table thead th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; }
         .gsd-preview-table thead th.sortable { cursor: pointer; user-select: none; }
         .gsd-preview-table thead th.sortable:hover { background: #e9ecef; }
         .gsd-preview-table .sort-arrow { opacity: 0.7; font-size: 0.7rem; }
@@ -99,7 +99,7 @@
         .ll-history-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
 
         /* Preview results table — same header layout as the history table */
-        .ll-preview-table th { background: #f8f9fa; color: #212529; font-weight: 600; white-space: nowrap; padding-top: 0.7rem; padding-bottom: 0.7rem; border-bottom: 1px solid #dee2e6; }
+        .ll-preview-table th { white-space: nowrap; padding: 6px 14px; }
         .ll-preview-table td { vertical-align: middle; font-size: 0.9rem; }
         .ll-preview-table .col-country { text-align: center; }
         .ll-preview-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
@@ -1006,7 +1006,7 @@
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover ll-preview-table mb-0">
-                        <thead>
+                        <thead class="table-light">
                             <tr>
                                 ${selectAllTh}
                                 <th class="sortable" data-sort="shop_name" onclick="sortPreviewBy('shop_name')">Shop</th>
@@ -1483,8 +1483,17 @@
                 : '<span class="badge bg-transparent fw-bold" style="border:1px solid #e65100; color:#e65100;">pause</span>';
             const aanN = rows.filter(r => r.actie === 'aan').length;
             const uitN = rows.filter(r => r.actie === 'uit').length;
-            // Countries a shop targets follow its model: CPR -> NL/BE/DE, CPC -> NL/BE.
-            const countriesFor = (s) => (s.type === 'CPC') ? 'NL, BE' : 'NL, BE, DE';
+            // Countries actually acted on per shop, taken from the previewed
+            // campaigns (create/skip for 'aan', pause for 'uit') — this reflects
+            // exactly what the script will do, not a model-based guess.
+            const countriesFor = (s) => {
+                const want = s.actie === 'uit' ? ['pause'] : ['create', 'skip'];
+                const set = new Set();
+                previewCampaigns.forEach(c => {
+                    if (c.shop_name === s.shop_name && want.includes(c.action) && c.country) set.add(c.country);
+                });
+                return set.size ? [...set].sort().join(', ') : '—';
+            };
             const body = rows.map(s => `<tr>
                 <td style="text-align:left; padding:6px 14px;">${escapeHtml(s.shop_name || '')}</td>
                 <td style="text-align:center; padding:6px 14px;">${countriesFor(s)}</td>
@@ -1586,7 +1595,7 @@
             wrap.innerHTML = `
                 <div style="max-height:340px; overflow:auto; border:1px solid #eee; border-radius:4px;">
                     <table class="table table-sm table-hover mb-0 gsd-preview-table">
-                        <thead>
+                        <thead class="table-light">
                             <tr>
                                 ${th('shop_name', 'Shop', '160px')}
                                 ${th('campaign_name', 'Campaign name')}
