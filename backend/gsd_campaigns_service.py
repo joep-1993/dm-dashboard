@@ -1398,13 +1398,66 @@ def _set_campaign_status_by_resource(
         return False
 
 
+def _tree_targets_label(ga, customer_id, campaign_id, campaign_type, label) -> bool:
+    """
+    True if the campaign's listing tree looks correct for its custom label: a
+    SUBDIVISION root, and (for CPR) a biddable UNIT keyed on
+    product_custom_attribute[INDEX0] == the label's value. Catches the legacy
+    single-root-UNIT tree and trees targeting the wrong label value.
+    """
+    crits = list(ga.search(customer_id=customer_id, query=(
+        "SELECT ad_group_criterion.listing_group.type, "
+        "ad_group_criterion.listing_group.parent_ad_group_criterion, "
+        "ad_group_criterion.negative, "
+        "ad_group_criterion.listing_group.case_value.product_custom_attribute.value "
+        f"FROM ad_group_criterion WHERE campaign.id = {campaign_id} "
+        "AND ad_group_criterion.type = 'LISTING_GROUP' "
+        "AND ad_group_criterion.status != 'REMOVED'")))
+    if not crits:
+        return False
+    # A single biddable root UNIT (the old wrong tree) has no subdivision root.
+    has_subdiv_root = any(
+        c.ad_group_criterion.listing_group.type_.name == "SUBDIVISION"
+        and not c.ad_group_criterion.listing_group.parent_ad_group_criterion
+        for c in crits)
+    if not has_subdiv_root:
+        return False
+    if campaign_type != "CPR":
+        return True  # CPC uses a price-bucket subdivision tree; root check suffices
+    expected = _CPR_LABEL_VALUE.get(label, label)
+    return any(
+        c.ad_group_criterion.listing_group.type_.name == "UNIT"
+        and not c.ad_group_criterion.negative
+        and c.ad_group_criterion.listing_group.case_value.product_custom_attribute.value == expected
+        for c in crits)
+
+
+def _remove_listing_tree(client, customer_id, campaign_id) -> None:
+    """Remove all (non-removed) LISTING_GROUP criteria for a campaign's ad group."""
+    ga = client.get_service("GoogleAdsService")
+    svc = client.get_service("AdGroupCriterionService")
+    crits = list(ga.search(customer_id=customer_id, query=(
+        f"SELECT ad_group_criterion.resource_name FROM ad_group_criterion "
+        f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
+        f"AND ad_group_criterion.status != 'REMOVED'")))
+    if not crits:
+        return
+    ops = []
+    for c in crits:
+        op = client.get_type("AdGroupCriterionOperation")
+        op.remove = c.ad_group_criterion.resource_name
+        ops.append(op)
+    svc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops)
+
+
 def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
                      campaign_type, label) -> Dict[str, Any]:
     """
-    An existing campaign was found. If it's COMPLETE (ad group + product ad +
-    listing group) leave it as-is and report 'skipped'. If it's an INCOMPLETE
-    shell (a prior run failed mid-build, leaving it PAUSED), create the missing
-    pieces and enable it — reported as 'created' with reason 'repaired'.
+    An existing campaign was found. Complete/repair it and leave it PAUSED:
+    - missing ad group / product ad / listing tree -> create the missing pieces
+    - a present but WRONG listing tree (single root UNIT, or not targeting this
+      campaign's custom label) -> remove it and rebuild the correct one
+    - fully complete AND correctly targeted -> skip unchanged
     """
     ga = client.get_service("GoogleAdsService")
     campaign_id = campaign_resource.rstrip("/").split("/")[-1]
@@ -1422,12 +1475,26 @@ def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
             f"SELECT ad_group_criterion.criterion_id FROM ad_group_criterion "
             f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP'"))))
 
+    # Validate the existing tree targets this campaign's label; drop a wrong one
+    # so it gets rebuilt below.
+    retree = False
+    if has_lg and not _tree_targets_label(ga, customer_id, campaign_id, campaign_type, label):
+        try:
+            _remove_listing_tree(client, customer_id, campaign_id)
+        except GoogleAdsException as ex:
+            logger.error("Failed to remove wrong listing tree for '%s': %s", campaign_name, ex)
+            _last_gads_error["msg"] = _gads_err(ex)
+            return {"campaign_name": campaign_name, "action": "error", "reason": "repair_retree_failed",
+                    "error": _last_gads_error["msg"], "campaign_resource": campaign_resource}
+        has_lg = False
+        retree = True
+
     if ad_group_resource and has_ad and has_lg:
         return {"campaign_name": campaign_name, "action": "skipped", "reason": "already_exists"}
 
-    # Incomplete shell — complete the missing pieces, then enable.
-    logger.info("Repairing incomplete campaign '%s' (ad_group=%s ad=%s listing=%s)",
-                campaign_name, bool(ad_group_resource), has_ad, has_lg)
+    # Incomplete/mis-targeted — complete the missing pieces (stays PAUSED).
+    logger.info("Repairing campaign '%s' (ad_group=%s ad=%s listing=%s retree=%s)",
+                campaign_name, bool(ad_group_resource), has_ad, has_lg, retree)
     _last_gads_error["msg"] = None
     if not ad_group_resource:
         ad_group_resource = add_shopping_ad_group(
@@ -1446,7 +1513,8 @@ def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
                     "error": _last_gads_error["msg"] or "listing group creation failed", "campaign_resource": campaign_resource}
     # Leave PAUSED (GSD campaigns are created paused); repair only completes the
     # missing structure so the shell is valid, it does not go live.
-    return {"campaign_name": campaign_name, "action": "created", "reason": "repaired", "campaign_resource": campaign_resource}
+    return {"campaign_name": campaign_name, "action": "created",
+            "reason": "retreed" if retree else "repaired", "campaign_resource": campaign_resource}
 
 
 def _create_campaigns_for_shop(

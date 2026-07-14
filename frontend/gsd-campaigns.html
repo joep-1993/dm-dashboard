@@ -54,6 +54,7 @@
         .gsd-preview-table .sort-arrow { opacity: 0.7; font-size: 0.7rem; }
         .gsd-preview-table td { vertical-align: middle; }
         .gsd-preview-table td.col-name { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .gsd-preview-table th[data-sort="country"], .gsd-preview-table td.col-country { text-align: left; }
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
@@ -1614,7 +1615,7 @@
                             ${rows.length ? rows.map(c => `<tr>
                                 <td>${escapeHtml(c.shop_name || '')}</td>
                                 <td class="col-name" title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '')}</td>
-                                <td>${escapeHtml(c.country || '')}</td>
+                                <td class="col-country">${escapeHtml(c.country || '')}</td>
                                 <td>${previewActionLabel(c.action)}</td>
                             </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No matching campaigns.</td></tr>'}
                         </tbody>
@@ -2030,7 +2031,7 @@
                         <tbody>
                             ${rows.length ? rows.map(r => `<tr>
                                 <td class="col-name" title="${escapeHtml(r.name || '')}">${escapeHtml(r.name || '')}</td>
-                                <td>${escapeHtml(r.country || '')}</td>
+                                <td class="col-country">${escapeHtml(r.country || '')}</td>
                                 <td>${runActionLabel(r.action)}</td>
                                 <td>${escapeHtml(r.detail || '')}</td>
                             </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No rows.</td></tr>'}
