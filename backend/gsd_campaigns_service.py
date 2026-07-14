@@ -1404,6 +1404,9 @@ def preview_gsd_script(
         "shops_aan": 0,
         "shops_uit": 0,
         "by_shop": [],
+        # Flat list of the affected campaigns for a table view.
+        # Each: {campaign_name, action: create|pause|skip, shop_name, country, type}
+        "campaigns": [],
         "errors": [],
     }
 
@@ -1488,16 +1491,31 @@ def preview_gsd_script(
                 existing_names = {r.campaign.name for r in rows}
                 for label in labels:
                     campaign_name = _build_campaign_name(country, shop_name, shop_id, label)
-                    if campaign_name in existing_names:
+                    exists = campaign_name in existing_names
+                    if exists:
                         shop_row["already_exists"] += 1
                     else:
                         shop_row["to_create"] += 1
+                    summary["campaigns"].append({
+                        "campaign_name": campaign_name,
+                        "action": "skip" if exists else "create",
+                        "shop_name": shop_name,
+                        "country": country,
+                        "type": campaign_type,
+                    })
             elif actie == "uit":
                 # Pause hits every currently-ENABLED campaign for the shop
                 # (matches _pause_campaigns_for_shop).
-                shop_row["to_pause"] += sum(
-                    1 for r in rows if r.campaign.status.name == "ENABLED"
-                )
+                for r in rows:
+                    if r.campaign.status.name == "ENABLED":
+                        shop_row["to_pause"] += 1
+                        summary["campaigns"].append({
+                            "campaign_name": r.campaign.name,
+                            "action": "pause",
+                            "shop_name": shop_name,
+                            "country": country,
+                            "type": campaign_type,
+                        })
 
         summary["to_create"] += shop_row["to_create"]
         summary["already_exists"] += shop_row["already_exists"]
