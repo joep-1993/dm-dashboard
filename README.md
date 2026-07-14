@@ -152,7 +152,54 @@ frontend/
   └── js/app.js          # Frontend logic
 ```
 
+## Windows Service Deployment (win-htz-006)
+
+The dashboard runs as a Windows service via [NSSM](https://nssm.cc/) on `win-htz-006.colo.beslist.net`.
+
+### Access
+
+- **Dashboard**: https://win-htz-006.colo.beslist.net:3003/static/dashboard.html
+- **Logs**: `logs\service.log`
+
+### Service Management
+
+```batch
+:: Start / stop / restart
+net start dm-dashboard
+net stop dm-dashboard
+net stop dm-dashboard && net start dm-dashboard
+```
+
+### Updating After Code Changes
+
+Run the update script on the desktop:
+
+```batch
+C:\Users\l.davidowski\Desktop\update-dashboard.bat
+```
+
+This script pulls the latest code, installs any missing Python dependencies from `requirements.txt`, and restarts the service.
+
+### Dependencies
+
+Python dependencies are managed via `requirements.txt` and installed in the local venv (`venv\`). Key notes:
+
+- **`setuptools<81`** is pinned because the vendored SA360 SDK uses `pkg_resources`, which was removed in setuptools 81+.
+- **`./backend/vendor/searchads360-py.tar.gz`** is a vendored package — it must exist in the repo for `pip install -r requirements.txt` to succeed.
+
+If the service fails to start, check `logs\service.log` for `ModuleNotFoundError` — this usually means a new dependency was added but not yet installed. Run the update script or manually:
+
+```batch
+venv\Scripts\pip install -r requirements.txt
+net stop dm-dashboard && net start dm-dashboard
+```
+
 ## 🐛 Troubleshooting
+
+**Service won't start / port 3003 not listening:**
+- Check `logs\service.log` for import errors
+- Run: `venv\Scripts\pip install -r requirements.txt`
+- Restart: `net stop dm-dashboard && net start dm-dashboard`
 
 **Database connection issues:**
 ```bash

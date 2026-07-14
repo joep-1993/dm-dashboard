@@ -1038,7 +1038,7 @@ def run_gsd_budgets(
                 "budget_constrained_load_status": f"failed: {e}",
                 "status": "aborted",
                 "error": (
-                    "Failed to load BUDGET_CONSTRAINED Google Sheet (after 1 retry). "
+                    f"Failed to load BUDGET_CONSTRAINED Google Sheet (after 1 retry): {e}. "
                     "Aborted before any budget mutations to avoid suppressing all "
                     "verhogen-20 actions. Re-run after the Sheets API recovers."
                 ),
