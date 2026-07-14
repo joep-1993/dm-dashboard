@@ -1,6 +1,10 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## SEO Stats — Performance standup table column widths jumped on re-sort (2026-07-14)
+
+The Performance standup visits/revenue tables (`standupList()` in `frontend/seo-stats.html`) used the default **auto** table layout. The Δ/Δ% header toggle swaps in a different set of rows (top gainers ↔ top losers), so the widest cell per column changed and the browser re-flowed the column widths — visibly jumpy. Fix (frontend-only, commit `2912cca`): a `fixed-cols` class (`table-layout: fixed`) with explicit inline widths on the numeric columns (**Δ 110px, Δ% 80px**); the two text columns absorb the remainder and wrap (`white-space: normal`). **Reusable UI gotcha: any sortable/toggleable table with `table-layout: auto` will jump its column widths when the visible rows change — pin `table-layout: fixed` + explicit widths on the numeric columns, let text columns take the slack.** The Per-day overview table already did this via `perf-fixed`; the Top-categories tables have the SAME latent issue (offered, not yet applied). Scope note: first misread "Performance standup" as the Top-categories card and fixed that instead — reverted, keep changes scoped to the named section.
+
 ## Reconciliation note — merged origin/main (other session) 2026-07-10 (merge a0b3d4c)
 
 A parallel session fixed the SAME two GSD bugs on `main` and also upgraded the Google Ads API **v20→v24**. Merged `origin/main` into `rurl-v45-confidence-scoring`, taking **main's** `gsd_campaigns_service.py` + `gsd_ll_service.py` wholesale (superset: both fixes + v24) and dropping this branch's redundant duplicates. So the LIVE code for the two fixes below is main's approach, not mine:
