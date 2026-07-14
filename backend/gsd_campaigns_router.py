@@ -10,6 +10,7 @@ from backend.gsd_campaigns_service import (
     remove_campaign,
     get_redshift_shop_changes,
     run_gsd_script,
+    cancel_run,
     preview_gsd_script,
     get_preview_progress,
     undo_run,
@@ -252,6 +253,13 @@ async def undo_run_endpoint(payload: dict):
     except Exception as e:
         logger.error(f"Error undoing GSD run: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/run/cancel")
+def cancel_run_endpoint():
+    """Request the active GSD run to stop at the next shop boundary."""
+    cancel_run()
+    return {"ok": True}
 
 
 @router.post("/run")
