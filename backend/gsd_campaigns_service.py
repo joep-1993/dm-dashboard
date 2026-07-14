@@ -65,6 +65,22 @@ def cancel_run() -> None:
 def get_run_progress() -> Dict[str, Any]:
     return dict(_run_progress)
 
+
+# Last Google Ads error captured by a create/enable helper, so
+# _create_campaigns_for_shop can surface the real reason (not just a code) in
+# the run result instead of a bare "—".
+_last_gads_error = {"msg": None}
+
+
+def _gads_err(ex) -> str:
+    """Concise message from a GoogleAdsException (joins the per-error messages)."""
+    try:
+        msgs = [e.message for e in ex.failure.errors if e.message]
+        joined = "; ".join(msgs)
+        return (joined or str(ex))[:400]
+    except Exception:
+        return str(ex)[:400]
+
 TRACKING_TEMPLATES = {
     "NL": (
         "https://www.beslist.nl/outclick/redirect?aff_id=900"
@@ -945,6 +961,7 @@ def add_standard_shopping_campaign(
         budget_resource = budget_response.results[0].resource_name
     except GoogleAdsException as ex:
         logger.error("Failed to create budget for '%s': %s", campaign_name, ex)
+        _last_gads_error["msg"] = _gads_err(ex)
         return None
 
     # Step 2: Create campaign
@@ -980,6 +997,7 @@ def add_standard_shopping_campaign(
         campaign_resource = camp_response.results[0].resource_name
     except GoogleAdsException as ex:
         logger.error("Failed to create campaign '%s': %s", campaign_name, ex)
+        _last_gads_error["msg"] = _gads_err(ex)
         return None
 
     # Step 3: Add location targeting
@@ -1030,6 +1048,7 @@ def add_shopping_ad_group(
         return resource
     except GoogleAdsException as ex:
         logger.error("Failed to create ad group '%s': %s", ad_group_name, ex)
+        _last_gads_error["msg"] = _gads_err(ex)
         return None
 
 
@@ -1056,6 +1075,7 @@ def add_shopping_product_ad_group_ad(
         return resource
     except GoogleAdsException as ex:
         logger.error("Failed to create shopping product ad: %s", ex)
+        _last_gads_error["msg"] = _gads_err(ex)
         return None
 
 
@@ -1201,6 +1221,7 @@ def add_sub_cpr(
         return True
     except GoogleAdsException as ex:
         logger.error("Failed to create CPR listing group: %s", ex)
+        _last_gads_error["msg"] = _gads_err(ex)
         return False
 
 
@@ -1278,6 +1299,7 @@ def add_sub_cpc(
         return True
     except GoogleAdsException as ex:
         logger.error("Failed to create CPC listing group: %s", ex)
+        _last_gads_error["msg"] = _gads_err(ex)
         return False
 
 
@@ -1328,6 +1350,7 @@ def _set_campaign_status_by_resource(
         return True
     except GoogleAdsException as ex:
         logger.error("Failed to set %s to %s: %s", campaign_resource, status, ex)
+        _last_gads_error["msg"] = _gads_err(ex)
         return False
 
 
@@ -1351,6 +1374,7 @@ def _create_campaigns_for_shop(
 
     for label in labels:
         campaign_name = _build_campaign_name(country, shop_name, shop_id, label)
+        _last_gads_error["msg"] = None  # cleared per label; helpers set it on failure
 
         # Check if campaign already exists
         existing = check_campaign(client, customer_id, campaign_name)
@@ -1378,6 +1402,7 @@ def _create_campaigns_for_shop(
                 "campaign_name": campaign_name,
                 "action": "error",
                 "reason": "campaign_creation_failed",
+                "error": _last_gads_error["msg"] or "campaign creation failed",
             })
             continue
 
@@ -1391,6 +1416,7 @@ def _create_campaigns_for_shop(
                 "campaign_name": campaign_name,
                 "action": "error",
                 "reason": "ad_group_creation_failed",
+                "error": _last_gads_error["msg"] or "ad group creation failed",
             })
             continue
 
@@ -1403,6 +1429,7 @@ def _create_campaigns_for_shop(
                 "campaign_name": campaign_name,
                 "action": "error",
                 "reason": "product_ad_creation_failed",
+                "error": _last_gads_error["msg"] or "product ad creation failed",
                 "campaign_resource": campaign_resource,
             })
             continue
@@ -1417,6 +1444,7 @@ def _create_campaigns_for_shop(
                 "campaign_name": campaign_name,
                 "action": "error",
                 "reason": "listing_group_creation_failed",
+                "error": _last_gads_error["msg"] or "listing group creation failed",
                 "campaign_resource": campaign_resource,
             })
             continue
@@ -1432,6 +1460,7 @@ def _create_campaigns_for_shop(
                 "campaign_name": campaign_name,
                 "action": "error",
                 "reason": "enable_failed",
+                "error": _last_gads_error["msg"] or "enable failed",
                 "campaign_resource": campaign_resource,
             })
             continue
