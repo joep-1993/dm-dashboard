@@ -1468,6 +1468,15 @@ def _pause_campaigns_for_shop(
     return results
 
 
+# Progress for the GSD preview, polled by the frontend to drive its progress bar.
+# Single-flight is fine here (one preview at a time in practice).
+_preview_progress: Dict[str, Any] = {"current": 0, "total": 0, "running": False}
+
+
+def get_preview_progress() -> Dict[str, Any]:
+    return dict(_preview_progress)
+
+
 def preview_gsd_script(
     date_str: Optional[str] = None,
     shop_names: Optional[List[str]] = None,
@@ -1501,17 +1510,22 @@ def preview_gsd_script(
         "errors": [],
     }
 
+    _preview_progress.update({"current": 0, "total": 0, "running": True})
+
     try:
         changes = get_redshift_shop_changes(date_str, shop_names, included)
     except Exception as ex:
         logger.error("Preview: failed to get shop changes from Redshift: %s", ex)
         summary["errors"].append({"step": "redshift_query", "error": str(ex)})
+        _preview_progress["running"] = False
         return summary
 
     if not changes:
         logger.info("Preview: no shop changes found for %s", summary["date"])
+        _preview_progress["running"] = False
         return summary
 
+    _preview_progress["total"] = len(changes)
     ga_service = client.get_service("GoogleAdsService")
 
     for change in changes:
@@ -1612,7 +1626,9 @@ def preview_gsd_script(
         summary["already_exists"] += shop_row["already_exists"]
         summary["to_pause"] += shop_row["to_pause"]
         summary["by_shop"].append(shop_row)
+        _preview_progress["current"] += 1
 
+    _preview_progress["running"] = False
     logger.info(
         "GSD preview: %d to create, %d to pause, %d already exist across %d shops",
         summary["to_create"], summary["to_pause"], summary["already_exists"], len(changes),

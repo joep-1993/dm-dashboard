@@ -11,6 +11,7 @@ from backend.gsd_campaigns_service import (
     get_redshift_shop_changes,
     run_gsd_script,
     preview_gsd_script,
+    get_preview_progress,
     undo_run,
     reconstruct_run,
 )
@@ -204,6 +205,12 @@ async def preview_gsd_script_endpoint(
     except Exception as e:
         logger.error(f"Error previewing GSD script: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/preview/progress")
+def preview_progress_endpoint():
+    """Current GSD preview progress {current, total, running} for the progress bar."""
+    return get_preview_progress()
 
 
 @router.post("/reconstruct")

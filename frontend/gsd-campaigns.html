@@ -1391,10 +1391,29 @@
             runBtn.disabled = true;
             area.style.display = 'block';
             content.innerHTML = `
-                <div class="mb-1" style="font-size:0.85rem;">Checking what would be created and paused…</div>
+                <div class="d-flex justify-content-between mb-1" style="font-size:0.85rem;">
+                    <span>Checking what would be created and paused…</span>
+                    <span id="gsdPreviewPercent">0%</span>
+                </div>
                 <div class="progress" style="height:22px;">
-                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:100%; background-color:#00b894;"></div>
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" id="gsdPreviewBar" style="width:0%; background-color:#00b894;"></div>
                 </div>`;
+
+            // Poll the backend for per-shop progress while the preview runs.
+            const pollProgress = async () => {
+                try {
+                    const pr = await fetch(`${API_BASE}/api/gsd-campaigns/preview/progress`);
+                    if (!pr.ok) return;
+                    const p = await pr.json();
+                    const pct = p.total > 0 ? Math.min(100, Math.round((p.current / p.total) * 100)) : 0;
+                    const bar = document.getElementById('gsdPreviewBar');
+                    const lbl = document.getElementById('gsdPreviewPercent');
+                    if (bar) bar.style.width = pct + '%';
+                    if (lbl) lbl.textContent = pct + '%';
+                } catch (e) { /* ignore transient poll errors */ }
+            };
+            const pollTimer = setInterval(pollProgress, 400);
+            pollProgress();
 
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/preview?${params.toString()}`, { method: 'POST' });
@@ -1423,6 +1442,7 @@
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
                 logActivity('Preview', `Error: ${err.message}`, false);
             } finally {
+                clearInterval(pollTimer);
                 btn.disabled = false;
                 runBtn.disabled = false;
             }
