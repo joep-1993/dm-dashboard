@@ -1185,6 +1185,9 @@
             const selAll = document.getElementById('llPreviewSelectAll');
             if (selAll) {
                 const filteredKeys = llPreviewFiltered.filter(r => r._selectable).map(r => r._key);
+                // Hide the select-all checkbox when the current filter has no
+                // selectable rows (e.g. the Skipped / Errors tiles).
+                selAll.style.display = filteredKeys.length ? '' : 'none';
                 const selInFiltered = filteredKeys.filter(k => llPreviewSelected.has(k)).length;
                 selAll.checked = filteredKeys.length > 0 && selInFiltered === filteredKeys.length;
                 selAll.indeterminate = selInFiltered > 0 && selInFiltered < filteredKeys.length;
