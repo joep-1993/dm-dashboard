@@ -929,22 +929,38 @@ def get_redshift_shop_changes(
 # ---------------------------------------------------------------------------
 
 
-def ensure_campaign_label_exists(client: GoogleAdsClient, customer_id: str) -> str:
-    """
-    Ensure the GSD_SCRIPT label exists in the account.
-    Returns the label resource name.
-    """
-    ga_service = client.get_service("GoogleAdsService")
+# Label colour + description used when a label has to be created.
+_LABEL_META = {
+    SCRIPT_LABEL: ("#0000FF", "GSD Script managed campaigns"),
+    "BRANDED_0": ("#00B894", "GSD shop with branded = 0 (non-branded)"),
+    "BRANDED_1": ("#E17055", "GSD shop with branded = 1 (branded)"),
+}
 
-    # Check if label already exists
+# (customer_id, label_name) -> label resource name. Labels are immutable once
+# created, so caching avoids a lookup per campaign/shop across a run.
+_label_resource_cache: Dict[tuple, str] = {}
+
+
+def ensure_campaign_label_exists(
+    client: GoogleAdsClient, customer_id: str, label_name: str = SCRIPT_LABEL
+) -> str:
+    """
+    Ensure a label exists in the account (defaults to GSD_SCRIPT).
+    Returns the label resource name; cached per (customer_id, label_name).
+    """
+    cache_key = (customer_id, label_name)
+    if cache_key in _label_resource_cache:
+        return _label_resource_cache[cache_key]
+
+    ga_service = client.get_service("GoogleAdsService")
     query = f"""
         SELECT label.id, label.name, label.resource_name
         FROM label
-        WHERE label.name = '{SCRIPT_LABEL}'
+        WHERE label.name = '{label_name}'
     """
     try:
-        response = ga_service.search(customer_id=customer_id, query=query)
-        for row in response:
+        for row in ga_service.search(customer_id=customer_id, query=query):
+            _label_resource_cache[cache_key] = row.label.resource_name
             return row.label.resource_name
     except GoogleAdsException:
         pass
@@ -953,15 +969,42 @@ def ensure_campaign_label_exists(client: GoogleAdsClient, customer_id: str) -> s
     label_service = client.get_service("LabelService")
     label_op = client.get_type("LabelOperation")
     label = label_op.create
-    label.name = SCRIPT_LABEL
-    label.text_label.background_color = "#0000FF"
-    label.text_label.description = "GSD Script managed campaigns"
+    label.name = label_name
+    color, desc = _LABEL_META.get(label_name, ("#0000FF", f"{label_name} (GSD script)"))
+    label.text_label.background_color = color
+    label.text_label.description = desc
 
     response = _mutate_with_retry(
         "create label",
         lambda: label_service.mutate_labels(customer_id=customer_id, operations=[label_op]),
     )
-    return response.results[0].resource_name
+    rn = response.results[0].resource_name
+    _label_resource_cache[cache_key] = rn
+    return rn
+
+
+def _branded_label_name(branded) -> Optional[str]:
+    """Return "BRANDED_0"/"BRANDED_1" for branded 0/1, else None (NULL/unknown)."""
+    try:
+        v = int(branded)
+    except (TypeError, ValueError):
+        return None
+    if v == 0:
+        return "BRANDED_0"
+    if v == 1:
+        return "BRANDED_1"
+    return None
+
+
+def _apply_branded_label(client, customer_id, campaign_resource, branded) -> None:
+    """Apply the BRANDED_0/BRANDED_1 label matching the shop's branded flag."""
+    name = _branded_label_name(branded)
+    if not name or not campaign_resource:
+        return
+    _apply_label_to_campaign(
+        client, customer_id, campaign_resource,
+        ensure_campaign_label_exists(client, customer_id, name),
+    )
 
 
 def _apply_label_to_campaign(
@@ -1842,6 +1885,7 @@ def _create_campaigns_for_shop(
         # Existing campaign? Complete an incomplete shell, else skip.
         existing = check_campaign(client, customer_id, campaign_name)
         if existing:
+            _apply_branded_label(client, customer_id, existing, branded)
             results.append(_repair_campaign(
                 client, customer_id, existing, campaign_name, campaign_type, label))
             continue
@@ -1864,6 +1908,9 @@ def _create_campaigns_for_shop(
                 "error": _last_gads_error["msg"] or "campaign creation failed",
             })
             continue
+
+        # Apply the BRANDED_0 / BRANDED_1 label matching the shop's branded flag.
+        _apply_branded_label(client, customer_id, campaign_resource, branded)
 
         # Create ad group
         ad_group_name = label  # ad group is named after the label (a/b/c/no_data/no_ean), matching the original script
@@ -2378,3 +2425,111 @@ def run_gsd_script(
 
     _run_progress["running"] = False
     return overall_results
+
+
+# ---------------------------------------------------------------------------
+# Branded-label backfill
+# ---------------------------------------------------------------------------
+
+
+def _fetch_branded_by_shop() -> Dict[int, Any]:
+    """
+    Map shop_id -> f_branded for all current shops (same efficy join used by
+    get_redshift_shop_changes). Value is 0, 1, or None (no catman row).
+    """
+    conn = _get_redshift_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT s.f_shop_id, c.f_branded
+            FROM hda.efficy_shops s
+            LEFT JOIN hda.efficy_shop_catman c
+              ON c.k_shop = s.k_shop AND c.actual_ind = 1 AND c.deleted_ind = 0
+            WHERE s.actual_ind = 1 AND s.deleted_ind = 0
+            """
+        )
+        out: Dict[int, Any] = {}
+        for shop_id, branded in cur.fetchall():
+            if shop_id is None:
+                continue
+            out[int(shop_id)] = branded
+        return out
+    finally:
+        conn.close()
+
+
+def backfill_branded_labels(
+    dry_run: bool = True, customer_ids: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Label every GSD_SCRIPT campaign that lacks a BRANDED_0/BRANDED_1 label with
+    the one matching its shop's f_branded flag (from Redshift, by [shop_id:...]).
+
+    dry_run=True only reports what it would do. Campaigns whose shop has an
+    unknown/NULL branded flag, or whose name has no shop_id, are skipped.
+    Returns a per-account + totals summary.
+    """
+    client = _get_client()
+    ga = client.get_service("GoogleAdsService")
+    cl_service = client.get_service("CampaignLabelService")
+
+    branded_map = _fetch_branded_by_shop()
+
+    if customer_ids is None:
+        customer_ids = sorted({info["customer_id"] for info in ACCOUNTS.values()})
+
+    keys = ("gsd_total", "already", "BRANDED_0", "BRANDED_1", "skipped_unknown", "no_shop_id")
+    summary: Dict[str, Any] = {"dry_run": dry_run, "accounts": {}, "totals": {k: 0 for k in keys}}
+
+    for cid in customer_ids:
+        gsd_rn = ensure_campaign_label_exists(client, cid, SCRIPT_LABEL)
+        b0_rn = ensure_campaign_label_exists(client, cid, "BRANDED_0")
+        b1_rn = ensure_campaign_label_exists(client, cid, "BRANDED_1")
+        acct = {k: 0 for k in keys}
+        ops = []
+
+        for r in ga.search(customer_id=cid, query=f"""
+                SELECT campaign.id, campaign.resource_name, campaign.name, campaign.labels
+                FROM campaign
+                WHERE campaign.labels CONTAINS ANY ('{gsd_rn}')
+                  AND campaign.status != 'REMOVED'"""):
+            acct["gsd_total"] += 1
+            labels = set(r.campaign.labels)
+            if b0_rn in labels or b1_rn in labels:
+                acct["already"] += 1
+                continue
+            sid = _parse_campaign_name(r.campaign.name).get("shop_id")
+            if sid is None:
+                acct["no_shop_id"] += 1
+                continue
+            name = _branded_label_name(branded_map.get(int(sid)))
+            if not name:
+                acct["skipped_unknown"] += 1
+                continue
+            acct[name] += 1
+            if not dry_run:
+                op = client.get_type("CampaignLabelOperation")
+                op.create.campaign = r.campaign.resource_name
+                op.create.label = b0_rn if name == "BRANDED_0" else b1_rn
+                ops.append(op)
+
+        if not dry_run and ops:
+            for i in range(0, len(ops), 1000):
+                chunk = ops[i:i + 1000]
+                req = client.get_type("MutateCampaignLabelsRequest")
+                req.customer_id = cid
+                req.operations.extend(chunk)
+                req.partial_failure = True  # a label already present must not fail the chunk
+                _mutate_with_retry(
+                    f"backfill branded labels ({cid})",
+                    lambda req=req: cl_service.mutate_campaign_labels(request=req),
+                )
+
+        summary["accounts"][cid] = acct
+        for k in keys:
+            summary["totals"][k] += acct[k]
+        logger.info("Branded-label backfill %s account %s: %s",
+                    "(dry-run)" if dry_run else "(applied)", cid, acct)
+
+    return summary
