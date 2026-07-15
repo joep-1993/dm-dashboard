@@ -27,20 +27,21 @@
 
         .campaign-table { font-size: 0.9rem; }
         .campaign-table th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
-        /* Campaign Name stays on one line; the table scrolls with ONE horizontal
-           slider, and the Actions column is pinned right so its buttons stay in view. */
-        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(2) { white-space: nowrap; }
-        .campaign-table th:last-child, .campaign-table td:last-child { position: sticky; right: 0; }
-        .campaign-table td:last-child { background: #fff; z-index: 1; box-shadow: -6px 0 6px -6px rgba(0,0,0,0.15); }
-        .campaign-table th:last-child { z-index: 2; box-shadow: -6px 0 6px -6px rgba(0,0,0,0.15); }
-        /* Fixed widths so sorting doesn't resize these columns (Campaign Name stays
-           the flexible/scroll column); Impressions/Clicks/Cost centered. */
+        /* Checkbox column (1st): compact + centered. */
+        .campaign-table th:first-child, .campaign-table td:first-child { width: 36px; text-align: center; }
+        /* Columns: [check] Shop | Shop ID | Country | Campaign. Campaign is the
+           flexible column that scrolls; the others keep stable widths on sort. */
+        .campaign-table th[data-sort="shop_name"], .campaign-table td:nth-child(2) { min-width: 150px; }
+        .campaign-table th[data-sort="shop_id"], .campaign-table td:nth-child(3) { width: 90px; text-align: center; }
         .campaign-table th[data-sort="country"], .campaign-table td.col-country { width: 80px; }
-        .campaign-table th[data-sort="status"], .campaign-table td:nth-child(3) { width: 100px; }
-        .campaign-table th[data-sort="impressions"], .campaign-table td:nth-child(4) { width: 110px; text-align: center; }
-        .campaign-table th[data-sort="clicks"], .campaign-table td:nth-child(5) { width: 90px; text-align: center; }
-        .campaign-table th[data-sort="cost"], .campaign-table td:nth-child(6) { width: 100px; text-align: center; }
-        .campaign-table th:last-child, .campaign-table td:last-child { width: 160px; }
+        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(5) { white-space: nowrap; }
+        /* Bulk action buttons in the toolbar. */
+        .btn-bulk-pause { border: 1px solid #e65100; color: #e65100; background: transparent; }
+        .btn-bulk-activate { border: 1px solid #00b894; color: #00b894; background: transparent; }
+        .btn-bulk-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
+        .btn-bulk-pause:hover:not(:disabled) { background: #e65100; color: #fff; }
+        .btn-bulk-activate:hover:not(:disabled) { background: #00b894; color: #fff; }
+        .btn-bulk-remove:hover:not(:disabled) { background: #d63031; color: #fff; }
         /* Activity Log headers: match the other tables (light grey, same padding/size). */
         #gsdActivityTable th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         .campaign-table td { vertical-align: middle; }
@@ -284,31 +285,32 @@
                     <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="newCampaignIds.clear(); loadCampaigns(); loadStats();">↻ Refresh</button>
                     <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportXlsx()">Export Excel</button>
                     <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyForExcel()">Copy for Excel</button>
+                    <button class="btn btn-sm btn-bulk-pause" id="bulkPauseBtn" onclick="bulkAction('pause')" disabled>Pause</button>
+                    <button class="btn btn-sm btn-bulk-activate" id="bulkActivateBtn" onclick="bulkAction('enable')" disabled>Activate</button>
+                    <button class="btn btn-sm btn-bulk-remove" id="bulkRemoveBtn" onclick="bulkAction('remove')" disabled>Remove</button>
                 </div>
                 <div class="table-responsive gsd-table-wrap">
                     <table class="table table-sm table-hover campaign-table mb-0">
                         <thead class="table-light">
                             <tr>
+                                <th style="width:36px; text-align:center;"><input type="checkbox" id="selectAllCampaigns" onclick="toggleSelectAllCampaigns(this)" title="Select all on this page"></th>
+                                <th class="sortable" data-sort="shop_name" onclick="sortBy('shop_name')">Shop</th>
+                                <th class="sortable" data-sort="shop_id" onclick="sortBy('shop_id')">Shop ID</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortBy('country')">Country</th>
-                                <th class="sortable" data-sort="campaign_name" onclick="sortBy('campaign_name')">Campaign Name</th>
-                                <th class="sortable" data-sort="status" onclick="sortBy('status')">Status</th>
-                                <th class="sortable" data-sort="impressions" onclick="sortBy('impressions')">Impressions</th>
-                                <th class="sortable" data-sort="clicks" onclick="sortBy('clicks')">Clicks</th>
-                                <th class="sortable" data-sort="cost" onclick="sortBy('cost')">Cost</th>
-                                <th>Actions</th>
+                                <th class="sortable" data-sort="campaign_name" onclick="sortBy('campaign_name')">Campaign</th>
                             </tr>
                         </thead>
                         <tbody id="campaignTableBody"></tbody>
                     </table>
                 </div>
                 <script>
-                    // Render N placeholder rows (7 cells each) so the Campaigns
+                    // Render N placeholder rows (5 cells each) so the Campaigns
                     // table holds its height while data loads — prevents the
                     // layout below from jumping when campaigns arrive. Defined
                     // here so it paints during parse; reused by loadCampaigns().
                     function campaignSkeletonRows(n = 10) {
                         const cell = '<td><span class="skel-bar"></span></td>';
-                        return ('<tr class="skel-row">' + cell.repeat(7) + '</tr>').repeat(n);
+                        return ('<tr class="skel-row">' + cell.repeat(5) + '</tr>').repeat(n);
                     }
                     document.getElementById('campaignTableBody').innerHTML = campaignSkeletonRows();
                 </script>
@@ -571,7 +573,7 @@
             } catch (err) {
                 console.error('Failed to load campaigns:', err);
                 document.getElementById('campaignTableBody').innerHTML =
-                    '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load campaigns.</td></tr>';
+                    '<tr><td colspan="5" class="text-center text-danger py-4">Failed to load campaigns.</td></tr>';
             }
         }
 
@@ -671,40 +673,22 @@
         function renderTable(campaigns) {
             const tbody = document.getElementById('campaignTableBody');
             if (!campaigns.length) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No campaigns found.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No campaigns found.</td></tr>';
                 return;
             }
 
             tbody.innerHTML = campaigns.map(c => {
-                const isEnabled = (c.status || '').toUpperCase() === 'ENABLED';
-                const isPaused = (c.status || '').toUpperCase() === 'PAUSED';
                 const isNew = newCampaignIds.has(String(c.campaign_id));
-                const statusBadge = isEnabled
-                    ? '<span class="badge badge-active">Active</span>'
-                    : isPaused
-                        ? '<span class="badge bg-warning text-dark">Paused</span>'
-                        : `<span class="badge bg-secondary">${c.status || 'Unknown'}</span>`;
                 const newBadge = isNew ? ' <span class="badge badge-new">new</span>' : '';
-
-                const actions = [];
-                if (isEnabled) {
-                    actions.push(`<button class="btn btn-action btn-pause" onclick="pauseCampaign('${c.customer_id}','${c.campaign_id}','${escapeHtml(c.campaign_name || '')}')">Pause</button>`);
-                }
-                if (isPaused) {
-                    actions.push(`<button class="btn btn-action btn-activate" onclick="enableCampaign('${c.customer_id}','${c.campaign_id}','${escapeHtml(c.campaign_name || '')}')">Activate</button>`);
-                }
-                actions.push(`<button class="btn btn-action btn-remove" onclick="removeCampaign('${c.customer_id}','${c.campaign_id}','${escapeHtml(c.campaign_name || '')}')">Remove</button>`);
-
                 return `<tr class="${isNew ? 'row-new' : ''}">
+                    <td><input type="checkbox" class="camp-check" data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" onclick="updateBulkButtons()"></td>
+                    <td>${escapeHtml(c.shop_name || '-')}</td>
+                    <td>${c.shop_id ?? '-'}</td>
                     <td class="col-country">${c.country || '-'}</td>
                     <td>${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
-                    <td>${statusBadge}</td>
-                    <td>${(c.impressions || 0).toLocaleString()}</td>
-                    <td>${(c.clicks || 0).toLocaleString()}</td>
-                    <td>${formatCost(c.cost)}</td>
-                    <td><div class="d-flex gap-1">${actions.join('')}</div></td>
                 </tr>`;
             }).join('');
+            updateBulkButtons();
         }
 
         function formatCost(cost) {
@@ -719,12 +703,10 @@
         // --- Export / Copy ---
         function getCampaignRows() {
             return filteredCampaigns.map(c => ({
+                Shop: c.shop_name || '',
+                'Shop ID': c.shop_id ?? '',
                 Country: c.country || '',
-                'Campaign Name': c.campaign_name || '',
-                Status: c.status || '',
-                Impressions: c.impressions || 0,
-                Clicks: c.clicks || 0,
-                Cost: Math.round((c.cost || 0) * 100) / 100,
+                Campaign: c.campaign_name || '',
             }));
         }
 
@@ -787,6 +769,47 @@
             } catch (err) {
                 logActivity('Remove', `${name} - Error: ${err.message}`, false);
             }
+        }
+
+        // --- Bulk actions via row checkboxes ---
+        function toggleSelectAllCampaigns(cb) {
+            document.querySelectorAll('.camp-check').forEach(x => { x.checked = cb.checked; });
+            updateBulkButtons();
+        }
+
+        function updateBulkButtons() {
+            const all = document.querySelectorAll('.camp-check');
+            const n = document.querySelectorAll('.camp-check:checked').length;
+            ['bulkPauseBtn', 'bulkActivateBtn', 'bulkRemoveBtn'].forEach(id => {
+                const b = document.getElementById(id);
+                if (b) b.disabled = n === 0;
+            });
+            const sa = document.getElementById('selectAllCampaigns');
+            if (sa) { sa.checked = all.length > 0 && n === all.length; sa.indeterminate = n > 0 && n < all.length; }
+        }
+
+        async function bulkAction(type) {
+            const checks = Array.from(document.querySelectorAll('.camp-check:checked'));
+            if (!checks.length) return;
+            const items = checks.map(cb => ({ cid: cb.dataset.cid, campid: cb.dataset.campid, name: cb.dataset.name }));
+            const verb = type === 'pause' ? 'Pause' : type === 'enable' ? 'Activate' : 'Remove';
+            const msg = type === 'remove'
+                ? `Are you sure you want to REMOVE ${items.length} selected campaign(s)? This cannot be undone.`
+                : `${verb} ${items.length} selected campaign(s)?`;
+            if (!confirm(msg)) return;
+            let ok = 0, fail = 0;
+            for (const it of items) {
+                try {
+                    const res = type === 'remove'
+                        ? await fetch(`${API_BASE}/api/gsd-campaigns/campaigns/${it.cid}/${it.campid}`, { method: 'DELETE' })
+                        : await fetch(`${API_BASE}/api/gsd-campaigns/campaigns/${it.cid}/${it.campid}/${type}`, { method: 'POST' });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    ok++;
+                } catch (e) { fail++; }
+            }
+            logActivity(verb, `${ok} ${verb.toLowerCase()}d${fail ? ` / ${fail} failed` : ''} (${items.length} selected)`, fail === 0);
+            loadCampaigns();
+            loadStats();
         }
 
         // --- Pause/Enable low linkage shops ---
