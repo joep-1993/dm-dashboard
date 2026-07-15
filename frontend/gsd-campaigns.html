@@ -426,8 +426,11 @@
         let allCampaigns = [];
         let filteredCampaigns = [];
         let currentPage = 1;
-        let sortColumn = null;
-        let sortDirection = 'asc';
+        // Default: newest-created first. Google Ads campaign IDs are monotonically
+        // increasing, so campaign_id DESC ≈ creation-date DESC (no create-date field
+        // is available via the API for older campaigns).
+        let sortColumn = 'campaign_id';
+        let sortDirection = 'desc';
         let newCampaignIds = new Set();
         let pendingReconstruct = null;  // {id, created, paused} awaiting confirmation
         // GSD preview panel state (sort / filter / export)
@@ -549,7 +552,30 @@
                 String(c.shop_id || '').includes(campaignSearch)
             );
 
+            sortFilteredCampaigns();
             renderPage();
+        }
+
+        // Sort filteredCampaigns in place by the current sortColumn/sortDirection.
+        // Shared by sortBy() (header clicks) and applyFilters() so the chosen order
+        // — newest-first by default — survives filtering and reloads.
+        function sortFilteredCampaigns() {
+            if (!sortColumn) return;
+            const numericCols = ['impressions', 'clicks', 'cost', 'shop_id', 'campaign_id'];
+            filteredCampaigns.sort((a, b) => {
+                let valA = a[sortColumn] ?? '';
+                let valB = b[sortColumn] ?? '';
+                if (numericCols.includes(sortColumn)) {
+                    valA = Number(valA) || 0;
+                    valB = Number(valB) || 0;
+                } else {
+                    valA = String(valA).toLowerCase();
+                    valB = String(valB).toLowerCase();
+                }
+                if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+                if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
         }
 
         function sortBy(column) {
@@ -568,21 +594,7 @@
                 }
             });
 
-            const numericCols = ['impressions', 'clicks', 'cost', 'shop_id'];
-            filteredCampaigns.sort((a, b) => {
-                let valA = a[column] ?? '';
-                let valB = b[column] ?? '';
-                if (numericCols.includes(column)) {
-                    valA = Number(valA) || 0;
-                    valB = Number(valB) || 0;
-                } else {
-                    valA = String(valA).toLowerCase();
-                    valB = String(valB).toLowerCase();
-                }
-                if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
-                if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
-                return 0;
-            });
+            sortFilteredCampaigns();
 
             currentPage = 1;
             renderPage();
