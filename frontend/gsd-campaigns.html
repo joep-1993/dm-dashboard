@@ -27,8 +27,10 @@
 
         .campaign-table { font-size: 0.9rem; }
         .campaign-table th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
-        /* Keep Campaign Name on one line; the table wrap scrolls horizontally. */
-        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(2) { white-space: nowrap; }
+        /* Campaign Name stays on one line and scrolls WITHIN its own cell, so the
+           rest of the table (incl. the Actions buttons) stays in view. */
+        .campaign-table th[data-sort="campaign_name"] { white-space: nowrap; }
+        .camp-name-cell { max-width: 300px; overflow-x: auto; white-space: nowrap; }
         /* Activity Log headers: match the other tables (light grey, same padding/size). */
         #gsdActivityTable th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         .campaign-table td { vertical-align: middle; }
@@ -685,7 +687,7 @@
 
                 return `<tr class="${isNew ? 'row-new' : ''}">
                     <td class="col-country">${c.country || '-'}</td>
-                    <td>${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
+                    <td><div class="camp-name-cell">${escapeHtml(c.campaign_name || '-')}${newBadge}</div></td>
                     <td>${statusBadge}</td>
                     <td>${(c.impressions || 0).toLocaleString()}</td>
                     <td>${(c.clicks || 0).toLocaleString()}</td>
@@ -2009,7 +2011,7 @@
                 }
                 return `<tr>
                     <td style="text-align:center; white-space:nowrap;">${time}</td>
-                    <td style="text-align:left;">${activityActionLabel(entry.action)}</td>
+                    <td style="text-align:center;">${activityActionLabel(entry.action)}</td>
                     <td style="text-align:left;" class="${cls}">${escapeHtml(entry.details)}</td>
                     <td style="text-align:center;">${resetHtml}</td>
                 </tr>`;
@@ -2019,7 +2021,7 @@
                     <thead class="table-light">
                         <tr>
                             <th style="text-align:center; width:26%;">Time</th>
-                            <th style="text-align:left; width:18%;">Action</th>
+                            <th style="text-align:center; width:18%;">Action</th>
                             <th style="text-align:left; width:41%;">Details</th>
                             <th style="text-align:center; width:15%;">Reset</th>
                         </tr>
