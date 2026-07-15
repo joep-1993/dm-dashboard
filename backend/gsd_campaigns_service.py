@@ -7,6 +7,7 @@ Center for account linking and Redshift for shop change data.
 """
 import os
 import re
+import time
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any
@@ -191,6 +192,52 @@ def _get_client() -> GoogleAdsClient:
         "use_proto_plus": True,
     }
     return GoogleAdsClient.load_from_dict(config)
+
+
+def _is_retryable_gads(ex: GoogleAdsException) -> bool:
+    """
+    True for transient Google Ads failures that are safe to retry — chiefly
+    CONCURRENT_MODIFICATION ("Multiple requests were attempting to modify the
+    same resource at once"), plus transient internal/quota errors. Detection is
+    tolerant of proto-plus vs protobuf enum representations and falls back to the
+    rendered message text.
+    """
+    try:
+        for err in ex.failure.errors:
+            code = err.error_code
+            for family in ("database_error", "internal_error", "quota_error"):
+                val = getattr(code, family, 0)
+                name = getattr(val, "name", str(val))
+                if name in ("CONCURRENT_MODIFICATION", "INTERNAL_ERROR",
+                            "TRANSIENT_ERROR", "RESOURCE_EXHAUSTED",
+                            "RESOURCE_TEMPORARILY_EXHAUSTED"):
+                    return True
+    except Exception:
+        pass
+    msg = str(ex)
+    return "CONCURRENT_MODIFICATION" in msg or "modify the same resource" in msg
+
+
+def _mutate_with_retry(what: str, fn, retries: int = 5, base_delay: float = 0.5):
+    """
+    Call a Google Ads mutate (a zero-arg callable) and retry transient failures
+    with exponential backoff (0.5s, 1s, 2s, 4s, 8s). Non-retryable errors and a
+    final exhausted attempt re-raise, so existing per-call error handling still
+    sees the real GoogleAdsException.
+    """
+    for attempt in range(retries):
+        try:
+            return fn()
+        except GoogleAdsException as ex:
+            if attempt < retries - 1 and _is_retryable_gads(ex):
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    "Transient Ads error on %s (attempt %d/%d); retrying in %.1fs",
+                    what, attempt + 1, retries, delay,
+                )
+                time.sleep(delay)
+                continue
+            raise
 
 
 def _get_redshift_connection():
@@ -541,8 +588,11 @@ def _mutate_campaign_status(customer_id: str, campaign_id: str, status: str) -> 
         campaign_op.update_mask = field_mask_pb2.FieldMask(paths=["status"])
 
     try:
-        response = campaign_service.mutate_campaigns(
-            customer_id=customer_id, operations=[campaign_op]
+        response = _mutate_with_retry(
+            f"set campaign {campaign_id} -> {status}",
+            lambda: campaign_service.mutate_campaigns(
+                customer_id=customer_id, operations=[campaign_op]
+            ),
         )
         result = response.results[0]
         return {"success": True, "resource_name": result.resource_name}
@@ -615,7 +665,10 @@ def undo_run(
             req.customer_id = cid
             req.operations.extend(ops)
             req.partial_failure = True
-            resp = cs.mutate_campaigns(request=req)
+            resp = _mutate_with_retry(
+                f"bulk {status} ({cid})",
+                lambda: cs.mutate_campaigns(request=req),
+            )
             ok = sum(1 for r in resp.results if r.resource_name)
             if status == "PAUSED":
                 result["paused_created"] += ok
@@ -844,7 +897,10 @@ def ensure_campaign_label_exists(client: GoogleAdsClient, customer_id: str) -> s
     label.text_label.background_color = "#0000FF"
     label.text_label.description = "GSD Script managed campaigns"
 
-    response = label_service.mutate_labels(customer_id=customer_id, operations=[label_op])
+    response = _mutate_with_retry(
+        "create label",
+        lambda: label_service.mutate_labels(customer_id=customer_id, operations=[label_op]),
+    )
     return response.results[0].resource_name
 
 
@@ -858,8 +914,11 @@ def _apply_label_to_campaign(
     op.create.label = label_resource_name
 
     try:
-        campaign_label_service.mutate_campaign_labels(
-            customer_id=customer_id, operations=[op]
+        _mutate_with_retry(
+            "apply label",
+            lambda: campaign_label_service.mutate_campaign_labels(
+                customer_id=customer_id, operations=[op]
+            ),
         )
     except GoogleAdsException as ex:
         # Label may already be applied
@@ -1078,8 +1137,11 @@ def add_standard_shopping_campaign(
     budget.explicitly_shared = False
 
     try:
-        budget_response = campaign_budget_service.mutate_campaign_budgets(
-            customer_id=customer_id, operations=[budget_op]
+        budget_response = _mutate_with_retry(
+            "create budget",
+            lambda: campaign_budget_service.mutate_campaign_budgets(
+                customer_id=customer_id, operations=[budget_op]
+            ),
         )
         budget_resource = budget_response.results[0].resource_name
     except GoogleAdsException as ex:
@@ -1114,8 +1176,11 @@ def add_standard_shopping_campaign(
     campaign.tracking_url_template = tracking_template
 
     try:
-        camp_response = campaign_service.mutate_campaigns(
-            customer_id=customer_id, operations=[camp_op]
+        camp_response = _mutate_with_retry(
+            "create campaign",
+            lambda: campaign_service.mutate_campaigns(
+                customer_id=customer_id, operations=[camp_op]
+            ),
         )
         campaign_resource = camp_response.results[0].resource_name
     except GoogleAdsException as ex:
@@ -1126,8 +1191,11 @@ def add_standard_shopping_campaign(
     # Step 3: Add location targeting
     location_op = create_location_op(client, campaign_resource, country)
     try:
-        campaign_criterion_service.mutate_campaign_criteria(
-            customer_id=customer_id, operations=[location_op]
+        _mutate_with_retry(
+            "location targeting",
+            lambda: campaign_criterion_service.mutate_campaign_criteria(
+                customer_id=customer_id, operations=[location_op]
+            ),
         )
     except GoogleAdsException as ex:
         logger.warning("Failed to add location targeting: %s", ex)
@@ -1163,8 +1231,11 @@ def add_shopping_ad_group(
     ad_group.status = client.enums.AdGroupStatusEnum.ENABLED
 
     try:
-        response = ad_group_service.mutate_ad_groups(
-            customer_id=customer_id, operations=[op]
+        response = _mutate_with_retry(
+            "create ad group",
+            lambda: ad_group_service.mutate_ad_groups(
+                customer_id=customer_id, operations=[op]
+            ),
         )
         resource = response.results[0].resource_name
         logger.info("Created ad group '%s' -> %s", ad_group_name, resource)
@@ -1190,8 +1261,11 @@ def add_shopping_product_ad_group_ad(
     ad_group_ad.ad.shopping_product_ad = client.get_type("ShoppingProductAdInfo")
 
     try:
-        response = ad_group_ad_service.mutate_ad_group_ads(
-            customer_id=customer_id, operations=[op]
+        response = _mutate_with_retry(
+            "create product ad",
+            lambda: ad_group_ad_service.mutate_ad_group_ads(
+                customer_id=customer_id, operations=[op]
+            ),
         )
         resource = response.results[0].resource_name
         logger.info("Created shopping product ad -> %s", resource)
@@ -1238,8 +1312,11 @@ def add_negative_keywords(
             ops.append(op)
 
     try:
-        response = campaign_criterion_service.mutate_campaign_criteria(
-            customer_id=customer_id, operations=ops
+        response = _mutate_with_retry(
+            "negative keywords",
+            lambda: campaign_criterion_service.mutate_campaign_criteria(
+                customer_id=customer_id, operations=ops
+            ),
         )
         count = len(response.results)
         logger.info("Added %d negative keywords to %s", count, campaign_resource_name)
@@ -1386,8 +1463,11 @@ def add_sub_cpr(
     ))
 
     try:
-        ad_group_criterion_service.mutate_ad_group_criteria(
-            customer_id=customer_id, operations=ops
+        _mutate_with_retry(
+            "listing group tree",
+            lambda: ad_group_criterion_service.mutate_ad_group_criteria(
+                customer_id=customer_id, operations=ops
+            ),
         )
         logger.info("Created CPR listing group tree (label=%s) for %s", label, ad_group_resource_name)
         return True
@@ -1464,8 +1544,11 @@ def add_sub_cpc(
     ops.append(other_op)
 
     try:
-        ad_group_criterion_service.mutate_ad_group_criteria(
-            customer_id=customer_id, operations=ops
+        _mutate_with_retry(
+            "listing group tree",
+            lambda: ad_group_criterion_service.mutate_ad_group_criteria(
+                customer_id=customer_id, operations=ops
+            ),
         )
         logger.info("Created CPC listing group tree for %s", ad_group_resource_name)
         return True
@@ -1520,7 +1603,10 @@ def _set_campaign_status_by_resource(
     op.update.status = getattr(client.enums.CampaignStatusEnum, status)
     op.update_mask = field_mask_pb2.FieldMask(paths=["status"])
     try:
-        campaign_service.mutate_campaigns(customer_id=customer_id, operations=[op])
+        _mutate_with_retry(
+            f"set status -> {status}",
+            lambda: campaign_service.mutate_campaigns(customer_id=customer_id, operations=[op]),
+        )
         return True
     except GoogleAdsException as ex:
         logger.error("Failed to set %s to %s: %s", campaign_resource, status, ex)
@@ -1577,7 +1663,10 @@ def _remove_listing_tree(client, customer_id, campaign_id) -> None:
         op = client.get_type("AdGroupCriterionOperation")
         op.remove = c.ad_group_criterion.resource_name
         ops.append(op)
-    svc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops)
+    _mutate_with_retry(
+        "remove listing tree",
+        lambda: svc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops),
+    )
 
 
 def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
