@@ -262,16 +262,50 @@ def _name_contains_regexp(substring: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Two-level public suffixes we encounter in shop names (.co.uk etc.)
+_SECOND_LEVEL = {"co.uk", "com.au", "co.nz", "com.br", "co.za"}
+
+
+def _clean_host(raw: str) -> str:
+    """Normalise a shop/domain name to a bare host (no |country, scheme, www, path or note)."""
+    s = raw.split("|")[0].strip().lower()   # drop |NL country marker
+    s = re.sub(r"^https?://", "", s)        # drop scheme
+    s = re.sub(r"^www\.", "", s)            # drop leading www.
+    s = s.split("/")[0]                     # drop /path
+    s = s.split()[0] if s.split() else s    # drop trailing " (note)" / " OUD"
+    return s.strip(".")
+
+
 def get_negatives(shop_name: str) -> List[str]:
     """
-    Extract negative keywords from a shop name.
-    Splits the shop name into individual words for use as negative keywords.
+    Build negative keywords from a shop name as [full-domain, brand].
+
+    e.g. "Gymbeam.nl" -> ["gymbeam.nl", "gymbeam"];
+         "Calcuso.com|NL" -> ["calcuso.com", "calcuso"];
+         "Hoopo.eu" -> ["hoopo.eu", "hoopo"].
+    Handles any TLD (incl. two-level like .co.uk) and NEVER emits a bare
+    TLD/country token (the old split-on-every-non-alphanumeric produced
+    harmful "nl"/"com"/"eu" negatives).
     """
     if not shop_name:
         return []
-    # Remove common suffixes, split on non-alphanumeric
-    words = re.split(r"[^a-zA-Z0-9]+", shop_name.lower())
-    return [w for w in words if w and len(w) > 1]
+    host = _clean_host(shop_name)
+    if not host:
+        return []
+    if "." not in host:
+        return [host]
+    # strip the public suffix (two-level suffixes first)
+    for suf in _SECOND_LEVEL:
+        if host.endswith("." + suf):
+            name = host[: -(len(suf) + 1)]
+            break
+    else:
+        name = host.rsplit(".", 1)[0]
+    name = name.rsplit(".", 1)[-1]          # core brand label (drop shop./nl. subdomains)
+    negatives = [host]
+    if name and name != host:
+        negatives.append(name)
+    return negatives
 
 
 # ---------------------------------------------------------------------------
@@ -1112,8 +1146,9 @@ def add_negative_keywords(
     keywords: List[str],
 ) -> int:
     """
-    Add negative broad-match keywords to a campaign.
-    Returns count of successfully added keywords.
+    Add negative keywords to a campaign as both EXACT and PHRASE match
+    (matching the original create GSD-campaigns.py behaviour).
+    Returns count of successfully added criteria.
     """
     if not keywords:
         return 0
@@ -1122,13 +1157,17 @@ def add_negative_keywords(
     ops = []
 
     for kw in keywords:
-        op = client.get_type("CampaignCriterionOperation")
-        criterion = op.create
-        criterion.campaign = campaign_resource_name
-        criterion.negative = True
-        criterion.keyword.text = kw
-        criterion.keyword.match_type = client.enums.KeywordMatchTypeEnum.BROAD
-        ops.append(op)
+        for match_type in (
+            client.enums.KeywordMatchTypeEnum.EXACT,
+            client.enums.KeywordMatchTypeEnum.PHRASE,
+        ):
+            op = client.get_type("CampaignCriterionOperation")
+            criterion = op.create
+            criterion.campaign = campaign_resource_name
+            criterion.negative = True
+            criterion.keyword.text = kw
+            criterion.keyword.match_type = match_type
+            ops.append(op)
 
     try:
         response = campaign_criterion_service.mutate_campaign_criteria(
