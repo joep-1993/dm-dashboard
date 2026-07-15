@@ -27,6 +27,8 @@
 
         .campaign-table { font-size: 0.9rem; }
         .campaign-table th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
+        /* Keep Campaign Name on one line; the table wrap scrolls horizontally. */
+        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(2) { white-space: nowrap; }
         .campaign-table td { vertical-align: middle; }
         .campaign-table .col-country { text-align: center; }
 
