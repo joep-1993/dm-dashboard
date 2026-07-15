@@ -240,6 +240,66 @@ def _mutate_with_retry(what: str, fn, retries: int = 5, base_delay: float = 0.5)
             raise
 
 
+# A freshly-created Merchant Center -> Google Ads link is eventually consistent:
+# the MC-side link exists but Google Ads can briefly still report
+# RESOURCE_NOT_FOUND on shopping_setting.merchant_id when the campaign is created.
+# Give the campaign create its own patient retry so the link can propagate within
+# the same run (~2 min total) instead of failing the shop.
+_MERCHANT_LINK_RETRY_DELAYS = (5, 10, 20, 30, 60)  # seconds
+
+
+def _is_merchant_link_not_ready(ex: GoogleAdsException) -> bool:
+    """
+    True when a campaign create fails with RESOURCE_NOT_FOUND on the shopping
+    merchant_id — i.e. the MC->Ads link hasn't propagated yet. Deliberately
+    narrow (merchant_id / shopping_setting only) so we don't swallow other
+    genuinely-missing resources.
+    """
+    msg = str(ex)
+    if "RESOURCE_NOT_FOUND" not in msg:
+        return False
+    return "merchant_id" in msg or "shopping_setting" in msg
+
+
+def _create_campaign_with_retry(fn):
+    """
+    Run the campaign-create mutate (a zero-arg callable) with retries for BOTH
+    transient CONCURRENT_MODIFICATION (short exponential backoff) and
+    merchant-link eventual-consistency RESOURCE_NOT_FOUND (patient backoff, the
+    _MERCHANT_LINK_RETRY_DELAYS schedule). Scoped to campaign creation only, so
+    RESOURCE_NOT_FOUND is never treated as retryable elsewhere.
+
+    Retrying just this mutate is safe: mutate_campaigns is atomic (nothing is
+    created on failure) and the budget created earlier in the flow is reused, so
+    there are no duplicates.
+    """
+    transient_attempt = 0
+    link_attempt = 0
+    while True:
+        try:
+            return fn()
+        except GoogleAdsException as ex:
+            if _is_merchant_link_not_ready(ex) and link_attempt < len(_MERCHANT_LINK_RETRY_DELAYS):
+                delay = _MERCHANT_LINK_RETRY_DELAYS[link_attempt]
+                link_attempt += 1
+                logger.warning(
+                    "Campaign create hit RESOURCE_NOT_FOUND on merchant_id "
+                    "(MC link still propagating); retry %d/%d in %ds",
+                    link_attempt, len(_MERCHANT_LINK_RETRY_DELAYS), delay,
+                )
+                time.sleep(delay)
+                continue
+            if _is_retryable_gads(ex) and transient_attempt < 4:
+                delay = 0.5 * (2 ** transient_attempt)
+                transient_attempt += 1
+                logger.warning(
+                    "Transient Ads error on create campaign; retrying in %.1fs", delay,
+                )
+                time.sleep(delay)
+                continue
+            raise
+
+
 def _get_redshift_connection():
     """Create a Redshift connection from environment variables."""
     return psycopg2.connect(
@@ -1048,7 +1108,16 @@ def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: s
 
     # Step 2: accept the pending invitation from the Google Ads side
     try:
-        _accept_mc_invitation(ads_customer_id, int(mc_account_id))
+        accepted = _accept_mc_invitation(ads_customer_id, int(mc_account_id))
+        if not accepted:
+            # Not an error: the invitation often isn't visible on the Ads side yet
+            # right after the MC-side link is created (eventual consistency). The
+            # campaign create retries RESOURCE_NOT_FOUND to bridge this window.
+            logger.warning(
+                "No PENDING_APPROVAL ProductLinkInvitation found yet for MC %s in "
+                "Ads %s; link may still be propagating (campaign create will retry).",
+                mc_account_id, ads_customer_id,
+            )
     except Exception as ex:
         logger.error("Error accepting MC invitation for %s in Ads %s: %s", mc_account_id, ads_customer_id, ex)
         return False
@@ -1056,8 +1125,12 @@ def link_to_google_ads(mc_parent_id: str, mc_account_id: str, ads_customer_id: s
     return True
 
 
-def _accept_mc_invitation(ads_customer_id: str, mc_account_id: int) -> None:
-    """Find and accept a pending ProductLinkInvitation for the given MC account."""
+def _accept_mc_invitation(ads_customer_id: str, mc_account_id: int) -> bool:
+    """
+    Find and accept a pending ProductLinkInvitation for the given MC account.
+    Returns True if an invitation was accepted, False if none was found yet
+    (so the caller can tell "linked" from "not visible on the Ads side yet").
+    """
     client = _get_client()
     ga_service = client.get_service("GoogleAdsService")
 
@@ -1085,7 +1158,9 @@ def _accept_mc_invitation(ads_customer_id: str, mc_account_id: int) -> None:
                 "Ads side: accepted MC invitation %s for MC %s",
                 inv.resource_name, mc_account_id,
             )
-            return
+            return True
+
+    return False
 
     logger.info("No pending MC invitation found for MC %s in Ads %s", mc_account_id, ads_customer_id)
 
@@ -1176,8 +1251,7 @@ def add_standard_shopping_campaign(
     campaign.tracking_url_template = tracking_template
 
     try:
-        camp_response = _mutate_with_retry(
-            "create campaign",
+        camp_response = _create_campaign_with_retry(
             lambda: campaign_service.mutate_campaigns(
                 customer_id=customer_id, operations=[camp_op]
             ),
