@@ -684,7 +684,7 @@
                         ? '<span class="badge bg-warning text-dark">Paused</span>'
                         : `<span class="badge bg-secondary">${c.status || 'Unknown'}</span>`;
                 return `<tr class="${isNew ? 'row-new' : ''}">
-                    <td><input type="checkbox" class="camp-check" data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" onclick="updateBulkButtons()"></td>
+                    <td><input type="checkbox" class="camp-check" data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" data-status="${(c.status || '').toUpperCase()}" onclick="updateBulkButtons()"></td>
                     <td title="${escapeHtml(c.shop_name || '')}">${escapeHtml(c.shop_name || '-')}</td>
                     <td class="col-country">${c.country || '-'}</td>
                     <td title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
@@ -794,11 +794,25 @@
         async function bulkAction(type) {
             const checks = Array.from(document.querySelectorAll('.camp-check:checked'));
             if (!checks.length) return;
-            const items = checks.map(cb => ({ cid: cb.dataset.cid, campid: cb.dataset.campid, name: cb.dataset.name }));
+            const selected = checks.length;
+            let items = checks.map(cb => ({
+                cid: cb.dataset.cid, campid: cb.dataset.campid, name: cb.dataset.name,
+                status: (cb.dataset.status || '').toUpperCase(),
+            }));
+            // Skip no-ops: Activate only non-active, Pause only non-paused (Remove: all).
+            let skipped = 0;
+            if (type === 'enable') { const n = items.length; items = items.filter(i => i.status !== 'ENABLED'); skipped = n - items.length; }
+            else if (type === 'pause') { const n = items.length; items = items.filter(i => i.status !== 'PAUSED'); skipped = n - items.length; }
+            const stateWord = type === 'enable' ? 'active' : 'paused';
+            if (!items.length) {
+                alert(`All ${selected} selected campaign(s) are already ${stateWord}.`);
+                return;
+            }
             const verb = type === 'pause' ? 'Pause' : type === 'enable' ? 'Activate' : 'Remove';
+            const skipNote = skipped ? ` (${skipped} already ${stateWord}, skipped)` : '';
             const msg = type === 'remove'
                 ? `Are you sure you want to REMOVE ${items.length} selected campaign(s)? This cannot be undone.`
-                : `${verb} ${items.length} selected campaign(s)?`;
+                : `${verb} ${items.length} selected campaign(s)?${skipNote}`;
             if (!confirm(msg)) return;
             let ok = 0, fail = 0;
             for (const it of items) {
@@ -810,7 +824,7 @@
                     ok++;
                 } catch (e) { fail++; }
             }
-            logActivity(verb, `${ok} ${verb.toLowerCase()}d${fail ? ` / ${fail} failed` : ''} (${items.length} selected)`, fail === 0);
+            logActivity(verb, `${ok} ${verb.toLowerCase()}d${fail ? ` / ${fail} failed` : ''}${skipped ? ` / ${skipped} skipped` : ''} (${selected} selected)`, fail === 0);
             loadCampaigns();
             loadStats();
         }
