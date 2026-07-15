@@ -57,7 +57,9 @@
         /* Run-result table: show full campaign names on one line; the wrapper's
            overflow:auto then provides horizontal scroll instead of truncating. */
         .gsd-run-table td.col-name { max-width: none; overflow: visible; text-overflow: clip; white-space: nowrap; }
-        .gsd-preview-table th[data-sort="country"], .gsd-preview-table td.col-country { text-align: left; }
+        /* Preview & run tables: center the Country and Action columns. */
+        .gsd-preview-table th[data-sort="country"], .gsd-preview-table td.col-country,
+        .gsd-preview-table th[data-sort="action"], .gsd-preview-table td.col-action { text-align: center; }
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
@@ -1427,12 +1429,17 @@
                 </div>`;
 
             // Poll the backend for per-shop progress while the preview runs.
+            // Clamp to the max seen so far so the bar only ever moves forward
+            // (backend current/total can jitter between phases).
+            let previewShownPct = 0;
             const pollProgress = async () => {
                 try {
                     const pr = await fetch(`${API_BASE}/api/gsd-campaigns/preview/progress`);
                     if (!pr.ok) return;
                     const p = await pr.json();
-                    const pct = p.total > 0 ? Math.min(100, Math.round((p.current / p.total) * 100)) : 0;
+                    let pct = p.total > 0 ? Math.min(100, Math.round((p.current / p.total) * 100)) : 0;
+                    pct = Math.max(previewShownPct, pct);
+                    previewShownPct = pct;
                     const bar = document.getElementById('gsdPreviewBar');
                     const lbl = document.getElementById('gsdPreviewPercent');
                     if (bar) bar.style.width = pct + '%';
@@ -1519,7 +1526,7 @@
             };
             const body = rows.map(s => `<tr>
                 <td style="text-align:left; padding:6px 14px;">${escapeHtml(s.shop_name || '')}</td>
-                <td style="text-align:center; padding:6px 14px;">${countriesFor(s)}</td>
+                <td style="text-align:left; padding:6px 14px;">${countriesFor(s)}</td>
                 <td style="text-align:center; padding:6px 14px;">${lbl(s.actie)}</td>
                 <td style="text-align:center; padding:6px 14px;">${s.actie === 'aan' ? (s.to_create || 0) + ' to create' : (s.to_pause || 0) + ' to pause'}</td>
             </tr>`).join('');
@@ -1529,7 +1536,7 @@
                     <table class="table table-bordered bg-white mb-0 small" style="width:70%; min-width:420px; margin:0 auto;">
                         <thead class="table-light"><tr>
                             <th style="text-align:left; padding:6px 14px;">Shop</th>
-                            <th style="text-align:center; padding:6px 14px;">Country</th>
+                            <th style="text-align:left; padding:6px 14px;">Country</th>
                             <th style="text-align:center; padding:6px 14px;">Action</th>
                             <th style="text-align:center; padding:6px 14px;">Campaigns</th>
                         </tr></thead>
@@ -1631,7 +1638,7 @@
                                 <td>${escapeHtml(c.shop_name || '')}</td>
                                 <td class="col-name" title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '')}</td>
                                 <td class="col-country">${escapeHtml(c.country || '')}</td>
-                                <td>${previewActionLabel(c.action)}</td>
+                                <td class="col-action">${previewActionLabel(c.action)}</td>
                             </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No matching campaigns.</td></tr>'}
                         </tbody>
                     </table>
@@ -1701,12 +1708,16 @@
                 </div>`;
 
             // Poll per-shop run progress while the run executes.
+            // Clamp to the max seen so far so the bar only ever moves forward.
+            let runShownPct = 0;
             const pollRunProgress = async () => {
                 try {
                     const pr = await fetch(`${API_BASE}/api/gsd-campaigns/run/progress`);
                     if (!pr.ok) return;
                     const p = await pr.json();
-                    const pct = p.total > 0 ? Math.min(100, Math.round((p.current / p.total) * 100)) : 0;
+                    let pct = p.total > 0 ? Math.min(100, Math.round((p.current / p.total) * 100)) : 0;
+                    pct = Math.max(runShownPct, pct);
+                    runShownPct = pct;
                     const bar = document.getElementById('runBar');
                     const lbl = document.getElementById('runPercent');
                     if (bar) bar.style.width = pct + '%';
@@ -1876,7 +1887,7 @@
                             ${rows.length ? rows.map(r => `<tr>
                                 <td class="col-name" title="${escapeHtml(r.name || '')}">${escapeHtml(r.name || '')}</td>
                                 <td class="col-country">${escapeHtml(r.country || '')}</td>
-                                <td>${runActionLabel(r.action)}</td>
+                                <td class="col-action">${runActionLabel(r.action)}</td>
                                 <td>${escapeHtml(r.detail || '')}</td>
                             </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No rows.</td></tr>'}
                         </tbody>
