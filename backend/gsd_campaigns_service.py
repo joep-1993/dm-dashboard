@@ -1690,20 +1690,47 @@ def _find_account_info(country: str, campaign_type: str) -> Optional[Dict[str, s
     return ACCOUNTS.get(key)
 
 
+def _is_transient_mc_error(ex: Exception) -> bool:
+    """Return True if the Merchant Center API error is transient (worth retrying):
+    read timeouts and HTTP 500/503. Permanent errors (403 quota, 404, etc.) are not."""
+    ex_str = str(ex)
+    # Read timeouts (requests.exceptions.ReadTimeout / socket.timeout)
+    if "timed out" in ex_str.lower():
+        return True
+    # Google API HttpError 500/503
+    if hasattr(ex, "resp") and hasattr(ex.resp, "status"):
+        return ex.resp.status in (500, 503)
+    if "HttpError 500" in ex_str or "HttpError 503" in ex_str:
+        return True
+    return False
+
+
 def _get_or_create_mc_account(
     mc_parent_id: str, shop_name: str, ads_customer_id: str
 ) -> Optional[str]:
     """Find or create a Merchant Center sub-account and link to Google Ads."""
     _last_mc_error["msg"] = None  # cleared per attempt; set on failure below
-    try:
-        mc_id = get_mc_id(mc_parent_id, shop_name)
-    except Exception as ex:
-        # Lookup failed — abort rather than create, or we risk a duplicate
-        # sub-account for a shop that may already have one.
-        logger.error("MC lookup failed for '%s'; skipping create to avoid a duplicate: %s",
-                     shop_name, ex)
-        _last_mc_error["msg"] = _mc_err(ex)
-        return None
+    # Retry get_mc_id on transient MC API errors (read timeout, HTTP 500/503).
+    # A lookup that returns None (shop not found) is NOT an error and does not
+    # retry. Permanent errors (403 quota, 404, ...) abort immediately.
+    max_retries = 2
+    mc_id = None
+    for attempt in range(max_retries + 1):
+        try:
+            mc_id = get_mc_id(mc_parent_id, shop_name)
+            break  # success
+        except Exception as ex:
+            if _is_transient_mc_error(ex) and attempt < max_retries:
+                logger.warning("MC lookup for '%s' failed (attempt %d/%d), retrying in 5s: %s",
+                               shop_name, attempt + 1, max_retries + 1, ex)
+                time.sleep(5)
+                continue
+            # Lookup failed permanently — abort rather than create, or we risk a
+            # duplicate sub-account for a shop that may already have one.
+            logger.error("MC lookup failed for '%s'; skipping create to avoid a duplicate: %s",
+                         shop_name, ex)
+            _last_mc_error["msg"] = _mc_err(ex)
+            return None
     if mc_id is None:
         mc_id = create_merchant_id(mc_parent_id, shop_name)
         if mc_id is None:
