@@ -26,7 +26,7 @@
         .filter-row select, .filter-row input { font-size: 0.9rem; }
 
         .campaign-table { font-size: 0.9rem; }
-        .campaign-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .campaign-table th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; }
         .campaign-table td { vertical-align: middle; }
         .campaign-table .col-country { text-align: center; }
 
@@ -44,7 +44,7 @@
         .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
 
         .campaign-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
-        .campaign-table th.sortable:hover { opacity: 0.85; }
+        .campaign-table th.sortable:hover { background: #e9ecef; }
         .campaign-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .campaign-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .campaign-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
@@ -103,11 +103,11 @@
         .spinner-border-sm { width: 1rem; height: 1rem; }
 
         /* Enabled/Paused history table — mirrors the Campaigns table look */
-        .ll-history-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .ll-history-table th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; }
         .ll-history-table td { vertical-align: middle; font-size: 0.9rem; }
         .ll-history-table .col-country { text-align: center; }
         .ll-history-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
-        .ll-history-table th.sortable:hover { opacity: 0.85; }
+        .ll-history-table th.sortable:hover { background: #e9ecef; }
         .ll-history-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .ll-history-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .ll-history-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
