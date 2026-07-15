@@ -27,10 +27,12 @@
 
         .campaign-table { font-size: 0.9rem; }
         .campaign-table th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
-        /* Campaign Name stays on one line and scrolls WITHIN its own cell, so the
-           rest of the table (incl. the Actions buttons) stays in view. */
-        .campaign-table th[data-sort="campaign_name"] { white-space: nowrap; }
-        .camp-name-cell { max-width: 300px; overflow-x: auto; white-space: nowrap; }
+        /* Campaign Name stays on one line; the table scrolls with ONE horizontal
+           slider, and the Actions column is pinned right so its buttons stay in view. */
+        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(2) { white-space: nowrap; }
+        .campaign-table th:last-child, .campaign-table td:last-child { position: sticky; right: 0; }
+        .campaign-table td:last-child { background: #fff; z-index: 1; box-shadow: -6px 0 6px -6px rgba(0,0,0,0.15); }
+        .campaign-table th:last-child { z-index: 2; box-shadow: -6px 0 6px -6px rgba(0,0,0,0.15); }
         /* Activity Log headers: match the other tables (light grey, same padding/size). */
         #gsdActivityTable th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         .campaign-table td { vertical-align: middle; }
@@ -687,12 +689,12 @@
 
                 return `<tr class="${isNew ? 'row-new' : ''}">
                     <td class="col-country">${c.country || '-'}</td>
-                    <td><div class="camp-name-cell">${escapeHtml(c.campaign_name || '-')}${newBadge}</div></td>
+                    <td>${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
                     <td>${statusBadge}</td>
                     <td>${(c.impressions || 0).toLocaleString()}</td>
                     <td>${(c.clicks || 0).toLocaleString()}</td>
                     <td>${formatCost(c.cost)}</td>
-                    <td class="d-flex gap-1">${actions.join('')}</td>
+                    <td><div class="d-flex gap-1">${actions.join('')}</div></td>
                 </tr>`;
             }).join('');
         }
@@ -1979,7 +1981,7 @@
             else if (a === 'pause') c = '#e65100';
             else if (a === 'enable') c = '#00b894';
             else if (a === 'remove') c = '#d63031';
-            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; text-transform:uppercase; letter-spacing:0.4px;">${escapeHtml(action || '')}</span>`;
+            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; text-transform:uppercase; letter-spacing:0.4px; display:inline-block; min-width:150px; text-align:center;">${escapeHtml(action || '')}</span>`;
         }
 
         function renderLog() {
