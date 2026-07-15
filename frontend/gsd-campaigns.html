@@ -25,15 +25,16 @@
         .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
         .filter-row select, .filter-row input { font-size: 0.9rem; }
 
-        .campaign-table { font-size: 0.9rem; }
+        .campaign-table { font-size: 0.9rem; table-layout: fixed; }
         .campaign-table th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         /* Checkbox column (1st): compact + centered. */
         .campaign-table th:first-child, .campaign-table td:first-child { width: 36px; text-align: center; }
-        /* Columns: [check] Shop | Shop ID | Country | Campaign. Campaign is the
-           flexible column that scrolls; the others keep stable widths on sort. */
-        .campaign-table th[data-sort="shop_name"], .campaign-table td:nth-child(2) { min-width: 150px; }
+        /* Fixed layout (see .campaign-table table-layout:fixed) — column widths
+           don't shift when sorting. Columns: [check] Shop | Country | Campaign | Status.
+           Shop + Campaign ellipsize long text (full value on hover). */
+        .campaign-table th[data-sort="shop_name"], .campaign-table td:nth-child(2) { width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .campaign-table th[data-sort="country"], .campaign-table td.col-country { width: 80px; }
-        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(4) { white-space: nowrap; }
+        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(4) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .campaign-table th[data-sort="status"], .campaign-table td:nth-child(5) { width: 110px; }
         /* Bulk action buttons in the toolbar. */
         .btn-bulk-pause { border: 1px solid #e65100; color: #e65100; background: transparent; }
@@ -85,12 +86,9 @@
         /* Enabled/Paused history: keep cells on one line so Date/Shop/Shop ID
            get their natural width; the wrap scrolls horizontally when needed. */
         .ll-history-table th, .ll-history-table td { white-space: nowrap; }
-        /* Wider Date / Shop / Shop ID columns. */
+        /* Wider Date / Shop columns. */
         .ll-history-table th[data-sort="created_at"] { min-width: 160px; }
         .ll-history-table th[data-sort="shop_name"]  { min-width: 150px; }
-        .ll-history-table th[data-sort="shop_id"]    { min-width: 80px; }
-        /* Center the Shop ID column (3rd) header + cells. */
-        .ll-history-table th[data-sort="shop_id"], .ll-history-table td:nth-child(3) { text-align: center; }
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
@@ -410,14 +408,13 @@
                             <tr>
                                 <th class="sortable" data-sort="created_at" onclick="sortLLBy('created_at')">Date</th>
                                 <th class="sortable" data-sort="shop_name" onclick="sortLLBy('shop_name')">Shop</th>
-                                <th class="sortable" data-sort="shop_id" onclick="sortLLBy('shop_id')">Shop ID</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortLLBy('country')">Country</th>
                                 <th class="sortable" data-sort="action" onclick="sortLLBy('action')">Action</th>
                                 <th class="sortable" data-sort="campaign_name" onclick="sortLLBy('campaign_name')">Campaign</th>
                             </tr>
                         </thead>
                         <tbody id="llHistoryBody">
-                            <tr><td colspan="6" class="text-center text-muted py-3">Loading history...</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted py-3">Loading history...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -688,9 +685,9 @@
                         : `<span class="badge bg-secondary">${c.status || 'Unknown'}</span>`;
                 return `<tr class="${isNew ? 'row-new' : ''}">
                     <td><input type="checkbox" class="camp-check" data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" onclick="updateBulkButtons()"></td>
-                    <td>${escapeHtml(c.shop_name || '-')}</td>
+                    <td title="${escapeHtml(c.shop_name || '')}">${escapeHtml(c.shop_name || '-')}</td>
                     <td class="col-country">${c.country || '-'}</td>
-                    <td>${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
+                    <td title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
                     <td>${statusBadge}</td>
                 </tr>`;
             }).join('');
@@ -1316,7 +1313,7 @@
                 llHistory = data.rows || [];
                 applyLLFilter();
             } catch (err) {
-                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">Failed to load history: ${escapeHtml(err.message)}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-3">Failed to load history: ${escapeHtml(err.message)}</td></tr>`;
             }
         }
 
@@ -1347,7 +1344,6 @@
             return llFiltered.map(r => ({
                 Date: r.created_at ? new Date(r.created_at).toLocaleString('nl-NL') : '',
                 Shop: r.shop_name || '',
-                'Shop ID': r.shop_id || '',
                 Country: r.country || '',
                 Action: r.action || '',
                 Campaign: r.campaign_name || '',
@@ -1429,7 +1425,7 @@
             const total = llFiltered.length;
 
             if (!total) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No pause/enable actions logged yet.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No pause/enable actions logged yet.</td></tr>';
                 document.getElementById('llPrevBtn').disabled = true;
                 document.getElementById('llNextBtn').disabled = true;
                 document.getElementById('llPageInfo').textContent = '0 of 0';
@@ -1451,7 +1447,6 @@
                 return `<tr>
                     <td style="white-space:nowrap;">${escapeHtml(dt)}</td>
                     <td>${escapeHtml(r.shop_name || '')}</td>
-                    <td>${r.shop_id ?? ''}</td>
                     <td class="col-country">${escapeHtml(r.country || '')}</td>
                     <td>${badge}</td>
                     <td>${escapeHtml(r.campaign_name || '')}</td>
