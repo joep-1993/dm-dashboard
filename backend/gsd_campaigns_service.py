@@ -1335,6 +1335,7 @@ def add_shopping_ad_group(
     campaign_resource_name: str,
     ad_group_name: str,
     cpc_bid_micros: int = 100_000,  # €0.10, matching the original create GSD-campaigns.py
+    shop_name: str = "",
 ) -> Optional[str]:
     """Create a shopping ad group. Returns ad group resource name."""
     ad_group_service = client.get_service("AdGroupService")
@@ -1358,7 +1359,7 @@ def add_shopping_ad_group(
         logger.info("Created ad group '%s' -> %s", ad_group_name, resource)
         return resource
     except GoogleAdsException as ex:
-        logger.error("Failed to create ad group '%s': %s", ad_group_name, ex)
+        logger.error("Failed to create ad group '%s' (shop: %s): %s", ad_group_name, shop_name, ex)
         _last_gads_error["msg"] = _gads_err(ex)
         return None
 
@@ -1367,6 +1368,7 @@ def add_shopping_product_ad_group_ad(
     client: GoogleAdsClient,
     customer_id: str,
     ad_group_resource_name: str,
+    shop_name: str = "",
 ) -> Optional[str]:
     """Create a product shopping ad in the ad group. Returns ad resource name."""
     ad_group_ad_service = client.get_service("AdGroupAdService")
@@ -1388,7 +1390,7 @@ def add_shopping_product_ad_group_ad(
         logger.info("Created shopping product ad -> %s", resource)
         return resource
     except GoogleAdsException as ex:
-        logger.error("Failed to create shopping product ad: %s", ex)
+        logger.error("Failed to create shopping product ad (shop: %s): %s", shop_name, ex)
         _last_gads_error["msg"] = _gads_err(ex)
         return None
 
@@ -1534,6 +1536,7 @@ def add_sub_cpr(
     ad_group_resource_name: str,
     label: str,
     cpc_bid_micros: int = 50_000,
+    shop_name: str = "",
 ) -> bool:
     """
     Create the CPR listing group tree, matching create GSD-campaigns.py `addSub`:
@@ -1589,7 +1592,7 @@ def add_sub_cpr(
         logger.info("Created CPR listing group tree (label=%s) for %s", label, ad_group_resource_name)
         return True
     except GoogleAdsException as ex:
-        logger.error("Failed to create CPR listing group: %s", ex)
+        logger.error("Failed to create CPR listing group (shop: %s): %s", shop_name, ex)
         _last_gads_error["msg"] = _gads_err(ex)
         return False
 
@@ -1599,6 +1602,7 @@ def add_sub_cpc(
     customer_id: str,
     ad_group_resource_name: str,
     label: str,
+    shop_name: str = "",
 ) -> bool:
     """
     Create the listing group tree with price buckets for CPC campaigns.
@@ -1670,7 +1674,7 @@ def add_sub_cpc(
         logger.info("Created CPC listing group tree for %s", ad_group_resource_name)
         return True
     except GoogleAdsException as ex:
-        logger.error("Failed to create CPC listing group: %s", ex)
+        logger.error("Failed to create CPC listing group (shop: %s): %s", shop_name, ex)
         _last_gads_error["msg"] = _gads_err(ex)
         return False
 
@@ -1787,7 +1791,7 @@ def _remove_listing_tree(client, customer_id, campaign_id) -> None:
 
 
 def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
-                     campaign_type, label) -> Dict[str, Any]:
+                     campaign_type, label, shop_name: str = "") -> Dict[str, Any]:
     """
     An existing campaign was found. Complete/repair it and leave it PAUSED:
     - missing ad group / product ad / listing tree -> create the missing pieces
@@ -1834,16 +1838,16 @@ def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
     _last_gads_error["msg"] = None
     if not ad_group_resource:
         ad_group_resource = add_shopping_ad_group(
-            client, customer_id, campaign_resource, label)
+            client, customer_id, campaign_resource, label, shop_name=shop_name)
         if ad_group_resource is None:
             return {"campaign_name": campaign_name, "action": "error", "reason": "repair_ad_group_failed",
                     "error": _last_gads_error["msg"] or "ad group creation failed", "campaign_resource": campaign_resource}
-    if not has_ad and add_shopping_product_ad_group_ad(client, customer_id, ad_group_resource) is None:
+    if not has_ad and add_shopping_product_ad_group_ad(client, customer_id, ad_group_resource, shop_name=shop_name) is None:
         return {"campaign_name": campaign_name, "action": "error", "reason": "repair_product_ad_failed",
                 "error": _last_gads_error["msg"] or "product ad creation failed", "campaign_resource": campaign_resource}
     if not has_lg:
-        tree_ok = (add_sub_cpr(client, customer_id, ad_group_resource, label) if campaign_type == "CPR"
-                   else add_sub_cpc(client, customer_id, ad_group_resource, label))
+        tree_ok = (add_sub_cpr(client, customer_id, ad_group_resource, label, shop_name=shop_name) if campaign_type == "CPR"
+                   else add_sub_cpc(client, customer_id, ad_group_resource, label, shop_name=shop_name))
         if not tree_ok:
             return {"campaign_name": campaign_name, "action": "error", "reason": "repair_listing_group_failed",
                     "error": _last_gads_error["msg"] or "listing group creation failed", "campaign_resource": campaign_resource}
@@ -1887,7 +1891,7 @@ def _create_campaigns_for_shop(
         if existing:
             _apply_branded_label(client, customer_id, existing, branded)
             results.append(_repair_campaign(
-                client, customer_id, existing, campaign_name, campaign_type, label))
+                client, customer_id, existing, campaign_name, campaign_type, label, shop_name=shop_name))
             continue
 
         # Create campaign
@@ -1915,7 +1919,8 @@ def _create_campaigns_for_shop(
         # Create ad group
         ad_group_name = label  # ad group is named after the label (a/b/c/no_data/no_ean), matching the original script
         ad_group_resource = add_shopping_ad_group(
-            client, customer_id, campaign_resource, ad_group_name
+            client, customer_id, campaign_resource, ad_group_name,
+            shop_name=shop_name,
         )
         if ad_group_resource is None:
             results.append({
@@ -1929,7 +1934,7 @@ def _create_campaigns_for_shop(
         # Create product ad. The campaign was created PAUSED, so a failure here
         # leaves a paused (non-spending) shell we report as an error rather than
         # a live campaign with no product ad.
-        product_ad = add_shopping_product_ad_group_ad(client, customer_id, ad_group_resource)
+        product_ad = add_shopping_product_ad_group_ad(client, customer_id, ad_group_resource, shop_name=shop_name)
         if product_ad is None:
             results.append({
                 "campaign_name": campaign_name,
@@ -1942,9 +1947,9 @@ def _create_campaigns_for_shop(
 
         # Create listing group tree
         if campaign_type == "CPR":
-            tree_ok = add_sub_cpr(client, customer_id, ad_group_resource, label)
+            tree_ok = add_sub_cpr(client, customer_id, ad_group_resource, label, shop_name=shop_name)
         else:
-            tree_ok = add_sub_cpc(client, customer_id, ad_group_resource, label)
+            tree_ok = add_sub_cpc(client, customer_id, ad_group_resource, label, shop_name=shop_name)
         if not tree_ok:
             results.append({
                 "campaign_name": campaign_name,
