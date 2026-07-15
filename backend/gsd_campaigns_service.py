@@ -49,6 +49,24 @@ LABELS_CPC = ["a,b", "c,no_data,no_ean"]
 # create/pause BE/DE campaigns (e.g. Calcuso.com|NL -> NL only).
 KOLOM_COUNTRY = {"is_gsd_nl_shop": "NL", "is_gsd_be_shop": "BE", "is_gsd_de_shop": "DE"}
 
+# --- Google Sheets run-logging ---------------------------------------------
+# Mirrors the original create GSD-campaigns.py: each real run appends one row per
+# processed shop to the "campaigns_created" tab of the "Data: Direct Shopping"
+# sheet. Best-effort — never fails a run.
+LOG_SPREADSHEET_ID = os.environ.get(
+    "GSD_LOG_SPREADSHEET_ID", "1m4k8kxhfU7oLIAH3DJOyYx_PKSv4luPyX97j45Wa6s4"
+)
+LOG_WORKSHEET = os.environ.get("GSD_LOG_WORKSHEET", "campaigns_created")
+# The sheet is shared with the dedicated sheets service account
+# (gsd-campaign-creator@cla-campaign-creation) — NOT the Content-API accounts in
+# backend/service_accounts/. Kept as a separate file/env so it doesn't disturb
+# the MC service-account auto-detect (_get_content_service).
+SHEETS_SA_FILE = os.environ.get(
+    "GSD_SHEETS_SERVICE_ACCOUNT_FILE",
+    "/mnt/c/Users/JoepvanSchagen/Downloads/Python/gsd-campaign-creation.json",
+)
+SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
 # Cooperative cancel for an in-flight run_gsd_script — checked between shops, so
 # a cancel stops further creates/pauses (already-processed shops stay done).
 _run_cancel = {"cancel": False}
@@ -130,8 +148,9 @@ GEO_TARGETS = {"NL": "2528", "BE": "2056", "DE": "2276"}
 CAMPAIGN_NAME_REGEX = re.compile(r"\[shop:([^\]]+)\].*?\[shop_id:(\d+)\].*?\[label:([^\]]+)\]")
 COUNTRY_REGEX = re.compile(r"\[domein:(\w+)\]")
 
-# Default daily budget in micros (e.g. 100 EUR = 100_000_000 micros)
-DEFAULT_BUDGET_MICROS = 100_000_000
+# Default daily budget in micros. 10 EUR = 10_000_000 micros, matching the
+# original create GSD-campaigns.py (campaign_budget.amount_micros = 10000000).
+DEFAULT_BUDGET_MICROS = 10_000_000
 
 # Content API scopes for Merchant Center
 MC_SCOPES = ["https://www.googleapis.com/auth/content"]
@@ -306,6 +325,55 @@ def get_negatives(shop_name: str) -> List[str]:
     if name and name != host:
         negatives.append(name)
     return negatives
+
+
+# ---------------------------------------------------------------------------
+# Google Sheets run-logging helper
+# ---------------------------------------------------------------------------
+
+
+def _log_run_to_sheet(rows: List[List[Any]]) -> Dict[str, Any]:
+    """
+    Append one row per processed shop to the "campaigns_created" tab of the
+    "Data: Direct Shopping" sheet, mirroring the original create GSD-campaigns.py.
+
+    Each row (columns A-I): [datum (dd-mm-yyyy), shop_id, shop_name, CPC/CPR,
+    Merchant Center ID, domein, op brand?, campagnes aangemaakt?, actie].
+
+    Best-effort: any failure is logged and swallowed so it never breaks a run.
+    """
+    if not rows:
+        return {"logged": 0}
+    try:
+        creds = service_account.Credentials.from_service_account_file(
+            SHEETS_SA_FILE, scopes=SHEETS_SCOPES
+        )
+        svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
+        sheet = svc.spreadsheets()
+        # Write right after the last populated LOGGING row (column A), exactly like
+        # the original create GSD-campaigns.py. We deliberately key off column A —
+        # NOT append() — because this tab has helper columns (J/K/L) with values
+        # far below the last log row, which would make append() leave a large gap.
+        col_a = sheet.values().get(
+            spreadsheetId=LOG_SPREADSHEET_ID, range=f"{LOG_WORKSHEET}!A:A"
+        ).execute().get("values", [])
+        first_empty = len(col_a) + 1
+        end_row = first_empty + len(rows) - 1
+        target = f"{LOG_WORKSHEET}!A{first_empty}:I{end_row}"
+        sheet.values().update(
+            spreadsheetId=LOG_SPREADSHEET_ID,
+            range=target,
+            valueInputOption="RAW",
+            body={"values": rows},
+        ).execute()
+        logger.info(
+            "Logged %d GSD run row(s) to sheet %s!%s from row %d",
+            len(rows), LOG_SPREADSHEET_ID, LOG_WORKSHEET, first_empty,
+        )
+        return {"logged": len(rows), "first_row": first_empty}
+    except Exception as ex:
+        logger.warning("Failed to log GSD run to sheet: %s", ex)
+        return {"logged": 0, "error": str(ex)[:300]}
 
 
 # ---------------------------------------------------------------------------
@@ -1951,6 +2019,8 @@ def run_gsd_script(
         "skipped": [],
         "cancelled": False,
     }
+    sheet_rows: List[List[Any]] = []                        # one row per processed shop, for the log sheet
+    run_date = datetime.now().strftime("%d-%m-%Y")          # dd-mm-yyyy, matching the original sheet format
     _run_cancel["cancel"] = False  # fresh run
     _run_progress.update({"current": 0, "total": 0, "running": True})
 
@@ -1981,6 +2051,7 @@ def run_gsd_script(
         shop_name = change.get("shop_name", "")
         actie = change.get("actie", "")
         model = change.get("model", "CPR")
+        branded_yes = str(change.get("branded", "")).strip().lower() in ("1", "true", "t", "ja", "yes")
 
         # Determine campaign type
         campaign_type = model.upper() if model else "CPR"
@@ -2064,6 +2135,16 @@ def run_gsd_script(
                     else:
                         overall_results["errors"].append(cr)
 
+                # Log one row for this shop (mirrors the original sheet).
+                created_count = sum(1 for cr in campaign_results if cr.get("action") == "created")
+                sheet_rows.append([
+                    run_date, str(shop_id or ""), shop_name or "", campaign_type,
+                    str(mc_id or ""), country or "",
+                    ("ja" if branded_yes else "nee"),
+                    ("ja" if created_count > 0 else "nee"),
+                    "aan",
+                ])
+
             elif actie == "uit":
                 # Pause campaigns
                 pause_results = _pause_campaigns_for_shop(
@@ -2081,6 +2162,13 @@ def run_gsd_script(
                         overall_results["paused"].append(pr)
                     else:
                         overall_results["errors"].append(pr)
+
+                # Log one row for this shop (MC ID not looked up on pause; matches
+                # the original: op brand? = n.v.t., campagnes aangemaakt? = nee).
+                sheet_rows.append([
+                    run_date, str(shop_id or ""), shop_name or "", campaign_type,
+                    "", country or "", "n.v.t.", "nee", "uit",
+                ])
 
     # Safety net: cancel may fire on the last shop/label, so the loops above
     # end naturally without hitting a cancel check — flag it here regardless.
@@ -2108,6 +2196,9 @@ def run_gsd_script(
                 c.get("campaign_name"), c.get("campaign_id"),
                 c.get("shop_name"), c.get("country"), c.get("type"),
             )
+
+    # Append this run to the log sheet (best-effort; never fails the run).
+    overall_results["sheet_log"] = _log_run_to_sheet(sheet_rows)
 
     _run_progress["running"] = False
     return overall_results
