@@ -1240,7 +1240,7 @@ def add_standard_shopping_campaign(
     campaign.shopping_setting.merchant_id = int(merchant_id)
     campaign.shopping_setting.feed_label = country.upper()
     campaign.shopping_setting.campaign_priority = 0
-    campaign.shopping_setting.enable_local = False
+    campaign.shopping_setting.enable_local = True  # matches the original create GSD-campaigns.py
 
     # Required in API v24+ for EU campaigns
     campaign.contains_eu_political_advertising = (
@@ -1291,7 +1291,7 @@ def add_shopping_ad_group(
     customer_id: str,
     campaign_resource_name: str,
     ad_group_name: str,
-    cpc_bid_micros: int = 1_000_000,
+    cpc_bid_micros: int = 100_000,  # €0.10, matching the original create GSD-campaigns.py
 ) -> Optional[str]:
     """Create a shopping ad group. Returns ad group resource name."""
     ad_group_service = client.get_service("AdGroupService")
@@ -1819,10 +1819,15 @@ def _create_campaigns_for_shop(
     country: str,
     campaign_type: str,
     label_resource_name: str,
+    branded: Any = None,
 ) -> List[Dict[str, Any]]:
     """
     Create all GSD campaigns for a shop (one per label).
     Returns a list of result dicts.
+
+    ``branded`` is the shop's f_branded flag from Redshift; negatives are only
+    added for non-branded shops (branded == 0), matching the original
+    create GSD-campaigns.py.
     """
     labels = LABELS_CPR if campaign_type == "CPR" else LABELS_CPC
     tracking_template = TRACKING_TEMPLATES.get(country.upper(), TRACKING_TEMPLATES["NL"])
@@ -1903,10 +1908,17 @@ def _create_campaigns_for_shop(
             })
             continue
 
-        # Add negative keywords (best-effort).
-        negatives = get_negatives(shop_name)
-        if negatives:
-            add_negative_keywords(client, customer_id, campaign_resource, negatives)
+        # Add negative keywords (best-effort) — ONLY for non-branded shops
+        # (branded == 0), matching the original create GSD-campaigns.py. NULL/1
+        # (branded or unknown) get no negatives.
+        try:
+            _non_branded = int(branded) == 0
+        except (TypeError, ValueError):
+            _non_branded = False
+        if _non_branded:
+            negatives = get_negatives(shop_name)
+            if negatives:
+                add_negative_keywords(client, customer_id, campaign_resource, negatives)
 
         # Leave the campaign PAUSED — the original script creates GSD campaigns
         # paused and never enables them; enabling is done separately/manually.
@@ -2279,6 +2291,7 @@ def run_gsd_script(
                     country=country,
                     campaign_type=campaign_type,
                     label_resource_name=label_resource,
+                    branded=change.get("branded"),
                 )
 
                 for cr in campaign_results:
