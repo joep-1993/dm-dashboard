@@ -32,9 +32,9 @@
         /* Columns: [check] Shop | Shop ID | Country | Campaign. Campaign is the
            flexible column that scrolls; the others keep stable widths on sort. */
         .campaign-table th[data-sort="shop_name"], .campaign-table td:nth-child(2) { min-width: 150px; }
-        .campaign-table th[data-sort="shop_id"], .campaign-table td:nth-child(3) { width: 90px; text-align: center; }
         .campaign-table th[data-sort="country"], .campaign-table td.col-country { width: 80px; }
-        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(5) { white-space: nowrap; }
+        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(4) { white-space: nowrap; }
+        .campaign-table th[data-sort="status"], .campaign-table td:nth-child(5) { width: 110px; }
         /* Bulk action buttons in the toolbar. */
         .btn-bulk-pause { border: 1px solid #e65100; color: #e65100; background: transparent; }
         .btn-bulk-activate { border: 1px solid #00b894; color: #00b894; background: transparent; }
@@ -283,7 +283,6 @@
                     </select>
                     <input type="text" class="form-control form-control-sm" id="filterCampaignName" placeholder="Search campaign name..." oninput="applyFilters()" style="max-width: 250px;">
                     <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="newCampaignIds.clear(); loadCampaigns(); loadStats();">↻ Refresh</button>
-                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportXlsx()">Export Excel</button>
                     <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyForExcel()">Copy for Excel</button>
                     <button class="btn btn-sm btn-bulk-pause" id="bulkPauseBtn" onclick="bulkAction('pause')" disabled>Pause</button>
                     <button class="btn btn-sm btn-bulk-activate" id="bulkActivateBtn" onclick="bulkAction('enable')" disabled>Activate</button>
@@ -295,9 +294,9 @@
                             <tr>
                                 <th style="width:36px; text-align:center;"><input type="checkbox" id="selectAllCampaigns" onclick="toggleSelectAllCampaigns(this)" title="Select all on this page"></th>
                                 <th class="sortable" data-sort="shop_name" onclick="sortBy('shop_name')">Shop</th>
-                                <th class="sortable" data-sort="shop_id" onclick="sortBy('shop_id')">Shop ID</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortBy('country')">Country</th>
                                 <th class="sortable" data-sort="campaign_name" onclick="sortBy('campaign_name')">Campaign</th>
+                                <th class="sortable" data-sort="status" onclick="sortBy('status')">Status</th>
                             </tr>
                         </thead>
                         <tbody id="campaignTableBody"></tbody>
@@ -680,12 +679,19 @@
             tbody.innerHTML = campaigns.map(c => {
                 const isNew = newCampaignIds.has(String(c.campaign_id));
                 const newBadge = isNew ? ' <span class="badge badge-new">new</span>' : '';
+                const isEnabled = (c.status || '').toUpperCase() === 'ENABLED';
+                const isPaused = (c.status || '').toUpperCase() === 'PAUSED';
+                const statusBadge = isEnabled
+                    ? '<span class="badge badge-active">Active</span>'
+                    : isPaused
+                        ? '<span class="badge bg-warning text-dark">Paused</span>'
+                        : `<span class="badge bg-secondary">${c.status || 'Unknown'}</span>`;
                 return `<tr class="${isNew ? 'row-new' : ''}">
                     <td><input type="checkbox" class="camp-check" data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" onclick="updateBulkButtons()"></td>
                     <td>${escapeHtml(c.shop_name || '-')}</td>
-                    <td>${c.shop_id ?? '-'}</td>
                     <td class="col-country">${c.country || '-'}</td>
                     <td>${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
+                    <td>${statusBadge}</td>
                 </tr>`;
             }).join('');
             updateBulkButtons();
@@ -704,9 +710,9 @@
         function getCampaignRows() {
             return filteredCampaigns.map(c => ({
                 Shop: c.shop_name || '',
-                'Shop ID': c.shop_id ?? '',
                 Country: c.country || '',
                 Campaign: c.campaign_name || '',
+                Status: c.status || '',
             }));
         }
 
