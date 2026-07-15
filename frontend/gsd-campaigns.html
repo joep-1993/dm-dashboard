@@ -54,6 +54,9 @@
         .gsd-preview-table .sort-arrow { opacity: 0.7; font-size: 0.7rem; }
         .gsd-preview-table td { vertical-align: middle; }
         .gsd-preview-table td.col-name { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* Run-result table: show full campaign names on one line; the wrapper's
+           overflow:auto then provides horizontal scroll instead of truncating. */
+        .gsd-run-table td.col-name { max-width: none; overflow: visible; text-overflow: clip; white-space: nowrap; }
         .gsd-preview-table th[data-sort="country"], .gsd-preview-table td.col-country { text-align: left; }
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
@@ -1860,7 +1863,7 @@
             const th = (col, label, w) => `<th class="sortable" data-sort="${col}" onclick="sortRunResult('${col}')"${w ? ` style="width:${w};"` : ''}>${label} <span class="sort-arrow">${arrow(col)}</span></th>`;
             wrap.innerHTML = `
                 <div style="max-height:340px; overflow:auto; border:1px solid #eee; border-radius:4px;">
-                    <table class="table table-sm table-hover mb-0 gsd-preview-table">
+                    <table class="table table-sm table-hover mb-0 gsd-preview-table gsd-run-table">
                         <thead class="table-light">
                             <tr>
                                 ${th('name', 'Campaign / shop')}
