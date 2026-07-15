@@ -33,6 +33,14 @@
         .campaign-table th:last-child, .campaign-table td:last-child { position: sticky; right: 0; }
         .campaign-table td:last-child { background: #fff; z-index: 1; box-shadow: -6px 0 6px -6px rgba(0,0,0,0.15); }
         .campaign-table th:last-child { z-index: 2; box-shadow: -6px 0 6px -6px rgba(0,0,0,0.15); }
+        /* Fixed widths so sorting doesn't resize these columns (Campaign Name stays
+           the flexible/scroll column); Impressions/Clicks/Cost centered. */
+        .campaign-table th[data-sort="country"], .campaign-table td.col-country { width: 80px; }
+        .campaign-table th[data-sort="status"], .campaign-table td:nth-child(3) { width: 100px; }
+        .campaign-table th[data-sort="impressions"], .campaign-table td:nth-child(4) { width: 110px; text-align: center; }
+        .campaign-table th[data-sort="clicks"], .campaign-table td:nth-child(5) { width: 90px; text-align: center; }
+        .campaign-table th[data-sort="cost"], .campaign-table td:nth-child(6) { width: 100px; text-align: center; }
+        .campaign-table th:last-child, .campaign-table td:last-child { width: 160px; }
         /* Activity Log headers: match the other tables (light grey, same padding/size). */
         #gsdActivityTable th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         .campaign-table td { vertical-align: middle; }
@@ -873,15 +881,15 @@
                 barWrap.classList.add('d-none');
                 if (prog.error) {
                     content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(prog.error)}</div>`;
-                    logActivity(dryRun ? 'LL Preview' : 'LL Run', `Error: ${prog.error}`, false);
+                    if (!dryRun) logActivity('LL Run', `Error: ${prog.error}`, false);
                     return;
                 }
 
                 const data = prog.result || {};
                 content.innerHTML = renderLLSummary(data);
                 applyPreviewFilter();
-                logActivity(dryRun ? 'LL Preview' : 'LL Run',
-                    `${data.paused_count ?? (data.paused || []).length} paused / ${data.enabled_count ?? (data.enabled || []).length} enabled${dryRun ? ' (dry run)' : ''}`,
+                if (!dryRun) logActivity('LL Run',
+                    `${data.paused_count ?? (data.paused || []).length} paused / ${data.enabled_count ?? (data.enabled || []).length} enabled`,
                     (data.errors || []).length === 0);
                 if (!dryRun) {
                     loadLLHistory();
@@ -891,7 +899,7 @@
             } catch (err) {
                 barWrap.classList.add('d-none');
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
-                logActivity(dryRun ? 'LL Preview' : 'LL Run', `Error: ${err.message}`, false);
+                if (!dryRun) logActivity('LL Run', `Error: ${err.message}`, false);
             } finally {
                 previewBtn.disabled = false;
                 runBtn.disabled = false;
@@ -1498,10 +1506,9 @@
                 previewByShop = data.by_shop || [];
 
                 renderPreviewPanel();
-                logActivity('Preview', `${previewMeta.to_create} to create / ${previewMeta.to_pause} to pause${date ? ' for ' + date : ''}`, true);
+                // Preview/dry-runs are intentionally not logged to the Activity Log.
             } catch (err) {
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
-                logActivity('Preview', `Error: ${err.message}`, false);
             } finally {
                 clearInterval(pollTimer);
                 btn.disabled = false;
@@ -1973,19 +1980,17 @@
 
         // Outlined, all-caps label for an Activity Log action, colored by type.
         function activityActionLabel(action) {
-            const a = (action || '').toLowerCase();
-            let c = '#6c757d';
-            if (a.includes('preview')) c = '#0984e3';
-            else if (a.includes('run')) c = '#CC5500';
-            else if (a.includes('reset')) c = '#5e4a90';
-            else if (a === 'pause') c = '#e65100';
-            else if (a === 'enable') c = '#00b894';
-            else if (a === 'remove') c = '#d63031';
-            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; text-transform:uppercase; letter-spacing:0.4px; display:inline-block; min-width:150px; text-align:center;">${escapeHtml(action || '')}</span>`;
+            // Categorise by source tool: LL = Pause/Enable low linkage, GSD = Create GSD-campaigns.
+            const isLL = (action || '').toLowerCase().startsWith('ll');
+            const label = isLL ? 'LL' : 'GSD';
+            const c = isLL ? '#5e4a90' : '#CC5500';
+            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; text-transform:uppercase; letter-spacing:0.4px;">${label}</span>`;
         }
 
         function renderLog() {
-            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+            // Preview/dry-runs are not shown in the Activity Log.
+            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]')
+                .filter(e => !/preview/i.test(e.action || ''));
             const el = document.getElementById('activityLog');
             if (!log.length) {
                 el.innerHTML = '<div class="text-muted text-center py-3">No activity yet.</div>';
