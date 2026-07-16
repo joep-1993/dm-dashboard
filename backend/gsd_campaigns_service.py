@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover - stdlib on py3.9+
 
 import psycopg2
 from psycopg2.extras import execute_values
+from backend.database import get_db_connection, return_db_connection
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from google.protobuf import field_mask_pb2
@@ -42,6 +43,13 @@ ACCOUNTS = {
 MCC_CUSTOMER_ID = "3011145605"
 
 SCRIPT_LABEL = "GSD_SCRIPT"
+
+# Persistent per-(shop, country) creation dates (n8n-vector-db PostgreSQL). The
+# Google Ads API exposes no campaign creation-date field (campaign.start_date was
+# removed in v24) and change_event only retains ~30 days, so we log each shop's
+# creation date at create time and grow coverage over time (seeded from a
+# spreadsheet backfill). The Campaigns-created "Date" column reads from here.
+CAMPAIGN_CREATED_TABLE = "pa.jvs_gsd_campaign_created"
 
 LABELS_CPR = ["a", "b", "c", "no_data", "no_ean"]
 LABELS_CPC = ["a,b", "c,no_data,no_ean"]
@@ -413,6 +421,210 @@ def push_mc_ids_to_redshift(rows: List[tuple]) -> Dict[str, Any]:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Per-shop creation dates (n8n-vector-db PostgreSQL)
+# ---------------------------------------------------------------------------
+# A shop's GSD label campaigns (a/b/c/...) in a country are all created in the
+# same run, so creation date is naturally per (shop_id, country) — the same
+# grain the source spreadsheet uses. The Campaigns-created "Date" column joins
+# each campaign to this table by (shop_id, country).
+
+
+def _created_key(shop_id: Any, country: Any) -> Optional[str]:
+    """Normalise (shop_id, country) into the join key used everywhere, or None."""
+    if shop_id in (None, "") or not country:
+        return None
+    try:
+        return f"{int(shop_id)}|{str(country).upper()}"
+    except (TypeError, ValueError):
+        return None
+
+
+def ensure_campaign_created_table() -> None:
+    """Create the per-(shop, country) creation-date table if it does not exist."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {CAMPAIGN_CREATED_TABLE} (
+                    shop_id      BIGINT      NOT NULL,
+                    country      VARCHAR(4)  NOT NULL,
+                    created_date DATE        NOT NULL,
+                    shop_name    TEXT,
+                    recorded_at  TIMESTAMPTZ DEFAULT now(),
+                    PRIMARY KEY (shop_id, country)
+                )
+            """)
+        conn.commit()
+    finally:
+        return_db_connection(conn)
+
+
+def upsert_created_dates(rows: List[tuple]) -> Dict[str, Any]:
+    """
+    Insert (shop_id, country, created_date, shop_name) rows into
+    CAMPAIGN_CREATED_TABLE. ON CONFLICT DO NOTHING so the FIRST recorded date
+    for a (shop, country) wins — a later run never overwrites the original
+    creation date. Returns {inserted, error}; best-effort (never raises).
+    """
+    result: Dict[str, Any] = {"inserted": 0, "error": None}
+    if not rows:
+        return result
+    try:
+        ensure_campaign_created_table()
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                # RETURNING + fetch=True gives an accurate insert count: with
+                # execute_values' internal paging, cur.rowcount would only reflect
+                # the last page. DO NOTHING means only real inserts are returned.
+                returned = execute_values(
+                    cur,
+                    f"""
+                    INSERT INTO {CAMPAIGN_CREATED_TABLE}
+                        (shop_id, country, created_date, shop_name)
+                    VALUES %s
+                    ON CONFLICT (shop_id, country) DO NOTHING
+                    RETURNING 1
+                    """,
+                    rows,
+                    fetch=True,
+                )
+                result["inserted"] = len(returned)
+            conn.commit()
+        finally:
+            return_db_connection(conn)
+    except Exception as ex:
+        logger.error("Failed to upsert created dates: %s", ex)
+        result["error"] = str(ex)
+    return result
+
+
+def record_created_campaigns(
+    entries: List[Dict[str, Any]], created_date: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Persist the creation date of freshly created campaigns, deduped to one row
+    per (shop_id, country). ``entries`` are the run's "created" result dicts
+    (need shop_id + country). ``created_date`` is 'YYYY-MM-DD' (default: today).
+    Best-effort — a logging miss must never fail a real run.
+    """
+    if created_date is None:
+        created_date = datetime.now().strftime("%Y-%m-%d")
+    seen: Dict[tuple, tuple] = {}
+    for e in entries or []:
+        try:
+            shop_id_int = int(e["shop_id"]) if e.get("shop_id") else None
+        except (TypeError, ValueError):
+            shop_id_int = None
+        country = (e.get("country") or "").upper()
+        if shop_id_int is None or not country:
+            continue
+        key = (shop_id_int, country)
+        if key not in seen:
+            seen[key] = (shop_id_int, country, created_date, e.get("shop_name"))
+    return upsert_created_dates(list(seen.values()))
+
+
+def get_created_dates() -> Dict[str, str]:
+    """
+    Return {"<shop_id>|<COUNTRY>": 'YYYY-MM-DD'} for every recorded (shop, country).
+    Best-effort: returns {} on any error so the table still renders without dates.
+    """
+    try:
+        ensure_campaign_created_table()
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT shop_id, country, created_date FROM {CAMPAIGN_CREATED_TABLE}")
+                out: Dict[str, str] = {}
+                for r in cur.fetchall():
+                    key = _created_key(r["shop_id"], r["country"])
+                    if key and r.get("created_date"):
+                        out[key] = r["created_date"].strftime("%Y-%m-%d")
+                return out
+        finally:
+            return_db_connection(conn)
+    except Exception as ex:
+        logger.error("Failed to read created dates: %s", ex)
+        return {}
+
+
+def backfill_campaign_created_dates(days: int = 30, dry_run: bool = False) -> Dict[str, Any]:
+    """
+    Seed CAMPAIGN_CREATED_TABLE from the Google Ads change_event log — the CREATE
+    event's change_date_time is the real creation date, deduped to the EARLIEST
+    date per (shop_id, country). change_event retains only ~30 days, so this only
+    recovers recent creations (the spreadsheet backfill covers the deep history);
+    it's handy to fill the gap between the spreadsheet snapshot and go-live.
+    Existing rows are never overwritten. dry_run=True reports without writing.
+    """
+    ensure_campaign_created_table()
+    client = _get_client()
+    ga = client.get_service("GoogleAdsService")
+    # change_event rejects a start date >30 days old (strict), so clamp to 29.
+    days = min(days, 29)
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    customer_ids = sorted({info["customer_id"] for info in ACCOUNTS.values()})
+
+    by_shop: Dict[tuple, tuple] = {}  # (shop_id, country) -> row, earliest date kept
+    for cid in customer_ids:
+        created_on: Dict[str, str] = {}
+        try:
+            for r in ga.search(customer_id=cid, query=f"""
+                    SELECT change_event.campaign, change_event.change_date_time
+                    FROM change_event
+                    WHERE change_event.change_date_time >= '{cutoff} 00:00:00'
+                      AND change_event.change_date_time <= '{now_str}'
+                      AND change_event.change_resource_type = 'CAMPAIGN'
+                      AND change_event.resource_change_operation = 'CREATE'
+                    ORDER BY change_event.change_date_time DESC
+                    LIMIT 10000"""):
+                camp_id = r.change_event.campaign.rstrip("/").split("/")[-1]
+                d = r.change_event.change_date_time[:10]
+                if camp_id not in created_on or d < created_on[camp_id]:
+                    created_on[camp_id] = d
+        except GoogleAdsException as ex:
+            logger.warning("Backfill change_event query failed for %s: %s", cid, ex)
+            continue
+        if not created_on:
+            continue
+
+        gsd_rn = ensure_campaign_label_exists(client, cid, SCRIPT_LABEL)
+        try:
+            for r in ga.search(customer_id=cid, query=f"""
+                    SELECT campaign.id, campaign.name
+                    FROM campaign
+                    WHERE campaign.labels CONTAINS ANY ('{gsd_rn}')
+                      AND campaign.status != 'REMOVED'"""):
+                camp_id = str(r.campaign.id)
+                if camp_id not in created_on:
+                    continue
+                parsed = _parse_campaign_name(r.campaign.name)
+                try:
+                    shop_id_int = int(parsed["shop_id"]) if parsed.get("shop_id") else None
+                except (TypeError, ValueError):
+                    shop_id_int = None
+                country = (parsed.get("country") or "").upper()
+                if shop_id_int is None or not country:
+                    continue
+                key = (shop_id_int, country)
+                d = created_on[camp_id]
+                if key not in by_shop or d < by_shop[key][2]:
+                    by_shop[key] = (shop_id_int, country, d, parsed.get("shop_name"))
+        except GoogleAdsException as ex:
+            logger.warning("Backfill campaign query failed for %s: %s", cid, ex)
+            continue
+
+    rows = list(by_shop.values())
+    result = {"found": len(rows), "inserted": 0, "dry_run": dry_run}
+    if rows and not dry_run:
+        result["inserted"] = upsert_created_dates(rows)["inserted"]
+    logger.info("change_event backfill: %d found, %d inserted", result["found"], result["inserted"])
+    return result
+
+
 def _get_mc_service():
     """Build a Merchant Center Content API service using a service account."""
     sa_file = os.environ.get("GSD_SERVICE_ACCOUNT_FILE", "")
@@ -696,6 +908,12 @@ def get_all_gsd_stats() -> Dict[str, Any]:
         except Exception as ex:
             errors.append(f"{account_key}: {ex}")
             logger.error("Error fetching GSD campaigns for %s: %s", account_key, ex)
+
+    # Attach persisted creation dates by (shop_id, country) — one fast Postgres
+    # read; None (rendered '-') when the shop has no recorded date yet.
+    created_dates = get_created_dates()
+    for c in all_campaigns:
+        c["created_date"] = created_dates.get(_created_key(c.get("shop_id"), c.get("country")))
 
     total_impressions = sum(c["impressions"] for c in all_campaigns)
     total_clicks = sum(c["clicks"] for c in all_campaigns)
@@ -2677,6 +2895,11 @@ def run_gsd_script(
     # Persist newly created MC ids to pa.mc_ids_efficy (best-effort; never fails
     # the run), mirroring push_to_redshift() in the original create GSD-campaigns.py.
     overall_results["mc_ids_pushed"] = push_mc_ids_to_redshift(mc_created_rows)
+
+    # Persist creation dates of the campaigns created this run (best-effort;
+    # never fails the run) so the Campaigns-created Date column stays populated
+    # going forward, independent of change_event's ~30-day retention.
+    overall_results["created_dates_logged"] = record_created_campaigns(overall_results["created"])
 
     # Final structural check of everything created/repaired this run (best-effort;
     # never fails the run). Flags any campaign left without an ad group / product

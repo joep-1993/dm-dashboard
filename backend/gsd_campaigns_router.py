@@ -16,6 +16,7 @@ from backend.gsd_campaigns_service import (
     get_preview_progress,
     undo_run,
     reconstruct_run,
+    backfill_campaign_created_dates,
 )
 from backend.gsd_ll_service import (
     start_ll_run,
@@ -77,6 +78,21 @@ async def get_campaigns(
         return {"campaigns": campaigns, "total": len(campaigns)}
     except Exception as e:
         logger.error(f"Error fetching GSD campaigns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/campaigns/backfill-created-dates")
+async def backfill_created_dates_endpoint(
+    days: int = Query(30, description="Look back this many days in change_event (~30 max retained)"),
+    dry_run: bool = Query(False, description="If true, report what would be inserted without writing"),
+):
+    """Seed per-campaign creation dates from the Google Ads change_event log."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, backfill_campaign_created_dates, days, dry_run)
+        return result
+    except Exception as e:
+        logger.error(f"Error backfilling created dates: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

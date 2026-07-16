@@ -25,17 +25,17 @@
         .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
         .filter-row select, .filter-row input { font-size: 0.9rem; }
 
-        .campaign-table { font-size: 0.9rem; table-layout: fixed; }
-        .campaign-table th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
+        /* Columns match the Enabled/Paused history table: cells stay on one line
+           so each column takes its natural width; the .gsd-table-wrap scrolls
+           horizontally (slider) instead of truncating. */
+        .campaign-table { font-size: 0.9rem; }
+        .campaign-table th, .campaign-table td { white-space: nowrap; }
+        .campaign-table th { background: #f8f9fa; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         /* Checkbox column (1st): compact + centered. */
         .campaign-table th:first-child, .campaign-table td:first-child { width: 36px; text-align: center; }
-        /* Fixed layout (see .campaign-table table-layout:fixed) — column widths
-           don't shift when sorting. Columns: [check] Shop | Country | Campaign | Status.
-           Shop + Campaign ellipsize long text (full value on hover). */
-        .campaign-table th[data-sort="shop_name"], .campaign-table td:nth-child(2) { width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .campaign-table th[data-sort="country"], .campaign-table td.col-country { width: 100px; }
-        .campaign-table th[data-sort="campaign_name"], .campaign-table td:nth-child(4) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .campaign-table th[data-sort="status"], .campaign-table td:nth-child(5) { width: 110px; }
+        /* Wider Date / Shop columns (mirrors ll-history-table). */
+        .campaign-table th[data-sort="created_date"] { min-width: 110px; }
+        .campaign-table th[data-sort="shop_name"] { min-width: 150px; }
         /* Bulk action buttons in the toolbar. */
         .btn-bulk-pause { border: 1px solid #CC5500; color: #CC5500; background: transparent; }
         .btn-bulk-activate { border: 1px solid #00b894; color: #00b894; background: transparent; }
@@ -291,10 +291,11 @@
                         <thead class="table-light">
                             <tr>
                                 <th style="width:36px; text-align:center;"><input type="checkbox" id="selectAllCampaigns" onclick="toggleSelectAllCampaigns(this)" title="Select all on this page"></th>
+                                <th class="sortable" data-sort="created_date" onclick="sortBy('created_date')">Date</th>
                                 <th class="sortable" data-sort="shop_name" onclick="sortBy('shop_name')">Shop</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortBy('country')">Country</th>
-                                <th class="sortable" data-sort="campaign_name" onclick="sortBy('campaign_name')">Campaign</th>
                                 <th class="sortable" data-sort="status" onclick="sortBy('status')">Status</th>
+                                <th class="sortable" data-sort="campaign_name" onclick="sortBy('campaign_name')">Campaign</th>
                             </tr>
                         </thead>
                         <tbody id="campaignTableBody"></tbody>
@@ -307,7 +308,7 @@
                     // here so it paints during parse; reused by loadCampaigns().
                     function campaignSkeletonRows(n = 10) {
                         const cell = '<td><span class="skel-bar"></span></td>';
-                        return ('<tr class="skel-row">' + cell.repeat(5) + '</tr>').repeat(n);
+                        return ('<tr class="skel-row">' + cell.repeat(6) + '</tr>').repeat(n);
                     }
                     document.getElementById('campaignTableBody').innerHTML = campaignSkeletonRows();
                 </script>
@@ -569,7 +570,7 @@
             } catch (err) {
                 console.error('Failed to load campaigns:', err);
                 document.getElementById('campaignTableBody').innerHTML =
-                    '<tr><td colspan="5" class="text-center text-danger py-4">Failed to load campaigns.</td></tr>';
+                    '<tr><td colspan="6" class="text-center text-danger py-4">Failed to load campaigns.</td></tr>';
             }
         }
 
@@ -669,7 +670,7 @@
         function renderTable(campaigns) {
             const tbody = document.getElementById('campaignTableBody');
             if (!campaigns.length) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No campaigns found.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No campaigns found.</td></tr>';
                 return;
             }
 
@@ -685,10 +686,11 @@
                         : `<span class="badge bg-secondary">${c.status || 'Unknown'}</span>`;
                 return `<tr class="${isNew ? 'row-new' : ''}">
                     <td><input type="checkbox" class="camp-check" data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" data-status="${(c.status || '').toUpperCase()}" onclick="updateBulkButtons()"></td>
+                    <td>${c.created_date || '-'}</td>
                     <td title="${escapeHtml(c.shop_name || '')}">${escapeHtml(c.shop_name || '-')}</td>
                     <td class="col-country">${c.country || '-'}</td>
-                    <td title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
                     <td>${statusBadge}</td>
+                    <td title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
                 </tr>`;
             }).join('');
             updateBulkButtons();
@@ -706,10 +708,11 @@
         // --- Export / Copy ---
         function getCampaignRows() {
             return filteredCampaigns.map(c => ({
+                Date: c.created_date || '',
                 Shop: c.shop_name || '',
                 Country: c.country || '',
-                Campaign: c.campaign_name || '',
                 Status: c.status || '',
+                Campaign: c.campaign_name || '',
             }));
         }
 
@@ -732,10 +735,11 @@
             return filteredCampaigns
                 .filter(c => selected.has(`${c.customer_id}|${c.campaign_id}`))
                 .map(c => ({
+                    Date: c.created_date || '',
                     Shop: c.shop_name || '',
                     Country: c.country || '',
-                    Campaign: c.campaign_name || '',
                     Status: c.status || '',
+                    Campaign: c.campaign_name || '',
                 }));
         }
 
