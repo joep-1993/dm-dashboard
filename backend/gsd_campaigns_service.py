@@ -2092,19 +2092,23 @@ def _set_campaign_status_by_resource(
         return False
 
 
-def _tree_targets_label(ga, customer_id, campaign_id, campaign_type, label) -> bool:
+def _tree_targets_label(ga, customer_id, ad_group_id, campaign_type, label) -> bool:
     """
-    True if the campaign's listing tree looks correct for its custom label: a
+    True if the ad group's listing tree looks correct for its custom label: a
     SUBDIVISION root, and (for CPR) a biddable UNIT keyed on
     product_custom_attribute[INDEX0] == the label's value. Catches the legacy
     single-root-UNIT tree and trees targeting the wrong label value.
+
+    Scoped to a specific ad group (NOT the campaign): a campaign can retain a
+    REMOVED ad group whose child criteria keep their own non-REMOVED status, so a
+    campaign-wide query would read a dead ad group's tree as the live one's.
     """
     crits = list(ga.search(customer_id=customer_id, query=(
         "SELECT ad_group_criterion.listing_group.type, "
         "ad_group_criterion.listing_group.parent_ad_group_criterion, "
         "ad_group_criterion.negative, "
         "ad_group_criterion.listing_group.case_value.product_custom_attribute.value "
-        f"FROM ad_group_criterion WHERE campaign.id = {campaign_id} "
+        f"FROM ad_group_criterion WHERE ad_group.id = {ad_group_id} "
         "AND ad_group_criterion.type = 'LISTING_GROUP' "
         "AND ad_group_criterion.status != 'REMOVED'")))
     if not crits:
@@ -2126,13 +2130,17 @@ def _tree_targets_label(ga, customer_id, campaign_id, campaign_type, label) -> b
         for c in crits)
 
 
-def _remove_listing_tree(client, customer_id, campaign_id) -> None:
-    """Remove all (non-removed) LISTING_GROUP criteria for a campaign's ad group."""
+def _remove_listing_tree(client, customer_id, ad_group_id) -> None:
+    """Remove all (non-removed) LISTING_GROUP criteria for a specific ad group.
+
+    Scoped by ad_group.id (not campaign.id) so a REMOVED sibling ad group's
+    orphaned criteria are left alone.
+    """
     ga = client.get_service("GoogleAdsService")
     svc = client.get_service("AdGroupCriterionService")
     crits = list(ga.search(customer_id=customer_id, query=(
         f"SELECT ad_group_criterion.resource_name FROM ad_group_criterion "
-        f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
+        f"WHERE ad_group.id = {ad_group_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
         f"AND ad_group_criterion.status != 'REMOVED'")))
     if not crits:
         return
@@ -2163,22 +2171,28 @@ def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
         f"SELECT ad_group.resource_name FROM ad_group "
         f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED'")))
     ad_group_resource = ags[0].ad_group.resource_name if ags else None
+    # Scope the product-ad / listing-tree checks to the LIVE ad group, not the
+    # campaign: a REMOVED sibling ad group keeps its child ads/criteria at their
+    # own non-REMOVED status, so a campaign-wide query would see a dead ad group's
+    # ad + tree and wrongly conclude the live ad group is complete (skipping the
+    # repair of an ad group whose tree was deleted).
+    ad_group_id = ad_group_resource.rstrip("/").split("/")[-1] if ad_group_resource else None
     has_ad = has_lg = False
     if ad_group_resource:
         has_ad = bool(list(ga.search(customer_id=customer_id, query=(
             f"SELECT ad_group_ad.ad.id FROM ad_group_ad "
-            f"WHERE campaign.id = {campaign_id} AND ad_group_ad.status != 'REMOVED'"))))
+            f"WHERE ad_group.id = {ad_group_id} AND ad_group_ad.status != 'REMOVED'"))))
         has_lg = bool(list(ga.search(customer_id=customer_id, query=(
             f"SELECT ad_group_criterion.criterion_id FROM ad_group_criterion "
-            f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
+            f"WHERE ad_group.id = {ad_group_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
             f"AND ad_group_criterion.status != 'REMOVED'"))))
 
     # Validate the existing tree targets this campaign's label; drop a wrong one
     # so it gets rebuilt below.
     retree = False
-    if has_lg and not _tree_targets_label(ga, customer_id, campaign_id, campaign_type, label):
+    if has_lg and not _tree_targets_label(ga, customer_id, ad_group_id, campaign_type, label):
         try:
-            _remove_listing_tree(client, customer_id, campaign_id)
+            _remove_listing_tree(client, customer_id, ad_group_id)
         except GoogleAdsException as ex:
             logger.error("Failed to remove wrong listing tree for '%s': %s", campaign_name, ex)
             _last_gads_error["msg"] = _gads_err(ex)
@@ -2586,23 +2600,29 @@ def _check_campaign_structure(
     with "a rerun would repair it".
     """
     issues: List[str] = []
-    if not list(ga.search(customer_id=customer_id, query=(
-            f"SELECT ad_group.resource_name FROM ad_group "
-            f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED'"))):
+    # Scope the ad-group-child checks to the LIVE ad group, mirroring
+    # _repair_campaign — a REMOVED sibling ad group's ads/criteria stay
+    # non-REMOVED and would otherwise mask a broken live ad group.
+    ags = list(ga.search(customer_id=customer_id, query=(
+        f"SELECT ad_group.id FROM ad_group "
+        f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED'")))
+    if not ags:
         issues.append("no_ad_group")
+        return issues  # nothing else to check without a live ad group
+    ad_group_id = ags[0].ad_group.id
     if not list(ga.search(customer_id=customer_id, query=(
             f"SELECT ad_group_ad.ad.id FROM ad_group_ad "
-            f"WHERE campaign.id = {campaign_id} AND ad_group_ad.status != 'REMOVED'"))):
+            f"WHERE ad_group.id = {ad_group_id} AND ad_group_ad.status != 'REMOVED'"))):
         issues.append("no_product_ad")
     has_lg = bool(list(ga.search(customer_id=customer_id, query=(
         f"SELECT ad_group_criterion.criterion_id FROM ad_group_criterion "
-        f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
+        f"WHERE ad_group.id = {ad_group_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
         f"AND ad_group_criterion.status != 'REMOVED'"))))
     if not has_lg:
         issues.append("no_listing_group")
     else:
         label = _parse_campaign_name(campaign_name).get("label")
-        if label and not _tree_targets_label(ga, customer_id, campaign_id, campaign_type, label):
+        if label and not _tree_targets_label(ga, customer_id, ad_group_id, campaign_type, label):
             issues.append("wrong_listing_tree")
     return issues
 
