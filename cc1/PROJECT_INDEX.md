@@ -100,6 +100,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   └── kopteksten_uitrol (1).json # n8n workflow reference
 ├── logs/                 # Log output (cleared regularly)
 ├── scripts/              # Standalone CLI tools + utilities
+│   ├── backfill_gsd_creation_dates.py # Seed pa.jvs_gsd_campaign_created (shop_id,country → creation date) from the shop creation-date xlsx
 │   ├── redirect_checker.py   # HTTP redirect/canonical checker
 │   ├── setup.sh              # Project setup script
 │   ├── start-thema-ads.sh    # Thema ads startup
