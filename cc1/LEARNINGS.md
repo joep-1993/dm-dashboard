@@ -1,6 +1,20 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## New-tool UI blueprint — template + canonical button vocabulary (2026-07-16)
+
+Created a durable blueprint so every new dm-tools page looks identical. Full spec lives in **`cc1/UI_BLUEPRINT.md`**; the copy-paste scaffold is **`frontend/_tool-template.html`** (commit `50240cb` on main). Frontend is static → live on refresh.
+
+- **Design tokens are already in `frontend/css/style.css` `:root`** — don't hard-code hexes inline: `--color-navbar #5e4a90` (purple, navbar only), `--color-section #E8E9EB` (grey card headers), `--color-button #CC5500` (orange), `--color-button-hover #E97451` (coral).
+- **Canonical button vocabulary** (added to style.css, additive + opt-in so existing tools are untouched): `.btn-run` = full orange + coral hover for the Run/execute CTA (goes **far right** of its section); `.btn-outline-orange` = orange-outline for non-run orange actions (e.g. Export); `.btn-outline-purple` = purple-outline for any other action + Refresh (Refresh keeps the `↻` glyph); **`:disabled` on any of the three auto-renders grey outline `#6c757d`** so "not clickable = grey" needs no per-button styling.
+- **Table standard = GSD "Campaigns created":** `.tool-table` in a `.tool-table-wrap` (1px `#eee`, rounded, overflow auto); grey sticky `th` (`#f8f9fa`, `padding 6px 14px`, **font 1rem**), body `0.9rem` `vertical-align:middle`; sortable headers via `class="sortable" data-sort=… onclick="sortBy()"` with `⇅`/`▲`/`▼` (`sort-asc`/`sort-desc` on the active th).
+- **Pagination orange arrows** = `btn btn-outline-secondary btn-page` — `btn-outline-secondary` maps to `--color-button` in style.css, which is *why* the chevrons are orange (this was the "orange arrows in Enabled/Paused history" the user meant). Use the chevron SVGs, not `<`/`>`.
+- **Status bar:** hidden `#progressArea`; green (`#00b894`) striped/animated bar + label/percent line + **red-outline Cancel** below. Drive with `showStatus/setStatus/hideStatus`, honour `cancelRequested`.
+- **Page width is fixed for ALL tools:** `container mt-5 pb-5 › row › col-md-10 mx-auto`. dma-exclusions' `col-lg-11` is a legacy outlier — don't copy it.
+- **Card headers = grey** (`.card-header` default). Decision call: **GSD Campaigns' inline purple (`#5e4a90`) headers are the outlier** — every other tool uses the style.css grey default, so the blueprint standardises on grey. Flip both template + doc if the user later prefers purple.
+- **Footer (every page):** `<footer class="text-center py-4"><small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small></footer>`.
+- **Gotcha:** adding a new tool means adding its link to the **navbar of every other page**, not just the new one (the nav dropdown block is shared markup, hand-maintained).
+
 ## GSD Campaigns — orange-button color alignment + Preview/Run button sizing (2026-07-16)
 
 Frontend-only polish on `frontend/gsd-campaigns.html` (commit `bf34bc5` → pushed `eb2841f` on main). Static file, live on browser refresh — no uvicorn restart.

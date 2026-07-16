@@ -58,6 +58,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── deduplicate_content.py # Utility: Remove duplicate URLs
 │   └── migrate_shared_validation.py # Utility: Merge skipped URLs into shared tracking table
 ├── frontend/
+│   ├── _tool-template.html # NEW-TOOL BLUEPRINT scaffold — copy this for a new tool (see cc1/UI_BLUEPRINT.md)
 │   ├── dashboard.html    # Entry point - tool overview
 │   ├── index.html        # SEO Content Generation (kopteksten)
 │   ├── faq.html          # FAQ Generation
