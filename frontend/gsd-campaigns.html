@@ -157,29 +157,6 @@
             animation: skelShimmer 1.4s ease infinite;
         }
         @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
-
-        /* Purple info ("i") button + hover tooltip next to the LL card header.
-           Uses the shared brand purple (#5e4a90). The card header is itself
-           purple, so a thin white ring keeps the purple glyph legible. */
-        .ll-info-wrap { position: relative; display: inline-flex; }
-        .ll-info-btn {
-            width: 20px; height: 20px; padding: 0; border-radius: 50%;
-            border: 1.5px solid #fff; background: #5e4a90; color: #fff;
-            font-family: Georgia, 'Times New Roman', serif; font-style: italic;
-            font-weight: 700; font-size: 0.82rem; line-height: 1; cursor: help;
-            display: inline-flex; align-items: center; justify-content: center;
-        }
-        .ll-info-wrap .ll-info-tip {
-            visibility: hidden; opacity: 0; transition: opacity 0.15s ease;
-            position: absolute; top: 50%; left: calc(100% + 8px);
-            transform: translateY(-50%);
-            background: #3d3060; color: #fff; padding: 0.35rem 0.6rem;
-            border-radius: 6px; font-size: 0.78rem; font-weight: 400;
-            white-space: nowrap; z-index: 30;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-        }
-        .ll-info-wrap:hover .ll-info-tip,
-        .ll-info-wrap:focus-within .ll-info-tip { visibility: visible; opacity: 1; }
     </style>
 </head>
 <body>
@@ -356,13 +333,7 @@
         <!-- Pause/Enable low linkage shops -->
         <div class="card mb-4">
             <div class="card-header" style="background: #5e4a90; color: white;">
-                <h5 class="mb-0 d-flex align-items-center gap-2">
-                    Pause / Enable low linkage shops
-                    <span class="ll-info-wrap">
-                        <button type="button" class="ll-info-btn" id="llDataInfoBtn" aria-label="Last successful data load" tabindex="0">i</button>
-                        <span class="ll-info-tip" id="llDataInfoTip">Last successful data load: —</span>
-                    </span>
-                </h5>
+                <h5 class="mb-0">Pause / Enable low linkage shops <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="llDataInfoTip">Last successful data load: …</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg></h5>
             </div>
             <div class="card-body">
                 <div class="row g-3">
