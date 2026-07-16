@@ -159,14 +159,14 @@
         @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 
         /* Purple info ("i") button + hover tooltip next to the LL card header.
-           The card header is purple, so the glyph is a white-filled circle with
-           a purple "i" to stay legible against the background. */
+           Uses the shared brand purple (#5e4a90). The card header is itself
+           purple, so a thin white ring keeps the purple glyph legible. */
         .ll-info-wrap { position: relative; display: inline-flex; }
         .ll-info-btn {
             width: 20px; height: 20px; padding: 0; border-radius: 50%;
-            border: 1px solid #fff; background: #fff; color: #5e4a90;
+            border: 1.5px solid #fff; background: #5e4a90; color: #fff;
             font-family: Georgia, 'Times New Roman', serif; font-style: italic;
-            font-weight: 700; font-size: 0.82rem; line-height: 1; cursor: default;
+            font-weight: 700; font-size: 0.82rem; line-height: 1; cursor: help;
             display: inline-flex; align-items: center; justify-content: center;
         }
         .ll-info-wrap .ll-info-tip {
