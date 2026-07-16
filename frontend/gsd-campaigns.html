@@ -128,6 +128,7 @@
         .ll-history-table th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; }
         .ll-history-table td { vertical-align: middle; font-size: 0.9rem; }
         .ll-history-table .col-country { text-align: center; }
+        .ll-history-table .col-action { text-align: center; }
         .ll-history-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
         .ll-history-table th.sortable:hover { background: #e9ecef; }
         .ll-history-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
@@ -405,7 +406,7 @@
                                 <th class="sortable" data-sort="created_at" onclick="sortLLBy('created_at')">Date</th>
                                 <th class="sortable" data-sort="shop_name" onclick="sortLLBy('shop_name')">Shop</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortLLBy('country')">Country</th>
-                                <th class="sortable" data-sort="action" onclick="sortLLBy('action')">Action</th>
+                                <th class="col-action sortable" data-sort="action" onclick="sortLLBy('action')">Action</th>
                                 <th class="sortable" data-sort="campaign_name" onclick="sortLLBy('campaign_name')">Campaign</th>
                             </tr>
                         </thead>
@@ -1503,7 +1504,7 @@
                     <td style="white-space:nowrap;">${escapeHtml(dt)}</td>
                     <td>${escapeHtml(r.shop_name || '')}</td>
                     <td class="col-country">${escapeHtml(r.country || '')}</td>
-                    <td>${badge}</td>
+                    <td class="col-action">${badge}</td>
                     <td>${escapeHtml(r.campaign_name || '')}</td>
                 </tr>`;
             }).join('');
