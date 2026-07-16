@@ -34,6 +34,19 @@ Created a durable blueprint so every new dm-tools page looks identical. Full spe
 - **Card headers = grey** (`.card-header` default). Decision call: **GSD Campaigns' inline purple (`#5e4a90`) headers are the outlier** — every other tool uses the style.css grey default, so the blueprint standardises on grey. Flip both template + doc if the user later prefers purple.
 - **Footer (every page):** `<footer class="text-center py-4"><small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small></footer>`.
 - **Gotcha:** adding a new tool means adding its link to the **navbar of every other page**, not just the new one (the nav dropdown block is shared markup, hand-maintained).
+## GSD Campaigns — LL card simplified to Excel-only + last-load tooltip, unlogged campaign actions (2026-07-16)
+
+Frontend-only on `frontend/gsd-campaigns.html` (commit `14923e5` on main). Static file, live on browser refresh — no uvicorn restart.
+
+- **Low-linkage card now standardises on the daily-loaded Excel data.** Removed the "Pixel Monitor Feed / Excel File" data-source toggle; `runLowLinkage()` hardcodes `source = 'excel'`. Also removed the "Daily data load (09:50 CET)" schedule toggle, the "Load now" button, and the cached-data status line. **Backend is untouched** — the scheduler still loads the Excel daily and the `/ll/excel-*` endpoints all still exist; only the manual UI controls were dropped.
+- The optional **Date field is now dead UI** for the Excel source (backend ignores `date` when `source='excel'` — see `gsd_ll_service.py` docstring). Left in place (removing it would need col-md rebalancing); flag if it should go.
+- **New purple "i" info button** next to the card header shows the last successful data load on hover, e.g. `Last successful data load: 17-07-2026, 09:50`. Sourced from `/ll/excel-data` `loaded_at` (that IS the last successful load), falling back to `/ll/excel-schedule` `last_run_at` when there's no error. Header bg is purple (`#5e4a90`), so the info glyph is a **white-filled circle with a purple "i"** (a purple-on-purple button would be invisible) — CSS `.ll-info-btn` + hover tooltip `.ll-info-tip`, shown via `:hover`/`:focus-within`.
+- Format trick for the `DD-MM-YYYY, HH:MM` comma: `toLocaleDateString('nl-NL', {day,month:'2-digit',year:'numeric'})` + `toLocaleTimeString('nl-NL', {hour,minute:'2-digit'})` joined with `', '` (a single `toLocaleString` gives a space, not a comma).
+- **Activity Log no longer records individual/bulk campaign Pause/Enable/Remove actions.** These were the `logActivity('Pause'|'Enable'|'Remove'|verb, …)` calls in `pauseCampaign`/`enableCampaign`/`removeCampaign`/`bulkAction`; removed. Failures now surface via `alert()` (were previously only visible as red log rows). Only **Run Script** (create runs), **LL Run** / **LL Run selected**, and **Reset** remain logged.
+
+## GSD Campaigns — why some Activity Log rows have no Reset button (2026-07-16)
+
+`renderLog()` only renders a **Reset** button when an entry is a GSD create-run: either `entry.action === 'Run Script'` (reconstructs from Google Ads change history), or it carries a stored undo payload (`created`/`paused` > 0 → direct undo). **Everything else gets no Reset button by design** — individual/bulk Pause/Enable/Remove actions, LL runs, and Reset entries themselves. The Activity Log badge only distinguishes `LL` (action starts with `ll`) from everything-else (badge reads `GSD`), so a manual "1 activated (1 selected)" pause/activate row shows a GSD badge with no Reset — that's expected, not a bug. (This became moot for those actions after they stopped being logged; see entry above.)
 
 ## GSD Campaigns — orange-button color alignment + Preview/Run button sizing (2026-07-16)
 
