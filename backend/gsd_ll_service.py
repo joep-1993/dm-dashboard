@@ -48,6 +48,12 @@ LL_LABEL = "GSD_LL_PAUSED"
 
 ADMIN_TABLE = "pa.jvs_gsd_ll_campaigns"
 
+# Per-(shop, country) pause/enable cycle counters — how often a shop has been
+# paused vs re-enabled by this tool. One "event" == one run that actually paused
+# (or enabled) >=1 campaign for that shop+country, so a run touching a shop's 5
+# campaigns bumps the counter once, not five times.
+SHOP_CYCLES_TABLE = "pa.jvs_gsd_ll_shop_cycles"
+
 # Map the shop_list GSD flag columns to a country code.
 FLAG_TO_COUNTRY = {
     "is_gsd_nl_shop": "NL",
@@ -349,6 +355,172 @@ def get_history(limit: int = 500) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Shop-level pause/enable cycle counters (n8n-vector-db PostgreSQL)
+# ---------------------------------------------------------------------------
+
+
+def ensure_shop_cycles_table() -> None:
+    """Create the per-(shop, country) cycle-counter table if it does not exist."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {SHOP_CYCLES_TABLE} (
+                    shop_id          BIGINT      NOT NULL,
+                    shop_name        TEXT,
+                    country          VARCHAR(4)  NOT NULL,
+                    pause_count      INTEGER     NOT NULL DEFAULT 0,
+                    enable_count     INTEGER     NOT NULL DEFAULT 0,
+                    last_paused_at   TIMESTAMPTZ,
+                    last_enabled_at  TIMESTAMPTZ,
+                    currently_paused BOOLEAN,
+                    updated_at       TIMESTAMPTZ DEFAULT now(),
+                    PRIMARY KEY (shop_id, country)
+                )
+            """)
+        conn.commit()
+    finally:
+        return_db_connection(conn)
+
+
+def _bump_shop_cycles(conn, shop_id: int, shop_name: str, country: str, action: str) -> None:
+    """
+    Increment the pause/enable counter for one (shop, country) by exactly one
+    event (the caller must call this at most once per run per shop+country+action,
+    NOT once per campaign). Also stamps the last-action time, refreshes shop_name,
+    and sets currently_paused. Caller owns the transaction / commit.
+    """
+    if action == "Paused":
+        cnt_col, ts_col, now_paused = "pause_count", "last_paused_at", True
+    elif action == "Enabled":
+        cnt_col, ts_col, now_paused = "enable_count", "last_enabled_at", False
+    else:
+        return  # unknown action — nothing to record
+    with conn.cursor() as cur:
+        # Column names come from the fixed action branch above (never user input).
+        cur.execute(f"""
+            INSERT INTO {SHOP_CYCLES_TABLE}
+                (shop_id, shop_name, country, {cnt_col}, {ts_col},
+                 currently_paused, updated_at)
+            VALUES (%s, %s, %s, 1, now(), %s, now())
+            ON CONFLICT (shop_id, country) DO UPDATE SET
+                shop_name        = EXCLUDED.shop_name,
+                {cnt_col}        = {SHOP_CYCLES_TABLE}.{cnt_col} + 1,
+                {ts_col}         = now(),
+                currently_paused = EXCLUDED.currently_paused,
+                updated_at       = now()
+        """, (shop_id, shop_name, country, now_paused))
+
+
+def get_shop_cycles(limit: int = 1000) -> List[Dict[str, Any]]:
+    """Return the per-(shop, country) cycle counters for the frontend."""
+    ensure_shop_cycles_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT shop_id, shop_name, country, pause_count, enable_count,
+                       last_paused_at, last_enabled_at, currently_paused, updated_at
+                FROM {SHOP_CYCLES_TABLE}
+                ORDER BY (pause_count + enable_count) DESC, shop_name, country
+                LIMIT %s
+            """, (limit,))
+            return [dict(r) for r in cur.fetchall()]
+    finally:
+        return_db_connection(conn)
+
+
+def backfill_shop_cycles(gap_minutes: int = 30, dry_run: bool = True) -> Dict[str, Any]:
+    """
+    Seed the cycle counters from the existing per-campaign action log
+    (pa.jvs_gsd_ll_campaigns). That log has no run_id, so rows are grouped into
+    "events" by time: consecutive same-(shop, country, action) rows more than
+    ``gap_minutes`` apart count as separate events. Counts are therefore
+    APPROXIMATE for history; from the next run onward they are exact.
+
+    dry_run=True only reports the counts it would write. dry_run=False replaces
+    the table's counters with the backfilled values (idempotent).
+    """
+    ensure_shop_cycles_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # One row per action per (shop, country), collapsing bursts within
+            # gap_minutes into a single event via a gap-and-islands count.
+            cur.execute(f"""
+                WITH ordered AS (
+                    SELECT shop_id, shop_name, country, action, created_at,
+                           LAG(created_at) OVER (
+                               PARTITION BY shop_id, country, action
+                               ORDER BY created_at
+                           ) AS prev_at
+                    FROM {ADMIN_TABLE}
+                    WHERE shop_id IS NOT NULL AND country IS NOT NULL
+                      AND action IN ('Paused', 'Enabled')
+                ),
+                events AS (
+                    SELECT shop_id, shop_name, country, action, created_at,
+                           CASE WHEN prev_at IS NULL
+                                     OR created_at - prev_at > interval '%s minutes'
+                                THEN 1 ELSE 0 END AS is_new_event
+                    FROM ordered
+                )
+                SELECT shop_id, country,
+                       MAX(shop_name) AS shop_name,
+                       SUM(CASE WHEN action='Paused'  THEN is_new_event ELSE 0 END) AS pause_events,
+                       SUM(CASE WHEN action='Enabled' THEN is_new_event ELSE 0 END) AS enable_events,
+                       MAX(created_at) FILTER (WHERE action='Paused')  AS last_paused_at,
+                       MAX(created_at) FILTER (WHERE action='Enabled') AS last_enabled_at
+                FROM events
+                GROUP BY shop_id, country
+            """, (gap_minutes,))
+            rows = [dict(r) for r in cur.fetchall()]
+
+        for r in rows:
+            lp, le = r["last_paused_at"], r["last_enabled_at"]
+            # Currently paused if the most recent event was a pause.
+            r["currently_paused"] = (
+                lp is not None and (le is None or lp >= le)
+            )
+
+        summary = {
+            "dry_run": dry_run,
+            "gap_minutes": gap_minutes,
+            "shops_country_rows": len(rows),
+            "total_pause_events": sum(r["pause_events"] for r in rows),
+            "total_enable_events": sum(r["enable_events"] for r in rows),
+        }
+
+        if not dry_run and rows:
+            with conn.cursor() as cur:
+                for r in rows:
+                    cur.execute(f"""
+                        INSERT INTO {SHOP_CYCLES_TABLE}
+                            (shop_id, shop_name, country, pause_count, enable_count,
+                             last_paused_at, last_enabled_at, currently_paused, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                        ON CONFLICT (shop_id, country) DO UPDATE SET
+                            shop_name        = EXCLUDED.shop_name,
+                            pause_count      = EXCLUDED.pause_count,
+                            enable_count     = EXCLUDED.enable_count,
+                            last_paused_at   = EXCLUDED.last_paused_at,
+                            last_enabled_at  = EXCLUDED.last_enabled_at,
+                            currently_paused = EXCLUDED.currently_paused,
+                            updated_at       = now()
+                    """, (r["shop_id"], r["shop_name"], r["country"],
+                          int(r["pause_events"]), int(r["enable_events"]),
+                          r["last_paused_at"], r["last_enabled_at"],
+                          r["currently_paused"]))
+            conn.commit()
+            summary["written"] = len(rows)
+
+        summary["rows"] = rows
+        return summary
+    finally:
+        return_db_connection(conn)
+
+
+# ---------------------------------------------------------------------------
 # Google Ads label helpers (shared client)
 # ---------------------------------------------------------------------------
 
@@ -583,7 +755,13 @@ def run_low_linkage(
 
     if not dry_run:
         ensure_admin_table()
+        ensure_shop_cycles_table()
     db_conn = None if dry_run else get_db_connection()
+
+    # (shop_id, country, action) -> shop_name for every shop+country actually
+    # mutated this run, so the shop-cycle counter is bumped once per event (not
+    # once per campaign) after the feed loop.
+    cycle_events: Dict[tuple, str] = {}
 
     try:
         for idx, row in enumerate(feed):
@@ -674,6 +852,7 @@ def run_low_linkage(
                         # reclassify a real live mutation as an error — the
                         # campaign IS changed. Count it, then best-effort audit.
                         (result["paused"] if gsd == 0 else result["enabled"]).append(entry)
+                        cycle_events[(shop_id, country, action)] = shop_name
                         try:
                             _record_action(
                                 db_conn, shop_id, shop_name, country, action,
@@ -688,6 +867,17 @@ def run_low_linkage(
                                          action, camp["campaign_id"], ex)
                             result.setdefault("audit_failures", []).append(
                                 {**entry, "error": str(ex)})
+
+        # One shop-cycle bump per (shop, country) event actually mutated this run
+        # (best-effort; a counter miss must never fail a real mutation).
+        for (s_id, ctry, act), s_name in cycle_events.items():
+            try:
+                _bump_shop_cycles(db_conn, s_id, s_name, ctry, act)
+                db_conn.commit()
+            except Exception as ex:
+                db_conn.rollback()
+                logger.error("GSD LL: shop-cycle bump failed for shop_id=%s / %s: %s",
+                             s_id, ctry, ex)
     finally:
         if db_conn is not None:
             return_db_connection(db_conn)
@@ -755,7 +945,11 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
         return labeled_cache[key].get(campaign_id)
 
     ensure_admin_table()
+    ensure_shop_cycles_table()
     db_conn = get_db_connection()
+
+    # (shop_id, country, action) -> shop_name, bumped once per event after the loop.
+    cycle_events: Dict[tuple, str] = {}
 
     try:
         for idx, e in enumerate(entries):
@@ -805,6 +999,8 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
             # Ads mutation succeeded — count it, then best-effort audit so a DB
             # failure doesn't misreport a real live mutation as an error.
             (result["paused"] if action == "Paused" else result["enabled"]).append(e)
+            if shop_id is not None and country:
+                cycle_events[(shop_id, country, action)] = shop_name
             try:
                 _record_action(
                     db_conn, shop_id, shop_name, country, action,
@@ -816,6 +1012,16 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
                 logger.error("GSD LL apply: audit-write failed for %s / %s "
                              "(mutation already applied): %s", action, campaign_id, ex)
                 result.setdefault("audit_failures", []).append({**e, "error": str(ex)})
+
+        # One shop-cycle bump per (shop, country) event actually mutated (best-effort).
+        for (s_id, ctry, act), s_name in cycle_events.items():
+            try:
+                _bump_shop_cycles(db_conn, s_id, s_name, ctry, act)
+                db_conn.commit()
+            except Exception as ex:
+                db_conn.rollback()
+                logger.error("GSD LL apply: shop-cycle bump failed for shop_id=%s / %s: %s",
+                             s_id, ctry, ex)
     finally:
         return_db_connection(db_conn)
 

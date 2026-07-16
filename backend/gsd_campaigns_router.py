@@ -22,6 +22,7 @@ from backend.gsd_ll_service import (
     start_ll_apply,
     get_ll_progress,
     get_history as get_ll_history,
+    get_shop_cycles as get_ll_shop_cycles,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,20 @@ async def ll_history_endpoint(
         return {"rows": rows, "total": len(rows)}
     except Exception as e:
         logger.error(f"Error fetching GSD LL history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ll/shop-cycles")
+async def ll_shop_cycles_endpoint(
+    limit: int = Query(1000, ge=1, le=10000, description="Max shop-cycle rows to return"),
+):
+    """Per-(shop, country) pause/enable cycle counts from pa.jvs_gsd_ll_shop_cycles."""
+    try:
+        loop = asyncio.get_event_loop()
+        rows = await loop.run_in_executor(executor, get_ll_shop_cycles, limit)
+        return {"rows": rows, "total": len(rows)}
+    except Exception as e:
+        logger.error(f"Error fetching GSD LL shop cycles: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

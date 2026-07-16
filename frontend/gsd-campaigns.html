@@ -399,8 +399,8 @@
                     </select>
                     <input type="text" class="form-control form-control-sm" id="llFilter" placeholder="Search shop or campaign..." oninput="applyLLFilter()" style="max-width: 250px;">
                     <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="loadLLHistory()">↻ Refresh</button>
-                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportLLXlsx()">Export Excel</button>
                     <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyLLForExcel()">Copy for Excel</button>
+                    <button class="btn btn-sm" style="border: 1px solid #fd7e14; color: #fd7e14; background: transparent;" onmouseover="this.style.background='#fd7e14';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#fd7e14'" onclick="exportLLShopCycles()" title="Per-shop count of paused vs re-enabled instances">Export history</button>
                 </div>
                 <div class="table-responsive gsd-table-wrap">
                     <table class="table table-sm table-hover ll-history-table mb-0">
@@ -722,9 +722,26 @@
             XLSX.writeFile(wb, `gsd_campaigns_${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
+        // Copy only the checked rows (falls back to a hint if nothing is selected).
+        function getSelectedCampaignRows() {
+            const selected = new Set();
+            document.querySelectorAll('.camp-check:checked').forEach(x => {
+                selected.add(`${x.dataset.cid}|${x.dataset.campid}`);
+            });
+            if (!selected.size) return [];
+            return filteredCampaigns
+                .filter(c => selected.has(`${c.customer_id}|${c.campaign_id}`))
+                .map(c => ({
+                    Shop: c.shop_name || '',
+                    Country: c.country || '',
+                    Campaign: c.campaign_name || '',
+                    Status: c.status || '',
+                }));
+        }
+
         function copyForExcel() {
-            const rows = getCampaignRows();
-            if (!rows.length) return alert('No campaigns to copy.');
+            const rows = getSelectedCampaignRows();
+            if (!rows.length) return alert('No rows selected — tick the checkboxes of the rows you want to copy.');
             const headers = Object.keys(rows[0]);
             const tsv = [headers.join('\t'), ...rows.map(r => headers.map(h => r[h]).join('\t'))].join('\n');
             navigator.clipboard.writeText(tsv).then(() => {
@@ -1364,13 +1381,36 @@
             }));
         }
 
-        function exportLLXlsx() {
-            const rows = getLLRows();
-            if (!rows.length) return alert('No history to export.');
-            const ws = XLSX.utils.json_to_sheet(rows);
+        // Export per-shop pause/re-enable counts (from pa.jvs_gsd_ll_shop_cycles),
+        // one row per shop_name, summed across countries.
+        async function exportLLShopCycles() {
+            let rows;
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/ll/shop-cycles?limit=10000`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                rows = (await res.json()).rows || [];
+            } catch (e) {
+                return alert('Could not load shop pause/enable counts: ' + e.message);
+            }
+            if (!rows.length) return alert('No shop history to export yet.');
+            const byShop = {};
+            for (const r of rows) {
+                const name = r.shop_name || '(unknown)';
+                if (!byShop[name]) byShop[name] = { paused: 0, enabled: 0 };
+                byShop[name].paused += (r.pause_count || 0);
+                byShop[name].enabled += (r.enable_count || 0);
+            }
+            const out = Object.keys(byShop)
+                .map(name => ({
+                    Shop: name,
+                    'Times paused': byShop[name].paused,
+                    'Times re-enabled': byShop[name].enabled,
+                }))
+                .sort((a, b) => b['Times paused'] - a['Times paused'] || a.Shop.localeCompare(b.Shop));
+            const ws = XLSX.utils.json_to_sheet(out);
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Enabled-Paused history');
-            XLSX.writeFile(wb, `gsd_ll_history_${new Date().toISOString().slice(0,10)}.xlsx`);
+            XLSX.utils.book_append_sheet(wb, ws, 'Pause-enable counts');
+            XLSX.writeFile(wb, `gsd_ll_shop_cycles_${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
         function copyLLForExcel() {

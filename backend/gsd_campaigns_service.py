@@ -1952,7 +1952,8 @@ def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
             f"WHERE campaign.id = {campaign_id} AND ad_group_ad.status != 'REMOVED'"))))
         has_lg = bool(list(ga.search(customer_id=customer_id, query=(
             f"SELECT ad_group_criterion.criterion_id FROM ad_group_criterion "
-            f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP'"))))
+            f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
+            f"AND ad_group_criterion.status != 'REMOVED'"))))
 
     # Validate the existing tree targets this campaign's label; drop a wrong one
     # so it gets rebuilt below.
