@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  dm-tools NEW-TOOL TEMPLATE  —  copy this file to frontend/<your-tool>.html
+  ============================================================================
+  This scaffold encodes the shared UI conventions so every tool looks the same.
+  Full spec + rationale: cc1/UI_BLUEPRINT.md.
+
+  Quick checklist when you copy it:
+    1. Rename the file, set <title> and the .navbar-brand text.
+    2. Add a nav entry for the new tool to EVERY other tool page's dropdown
+       (the navbar block below is shared markup — keep it identical across pages).
+    3. Mark this tool's own nav link with class="nav-dropdown-item active" and
+       its parent group toggle with class="nav-dropdown-toggle nav-dropdown-active".
+    4. Replace the example cards; keep the card / table / button / status-bar
+       / pagination / footer structure exactly as-is.
+
+  Button vocabulary (classes live in css/style.css):
+    - Run / execute (primary CTA):        <button class="btn btn-sm btn-run">
+        -> full orange, hover coral, ALWAYS far right of its section.
+    - Orange non-run action (e.g. Export):<button class="btn btn-sm btn-outline-orange">
+    - Any other action / Refresh:         <button class="btn btn-sm btn-outline-purple">
+    - Refresh always carries the ↻ arrow glyph.
+    - Not clickable -> add `disabled`; it auto-renders as a grey outline.
+  Never hard-code the orange/purple hexes inline — use the classes above.
+  ============================================================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        /* ---- Standard table look (matches "Campaigns created" in GSD Campaigns) ---- */
+        /* Bordered, rounded wrapper so the table sits INSIDE the card body. */
+        .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
+        .tool-table { font-size: 0.9rem; margin-bottom: 0; }
+        /* Grey, sticky column headers. Header font is 1rem (slightly larger than body). */
+        .tool-table th {
+            background: #f8f9fa; white-space: nowrap;
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 14px; font-size: 1rem;
+        }
+        .tool-table td { vertical-align: middle; }
+        /* Clickable / sortable headers with the ⇅ / ▲ / ▼ affordance. */
+        .tool-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+        .tool-table th.sortable:hover { background: #e9ecef; }
+        .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
+        .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+
+        /* ---- Pagination (orange arrows via btn-outline-secondary in style.css) ---- */
+        .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
+        .pagination-controls select { font-size: 0.85rem; width: auto; }
+        .pagination-controls .page-info { color: #636e72; }
+        .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+
+        /* ---- Status / progress area (green bar + Cancel) ---- */
+        .progress-area { background: #ffffff; border-radius: 8px; padding: 1rem; min-height: 60px; }
+
+        .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
+        .filter-row select, .filter-row input { font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <!-- ============================ SHARED NAVBAR ============================ -->
+    <!-- Keep identical across every tool page. Set the brand text; mark this
+         tool's link `active` and its group toggle `nav-dropdown-active`. -->
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">New Tool</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/canonical.html" class="nav-dropdown-item">Canonicals</a>
+                        <a href="/static/faq.html" class="nav-dropdown-item">FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item">Kopteksten</a>
+                        <a href="/static/seo-titles.html" class="nav-dropdown-item">SEO titles</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item">Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Redirects</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rurl-optimizer.html" class="nav-dropdown-item">Auto-Redirects</a>
+                        <a href="/static/rfinder.html" class="nav-dropdown-item">R-Finder</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item">Redirect Checker</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item">Redirect Generator</a>
+                        <a href="/static/redirect-tool.html" class="nav-dropdown-item">Redirect Tool</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item">DMA Bidding</a>
+                        <a href="/static/dma-plus.html" class="nav-dropdown-item">DMA+</a>
+                        <a href="/static/dma-exclusions.html" class="nav-dropdown-item">DMA Exclusions</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item">GSD Budgets</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item">GSD Campaigns</a>
+                        <a href="/static/gsd-check.html" class="nav-dropdown-item">GSD Check</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item">MC ID Finder</a>
+                        <a href="/static/shop-campaigns.html" class="nav-dropdown-item">Shop-campaigns</a>
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item">Thema Ads</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dm-review.html" class="nav-dropdown-item">DM Review</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item">Index Checker</a>
+                        <a href="/static/indexnow.html" class="nav-dropdown-item">IndexNow</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item">Keyword Planner</a>
+                        <a href="/static/performance-standup.html" class="nav-dropdown-item">Performance Standup</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item">Redshift Upload</a>
+                        <a href="/static/seo-prio.html" class="nav-dropdown-item">SEO Priority</a>
+                        <a href="/static/seo-rulings.html" class="nav-dropdown-item">SEO Rulings</a>
+                        <a href="/static/seo-stats.html" class="nav-dropdown-item">SEO stats</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item">URL Checker</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item">URL Validator</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ===================== PAGE BODY (fixed width wrapper) ===================== -->
+    <!-- Every tool uses: container mt-5 pb-5 > row > col-md-10 mx-auto. -->
+    <div class="container mt-5 pb-5">
+        <div class="row">
+            <div class="col-md-10 mx-auto">
+
+                <!-- ------------------ Section: input + Run action ------------------ -->
+                <div class="card mb-4">
+                    <!-- Grey section header comes from style.css .card-header — no inline style. -->
+                    <div class="card-header">
+                        <h5 class="mb-0">Run something</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-6">
+                                <label for="exampleInput" class="form-label">Example input</label>
+                                <input type="text" class="form-control" id="exampleInput" placeholder="…">
+                            </div>
+                            <!-- Action buttons: Run/execute goes FAR RIGHT (justify-content-end).
+                                 Secondary actions sit to its left, outlined purple. -->
+                            <div class="col-md-6 d-flex justify-content-end gap-2">
+                                <button class="btn btn-sm btn-outline-purple" onclick="previewTool()" id="previewBtn">Preview</button>
+                                <button class="btn btn-sm btn-run" onclick="runTool()" id="runBtn">Run</button>
+                            </div>
+                        </div>
+
+                        <!-- Status bar: hidden until a process runs. Green bar + Cancel. -->
+                        <div class="progress-area mt-3" id="progressArea" style="display: none;">
+                            <div class="d-flex justify-content-between mb-1" style="font-size: 0.85rem;">
+                                <span id="progressText">Processing…</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
+                            <div class="progress" style="height: 22px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar" id="progressBar"
+                                     style="width: 0%; background-color: #00b894;"></div>
+                            </div>
+                            <div class="mt-2">
+                                <button class="btn btn-sm" id="cancelBtn"
+                                        style="border:1px solid #d63031; color:#d63031; background:transparent;"
+                                        onmouseover="this.style.background='#d63031';this.style.color='white'"
+                                        onmouseout="this.style.background='transparent';this.style.color='#d63031'"
+                                        onclick="cancelTool()">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ------------------ Section: results table ------------------ -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Results</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="filter-row d-flex gap-2 align-items-center mb-3">
+                            <input type="text" class="form-control form-control-sm" id="tableFilter"
+                                   placeholder="Search…" oninput="renderTable()" style="max-width: 250px;">
+                            <!-- Refresh: outlined purple + ↻ arrow, pushed right with ms-auto. -->
+                            <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadData()">↻ Refresh</button>
+                            <!-- Example orange non-run action. -->
+                            <button class="btn btn-sm btn-outline-orange" onclick="exportTable()">Export history</button>
+                        </div>
+
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm table-hover tool-table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="sortable" data-sort="name"    onclick="sortBy('name')">Name</th>
+                                        <th class="sortable" data-sort="country" onclick="sortBy('country')">Country</th>
+                                        <th class="sortable" data-sort="status"  onclick="sortBy('status')">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tableBody">
+                                    <tr><td colspan="3" class="text-center text-muted py-3">No data yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Pagination: orange chevron arrows (btn-outline-secondary btn-page). -->
+                        <div class="pagination-controls" id="paginationControls">
+                            <span>Per page:</span>
+                            <select class="form-select form-select-sm" id="perPage" onchange="currentPage=1; renderTable();">
+                                <option value="10" selected>10</option>
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="all">Show all</option>
+                            </select>
+                            <button class="btn btn-outline-secondary btn-page" onclick="changePage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                            <span class="page-info" id="pageInfo">-</span>
+                            <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ------------------ Standard footer ------------------ -->
+                <footer class="text-center py-4">
+                    <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+                </footer>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // ===================================================================
+        //  Reusable scaffolding — sort, paginate, status bar. Adapt freely.
+        // ===================================================================
+        const API_BASE = '';               // same-origin
+
+        let rows = [];                      // full dataset
+        let sortColumn = 'name';
+        let sortDir = 'asc';                // 'asc' | 'desc'
+        let currentPage = 1;
+        let cancelRequested = false;
+
+        // ---- Sorting ------------------------------------------------------
+        function sortBy(col) {
+            if (sortColumn === col) { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; }
+            else { sortColumn = col; sortDir = 'asc'; }
+            currentPage = 1;
+            renderTable();
+        }
+
+        function paintSortIndicators() {
+            document.querySelectorAll('.tool-table th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === sortColumn) th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+            });
+        }
+
+        // ---- Pagination ---------------------------------------------------
+        function changePage(delta) {
+            const perPage = document.getElementById('perPage').value;
+            if (perPage === 'all') return;
+            const filtered = getFilteredSortedRows();
+            const pages = Math.max(1, Math.ceil(filtered.length / Number(perPage)));
+            currentPage = Math.min(pages, Math.max(1, currentPage + delta));
+            renderTable();
+        }
+
+        function getFilteredSortedRows() {
+            const q = (document.getElementById('tableFilter').value || '').toLowerCase();
+            let out = rows.filter(r => !q || JSON.stringify(r).toLowerCase().includes(q));
+            out.sort((a, b) => {
+                const av = a[sortColumn] ?? '', bv = b[sortColumn] ?? '';
+                const cmp = (typeof av === 'number' && typeof bv === 'number')
+                    ? av - bv
+                    : String(av).localeCompare(String(bv), undefined, { numeric: true });
+                return sortDir === 'asc' ? cmp : -cmp;
+            });
+            return out;
+        }
+
+        // ---- Render -------------------------------------------------------
+        function renderTable() {
+            const body = document.getElementById('tableBody');
+            const filtered = getFilteredSortedRows();
+            const perPageVal = document.getElementById('perPage').value;
+            const perPage = perPageVal === 'all' ? filtered.length || 1 : Number(perPageVal);
+            const pages = Math.max(1, Math.ceil(filtered.length / perPage));
+            currentPage = Math.min(currentPage, pages);
+            const start = (currentPage - 1) * perPage;
+            const pageRows = filtered.slice(start, start + perPage);
+
+            body.innerHTML = pageRows.length
+                ? pageRows.map(r => `<tr>
+                        <td>${escapeHtml(r.name)}</td>
+                        <td>${escapeHtml(r.country)}</td>
+                        <td>${escapeHtml(r.status)}</td>
+                    </tr>`).join('')
+                : `<tr><td colspan="3" class="text-center text-muted py-3">No matching rows.</td></tr>`;
+
+            document.getElementById('pageInfo').textContent =
+                filtered.length ? `${start + 1}-${Math.min(start + perPage, filtered.length)} of ${filtered.length}` : '-';
+            document.getElementById('prevBtn').disabled = currentPage <= 1 || perPageVal === 'all';
+            document.getElementById('nextBtn').disabled = currentPage >= pages || perPageVal === 'all';
+            paintSortIndicators();
+        }
+
+        function escapeHtml(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // ---- Status bar ---------------------------------------------------
+        function showStatus(text) {
+            cancelRequested = false;
+            const area = document.getElementById('progressArea');
+            area.style.display = 'block';
+            setStatus(0, text);
+            const cb = document.getElementById('cancelBtn');
+            cb.disabled = false; cb.textContent = 'Cancel';
+        }
+        function setStatus(pct, text) {
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('progressPercent').textContent = pct + '%';
+            if (text != null) document.getElementById('progressText').textContent = text;
+        }
+        function hideStatus() {
+            document.getElementById('progressArea').style.display = 'none';
+        }
+        function cancelTool() {
+            cancelRequested = true;
+            const b = document.getElementById('cancelBtn');
+            b.disabled = true; b.textContent = 'Cancelling…';
+            // TODO: POST your backend cancel endpoint here.
+        }
+
+        // ---- Tool actions (stubs — wire to your endpoints) ----------------
+        async function loadData() {
+            // const res = await fetch(`${API_BASE}/api/your-tool/data`);
+            // rows = await res.json();
+            renderTable();
+        }
+        async function previewTool() { /* dry-run */ }
+        async function runTool() {
+            const runBtn = document.getElementById('runBtn');
+            runBtn.disabled = true;                 // -> auto grey outline while running
+            showStatus('Starting…');
+            try {
+                // drive your run + poll progress with setStatus(pct, label)
+                // honour cancelRequested between items
+            } finally {
+                runBtn.disabled = false;
+                hideStatus();
+                loadData();
+            }
+        }
+        function exportTable() { /* build + download an .xlsx/.csv */ }
+
+        document.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>

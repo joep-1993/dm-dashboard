@@ -384,6 +384,49 @@ body {
     color: white;
 }
 
+/* ------------------------------------------------------------------ *
+ * Canonical tool button vocabulary — see cc1/UI_BLUEPRINT.md.
+ * Additive + opt-in: only markup that uses these class names is
+ * affected, so existing tools are untouched until migrated.
+ *   - Run / execute (primary CTA, far right):  btn btn-run
+ *   - Orange, non-run action:                  btn btn-outline-orange
+ *   - Any other action / Refresh:              btn btn-outline-purple
+ *   - Not clickable: add `disabled` -> grey outline automatically.
+ * ------------------------------------------------------------------ */
+.btn-run {
+    background-color: var(--color-button);
+    border: 1px solid var(--color-button);
+    color: #fff;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+.btn-run:hover:not(:disabled) {
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: #fff;
+}
+
+.btn-outline-orange {
+    color: var(--color-button);
+    border: 1px solid var(--color-button);
+    background-color: transparent;
+}
+.btn-outline-orange:hover:not(:disabled) {
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: #fff;
+}
+
+/* Non-clickable buttons in the canonical vocabulary read as grey outline. */
+.btn-run:disabled,
+.btn-outline-orange:disabled,
+.btn-outline-purple:disabled {
+    color: #6c757d;
+    border-color: #6c757d;
+    background-color: transparent;
+    opacity: 1;
+    cursor: not-allowed;
+}
+
 .btn-danger-invert {
     background-color: #dc3545;
     border: 1px solid #dc3545;
