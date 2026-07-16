@@ -18,6 +18,7 @@ except Exception:  # pragma: no cover - stdlib on py3.9+
     ZoneInfo = None
 
 import psycopg2
+from psycopg2.extras import execute_values
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from google.protobuf import field_mask_pb2
@@ -300,6 +301,55 @@ def _create_campaign_with_retry(fn):
             raise
 
 
+def _is_parent_not_ready(ex: GoogleAdsException) -> bool:
+    """
+    True when a mutate that references a just-created ad group fails with
+    RESOURCE_NOT_FOUND — i.e. the ad group / campaign hasn't propagated yet.
+    A product-ad or listing-group mutate references only the ad group we created
+    moments earlier, so RESOURCE_NOT_FOUND here is eventual consistency, not a
+    genuinely missing resource; it is safe (and idempotent — the mutate is atomic
+    and creates nothing on failure) to retry patiently.
+    """
+    return "RESOURCE_NOT_FOUND" in str(ex)
+
+
+def _create_child_with_retry(what: str, fn):
+    """
+    Run a mutate that depends on a freshly-created ad group (product ad, listing
+    tree) with retries for BOTH transient errors (short exponential backoff) and
+    ad-group eventual-consistency RESOURCE_NOT_FOUND (patient backoff, the
+    _MERCHANT_LINK_RETRY_DELAYS schedule up to ~2 min).
+
+    This is the root-cause fix for the observed failure where a product ad was
+    rejected seconds after its ad group was created — _mutate_with_retry's ~15s
+    budget wasn't enough for the ad group to become visible, leaving an empty
+    ad group that needed a second run to repair.
+    """
+    transient_attempt = 0
+    not_ready_attempt = 0
+    while True:
+        try:
+            return fn()
+        except GoogleAdsException as ex:
+            if _is_parent_not_ready(ex) and not_ready_attempt < len(_MERCHANT_LINK_RETRY_DELAYS):
+                delay = _MERCHANT_LINK_RETRY_DELAYS[not_ready_attempt]
+                not_ready_attempt += 1
+                logger.warning(
+                    "%s hit RESOURCE_NOT_FOUND (ad group still propagating); "
+                    "retry %d/%d in %ds",
+                    what, not_ready_attempt, len(_MERCHANT_LINK_RETRY_DELAYS), delay,
+                )
+                time.sleep(delay)
+                continue
+            if _is_retryable_gads(ex) and transient_attempt < 4:
+                delay = 0.5 * (2 ** transient_attempt)
+                transient_attempt += 1
+                logger.warning("Transient Ads error on %s; retrying in %.1fs", what, delay)
+                time.sleep(delay)
+                continue
+            raise
+
+
 def _get_redshift_connection():
     """Create a Redshift connection from environment variables."""
     return psycopg2.connect(
@@ -309,6 +359,58 @@ def _get_redshift_connection():
         user=os.environ.get("REDSHIFT_USER", ""),
         password=os.environ.get("REDSHIFT_PASSWORD", ""),
     )
+
+
+def push_mc_ids_to_redshift(rows: List[tuple]) -> Dict[str, Any]:
+    """
+    Persist newly created Merchant Center sub-accounts to pa.mc_ids_efficy,
+    mirroring push_to_redshift() in the original create GSD-campaigns.py.
+
+    ``rows`` is a list of (shop_name, shop_id, mc_created, domain, date) tuples,
+    where ``domain`` holds the country (NL/BE/DE) and ``date`` is YYYYMMDD.
+    Only rows for MC accounts that were actually created should be passed —
+    existing/reused accounts are not logged (same as the original).
+
+    Best-effort: exceptions are caught and returned in the result dict so a
+    Redshift hiccup never fails the GSD run.
+    """
+    result: Dict[str, Any] = {"inserted": 0, "error": None}
+    if not rows:
+        return result
+    try:
+        conn = _get_redshift_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pa.mc_ids_efficy (
+                        shop_name TEXT,
+                        shop_id BIGINT,
+                        mc_created BIGINT,
+                        domain TEXT,
+                        date VARCHAR(255)
+                    );
+                    """
+                )
+                conn.commit()
+                execute_values(
+                    cur,
+                    """
+                    INSERT INTO pa.mc_ids_efficy
+                        (shop_name, shop_id, mc_created, domain, date)
+                    VALUES %s
+                    """,
+                    rows,
+                )
+                conn.commit()
+            result["inserted"] = len(rows)
+            logger.info("Pushed %d new MC id(s) to pa.mc_ids_efficy", len(rows))
+        finally:
+            conn.close()
+    except Exception as ex:
+        logger.error("Failed to push MC ids to pa.mc_ids_efficy: %s", ex)
+        result["error"] = str(ex)
+    return result
 
 
 def _get_mc_service():
@@ -1380,7 +1482,10 @@ def add_shopping_product_ad_group_ad(
     ad_group_ad.ad.shopping_product_ad = client.get_type("ShoppingProductAdInfo")
 
     try:
-        response = _mutate_with_retry(
+        # Patient retry: a product ad created seconds after its ad group can be
+        # rejected with RESOURCE_NOT_FOUND until the ad group propagates. Wait it
+        # out (~2 min) rather than fail and leave an empty ad group for a rerun.
+        response = _create_child_with_retry(
             "create product ad",
             lambda: ad_group_ad_service.mutate_ad_group_ads(
                 customer_id=customer_id, operations=[op]
@@ -1583,8 +1688,8 @@ def add_sub_cpr(
     ))
 
     try:
-        _mutate_with_retry(
-            "listing group tree",
+        _create_child_with_retry(
+            "CPR listing group tree",
             lambda: ad_group_criterion_service.mutate_ad_group_criteria(
                 customer_id=customer_id, operations=ops
             ),
@@ -1665,8 +1770,8 @@ def add_sub_cpc(
     ops.append(other_op)
 
     try:
-        _mutate_with_retry(
-            "listing group tree",
+        _create_child_with_retry(
+            "CPC listing group tree",
             lambda: ad_group_criterion_service.mutate_ad_group_criteria(
                 customer_id=customer_id, operations=ops
             ),
@@ -1707,8 +1812,13 @@ def _is_transient_mc_error(ex: Exception) -> bool:
 
 def _get_or_create_mc_account(
     mc_parent_id: str, shop_name: str, ads_customer_id: str
-) -> Optional[str]:
-    """Find or create a Merchant Center sub-account and link to Google Ads."""
+) -> tuple[Optional[str], bool]:
+    """Find or create a Merchant Center sub-account and link to Google Ads.
+
+    Returns ``(mc_id, created)`` where ``created`` is True only when a NEW
+    sub-account was created (vs. an existing one being reused). On failure
+    returns ``(None, False)``.
+    """
     _last_mc_error["msg"] = None  # cleared per attempt; set on failure below
     # Retry get_mc_id on transient MC API errors (read timeout, HTTP 500/503).
     # A lookup that returns None (shop not found) is NOT an error and does not
@@ -1730,13 +1840,15 @@ def _get_or_create_mc_account(
             logger.error("MC lookup failed for '%s'; skipping create to avoid a duplicate: %s",
                          shop_name, ex)
             _last_mc_error["msg"] = _mc_err(ex)
-            return None
+            return None, False
+    created = False
     if mc_id is None:
         mc_id = create_merchant_id(mc_parent_id, shop_name)
         if mc_id is None:
-            return None
+            return None, False
+        created = True
     link_to_google_ads(mc_parent_id, mc_id, ads_customer_id)
-    return mc_id
+    return mc_id, created
 
 
 def _set_campaign_status_by_resource(
@@ -2240,10 +2352,102 @@ def preview_gsd_script(
     return summary
 
 
+# ---------------------------------------------------------------------------
+# Post-run structural verification
+# ---------------------------------------------------------------------------
+
+
+def _check_campaign_structure(
+    ga, customer_id: str, campaign_id: str, campaign_name: str, campaign_type: str
+) -> List[str]:
+    """
+    Return the list of structural issues for one campaign (empty list == OK):
+    no_ad_group / no_product_ad / no_listing_group / wrong_listing_tree. Mirrors
+    the completeness checks _repair_campaign uses, so "verify says bad" lines up
+    with "a rerun would repair it".
+    """
+    issues: List[str] = []
+    if not list(ga.search(customer_id=customer_id, query=(
+            f"SELECT ad_group.resource_name FROM ad_group "
+            f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED'"))):
+        issues.append("no_ad_group")
+    if not list(ga.search(customer_id=customer_id, query=(
+            f"SELECT ad_group_ad.ad.id FROM ad_group_ad "
+            f"WHERE campaign.id = {campaign_id} AND ad_group_ad.status != 'REMOVED'"))):
+        issues.append("no_product_ad")
+    has_lg = bool(list(ga.search(customer_id=customer_id, query=(
+        f"SELECT ad_group_criterion.criterion_id FROM ad_group_criterion "
+        f"WHERE campaign.id = {campaign_id} AND ad_group_criterion.type = 'LISTING_GROUP' "
+        f"AND ad_group_criterion.status != 'REMOVED'"))))
+    if not has_lg:
+        issues.append("no_listing_group")
+    else:
+        label = _parse_campaign_name(campaign_name).get("label")
+        if label and not _tree_targets_label(ga, customer_id, campaign_id, campaign_type, label):
+            issues.append("wrong_listing_tree")
+    return issues
+
+
+def verify_run_campaigns(
+    client: Optional[GoogleAdsClient],
+    campaigns: List[Dict[str, Any]],
+    recheck_delay: int = 15,
+) -> Dict[str, Any]:
+    """
+    Final safety net: confirm each created/repaired campaign has an ad group, a
+    product ad, and a correctly-targeted listing-group tree. Campaigns flagged on
+    the first pass are re-checked once after ``recheck_delay`` seconds so a fresh
+    structure that hasn't propagated to the read API yet is not a false alarm.
+
+    ``campaigns`` items need customer_id, campaign_id, campaign_name and (for tree
+    targeting) type. Returns {checked, ok, problems:[{..., issues:[...]}]}.
+    """
+    client = client or _get_client()
+    ga = client.get_service("GoogleAdsService")
+    _fields = ("campaign_name", "campaign_id", "customer_id", "shop_name", "country", "type")
+
+    problems: List[Dict[str, Any]] = []
+    checked = 0
+    for c in campaigns:
+        camp_id = c.get("campaign_id")
+        cust = c.get("customer_id")
+        if not camp_id or not cust:
+            continue
+        checked += 1
+        issues = _check_campaign_structure(
+            ga, cust, camp_id, c.get("campaign_name", ""), c.get("type", "CPR"))
+        if issues:
+            entry = {k: c.get(k) for k in _fields}
+            entry["issues"] = issues
+            problems.append(entry)
+
+    # Re-check only the flagged ones once, after a delay, to filter propagation lag.
+    if problems and recheck_delay:
+        time.sleep(recheck_delay)
+        still: List[Dict[str, Any]] = []
+        for p in problems:
+            issues = _check_campaign_structure(
+                ga, p["customer_id"], p["campaign_id"], p.get("campaign_name", ""), p.get("type", "CPR"))
+            if issues:
+                p["issues"] = issues
+                still.append(p)
+        problems = still
+
+    result = {"checked": checked, "ok": checked - len(problems), "problems": problems}
+    if problems:
+        for p in problems:
+            logger.warning("VERIFY: campaign '%s' (id=%s) incomplete: %s — a rerun will repair it",
+                           p.get("campaign_name"), p.get("campaign_id"), ", ".join(p["issues"]))
+    else:
+        logger.info("VERIFY: all %d created/repaired campaigns are structurally complete", checked)
+    return result
+
+
 def run_gsd_script(
     date_str: Optional[str] = None,
     shop_names: Optional[List[str]] = None,
     included: bool = False,
+    verify: bool = True,
 ) -> Dict[str, Any]:
     """
     Main GSD campaign creation/pausing flow.
@@ -2274,7 +2478,9 @@ def run_gsd_script(
         "cancelled": False,
     }
     sheet_rows: List[List[Any]] = []                        # one row per processed shop, for the log sheet
+    mc_created_rows: List[tuple] = []                        # (shop_name, shop_id, mc_created, country, date) for pa.mc_ids_efficy
     run_date = datetime.now().strftime("%d-%m-%Y")          # dd-mm-yyyy, matching the original sheet format
+    date_ymd = datetime.now().strftime("%Y%m%d")            # YYYYMMDD, matching the original Redshift push
     _run_cancel["cancel"] = False  # fresh run
     _run_progress.update({"current": 0, "total": 0, "running": True})
 
@@ -2350,7 +2556,7 @@ def run_gsd_script(
                     continue
 
                 # Get or create MC sub-account and link
-                mc_id = _get_or_create_mc_account(mc_parent_id, shop_name, customer_id)
+                mc_id, mc_was_created = _get_or_create_mc_account(mc_parent_id, shop_name, customer_id)
                 if mc_id is None:
                     overall_results["errors"].append({
                         "shop_name": shop_name,
@@ -2359,6 +2565,18 @@ def run_gsd_script(
                         "error": _last_mc_error["msg"] or "failed_to_get_or_create_mc_account",
                     })
                     continue
+
+                # Log ONLY newly created MC sub-accounts to pa.mc_ids_efficy at the
+                # end of the run, mirroring the original create GSD-campaigns.py
+                # (which pushed its `mc_created` list; existing accounts are skipped).
+                if mc_was_created:
+                    try:
+                        _mc_id_int = int(mc_id)
+                    except (TypeError, ValueError):
+                        _mc_id_int = None
+                    mc_created_rows.append(
+                        (shop_name, shop_id, _mc_id_int, country, date_ymd)
+                    )
 
                 # Create campaigns
                 campaign_results = _create_campaigns_for_shop(
@@ -2454,6 +2672,20 @@ def run_gsd_script(
 
     # Append this run to the log sheet (best-effort; never fails the run).
     overall_results["sheet_log"] = _log_run_to_sheet(sheet_rows)
+
+    # Persist newly created MC ids to pa.mc_ids_efficy (best-effort; never fails
+    # the run), mirroring push_to_redshift() in the original create GSD-campaigns.py.
+    overall_results["mc_ids_pushed"] = push_mc_ids_to_redshift(mc_created_rows)
+
+    # Final structural check of everything created/repaired this run (best-effort;
+    # never fails the run). Flags any campaign left without an ad group / product
+    # ad / correct listing tree — the exact gap a rerun's _repair_campaign fixes.
+    if verify and overall_results["created"]:
+        try:
+            overall_results["verification"] = verify_run_campaigns(client, overall_results["created"])
+        except Exception as ex:
+            logger.error("Post-run verification failed: %s", ex)
+            overall_results["verification"] = {"error": str(ex)}
 
     _run_progress["running"] = False
     return overall_results
@@ -2564,4 +2796,105 @@ def backfill_branded_labels(
         logger.info("Branded-label backfill %s account %s: %s",
                     "(dry-run)" if dry_run else "(applied)", cid, acct)
 
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Merchant-ID backfill to pa.mc_ids_efficy
+# ---------------------------------------------------------------------------
+
+
+def backfill_recent_mc_ids_to_redshift(
+    days: int = 2, dry_run: bool = True, customer_ids: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Push the Merchant Center ids of recently created GSD_SCRIPT campaigns to
+    pa.mc_ids_efficy — a one-off backfill for campaigns created before the run
+    started logging MC ids itself.
+
+    "Created recently" is taken from the ``change_event`` resource (the actual
+    CREATE event's change_date_time) — ``campaign.start_date`` was removed from
+    the API. For each account it finds campaigns created in the window, then reads
+    shop_name/shop_id/country from the GSD_SCRIPT campaign name and merchant_id
+    from the shopping setting.
+
+    Rows are deduped per (shop_id, country, merchant_id), so a shop's 2-5 label
+    campaigns collapse to one row — matching the original create GSD-campaigns.py,
+    which logged one mc_created per shop. The ``date`` column gets each campaign's
+    creation date (YYYYMMDD).
+
+    dry_run=True only reports what it would push; dry_run=False also inserts.
+    """
+    client = _get_client()
+    ga = client.get_service("GoogleAdsService")
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if customer_ids is None:
+        customer_ids = sorted({info["customer_id"] for info in ACCOUNTS.values()})
+
+    seen: Dict[tuple, tuple] = {}          # (shop_id, country, mc_id) -> row tuple
+    per_account: Dict[str, int] = {}
+
+    for cid in customer_ids:
+        # 1. Campaign ids CREATEd in the window -> creation date (YYYY-MM-DD).
+        #    change_event needs a finite change_date_time range and a LIMIT, and
+        #    only covers the last ~30 days (fine for a 2-day backfill).
+        created_on: Dict[str, str] = {}
+        for r in ga.search(customer_id=cid, query=f"""
+                SELECT change_event.campaign, change_event.change_date_time
+                FROM change_event
+                WHERE change_event.change_date_time >= '{cutoff} 00:00:00'
+                  AND change_event.change_date_time <= '{now_str}'
+                  AND change_event.change_resource_type = 'CAMPAIGN'
+                  AND change_event.resource_change_operation = 'CREATE'
+                ORDER BY change_event.change_date_time DESC
+                LIMIT 10000"""):
+            camp_id = r.change_event.campaign.rstrip("/").split("/")[-1]
+            # keep the earliest CREATE date seen for a campaign id
+            d = r.change_event.change_date_time[:10]
+            if camp_id not in created_on or d < created_on[camp_id]:
+                created_on[camp_id] = d
+
+        # 2. GSD_SCRIPT campaigns with their merchant id; keep only recent ones.
+        gsd_rn = ensure_campaign_label_exists(client, cid, SCRIPT_LABEL)
+        found = 0
+        for r in ga.search(customer_id=cid, query=f"""
+                SELECT campaign.id, campaign.name,
+                       campaign.shopping_setting.merchant_id
+                FROM campaign
+                WHERE campaign.labels CONTAINS ANY ('{gsd_rn}')
+                  AND campaign.status != 'REMOVED'"""):
+            camp_id = str(r.campaign.id)
+            if camp_id not in created_on:
+                continue  # not created in the window
+            merchant_id = r.campaign.shopping_setting.merchant_id
+            if not merchant_id:  # 0/unset — no MC linked, nothing to log
+                continue
+            parsed = _parse_campaign_name(r.campaign.name)
+            shop_name = parsed.get("shop_name")
+            country = parsed.get("country") or ""
+            try:
+                shop_id_int = int(parsed["shop_id"]) if parsed.get("shop_id") else None
+            except (TypeError, ValueError):
+                shop_id_int = None
+            key = (shop_id_int, country, int(merchant_id))
+            if key in seen:
+                continue
+            date_ymd = created_on[camp_id].replace("-", "")  # YYYYMMDD
+            seen[key] = (shop_name, shop_id_int, int(merchant_id), country, date_ymd)
+            found += 1
+        per_account[cid] = found
+        logger.info("MC-id backfill account %s: %d new MC id(s) since %s", cid, found, cutoff)
+
+    rows = list(seen.values())
+    summary: Dict[str, Any] = {
+        "dry_run": dry_run,
+        "cutoff_date": cutoff,
+        "accounts": per_account,
+        "unique_mc_ids": len(rows),
+        "rows": rows,
+    }
+    if not dry_run:
+        summary["push_result"] = push_mc_ids_to_redshift(rows)
     return summary
