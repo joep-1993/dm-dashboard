@@ -23,11 +23,14 @@ Country -> account mapping and the Google Ads client are reused from
 gsd_campaigns_service so this stays in sync with the rest of GSD Campaigns.
 """
 import csv
+import glob as glob_mod
 import io
 import logging
+import os
 import threading
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Set, Tuple
+from zoneinfo import ZoneInfo
 
 import requests
 from google.ads.googleads.errors import GoogleAdsException
@@ -61,6 +64,16 @@ FLAG_TO_COUNTRY = {
     "is_gsd_de_shop": "DE",
 }
 
+# ---------------------------------------------------------------------------
+# Excel data source (daily scheduled runs)
+# ---------------------------------------------------------------------------
+
+EXCEL_DIR = r"C:\Users\l.davidowski\Documents\Schelduled scripts 2023\script_bc_signalering_gsd_nl_be_efficy"
+EXCEL_SHEET = "Pixel linkage"
+SCHEDULE_HOUR = 9
+SCHEDULE_MINUTE = 50
+AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
+
 
 def _country_customer_ids() -> Dict[str, Set[str]]:
     """Build {country: {customer_id, ...}} from the shared ACCOUNTS map.
@@ -90,6 +103,35 @@ _LL_PROGRESS: Dict[str, Any] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Excel schedule state (daily auto-run at SCHEDULE_HOUR:SCHEDULE_MINUTE CET)
+# ---------------------------------------------------------------------------
+
+_EXCEL_TIMER: Optional[threading.Timer] = None
+_EXCEL_LOCK = threading.Lock()
+_EXCEL_STATE: Dict[str, Any] = {
+    "enabled": True,
+    "next_run_at": None,
+    "last_run_at": None,
+    "last_file": None,
+    "last_error": None,
+}
+
+# Cached Excel data — loaded daily at SCHEDULE_HOUR:SCHEDULE_MINUTE or on
+# demand via /ll/excel-load. The Preview/Run flow consumes this cache when
+# source='excel', so the actual campaigns are only mutated when the user
+# explicitly clicks "Run" in the dashboard.
+_EXCEL_DATA: Dict[str, Any] = {
+    "feed": None,
+    "flags": None,
+    "file": None,
+    "loaded_at": None,
+    "shop_count": 0,
+    "pause_count": 0,
+    "enable_count": 0,
+}
+
+
 def _progress_set(**kw: Any) -> None:
     with _LL_LOCK:
         _LL_PROGRESS.update(kw)
@@ -106,6 +148,7 @@ def start_ll_run(
     date_str: Optional[str] = None,
     shop_names: Optional[List[str]] = None,
     included: bool = False,
+    source: str = "feed",
 ) -> Dict[str, Any]:
     """Kick off a low-linkage run in a background thread and return immediately.
 
@@ -125,7 +168,7 @@ def start_ll_run(
 
     def _worker() -> None:
         try:
-            res = run_low_linkage(dry_run, date_str, shop_names, included)
+            res = run_low_linkage(dry_run, date_str, shop_names, included, source)
             _progress_set(
                 result=res, done=True, phase="Done",
                 processed=_LL_PROGRESS.get("total", 0),
@@ -225,6 +268,125 @@ def fetch_feed(url: str = FEED_URL) -> List[Dict[str, Any]]:
         })
     logger.info("GSD LL: fetched %d usable feed rows", len(rows))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Excel data source
+# ---------------------------------------------------------------------------
+
+
+def _newest_excel(directory: str = EXCEL_DIR) -> Optional[str]:
+    """Return the path to the newest gsd_shops_nl_be_*.xlsx file."""
+    pattern = os.path.join(directory, "gsd_shops_nl_be_*.xlsx")
+    files = glob_mod.glob(pattern)
+    if not files:
+        return None
+    return max(files, key=os.path.getmtime)
+
+
+def fetch_feed_from_excel(
+    filepath: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, int]], str]:
+    """Read the 'Pixel linkage' sheet from an Excel file.
+
+    Returns (feed_rows, flags_by_shop, filepath) where:
+    - feed_rows: [{shop_id, shop_name, linkage, gsd}, ...] — same shape as fetch_feed()
+    - flags_by_shop: {shop_id: {is_gsd_nl_shop, is_gsd_be_shop, is_gsd_de_shop}}
+    - filepath: the actual file that was read
+    """
+    import pandas as pd
+
+    if filepath is None:
+        filepath = _newest_excel()
+    if filepath is None:
+        raise FileNotFoundError(f"No gsd_shops_nl_be_*.xlsx files found in {EXCEL_DIR}")
+
+    df = pd.read_excel(filepath, sheet_name=EXCEL_SHEET, engine="openpyxl")
+
+    feed: List[Dict[str, Any]] = []
+    flags: Dict[int, Dict[str, int]] = {}
+    for _, row in df.iterrows():
+        shop_id = int(row["shop_id"])
+        linkage_val = row.get("LinkagePercentage")
+        feed.append({
+            "shop_id": shop_id,
+            "shop_name": str(row["ShopNaam"]),
+            "linkage": float(linkage_val) if pd.notna(linkage_val) else None,
+            "gsd": int(row["linkage_gsd"]),
+        })
+        flags[shop_id] = {
+            "is_gsd_nl_shop": int(row.get("is_gsd_nl", 0) or 0),
+            "is_gsd_be_shop": int(row.get("is_gsd_be", 0) or 0),
+            "is_gsd_de_shop": int(row.get("is_gsd_de", 0) or 0),
+        }
+
+    logger.info("GSD LL Excel: read %d rows from %s", len(feed), os.path.basename(filepath))
+    return feed, flags, filepath
+
+
+def _send_slack(text: str) -> None:
+    """Best-effort Slack DM using the shared bot token."""
+    token = os.environ.get("SLACK_BOT_TOKEN", "")
+    user_id = os.environ.get("SLACK_USER_ID", "")
+    if not token or not user_id:
+        return
+    try:
+        requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"channel": user_id, "text": text},
+            timeout=15,
+        )
+    except Exception:
+        logger.warning("GSD LL: Slack notification failed", exc_info=True)
+
+
+def load_excel_data(filepath: Optional[str] = None) -> Dict[str, Any]:
+    """Read the newest Excel file and store in the in-memory cache.
+
+    Called daily by the scheduler and on-demand via POST /ll/excel-load.
+    Does NOT pause/enable any campaigns — that only happens when the user
+    clicks Preview or Run in the dashboard with source='excel'.
+    """
+    feed, flags, path = fetch_feed_from_excel(filepath)
+    fname = os.path.basename(path)
+    pause_n = sum(1 for r in feed if r["gsd"] == 0)
+    enable_n = sum(1 for r in feed if r["gsd"] == 1)
+    status = {
+        "feed": feed,
+        "flags": flags,
+        "file": fname,
+        "loaded_at": datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds"),
+        "shop_count": len(feed),
+        "pause_count": pause_n,
+        "enable_count": enable_n,
+    }
+    with _EXCEL_LOCK:
+        _EXCEL_DATA.update(status)
+    logger.info(
+        "GSD LL Excel cache loaded: %d shops (%d pause, %d enable) from %s",
+        status["shop_count"], pause_n, enable_n, fname,
+    )
+    _send_slack(
+        f":white_check_mark: *GSD Low Linkage — Excel data loaded*\n"
+        f"File: {fname}\n"
+        f"Shops: {len(feed)} ({pause_n} to pause, {enable_n} to enable)\n"
+        f"Ready for Preview / Run in the dashboard."
+    )
+    return get_excel_data_status()
+
+
+def get_excel_data_status() -> Dict[str, Any]:
+    """Return the cached Excel data status (without the raw data itself)."""
+    with _EXCEL_LOCK:
+        return {
+            "file": _EXCEL_DATA["file"],
+            "loaded_at": _EXCEL_DATA["loaded_at"],
+            "shop_count": _EXCEL_DATA["shop_count"],
+            "pause_count": _EXCEL_DATA["pause_count"],
+            "enable_count": _EXCEL_DATA["enable_count"],
+            "has_data": _EXCEL_DATA["feed"] is not None,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -688,6 +850,7 @@ def run_low_linkage(
     date_str: Optional[str] = None,
     shop_names: Optional[List[str]] = None,
     included: bool = False,
+    source: str = "feed",
 ) -> Dict[str, Any]:
     """Fetch the feed and pause / re-enable low-linkage GSD campaigns.
 
@@ -697,15 +860,20 @@ def run_low_linkage(
         value lists exactly what *would* be paused / enabled.
     date_str : optional YYYY-MM-DD; evaluate the shop_list GSD flags as of this
         date (most recent row on or before it). Defaults to the absolute latest.
+        Ignored when source='excel' (the Excel already contains the flags).
     shop_names : optional list of feed shop names to scope the run to.
     included : with shop_names, True = process ONLY those shops, False = process
         all EXCEPT those. Ignored when shop_names is empty.
+    source : 'feed' (pixel-monitor CSV + Redshift flags) or 'excel' (local
+        Excel file — uses the newest gsd_shops_nl_be_*.xlsx from EXCEL_DIR,
+        which already contains the country flags so no Redshift query is needed).
     """
     started = datetime.now()
     result: Dict[str, Any] = {
         "started_at": started.isoformat(timespec="seconds"),
         "dry_run": dry_run,
         "date": date_str,
+        "source": source,
         "feed_rows": 0,
         "paused": [],
         "enabled": [],
@@ -713,14 +881,38 @@ def run_low_linkage(
         "errors": [],
     }
 
-    # 1. Feed
-    _progress_set(phase="Fetching linkage feed…")
-    try:
-        feed = fetch_feed()
-    except Exception as ex:
-        logger.error("GSD LL: failed to fetch feed: %s", ex)
-        result["errors"].append({"step": "fetch_feed", "error": str(ex)})
-        return result
+    # 1. Feed — from cached Excel data, fresh Excel read, or pixel-monitor CSV
+    excel_flags: Optional[Dict[int, Dict[str, int]]] = None
+    if source == "excel":
+        # Prefer the in-memory cache (populated daily by the scheduler or
+        # manually via /ll/excel-load). Fall back to a direct file read if
+        # the cache is empty (first start or after a server restart).
+        with _EXCEL_LOCK:
+            cached_feed = _EXCEL_DATA["feed"]
+            cached_flags = _EXCEL_DATA["flags"]
+            cached_file = _EXCEL_DATA["file"]
+        if cached_feed is not None:
+            _progress_set(phase=f"Using cached Excel data ({cached_file})…")
+            feed = list(cached_feed)          # shallow copy — safe to filter
+            excel_flags = cached_flags
+            result["excel_file"] = cached_file
+        else:
+            _progress_set(phase="Reading Excel (no cache yet)…")
+            try:
+                feed, excel_flags, excel_path = fetch_feed_from_excel()
+                result["excel_file"] = os.path.basename(excel_path)
+            except Exception as ex:
+                logger.error("GSD LL: failed to read Excel: %s", ex)
+                result["errors"].append({"step": "read_excel", "error": str(ex)})
+                return result
+    else:
+        _progress_set(phase="Fetching linkage feed…")
+        try:
+            feed = fetch_feed()
+        except Exception as ex:
+            logger.error("GSD LL: failed to fetch feed: %s", ex)
+            result["errors"].append({"step": "fetch_feed", "error": str(ex)})
+            return result
 
     # Optional shop-name include/exclude filter (case-insensitive on ShopNaam).
     if shop_names:
@@ -730,17 +922,22 @@ def run_low_linkage(
                     if (r["shop_name"].lower() in wanted) == bool(included)]
 
     result["feed_rows"] = len(feed)
-    _progress_set(total=len(feed), phase="Reading shop GSD flags…")
     if not feed:
+        _progress_set(total=0, phase="No shops to process")
         return result
 
-    # 2. Flags as of the requested date (batch)
-    try:
-        flags_by_shop = get_shop_flags([r["shop_id"] for r in feed], date_str)
-    except Exception as ex:
-        logger.error("GSD LL: failed to fetch shop flags: %s", ex)
-        result["errors"].append({"step": "shop_flags", "error": str(ex)})
-        return result
+    # 2. Flags — from Excel (already loaded) or from Redshift
+    if excel_flags is not None:
+        flags_by_shop = excel_flags
+        _progress_set(total=len(feed), phase="Processing shops…")
+    else:
+        _progress_set(total=len(feed), phase="Reading shop GSD flags…")
+        try:
+            flags_by_shop = get_shop_flags([r["shop_id"] for r in feed], date_str)
+        except Exception as ex:
+            logger.error("GSD LL: failed to fetch shop flags: %s", ex)
+            result["errors"].append({"step": "shop_flags", "error": str(ex)})
+            return result
 
     _progress_set(phase="Processing shops…")
 
@@ -1032,3 +1229,100 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
                 result["paused_count"], result["enabled_count"],
                 len(result["skipped"]), len(result["errors"]))
     return result
+
+
+# ---------------------------------------------------------------------------
+# Daily Excel scheduler
+# ---------------------------------------------------------------------------
+
+
+def _seconds_until(hour: int, minute: int) -> Tuple[float, datetime]:
+    """Seconds from now until the next occurrence of hour:minute in Amsterdam time."""
+    now = datetime.now(AMSTERDAM_TZ)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds(), target
+
+
+def _excel_scheduled_run() -> None:
+    """Called by the timer: load (cache) the newest Excel data and reschedule.
+
+    Does NOT pause/enable any campaigns — only refreshes the in-memory cache
+    so the user can Preview/Run from the dashboard using the latest data.
+    """
+    try:
+        logger.info("GSD LL Excel scheduler: loading daily data")
+        with _EXCEL_LOCK:
+            _EXCEL_STATE["last_run_at"] = datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds")
+            _EXCEL_STATE["last_error"] = None
+
+        status = load_excel_data()
+
+        with _EXCEL_LOCK:
+            _EXCEL_STATE["last_file"] = status.get("file")
+    except Exception as ex:
+        logger.exception("GSD LL Excel scheduler: data load failed")
+        with _EXCEL_LOCK:
+            _EXCEL_STATE["last_error"] = str(ex)
+        _send_slack(
+            f":x: *GSD Low Linkage — Excel data load failed*\n"
+            f"Error: {ex}"
+        )
+    finally:
+        _schedule_next_excel_run()
+
+
+def _schedule_next_excel_run() -> None:
+    """Set a timer for the next SCHEDULE_HOUR:SCHEDULE_MINUTE CET run."""
+    global _EXCEL_TIMER
+    with _EXCEL_LOCK:
+        if not _EXCEL_STATE["enabled"]:
+            _EXCEL_STATE["next_run_at"] = None
+            return
+
+    secs, target = _seconds_until(SCHEDULE_HOUR, SCHEDULE_MINUTE)
+    with _EXCEL_LOCK:
+        _EXCEL_STATE["next_run_at"] = target.isoformat(timespec="seconds")
+
+    _EXCEL_TIMER = threading.Timer(secs, _excel_scheduled_run)
+    _EXCEL_TIMER.daemon = True
+    _EXCEL_TIMER.start()
+    logger.info("GSD LL Excel scheduler: next run at %s (in %.0f seconds)", target, secs)
+
+
+def start_excel_scheduler() -> None:
+    """Initialize the daily Excel scheduler. Call on app startup."""
+    _schedule_next_excel_run()
+
+
+def stop_excel_scheduler() -> None:
+    """Cancel the pending timer. Call on app shutdown."""
+    global _EXCEL_TIMER
+    if _EXCEL_TIMER:
+        _EXCEL_TIMER.cancel()
+        _EXCEL_TIMER = None
+
+
+def toggle_excel_schedule(enabled: bool) -> Dict[str, Any]:
+    """Enable or disable the daily Excel schedule."""
+    global _EXCEL_TIMER
+    with _EXCEL_LOCK:
+        _EXCEL_STATE["enabled"] = enabled
+
+    if enabled:
+        _schedule_next_excel_run()
+    else:
+        if _EXCEL_TIMER:
+            _EXCEL_TIMER.cancel()
+            _EXCEL_TIMER = None
+        with _EXCEL_LOCK:
+            _EXCEL_STATE["next_run_at"] = None
+
+    return get_excel_schedule_status()
+
+
+def get_excel_schedule_status() -> Dict[str, Any]:
+    """Return the current schedule state for the UI."""
+    with _EXCEL_LOCK:
+        return dict(_EXCEL_STATE)

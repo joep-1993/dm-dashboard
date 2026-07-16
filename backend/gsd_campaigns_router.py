@@ -24,6 +24,10 @@ from backend.gsd_ll_service import (
     get_ll_progress,
     get_history as get_ll_history,
     get_shop_cycles as get_ll_shop_cycles,
+    get_excel_schedule_status,
+    toggle_excel_schedule,
+    load_excel_data,
+    get_excel_data_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,11 +161,12 @@ async def run_low_linkage_endpoint(
     date: Optional[str] = Query(None, description="Evaluate shop_list GSD flags as of this date (YYYY-MM-DD)"),
     shop_names: Optional[str] = Query(None, description="Comma-separated feed shop names to scope the run"),
     included: bool = Query(False, description="With shop_names: True = only these shops, False = all except"),
+    source: str = Query("feed", description="Data source: 'feed' (pixel-monitor CSV) or 'excel' (local Excel file)"),
 ):
     """Start a low-linkage run in the background; poll /ll/progress for status."""
     try:
         shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
-        return start_ll_run(dry_run, date, shop_list, included)
+        return start_ll_run(dry_run, date, shop_list, included, source)
     except Exception as e:
         logger.error(f"Error starting GSD low-linkage process: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -317,3 +322,39 @@ async def run_gsd_script_endpoint(
     except Exception as e:
         logger.error(f"Error running GSD script: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ll/excel-schedule")
+def excel_schedule_endpoint():
+    """Return the daily Excel data-load schedule status."""
+    return get_excel_schedule_status()
+
+
+@router.post("/ll/excel-schedule/toggle")
+def excel_schedule_toggle_endpoint(
+    enabled: bool = Query(..., description="Enable or disable the daily schedule"),
+):
+    """Enable or disable the daily Excel data-load at 9:50 CET."""
+    return toggle_excel_schedule(enabled)
+
+
+@router.post("/ll/excel-load")
+async def excel_load_endpoint():
+    """Load (cache) the newest Excel file for use by Preview/Run.
+
+    Called daily by the Windows Scheduled Task or manually from the UI.
+    Does NOT pause/enable any campaigns.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, load_excel_data)
+        return result
+    except Exception as e:
+        logger.error(f"Error loading Excel data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ll/excel-data")
+def excel_data_endpoint():
+    """Return the cached Excel data status (file, counts, load time)."""
+    return get_excel_data_status()

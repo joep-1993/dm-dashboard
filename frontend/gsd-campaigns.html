@@ -336,8 +336,18 @@
                 <h5 class="mb-0">Pause / Enable low linkage shops</h5>
             </div>
             <div class="card-body">
+                <!-- Data source selector -->
+                <div class="mb-3 d-flex align-items-center gap-3">
+                    <label class="form-label mb-0 fw-bold" style="font-size: 0.9rem;">Data source</label>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <input type="radio" class="btn-check" name="llSource" id="llSourceFeed" value="feed" checked>
+                        <label class="btn btn-outline-secondary" for="llSourceFeed">Pixel Monitor Feed</label>
+                        <input type="radio" class="btn-check" name="llSource" id="llSourceExcel" value="excel">
+                        <label class="btn btn-outline-secondary" for="llSourceExcel">Excel File</label>
+                    </div>
+                </div>
                 <div class="row g-3">
-                    <div class="col-md-3">
+                    <div class="col-md-3" id="llDateCol">
                         <label for="llDate" class="form-label">Date (optional)</label>
                         <input type="date" class="form-control" id="llDate" placeholder="Leave empty for most recent">
                     </div>
@@ -360,6 +370,19 @@
                             <button class="btn btn-sm" style="background: #CC5500; color: white; border: none; transition: background-color 0.2s ease; padding: 0.25rem 0.6rem; min-width: 70px;" onmouseover="this.style.backgroundColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500'" onclick="runLowLinkage(false)" id="llRunBtn">Run</button>
                         </div>
                     </div>
+                </div>
+                <!-- Excel data cache + daily schedule -->
+                <div class="border-top pt-3 mt-3" id="excelScheduleSection">
+                    <div class="d-flex align-items-center gap-3 flex-wrap mb-2">
+                        <span class="fw-bold" style="font-size: 0.9rem;">Daily data load (09:50 CET)</span>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="excelScheduleToggle" checked onchange="toggleExcelSchedule(this.checked)">
+                            <label class="form-check-label" for="excelScheduleToggle" id="excelScheduleLabel">Enabled</label>
+                        </div>
+                        <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; padding: 0.15rem 0.5rem; font-size: 0.8rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="manualExcelLoad()" id="excelLoadBtn">Load now</button>
+                        <span id="excelScheduleStatus" class="text-muted" style="font-size: 0.82rem;"></span>
+                    </div>
+                    <div id="excelDataStatus" class="text-muted" style="font-size: 0.82rem;"></div>
                 </div>
                 <div class="progress-area mt-3" id="llProgressArea" style="display: none;">
                     <div id="llProgressBarWrap" class="mb-3 d-none">
@@ -494,7 +517,12 @@
             loadStats();
             loadCampaigns();
             loadLLHistory();
+            loadExcelSchedule();
             renderLog();
+            // Source toggle: hide date field when Excel is selected
+            document.querySelectorAll('input[name="llSource"]').forEach(r => {
+                r.addEventListener('change', toggleLLSource);
+            });
         });
 
         // Shop filter mode is only meaningful with shop names entered — grey out otherwise.
@@ -515,6 +543,84 @@
                 const lbl = r.closest('.form-check');
                 if (lbl) lbl.style.opacity = hasShops ? '1' : '0.5';
             });
+        }
+
+        // Toggle between feed and excel source — hide date field for Excel.
+        function toggleLLSource() {
+            const isExcel = document.getElementById('llSourceExcel').checked;
+            const dateCol = document.getElementById('llDateCol');
+            dateCol.style.opacity = isExcel ? '0.35' : '1';
+            dateCol.style.pointerEvents = isExcel ? 'none' : '';
+            if (isExcel) document.getElementById('llDate').value = '';
+        }
+
+        // --- Excel schedule + data cache ---
+        async function loadExcelSchedule() {
+            try {
+                const [schedRes, dataRes] = await Promise.all([
+                    fetch(`${API_BASE}/api/gsd-campaigns/ll/excel-schedule`),
+                    fetch(`${API_BASE}/api/gsd-campaigns/ll/excel-data`),
+                ]);
+                if (schedRes.ok) {
+                    const s = await schedRes.json();
+                    const toggle = document.getElementById('excelScheduleToggle');
+                    const label = document.getElementById('excelScheduleLabel');
+                    const status = document.getElementById('excelScheduleStatus');
+                    toggle.checked = s.enabled;
+                    label.textContent = s.enabled ? 'Enabled' : 'Disabled';
+                    let parts = [];
+                    if (s.next_run_at) {
+                        const d = new Date(s.next_run_at);
+                        parts.push('Next load: ' + d.toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
+                    }
+                    if (s.last_run_at) {
+                        const d = new Date(s.last_run_at);
+                        parts.push('Last load: ' + d.toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
+                    }
+                    if (s.last_error) parts.push('Error: ' + s.last_error);
+                    status.textContent = parts.join(' | ');
+                    status.style.color = s.last_error ? '#dc3545' : '';
+                }
+                if (dataRes.ok) {
+                    const d = await dataRes.json();
+                    const el = document.getElementById('excelDataStatus');
+                    if (d.has_data) {
+                        const t = new Date(d.loaded_at);
+                        el.innerHTML = `<span style="color: #198754;">&#9679;</span> Data loaded: <b>${escapeHtml(d.file)}</b> `
+                            + `(${d.shop_count} shops: ${d.pause_count} to pause, ${d.enable_count} to enable) `
+                            + `— ${t.toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`;
+                    } else {
+                        el.innerHTML = `<span style="color: #dc3545;">&#9679;</span> No Excel data loaded yet — click "Load now" or wait for the daily schedule.`;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to load Excel schedule status', e);
+            }
+        }
+
+        async function toggleExcelSchedule(enabled) {
+            try {
+                await fetch(`${API_BASE}/api/gsd-campaigns/ll/excel-schedule/toggle?enabled=${enabled}`, { method: 'POST' });
+                loadExcelSchedule();
+            } catch (e) {
+                alert('Failed to toggle schedule: ' + e.message);
+            }
+        }
+
+        async function manualExcelLoad() {
+            const btn = document.getElementById('excelLoadBtn');
+            btn.disabled = true;
+            btn.textContent = 'Loading…';
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/ll/excel-load`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                loadExcelSchedule();
+            } catch (e) {
+                alert('Failed to load Excel data: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Load now';
+            }
         }
 
         // --- Stats ---
@@ -904,12 +1010,18 @@
             const content = document.getElementById('llProgressContent');
             const barWrap = document.getElementById('llProgressBarWrap');
 
-            if (!dryRun && !confirm('Run for real? This will PAUSE and RE-ENABLE live GSD campaigns based on the current linkage feed.')) {
+            const source = document.querySelector('input[name="llSource"]:checked').value;
+            if (!dryRun && !confirm(
+                source === 'excel'
+                    ? 'Run for real? This will PAUSE and RE-ENABLE live GSD campaigns based on the latest Excel file.'
+                    : 'Run for real? This will PAUSE and RE-ENABLE live GSD campaigns based on the current linkage feed.'
+            )) {
                 return;
             }
 
             const params = new URLSearchParams();
             params.set('dry_run', dryRun);
+            params.set('source', source);
             const date = document.getElementById('llDate').value || '';
             if (date) params.set('date', date);
             const shopText = document.getElementById('llShopNames').value.trim();
@@ -954,6 +1066,7 @@
                     loadLLHistory();
                     loadCampaigns();
                     loadStats();
+                    loadExcelSchedule();
                 }
             } catch (err) {
                 barWrap.classList.add('d-none');

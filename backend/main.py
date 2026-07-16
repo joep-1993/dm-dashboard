@@ -219,11 +219,16 @@ async def get_runtime_config():
 async def startup_event():
     """Run startup tasks for all services."""
     await cleanup_thema_ads_jobs()
+    # Start the daily Excel-based low-linkage scheduler (9:50 CET)
+    from backend.gsd_ll_service import start_excel_scheduler
+    start_excel_scheduler()
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close long-lived HTTP sessions to prevent CLOSE_WAIT socket buildup."""
+    from backend.gsd_ll_service import stop_excel_scheduler
+    stop_excel_scheduler()
     from backend import (
         gpt_service, scraper_service, link_validator, faq_service,
         ai_titles_service, url_validator_service,
