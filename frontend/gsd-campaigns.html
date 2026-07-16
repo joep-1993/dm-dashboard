@@ -47,6 +47,7 @@
         #gsdActivityTable th { background: #f8f9fa; white-space: nowrap; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         .campaign-table td { vertical-align: middle; }
         .campaign-table .col-country { text-align: center; }
+        .campaign-table .col-status { text-align: center; }
 
         .btn-action { font-size: 0.8rem; padding: 0.25rem 0; border-radius: 4px; width: 70px; text-align: center; display: inline-block; }
         .btn-pause { border: 1px solid #e0a800; color: #e0a800; background: transparent; }
@@ -294,7 +295,7 @@
                                 <th class="sortable" data-sort="created_date" onclick="sortBy('created_date')">Date</th>
                                 <th class="sortable" data-sort="shop_name" onclick="sortBy('shop_name')">Shop</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortBy('country')">Country</th>
-                                <th class="sortable" data-sort="status" onclick="sortBy('status')">Status</th>
+                                <th class="col-status sortable" data-sort="status" onclick="sortBy('status')">Status</th>
                                 <th class="sortable" data-sort="campaign_name" onclick="sortBy('campaign_name')">Campaign</th>
                             </tr>
                         </thead>
@@ -330,14 +331,8 @@
 
         <!-- Pause/Enable low linkage shops -->
         <div class="card mb-4">
-            <div class="card-header d-flex align-items-center gap-2" style="background: #5e4a90; color: white;">
+            <div class="card-header" style="background: #5e4a90; color: white;">
                 <h5 class="mb-0">Pause / Enable low linkage shops</h5>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; flex: 0 0 auto;">
-                    <title>Reads the GSD linkage feed and, only for shops flagged as GSD shops in shop_list (most recent date): pauses the ENABLED campaigns of shops with GSD = 0 (tagging them GSD_LL_PAUSED), and re-enables previously-paused campaigns of shops with GSD = 1 (removing the label). Every action is logged to pa.jvs_gsd_ll_campaigns.</title>
-                    <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
-                    <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
-                    <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
-                </svg>
             </div>
             <div class="card-body">
                 <div class="row g-3">
@@ -689,7 +684,7 @@
                     <td>${c.created_date || '-'}</td>
                     <td title="${escapeHtml(c.shop_name || '')}">${escapeHtml(c.shop_name || '-')}</td>
                     <td class="col-country">${c.country || '-'}</td>
-                    <td>${statusBadge}</td>
+                    <td class="col-status">${statusBadge}</td>
                     <td title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
                 </tr>`;
             }).join('');
