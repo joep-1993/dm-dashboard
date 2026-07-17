@@ -835,6 +835,56 @@ def _find_labeled_campaigns(client, customer_id: str, shop_id: int) -> List[Dict
     return out
 
 
+def _find_all_shopping_campaigns(client, customer_id: str, shop_id: int) -> List[Dict[str, str]]:
+    """All non-REMOVED Shopping campaigns for this shop, regardless of status or label.
+
+    Used for diagnostics when the primary lookup returns no results, to explain
+    *why* (already paused, already enabled, no campaigns at all, etc.).
+    """
+    ga_service = client.get_service("GoogleAdsService")
+    name_pattern = _name_contains_regexp(f"[shop_id:{int(shop_id)}]")
+    query = f"""
+        SELECT campaign.id, campaign.name, campaign.status
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+          AND campaign.advertising_channel_type = 'SHOPPING'
+          AND campaign.name REGEXP_MATCH '{name_pattern}'
+    """
+    out: List[Dict[str, str]] = []
+    try:
+        for row in ga_service.search(customer_id=customer_id, query=query):
+            out.append({
+                "campaign_id": str(row.campaign.id),
+                "campaign_name": row.campaign.name,
+                "status": row.campaign.status.name,
+            })
+    except GoogleAdsException as ex:
+        logger.error("All-campaign lookup failed (%s, shop_id=%s): %s", customer_id, shop_id, ex)
+        raise
+    return out
+
+
+def _diagnose_no_campaigns(client, country: str, shop_id: int, gsd: int) -> str:
+    """Determine why no actionable campaigns were found for a shop+country.
+
+    Returns a human-readable reason string used in the preview 'skipped' rows.
+    """
+    all_statuses: set = set()
+    for cid in sorted(COUNTRY_CUSTOMER_IDS.get(country, set())):
+        try:
+            for camp in _find_all_shopping_campaigns(client, cid, shop_id):
+                all_statuses.add(camp["status"])
+        except Exception:
+            pass
+
+    if not all_statuses:
+        return "no_shopping_campaigns"
+    if gsd == 0:
+        return "already_paused" if all_statuses <= {"PAUSED"} else "no_enabled_campaigns"
+    else:
+        return "already_enabled" if all_statuses <= {"ENABLED"} else "no_ll_label"
+
+
 # ---------------------------------------------------------------------------
 # Main flow
 # ---------------------------------------------------------------------------
@@ -982,15 +1032,13 @@ def run_low_linkage(
 
             countries = _countries_for_shop(flags)
             if not countries:
-                result["skipped"].append({
-                    "shop_id": shop_id, "shop_name": shop_name,
-                    "reason": "not_a_gsd_shop",
-                })
                 continue
 
             action = "Paused" if gsd == 0 else "Enabled"
 
             for country in countries:
+                found_in_country = 0
+                had_error = False
                 for customer_id in sorted(COUNTRY_CUSTOMER_IDS.get(country, set())):
                     try:
                         if gsd == 0:
@@ -998,12 +1046,15 @@ def run_low_linkage(
                         else:
                             campaigns = _find_labeled_campaigns(client, customer_id, shop_id)
                     except Exception as ex:
+                        had_error = True
                         result["errors"].append({
                             "shop_id": shop_id, "shop_name": shop_name,
                             "country": country, "customer_id": customer_id,
                             "step": "lookup", "error": str(ex),
                         })
                         continue
+
+                    found_in_country += len(campaigns)
 
                     for camp in campaigns:
                         entry = {
@@ -1064,6 +1115,21 @@ def run_low_linkage(
                                          action, camp["campaign_id"], ex)
                             result.setdefault("audit_failures", []).append(
                                 {**entry, "error": str(ex)})
+
+                # After all customer_ids for this country: if nothing was found,
+                # diagnose WHY so the preview shows a useful reason.
+                if found_in_country == 0 and not had_error:
+                    try:
+                        reason = _diagnose_no_campaigns(client, country, shop_id, gsd)
+                    except Exception:
+                        reason = "lookup_failed"
+                    result["skipped"].append({
+                        "shop_id": shop_id,
+                        "shop_name": shop_name,
+                        "country": country,
+                        "linkage": linkage,
+                        "reason": reason,
+                    })
 
         # One shop-cycle bump per (shop, country) event actually mutated this run
         # (best-effort; a counter miss must never fail a real mutation).
