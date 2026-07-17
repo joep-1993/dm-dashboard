@@ -145,8 +145,9 @@
         .ll-preview-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .ll-preview-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .ll-preview-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
-        /* Expanded detail sub-table: campaign name on one line with scroll */
-        .ll-detail-table td.camp-name { white-space: nowrap; max-width: 350px; overflow-x: auto; display: block; }
+        /* Expanded detail sub-table: full campaign names, single horizontal scroll on wrapper */
+        .ll-detail-table { white-space: nowrap; }
+        .ll-detail-table td:last-child, .ll-detail-table th:last-child { text-align: center; }
 
         /* Loading skeleton rows — keep the Campaigns table at full height while
            campaigns load so the layout below doesn't shift on first paint. */
@@ -1370,13 +1371,15 @@
 
             row.insertAdjacentHTML('afterend', `<tr id="ll-detail-${groupKey}">
                 <td colspan="${cols}" class="bg-light py-2">
-                    <table class="table table-bordered bg-white mb-0 small ll-detail-table" style="width:85%; min-width:400px; margin:0 auto;">
-                        <thead><tr>
-                            <th style="text-align:left; padding:6px 14px;">Campaign</th>
-                            <th style="padding:6px 14px; white-space:nowrap;">Action</th>
-                        </tr></thead>
-                        <tbody>${subRows}</tbody>
-                    </table>
+                    <div style="width:85%; min-width:400px; margin:0 auto; overflow-x:auto;">
+                        <table class="table table-bordered bg-white mb-0 small ll-detail-table" style="width:100%;">
+                            <thead><tr>
+                                <th style="text-align:left; padding:6px 14px;">Campaign</th>
+                                <th style="padding:6px 14px; white-space:nowrap; width:120px;">Action</th>
+                            </tr></thead>
+                            <tbody>${subRows}</tbody>
+                        </table>
+                    </div>
                 </td>
             </tr>`);
         }
