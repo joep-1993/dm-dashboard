@@ -151,12 +151,12 @@ body {
 .nav-dashboard-btn {
     font-size: 1.1rem !important;
     font-weight: 700 !important;
-    /* Same fixed height as .nav-dropdown-toggle; no vertical padding so the
-       apps icon is centred and the button is exactly as tall as the menu
-       buttons. */
+    /* Square: width == height (== the .nav-dropdown-toggle height), no padding,
+       icon centred both ways. */
+    width: 2.25rem;
     height: 2.25rem;
     box-sizing: border-box;
-    padding: 0 0.85rem !important;
+    padding: 0 !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -168,15 +168,15 @@ body {
 
 /* Shrink nav text on smaller screens to prevent wrapping */
 @media (max-width: 1600px) {
-    .nav-dropdown-toggle, .nav-dashboard-btn { font-size: 0.9rem !important; padding: 0.35rem 0.6rem !important; }
+    .nav-dropdown-toggle { font-size: 0.9rem !important; padding: 0.35rem 0.6rem !important; }
     .nav-dropdown-item { font-size: 0.85rem; padding: 0.45rem 0.8rem; }
 }
 @media (max-width: 1200px) {
-    .nav-dropdown-toggle, .nav-dashboard-btn { font-size: 0.8rem !important; padding: 0.3rem 0.5rem !important; }
+    .nav-dropdown-toggle { font-size: 0.8rem !important; padding: 0.3rem 0.5rem !important; }
     .nav-dropdown-item { font-size: 0.75rem; padding: 0.4rem 0.7rem; }
 }
 @media (max-width: 992px) {
-    .nav-dropdown-toggle, .nav-dashboard-btn { font-size: 0.7rem !important; padding: 0.25rem 0.4rem !important; }
+    .nav-dropdown-toggle { font-size: 0.7rem !important; padding: 0.25rem 0.4rem !important; }
     .nav-dropdown-item { font-size: 0.65rem; padding: 0.35rem 0.6rem; }
 }
 
