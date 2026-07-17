@@ -22,6 +22,15 @@ hexes inline, use the token or the class that references it:
   `nav-dropdown-item active` and its group toggle `nav-dropdown-toggle nav-dropdown-active`.
   **Adding a tool means adding its link to the navbar of *every* page**, not just
   the new one.
+- **Apps button** (far-right, `a.btn.btn-light.nav-dashboard-btn`, links to
+  `dashboard.html`): icon-only, inline 9-square-grid SVG with `fill="currentColor"`,
+  recoloured brand purple via `.nav-dashboard-btn svg { color:#5e4a90 }`. It and
+  `.nav-dropdown-toggle` share an explicit `height:2.25rem` + `box-sizing:border-box`
+  + centred flex content so text and icon buttons are pixel-identical in height —
+  do **not** try to match heights via padding (Bootstrap `.btn` `line-height:1.5`
+  vs the native toggles' `normal` makes that unreliable). The apps button is
+  deliberately **excluded from the responsive `@media` padding/font rules** (fixed
+  `2.75rem`-wide box at every breakpoint). Icon markup is hand-duplicated per page.
 - **Fixed width wrapper — same on every tool:**
   `container mt-5 pb-5` › `row` › `col-md-10 mx-auto`. Do not use `col-lg-11`,
   `container-fluid`, or a bare container (dma-exclusions' `col-lg-11` is a legacy
