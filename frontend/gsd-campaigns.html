@@ -86,10 +86,13 @@
         .gsd-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
         /* Enabled/Paused history: keep cells on one line so Date/Shop/Shop ID
            get their natural width; the wrap scrolls horizontally when needed. */
-        .ll-history-table th, .ll-history-table td { white-space: nowrap; }
-        /* Wider Date / Shop columns. */
-        .ll-history-table th[data-sort="created_at"] { min-width: 160px; }
-        .ll-history-table th[data-sort="shop_name"]  { min-width: 150px; }
+        /* Fixed layout so column widths never reflow when sorting. Campaign (last) takes the remainder. */
+        .ll-history-table { table-layout: fixed; width: 100%; }
+        .ll-history-table th, .ll-history-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ll-history-table th[data-sort="created_at"] { width: 165px; }
+        .ll-history-table th[data-sort="shop_name"]  { width: 190px; }
+        .ll-history-table .col-country { width: 90px; }
+        .ll-history-table .col-action  { width: 120px; }
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
@@ -140,6 +143,7 @@
         .ll-preview-table th { white-space: nowrap; padding: 6px 14px; }
         .ll-preview-table td { vertical-align: middle; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .ll-preview-table .col-country { text-align: center; }
+        .ll-preview-table .col-shopid, .ll-preview-table .col-action { text-align: center; }
         .ll-preview-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
         .ll-preview-table th.sortable:hover { background: #e9ecef; }
         .ll-preview-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
@@ -219,7 +223,7 @@
                         <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
                     </div>
                 </div>
-                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn">Dashboard</a>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn" title="Apps" aria-label="Apps"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg></a>
             </div>
         </div>
     </nav>
@@ -730,7 +734,7 @@
                 const statusBadge = isEnabled
                     ? '<span class="badge badge-active">Active</span>'
                     : isPaused
-                        ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e0a800; color:#e0a800;">Paused</span>'
+                        ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #CC5500; color:#CC5500;">Paused</span>'
                         : `<span class="badge bg-transparent fw-bold" style="border:1px solid #6c757d; color:#6c757d;">${c.status || 'Unknown'}</span>`;
                 return `<tr class="${isNew ? 'row-new' : ''}">
                     <td><input type="checkbox" class="camp-check" data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" data-status="${(c.status || '').toUpperCase()}" onclick="updateBulkButtons()"></td>
@@ -1188,9 +1192,9 @@
                             <tr>
                                 ${selectAllTh}
                                 <th class="sortable" data-sort="shop_name" onclick="sortPreviewBy('shop_name')">Shop</th>
-                                <th class="sortable" data-sort="shop_id" onclick="sortPreviewBy('shop_id')">Shop ID</th>
+                                <th class="col-shopid sortable" data-sort="shop_id" onclick="sortPreviewBy('shop_id')">Shop ID</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortPreviewBy('country')">Country</th>
-                                <th class="sortable" data-sort="action" onclick="sortPreviewBy('action')">Action</th>
+                                <th class="col-action sortable" data-sort="action" onclick="sortPreviewBy('action')">Action</th>
                                 <th class="sortable" data-sort="campaign_name" onclick="sortPreviewBy('campaign_name')">Campaigns</th>
                             </tr>
                         </thead>
@@ -1345,7 +1349,7 @@
 
             const cols = llPreviewSelectable ? 6 : 5;
             const badgeMap = {
-                Paused: '<span class="badge bg-transparent fw-bold" style="border:1px solid #e0a800; color:#e0a800;">Paused</span>',
+                Paused: '<span class="badge bg-transparent fw-bold" style="border:1px solid #CC5500; color:#CC5500;">Paused</span>',
                 Enabled: '<span class="badge badge-active">Enabled</span>',
                 Skipped: '<span class="badge bg-transparent fw-bold" style="border:1px solid #5e4a90; color:#5e4a90;">Skipped</span>',
                 Error: '<span class="badge bg-transparent fw-bold" style="border:1px solid #d63031; color:#d63031;">Error</span>',
@@ -1384,7 +1388,7 @@
             row.insertAdjacentHTML('afterend', `<tr id="ll-detail-${groupKey}">
                 <td colspan="${cols}" class="bg-light py-2">
                     <div style="overflow-x:auto;">
-                        <table class="table table-bordered bg-white mb-0 small ll-detail-table" style="width:100%;">
+                        <table class="table table-bordered bg-white mb-0 small ll-detail-table" style="width:auto;">
                             <thead><tr>
                                 <th style="text-align:left; padding:6px 14px;">Campaign</th>
                                 <th style="padding:6px 14px; white-space:nowrap; width:120px;">Status</th>
@@ -1436,7 +1440,7 @@
 
             const cols = llPreviewSelectable ? 6 : 5;
             const badgeMap = {
-                Paused: '<span class="badge bg-transparent fw-bold" style="border:1px solid #e0a800; color:#e0a800;">Paused</span>',
+                Paused: '<span class="badge bg-transparent fw-bold" style="border:1px solid #CC5500; color:#CC5500;">Paused</span>',
                 Enabled: '<span class="badge badge-active">Enabled</span>',
                 Skipped: '<span class="badge bg-transparent fw-bold" style="border:1px solid #5e4a90; color:#5e4a90;">Skipped</span>',
                 Error: '<span class="badge bg-transparent fw-bold" style="border:1px solid #d63031; color:#d63031;">Error</span>',
@@ -1460,9 +1464,9 @@
                 return `<tr id="ll-group-${g.groupKey}" style="cursor:pointer;" onclick="toggleLLPreviewDetail('${g.groupKey}')" title="Klik om campagnes te bekijken">
                     ${checkboxCell}
                     <td>${escapeHtml(g.shop_name || '')}</td>
-                    <td>${g.shop_id ?? ''}</td>
+                    <td class="col-shopid">${g.shop_id ?? ''}</td>
                     <td class="col-country">${escapeHtml(g.country || '')}</td>
-                    <td>${badge}</td>
+                    <td class="col-action">${badge}</td>
                     <td>${campLabel}</td>
                 </tr>`;
             }).join('') : `<tr><td colspan="${cols}" class="text-center text-muted py-3">No rows.</td></tr>`;
@@ -1693,14 +1697,14 @@
                 const dt = r.created_at ? new Date(r.created_at).toLocaleString('nl-NL') : '';
                 const isPaused = (r.action || '') === 'Paused';
                 const badge = isPaused
-                    ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e0a800; color:#e0a800;">Paused</span>'
+                    ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #CC5500; color:#CC5500;">Paused</span>'
                     : '<span class="badge badge-active">Enabled</span>';
                 return `<tr>
                     <td style="white-space:nowrap;">${escapeHtml(dt)}</td>
-                    <td>${escapeHtml(r.shop_name || '')}</td>
+                    <td title="${escapeHtml(r.shop_name || '')}">${escapeHtml(r.shop_name || '')}</td>
                     <td class="col-country">${escapeHtml(r.country || '')}</td>
                     <td class="col-action">${badge}</td>
-                    <td>${escapeHtml(r.campaign_name || '')}</td>
+                    <td title="${escapeHtml(r.campaign_name || '')}">${escapeHtml(r.campaign_name || '')}</td>
                 </tr>`;
             }).join('');
 
