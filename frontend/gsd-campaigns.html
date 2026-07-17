@@ -292,7 +292,7 @@
                     </select>
                     <input type="text" class="form-control form-control-sm" id="filterCampaignName" placeholder="Search campaign name..." oninput="applyFilters()" style="max-width: 250px;">
                     <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="newCampaignIds.clear(); loadCampaigns(); loadStats();">↻ Refresh</button>
-                    <button class="btn btn-sm" id="copyForExcelBtn" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyForExcel()">Copy for Excel</button>
+                    <button class="btn btn-sm" id="copyForExcelBtn" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyForExcel()">Copy</button>
                     <button class="btn btn-sm btn-bulk-pause" id="bulkPauseBtn" onclick="bulkAction('pause')" disabled>Pause</button>
                     <button class="btn btn-sm btn-bulk-activate" id="bulkActivateBtn" onclick="bulkAction('enable')" disabled>Activate</button>
                     <button class="btn btn-sm btn-bulk-remove" id="bulkRemoveBtn" onclick="bulkAction('remove')" disabled>Remove</button>
@@ -863,7 +863,7 @@
             const sa = document.getElementById('selectAllCampaigns');
             if (sa) { sa.checked = all.length > 0 && n === all.length; sa.indeterminate = n > 0 && n < all.length; }
             const cb = document.getElementById('copyForExcelBtn');
-            if (cb) cb.textContent = n > 0 ? `Copy (${n}) for Excel` : 'Copy for Excel';
+            if (cb) cb.textContent = n > 0 ? `Copy (${n})` : 'Copy';
         }
 
         async function bulkAction(type) {

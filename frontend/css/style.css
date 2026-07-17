@@ -151,6 +151,10 @@ body {
     align-items: center !important;
     border-radius: 0.3rem !important;
 }
+/* Size the apps icon to ~the toggles' text line-box (in em, so it tracks the
+   responsive font-size below) — makes the button the same height as the other
+   menu items and the icon slightly larger than the original 18px. */
+.nav-dashboard-btn svg { width: 1.3em; height: 1.3em; display: block; }
 
 /* Shrink nav text on smaller screens to prevent wrapping */
 @media (max-width: 1600px) {
