@@ -1145,7 +1145,7 @@
             llPreviewRows = [
                 ...(data.paused || []).map(c => ({ ...c, action: 'Paused', _selectable: true })),
                 ...(data.enabled || []).map(c => ({ ...c, action: 'Enabled', _selectable: true })),
-                ...(data.skipped || []).map(c => ({ ...c, action: 'Skipped', _selectable: false, campaign_name: c.reason ? `(${c.reason})` : (c.campaign_name || '') })),
+                ...(data.skipped || []).map(c => ({ ...c, action: 'Skipped', _selectable: false, campaign_name: c.reason || c.campaign_name || '' })),
                 ...(data.errors || []).map(c => ({ ...c, action: 'Error', _selectable: false, shop_name: c.shop_name || c.step || '', campaign_name: c.error ? String(c.error).slice(0, 140) : (c.campaign_name || '') })),
             ].map((r, i) => ({ ...r, _key: i }));
             // Preview shows the full set a plain "Run" would touch, so start every

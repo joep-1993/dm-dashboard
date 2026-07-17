@@ -341,7 +341,7 @@ def _send_slack(text: str) -> None:
         logger.warning("GSD LL: Slack notification failed", exc_info=True)
 
 
-def load_excel_data(filepath: Optional[str] = None) -> Dict[str, Any]:
+def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True) -> Dict[str, Any]:
     """Read the newest Excel file and store in the in-memory cache.
 
     Called daily by the scheduler and on-demand via POST /ll/excel-load.
@@ -367,12 +367,13 @@ def load_excel_data(filepath: Optional[str] = None) -> Dict[str, Any]:
         "GSD LL Excel cache loaded: %d shops (%d pause, %d enable) from %s",
         status["shop_count"], pause_n, enable_n, fname,
     )
-    _send_slack(
-        f":white_check_mark: *GSD Low Linkage — Excel data loaded*\n"
-        f"File: {fname}\n"
-        f"Shops: {len(feed)} ({pause_n} to pause, {enable_n} to enable)\n"
-        f"Ready for Preview / Run in the dashboard."
-    )
+    if notify:
+        _send_slack(
+            f":white_check_mark: *GSD Low Linkage — Excel data loaded*\n"
+            f"File: {fname}\n"
+            f"Shops: {len(feed)} ({pause_n} to pause, {enable_n} to enable)\n"
+            f"Ready for Preview / Run in the dashboard."
+        )
     return get_excel_data_status()
 
 
@@ -878,11 +879,11 @@ def _diagnose_no_campaigns(client, country: str, shop_id: int, gsd: int) -> str:
             pass
 
     if not all_statuses:
-        return "no_shopping_campaigns"
+        return "geen shopping campagnes"
     if gsd == 0:
-        return "already_paused" if all_statuses <= {"PAUSED"} else "no_enabled_campaigns"
+        return "al gepauzeerd" if all_statuses <= {"PAUSED"} else "geen actieve campagnes"
     else:
-        return "already_enabled" if all_statuses <= {"ENABLED"} else "no_ll_label"
+        return "al geactiveerd" if all_statuses <= {"ENABLED"} else "geen LL label"
 
 
 # ---------------------------------------------------------------------------
@@ -1362,7 +1363,19 @@ def _schedule_next_excel_run() -> None:
 
 
 def start_excel_scheduler() -> None:
-    """Initialize the daily Excel scheduler. Call on app startup."""
+    """Initialize the daily Excel scheduler. Call on app startup.
+
+    Also eagerly loads the newest Excel file into the in-memory cache so
+    the "last successful data load" indicator is correct immediately after
+    a server restart (the cache is volatile).
+    """
+    try:
+        load_excel_data(notify=False)
+        logger.info("GSD LL Excel scheduler: pre-loaded cache on startup")
+    except FileNotFoundError:
+        logger.info("GSD LL Excel scheduler: no Excel file found yet, skipping startup pre-load")
+    except Exception:
+        logger.warning("GSD LL Excel scheduler: startup pre-load failed", exc_info=True)
     _schedule_next_excel_run()
 
 
