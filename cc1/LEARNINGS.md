@@ -1,6 +1,11 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## GSD Campaigns — deploy/restart from dm-dashboard checkout + UI polish batch (2026-07-17)
+
+- **Deployed via a restart of the WSL backend serving from the dm-dashboard checkout** (commit `de47503` + earlier). The old instance (PID from dm-tools/venv serving dm-tools) was killed and a new one launched: `cd /home/joepvanschagen/projects/dm-dashboard && source /home/joepvanschagen/projects/dm-tools/venv/bin/activate && uvicorn backend.main:app --host 0.0.0.0 --port 8003` — i.e. dm-dashboard code/static + dm-tools venv, exactly like the Windows-startup `start-dm-tools.bat`. Did this because **dm-tools is blocked**: 16 commits behind + 34 dirty files from another session's uncommitted Healthscore tool. Both checkouts have their own `.env`; `backend/main.py` does bare `load_dotenv()` (CWD-relative), so serving from dm-dashboard picks up `dm-dashboard/.env`. **Gotcha: the current backend requires dashboard auth** (307 redirect / `{"detail":"Not authenticated"}` on unauthenticated curl) — the stale dm-tools build didn't — so verify served content via the browser (logged in) or on-disk files, not anonymous curl. `change_event` explicit date range must start <30d ago; `LAST_29_DAYS` is not a valid GAQL literal and `LAST_30_DAYS` errors `START_DATE_TOO_OLD`.
+- **UI polish batch** (all `frontend/`): nav "Dashboard" text button → Material **apps grid SVG icon** across **all 32 pages** (shared nav is hand-duplicated per page — replace in every file, scripted); LL foldout detail table `width:auto` (frees the Campaign column, wrapper keeps the x-slider); Enabled/Paused history `table-layout:fixed` + explicit column widths so **sorting never reflows columns** (Campaign takes remainder; ellipsis + hover `title` on Shop/Campaign); **"Paused" status badges → outlined canonical orange `#CC5500`** (was amber `#e0a800`) in history + LL run/detail tables (the `.btn-pause` button left amber); centered Shop ID + Action columns in the LL run table; dry-run badge text shortened to "dry run".
+
 ## GSD Campaigns — LL last-load timestamp from file mtime, accordion detail rows, orange dry-run badge (2026-07-17)
 
 Three follow-up tweaks (commits `90796f9` backend, `00a7935` frontend; dm-dashboard checkout).
