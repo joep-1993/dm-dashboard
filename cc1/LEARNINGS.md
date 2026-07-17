@@ -1,6 +1,14 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## GSD Campaigns — LL last-load timestamp from file mtime, accordion detail rows, orange dry-run badge (2026-07-17)
+
+Three follow-up tweaks (commits `90796f9` backend, `00a7935` frontend; dm-dashboard checkout).
+
+- **"Last successful data load" tooltip jumped to the restart time.** `load_excel_data` set `loaded_at = datetime.now()` and persisted it to `backend/data/ll_load_state.json`; the startup pre-load (`notify=False`) read it back so it wouldn't jump. But `backend/data/` isn't guaranteed to exist on the box → the write failed silently (caught), the read returned None → fell back to `now()`, so every server restart showed the restart time instead of ~09:50. **Fix: derive `loaded_at` from the Excel file's own mtime** (`datetime.fromtimestamp(os.path.getmtime(path), AMSTERDAM_TZ)`) — stable across restarts, reflects the real data date, and needs no writable state dir. Dropped the `_persist_load_time`/`_read_persisted_load_time` JSON dance. Lesson: don't persist a "when did X happen" timestamp to a maybe-missing dir when the source artifact already carries the time (file mtime).
+- **Accordion detail rows:** `toggleLLPreviewDetail` now removes ALL open `tr[id^="ll-detail-"]` before opening, so clicking another (shop,country) row auto-collapses the previously expanded campaigns sub-table (only one open at a time).
+- **Dry-run badge** ("dry run — nothing changed") restyled from Bootstrap `bg-info text-dark` to canonical orange `#CC5500` + white text, in both the LL and GSD-create result panels ([[LEARNINGS orange-button entry]]: canonical dm-tools orange = `#CC5500`).
+
 ## GSD Campaigns — change_event truncation missed labels + LL run-table Skipped count/header fixes (2026-07-17)
 
 Follow-up on the bulk `GSD_LL_PAUSED` labeling below. Two things surfaced.
