@@ -25,6 +25,7 @@ gsd_campaigns_service so this stays in sync with the rest of GSD Campaigns.
 import csv
 import glob as glob_mod
 import io
+import json
 import logging
 import os
 import threading
@@ -72,6 +73,26 @@ EXCEL_DIR = r"C:\Users\l.davidowski\Documents\Schelduled scripts 2023\script_bc_
 EXCEL_SHEET = "Pixel linkage"
 SCHEDULE_HOUR = 9
 SCHEDULE_MINUTE = 50
+
+# Persist the last-load timestamp so it survives server restarts.
+_LL_LOAD_STATE_FILE = os.path.join(os.path.dirname(__file__), "data", "ll_load_state.json")
+
+
+def _persist_load_time(loaded_at: str, filename: str) -> None:
+    try:
+        with open(_LL_LOAD_STATE_FILE, "w") as f:
+            json.dump({"loaded_at": loaded_at, "file": filename}, f)
+    except Exception:
+        logger.warning("Could not persist LL load state", exc_info=True)
+
+
+def _read_persisted_load_time() -> Optional[str]:
+    try:
+        with open(_LL_LOAD_STATE_FILE) as f:
+            return json.load(f).get("loaded_at")
+    except Exception:
+        return None
+
 AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
 
 
@@ -352,11 +373,22 @@ def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True) -> D
     fname = os.path.basename(path)
     pause_n = sum(1 for r in feed if r["gsd"] == 0)
     enable_n = sum(1 for r in feed if r["gsd"] == 1)
+
+    if notify:
+        # Real load (scheduler / manual) — new timestamp, persist it.
+        loaded_at = datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds")
+        _persist_load_time(loaded_at, fname)
+    else:
+        # Startup pre-load — reuse the persisted timestamp so it doesn't
+        # jump to "now" on every server restart.
+        loaded_at = _read_persisted_load_time() \
+            or datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds")
+
     status = {
         "feed": feed,
         "flags": flags,
         "file": fname,
-        "loaded_at": datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds"),
+        "loaded_at": loaded_at,
         "shop_count": len(feed),
         "pause_count": pause_n,
         "enable_count": enable_n,

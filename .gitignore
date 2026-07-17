@@ -41,6 +41,7 @@ backend/data/search-ads-360.yaml
 backend/data/shop_campaigns_sa360.yaml
 # Service-account JSON for Google Sheets (copied locally, not tracked)
 backend/data/gsd-campaign-creation.json
+backend/data/ll_load_state.json
 
 # Large data files
 *.xlsx
