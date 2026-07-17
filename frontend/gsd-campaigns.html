@@ -136,14 +136,17 @@
         .ll-history-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
 
         /* Preview results table — same header layout as the history table */
+        .ll-preview-table { table-layout: fixed; width: 100%; }
         .ll-preview-table th { white-space: nowrap; padding: 6px 14px; }
-        .ll-preview-table td { vertical-align: middle; font-size: 0.9rem; }
+        .ll-preview-table td { vertical-align: middle; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .ll-preview-table .col-country { text-align: center; }
         .ll-preview-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
         .ll-preview-table th.sortable:hover { background: #e9ecef; }
         .ll-preview-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .ll-preview-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .ll-preview-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        /* Expanded detail sub-table: campaign name on one line with scroll */
+        .ll-detail-table td.camp-name { white-space: nowrap; max-width: 350px; overflow-x: auto; display: block; }
 
         /* Loading skeleton rows — keep the Campaigns table at full height while
            campaigns load so the layout below doesn't shift on first paint. */
@@ -1174,7 +1177,7 @@
                 <div class="filter-row d-flex gap-2 align-items-center mt-2 mb-2">
                     <input type="text" class="form-control form-control-sm" id="llPreviewFilter" placeholder="Filter shop, campaign, country..." oninput="applyPreviewFilter()" style="max-width: 260px;">
                     ${selInfo}
-                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; padding: 0.25rem 0.6rem; min-width: 70px;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportPreviewXlsx()">Export Excel</button>
+                    <span class="ms-auto"></span>
                     ${runSelBtnHtml}
                 </div>
                 <div class="table-responsive">
@@ -1335,30 +1338,42 @@
                 Error: '<span class="badge bg-transparent fw-bold" style="border:1px solid #d63031; color:#d63031;">Error</span>',
             };
 
-            const subRows = group.campaigns.map(c => {
-                let campName, actionHtml;
-                if (c.action === 'Skipped') {
-                    campName = '—';
-                    actionHtml = `<span class="text-muted">${escapeHtml(c.reason || '—')}</span>`;
+            // Build sub-rows: for Skipped entries the backend now sends a
+            // "campaigns" array with the actual campaign names + statuses.
+            let detailRows = [];
+            for (const c of group.campaigns) {
+                if (c.action === 'Skipped' && c.campaigns && c.campaigns.length) {
+                    for (const sc of c.campaigns) {
+                        detailRows.push(`<tr>
+                            <td class="camp-name" style="text-align:left; padding:6px 14px;">${escapeHtml(sc.campaign_name || '—')}</td>
+                            <td style="padding:6px 14px; white-space:nowrap;"><span class="text-muted">${escapeHtml(c.reason || '—')}</span></td>
+                        </tr>`);
+                    }
+                } else if (c.action === 'Skipped') {
+                    detailRows.push(`<tr>
+                        <td class="camp-name" style="text-align:left; padding:6px 14px;">—</td>
+                        <td style="padding:6px 14px; white-space:nowrap;"><span class="text-muted">${escapeHtml(c.reason || '—')}</span></td>
+                    </tr>`);
                 } else if (c.action === 'Error') {
-                    campName = c._origName || '—';
-                    actionHtml = badgeMap.Error + (c.error ? ` <span class="text-muted small">${escapeHtml(String(c.error).slice(0, 100))}</span>` : '');
+                    detailRows.push(`<tr>
+                        <td class="camp-name" style="text-align:left; padding:6px 14px;">${escapeHtml(c._origName || '—')}</td>
+                        <td style="padding:6px 14px; white-space:nowrap;">${badgeMap.Error}${c.error ? ` <span class="text-muted small">${escapeHtml(String(c.error).slice(0, 100))}</span>` : ''}</td>
+                    </tr>`);
                 } else {
-                    campName = c.campaign_name || '—';
-                    actionHtml = badgeMap[c.action] || escapeHtml(c.action);
+                    detailRows.push(`<tr>
+                        <td class="camp-name" style="text-align:left; padding:6px 14px;">${escapeHtml(c.campaign_name || '—')}</td>
+                        <td style="padding:6px 14px; white-space:nowrap;">${badgeMap[c.action] || escapeHtml(c.action)}</td>
+                    </tr>`);
                 }
-                return `<tr>
-                    <td style="text-align:left; padding:6px 14px;">${escapeHtml(campName)}</td>
-                    <td style="padding:6px 14px;">${actionHtml}</td>
-                </tr>`;
-            }).join('');
+            }
+            const subRows = detailRows.join('');
 
             row.insertAdjacentHTML('afterend', `<tr id="ll-detail-${groupKey}">
                 <td colspan="${cols}" class="bg-light py-2">
-                    <table class="table table-bordered bg-white mb-0 small" style="width:85%; min-width:400px; margin:0 auto;">
+                    <table class="table table-bordered bg-white mb-0 small ll-detail-table" style="width:85%; min-width:400px; margin:0 auto;">
                         <thead><tr>
                             <th style="text-align:left; padding:6px 14px;">Campaign</th>
-                            <th style="padding:6px 14px;">Action</th>
+                            <th style="padding:6px 14px; white-space:nowrap;">Action</th>
                         </tr></thead>
                         <tbody>${subRows}</tbody>
                     </table>
@@ -1416,16 +1431,8 @@
                 const badge = badgeMap[action] || escapeHtml(action);
                 const n = g.campaigns.length;
 
-                // Campaigns column: for skipped show reason, otherwise count
-                let campLabel;
-                if (action === 'Skipped') {
-                    campLabel = escapeHtml(g.campaigns[0].reason || g.campaigns[0].campaign_name || '—');
-                } else if (n === 1) {
-                    const c = g.campaigns[0];
-                    campLabel = escapeHtml(c.action === 'Error' ? (c._origName || c.campaign_name || '—') : (c.campaign_name || '—'));
-                } else {
-                    campLabel = `${n} campagnes`;
-                }
+                // Campaigns column: always show count
+                const campLabel = `${n} campagne${n !== 1 ? 's' : ''}`;
 
                 const selKeys = g._keys;
                 const allSel = selKeys.length > 0 && selKeys.every(k => llPreviewSelected.has(k));

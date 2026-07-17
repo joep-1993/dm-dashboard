@@ -897,25 +897,29 @@ def _find_all_shopping_campaigns(client, customer_id: str, shop_id: int) -> List
     return out
 
 
-def _diagnose_no_campaigns(client, country: str, shop_id: int, gsd: int) -> str:
+def _diagnose_no_campaigns(client, country: str, shop_id: int, gsd: int) -> Tuple[str, List[Dict[str, str]]]:
     """Determine why no actionable campaigns were found for a shop+country.
 
-    Returns a human-readable reason string used in the preview 'skipped' rows.
+    Returns (reason, campaigns) where *campaigns* is a list of
+    ``{"campaign_name": ..., "status": ...}`` dicts so the frontend can
+    show them in the expandable detail row.
     """
-    all_statuses: set = set()
+    all_camps: List[Dict[str, str]] = []
     for cid in sorted(COUNTRY_CUSTOMER_IDS.get(country, set())):
         try:
             for camp in _find_all_shopping_campaigns(client, cid, shop_id):
-                all_statuses.add(camp["status"])
+                all_camps.append(camp)
         except Exception:
             pass
 
+    all_statuses = {c["status"] for c in all_camps}
     if not all_statuses:
-        return "geen shopping campagnes"
+        return "geen shopping campagnes", []
     if gsd == 0:
-        return "al gepauzeerd" if all_statuses <= {"PAUSED"} else "geen actieve campagnes"
+        reason = "al gepauzeerd" if all_statuses <= {"PAUSED"} else "geen actieve campagnes"
     else:
-        return "al geactiveerd" if all_statuses <= {"ENABLED"} else "geen LL label"
+        reason = "al geactiveerd" if all_statuses <= {"ENABLED"} else "geen LL label"
+    return reason, [{"campaign_name": c["campaign_name"], "status": c["status"]} for c in all_camps]
 
 
 # ---------------------------------------------------------------------------
@@ -1153,15 +1157,16 @@ def run_low_linkage(
                 # diagnose WHY so the preview shows a useful reason.
                 if found_in_country == 0 and not had_error:
                     try:
-                        reason = _diagnose_no_campaigns(client, country, shop_id, gsd)
+                        reason, diag_camps = _diagnose_no_campaigns(client, country, shop_id, gsd)
                     except Exception:
-                        reason = "lookup_failed"
+                        reason, diag_camps = "lookup_failed", []
                     result["skipped"].append({
                         "shop_id": shop_id,
                         "shop_name": shop_name,
                         "country": country,
                         "linkage": linkage,
                         "reason": reason,
+                        "campaigns": diag_camps,
                     })
 
         # One shop-cycle bump per (shop, country) event actually mutated this run
