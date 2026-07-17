@@ -151,9 +151,9 @@ body {
 .nav-dashboard-btn {
     font-size: 1.1rem !important;
     font-weight: 700 !important;
-    /* Square: width == height (== the .nav-dropdown-toggle height), no padding,
-       icon centred both ways. */
-    width: 2.25rem;
+    /* Height matches the .nav-dropdown-toggle menu buttons; a little wider than
+       tall so the icon has some breathing room on the sides. */
+    width: 2.75rem;
     height: 2.25rem;
     box-sizing: border-box;
     padding: 0 !important;
