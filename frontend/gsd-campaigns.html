@@ -1278,7 +1278,7 @@
                 if (llPreviewSortColumn === 'action') {
                     valA = groupActionText(a); valB = groupActionText(b);
                 } else if (llPreviewSortColumn === 'campaign_name') {
-                    valA = a.campaigns.length; valB = b.campaigns.length;
+                    valA = groupCampaignCount(a); valB = groupCampaignCount(b);
                     return llPreviewSortDirection === 'asc' ? valA - valB : valB - valA;
                 } else {
                     valA = a[llPreviewSortColumn] ?? '';
@@ -1321,6 +1321,14 @@
             const actions = new Set(group.campaigns.map(c => c.action));
             if (actions.size === 1) return [...actions][0];
             return [...actions][0]; // primary action (all campaigns for a shop share intent)
+        }
+
+        // Actual campaign count for a group. A Skipped entry is a single row per
+        // (shop, country) that carries a nested `campaigns` array, so counting
+        // group rows undercounts it to 1 — mirror the detail-expansion logic.
+        function groupCampaignCount(group) {
+            return group.campaigns.reduce((sum, c) =>
+                sum + ((c.action === 'Skipped' && c.campaigns && c.campaigns.length) ? c.campaigns.length : 1), 0);
         }
 
         function toggleLLPreviewDetail(groupKey) {
@@ -1432,7 +1440,7 @@
             tbody.innerHTML = total ? llPreviewGroups.slice(start, end).map(g => {
                 const action = groupActionText(g);
                 const badge = badgeMap[action] || escapeHtml(action);
-                const n = g.campaigns.length;
+                const n = groupCampaignCount(g);
 
                 // Campaigns column: always show count
                 const campLabel = `${n} campagne${n !== 1 ? 's' : ''}`;
