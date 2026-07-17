@@ -55,7 +55,7 @@
         .btn-activate { border: 1px solid #00b894; color: #00b894; background: transparent; }
         .btn-activate:hover { background: #00b894; color: white; }
 
-        .badge-active { background-color: #00b894 !important; }
+        .badge-active { background: transparent !important; border: 1px solid #00b894; color: #00b894 !important; font-weight: 600; }
 
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
         .pagination-controls select { font-size: 0.85rem; width: auto; }
@@ -495,6 +495,12 @@
             loadCampaigns();
             loadLLHistory();
             loadExcelSchedule();
+            // One-time cleanup: remove stale individual pause/enable entries
+            // from old code that no longer logs these actions.
+            const KNOWN_ACTIONS = ['LL Run', 'LL Run selected', 'Run Script', 'Reset'];
+            const _log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
+            const _cleaned = _log.filter(e => KNOWN_ACTIONS.includes(e.action));
+            if (_cleaned.length < _log.length) localStorage.setItem('gsd_activity_log', JSON.stringify(_cleaned));
             renderLog();
         });
 
@@ -719,8 +725,8 @@
                 const statusBadge = isEnabled
                     ? '<span class="badge badge-active">Active</span>'
                     : isPaused
-                        ? '<span class="badge bg-warning text-dark">Paused</span>'
-                        : `<span class="badge bg-secondary">${c.status || 'Unknown'}</span>`;
+                        ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e0a800; color:#e0a800;">Paused</span>'
+                        : `<span class="badge bg-transparent fw-bold" style="border:1px solid #6c757d; color:#6c757d;">${c.status || 'Unknown'}</span>`;
                 return `<tr class="${isNew ? 'row-new' : ''}">
                     <td><input type="checkbox" class="camp-check" data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" data-status="${(c.status || '').toUpperCase()}" onclick="updateBulkButtons()"></td>
                     <td>${c.created_date || '-'}</td>
@@ -1107,6 +1113,7 @@
         let llPreviewSortDirection = 'asc';
         let llPreviewPage = 1;
         let llPreviewActionFilter = null;   // null=all | 'Paused' | 'Enabled' | 'Skipped' | 'Error'
+        let llPreviewGroups = [];            // (shop_id, country) groups built from llPreviewFiltered
 
         function renderLLSummary(data) {
             const pausedN = data.paused_count ?? (data.paused || []).length;
@@ -1146,7 +1153,7 @@
                 ...(data.paused || []).map(c => ({ ...c, action: 'Paused', _selectable: true })),
                 ...(data.enabled || []).map(c => ({ ...c, action: 'Enabled', _selectable: true })),
                 ...(data.skipped || []).map(c => ({ ...c, action: 'Skipped', _selectable: false, campaign_name: c.reason || c.campaign_name || '' })),
-                ...(data.errors || []).map(c => ({ ...c, action: 'Error', _selectable: false, shop_name: c.shop_name || c.step || '', campaign_name: c.error ? String(c.error).slice(0, 140) : (c.campaign_name || '') })),
+                ...(data.errors || []).map(c => ({ ...c, action: 'Error', _selectable: false, _origName: c.campaign_name || '', shop_name: c.shop_name || c.step || '', campaign_name: c.error ? String(c.error).slice(0, 140) : (c.campaign_name || '') })),
             ].map((r, i) => ({ ...r, _key: i }));
             // Preview shows the full set a plain "Run" would touch, so start every
             // actionable (paused/enabled) row checked; skipped/error rows are not
@@ -1179,7 +1186,7 @@
                                 <th class="sortable" data-sort="shop_id" onclick="sortPreviewBy('shop_id')">Shop ID</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortPreviewBy('country')">Country</th>
                                 <th class="sortable" data-sort="action" onclick="sortPreviewBy('action')">Action</th>
-                                <th class="sortable" data-sort="campaign_name" onclick="sortPreviewBy('campaign_name')">Campaign</th>
+                                <th class="sortable" data-sort="campaign_name" onclick="sortPreviewBy('campaign_name')">Campaigns</th>
                             </tr>
                         </thead>
                         <tbody id="llPreviewBody"></tbody>
@@ -1218,6 +1225,7 @@
                 String(r.shop_id || '').includes(q)
             );
             llPreviewFiltered = rows.slice();
+            buildPreviewGroups();
             llPreviewPage = 1;
             sortPreviewRows();
             renderPreviewPage();
@@ -1261,9 +1269,17 @@
         function sortPreviewRows() {
             if (!llPreviewSortColumn) return;
             const numericCols = ['shop_id'];
-            llPreviewFiltered.sort((a, b) => {
-                let valA = a[llPreviewSortColumn] ?? '';
-                let valB = b[llPreviewSortColumn] ?? '';
+            llPreviewGroups.sort((a, b) => {
+                let valA, valB;
+                if (llPreviewSortColumn === 'action') {
+                    valA = groupActionText(a); valB = groupActionText(b);
+                } else if (llPreviewSortColumn === 'campaign_name') {
+                    valA = a.campaigns.length; valB = b.campaigns.length;
+                    return llPreviewSortDirection === 'asc' ? valA - valB : valB - valA;
+                } else {
+                    valA = a[llPreviewSortColumn] ?? '';
+                    valB = b[llPreviewSortColumn] ?? '';
+                }
                 if (numericCols.includes(llPreviewSortColumn)) {
                     valA = Number(valA) || 0; valB = Number(valB) || 0;
                 } else {
@@ -1273,6 +1289,98 @@
                 if (valA > valB) return llPreviewSortDirection === 'asc' ? 1 : -1;
                 return 0;
             });
+        }
+
+        // --- Shop grouping for preview/run table ---
+        function buildPreviewGroups() {
+            const map = {};
+            for (const r of llPreviewFiltered) {
+                const gk = `${r.shop_id}_${r.country}`;
+                if (!map[gk]) {
+                    map[gk] = {
+                        groupKey: gk,
+                        shop_id: r.shop_id,
+                        shop_name: r.shop_name,
+                        country: r.country,
+                        linkage: r.linkage,
+                        campaigns: [],
+                        _keys: [],       // only selectable campaign keys
+                    };
+                }
+                map[gk].campaigns.push(r);
+                if (r._selectable) map[gk]._keys.push(r._key);
+            }
+            llPreviewGroups = Object.values(map);
+        }
+
+        function groupActionText(group) {
+            const actions = new Set(group.campaigns.map(c => c.action));
+            if (actions.size === 1) return [...actions][0];
+            return [...actions][0]; // primary action (all campaigns for a shop share intent)
+        }
+
+        function toggleLLPreviewDetail(groupKey) {
+            const existing = document.getElementById(`ll-detail-${groupKey}`);
+            if (existing) { existing.remove(); return; }
+            const row = document.getElementById(`ll-group-${groupKey}`);
+            if (!row) return;
+            const group = llPreviewGroups.find(g => g.groupKey === groupKey);
+            if (!group) return;
+
+            const cols = llPreviewSelectable ? 6 : 5;
+            const badgeMap = {
+                Paused: '<span class="badge bg-transparent fw-bold" style="border:1px solid #e0a800; color:#e0a800;">Paused</span>',
+                Enabled: '<span class="badge badge-active">Enabled</span>',
+                Skipped: '<span class="badge bg-transparent fw-bold" style="border:1px solid #5e4a90; color:#5e4a90;">Skipped</span>',
+                Error: '<span class="badge bg-transparent fw-bold" style="border:1px solid #d63031; color:#d63031;">Error</span>',
+            };
+
+            const subRows = group.campaigns.map(c => {
+                let campName, actionHtml;
+                if (c.action === 'Skipped') {
+                    campName = '—';
+                    actionHtml = `<span class="text-muted">${escapeHtml(c.reason || '—')}</span>`;
+                } else if (c.action === 'Error') {
+                    campName = c._origName || '—';
+                    actionHtml = badgeMap.Error + (c.error ? ` <span class="text-muted small">${escapeHtml(String(c.error).slice(0, 100))}</span>` : '');
+                } else {
+                    campName = c.campaign_name || '—';
+                    actionHtml = badgeMap[c.action] || escapeHtml(c.action);
+                }
+                return `<tr>
+                    <td style="text-align:left; padding:6px 14px;">${escapeHtml(campName)}</td>
+                    <td style="padding:6px 14px;">${actionHtml}</td>
+                </tr>`;
+            }).join('');
+
+            row.insertAdjacentHTML('afterend', `<tr id="ll-detail-${groupKey}">
+                <td colspan="${cols}" class="bg-light py-2">
+                    <table class="table table-bordered bg-white mb-0 small" style="width:85%; min-width:400px; margin:0 auto;">
+                        <thead><tr>
+                            <th style="text-align:left; padding:6px 14px;">Campaign</th>
+                            <th style="padding:6px 14px;">Action</th>
+                        </tr></thead>
+                        <tbody>${subRows}</tbody>
+                    </table>
+                </td>
+            </tr>`);
+        }
+
+        function togglePreviewGroup(groupKey, checked) {
+            const group = llPreviewGroups.find(g => g.groupKey === groupKey);
+            if (!group) return;
+            group._keys.forEach(k => {
+                if (checked) llPreviewSelected.add(k);
+                else llPreviewSelected.delete(k);
+            });
+            // Update checkboxes in-place to preserve expanded detail rows
+            for (const g of llPreviewGroups) {
+                const r = document.getElementById(`ll-group-${g.groupKey}`);
+                if (!r) continue;
+                const cb = r.querySelector('input[type="checkbox"]');
+                if (cb) cb.checked = g._keys.length > 0 && g._keys.every(k => llPreviewSelected.has(k));
+            }
+            updatePreviewSelectionUI();
         }
 
         function getPreviewPerPage() {
@@ -1289,7 +1397,7 @@
         function renderPreviewPage() {
             const tbody = document.getElementById('llPreviewBody');
             if (!tbody) return;
-            const total = llPreviewFiltered.length;
+            const total = llPreviewGroups.length;
             const perPage = getPreviewPerPage();
             const totalPages = perPage === Infinity ? 1 : (Math.ceil(total / perPage) || 1);
             if (llPreviewPage > totalPages) llPreviewPage = totalPages;
@@ -1298,25 +1406,42 @@
 
             const cols = llPreviewSelectable ? 6 : 5;
             const badgeMap = {
-                Paused: '<span class="badge bg-warning text-dark">Paused</span>',
+                Paused: '<span class="badge bg-transparent fw-bold" style="border:1px solid #e0a800; color:#e0a800;">Paused</span>',
                 Enabled: '<span class="badge badge-active">Enabled</span>',
-                Skipped: '<span class="badge" style="background:#5e4a90;color:#fff;">Skipped</span>',
-                Error: '<span class="badge bg-danger">Error</span>',
+                Skipped: '<span class="badge bg-transparent fw-bold" style="border:1px solid #5e4a90; color:#5e4a90;">Skipped</span>',
+                Error: '<span class="badge bg-transparent fw-bold" style="border:1px solid #d63031; color:#d63031;">Error</span>',
             };
-            tbody.innerHTML = total ? llPreviewFiltered.slice(start, end).map(r => {
-                const badge = badgeMap[r.action] || escapeHtml(r.action || '');
+            tbody.innerHTML = total ? llPreviewGroups.slice(start, end).map(g => {
+                const action = groupActionText(g);
+                const badge = badgeMap[action] || escapeHtml(action);
+                const n = g.campaigns.length;
+
+                // Campaigns column: for skipped show reason, otherwise count
+                let campLabel;
+                if (action === 'Skipped') {
+                    campLabel = escapeHtml(g.campaigns[0].reason || g.campaigns[0].campaign_name || '—');
+                } else if (n === 1) {
+                    const c = g.campaigns[0];
+                    campLabel = escapeHtml(c.action === 'Error' ? (c._origName || c.campaign_name || '—') : (c.campaign_name || '—'));
+                } else {
+                    campLabel = `${n} campagnes`;
+                }
+
+                const selKeys = g._keys;
+                const allSel = selKeys.length > 0 && selKeys.every(k => llPreviewSelected.has(k));
                 const checkboxCell = llPreviewSelectable
-                    ? (r._selectable
-                        ? `<td style="text-align: center;"><input type="checkbox" ${llPreviewSelected.has(r._key) ? 'checked' : ''} onchange="togglePreviewRow(${r._key}, this.checked)"></td>`
+                    ? (selKeys.length > 0
+                        ? `<td style="text-align:center;" onclick="event.stopPropagation();"><input type="checkbox" ${allSel ? 'checked' : ''} onchange="togglePreviewGroup('${g.groupKey}', this.checked)"></td>`
                         : '<td></td>')
                     : '';
-                return `<tr>
+
+                return `<tr id="ll-group-${g.groupKey}" style="cursor:pointer;" onclick="toggleLLPreviewDetail('${g.groupKey}')" title="Klik om campagnes te bekijken">
                     ${checkboxCell}
-                    <td>${escapeHtml(r.shop_name || '')}</td>
-                    <td>${r.shop_id ?? ''}</td>
-                    <td class="col-country">${escapeHtml(r.country || '')}</td>
+                    <td>${escapeHtml(g.shop_name || '')}</td>
+                    <td>${g.shop_id ?? ''}</td>
+                    <td class="col-country">${escapeHtml(g.country || '')}</td>
                     <td>${badge}</td>
-                    <td>${escapeHtml(r.campaign_name || '')}</td>
+                    <td>${campLabel}</td>
                 </tr>`;
             }).join('') : `<tr><td colspan="${cols}" class="text-center text-muted py-3">No rows.</td></tr>`;
 
@@ -1546,7 +1671,7 @@
                 const dt = r.created_at ? new Date(r.created_at).toLocaleString('nl-NL') : '';
                 const isPaused = (r.action || '') === 'Paused';
                 const badge = isPaused
-                    ? '<span class="badge bg-warning text-dark">Paused</span>'
+                    ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #e0a800; color:#e0a800;">Paused</span>'
                     : '<span class="badge badge-active">Enabled</span>';
                 return `<tr>
                     <td style="white-space:nowrap;">${escapeHtml(dt)}</td>
