@@ -76,7 +76,12 @@ body {
     background: transparent;
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.5);
-    padding: 0.4rem 0.85rem;
+    /* Fixed height (shared with .nav-dashboard-btn) so the menu buttons and the
+       icon-only apps button are pixel-identical in height regardless of whether
+       the content is text or an SVG. */
+    height: 2.25rem;
+    box-sizing: border-box;
+    padding: 0 0.85rem;
     font-size: 1.1rem;
     font-weight: 600;
     cursor: pointer;
@@ -146,16 +151,19 @@ body {
 .nav-dashboard-btn {
     font-size: 1.1rem !important;
     font-weight: 700 !important;
-    /* Tighter vertical padding so the larger apps icon below still leaves the
-       button the same overall height as the .nav-dropdown-toggle menu items. */
-    padding: 0.25rem 0.85rem !important;
+    /* Same fixed height as .nav-dropdown-toggle; no vertical padding so the
+       apps icon is centred and the button is exactly as tall as the menu
+       buttons. */
+    height: 2.25rem;
+    box-sizing: border-box;
+    padding: 0 0.85rem !important;
     display: inline-flex !important;
     align-items: center !important;
+    justify-content: center !important;
     border-radius: 0.3rem !important;
 }
 /* Apps icon: brand purple, sized in em so it tracks the responsive font-size
-   below. Larger than before so it fills more of the button, offset by the
-   reduced vertical padding above to keep the button height matched. */
+   below. Sized to fill most of the button height. */
 .nav-dashboard-btn svg { width: 1.55em; height: 1.55em; display: block; color: #5e4a90; }
 
 /* Shrink nav text on smaller screens to prevent wrapping */
