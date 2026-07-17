@@ -1281,6 +1281,10 @@ def _schedule_next_excel_run() -> None:
             _EXCEL_STATE["next_run_at"] = None
             return
 
+    # Cancel any existing timer to prevent duplicate firings
+    if _EXCEL_TIMER:
+        _EXCEL_TIMER.cancel()
+
     secs, target = _seconds_until(SCHEDULE_HOUR, SCHEDULE_MINUTE)
     with _EXCEL_LOCK:
         _EXCEL_STATE["next_run_at"] = target.isoformat(timespec="seconds")
