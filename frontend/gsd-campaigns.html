@@ -1125,7 +1125,7 @@
             const enabledN = data.enabled_count ?? (data.enabled || []).length;
             const skippedN = (data.skipped || []).length;
             const errorsN = (data.errors || []).length;
-            const tag = data.dry_run ? ' <span class="badge" style="background:#CC5500;color:#fff;">dry run — nothing changed</span>' : '';
+            const tag = data.dry_run ? ' <span class="badge" style="background:#CC5500;color:#fff;">dry run</span>' : '';
 
             const llTile = (act, count, label, color, bg, border) => {
                 const active = llPreviewActionFilter === act;
@@ -1863,7 +1863,7 @@
                 </div>`;
             };
             return `
-                <div class="fw-bold mb-2">Done <span class="badge" style="background:#CC5500;color:#fff;">dry run — nothing changed</span></div>
+                <div class="fw-bold mb-2">Done <span class="badge" style="background:#CC5500;color:#fff;">dry run</span></div>
                 <div class="d-flex flex-wrap gap-3 mb-2">
                     ${tile('create', m.to_create, 'campaigns to create', '#00b894', '#e8f7f3', '#00b894')}
                     ${tile('pause', m.to_pause, 'campaigns to pause', '#e65100', '#fff3e0', '#fb8c00')}
