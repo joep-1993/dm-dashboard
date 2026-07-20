@@ -32,6 +32,7 @@ from backend.gsd_ll_service import (
     get_activity_log,
     mark_activity_reset,
     backfill_activity_from_ll,
+    backfill_activity_from_gsd,
 )
 
 logger = logging.getLogger(__name__)
@@ -275,11 +276,12 @@ async def activity_log_mark_reset(entry_id: str):
 
 @router.post("/activity-log/backfill")
 async def activity_log_backfill():
-    """Reconstruct Activity Log entries from the LL campaign audit table."""
+    """Reconstruct Activity Log entries from both LL audit table and Google Ads change history."""
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(executor, backfill_activity_from_ll)
-        return result
+        ll_result = await loop.run_in_executor(executor, backfill_activity_from_ll)
+        gsd_result = await loop.run_in_executor(executor, backfill_activity_from_gsd)
+        return {"ll": ll_result, "gsd": gsd_result}
     except Exception as e:
         logger.error(f"Error backfilling activity log: {e}")
         raise HTTPException(status_code=500, detail=str(e))

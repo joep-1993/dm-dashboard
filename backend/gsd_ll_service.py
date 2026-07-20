@@ -825,7 +825,7 @@ def backfill_activity_from_ll(gap_minutes: int = 10) -> Dict[str, Any]:
     (pa.jvs_gsd_ll_campaigns) by grouping rows into runs.
 
     Rows within ``gap_minutes`` of each other with the same action are treated
-    as one run.  Returns a summary of how many entries were created.
+    as one run.  Includes undo payloads so reset buttons appear.
     """
     ensure_activity_table()
     ensure_admin_table()
@@ -833,10 +833,10 @@ def backfill_activity_from_ll(gap_minutes: int = 10) -> Dict[str, Any]:
     try:
         with conn.cursor() as cur:
             # Gap-and-islands: assign a run_group to consecutive rows within
-            # gap_minutes of each other.
+            # gap_minutes of each other.  Return per-campaign detail too.
             cur.execute(f"""
                 WITH ordered AS (
-                    SELECT id, action, created_at,
+                    SELECT id, action, campaign_id, campaign_name, customer_id, created_at,
                            LAG(created_at) OVER (PARTITION BY action ORDER BY created_at) AS prev_at
                     FROM {ADMIN_TABLE}
                 ),
@@ -847,36 +847,183 @@ def backfill_activity_from_ll(gap_minutes: int = 10) -> Dict[str, Any]:
                                     THEN 1 ELSE 0 END)
                                OVER (PARTITION BY action ORDER BY created_at) AS run_group
                     FROM ordered
-                ),
-                runs AS (
-                    SELECT action,
-                           run_group,
-                           MIN(created_at) AS run_time,
-                           COUNT(*)        AS cnt
-                    FROM grouped
-                    GROUP BY action, run_group
                 )
-                SELECT action, run_time, cnt FROM runs
-                ORDER BY run_time
+                SELECT action, run_group, campaign_id, campaign_name, customer_id,
+                       MIN(created_at) OVER (PARTITION BY action, run_group) AS run_time
+                FROM grouped
+                ORDER BY run_time, action, id
             """)
-            runs = cur.fetchall()
+            all_rows = cur.fetchall()
+
+            # Group into runs.
+            runs: Dict[str, Dict] = {}   # keyed by entry_id
+            for r in all_rows:
+                action = r["action"]     # 'Paused' or 'Enabled'
+                run_time = r["run_time"]
+                entry_id = f"backfill-{action}-{run_time.isoformat()}"
+                if entry_id not in runs:
+                    runs[entry_id] = {
+                        "action": action,
+                        "run_time": run_time,
+                        "campaigns": [],
+                    }
+                runs[entry_id]["campaigns"].append({
+                    "customer_id": str(r["customer_id"]),
+                    "campaign_id": str(r["campaign_id"]),
+                    "campaign_name": r["campaign_name"] or "",
+                })
 
             inserted = 0
-            for r in runs:
-                action = r["action"]   # 'Paused' or 'Enabled'
-                run_time = r["run_time"]
-                cnt = r["cnt"]
-                entry_id = f"backfill-{action}-{run_time.isoformat()}"
+            for entry_id, run in runs.items():
+                camps = run["campaigns"]
+                action = run["action"]
+                cnt = len(camps)
                 details = f"{cnt} campaign(s) {action.lower()}"
+                # For undo: paused campaigns -> undo re-enables them (and vice versa).
+                if action == "Paused":
+                    undo = {"created": [], "paused": camps}
+                else:
+                    undo = {"created": camps, "paused": []}
                 cur.execute(f"""
                     INSERT INTO {ACTIVITY_TABLE}
-                        (entry_id, time, action, details, success, reset)
-                    VALUES (%s, %s, %s, %s, TRUE, FALSE)
-                    ON CONFLICT (entry_id) DO NOTHING
-                """, (entry_id, run_time, f"LL Run", details))
+                        (entry_id, time, action, details, success, undo, reset)
+                    VALUES (%s, %s, %s, %s, TRUE, %s, FALSE)
+                    ON CONFLICT (entry_id) DO UPDATE SET
+                        undo = EXCLUDED.undo,
+                        details = EXCLUDED.details
+                """, (entry_id, run["run_time"], "LL Run", details, json.dumps(undo)))
                 inserted += cur.rowcount
         conn.commit()
         return {"backfilled": inserted, "total_runs": len(runs)}
+    finally:
+        return_db_connection(conn)
+
+
+def backfill_activity_from_gsd(days: int = 29, gap_minutes: int = 30) -> Dict[str, Any]:
+    """
+    Reconstruct "Run Script" Activity Log entries from Google Ads change_event.
+
+    Queries campaign CREATE events (and status-change-to-PAUSED events for
+    non-created campaigns) across all GSD accounts for the last ``days`` days,
+    groups them into runs by time proximity, and upserts activity entries with
+    undo payloads.
+
+    Google Ads retains change_event for ~30 days, so older runs are lost.
+    """
+    ensure_activity_table()
+    tz = ZoneInfo("Europe/Amsterdam")
+    now = datetime.now(tz)
+    start = now - timedelta(days=days)
+    start_s = start.strftime("%Y-%m-%d %H:%M:%S")
+    end_s = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    client = _get_client()
+    ga = client.get_service("GoogleAdsService")
+    customer_ids = sorted({info["customer_id"] for info in ACCOUNTS.values()})
+
+    # Collect all CREATE + status-change events across accounts.
+    events: List[Dict] = []
+    errors: List[Dict] = []
+
+    for cid in customer_ids:
+        query = f"""
+            SELECT change_event.change_date_time,
+                   change_event.resource_change_operation,
+                   change_event.changed_fields,
+                   change_event.new_resource,
+                   campaign.id, campaign.name
+            FROM change_event
+            WHERE change_event.change_date_time BETWEEN '{start_s}' AND '{end_s}'
+              AND change_event.change_resource_type = 'CAMPAIGN'
+            ORDER BY change_event.change_date_time
+            LIMIT 10000
+        """
+        try:
+            rows = list(ga.search(customer_id=cid, query=query))
+        except GoogleAdsException as ex:
+            errors.append({"customer_id": cid, "error": str(ex)[:400]})
+            continue
+
+        for row in rows:
+            ce = row.change_event
+            name = row.campaign.name or ""
+            if "[channel:directshopping]" not in name:
+                continue
+            op = ce.resource_change_operation.name
+            is_create = (op == "CREATE")
+            is_pause = ("status" in list(ce.changed_fields.paths)
+                        and ce.new_resource.campaign.status.name == "PAUSED")
+            if not is_create and not is_pause:
+                continue
+            events.append({
+                "time": ce.change_date_time,
+                "customer_id": cid,
+                "campaign_id": str(row.campaign.id),
+                "campaign_name": name,
+                "is_create": is_create,
+                "is_pause": is_pause,
+            })
+
+    if not events:
+        return {"backfilled": 0, "total_runs": 0, "errors": errors}
+
+    # Sort by time and group into runs (gap_minutes apart = new run).
+    events.sort(key=lambda e: e["time"])
+    runs: List[List[Dict]] = []
+    current_run: List[Dict] = [events[0]]
+    for ev in events[1:]:
+        prev_time = datetime.fromisoformat(current_run[-1]["time"])
+        cur_time = datetime.fromisoformat(ev["time"])
+        if (cur_time - prev_time).total_seconds() > gap_minutes * 60:
+            runs.append(current_run)
+            current_run = [ev]
+        else:
+            current_run.append(ev)
+    runs.append(current_run)
+
+    # Insert activity entries.
+    conn = get_db_connection()
+    try:
+        inserted = 0
+        with conn.cursor() as cur:
+            for run_events in runs:
+                run_time = datetime.fromisoformat(run_events[0]["time"])
+                created_keys = set()
+                created = []
+                paused = []
+                for ev in run_events:
+                    key = (ev["customer_id"], ev["campaign_id"])
+                    if ev["is_create"]:
+                        created_keys.add(key)
+                        created.append({
+                            "customer_id": ev["customer_id"],
+                            "campaign_id": ev["campaign_id"],
+                            "campaign_name": ev["campaign_name"],
+                        })
+                    elif ev["is_pause"] and key not in created_keys:
+                        paused.append({
+                            "customer_id": ev["customer_id"],
+                            "campaign_id": ev["campaign_id"],
+                            "campaign_name": ev["campaign_name"],
+                        })
+
+                nC, nP = len(created), len(paused)
+                if nC + nP == 0:
+                    continue
+                entry_id = f"backfill-gsd-{run_time.isoformat()}"
+                details = f"{nC} created / {nP} paused"
+                undo = {"created": created, "paused": paused}
+                cur.execute(f"""
+                    INSERT INTO {ACTIVITY_TABLE}
+                        (entry_id, time, action, details, success, undo, reset)
+                    VALUES (%s, %s, 'Run Script', %s, TRUE, %s, FALSE)
+                    ON CONFLICT (entry_id) DO UPDATE SET
+                        undo = EXCLUDED.undo,
+                        details = EXCLUDED.details
+                """, (entry_id, run_time, details, json.dumps(undo)))
+                inserted += cur.rowcount
+        conn.commit()
+        return {"backfilled": inserted, "total_runs": len(runs), "errors": errors}
     finally:
         return_db_connection(conn)
 
