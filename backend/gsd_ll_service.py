@@ -719,6 +719,169 @@ def backfill_shop_cycles(gap_minutes: int = 30, dry_run: bool = True) -> Dict[st
 
 
 # ---------------------------------------------------------------------------
+# Activity Log (server-side, replaces the old localStorage log)
+# ---------------------------------------------------------------------------
+
+ACTIVITY_TABLE = "pa.jvs_gsd_activity_log"
+
+
+def ensure_activity_table() -> None:
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {ACTIVITY_TABLE} (
+                    id         SERIAL PRIMARY KEY,
+                    entry_id   TEXT UNIQUE NOT NULL,
+                    time       TIMESTAMPTZ NOT NULL,
+                    action     TEXT NOT NULL,
+                    details    TEXT,
+                    success    BOOLEAN DEFAULT TRUE,
+                    undo       JSONB,
+                    reset      BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+            """)
+        conn.commit()
+    finally:
+        return_db_connection(conn)
+
+
+def save_activity(entry: Dict[str, Any]) -> None:
+    """Insert one activity log entry (idempotent on entry_id)."""
+    ensure_activity_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                INSERT INTO {ACTIVITY_TABLE} (entry_id, time, action, details, success, undo, reset)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (entry_id) DO UPDATE SET
+                    details = EXCLUDED.details,
+                    success = EXCLUDED.success,
+                    undo    = EXCLUDED.undo,
+                    reset   = EXCLUDED.reset
+            """, (
+                entry["id"],
+                entry["time"],
+                entry["action"],
+                entry.get("details"),
+                entry.get("success", True),
+                json.dumps(entry["undo"]) if entry.get("undo") else None,
+                entry.get("reset", False),
+            ))
+        conn.commit()
+    finally:
+        return_db_connection(conn)
+
+
+def get_activity_log(limit: int = 100) -> List[Dict[str, Any]]:
+    """Return recent activity entries for the frontend."""
+    ensure_activity_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT entry_id, time, action, details, success, undo, reset
+                FROM {ACTIVITY_TABLE}
+                ORDER BY time DESC, id DESC
+                LIMIT %s
+            """, (limit,))
+            rows = cur.fetchall()
+        return [
+            {
+                "id": r["entry_id"],
+                "time": r["time"].isoformat() if r["time"] else None,
+                "action": r["action"],
+                "details": r["details"],
+                "success": r["success"],
+                "undo": r["undo"],
+                "reset": r["reset"],
+            }
+            for r in rows
+        ]
+    finally:
+        return_db_connection(conn)
+
+
+def mark_activity_reset(entry_id: str) -> bool:
+    """Mark an activity entry as reset. Returns True if found."""
+    ensure_activity_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                UPDATE {ACTIVITY_TABLE} SET reset = TRUE WHERE entry_id = %s
+            """, (entry_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        return_db_connection(conn)
+
+
+def backfill_activity_from_ll(gap_minutes: int = 10) -> Dict[str, Any]:
+    """
+    Reconstruct Activity Log entries from the per-campaign audit table
+    (pa.jvs_gsd_ll_campaigns) by grouping rows into runs.
+
+    Rows within ``gap_minutes`` of each other with the same action are treated
+    as one run.  Returns a summary of how many entries were created.
+    """
+    ensure_activity_table()
+    ensure_admin_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # Gap-and-islands: assign a run_group to consecutive rows within
+            # gap_minutes of each other.
+            cur.execute(f"""
+                WITH ordered AS (
+                    SELECT id, action, created_at,
+                           LAG(created_at) OVER (PARTITION BY action ORDER BY created_at) AS prev_at
+                    FROM {ADMIN_TABLE}
+                ),
+                grouped AS (
+                    SELECT *,
+                           SUM(CASE WHEN prev_at IS NULL
+                                         OR created_at - prev_at > interval '{int(gap_minutes)} minutes'
+                                    THEN 1 ELSE 0 END)
+                               OVER (PARTITION BY action ORDER BY created_at) AS run_group
+                    FROM ordered
+                ),
+                runs AS (
+                    SELECT action,
+                           run_group,
+                           MIN(created_at) AS run_time,
+                           COUNT(*)        AS cnt
+                    FROM grouped
+                    GROUP BY action, run_group
+                )
+                SELECT action, run_time, cnt FROM runs
+                ORDER BY run_time
+            """)
+            runs = cur.fetchall()
+
+            inserted = 0
+            for r in runs:
+                action = r["action"]   # 'Paused' or 'Enabled'
+                run_time = r["run_time"]
+                cnt = r["cnt"]
+                entry_id = f"backfill-{action}-{run_time.isoformat()}"
+                details = f"{cnt} campaign(s) {action.lower()}"
+                cur.execute(f"""
+                    INSERT INTO {ACTIVITY_TABLE}
+                        (entry_id, time, action, details, success, reset)
+                    VALUES (%s, %s, %s, %s, TRUE, FALSE)
+                    ON CONFLICT (entry_id) DO NOTHING
+                """, (entry_id, run_time, f"LL Run", details))
+                inserted += cur.rowcount
+        conn.commit()
+        return {"backfilled": inserted, "total_runs": len(runs)}
+    finally:
+        return_db_connection(conn)
+
+
+# ---------------------------------------------------------------------------
 # Google Ads label helpers (shared client)
 # ---------------------------------------------------------------------------
 

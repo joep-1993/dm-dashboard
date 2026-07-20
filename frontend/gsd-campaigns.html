@@ -441,7 +441,6 @@
             <div class="card-header" style="background: #5e4a90; color: white;">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center">
                     Activity Log
-                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="clearLog()">Clear</button>
                 </h5>
             </div>
             <div class="card-body">
@@ -500,13 +499,7 @@
             loadCampaigns();
             loadLLHistory();
             loadExcelSchedule();
-            // One-time cleanup: remove stale individual pause/enable entries
-            // from old code that no longer logs these actions.
-            const KNOWN_ACTIONS = ['LL Run', 'LL Run selected', 'Run Script', 'Reset'];
-            const _log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
-            const _cleaned = _log.filter(e => KNOWN_ACTIONS.includes(e.action));
-            if (_cleaned.length < _log.length) localStorage.setItem('gsd_activity_log', JSON.stringify(_cleaned));
-            renderLog();
+            loadActivityLog();
         });
 
         // Shop filter mode is only meaningful with shop names entered — grey out otherwise.
@@ -2237,20 +2230,39 @@
         }
 
         // --- Activity Log ---
+        // In-memory cache of the activity log, loaded from server.
+        let _activityCache = [];
+
+        async function loadActivityLog() {
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/activity-log`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                _activityCache = data.entries || [];
+            } catch (e) {
+                console.warn('Failed to load activity log from server:', e);
+                _activityCache = [];
+            }
+            renderLog();
+        }
+
         function logActivity(action, details, success, extra) {
-            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
-            log.unshift({
+            const entry = {
                 id: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
                 time: new Date().toISOString(),
                 action,
                 details,
                 success,
                 ...(extra || {})
-            });
-            // Keep last 50
-            if (log.length > 50) log.length = 50;
-            localStorage.setItem('gsd_activity_log', JSON.stringify(log));
+            };
+            _activityCache.unshift(entry);
             renderLog();
+            // Persist to server (fire-and-forget).
+            fetch(`${API_BASE}/api/gsd-campaigns/activity-log`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(entry)
+            }).catch(e => console.warn('Failed to save activity entry:', e));
         }
 
         // Outlined, all-caps label for an Activity Log action, colored by type.
@@ -2264,8 +2276,7 @@
 
         function renderLog() {
             // Preview/dry-runs are not shown in the Activity Log.
-            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]')
-                .filter(e => !/preview/i.test(e.action || ''));
+            const log = _activityCache.filter(e => !/preview/i.test(e.action || ''));
             const el = document.getElementById('activityLog');
             if (!log.length) {
                 el.innerHTML = '<div class="text-muted text-center py-3">No activity yet.</div>';
@@ -2284,11 +2295,8 @@
                 if (entry.reset) {
                     resetHtml = `<span class="text-muted" style="font-size:0.75rem;">reset</span>`;
                 } else if (hasUndo) {
-                    // Run performed after undo-tracking shipped — undo directly.
                     resetHtml = `<button class="btn btn-sm" title="Pause the ${nCreated} created and re-enable the ${nPaused} paused campaign(s)" style="${btnStyle}" ${btnHover} onclick="resetRun('${entry.id}')">Reset</button>`;
                 } else if (entry.action === 'Run Script') {
-                    // Older run without a stored undo payload — reconstruct from
-                    // Google Ads change history around this entry's timestamp.
                     resetHtml = `<button class="btn btn-sm" title="Reconstruct this run from Google Ads change history (around ${escapeHtml(time)}), review, then undo" style="${btnStyle}" ${btnHover} onclick="reconstructRun('${entry.id}')">Reset</button>`;
                 }
                 return `<tr>
@@ -2313,8 +2321,7 @@
         }
 
         async function resetRun(id) {
-            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
-            const entry = log.find(e => e.id === id);
+            const entry = _activityCache.find(e => e.id === id);
             if (!entry || !entry.undo) return;
             const nCreated = (entry.undo.created || []).length;
             const nPaused = (entry.undo.paused || []).length;
@@ -2330,11 +2337,9 @@
                 const data = await res.json();
                 const errN = (data.errors || []).length;
 
-                // Mark the original entry as reset so its button disappears.
-                const fresh = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
-                const target = fresh.find(e => e.id === id);
-                if (target) { target.reset = true; }
-                localStorage.setItem('gsd_activity_log', JSON.stringify(fresh));
+                // Mark the original entry as reset server-side + locally.
+                entry.reset = true;
+                fetch(`${API_BASE}/api/gsd-campaigns/activity-log/${encodeURIComponent(id)}/reset`, { method: 'POST' }).catch(() => {});
 
                 logActivity('Reset', `Paused ${data.paused_created ?? 0} created / re-enabled ${data.enabled_paused ?? 0} paused${errN ? ` · ${errN} error(s)` : ''}`, errN === 0);
                 loadCampaigns();
@@ -2347,8 +2352,7 @@
         // Rebuild a past run's affected campaigns from Google Ads change history
         // (keyed off the log entry's timestamp), show them, then undo on confirm.
         async function reconstructRun(id) {
-            const log = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
-            const entry = log.find(e => e.id === id);
+            const entry = _activityCache.find(e => e.id === id);
             if (!entry) return;
             const area = document.getElementById('progressArea');
             const content = document.getElementById('progressContent');
@@ -2375,7 +2379,6 @@
                 }
 
                 pendingReconstruct = { id, created, paused };
-                // Each row shows the undo action: created -> pause, paused -> enable.
                 const rows = created.map(c => ({ ...c, act: 'pause' })).concat(paused.map(c => ({ ...c, act: 'enable' })));
                 const badge = (a) => a === 'pause'
                     ? '<span style="color:#e65100; font-weight:600;">pause</span>'
@@ -2421,11 +2424,10 @@
                 const data = await res.json();
                 const errN = (data.errors || []).length;
 
-                // Mark the original entry reset and stash what was undone.
-                const fresh = JSON.parse(localStorage.getItem('gsd_activity_log') || '[]');
-                const target = fresh.find(e => e.id === id);
+                // Mark the original entry reset server-side + locally.
+                const target = _activityCache.find(e => e.id === id);
                 if (target) { target.reset = true; target.undo = { created, paused }; }
-                localStorage.setItem('gsd_activity_log', JSON.stringify(fresh));
+                fetch(`${API_BASE}/api/gsd-campaigns/activity-log/${encodeURIComponent(id)}/reset`, { method: 'POST' }).catch(() => {});
 
                 pendingReconstruct = null;
                 content.innerHTML = `<div class="text-success fw-bold">Undo applied — paused ${data.paused_created ?? 0} created, re-enabled ${data.enabled_paused ?? 0} paused${errN ? ` · ${errN} error(s)` : ''}.</div>`;
@@ -2444,11 +2446,6 @@
             const content = document.getElementById('progressContent');
             content.innerHTML = '';
             area.style.display = 'none';
-        }
-
-        function clearLog() {
-            localStorage.removeItem('gsd_activity_log');
-            renderLog();
         }
     </script>
 </body>

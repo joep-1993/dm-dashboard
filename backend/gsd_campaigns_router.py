@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Body
 from typing import Optional, List
 import asyncio
 import logging
@@ -28,6 +28,10 @@ from backend.gsd_ll_service import (
     toggle_excel_schedule,
     load_excel_data,
     get_excel_data_status,
+    save_activity,
+    get_activity_log,
+    mark_activity_reset,
+    backfill_activity_from_ll,
 )
 
 logger = logging.getLogger(__name__)
@@ -228,6 +232,56 @@ async def ll_shop_cycles_endpoint(
         return {"rows": rows, "total": len(rows)}
     except Exception as e:
         logger.error(f"Error fetching GSD LL shop cycles: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/activity-log")
+async def activity_log_get(
+    limit: int = Query(100, ge=1, le=500, description="Max entries to return"),
+):
+    """Return the server-side activity log."""
+    try:
+        loop = asyncio.get_event_loop()
+        rows = await loop.run_in_executor(executor, get_activity_log, limit)
+        return {"entries": rows}
+    except Exception as e:
+        logger.error(f"Error fetching activity log: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/activity-log")
+async def activity_log_post(entry: dict = Body(...)):
+    """Save or update an activity log entry from the frontend."""
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(executor, save_activity, entry)
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Error saving activity log entry: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/activity-log/{entry_id}/reset")
+async def activity_log_mark_reset(entry_id: str):
+    """Mark an activity log entry as reset."""
+    try:
+        loop = asyncio.get_event_loop()
+        found = await loop.run_in_executor(executor, mark_activity_reset, entry_id)
+        return {"ok": True, "found": found}
+    except Exception as e:
+        logger.error(f"Error marking activity reset: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/activity-log/backfill")
+async def activity_log_backfill():
+    """Reconstruct Activity Log entries from the LL campaign audit table."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, backfill_activity_from_ll)
+        return result
+    except Exception as e:
+        logger.error(f"Error backfilling activity log: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
