@@ -376,16 +376,7 @@ def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_
     pause_n = sum(1 for r in feed if r["gsd"] == 0)
     enable_n = sum(1 for r in feed if r["gsd"] == 1)
 
-    # loaded_at = the Excel file's own modification time (~09:50 CET, when the
-    # daily job produces it). Using the file mtime instead of now() keeps the
-    # dashboard "last successful data load" stable across server restarts and
-    # reflects the real data date, not when this process happened to read it.
-    try:
-        loaded_at = datetime.fromtimestamp(
-            os.path.getmtime(path), AMSTERDAM_TZ
-        ).isoformat(timespec="seconds")
-    except OSError:
-        loaded_at = datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds")
+    loaded_at = datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds")
 
     status = {
         "feed": feed,
