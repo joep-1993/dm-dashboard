@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import os
+import subprocess
 import asyncio
 import secrets
 import tempfile
@@ -314,6 +315,28 @@ def read_root():
 @app.get("/api/health")
 def health_check():
     return {"status": "healthy", "service": "dm_tools"}
+
+
+@app.get("/api/version")
+def version_info():
+    """Return the git commit currently running so we can verify deploys remotely."""
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(__file__),
+            text=True,
+        ).strip()
+    except Exception:
+        commit = "unknown"
+    try:
+        message = subprocess.check_output(
+            ["git", "log", "-1", "--format=%s"],
+            cwd=os.path.dirname(__file__),
+            text=True,
+        ).strip()
+    except Exception:
+        message = "unknown"
+    return {"commit": commit, "message": message}
 
 @app.get("/api/debug/test-scraper")
 def debug_test_scraper(url: str):
