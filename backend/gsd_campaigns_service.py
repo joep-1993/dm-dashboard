@@ -1409,16 +1409,38 @@ def get_mc_id(mc_parent_id: str, shop_name: str) -> Optional[str]:
     return None
 
 
-def create_merchant_id(mc_parent_id: str, shop_name: str) -> Optional[str]:
+def _shop_website_url(shop_name: str, country: Optional[str] = None) -> str:
+    """Derive the online-store URL for an MC sub-account from the shop name.
+
+    Beslist shop names are domains (e.g. "Hoopo.eu", "GSMpunt.nl", "Ko-co.beauty"),
+    so the URL is just ``https://www.<shop_name>``. If a name has no TLD (rare),
+    fall back to the country's TLD. Mirrors the original create GSD-campaigns.py
+    but keeps any existing TLD (incl. .eu/.beauty) instead of blindly appending a
+    country suffix (which would produce e.g. "hoopo.eu.nl").
+    """
+    name = shop_name.split("|", 1)[0].split(" l ", 1)[0].strip().lower()
+    if not re.search(r"\.[a-z]{2,}$", name):  # no TLD → append the country's
+        tld = {"NL": ".nl", "BE": ".be", "DE": ".de"}.get((country or "").upper(), ".nl")
+        name += tld
+    return f"https://www.{name}"
+
+
+def create_merchant_id(
+    mc_parent_id: str, shop_name: str, website_url: Optional[str] = None
+) -> Optional[str]:
     """
     Create a new Merchant Center sub-account.
     Returns the new account ID.
+
+    ``website_url`` populates the account's online-store URL ("Uw online winkel"
+    in Merchant Center). When omitted it is derived from the shop name.
     """
     service = _get_mc_service()
     body = {
         "name": shop_name,
         "kind": "content#account",
     }
+    body["websiteUrl"] = website_url or _shop_website_url(shop_name)
     try:
         response = service.accounts().insert(merchantId=mc_parent_id, body=body).execute()
         return str(response["id"])
@@ -2029,7 +2051,7 @@ def _is_transient_mc_error(ex: Exception) -> bool:
 
 
 def _get_or_create_mc_account(
-    mc_parent_id: str, shop_name: str, ads_customer_id: str
+    mc_parent_id: str, shop_name: str, ads_customer_id: str, country: Optional[str] = None
 ) -> tuple[Optional[str], bool]:
     """Find or create a Merchant Center sub-account and link to Google Ads.
 
@@ -2061,7 +2083,8 @@ def _get_or_create_mc_account(
             return None, False
     created = False
     if mc_id is None:
-        mc_id = create_merchant_id(mc_parent_id, shop_name)
+        website_url = _shop_website_url(shop_name, country)
+        mc_id = create_merchant_id(mc_parent_id, shop_name, website_url)
         if mc_id is None:
             return None, False
         created = True
@@ -2795,7 +2818,7 @@ def run_gsd_script(
                     continue
 
                 # Get or create MC sub-account and link
-                mc_id, mc_was_created = _get_or_create_mc_account(mc_parent_id, shop_name, customer_id)
+                mc_id, mc_was_created = _get_or_create_mc_account(mc_parent_id, shop_name, customer_id, country)
                 if mc_id is None:
                     overall_results["errors"].append({
                         "shop_name": shop_name,
