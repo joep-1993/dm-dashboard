@@ -82,11 +82,19 @@ inline the hexes.
 | Orange non-run action (e.g. Export) | `btn btn-outline-orange` | orange outline, fills on hover | — |
 | Any other action | `btn btn-outline-purple` | purple outline, fills on hover | — |
 | Refresh | `btn btn-outline-purple` + `↻` glyph | purple outline **with arrow icon** | usually right (`ms-auto`) |
-| Not clickable | add `disabled` | **grey outline** (`#6c757d`) automatically | — |
+| Destructive (Stop / Remove / Cancel) | `btn btn-outline-danger` | **red outline**, fills red on hover — *only while available* | — |
+| Not clickable / unavailable | add `disabled` | **grey outline** (`#6c757d`) — always, even for red buttons | — |
 
-The grey-when-disabled behaviour is built into `.btn-run` / `.btn-outline-orange`
-/ `.btn-outline-purple` `:disabled` in style.css — just toggle the `disabled`
-attribute, don't restyle by hand.
+**Unavailable always wins over colour.** A `disabled` button must render **grey
+outline** (`#6c757d`) regardless of its available-state colour — this includes
+red / destructive buttons (Stop, Remove, Cancel). Red is only shown when the
+action is actually available. The canonical `.btn-run` / `.btn-outline-orange` /
+`.btn-outline-purple` classes already do this via their `:disabled` rule in
+style.css — just toggle the `disabled` attribute, don't restyle by hand. A
+`btn-outline-danger` or hand-styled red button does **not** get it for free, so
+add an explicit `#id:disabled { color:#6c757d; border-color:#6c757d;
+background:transparent; opacity:1; }` (see seo-titles.html `#btnStop` /
+`#btnRemove`) so red never shows in the unavailable state.
 
 ## Status / progress bar
 
