@@ -317,26 +317,32 @@ def health_check():
     return {"status": "healthy", "service": "dm_tools"}
 
 
+def _read_git_version():
+    """Read git commit info once at import time."""
+    _git = r"C:\Program Files\Git\cmd\git.exe"
+    _cwd = os.path.dirname(__file__)
+    info = {"commit": "unknown", "message": "unknown"}
+    try:
+        info["commit"] = subprocess.check_output(
+            [_git, "rev-parse", "--short", "HEAD"], cwd=_cwd, text=True,
+        ).strip()
+    except Exception:
+        pass
+    try:
+        info["message"] = subprocess.check_output(
+            [_git, "log", "-1", "--format=%s"], cwd=_cwd, text=True,
+        ).strip()
+    except Exception:
+        pass
+    return info
+
+_GIT_VERSION = _read_git_version()
+
+
 @app.get("/api/version")
 def version_info():
-    """Return the git commit currently running so we can verify deploys remotely."""
-    try:
-        commit = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=os.path.dirname(__file__),
-            text=True,
-        ).strip()
-    except Exception:
-        commit = "unknown"
-    try:
-        message = subprocess.check_output(
-            ["git", "log", "-1", "--format=%s"],
-            cwd=os.path.dirname(__file__),
-            text=True,
-        ).strip()
-    except Exception:
-        message = "unknown"
-    return {"commit": commit, "message": message}
+    """Return the git commit that was HEAD when the server started."""
+    return _GIT_VERSION
 
 @app.get("/api/debug/test-scraper")
 def debug_test_scraper(url: str):
