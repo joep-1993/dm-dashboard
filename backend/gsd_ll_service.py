@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
@@ -344,14 +345,33 @@ def _send_slack(text: str) -> None:
         logger.warning("GSD LL: Slack notification failed", exc_info=True)
 
 
-def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True) -> Dict[str, Any]:
+def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_retries: int = 3, retry_delay: float = 10.0) -> Dict[str, Any]:
     """Read the newest Excel file and store in the in-memory cache.
 
     Called daily by the scheduler and on-demand via POST /ll/excel-load.
     Does NOT pause/enable any campaigns — that only happens when the user
     clicks Preview or Run in the dashboard with source='excel'.
+
+    Retries up to ``max_retries`` times (with ``retry_delay`` seconds between
+    attempts) when reading the Excel file fails — e.g. the file is still being
+    written by the scheduled script or a transient I/O error occurs.
     """
-    feed, flags, path = fetch_feed_from_excel(filepath)
+    for attempt in range(1, max_retries + 1):
+        try:
+            feed, flags, path = fetch_feed_from_excel(filepath)
+            break
+        except Exception as exc:
+            if attempt < max_retries:
+                logger.warning(
+                    "GSD LL Excel load attempt %d/%d failed: %s — retrying in %.0fs",
+                    attempt, max_retries, exc, retry_delay,
+                )
+                time.sleep(retry_delay)
+            else:
+                logger.error(
+                    "GSD LL Excel load failed after %d attempts: %s", max_retries, exc,
+                )
+                raise
     fname = os.path.basename(path)
     pause_n = sum(1 for r in feed if r["gsd"] == 0)
     enable_n = sum(1 for r in feed if r["gsd"] == 1)
