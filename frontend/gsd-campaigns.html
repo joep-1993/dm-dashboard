@@ -28,7 +28,7 @@
         /* Columns match the Enabled/Paused history table: cells stay on one line
            so each column takes its natural width; the .gsd-table-wrap scrolls
            horizontally (slider) instead of truncating. */
-        .campaign-table { font-size: 0.9rem; }
+        .campaign-table { font-size: 0.9rem; width: max-content; min-width: 100%; }
         .campaign-table th, .campaign-table td { white-space: nowrap; }
         .campaign-table th { background: #f8f9fa; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         /* Checkbox column (1st): compact + centered. */
@@ -86,13 +86,9 @@
         .gsd-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
         /* Enabled/Paused history: keep cells on one line so Date/Shop/Shop ID
            get their natural width; the wrap scrolls horizontally when needed. */
-        /* Fixed layout so column widths never reflow when sorting. Campaign (last) takes the remainder. */
-        .ll-history-table { table-layout: fixed; width: 100%; }
-        .ll-history-table th, .ll-history-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .ll-history-table th[data-sort="created_at"] { width: 165px; }
-        .ll-history-table th[data-sort="shop_name"]  { width: 190px; }
-        .ll-history-table .col-country { width: 90px; }
-        .ll-history-table .col-action  { width: 120px; }
+        /* Natural column widths; the .gsd-table-wrap scrolls horizontally. */
+        .ll-history-table { width: max-content; min-width: 100%; }
+        .ll-history-table th, .ll-history-table td { white-space: nowrap; }
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
