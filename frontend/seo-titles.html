@@ -28,7 +28,8 @@
         #btnRemove { color:#dc3545; border-color:#dc3545; background-color:transparent; }
         #btnRemove:hover, #btnRemove:focus { background-color:#dc3545; border-color:#dc3545; color:#fff; }
         /* grey out the Generate button while a run is going on (like FAQ's) */
-        #btnGenerate:disabled { color:#6c757d; border-color:#6c757d; background-color:transparent; opacity:1; }
+        /* Unavailable (disabled) buttons are ALWAYS outlined grey, never red — see cc1/UI_BLUEPRINT.md */
+        #btnGenerate:disabled, #btnStop:disabled, #btnRemove:disabled { color:#6c757d; border-color:#6c757d; background-color:transparent; opacity:1; }
         /* flatpickr styling — same purple theme as SEO stats */
         .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
         .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
@@ -84,6 +85,7 @@
                     <button class="nav-dropdown-toggle">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
+                        <a href="/static/healthscore.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Healthscore</a>
                         <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
                         <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>

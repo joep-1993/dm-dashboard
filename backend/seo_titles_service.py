@@ -58,6 +58,8 @@ UNKNOWN_ORDER = 1500
 IGNORE_FACETS = {'pricemin', 'pricemax'}
 COUNTRY_CODE = 'NL'
 TAIL_TITLE = 'kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl'
+# /page-titles rejects a title over this many characters (400 "too long").
+MAX_TITLE_LEN = 200
 
 
 def canon_key(s):
@@ -130,11 +132,30 @@ def facet_phrase(types, rules):
     return ' '.join(ph for _, _, ph in items)
 
 
+def _compose_title(phrase):
+    """Assemble the page title from the (possibly trimmed) facet phrase.
+    Skips an empty phrase so no double space slips in."""
+    parts = ['!!current_query!!']
+    if phrase:
+        parts.append(phrase)
+    parts.append(TAIL_TITLE)
+    return ' '.join(parts)
+
+
 def build_blueprint(cat_id, cat_name, types, rules):
     """Return a blueprint dict for a (cat_id, {types}) combo."""
     key = '~'.join(sorted(types))
     phrase = facet_phrase(types, rules)
-    title = f'!!current_query!! {phrase} {TAIL_TITLE}'
+    title = _compose_title(phrase)
+    # /page-titles caps the title at MAX_TITLE_LEN chars. When a deep facet
+    # combo overflows, drop trailing (lowest-priority) facet placeholders until
+    # it fits — never split a !!placeholder!! and always keep !!current_query!!
+    # and the branding tail. h1/description keep the full phrase (no such cap).
+    if len(title) > MAX_TITLE_LEN:
+        tokens = phrase.split(' ')
+        while tokens and len(_compose_title(' '.join(tokens))) > MAX_TITLE_LEN:
+            tokens.pop()
+        title = _compose_title(' '.join(tokens))
     h1 = phrase
     desc = (f'Zoek je {phrase}? &#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je '
             f'aankoop &#10062; Shop {phrase} met !!DISCOUNT!! korting online! &#10062; beslist.nl')
