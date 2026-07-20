@@ -318,20 +318,20 @@ def health_check():
 
 
 def _read_git_version():
-    """Read git commit info once at import time."""
-    _git = r"C:\Program Files\Git\cmd\git.exe"
-    _cwd = os.path.dirname(__file__)
+    """Read git commit from .git files directly — no git binary needed."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     info = {"commit": "unknown", "message": "unknown"}
     try:
-        info["commit"] = subprocess.check_output(
-            [_git, "rev-parse", "--short", "HEAD"], cwd=_cwd, text=True,
-        ).strip()
-    except Exception:
-        pass
-    try:
-        info["message"] = subprocess.check_output(
-            [_git, "log", "-1", "--format=%s"], cwd=_cwd, text=True,
-        ).strip()
+        head_file = os.path.join(repo_root, ".git", "HEAD")
+        with open(head_file) as f:
+            head = f.read().strip()
+        if head.startswith("ref: "):
+            ref_path = os.path.join(repo_root, ".git", head[5:])
+            with open(ref_path) as f:
+                full_hash = f.read().strip()
+        else:
+            full_hash = head
+        info["commit"] = full_hash[:7]
     except Exception:
         pass
     return info
