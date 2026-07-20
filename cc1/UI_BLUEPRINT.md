@@ -96,6 +96,49 @@ add an explicit `#id:disabled { color:#6c757d; border-color:#6c757d;
 background:transparent; opacity:1; }` (see seo-titles.html `#btnStop` /
 `#btnRemove`) so red never shows in the unavailable state.
 
+## Info tooltips — the "i" button
+
+For a "what is this?" hint next to a header or field, use the inline
+purple-circle **"i"** SVG with a native `<title>` tooltip (no Bootstrap tooltip JS
+needed). 16×16, brand purple `#5e4a90`, white glyph, `cursor: help`, baseline
+nudge `vertical-align:-2px`:
+
+```html
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="myTip">Explain this here.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
+```
+
+Give the `<title>` an `id` and rewrite its text at runtime to update the hint
+(e.g. GSD Campaigns' "last successful data load"). In use across GSD Campaigns,
+SEO titles / prio / stats, DMA Exclusions, DM Review, Redirect Tool, R-URL Optimizer.
+
+## Tabs — multi-section cards (see Canonicals)
+
+When one card holds several parallel rule-sets or modes, use Bootstrap tabs:
+`ul.nav.nav-tabs` › `li.nav-item` › `button.nav-link` with
+`data-bs-toggle="tab" data-bs-target="#pane"`; panes are `div.tab-pane.fade`
+(first one also `show active`). Restyle the links **dark + bold** (not default
+blue) with this per-page CSS:
+
+```css
+.nav-tabs .nav-link { color:#3a3a3a; font-weight:bold; }
+.nav-tabs .nav-link:hover { color:#1a1a1a; }
+.nav-tabs .nav-link.active { color:#3a3a3a; font-weight:bold; }
+```
+
+## Form controls — inputs, date pickers, checkboxes, radios, selects
+
+Plain Bootstrap 5.3 — **no custom skinning**, so the brand theme in style.css
+carries through automatically:
+
+- **Text / number inputs & selects**: `form-control` / `form-select`. Add `-sm`
+  inside dense toolbars; set an explicit inline `width` when it shouldn't stretch.
+- **Date pickers**: native `<input type="date" class="form-control">` (or
+  `form-control-sm`, ~160px wide). No JS date library anywhere.
+- **Checkboxes / radios**: `<input class="form-check-input" type="checkbox|radio">`
+  in a `.form-check` with a `.form-check-label`. Keep the default Bootstrap accent —
+  don't recolour. (Canonicals' bulk-select adds a `canon-select` class alongside
+  `form-check-input`; that's a local extension, not the shared default.)
+
 ## Status / progress bar
 
 When a process runs, show the status bar (hidden `#progressArea` by default):
