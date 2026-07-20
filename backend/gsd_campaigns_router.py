@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional, List
 import asyncio
 import logging
@@ -157,6 +157,7 @@ async def get_shop_changes(
 
 @router.post("/ll/run")
 async def run_low_linkage_endpoint(
+    request: Request,
     dry_run: bool = Query(False, description="If true, preview only — no Ads mutations or DB writes"),
     date: Optional[str] = Query(None, description="Evaluate shop_list GSD flags as of this date (YYYY-MM-DD)"),
     shop_names: Optional[str] = Query(None, description="Comma-separated feed shop names to scope the run"),
@@ -164,6 +165,10 @@ async def run_low_linkage_endpoint(
     source: str = Query("feed", description="Data source: 'feed' (pixel-monitor CSV) or 'excel' (local Excel file)"),
 ):
     """Start a low-linkage run in the background; poll /ll/progress for status."""
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    logger.info("GSD LL /ll/run called — ip=%s  dry_run=%s  source=%s  user-agent=%s",
+                client_ip, dry_run, source, user_agent)
     try:
         shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
         return start_ll_run(dry_run, date, shop_list, included, source)
