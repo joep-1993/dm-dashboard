@@ -97,6 +97,21 @@ def download(task_id: str):
     )
 
 
+@router.post("/refresh-facets")
+def refresh_facets():
+    """Kick off a background rebuild of facets.csv from the Search API.
+
+    No-op (already_running=True) if a refresh is already in progress. Poll
+    /refresh-facets/status for completion.
+    """
+    return svc.start_facets_refresh()
+
+
+@router.get("/refresh-facets/status")
+def refresh_facets_status():
+    return svc.get_facets_status()
+
+
 @router.get("/history")
 def history():
     return svc.get_history()

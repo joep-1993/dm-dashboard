@@ -14,6 +14,7 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from collections import deque
 from datetime import datetime
@@ -558,6 +559,166 @@ def _optimizer_argv(input_path: Path, output_path: Path, url_column: str,
 _DATA_CACHE_PKL = Path("/tmp/r_url_optimizer_cache.pkl")
 
 
+# ---------------------------------------------------------------------------
+# Facet cache (facets.csv) refresh
+#
+# facets.csv is the (category, facet, value) snapshot the engine matches
+# against — built by querying the Search API once per subcategory (see
+# rurl_optimizer_v2/src/db_loader.py::load_facets). It is NOT rebuilt on a
+# schedule; without this it only ever regenerates when the file is deleted.
+# The "Refresh facets" button triggers a rebuild, and start_optimize()
+# auto-refreshes when the cache is older than FACETS_MAX_AGE_DAYS.
+# ---------------------------------------------------------------------------
+FACETS_CSV = PKG_DIR / "data" / "cache" / "facets.csv"
+FACETS_MAX_AGE_DAYS = 7  # auto-refresh before a run if the cache is older
+
+_FACETS_REFRESH_LOCK = threading.Lock()
+_FACETS_REFRESH: Dict[str, Any] = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "error": None,
+}
+
+
+def facets_age_days() -> Optional[float]:
+    """Age of facets.csv in days, or None if it doesn't exist yet."""
+    try:
+        mtime = FACETS_CSV.stat().st_mtime
+    except OSError:
+        return None
+    return (time.time() - mtime) / 86400.0
+
+
+def _facets_status_locked() -> Dict[str, Any]:
+    """Build the status dict. Caller must hold _FACETS_REFRESH_LOCK."""
+    age = facets_age_days()
+    try:
+        mtime = datetime.fromtimestamp(FACETS_CSV.stat().st_mtime).isoformat()
+    except OSError:
+        mtime = None
+    return {
+        "running": _FACETS_REFRESH["running"],
+        "started_at": _FACETS_REFRESH["started_at"],
+        "finished_at": _FACETS_REFRESH["finished_at"],
+        "error": _FACETS_REFRESH["error"],
+        "mtime": mtime,
+        "age_days": round(age, 2) if age is not None else None,
+        "stale": (age is not None and age > FACETS_MAX_AGE_DAYS),
+        "max_age_days": FACETS_MAX_AGE_DAYS,
+    }
+
+
+def get_facets_status() -> Dict[str, Any]:
+    with _FACETS_REFRESH_LOCK:
+        return _facets_status_locked()
+
+
+def _do_refresh_facets(log_cb=None) -> None:
+    """Rebuild facets.csv from the live Search API (blocking; ~5-8 min).
+
+    Runs the bundled DataLoader with use_cache=False in a subprocess (mirroring
+    the run subprocess's cwd/env) so it reuses the exact fetch + output format
+    and stays isolated from the web process. Raises on non-zero exit.
+    """
+    def _log(msg: str) -> None:
+        logger.info("[facets-refresh] %s", msg)
+        if log_cb:
+            try:
+                log_cb(msg)
+            except Exception:
+                pass
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(PKG_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONWARNINGS"] = "ignore::DeprecationWarning,ignore::FutureWarning"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+
+    code = (
+        "from src.db_loader import DataLoader; "
+        "df = DataLoader(use_cache=False).load_facets(); "
+        "print('facets.csv rebuilt:', len(df), 'rows')"
+    )
+    argv = [sys.executable, "-c", code]
+    _log("Rebuilding facets.csv from the Search API (this takes ~5-8 min)...")
+
+    proc = subprocess.Popen(
+        argv, cwd=str(PKG_DIR), env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1, encoding="utf-8", errors="replace",
+    )
+    assert proc.stdout is not None
+    for raw_line in proc.stdout:
+        line = raw_line.rstrip()
+        if line:
+            _log(line)
+    rc = proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"facets.csv rebuild failed (exit {rc})")
+
+    # The fresh facets.csv invalidates the shared preload pickle the run reuses
+    # across chunks — drop it so the next run rebuilds its dataset from the new
+    # snapshot instead of the stale one.
+    try:
+        _DATA_CACHE_PKL.unlink()
+    except OSError:
+        pass
+    _log("facets.csv refresh complete.")
+
+
+def _refresh_facets_guarded(log_cb=None) -> bool:
+    """Run a refresh unless one is already in progress.
+
+    Returns True if THIS call performed the refresh. If another refresh was
+    already running, this waits for it to finish (so a run never starts on a
+    half-written CSV) and returns False.
+    """
+    with _FACETS_REFRESH_LOCK:
+        already = _FACETS_REFRESH["running"]
+        if not already:
+            _FACETS_REFRESH.update(
+                running=True,
+                started_at=datetime.now().isoformat(),
+                finished_at=None,
+                error=None,
+            )
+    if already:
+        while True:
+            time.sleep(2)
+            with _FACETS_REFRESH_LOCK:
+                if not _FACETS_REFRESH["running"]:
+                    break
+        return False
+    try:
+        _do_refresh_facets(log_cb=log_cb)
+        with _FACETS_REFRESH_LOCK:
+            _FACETS_REFRESH.update(
+                running=False, finished_at=datetime.now().isoformat(), error=None)
+        return True
+    except Exception as e:
+        with _FACETS_REFRESH_LOCK:
+            _FACETS_REFRESH.update(
+                running=False, finished_at=datetime.now().isoformat(), error=str(e))
+        raise
+
+
+def start_facets_refresh() -> Dict[str, Any]:
+    """Kick off a background facets.csv refresh (Refresh facets button).
+
+    No-op if a refresh is already running (returns already_running=True).
+    """
+    with _FACETS_REFRESH_LOCK:
+        if _FACETS_REFRESH["running"]:
+            return {"started": False, "already_running": True,
+                    **_facets_status_locked()}
+    threading.Thread(
+        target=_refresh_facets_guarded, name="facets-refresh", daemon=True
+    ).start()
+    return {"started": True, "already_running": False, **get_facets_status()}
+
+
 def _run_optimizer_chunk(task_id: str, argv: list[str], output_path: Path,
                          round_no: int) -> bool:
     """Run one optimizer subprocess for a Tier-A-mode chunk. Unlike
@@ -882,6 +1043,30 @@ def start_optimize(
     })
 
     def _runner():
+        # Auto-refresh the facet cache before the run if it's older than a week.
+        # facets.csv never rebuilds on its own, so a long-lived server would
+        # otherwise match every run against an increasingly stale snapshot. On
+        # failure we log a warning and fall back to the existing cache rather
+        # than aborting the user's run.
+        try:
+            age = facets_age_days()
+            if age is not None and age > FACETS_MAX_AGE_DAYS:
+                _set(task_id, {
+                    "status": "running", "progress": 0,
+                    "message": f"Facet cache is {age:.0f}d old — refreshing before run...",
+                })
+                _append_log(
+                    task_id,
+                    f"Facet cache is {age:.1f} days old (> {FACETS_MAX_AGE_DAYS}d); "
+                    f"rebuilding facets.csv before the run...")
+                _refresh_facets_guarded(
+                    log_cb=lambda m: _append_log(task_id, m))
+                _append_log(task_id, "Facet cache refreshed; starting optimizer.")
+        except Exception as e:
+            _append_log(
+                task_id,
+                f"[warn] facet refresh failed, continuing with existing cache: {e}")
+
         # Tier-A mode: chunked fetch+process until N tier-A redirects. Owns its
         # whole lifecycle (fetch, subprocess loop, output, save) and returns.
         if source == "redshift" and tier_a_limit and tier_a_limit > 0:

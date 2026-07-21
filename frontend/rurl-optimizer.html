@@ -157,7 +157,16 @@
                                 </div>
                             </div>
 
-                            <div class="col-12 d-flex justify-content-end gap-2">
+                            <div class="col-12 d-flex justify-content-end align-items-center gap-2">
+                                <span id="facetsStatus" class="text-muted small me-auto"></span>
+                                <button type="button" class="btn d-inline-flex align-items-center gap-1" id="refreshFacetsBtn"
+                                        style="border:1px solid #6f42c1;color:#6f42c1;background:transparent;"
+                                        onmouseover="if(!this.disabled){this.style.background='#6f42c1';this.style.color='white';}"
+                                        onmouseout="if(!this.disabled){this.style.background='transparent';this.style.color='#6f42c1';}"
+                                        title="Rebuild facets.csv from the Search API. Runs automatically before a run when the cache is older than a week; takes ~5-8 min.">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                    <span id="refreshFacetsLabel">Refresh facets</span>
+                                </button>
                                 <button type="button" class="btn btn-outline-danger d-none" id="cancelBtn">Cancel</button>
                                 <button type="submit" class="btn btn-primary" id="runBtn">Run</button>
                             </div>
@@ -483,6 +492,67 @@
         });
 
         loadHistory();
+
+        // ---- Facet cache (facets.csv) refresh ----
+        // facets.csv is the v2 engine's snapshot, so these endpoints always
+        // target /api/rurl-v2 regardless of the v1/v2 toggle.
+        const FACETS_BASE = '/api/rurl-v2';
+        let facetsPollTimer = null;
+
+        function renderFacetsStatus(s) {
+            const el = document.getElementById('facetsStatus');
+            if (!el) return;
+            if (!s || s.age_days == null) { el.textContent = ''; el.title = ''; el.style.color = ''; return; }
+            const ageTxt = s.age_days < 1 ? 'refreshed today' : (Math.round(s.age_days) + 'd old');
+            el.textContent = 'Facet cache: ' + ageTxt + (s.stale ? ' (stale)' : '');
+            el.style.color = s.stale ? '#b8860b' : '';
+            el.title = s.mtime ? ('Last rebuilt: ' + new Date(s.mtime).toLocaleString()) : '';
+        }
+
+        function setRefreshBtnRunning(running) {
+            const btn = document.getElementById('refreshFacetsBtn');
+            const label = document.getElementById('refreshFacetsLabel');
+            if (!btn) return;
+            btn.disabled = running;
+            btn.style.opacity = running ? '0.6' : '';
+            btn.style.cursor = running ? 'wait' : '';
+            btn.style.background = 'transparent';
+            btn.style.color = '#6f42c1';
+            if (label) label.textContent = running ? 'Refreshing…' : 'Refresh facets';
+        }
+
+        function startFacetsPoll() {
+            if (facetsPollTimer) clearInterval(facetsPollTimer);
+            facetsPollTimer = setInterval(loadFacetsStatus, 5000);
+        }
+
+        async function loadFacetsStatus() {
+            try {
+                const r = await fetch(FACETS_BASE + '/refresh-facets/status');
+                if (!r.ok) return;
+                const s = await r.json();
+                renderFacetsStatus(s);
+                setRefreshBtnRunning(!!s.running);
+                if (s.running && !facetsPollTimer) startFacetsPoll();
+                if (!s.running && facetsPollTimer) { clearInterval(facetsPollTimer); facetsPollTimer = null; }
+            } catch (e) { /* status is best-effort */ }
+        }
+
+        document.getElementById('refreshFacetsBtn').addEventListener('click', async () => {
+            if (!confirm('Rebuild facets.csv from the Search API now?\n\nThis takes ~5-8 minutes and runs in the background.')) return;
+            setRefreshBtnRunning(true);
+            try {
+                const r = await fetch(FACETS_BASE + '/refresh-facets', { method: 'POST' });
+                if (!r.ok) throw new Error(await r.text());
+                startFacetsPoll();
+                loadFacetsStatus();
+            } catch (err) {
+                alert('Failed to start facet refresh: ' + err.message);
+                setRefreshBtnRunning(false);
+            }
+        });
+
+        loadFacetsStatus();
     </script>
     <footer class="text-center py-4">
         <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
