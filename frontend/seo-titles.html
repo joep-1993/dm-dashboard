@@ -10,19 +10,56 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <style>
         .sortable { cursor: pointer; user-select: none; }
-        .sort-ind { font-size: 0.75em; color: #6c757d; }
+        .stat-tile { cursor: pointer; transition: box-shadow .12s, border-color .12s; }
+        .stat-tile:hover { box-shadow: 0 2px 10px rgba(94,74,144,0.18); }
+        .stat-tile.active { border-color: #5e4a90; box-shadow: 0 0 0 2px #5e4a90 inset; }
+        .filter-row { background: #fff; border-radius: 8px; padding: 0.75rem; }
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
         .pagination-controls select { font-size: 0.85rem; width: auto; }
         .pagination-controls .page-info { color: #636e72; }
         .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
-        #previewTable td, #previewTable th { white-space: nowrap; }
-        #previewTable td:first-child, #previewTable th:first-child { padding-left: 1.25rem; width: 36px; }
-        #previewTable td:nth-child(2), #previewTable th:nth-child(2) { padding-right: 1.5rem; min-width: 90px; }
         .btn-orange { background:var(--color-button); border-color:var(--color-button); color:#fff; }
         .btn-orange:hover, .btn-orange:focus { background:var(--color-button-hover); border-color:var(--color-button-hover); color:#fff; }
-        .hdr-btn { min-width: 120px; }  /* Publish — stays put as its label changes */
-        .hdr-btn-sm { min-width: 90px; }  /* Refresh & Remove — narrower, equal to each other */
-        #btnStop, #btnGenerate { flex: 1 1 0; }  /* Stop & Generate equal width regardless of label */
+        .hdr-btn-sm { min-width: 90px; }  /* Refresh, Copy, Remove & Publish — equal width */
+        #btnStop, #btnGenerate { min-width: 90px; }  /* Stop & Generate: compact, equal width regardless of label */
+        /* Body cells at 0.9rem per UI_BLUEPRINT.md (headers stay 1rem / .table-light default) */
+        #previewTable tbody td { font-size: 0.9rem; }
+        /* Auto layout: every column sizes to its widest value in the current view,
+           values shown in full on one line (no truncation). The table may exceed the
+           card width — .table-responsive gives it a horizontal scrollbar. */
+        #previewTable { width: auto; min-width: 100%; }
+        #previewTable td, #previewTable th { white-space: nowrap; }
+        #previewTable .col-chk { width: 36px; text-align: center; }
+        /* Action column pinned to the right so the edit pencil stays visible while scrolling */
+        #previewTable .col-act { position: sticky; right: 0; width: 42px; text-align: center; background: transparent; }
+        #previewTable thead .col-act { background: #f8f9fa; }
+        /* Always laid out (reserves its height so the row doesn't grow on hover); just hidden until hover */
+        .row-edit { display: inline-flex; visibility: hidden; align-items: center; justify-content: center; cursor: pointer;
+            color: #ced4da; background: #fff; border: 1px solid #e9ecef; border-radius: 6px;
+            padding: 3px; line-height: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+        #previewTable tbody tr:hover .row-edit { visibility: visible; }
+        .row-edit:hover { color: #6c757d; border-color: #ced4da; }
+        /* Edit modal + dimmed backdrop */
+        .edit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+            display: none; align-items: center; justify-content: center; z-index: 1080; }
+        .edit-overlay.open { display: flex; }
+        .edit-modal { background: #fff; border-radius: 12px; padding: 1.5rem; width: 760px;
+            max-width: 92vw; max-height: 90vh; overflow: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
+        #editDesc { min-height: 160px; }
+        /* Skeleton loading rows (table "being drawn"), like GSD Campaigns */
+        .skel-row td { vertical-align: middle; }
+        .skel-bar { display: block; height: 1.45rem; border-radius: 4px;
+            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
+            background-size: 400% 100%; animation: skelShimmer 1.4s ease infinite; }
+        @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        /* Sort arrows in headers (idle ⇅ / active ▲▼) — matches GSD "Campaigns created" */
+        #previewTable th.sortable { position: relative; padding-right: 1.2rem; }
+        #previewTable th.sortable:hover { background: #e9ecef; }
+        #previewTable th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        #previewTable th.sort-asc::after { content: '▲'; opacity: 0.9; }
+        #previewTable th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        /* Collapse the publish-message box entirely when there's no message (no white bar above the table) */
+        #publishResult:empty { display: none; }
         #previewSelCount { display: inline-block; min-width: 82px; text-align: right; }  /* stable width as the count changes */
         /* theme makes .btn-outline-danger orange; force the Remove button truly red */
         #btnRemove { color:#dc3545; border-color:#dc3545; background-color:transparent; }
@@ -106,18 +143,18 @@
     <div class="container mt-5 pb-5">
         <div class="col-lg-11 mx-auto">
 
-            <!-- Stats -->
+            <!-- Stats (click a tile to show its rows in Built titles below) -->
             <div class="row g-3 mb-4" id="statsRow">
-                <div class="col"><div class="card text-center"><div class="card-body py-3">
+                <div class="col"><div class="card text-center stat-tile" data-view="existing" onclick="showView('existing')" title="Show existing combos"><div class="card-body py-3">
                     <div class="h4 mb-0" id="statExisting" style="color:#5e4a90; font-weight:700;">–</div><small class="text-dark">Existing combos</small>
                 </div></div></div>
-                <div class="col"><div class="card text-center"><div class="card-body py-3">
+                <div class="col"><div class="card text-center stat-tile" data-view="built" onclick="showView('built')" title="Show built (not pushed)"><div class="card-body py-3">
                     <div class="h4 mb-0" id="statBuilt" style="color:#5e4a90; font-weight:700;">–</div><small class="text-dark">Built (not pushed)</small>
                 </div></div></div>
-                <div class="col"><div class="card text-center"><div class="card-body py-3">
+                <div class="col"><div class="card text-center stat-tile" data-view="pushed" onclick="showView('pushed')" title="Show pushed"><div class="card-body py-3">
                     <div class="h4 mb-0" id="statPushed" style="color:#5e4a90; font-weight:700;">–</div><small class="text-dark">Pushed</small>
                 </div></div></div>
-                <div class="col"><div class="card text-center"><div class="card-body py-3">
+                <div class="col"><div class="card text-center stat-tile" data-view="failed" onclick="showView('failed')" title="Show failed"><div class="card-body py-3">
                     <div class="h4 mb-0" id="statFailed" style="color:#5e4a90; font-weight:700;">–</div><small class="text-dark">Failed</small>
                 </div></div></div>
             </div>
@@ -147,9 +184,9 @@
                             <label class="form-label">Visits to</label>
                             <input type="date" class="form-control" id="dateTo">
                         </div>
-                        <div class="col-md-3 d-flex gap-2">
-                            <button class="btn btn-outline-danger flex-fill" id="btnStop" onclick="stopRun()" disabled>Stop</button>
-                            <button class="btn btn-primary flex-fill" id="btnGenerate" onclick="startRun()">Generate</button>
+                        <div class="col-md-3 d-flex gap-2 justify-content-end">
+                            <button class="btn btn-sm btn-outline-danger" id="btnStop" onclick="stopRun()" disabled>Stop</button>
+                            <button class="btn btn-sm btn-primary" id="btnGenerate" onclick="startRun()">Generate</button>
                         </div>
                     </div>
 
@@ -172,32 +209,31 @@
 
             <!-- Preview + Publish -->
             <div class="card mb-4">
-                <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
-                    <h5 class="mb-0">Built titles</h5>
-                    <input id="previewFilter" class="form-control form-control-sm" style="width:280px;" placeholder="filter" oninput="previewPage=1; renderPreview();">
-                    <div class="d-flex gap-2 align-items-center">
-                        <span id="previewSelCount" class="small text-muted">0 selected</span>
-                        <button class="btn btn-sm btn-outline-purple hdr-btn-sm" onclick="loadPreview()">↻ Refresh</button>
-                        <button class="btn btn-sm btn-outline-danger hdr-btn-sm" id="btnRemove" onclick="removeSelected()" disabled>Remove</button>
-                        <button class="btn btn-sm btn-orange hdr-btn" id="btnPublish" onclick="publish()">Publish</button>
-                    </div>
+                <div class="card-header bg-white">
+                    <h5 class="mb-0" id="previewTitle">Built titles</h5>
                 </div>
-                <div class="card-body p-0">
-                    <div id="publishResult" class="p-3 pb-0"></div>
+                <div class="card-body">
+                    <div id="publishResult" class="mb-3"></div>
+                    <div class="filter-row d-flex gap-2 align-items-center mb-3">
+                        <input id="previewFilter" class="form-control form-control-sm" style="max-width:280px;" placeholder="filter" oninput="previewPage=1; renderPreview();">
+                        <span id="previewSelCount" class="small text-muted ms-auto">0 selected</span>
+                        <button class="btn btn-sm btn-outline-purple hdr-btn-sm" onclick="loadPreview()">↻ Refresh</button>
+                        <button class="btn btn-sm btn-outline-purple hdr-btn-sm" id="btnCopy" onclick="copySelected()" disabled>Copy</button>
+                        <button class="btn btn-sm btn-outline-danger hdr-btn-sm" id="btnRemove" onclick="removeSelected()" disabled>Remove</button>
+                        <button class="btn btn-sm btn-orange hdr-btn-sm" id="btnPublish" onclick="publish()">Publish</button>
+                    </div>
                     <div class="table-responsive">
                         <table id="previewTable" class="table table-sm table-hover align-middle mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th><input type="checkbox" id="previewSelectAll" onclick="toggleAllPreview(this.checked)" title="Select/unselect all on this page"></th>
-                                    <th class="sortable" data-sort="cat_id" onclick="setPreviewSort('cat_id')">cat_id<span class="sort-ind"></span></th>
-                                    <th class="sortable" data-sort="cat_name" onclick="setPreviewSort('cat_name')">cat_name<span class="sort-ind"></span></th>
-                                    <th class="sortable" data-sort="key" onclick="setPreviewSort('key')">facet combo<span class="sort-ind"></span></th>
-                                    <th class="sortable" data-sort="title" onclick="setPreviewSort('title')">title<span class="sort-ind"></span></th>
-                                    <th class="sortable" data-sort="example_title" onclick="setPreviewSort('example_title')">example title<span class="sort-ind"></span></th>
-                                    <th class="sortable" data-sort="source_url" onclick="setPreviewSort('source_url')">example url<span class="sort-ind"></span></th>
+                                    <th class="col-chk"><input type="checkbox" id="previewSelectAll" onclick="toggleAllPreview(this.checked)" title="Select/unselect all on this page"></th>
+                                    <th class="sortable col-cat" data-sort="cat_name" onclick="setPreviewSort('cat_name')">Deepest cat</th>
+                                    <th class="sortable col-h1" data-sort="h1_title" onclick="setPreviewSort('h1_title')">H1 title</th>
+                                    <th class="sortable col-facets" data-sort="key" onclick="setPreviewSort('key')">Facets</th>
+                                    <th class="col-act"></th>
                                 </tr>
                             </thead>
-                            <tbody id="previewBody"><tr><td colspan="7" class="text-muted text-center py-3">No built blueprints yet — run a generation.</td></tr></tbody>
+                            <tbody id="previewBody"><tr><td colspan="5" class="text-muted text-center py-3">No built blueprints yet — run a generation.</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -205,8 +241,9 @@
                     <div class="pagination-controls">
                         <span>Per page:</span>
                         <select class="form-select form-select-sm" id="previewPerPage" onchange="previewPage=1; renderPreview();">
+                            <option value="10" selected>10</option>
                             <option value="25">25</option>
-                            <option value="50" selected>50</option>
+                            <option value="50">50</option>
                             <option value="100">100</option>
                             <option value="all">Show all</option>
                         </select>
@@ -220,6 +257,31 @@
             <footer class="text-center py-4">
                 <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
             </footer>
+
+            <!-- Edit-title modal (floating, centered, dimmed backdrop) -->
+            <div id="editOverlay" class="edit-overlay">
+                <div class="edit-modal">
+                    <h5 class="mb-1">Edit title</h5>
+                    <div class="small text-muted mb-3" id="editContext"></div>
+                    <div class="mb-3">
+                        <label class="form-label" for="editTitle">Title</label>
+                        <input type="text" class="form-control" id="editTitle">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="editH1">H1 title</label>
+                        <input type="text" class="form-control" id="editH1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="editDesc">Meta description</label>
+                        <textarea class="form-control" id="editDesc" rows="6"></textarea>
+                    </div>
+                    <div id="editResult" class="small mb-2"></div>
+                    <div class="d-flex justify-content-end gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-purple" onclick="closeEditModal()">Cancel</button>
+                        <button type="button" class="btn btn-sm btn-orange" id="editSaveBtn" onclick="saveEdit()">Save</button>
+                    </div>
+                </div>
+            </div>
 
         </div>
     </div>
@@ -360,8 +422,7 @@
                 String(x.cat_id).includes(f) ||
                 (x.key || '').toLowerCase().includes(f) ||
                 (x.cat_name || '').toLowerCase().includes(f) ||
-                (x.title || '').toLowerCase().includes(f) ||
-                (x.example_title || '').toLowerCase().includes(f) ||
+                (x.h1_title || '').toLowerCase().includes(f) ||
                 (x.source_url || '').toLowerCase().includes(f));
             if (previewSort.key) {
                 rows = rows.slice().sort((a, b) => {
@@ -373,10 +434,10 @@
         }
         function updatePreviewSortIndicators() {
             document.querySelectorAll('#previewTable thead th[data-sort]').forEach(th => {
-                const ind = th.querySelector('.sort-ind');
-                if (!ind) return;
-                ind.textContent = th.dataset.sort === previewSort.key
-                    ? (previewSort.dir === 1 ? ' ▲' : ' ▼') : '';
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === previewSort.key) {
+                    th.classList.add(previewSort.dir === 1 ? 'sort-asc' : 'sort-desc');
+                }
             });
         }
         function renderPreview() {
@@ -389,16 +450,14 @@
             const end = pp === Infinity ? total : Math.min(start + pp, total);
             const body = data.slice(start, end).map(x => { const id = selId(x); return `<tr>
                 <td><input type="checkbox" ${previewSelected.has(id) ? 'checked' : ''} onclick="togglePreviewSel('${id}', this.checked)"></td>
-                <td>${esc(x.cat_id)}</td>
                 <td>${esc(x.cat_name)}</td>
-                <td><code>${esc(x.key)}</code></td>
-                <td class="small">${esc(x.title)}</td>
-                <td class="small">${esc(x.example_title)}</td>
-                <td class="small">${x.source_url && /^https?:/i.test(x.source_url) ? `<a href="${esc(x.source_url)}" target="_blank" rel="noopener">${esc(x.source_url)}</a>` : esc(x.source_url)}</td>
+                <td>${esc(x.h1_title)}</td>
+                <td>${x.source_url && /^https?:/i.test(x.source_url) ? `<a href="${esc(x.source_url.split('?')[0])}" target="_blank" rel="noopener"><code>${esc(x.key)}</code></a>` : `<code>${esc(x.key)}</code>`}</td>
+                <td class="col-act"><button class="row-edit" title="Edit title" onclick="openEditModal('${id}')"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></td>
             </tr>`; }).join('');
             const filterActive = (document.getElementById('previewFilter').value || '').trim();
             document.getElementById('previewBody').innerHTML = body ||
-                `<tr><td colspan="7" class="text-muted text-center py-3">${filterActive ? 'No matching blueprints.' : 'No built blueprints yet — run a generation.'}</td></tr>`;
+                `<tr><td colspan="5" class="text-muted text-center py-3">${filterActive ? 'No matching blueprints.' : 'No built blueprints yet — run a generation.'}</td></tr>`;
             document.getElementById('previewFooter').style.display = total ? 'block' : 'none';
             document.getElementById('previewPageInfo').textContent = total ? `${start + 1}-${end} of ${total.toLocaleString()}` : '0 of 0';
             document.getElementById('previewPrev').disabled = previewPage <= 1;
@@ -413,9 +472,31 @@
             previewPage = Math.min(Math.max(1, page), pages);
             renderPreview();
         }
+        // Which set of rows the Built-titles table is showing (driven by the stat tiles).
+        let previewStatus = 'built';
+        const VIEW_TITLES = { existing: 'Existing combos', built: 'Built titles', pushed: 'Pushed titles', failed: 'Failed titles' };
+        function showView(status) {
+            previewStatus = status;
+            previewPage = 1;
+            previewSelected.clear();
+            document.querySelectorAll('#statsRow .stat-tile').forEach(t =>
+                t.classList.toggle('active', t.dataset.view === status));
+            const h = document.getElementById('previewTitle');
+            if (h) h.textContent = VIEW_TITLES[status] || 'Built titles';
+            loadPreview();
+        }
+        function previewSkeletonRows(n = 10) {
+            // 5 columns: checkbox, Deepest cat, H1 title, Facets, action
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(5) + '</tr>').repeat(n);
+        }
         async function loadPreview() {
+            // Draw skeleton rows while fetching so it's clear the table is loading.
+            const pp = previewPerPage();
+            document.getElementById('previewBody').innerHTML =
+                previewSkeletonRows(pp === Infinity ? 10 : Math.min(pp, 10));
             try {
-                const r = await fetch(`${API_BASE}/api/seo-titles/preview?limit=5000&status=built`);
+                const r = await fetch(`${API_BASE}/api/seo-titles/preview?limit=5000&status=${encodeURIComponent(previewStatus)}`);
                 const d = await r.json();
                 previewData = d.rows || [];
                 const live = new Set(previewData.map(selId));
@@ -457,7 +538,118 @@
             const n = previewSelected.size;
             document.getElementById('previewSelCount').textContent = `${n} selected`;
             document.getElementById('btnRemove').disabled = n === 0;
+            const btnCopy = document.getElementById('btnCopy');
+            btnCopy.disabled = n === 0;
+            btnCopy.textContent = `Copy (${n})`;
             document.getElementById('btnPublish').textContent = n ? `Publish (${n})` : 'Publish';
+        }
+        function copySelected() {
+            // Copy the selected rows as TSV. Includes the columns that were removed
+            // from the visible table (cat_id, title, example title, example url) so
+            // the clipboard carries the full record, not just what's on screen.
+            const rows = previewData.filter(x => previewSelected.has(selId(x)));
+            if (!rows.length) return;
+            const cols = [
+                ['cat_id', x => x.cat_id],
+                ['cat_name', x => x.cat_name],
+                ['h1_title', x => x.h1_title],
+                ['facet combo', x => x.key],
+                ['title', x => x.title],
+                ['meta description', x => x.description],
+                ['example title', x => x.example_title],
+                ['example url', x => x.source_url],
+            ];
+            const cell = v => (v == null ? '' : String(v)).replace(/[\t\r\n]+/g, ' ').trim();
+            const tsv = [cols.map(c => c[0]).join('\t')]
+                .concat(rows.map(x => cols.map(c => cell(c[1](x))).join('\t')))
+                .join('\n');
+
+            const flash = () => {
+                const b = document.getElementById('btnCopy');
+                const orig = b.textContent;
+                b.textContent = `Copied ${rows.length}!`;
+                setTimeout(() => { b.textContent = orig; }, 1500);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(tsv).then(flash).catch(() => fallbackCopy(tsv, flash));
+            } else {
+                fallbackCopy(tsv, flash);
+            }
+        }
+        function fallbackCopy(text, done) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); done && done(); }
+            catch (e) { alert('Copy failed — select and copy manually.'); }
+            document.body.removeChild(ta);
+        }
+        // ---- edit-title modal ----
+        let editingId = null;
+        function openEditModal(id) {
+            const row = previewData.find(r => selId(r) === id);
+            if (!row) return;
+            editingId = id;
+            document.getElementById('editContext').textContent =
+                `${row.cat_name || ''} · ${row.key || ''} · cat_id ${row.cat_id}`;
+            document.getElementById('editTitle').value = row.title || '';
+            document.getElementById('editH1').value = row.h1_title || '';
+            const desc = document.getElementById('editDesc');
+            desc.style.height = '';   // reset any manual drag-resize so it opens at the default size
+            desc.style.width = '';
+            desc.value = row.description || '';
+            document.getElementById('editResult').textContent = '';
+            document.getElementById('editOverlay').classList.add('open');
+        }
+        function closeEditModal() {
+            document.getElementById('editOverlay').classList.remove('open');
+            editingId = null;
+        }
+        async function saveEdit() {
+            if (!editingId) return;
+            const row = previewData.find(r => selId(r) === editingId);
+            if (!row) return;
+            const fromExisting = (previewStatus === 'existing');
+            const payload = {
+                cat_id: row.cat_id,
+                key: row.key,
+                title: document.getElementById('editTitle').value,
+                h1_title: document.getElementById('editH1').value,
+                description: document.getElementById('editDesc').value,
+            };
+            // Editing an "existing combo" creates a Built blueprint (moves it to Built).
+            if (fromExisting) payload.cat_name = row.cat_name || null;
+            const endpoint = fromExisting ? 'create-built' : 'update';
+            const btn = document.getElementById('editSaveBtn');
+            const res = document.getElementById('editResult');
+            btn.disabled = true;
+            try {
+                const r = await fetch(`${API_BASE}/api/seo-titles/${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.detail || 'Save failed');
+                closeEditModal();
+                if (fromExisting) {
+                    await loadStats();      // Built count goes up
+                    showView('built');      // move the user to the Built set where the row now lives
+                } else {
+                    row.title = payload.title;
+                    row.h1_title = payload.h1_title;
+                    row.description = payload.description;
+                    renderPreview();
+                }
+            } catch (e) {
+                res.className = 'small mb-2 text-danger';
+                res.textContent = e.message || 'Save failed';
+            } finally {
+                btn.disabled = false;
+            }
         }
         async function removeSelected() {
             const combos = selectedCombos();
@@ -504,7 +696,7 @@
 
         // initial load
         loadStats();
-        loadPreview();
+        showView('built');  // default view + highlight the Built tile
     </script>
 </body>
 </html>

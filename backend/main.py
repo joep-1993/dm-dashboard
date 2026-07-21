@@ -2172,14 +2172,18 @@ async def export_faq_json():
         cur.close()
         return_db_connection(conn)
 
-        # Convert to JSON-serializable format
+        # Convert to JSON-serializable format.
+        # Some stored faq_json/schema_org values contain raw control characters
+        # (literal newlines/tabs inside string values) which strict json.loads
+        # rejects with "Invalid control character at ...". Parse with strict=False
+        # so those chars are accepted; json.dumps below re-escapes them properly.
         data = []
         for row in rows:
             data.append({
                 'url': row['url'],
                 'page_title': row['page_title'],
-                'faqs': json.loads(row['faq_json']) if row['faq_json'] else [],
-                'schema_org': json.loads(row['schema_org']) if row['schema_org'] else {}
+                'faqs': json.loads(row['faq_json'], strict=False) if row['faq_json'] else [],
+                'schema_org': json.loads(row['schema_org'], strict=False) if row['schema_org'] else {}
             })
 
         # Return as downloadable file
@@ -3306,6 +3310,8 @@ from backend.seo_titles_service import (
     stop_run as seo_titles_stop_run,
     publish_built as seo_titles_publish,
     remove_blueprints as seo_titles_remove,
+    update_blueprint as seo_titles_update,
+    upsert_blueprint_built as seo_titles_upsert_built,
     get_preview as seo_titles_preview,
     get_recent as seo_titles_recent,
     get_stats as seo_titles_stats,
@@ -3373,6 +3379,47 @@ async def seo_titles_remove_endpoint(request: dict = None):
     request = request or {}
     try:
         return seo_titles_remove(request.get("combos") or [])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/seo-titles/update")
+async def seo_titles_update_endpoint(request: dict = None):
+    """Update the editable fields of one blueprint (cat_id, key, title, h1_title,
+    description)."""
+    request = request or {}
+    cat_id = request.get("cat_id")
+    key = request.get("key")
+    if cat_id is None or not key:
+        raise HTTPException(status_code=400, detail="cat_id and key are required")
+    try:
+        return seo_titles_update(
+            cat_id, key,
+            request.get("title", "") or "",
+            request.get("h1_title", "") or "",
+            request.get("description", "") or "",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/seo-titles/create-built")
+async def seo_titles_create_built_endpoint(request: dict = None):
+    """Create a built blueprint from an edited 'existing combo' row (cat_id, key,
+    cat_name, title, h1_title, description). Moves the combo into the Built set."""
+    request = request or {}
+    cat_id = request.get("cat_id")
+    key = request.get("key")
+    if cat_id is None or not key:
+        raise HTTPException(status_code=400, detail="cat_id and key are required")
+    try:
+        return seo_titles_upsert_built(
+            cat_id, key,
+            request.get("cat_name") or None,
+            request.get("title", "") or "",
+            request.get("h1_title", "") or "",
+            request.get("description", "") or "",
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -57,6 +57,27 @@ other tool uses the grey default. New tools follow the grey default.
 - Header cells: **grey `#f8f9fa`**, sticky, `padding:6px 14px`, **font-size `1rem`**
   (headers are a touch larger than the `0.9rem` body).
 - Body cells: `font-size:0.9rem`, `vertical-align:middle`.
+- **Column widths — pick one strategy, and a value must never bleed into the next column:**
+  - *Fixed widths (stable on sort):* `table-layout:fixed; width:100%` + an explicit
+    width on every column (a `.col-*` class per `<th>`; `width:36px` for the checkbox,
+    percentages for the rest). Keeps widths from shifting when you sort a different
+    column. Contain values with either *wrap* (`white-space:normal; overflow-wrap:anywhere;
+    word-break:break-word;` incl. nested `code`/`a`) or *single-line ellipsis*
+    (`white-space:nowrap; overflow:hidden; text-overflow:ellipsis;`). Never `nowrap`
+    **without** `overflow:hidden` here — that's the combination that bleeds.
+  - *Content widths + horizontal scroll (full values always visible):* `table-layout:auto`
+    (`width:auto; min-width:100%`) + `white-space:nowrap` (no truncation), inside a
+    horizontally-scrollable wrapper (`.table-responsive` / `overflow-x:auto`). Each column
+    sizes to its widest value in the current view and the table scrolls sideways when it
+    exceeds the card. Widths may shift between views — that's the trade for showing every
+    value in full. If a hover control (e.g. an edit pencil) must stay reachable while
+    scrolled, put it in a **right-pinned sticky column** (`position:sticky; right:0` + a
+    solid background).
+- **Filter box + action buttons go in a `.filter-row` above the table**, not in the
+  card header — one `d-flex gap-2 align-items-center mb-3` row with the filter input
+  on the left and the action buttons pushed right (`ms-auto` on the first right item),
+  so filter and buttons share a single baseline height. Sort arrows use the
+  `th.sortable::after` `⇅`/`▲`/`▼` glyph pattern (see "Campaigns created" in GSD Campaigns).
 - **Sortable headers**: add `class="sortable" data-sort="<key>" onclick="sortBy('<key>')"`.
   The `.sortable` CSS shows a `⇅` idle glyph and `▲`/`▼` for the active sort
   direction (toggled by adding `sort-asc` / `sort-desc` to the active `<th>`).

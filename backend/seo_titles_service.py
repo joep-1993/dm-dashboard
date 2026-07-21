@@ -118,16 +118,26 @@ def load_rules():
 
 def facet_phrase(types, rules):
     """Ordered placeholder phrase for a set of facet types. Inserts
-    !!sub_category!! at SUBCATEGORY_ORDER when the set has no type-facet."""
+    !!sub_category!! at SUBCATEGORY_ORDER when the set has no type-facet.
+
+    geschikte_leeftijd is always rendered AFTER the category/type-facet noun
+    (never before it), regardless of its configured order_index."""
     items = []  # (order, slug, placeholder)
     has_type = False
+    type_orders = []
     for t in types:
         order, is_type = rules.get(t, (UNKNOWN_ORDER, False))
         if is_type:
             has_type = True
+            type_orders.append(order)
         items.append((order, t, f'!!{t}!!'))
     if not has_type:
         items.append((SUBCATEGORY_ORDER, '', SUBCATEGORY_PH))
+    # Pin geschikte_leeftijd right after the noun (the last type-facet, or the
+    # sub_category placeholder when there is none) so it never precedes it.
+    noun_order = max(type_orders) if type_orders else SUBCATEGORY_ORDER
+    items = [(noun_order + 0.5, slug, ph) if slug == 'geschikte_leeftijd' else (order, slug, ph)
+             for (order, slug, ph) in items]
     items.sort(key=lambda x: (x[0], x[1]))
     return ' '.join(ph for _, _, ph in items)
 
@@ -514,6 +524,51 @@ def _post_page_titles(records, env):
     return False, 0, f"transport error after retries: {last}"
 
 
+def update_blueprint(cat_id, key, title, h1_title, description):
+    """Update the editable fields (title, h1_title, description) of a single
+    blueprint identified by (cat_id, key). Returns {"updated": <rowcount>}."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE pa.seo_titles_blueprints
+            SET title = %s, h1_title = %s, description = %s
+            WHERE cat_id = %s AND key = %s
+        """, (title, h1_title, description, int(cat_id), key))
+        conn.commit()
+        return {"updated": cur.rowcount}
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def upsert_blueprint_built(cat_id, key, cat_name, title, h1_title, description):
+    """Create (or refresh) a blueprint as status='built' from an edited row.
+    Used when an "existing combo" row is edited so it moves into the Built set.
+    Never downgrades a row that was already 'pushed'."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO pa.seo_titles_blueprints
+                (cat_id, key, cat_name, title, h1_title, description, country_code,
+                 status, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, 'NL', 'built', now())
+            ON CONFLICT (cat_id, key) DO UPDATE SET
+                cat_name    = EXCLUDED.cat_name,
+                title       = EXCLUDED.title,
+                h1_title    = EXCLUDED.h1_title,
+                description = EXCLUDED.description,
+                status      = 'built'
+            WHERE pa.seo_titles_blueprints.status <> 'pushed'
+        """, (int(cat_id), key, cat_name, title, h1_title, description))
+        conn.commit()
+        return {"upserted": cur.rowcount}
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
 def remove_blueprints(combos):
     """Delete unpushed (built/failed) blueprints for the given combos. Never
     touches 'pushed' rows so the dedup push-log stays intact."""
@@ -630,6 +685,34 @@ def get_preview(limit=100, status="built"):
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        # "existing" comes from the tblPageTitles export table, not the blueprints
+        # tool table. Shape the rows like blueprint rows so the frontend renders them
+        # in the same grid (cat_name / source_url / visits are not tracked there).
+        if status == "existing":
+            # pa.page_titles_existing (the tblPageTitles export) carries TWO row
+            # layouts merged from different export generations:
+            #   * "normal"  — key=facet combo, title=page title, h1_title=H1, description=meta
+            #   * "shifted" — key=category name, title=facet combo, h1_title=page title, description=H1
+            # Detect which by whether the `title` column holds a real page title
+            # (contains 'beslist.nl'); then normalise both into the same
+            # (cat_name / facet key / title / h1_title / description) shape so the
+            # grid's Deepest cat / H1 title / Facets columns line up correctly.
+            cur.execute("""
+                SELECT cat_id,
+                       CASE WHEN title ILIKE '%%beslist.nl%%' THEN key         ELSE title       END AS key,
+                       CASE WHEN title ILIKE '%%beslist.nl%%' THEN NULL        ELSE key         END AS cat_name,
+                       CASE WHEN title ILIKE '%%beslist.nl%%' THEN title       ELSE h1_title    END AS title,
+                       CASE WHEN title ILIKE '%%beslist.nl%%' THEN h1_title    ELSE description END AS h1_title,
+                       CASE WHEN title ILIKE '%%beslist.nl%%' THEN description ELSE NULL        END AS description,
+                       NULL::text AS source_url, NULL::int AS visits, NULL::numeric AS revenue,
+                       'existing' AS status,
+                       NULL::timestamp AS created_at, NULL::timestamp AS pushed_at,
+                       NULL::text AS example_title
+                FROM pa.page_titles_existing
+                ORDER BY cat_id, key
+                LIMIT %s
+            """, (limit,))
+            return [dict(r) for r in cur.fetchall()]
         cur.execute("""
             SELECT b.cat_id, b.key, b.cat_name, b.title, b.h1_title, b.description,
                    b.source_url, b.visits, b.revenue, b.status, b.created_at, b.pushed_at,
