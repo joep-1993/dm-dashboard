@@ -705,7 +705,12 @@ def get_preview(limit=100, status="built"):
                        cat_name,
                        CASE WHEN title ILIKE '%%beslist.nl%%' THEN title       ELSE h1_title    END AS title,
                        CASE WHEN title ILIKE '%%beslist.nl%%' THEN h1_title    ELSE description END AS h1_title,
-                       CASE WHEN title ILIKE '%%beslist.nl%%' THEN description ELSE NULL        END AS description,
+                       -- meta description: the row's own (normal layout) if present, else the
+                       -- category browse_description fetched from /html-title-descriptions
+                       COALESCE(
+                           CASE WHEN title ILIKE '%%beslist.nl%%' THEN NULLIF(description, '') END,
+                           NULLIF(browse_description, '')
+                       ) AS description,
                        NULL::text AS source_url, NULL::int AS visits, NULL::numeric AS revenue,
                        'existing' AS status,
                        NULL::timestamp AS created_at, NULL::timestamp AS pushed_at,

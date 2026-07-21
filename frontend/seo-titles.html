@@ -66,7 +66,7 @@
         #btnRemove:hover, #btnRemove:focus { background-color:#dc3545; border-color:#dc3545; color:#fff; }
         /* grey out the Generate button while a run is going on (like FAQ's) */
         /* Unavailable (disabled) buttons are ALWAYS outlined grey, never red — see cc1/UI_BLUEPRINT.md */
-        #btnGenerate:disabled, #btnStop:disabled, #btnRemove:disabled { color:#6c757d; border-color:#6c757d; background-color:transparent; opacity:1; }
+        #btnGenerate:disabled, #btnStop:disabled, #btnRemove:disabled, #btnPublish:disabled { color:#6c757d; border-color:#6c757d; background-color:transparent; opacity:1; }
         /* flatpickr styling — same purple theme as SEO stats */
         .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
         .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
@@ -159,54 +159,6 @@
                 </div></div></div>
             </div>
 
-            <!-- Generate -->
-            <div class="card mb-4">
-                <div class="card-header bg-primary text-white d-flex align-items-center gap-2">
-                    <h5 class="mb-0">Retrieve URL data</h5>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" style="cursor: help;">
-                        <title>Pulls the top-X SEO-visited faceted /c/ URLs from Redshift, finds the (cat_id, key) combinations that don't have a page-title blueprint yet, builds a deterministic blueprint for each (and an AI unique title for the source URL), then lets you push the blueprints to /page-titles. Dedup is against the current tblPageTitles export plus everything this tool has already pushed.</title>
-                        <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
-                        <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
-                        <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
-                    </svg>
-                </div>
-                <div class="card-body">
-                    <div class="row g-3 align-items-end">
-                        <div class="col-md-3">
-                            <label class="form-label">Top X URLs (by SEO visits)</label>
-                            <input type="number" class="form-control" id="topN" value="100" min="1" max="1000000">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Visits from</label>
-                            <input type="date" class="form-control" id="dateFrom" value="2025-01-01">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Visits to</label>
-                            <input type="date" class="form-control" id="dateTo">
-                        </div>
-                        <div class="col-md-3 d-flex gap-2 justify-content-end">
-                            <button class="btn btn-sm btn-outline-danger" id="btnStop" onclick="stopRun()" disabled>Stop</button>
-                            <button class="btn btn-sm btn-primary" id="btnGenerate" onclick="startRun()">Generate</button>
-                        </div>
-                    </div>
-
-                    <div id="progressWrap" class="mt-3" style="display:none;">
-                        <div class="d-flex justify-content-between mb-1">
-                            <span id="progressText">Processing...</span>
-                            <span id="progressPercent">0%</span>
-                        </div>
-                        <div class="progress" id="progressBarOuter" style="height: 25px;">
-                            <div class="progress-bar progress-bar-striped progress-bar-animated"
-                                 role="progressbar"
-                                 id="progressBar"
-                                 style="width: 0%; background-color: #00b894;">
-                            </div>
-                        </div>
-                        <div class="row g-2 mt-2 small text-center" id="counters"></div>
-                    </div>
-                </div>
-            </div>
-
             <!-- Preview + Publish -->
             <div class="card mb-4">
                 <div class="card-header bg-white">
@@ -251,6 +203,54 @@
                         <button class="btn btn-outline-secondary btn-page" onclick="previewGoto(previewPage - 1)" id="previewPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
                         <span class="page-info" id="previewPageInfo">-</span>
                         <button class="btn btn-outline-secondary btn-page" onclick="previewGoto(previewPage + 1)" id="previewNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Generate (Retrieve URL data) — moved to the bottom of the page -->
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white d-flex align-items-center gap-2">
+                    <h5 class="mb-0">Retrieve URL data</h5>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" style="cursor: help;">
+                        <title>Pulls the top-X SEO-visited faceted /c/ URLs from Redshift, finds the (cat_id, key) combinations that don't have a page-title blueprint yet, builds a deterministic blueprint for each (and an AI unique title for the source URL), then lets you push the blueprints to /page-titles. Dedup is against the current tblPageTitles export plus everything this tool has already pushed.</title>
+                        <circle cx="8" cy="8" r="8" fill="#5e4a90"/>
+                        <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                        <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                    </svg>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label">Top X URLs (by SEO visits)</label>
+                            <input type="number" class="form-control" id="topN" value="100" min="1" max="1000000">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Visits from</label>
+                            <input type="date" class="form-control" id="dateFrom" value="2025-01-01">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Visits to</label>
+                            <input type="date" class="form-control" id="dateTo">
+                        </div>
+                        <div class="col-md-3 d-flex gap-2 justify-content-end">
+                            <button class="btn btn-sm btn-outline-danger" id="btnStop" onclick="stopRun()" disabled>Stop</button>
+                            <button class="btn btn-sm btn-primary" id="btnGenerate" onclick="startRun()">Generate</button>
+                        </div>
+                    </div>
+
+                    <div id="progressWrap" class="mt-3" style="display:none;">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span id="progressText">Processing...</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                        <div class="progress" id="progressBarOuter" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar"
+                                 id="progressBar"
+                                 style="width: 0%; background-color: #00b894;">
+                            </div>
+                        </div>
+                        <div class="row g-2 mt-2 small text-center" id="counters"></div>
                     </div>
                 </div>
             </div>
@@ -539,12 +539,18 @@
         }
         function updatePreviewSelUI() {
             const n = previewSelected.size;
+            const isExisting = (previewStatus === 'existing');
             document.getElementById('previewSelCount').textContent = `${n} selected`;
             document.getElementById('btnRemove').disabled = n === 0;
             const btnCopy = document.getElementById('btnCopy');
             btnCopy.disabled = n === 0;
             btnCopy.textContent = `Copy (${n})`;
-            document.getElementById('btnPublish').textContent = n ? `Publish (${n})` : 'Publish';
+            // Publish only applies to blueprints (built set), not the read-only Existing
+            // combos — disable it there. Editing an Existing row moves it to Built, where
+            // the view switches and Publish becomes available again.
+            const btnPublish = document.getElementById('btnPublish');
+            btnPublish.disabled = isExisting;
+            btnPublish.textContent = n ? `Publish (${n})` : 'Publish';
         }
         function copySelected() {
             // Copy the selected rows as TSV. Includes the columns that were removed
