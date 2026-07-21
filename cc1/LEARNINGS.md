@@ -1,6 +1,15 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## GSD LL "last successful data load" reset on every restart — mtime + DB persistence (2026-07-21)
+
+The LL card's purple-"i" tooltip ("Last successful data load: …") changed on every backend restart. Root cause in `gsd_ll_service.py::load_excel_data`: `loaded_at = datetime.now()` written ONLY to the in-process `_EXCEL_DATA` cache. Each restart runs a startup pre-load → re-stamps the current time → the tooltip showed the last **restart**, not the last real ~09:50 data load. (A 2026-07-17 fix `90796f9` to use file mtime had regressed back to `now()` — same kind of silent revert as the GSD history column-width regression found the same day; watch for these.)
+
+- **Fix part 1 — date from the Excel file's mtime, not the clock.** `loaded_at = datetime.fromtimestamp(os.path.getmtime(path), AMSTERDAM_TZ).isoformat()`. The scheduled script writes a fresh `gsd_shops_nl_be_*.xlsx` ~09:50 daily; its mtime is the true data date and is stable — re-reading the same file across restarts yields the same value. Falls back to `now()` only on `OSError`.
+- **Fix part 2 — persist to a singleton DB table** `pa.jvs_gsd_ll_excel_load` (n8n-vector-db, `id INTEGER PK DEFAULT 1 CHECK (id=1)`, upsert `ON CONFLICT (id)`). `_record_excel_load()` after each successful load (best-effort, never raises); `get_last_excel_load()` reads it (converts the TIMESTAMPTZ back to an ISO string to match the in-memory shape). `get_excel_data_status()` falls back to the persisted row when in-memory `loaded_at` is None — so the date is retrievable across restarts AND across the two instances (this box + win-htz-006). DB read happens only when the in-memory value is absent (no per-request overhead on the prod box after its pre-load).
+- **Frontend** (`gsd-campaigns.html`): the tooltip now uses `d.loaded_at` regardless of `has_data` (the persisted value is the last real load even when the feed isn't cached in this process). TZ display is consistent: in-mem returns `+02:00`, DB returns `+00:00`, both the same instant → `new Date(iso).toLocaleString('nl-NL')` renders 09:50 either way.
+- **Dev-box caveat:** on this WSL box the Excel path (`C:\Users\l.davidowski\…`) is unreachable, so `loaded_at` stays null here (same reason startup logs show the "no xlsx found" retries); it populates on the box that can read the file. Commit `248877d`, deployed (kill+relaunch :8003). Test rows truncated → table empty, ready for first real load.
+
 ## Local folder consolidation: `dm-tools` renamed to `dm-dashboard`, single working copy (2026-07-21)
 
 This box had TWO local checkouts of the same GitHub repo (`joep-1993/dm-dashboard`): `projects/dm-tools` (served live :8003, up-to-date) and a stale `projects/dm-dashboard` (7 behind, occasionally edited). Merged into ONE folder named `dm-dashboard`. The old `joep-1993/dm-tools` GitHub repo was already archived (remote alias `archived-dm-tools`); the repo-level split was gone, only the local-folder duplication + confusing naming remained.
