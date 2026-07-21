@@ -448,7 +448,7 @@
                     return `<tr class="history-row">
                         <td style="padding: 6px 12px;">${started}</td>
                         <td style="padding: 6px 12px; text-align: center;">${versionBadge}</td>
-                        <td style="padding: 6px 12px;"><span class="badge border border-${color} text-${color}">${h.status || ''}</span></td>
+                        <td style="padding: 6px 12px;"><span class="badge border border-${color}" style="color: var(--bs-${color});">${h.status || ''}</span></td>
                         <td style="padding: 6px 12px;">${filename}</td>
                         <td style="padding: 6px 12px;">${msg}</td>
                         <td style="padding: 6px 12px;">${actions}</td>
