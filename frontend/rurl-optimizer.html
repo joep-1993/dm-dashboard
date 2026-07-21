@@ -159,10 +159,7 @@
 
                             <div class="col-12 d-flex justify-content-end align-items-center gap-2">
                                 <span id="facetsStatus" class="text-muted small me-auto"></span>
-                                <button type="button" class="btn d-inline-flex align-items-center gap-1" id="refreshFacetsBtn"
-                                        style="border:1px solid #6f42c1;color:#6f42c1;background:transparent;"
-                                        onmouseover="if(!this.disabled){this.style.background='#6f42c1';this.style.color='white';}"
-                                        onmouseout="if(!this.disabled){this.style.background='transparent';this.style.color='#6f42c1';}"
+                                <button type="button" class="btn btn-outline-purple d-inline-flex align-items-center gap-1" id="refreshFacetsBtn"
                                         title="Rebuild facets.csv from the Search API. Runs automatically before a run when the cache is older than a week; takes ~5-8 min.">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                                     <span id="refreshFacetsLabel">Refresh facets</span>
@@ -513,11 +510,9 @@
             const btn = document.getElementById('refreshFacetsBtn');
             const label = document.getElementById('refreshFacetsLabel');
             if (!btn) return;
+            // .btn-outline-purple handles colour + the disabled (grey outline)
+            // state via CSS; we only toggle disabled + swap the label.
             btn.disabled = running;
-            btn.style.opacity = running ? '0.6' : '';
-            btn.style.cursor = running ? 'wait' : '';
-            btn.style.background = 'transparent';
-            btn.style.color = '#6f42c1';
             if (label) label.textContent = running ? 'Refreshing…' : 'Refresh facets';
         }
 
