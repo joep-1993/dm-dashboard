@@ -5,7 +5,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 # query.txt verbatim
-SQL = open('/home/joepvanschagen/projects/dm-tools/notes/query.txt').read()
+SQL = open('/home/joepvanschagen/projects/dm-dashboard/notes/query.txt').read()
 
 print("Running query.txt against Redshift (date range as written in the file)...")
 rs = psycopg2.connect(host=os.getenv('REDSHIFT_HOST'), port=os.getenv('REDSHIFT_PORT'),

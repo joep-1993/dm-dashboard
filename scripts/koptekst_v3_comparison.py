@@ -14,7 +14,7 @@ informationele dimensies (meetbare specs, aantal alinea's, koopvraag-signalen).
 Output: side-by-side Excel (gegroepeerd per maincat) naar Downloads.
 
 Gebruik:
-  cd /home/joepvanschagen/projects/dm-tools
+  cd /home/joepvanschagen/projects/dm-dashboard
   ./venv/bin/python scripts/koptekst_v3_comparison.py [--per-maincat 2] [--only Maincat] [--out PATH]
 """
 import argparse

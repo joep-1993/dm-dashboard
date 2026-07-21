@@ -1,6 +1,6 @@
 import os, csv
 from dotenv import load_dotenv
-load_dotenv('/home/joepvanschagen/projects/dm-tools/.env')
+load_dotenv('/home/joepvanschagen/projects/dm-dashboard/.env')
 import psycopg2
 from psycopg2.extras import execute_values
 

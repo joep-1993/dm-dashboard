@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-load_dotenv('/home/joepvanschagen/projects/dm-tools/.env')
+load_dotenv('/home/joepvanschagen/projects/dm-dashboard/.env')
 import psycopg2
 rs = psycopg2.connect(host=os.getenv('REDSHIFT_HOST'), port=os.getenv('REDSHIFT_PORT'),
                       dbname=os.getenv('REDSHIFT_DB'), user=os.getenv('REDSHIFT_USER'),

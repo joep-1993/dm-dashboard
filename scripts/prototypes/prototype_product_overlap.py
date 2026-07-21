@@ -248,7 +248,7 @@ if __name__ == "__main__":
         "/mnt/c/Users/JoepvanSchagen/Downloads/redirects_global_63a90fd1_20260429_122533.xlsx"
     )
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(
-        "/home/joepvanschagen/projects/dm-tools/scripts/product_overlap_prototype.csv"
+        "/home/joepvanschagen/projects/dm-dashboard/scripts/product_overlap_prototype.csv"
     )
     # Pass --full as 3rd arg to skip per-bucket sampling.
     n_per_bucket = None if len(sys.argv) > 3 and sys.argv[3] == "--full" else 12

@@ -12,7 +12,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-SRC = "/home/joepvanschagen/projects/dm-tools/backend/data/kopteksten_maincat_prompts_v3.json"
+SRC = "/home/joepvanschagen/projects/dm-dashboard/backend/data/kopteksten_maincat_prompts_v3.json"
 OUT = "/mnt/c/Users/JoepvanSchagen/Downloads/claude/koptekst_v3_prompt_verschillen_per_maincat_2026-07-02.xlsx"
 
 d = json.load(open(SRC))

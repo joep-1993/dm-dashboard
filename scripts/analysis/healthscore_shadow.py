@@ -9,7 +9,7 @@ import numpy as np, pandas as pd, psycopg2
 
 CAP_N, W_V, W_R = 1000, 0.889, 0.111
 def g(k):
-    for line in open('/home/joepvanschagen/projects/dm-tools/.env'):
+    for line in open('/home/joepvanschagen/projects/dm-dashboard/.env'):
         if line.startswith(k + '='):
             return line.split('=', 1)[1].strip().strip('"').strip("'")
 

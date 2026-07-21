@@ -10,7 +10,7 @@ import psycopg2
 BLEND = 0.5  # weight on visit coverage; (1-BLEND) on revenue coverage
 
 def g(k):
-    for line in open('/home/joepvanschagen/projects/dm-tools/.env'):
+    for line in open('/home/joepvanschagen/projects/dm-dashboard/.env'):
         if line.startswith(k + '='):
             return line.split('=', 1)[1].strip().strip('"').strip("'")
 

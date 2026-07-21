@@ -7,7 +7,7 @@ genereert v2 met dezelfde producten via de Beslist Product Search API,
 scoort beide op compliance-dimensies, en schrijft side-by-side Excel naar Downloads.
 
 Gebruik:
-  cd /home/joepvanschagen/projects/dm-tools
+  cd /home/joepvanschagen/projects/dm-dashboard
   source venv/bin/activate
   python3 scripts/koptekst_v2_comparison.py [--n 50] [--seed mijnseed]
 

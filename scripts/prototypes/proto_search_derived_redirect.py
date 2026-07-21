@@ -227,6 +227,6 @@ if __name__ == "__main__":
         "/mnt/c/Users/JoepvanSchagen/Downloads/redirects_global_5ce534e0_20260429_134255.xlsx"
     )
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(
-        "/home/joepvanschagen/projects/dm-tools/scripts/search_derived_proto.csv"
+        "/home/joepvanschagen/projects/dm-dashboard/scripts/search_derived_proto.csv"
     )
     main(xlsx, out)

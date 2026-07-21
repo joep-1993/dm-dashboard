@@ -5,12 +5,12 @@ the blend (June split). If f_vol ~ 0, search volume doesn't help coverage.
 """
 import sys
 import numpy as np, pandas as pd, psycopg2
-sys.path.insert(0, '/home/joepvanschagen/projects/dm-tools/backend')
+sys.path.insert(0, '/home/joepvanschagen/projects/dm-dashboard/backend')
 from keyword_planner_service import clean_keyword
 
 BLEND = 0.5
 def g(k):
-    for line in open('/home/joepvanschagen/projects/dm-tools/.env'):
+    for line in open('/home/joepvanschagen/projects/dm-dashboard/.env'):
         if line.startswith(k + '='):
             return line.split('=', 1)[1].strip().strip('"').strip("'")
 

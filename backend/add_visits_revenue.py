@@ -8,8 +8,8 @@ import csv
 import pandas as pd
 from collections import defaultdict
 
-URL_DATA = '/home/joepvanschagen/projects/dm-tools/backend/url_visits_revenue.csv'
-FACET_FILE = '/home/joepvanschagen/projects/dm-tools/backend/faet_values_new_output.xlsx'
+URL_DATA = '/home/joepvanschagen/projects/dm-dashboard/backend/url_visits_revenue.csv'
+FACET_FILE = '/home/joepvanschagen/projects/dm-dashboard/backend/faet_values_new_output.xlsx'
 
 
 def main():

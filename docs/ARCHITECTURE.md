@@ -68,7 +68,7 @@
 ### Repository Management (as of 2026-04-15)
 - **Canonical repo**: `github.com/joep-1993/dm-dashboard` (git remote alias: `origin`)
 - **Legacy repo**: `github.com/joep-1993/dm-tools` (alias `dm-tools-old`) — kept for reference until archived. Do NOT push to it
-- **Working copy**: `/home/joepvanschagen/projects/dm-tools` (directory name unchanged, despite remote swap — historical)
+- **Working copy**: `/home/joepvanschagen/projects/dm-dashboard` (folder renamed from `dm-tools` on 2026-07-21 when the two local checkouts were consolidated into one; live :8003 also runs from here)
 - **History of the consolidation**: dm-tools and dm-dashboard were two parallel repos with drifting copies. On 2026-04-15 they were unified: dm-tools absorbed all dashboard features behind env flags, then its history was force-pushed to dm-dashboard. Both remotes now hold identical history at commit `2414674`
 - **Workflow**: always `git pull --rebase` before pushing; a second Claude instance on the networked box also has repo access
 
