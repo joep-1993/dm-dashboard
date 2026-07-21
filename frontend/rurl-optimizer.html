@@ -151,14 +151,9 @@
                                     <input type="checkbox" class="form-check-input" id="tierALimitEnabled">
                                     <label for="tierALimitEnabled" class="form-check-label">Tier A limit</label>
                                 </div>
-                                <div class="form-check form-check-inline">
-                                    <input type="checkbox" class="form-check-input" id="useV2" checked>
-                                    <label for="useV2" class="form-check-label" title="Switch between the original engine (v1) and the v2 engine. Persistence is shared.">2.0</label>
-                                </div>
                             </div>
 
                             <div class="col-12 d-flex justify-content-end align-items-center gap-2">
-                                <span id="facetsStatus" class="text-muted small me-auto"></span>
                                 <button type="button" class="btn btn-outline-purple d-inline-flex align-items-center gap-1" id="refreshFacetsBtn"
                                         title="Rebuild facets.csv from the Search API. Runs automatically before a run when the cache is older than a week; takes ~5-8 min.">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
@@ -235,13 +230,9 @@
         let pollTimer = null;
 
         function apiBase() {
-            return document.getElementById('useV2').checked ? '/api/rurl-v2' : '/api/rurl';
+            // v2 engine only (the v1/2.0 toggle was removed; 2.0 is now always used).
+            return '/api/rurl-v2';
         }
-        // Reload history when toggle flips so the badges/download links stay coherent.
-        document.addEventListener('DOMContentLoaded', () => {
-            const v2 = document.getElementById('useV2');
-            if (v2) v2.addEventListener('change', loadHistory);
-        });
 
         // Workers: 0 → empty (so 'auto' placeholder is visible again)
         document.getElementById('workers').addEventListener('input', (e) => {
@@ -457,7 +448,7 @@
                     return `<tr class="history-row">
                         <td style="padding: 6px 12px;">${started}</td>
                         <td style="padding: 6px 12px; text-align: center;">${versionBadge}</td>
-                        <td style="padding: 6px 12px;"><span class="badge bg-${color}">${h.status || ''}</span></td>
+                        <td style="padding: 6px 12px;"><span class="badge border border-${color} text-${color}">${h.status || ''}</span></td>
                         <td style="padding: 6px 12px;">${filename}</td>
                         <td style="padding: 6px 12px;">${msg}</td>
                         <td style="padding: 6px 12px;">${actions}</td>
@@ -496,14 +487,17 @@
         const FACETS_BASE = '/api/rurl-v2';
         let facetsPollTimer = null;
 
+        // Facet-cache age is surfaced as the Refresh-facets button's hover tooltip
+        // (rather than a separate status line).
+        const REFRESH_FACETS_BASE_TIP = 'Rebuild facets.csv from the Search API. Runs automatically before a run when the cache is older than a week; takes ~5-8 min.';
         function renderFacetsStatus(s) {
-            const el = document.getElementById('facetsStatus');
-            if (!el) return;
-            if (!s || s.age_days == null) { el.textContent = ''; el.title = ''; el.style.color = ''; return; }
+            const btn = document.getElementById('refreshFacetsBtn');
+            if (!btn) return;
+            if (!s || s.age_days == null) { btn.title = REFRESH_FACETS_BASE_TIP; return; }
             const ageTxt = s.age_days < 1 ? 'refreshed today' : (Math.round(s.age_days) + 'd old');
-            el.textContent = 'Facet cache: ' + ageTxt + (s.stale ? ' (stale)' : '');
-            el.style.color = s.stale ? '#b8860b' : '';
-            el.title = s.mtime ? ('Last rebuilt: ' + new Date(s.mtime).toLocaleString()) : '';
+            const rebuilt = s.mtime ? ('\nLast rebuilt: ' + new Date(s.mtime).toLocaleString()) : '';
+            btn.title = 'Facet cache: ' + ageTxt + (s.stale ? ' (stale)' : '')
+                + '\n' + REFRESH_FACETS_BASE_TIP + rebuilt;
         }
 
         function setRefreshBtnRunning(running) {
