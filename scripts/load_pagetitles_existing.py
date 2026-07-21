@@ -33,8 +33,11 @@ CREATE TABLE IF NOT EXISTS pa.page_titles_existing (
     title        TEXT,
     h1_title     TEXT,
     description  TEXT,
-    country_code TEXT DEFAULT 'NL'
+    country_code TEXT DEFAULT 'NL',
+    cat_name     TEXT                     -- deepest category name, backfilled by
+                                          -- scripts/backfill_page_titles_existing_catname.py
 );
+ALTER TABLE pa.page_titles_existing ADD COLUMN IF NOT EXISTS cat_name TEXT;
 CREATE INDEX IF NOT EXISTS ix_pte_combo ON pa.page_titles_existing (cat_id, canon_key);
 
 -- Blueprints this tool builds/pushes. Doubles as preview source, push queue,
@@ -118,6 +121,8 @@ def main():
         cur.execute("SELECT count(*), count(DISTINCT (cat_id, canon_key)) FROM pa.page_titles_existing")
         total, distinct = cur.fetchone()
         print(f"[done] pa.page_titles_existing rows={total} distinct(cat_id,canon_key)={distinct}", flush=True)
+        print("[note] TRUNCATE cleared cat_name — re-run "
+              "scripts/backfill_page_titles_existing_catname.py to repopulate it.", flush=True)
     finally:
         cur.close()
         conn.close()

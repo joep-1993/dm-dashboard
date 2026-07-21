@@ -216,6 +216,7 @@
                     <div id="publishResult" class="mb-3"></div>
                     <div class="filter-row d-flex gap-2 align-items-center mb-3">
                         <input id="previewFilter" class="form-control form-control-sm" style="max-width:280px;" placeholder="filter" oninput="previewPage=1; renderPreview();">
+                        <span id="previewFilterCount" class="small text-muted"></span>
                         <span id="previewSelCount" class="small text-muted ms-auto">0 selected</span>
                         <button class="btn btn-sm btn-outline-purple hdr-btn-sm" onclick="loadPreview()">↻ Refresh</button>
                         <button class="btn btn-sm btn-outline-purple hdr-btn-sm" id="btnCopy" onclick="copySelected()" disabled>Copy</button>
@@ -456,6 +457,8 @@
                 <td class="col-act"><button class="row-edit" title="Edit title" onclick="openEditModal('${id}')"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></td>
             </tr>`; }).join('');
             const filterActive = (document.getElementById('previewFilter').value || '').trim();
+            document.getElementById('previewFilterCount').textContent =
+                filterActive ? `${total.toLocaleString()} result${total === 1 ? '' : 's'}` : '';
             document.getElementById('previewBody').innerHTML = body ||
                 `<tr><td colspan="5" class="text-muted text-center py-3">${filterActive ? 'No matching blueprints.' : 'No built blueprints yet — run a generation.'}</td></tr>`;
             document.getElementById('previewFooter').style.display = total ? 'block' : 'none';
@@ -594,7 +597,7 @@
             if (!row) return;
             editingId = id;
             document.getElementById('editContext').textContent =
-                `${row.cat_name || ''} · ${row.key || ''} · cat_id ${row.cat_id}`;
+                [row.cat_name, row.key].filter(Boolean).join(' · ');
             document.getElementById('editTitle').value = row.title || '';
             document.getElementById('editH1').value = row.h1_title || '';
             const desc = document.getElementById('editDesc');

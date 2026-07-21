@@ -694,13 +694,15 @@ def get_preview(limit=100, status="built"):
             #   * "normal"  — key=facet combo, title=page title, h1_title=H1, description=meta
             #   * "shifted" — key=category name, title=facet combo, h1_title=page title, description=H1
             # Detect which by whether the `title` column holds a real page title
-            # (contains 'beslist.nl'); then normalise both into the same
-            # (cat_name / facet key / title / h1_title / description) shape so the
-            # grid's Deepest cat / H1 title / Facets columns line up correctly.
+            # (contains 'beslist.nl'); then normalise the text columns into the
+            # same (facet key / title / h1_title / description) shape. Deepest cat
+            # comes from the cat_name column (backfilled from the Taxonomy tree by
+            # cat_id via scripts/backfill_page_titles_existing_catname.py), so it's
+            # populated for both layouts, not just the shifted rows.
             cur.execute("""
                 SELECT cat_id,
                        CASE WHEN title ILIKE '%%beslist.nl%%' THEN key         ELSE title       END AS key,
-                       CASE WHEN title ILIKE '%%beslist.nl%%' THEN NULL        ELSE key         END AS cat_name,
+                       cat_name,
                        CASE WHEN title ILIKE '%%beslist.nl%%' THEN title       ELSE h1_title    END AS title,
                        CASE WHEN title ILIKE '%%beslist.nl%%' THEN h1_title    ELSE description END AS h1_title,
                        CASE WHEN title ILIKE '%%beslist.nl%%' THEN description ELSE NULL        END AS description,
