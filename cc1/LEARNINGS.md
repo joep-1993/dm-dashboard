@@ -1,6 +1,27 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## SEO Titles — `pa.page_titles_existing` has TWO merged column layouts; the tool's two config APIs (2026-07-21)
+
+Built out the SEO Titles "Built titles" panel + inline editing (commits `236a0d5`, `a9f2a8d`, `6fdd6d1` on main; deployed :8003). Durable findings:
+
+- **`pa.page_titles_existing` (the tblPageTitles export) contains TWO row layouts merged from different export generations — a single fixed column mapping is wrong for ~71% of rows:**
+  - *normal* (~28%, `title` contains `beslist.nl`): `key`=facet combo, `title`=page title, `h1_title`=H1, `description`=meta description.
+  - *shifted* (~71%, capitalized `key` e.g. "Games"): `key`=**category name**, `title`=**facet combo**, `h1_title`=**page title**, `description`=**H1** (there is NO meta description in this layout).
+  Discriminator that works: `title ILIKE '%beslist.nl%'` → normal, else shifted. `get_preview(status='existing')` normalises both into (facet key / title / h1 / description). Because shifted rows carry no meta and neither layout reliably stores a category name, two columns are backfilled **by `cat_id` (reliable in both layouts)**: `cat_name` from the taxonomy CSV cache (`scripts/backfill_page_titles_existing_catname.py`, 98.5%) and `browse_description` from the website-config API (below, 98.3%). `load_pagetitles_existing.py` TRUNCATE+reloads, so **both backfills must be re-run after a reload** (its DDL now declares the columns + prints a reminder).
+
+- **website-configuration `/html-title-descriptions` API** (same host + `X-Api-Key`=`UNIQUE_TITLES_API_KEY` as `/page-titles`): `GET /html-title-descriptions/{cat_id}` → array of ONE **category-level** record `{cat_id, country_code, browse_with_query_title, browse_empty_title, browse_description, details_title, details_description, h1_title, last_update}`. Per-category, not per-facet-combo. GET without an id → 405. Used `browse_description` to fill Existing-combo meta descriptions.
+
+- **The Taxonomy API has NO description field** — a category payload is only `{id, parentId, is*flags, labels{name,urlSlug}, subCategories, facets}`. Don't look there for page meta descriptions (the original request assumed taxonomy; it was the website-config API).
+
+- **Generator `facet_phrase` (seo_titles_service):** `geschikte_leeftijd` rendered before the category noun (its `order_index`=972 < the sub_category slot 1700). Fixed by pinning it to `noun_order + 0.5` (noun = max type-facet order, or 1700 when none) so it always renders AFTER the category/type-facet. Type-facet `order_index` ranges 3→1854, so no single fixed number works — hence the computed offset. Regenerated the 1,041 existing built rows via `build_blueprint`.
+
+- New endpoints `POST /api/seo-titles/update` (edit a built/pushed/failed blueprint in place) and `/create-built` (edit an Existing combo → new `status='built'` blueprint, which "moves" it into the Built set). Edit UI is a hand-rolled centered overlay (dimmed backdrop, only Save/Cancel close it) — no Bootstrap modal dependency. UI_BLUEPRINT.md gained: fixed-vs-content-width table strategies + no-bleed rule, filter-row + sort-arrow layout, right-pinned sticky action column for hover controls.
+
+## FAQ export JSON 500'd on a raw control character (strict `json.loads`) (2026-07-21)
+
+`GET /api/faq/export/json` (`backend/main.py`) 500'd with "Invalid control character at: line 1 column 96 (char 95)". One row of 269,793 (`schema_org`, url_id 3110993) had a literal newline inside a stored JSON string; strict `json.loads` rejects control chars in strings. The XLSX export already stripped them via regex, which is why only the JSON export failed. Fix: `json.loads(x, strict=False)` for both `faq_json` and `schema_org` — accepts the char on read, `json.dumps` re-escapes it to valid `\n` on write. Commit `236a0d5`. (Aside: that endpoint buffers the entire ~1.9 GB response in memory before streaming — a separate scalability smell, not fixed.)
+
 ## Auto-Redirects — a "cross-subcat" redirect traced to a stale `facets.csv`; added a Refresh-facets button + auto-refresh-before-run (2026-07-21)
 
 User flagged a redirect that "crossed to another category": `.../meubilair_389370_389409/r/riviera_maison/` → `.../meubilair_389369_10538533/c/merk~4874240` (score 90, tier A, reason `[maincat] Matched 1 facet 'Riviera Maison'`). Same maincat (meubilair), different **subcat**. User then pointed out the correct same-subcat target `.../meubilair_389370_389409/c/merk~4874240` **is live**. Root cause was NOT matcher logic — it was the **facet snapshot**.
