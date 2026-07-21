@@ -135,6 +135,30 @@ _EXCEL_DATA: Dict[str, Any] = {
     "enable_count": 0,
 }
 
+# ---------------------------------------------------------------------------
+# Kill switch — safety net while we trace the mysterious daily 09:50 run.
+# When active, run_low_linkage / apply_selected refuse to mutate campaigns
+# (forced dry-run) and log the blocked attempt loudly with port/pid, so an
+# unexpected caller is caught instead of executed. Initialised from env
+# GSD_LL_KILL_SWITCH; flip at runtime via POST /ll/kill-switch. See
+# cc1/GSD_LL_MYSTERY_RUN.md.
+# ---------------------------------------------------------------------------
+_KILL_SWITCH: Dict[str, Any] = {
+    "active": os.getenv("GSD_LL_KILL_SWITCH", "false").lower() in ("1", "true", "yes", "on"),
+}
+
+
+def kill_switch_status() -> Dict[str, Any]:
+    """Return whether the GSD-LL kill switch is currently active."""
+    return {"active": _KILL_SWITCH["active"]}
+
+
+def set_kill_switch(active: bool) -> Dict[str, Any]:
+    """Enable/disable the kill switch at runtime (no restart needed)."""
+    _KILL_SWITCH["active"] = active
+    logger.warning("GSD LL kill switch %s", "ENABLED" if active else "DISABLED")
+    return {"active": active}
+
 
 def _progress_set(**kw: Any) -> None:
     with _LL_LOCK:
@@ -1267,10 +1291,20 @@ def run_low_linkage(
         _get_server_port(), os.getpid(),
         "".join(traceback.format_stack()[-6:-1]).strip(),
     )
+    kill_switched = False
+    if _KILL_SWITCH["active"] and not dry_run:
+        logger.warning(
+            "GSD LL KILL SWITCH ACTIVE — blocking real run, forcing dry_run. "
+            "source=%s  date=%s  shop_names=%s  included=%s  server_port=%s  pid=%s",
+            source, date_str, shop_names, included, _get_server_port(), os.getpid(),
+        )
+        dry_run = True
+        kill_switched = True
     started = datetime.now()
     result: Dict[str, Any] = {
         "started_at": started.isoformat(timespec="seconds"),
         "dry_run": dry_run,
+        "kill_switch_blocked": kill_switched,
         "date": date_str,
         "source": source,
         "feed_rows": 0,
@@ -1518,6 +1552,22 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
         "apply_selected STARTED — %d entries  server_port=%s  pid=%s",
         len(entries), _get_server_port(), os.getpid(),
     )
+    if _KILL_SWITCH["active"]:
+        logger.warning(
+            "GSD LL KILL SWITCH ACTIVE — blocking apply_selected of %d entries. "
+            "server_port=%s  pid=%s",
+            len(entries), _get_server_port(), os.getpid(),
+        )
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        return {
+            "started_at": now_iso,
+            "finished_at": now_iso,
+            "dry_run": True,
+            "kill_switch_blocked": True,
+            "feed_rows": len(entries),
+            "paused": [], "enabled": [], "skipped": [], "errors": [],
+            "paused_count": 0, "enabled_count": 0,
+        }
     started = datetime.now()
     result: Dict[str, Any] = {
         "started_at": started.isoformat(timespec="seconds"),

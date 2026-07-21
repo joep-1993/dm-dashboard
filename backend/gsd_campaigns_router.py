@@ -33,6 +33,8 @@ from backend.gsd_ll_service import (
     mark_activity_reset,
     backfill_activity_from_ll,
     backfill_activity_from_gsd,
+    kill_switch_status,
+    set_kill_switch,
 )
 
 logger = logging.getLogger(__name__)
@@ -408,6 +410,21 @@ def excel_schedule_toggle_endpoint(
 ):
     """Enable or disable the daily Excel data-load at 9:50 CET."""
     return toggle_excel_schedule(enabled)
+
+
+@router.get("/ll/kill-switch")
+def kill_switch_get_endpoint():
+    """Return whether the low-linkage kill switch is active."""
+    return kill_switch_status()
+
+
+@router.post("/ll/kill-switch")
+def kill_switch_set_endpoint(
+    enabled: bool = Query(..., description="Block (true) or allow (false) real LL mutations"),
+):
+    """Kill switch: when enabled, every low-linkage run/apply is forced to
+    dry-run and logged, so no campaigns are mutated regardless of the caller."""
+    return set_kill_switch(enabled)
 
 
 @router.post("/ll/excel-load")

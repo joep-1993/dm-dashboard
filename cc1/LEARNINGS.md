@@ -5827,3 +5827,13 @@ _Last updated: 2026-02-03 (301 Generator, UI/UX improvements, navigation updates
 - **Deploy note**: live uvicorn runs WITHOUT `--reload` — kill + relaunch the dm-tools backend for this to take effect.
 - **Commit**: `bda88bd` (branch rurl-v45-confidence-scoring). n8n flow itself unchanged.
 - **Date**: 2026-07-13
+
+## GSD Low-Linkage — 09:50 mystery run traced to an external caller + kill switch added (2026-07-21)
+
+Follow-up on the 2026-07-20 entry above. Full write-up: **`cc1/GSD_LL_MYSTERY_RUN.md`**.
+
+- **Production box 3003 cleared.** `service.log` on `win-htz-006:3003` is a uvicorn **access log** (logs every HTTP request regardless of Python log level) → **0× `/ll/run` and 0× `/ll/apply`** in the 09:50 window. The real daily mutations do **not** go through 3003. They ran on a non-3003 (laptop/zombie) instance — ports 8003/8098/8099 were alive at 09:50 and killed ~10:36.
+- **Caller identified as an IP, not yet a host.** 31 historical `POST /ll/run` on 3003 **all from `94.142.210.226`** (a public IP, NOT the laptop egress `143.178.166.201`) → an automated **server-side** caller. Real runs left 3003 at access-log line **18574268** and migrated to a laptop instance. **Next step: reverse-DNS / ask infra who `94.142.210.226` is** — single most actionable lead. Also check l.davidowski's Windows Task Scheduler for a hand-made `/ll/run` task.
+- **Kill switch added (this session).** `GSD_LL_KILL_SWITCH` env + `POST /api/gsd-campaigns/ll/kill-switch?enabled=true|false` (`GET` reports state). When active, `run_low_linkage` is forced to dry-run and `apply_selected` returns a blocked result — **no campaigns mutated regardless of caller** — and the blocked attempt is logged with port/pid. Code in `gsd_ll_service.py` (`_KILL_SWITCH`, `kill_switch_status`, `set_kill_switch`) + `gsd_campaigns_router.py`. Deployed as a **safety net on the dev 8003 instance** (launched with `GSD_LL_KILL_SWITCH=true`); toggle off before a deliberate manual run.
+- **Pairs with l.davidowski's logging** (`3bf8995`: port/IP/params/call-stack on run/apply; `89d8f5e`: Slack only from prod 3003). Only emits on instances running that code → needs restart.
+- **Deploy note**: bare uvicorn, no `--reload` → kill + relaunch to take effect. Restart preserved the parallel session's uncommitted work via `pull --rebase --autostash` (their `main.py` edits at L68/203 don't overlap `3bf8995`'s L1–9).
