@@ -170,10 +170,17 @@ async def run_low_linkage_endpoint(
     source: str = Query("feed", description="Data source: 'feed' (pixel-monitor CSV) or 'excel' (local Excel file)"),
 ):
     """Start a low-linkage run in the background; poll /ll/progress for status."""
+    import traceback
     client_ip = request.client.host if request.client else "unknown"
     user_agent = request.headers.get("user-agent", "unknown")
-    logger.info("GSD LL /ll/run called — ip=%s  dry_run=%s  source=%s  user-agent=%s",
-                client_ip, dry_run, source, user_agent)
+    port = request.url.port or "unknown"
+    caller_stack = "".join(traceback.format_stack()[-4:-1]).strip()
+    logger.warning(
+        "GSD LL /ll/run CALLED — port=%s  ip=%s  dry_run=%s  source=%s  "
+        "date=%s  shop_names=%s  included=%s  user-agent=%s\n  Call stack:\n%s",
+        port, client_ip, dry_run, source, date, shop_names, included,
+        user_agent, caller_stack,
+    )
     try:
         shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
         return start_ll_run(dry_run, date, shop_list, included, source)
@@ -194,6 +201,10 @@ async def apply_low_linkage_endpoint(payload: dict):
         entries = payload.get("entries") if isinstance(payload, dict) else None
         if not isinstance(entries, list) or not entries:
             raise HTTPException(status_code=400, detail="No entries provided.")
+        logger.warning(
+            "GSD LL /ll/apply CALLED — %d entries to apply",
+            len(entries),
+        )
         return start_ll_apply(entries)
     except HTTPException:
         raise

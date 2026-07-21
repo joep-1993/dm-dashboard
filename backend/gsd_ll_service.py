@@ -1259,6 +1259,14 @@ def run_low_linkage(
         Excel file — uses the newest gsd_shops_nl_be_*.xlsx from EXCEL_DIR,
         which already contains the country flags so no Redshift query is needed).
     """
+    import traceback
+    logger.warning(
+        "run_low_linkage STARTED — dry_run=%s  source=%s  date=%s  "
+        "shop_names=%s  included=%s  server_port=%s  pid=%s\n  Call stack:\n%s",
+        dry_run, source, date_str, shop_names, included,
+        _get_server_port(), os.getpid(),
+        "".join(traceback.format_stack()[-6:-1]).strip(),
+    )
     started = datetime.now()
     result: Dict[str, Any] = {
         "started_at": started.isoformat(timespec="seconds"),
@@ -1506,6 +1514,10 @@ def apply_selected(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     the selected campaigns are touched. Every applied action is audited exactly
     like run_low_linkage.
     """
+    logger.warning(
+        "apply_selected STARTED — %d entries  server_port=%s  pid=%s",
+        len(entries), _get_server_port(), os.getpid(),
+    )
     started = datetime.now()
     result: Dict[str, Any] = {
         "started_at": started.isoformat(timespec="seconds"),
@@ -1653,6 +1665,17 @@ def _seconds_until(hour: int, minute: int) -> Tuple[float, datetime]:
     return (target - now).total_seconds(), target
 
 
+def _get_server_port() -> str:
+    """Best-effort: return the port this uvicorn instance listens on."""
+    import sys
+    for i, arg in enumerate(sys.argv):
+        if arg == "--port" and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        if arg.startswith("--port="):
+            return arg.split("=", 1)[1]
+    return "unknown"
+
+
 def _excel_scheduled_run() -> None:
     """Called by the timer: load (cache) the newest Excel data and reschedule.
 
@@ -1660,7 +1683,8 @@ def _excel_scheduled_run() -> None:
     so the user can Preview/Run from the dashboard using the latest data.
     """
     try:
-        logger.info("GSD LL Excel scheduler: loading daily data")
+        logger.warning("GSD LL Excel scheduler: loading daily data (server port=%s, pid=%s)",
+                       _get_server_port(), os.getpid())
         with _EXCEL_LOCK:
             _EXCEL_STATE["last_run_at"] = datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds")
             _EXCEL_STATE["last_error"] = None
