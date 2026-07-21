@@ -550,7 +550,10 @@
                 let loadedAt = null;
                 if (dataRes.ok) {
                     const d = await dataRes.json();
-                    if (d.has_data && d.loaded_at) loadedAt = d.loaded_at;
+                    // loaded_at is now persisted (DB), so it's the last real data
+                    // load regardless of whether THIS process has the feed cached
+                    // in memory — don't gate on has_data.
+                    if (d.loaded_at) loadedAt = d.loaded_at;
                 }
                 if (!loadedAt && schedRes.ok) {
                     const s = await schedRes.json();

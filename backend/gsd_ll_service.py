@@ -59,6 +59,11 @@ ADMIN_TABLE = "pa.jvs_gsd_ll_campaigns"
 # campaigns bumps the counter once, not five times.
 SHOP_CYCLES_TABLE = "pa.jvs_gsd_ll_shop_cycles"
 
+# Singleton row recording the last successful Excel load, so the "last
+# successful data load" date the tooltip shows survives server restarts
+# (the in-memory cache resets on every restart; this table does not).
+EXCEL_LOAD_TABLE = "pa.jvs_gsd_ll_excel_load"
+
 # Map the shop_list GSD flag columns to a country code.
 FLAG_TO_COUNTRY = {
     "is_gsd_nl_shop": "NL",
@@ -400,7 +405,18 @@ def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_
     pause_n = sum(1 for r in feed if r["gsd"] == 0)
     enable_n = sum(1 for r in feed if r["gsd"] == 1)
 
-    loaded_at = datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds")
+    # Use the Excel FILE's modification time as the load date, NOT the wall-clock
+    # time of this call. The scheduled script writes a fresh file ~09:50 daily;
+    # its mtime is the true "data date". Reading now() instead meant every
+    # restart's startup pre-load re-stamped the current time, so the tooltip
+    # showed the last SERVER RESTART instead of the last data load. mtime is
+    # stable: re-reading the same file yields the same date across restarts.
+    try:
+        loaded_at = datetime.fromtimestamp(
+            os.path.getmtime(path), AMSTERDAM_TZ
+        ).isoformat(timespec="seconds")
+    except OSError:
+        loaded_at = datetime.now(AMSTERDAM_TZ).isoformat(timespec="seconds")
 
     status = {
         "feed": feed,
@@ -413,6 +429,9 @@ def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_
     }
     with _EXCEL_LOCK:
         _EXCEL_DATA.update(status)
+    # Persist so the date survives restarts and is retrievable even before this
+    # process has (re)loaded the file. Best-effort — never breaks the load.
+    _record_excel_load(fname, loaded_at, len(feed), pause_n, enable_n)
     logger.info(
         "GSD LL Excel cache loaded: %d shops (%d pause, %d enable) from %s",
         status["shop_count"], pause_n, enable_n, fname,
@@ -427,17 +446,113 @@ def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_
     return get_excel_data_status()
 
 
+def ensure_excel_load_table() -> None:
+    """Create the singleton last-load table if it does not exist."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {EXCEL_LOAD_TABLE} (
+                    id           INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+                    file         TEXT,
+                    loaded_at    TIMESTAMPTZ,
+                    shop_count   INTEGER,
+                    pause_count  INTEGER,
+                    enable_count INTEGER,
+                    updated_at   TIMESTAMPTZ DEFAULT now()
+                )
+            """)
+        conn.commit()
+    finally:
+        return_db_connection(conn)
+
+
+def _record_excel_load(file: str, loaded_at: str, shop_count: int,
+                       pause_count: int, enable_count: int) -> None:
+    """Persist the latest successful Excel load (singleton row). Best-effort:
+    a DB hiccup must never break the load itself."""
+    try:
+        ensure_excel_load_table()
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    INSERT INTO {EXCEL_LOAD_TABLE}
+                        (id, file, loaded_at, shop_count, pause_count, enable_count, updated_at)
+                    VALUES (1, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (id) DO UPDATE SET
+                        file         = EXCLUDED.file,
+                        loaded_at    = EXCLUDED.loaded_at,
+                        shop_count   = EXCLUDED.shop_count,
+                        pause_count  = EXCLUDED.pause_count,
+                        enable_count = EXCLUDED.enable_count,
+                        updated_at   = now()
+                """, (file, loaded_at, shop_count, pause_count, enable_count))
+            conn.commit()
+        finally:
+            return_db_connection(conn)
+    except Exception:
+        logger.warning("GSD LL: failed to persist Excel load timestamp", exc_info=True)
+
+
+def get_last_excel_load() -> Optional[Dict[str, Any]]:
+    """Return the persisted last-successful-load metadata (or None). loaded_at is
+    an ISO string to match the in-memory cache's shape for the frontend."""
+    try:
+        ensure_excel_load_table()
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT file, loaded_at, shop_count, pause_count, enable_count
+                    FROM {EXCEL_LOAD_TABLE} WHERE id = 1
+                """)
+                row = cur.fetchone()
+            if not row:
+                return None
+            r = dict(row)
+            if r.get("loaded_at") is not None:
+                r["loaded_at"] = r["loaded_at"].isoformat(timespec="seconds")
+            return r
+        finally:
+            return_db_connection(conn)
+    except Exception:
+        logger.warning("GSD LL: failed to read persisted Excel load timestamp", exc_info=True)
+        return None
+
+
 def get_excel_data_status() -> Dict[str, Any]:
-    """Return the cached Excel data status (without the raw data itself)."""
+    """Return the cached Excel data status (without the raw data itself).
+
+    ``loaded_at`` falls back to the persisted last-load row when this process
+    has not (yet) loaded the file in memory — so the "last successful data load"
+    date the tooltip shows survives restarts instead of resetting.
+    """
     with _EXCEL_LOCK:
-        return {
-            "file": _EXCEL_DATA["file"],
-            "loaded_at": _EXCEL_DATA["loaded_at"],
-            "shop_count": _EXCEL_DATA["shop_count"],
-            "pause_count": _EXCEL_DATA["pause_count"],
-            "enable_count": _EXCEL_DATA["enable_count"],
-            "has_data": _EXCEL_DATA["feed"] is not None,
-        }
+        file = _EXCEL_DATA["file"]
+        loaded_at = _EXCEL_DATA["loaded_at"]
+        shop_count = _EXCEL_DATA["shop_count"]
+        pause_count = _EXCEL_DATA["pause_count"]
+        enable_count = _EXCEL_DATA["enable_count"]
+        has_data = _EXCEL_DATA["feed"] is not None
+
+    if not loaded_at:
+        persisted = get_last_excel_load()
+        if persisted and persisted.get("loaded_at"):
+            file = file or persisted.get("file")
+            loaded_at = persisted["loaded_at"]
+            shop_count = shop_count or persisted.get("shop_count") or 0
+            pause_count = pause_count or persisted.get("pause_count") or 0
+            enable_count = enable_count or persisted.get("enable_count") or 0
+
+    return {
+        "file": file,
+        "loaded_at": loaded_at,
+        "shop_count": shop_count,
+        "pause_count": pause_count,
+        "enable_count": enable_count,
+        "has_data": has_data,
+    }
 
 
 # ---------------------------------------------------------------------------
