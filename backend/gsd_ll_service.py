@@ -393,7 +393,7 @@ def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_
         "GSD LL Excel cache loaded: %d shops (%d pause, %d enable) from %s",
         status["shop_count"], pause_n, enable_n, fname,
     )
-    if notify:
+    if notify and _get_server_port() == "3003":
         _send_slack(
             f":white_check_mark: *GSD Low Linkage — Excel data loaded*\n"
             f"File: {fname}\n"
@@ -1697,10 +1697,11 @@ def _excel_scheduled_run() -> None:
         logger.exception("GSD LL Excel scheduler: data load failed")
         with _EXCEL_LOCK:
             _EXCEL_STATE["last_error"] = str(ex)
-        _send_slack(
-            f":x: *GSD Low Linkage — Excel data load failed*\n"
-            f"Error: {ex}"
-        )
+        if _get_server_port() == "3003":
+            _send_slack(
+                f":x: *GSD Low Linkage — Excel data load failed*\n"
+                f"Error: {ex}"
+            )
     finally:
         _schedule_next_excel_run()
 
