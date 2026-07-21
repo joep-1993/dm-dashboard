@@ -9,6 +9,8 @@ import csv
 import os
 from typing import Optional, Tuple
 
+from backend.text_encoding import fix_mojibake
+
 # Lookup dict: url_part -> (maincat, deepest_cat)
 # e.g. "meubilair_389369" -> ("Meubels", "Bankstellen")
 _URL_TO_CATEGORY: dict = {}
@@ -22,8 +24,13 @@ def _load():
             reader = csv.DictReader(f, delimiter=";")
             for row in reader:
                 url_name = row.get("url_name", "").strip("/")
-                maincat = row.get("maincat", "")
-                deepest_cat = row.get("deepest_cat", "")
+                # Defensive: cat_urls.csv has historically shipped with
+                # mojibaked category names (UTF-8 read as Latin-1 upstream),
+                # e.g. "PlissÃ©gordijnen". Repair on load so downstream
+                # title/FAQ generation never inherits the corruption even if
+                # the file regresses.
+                maincat = fix_mojibake(row.get("maincat", ""))
+                deepest_cat = fix_mojibake(row.get("deepest_cat", ""))
                 if url_name:
                     _URL_TO_CATEGORY[url_name] = (maincat, deepest_cat)
         print(f"[CategoryLookup] Loaded {len(_URL_TO_CATEGORY)} category mappings")

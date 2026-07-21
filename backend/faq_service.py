@@ -18,6 +18,7 @@ from urllib3.util.retry import Retry
 from openai import OpenAI
 from backend.category_lookup import lookup_category
 from backend.beslist_rate_limit import productsearch_bucket
+from backend.text_encoding import fix_mojibake
 # Single source of truth for these URL + facet helpers (canonical copies live
 # in scraper_service; re-exported here so existing imports keep working).
 from backend.scraper_service import (
@@ -360,6 +361,13 @@ def fetch_products_api(url: str, include_related: bool = True) -> Optional[Dict]
 
         # Use product_subject as title if available, otherwise use category
         h1_title = product_subject if product_subject else deepest_category_name if deepest_category_name else main_category
+
+        # Defensive mojibake repair on the assembled strings. The category
+        # source (cat_urls.csv) is repaired at load, but guard the output too
+        # so a future corrupted source can't leak "PlissÃ©gordijnen" into
+        # generated titles.
+        h1_title = fix_mojibake(h1_title)
+        deepest_category_name = fix_mojibake(deepest_category_name)
 
         return {
             "url": clean,

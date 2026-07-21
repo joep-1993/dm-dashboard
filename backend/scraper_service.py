@@ -125,6 +125,12 @@ def scrape_product_page(url: str, conservative_mode: bool = False) -> Optional[D
                 return {'error': '503'}
             return None
 
+        # Beslist serves HTML as UTF-8 but omits `charset` from the Content-Type
+        # header for our scraper User-Agent, so requests falls back to ISO-8859-1
+        # and `.text` mojibakes accented text (é -> Ã©). Force UTF-8 before any
+        # `.text` access. (Matches the fix in seo_rulings_service.py.)
+        response.encoding = "utf-8"
+
         # Check for hidden 503 errors in HTML body (Beslist.nl returns 200 with 503 message)
         # This happens when rate limited - we should retry later, not mark as "no products"
         # Use more specific checks to avoid false positives from URLs/IDs containing "503"

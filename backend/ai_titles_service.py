@@ -1366,6 +1366,9 @@ def scrape_page_h1(url: str) -> Optional[Dict]:
             print(f"[AI_TITLES] HTTP {response.status_code} for {url}")
             return None
 
+        # Beslist omits `charset` from the HTML Content-Type header, so requests
+        # falls back to ISO-8859-1 and `.text` mojibakes accented text. Force UTF-8.
+        response.encoding = "utf-8"
         html = response.text
 
         # Extract H1 title (using the CSS class from the N8N flow)
