@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Healthscore 2.0</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <style>
+        .stat-card {
+            background: #fff; border: 1px solid #e6e3ef; border-radius: 10px;
+            padding: 0.75rem 0.6rem; flex: 1 1 150px; min-width: 150px; text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .stat-card h3 { margin: 0; font-size: 1.35rem; font-weight: 700; color: #5e4a90; }
+        .stat-card h3.pos { color: #00854c; }
+        .stat-card .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
+        .stat-card .sub { font-size: 0.72rem; color: #9a96a8; margin-top: 2px; }
+        .card-header.hs-head { background: #5e4a90; color: #fff; }
+        .hs-table { font-size: 0.9rem; }
+        .hs-table th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.4px; }
+        .hs-table td, .hs-table th { text-align: right; vertical-align: middle; white-space: nowrap; }
+        .hs-table td:first-child, .hs-table th:first-child { text-align: left; }
+        .hs-table tr.row-all td { font-weight: 700; background: #f3f0fa; }
+        .cov-bar { position: relative; height: 16px; background: #eee; border-radius: 8px; overflow: hidden; min-width: 90px; }
+        .cov-bar > span { position: absolute; left: 0; top: 0; bottom: 0; background: #5e4a90; }
+        .cov-bar.gap > span { background: #d63031; }
+        .info-note { background: #fff8ed; border: 1px solid #f0d9b5; color: #8a5a00; border-radius: 8px; padding: 10px 14px; font-size: 0.88rem; }
+        .method-note { background: #f3f0fa; border: 1px solid #ddd4ee; color: #4a3f66; border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; }
+        .method-note code { background: #fff; padding: 1px 5px; border-radius: 4px; color: #5e4a90; }
+        .cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid #e6e3ef; border-radius: 10px; overflow: hidden; }
+        .cmp-cell { padding: 1rem 1.2rem; }
+        .cmp-cell + .cmp-cell { border-left: 1px solid #eee; }
+        .cmp-cell .cmp-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .05em; color: #8a8a8a; }
+        .cmp-cell.hs2 { background: #f6f3fc; }
+        .cmp-cell .big { font-size: 1.9rem; font-weight: 700; color: #2d2a3a; line-height: 1.1; }
+        .cmp-cell.hs2 .big { color: #5e4a90; }
+        .cmp-cell .sub { font-size: 0.8rem; color: #9a96a8; }
+        .delta-badge { display: inline-block; font-size: 0.8rem; font-weight: 700; padding: 1px 8px; border-radius: 20px; }
+        .delta-badge.up { background: #e3f9f0; color: #00854c; }
+        .delta-badge.down { background: #fdecec; color: #c0392b; }
+        .chip { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; background: #f3f0fa; color: #5e4a90; border: 1px solid #e0d8f2; }
+        .btn-hs { background: #5e4a90; color: #fff; border: none; }
+        .btn-hs:hover:not(:disabled) { background: #4a3a75; color: #fff; }
+        .btn-hs:disabled { opacity: .55; }
+        .btn-hs-outline { border: 1px solid #5e4a90; color: #5e4a90; background: #fff; }
+        .btn-hs-outline:hover:not(:disabled) { background: #5e4a90; color: #fff; }
+        .month-input { border: 1px solid #d9d4e8; border-radius: 8px; padding: 0.3rem 0.55rem; }
+        .job-row { font-size: 0.85rem; border-bottom: 1px solid #f0eef6; padding: 6px 0; display: flex; align-items: center; gap: 10px; }
+        .job-status { font-weight: 700; padding: 1px 8px; border-radius: 12px; font-size: 0.72rem; text-transform: uppercase; }
+        .job-status.running { background: #fff3cd; color: #856404; }
+        .job-status.queued { background: #e2e3e5; color: #383d41; }
+        .job-status.done { background: #d4edda; color: #155724; }
+        .job-status.error { background: #f8d7da; color: #721c24; }
+        .spinner-inline { width: 14px; height: 14px; border: 2px solid #cbb; border-top-color: #5e4a90; border-radius: 50%; display: inline-block; animation: spin 0.7s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .muted-sm { font-size: 0.78rem; color: #9a96a8; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Healthscore 2.0</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/seo-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 6h11"/><path d="M3 12h8"/><path d="M3 18h8"/><circle cx="18" cy="16" r="3"/><path d="m22 20-1.8-1.8"/></svg> SEO titles</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Redirects</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rurl-optimizer.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Auto-Redirects</a>
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirect Generator</a>
+                        <a href="/static/redirect-tool.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 17V7a2 2 0 0 1 2-2h9"/><path d="M15 2l4 3-4 3"/><path d="M20 7v10a2 2 0 0 1-2 2H9"/><path d="M9 22l-4-3 4-3"/></svg> Redirect Tool</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/dma-plus.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="10"/></svg> DMA+</a>
+                        <a href="/static/dma-exclusions.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> DMA Exclusions</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C9.5 4 6 7.5 6 12s3.5 8 7.8 8c2 0 3.8-.8 5.2-2"/></svg> GSD Budgets</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg> GSD Campaigns</a>
+                        <a href="/static/gsd-check.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> GSD Check</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                        <a href="/static/shop-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg> Shop-campaigns</a>
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2l-5 8h10l-5-8z"/><path d="M9 10l-3 5h12l-3-5"/><path d="M7 15l-2 4h14l-2-4"/></svg> Thema Ads</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
+                        <a href="/static/healthscore.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Healthscore</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
+                        <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
+                        <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
+                        <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
+                        <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO stats</a>
+                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn"><svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg> Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 pb-5">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <div>
+                <h4 class="mb-1" style="color:#5e4a90;">HTML-sitemap coverage</h4>
+                <div class="muted-sm">% of monthly organic SEO visits that land on a URL in the sitemap set — the north-star KPI for the HS2.0 redesign.</div>
+            </div>
+            <span class="chip" id="shadowStamp">shadow-only · no live cutover</span>
+        </div>
+
+        <!-- Headline stat cards -->
+        <div class="d-flex flex-wrap gap-2 my-3" id="statsRow">
+            <div class="text-muted p-3">Loading…</div>
+        </div>
+
+        <!-- Projected win (shadow) -->
+        <div class="card mb-4">
+            <div class="card-header hs-head d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <h5 class="mb-0">Projected win — HS2.0 vs current live set</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <input type="month" id="shadowMonth" class="month-input" title="Holdout month to score against">
+                    <button class="btn btn-sm btn-hs" id="btnShadow">Run shadow comparison</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="method-note mb-3">
+                    Out-of-sample: the HS2.0 set is scored from the <strong>90 days before</strong> the holdout month
+                    (no leakage), then both sets are measured on that month's real SEO visits &amp; revenue.
+                    Locked model: <code>score = 0.889·pct(log visits) + 0.111·pct(log revenue)</code> within
+                    <code>deepest_category_id</code>, top-N per category.
+                </div>
+                <div id="shadowBody"><div class="text-muted">No shadow run yet — pick a month and run one.</div></div>
+            </div>
+        </div>
+
+        <!-- Coverage history -->
+        <div class="card mb-4">
+            <div class="card-header hs-head d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <h5 class="mb-0">Coverage of the current live set — by month &amp; URL type</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <input type="month" id="covMonth" class="month-input" title="Month to (re)compute coverage for">
+                    <button class="btn btn-sm btn-hs-outline" id="btnCoverage">Compute coverage</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="info-note mb-3" id="covNote" style="display:none;"></div>
+                <div id="coverageBody"><div class="text-muted">Loading…</div></div>
+            </div>
+        </div>
+
+        <!-- HS2.0 selection: sitemap composition + run controls -->
+        <div class="row g-4 mb-4">
+            <div class="col-lg-7">
+                <div class="card h-100">
+                    <div class="card-header hs-head"><h5 class="mb-0">HS2.0 selected set (pa.hs2_sitemap)</h5></div>
+                    <div class="card-body" id="sitemapBody"><div class="text-muted">Loading…</div></div>
+                </div>
+            </div>
+            <div class="col-lg-5">
+                <div class="card h-100">
+                    <div class="card-header hs-head"><h5 class="mb-0">Pipeline runs</h5></div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="muted-sm d-block mb-1">Reference month (features use its month-end as <em>as-of</em>)</label>
+                            <input type="month" id="runMonth" class="month-input">
+                        </div>
+                        <div class="mb-3">
+                            <label class="muted-sm d-block mb-1">Per-category cap N (sitemap / shadow)</label>
+                            <input type="number" id="capN" class="month-input" value="1000" min="50" max="10000" step="50" style="width:120px;">
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-hs-outline btn-sm" id="btnFeatures">1 · Build features (heavy, ~minutes)</button>
+                            <button class="btn btn-hs-outline btn-sm" id="btnSitemap">2 · Build sitemap selection</button>
+                        </div>
+                        <hr>
+                        <div class="muted-sm mb-1">Recent jobs</div>
+                        <div id="jobsBody"><div class="text-muted muted-sm">No jobs this session.</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Feature snapshot -->
+        <div class="card mb-4">
+            <div class="card-header hs-head"><h5 class="mb-0">Feature snapshot (pa.hs2_features)</h5></div>
+            <div class="card-body" id="featuresBody"><div class="text-muted">Loading…</div></div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 muted-sm">Healthscore 2.0 · dm-tools</footer>
+
+    <script>
+    const API = '/api/healthscore';
+    const fmtN = n => (n == null ? '–' : Number(n).toLocaleString('nl-NL'));
+    const fmtPct = n => (n == null ? '–' : Number(n).toFixed(1) + '%');
+    const fmtEur = n => (n == null ? '–' : '€' + Math.round(n).toLocaleString('nl-NL'));
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+    function prevMonthStr() {
+        const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+        return d.toISOString().slice(0, 7);
+    }
+
+    async function jget(path) {
+        const r = await fetch(API + path);
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+        return r.json();
+    }
+    async function jpost(path, body) {
+        const r = await fetch(API + path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.detail || r.statusText);
+        return j;
+    }
+
+    // ---- headline cards (derive from latest shadow + sitemap) ----
+    function renderStats(shadow, sitemap) {
+        const row = document.getElementById('statsRow');
+        const cards = [];
+        if (shadow) {
+            const dV = shadow.hs2_visit_cov - shadow.cur_visit_cov;
+            const dR = shadow.hs2_rev_cov - shadow.cur_rev_cov;
+            cards.push(card(fmtPct(shadow.cur_visit_cov), 'Live visit coverage', shadow.holdout_month));
+            cards.push(card(fmtPct(shadow.hs2_visit_cov), 'HS2.0 visit coverage', 'projected', true));
+            cards.push(card((dV >= 0 ? '+' : '') + dV.toFixed(1) + 'pp', 'Visit Δ', 'out-of-sample', dV > 0));
+            cards.push(card((dR >= 0 ? '+' : '') + dR.toFixed(1) + 'pp', 'Revenue Δ', fmtEur(shadow.add_revenue - shadow.drop_revenue) + ' net', dR > 0));
+        }
+        if (sitemap && sitemap.total != null) {
+            cards.push(card(fmtN(sitemap.total), 'HS2.0 set size', fmtN(sitemap.categories) + ' cats'));
+        }
+        row.innerHTML = cards.length ? cards.join('') : '<div class="text-muted p-2">Run a shadow comparison to populate the headline.</div>';
+    }
+    function card(value, label, sub, pos) {
+        return `<div class="stat-card"><h3 class="${pos ? 'pos' : ''}">${esc(value)}</h3>`
+             + `<div class="label">${esc(label)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>`;
+    }
+
+    // ---- shadow section ----
+    function renderShadow(s) {
+        const el = document.getElementById('shadowBody');
+        if (!s) { el.innerHTML = '<div class="text-muted">No shadow run yet — pick a month and run one.</div>'; return; }
+        const dV = s.hs2_visit_cov - s.cur_visit_cov, dR = s.hs2_rev_cov - s.cur_rev_cov;
+        const badge = (d, unit) => `<span class="delta-badge ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '+' : ''}${d.toFixed(1)}${unit}</span>`;
+        el.innerHTML = `
+          <div class="cmp-grid mb-3">
+            <div class="cmp-cell">
+              <div class="cmp-title">Current live set · ${esc(s.cur_set_size.toLocaleString('nl-NL'))} urls</div>
+              <div class="big">${fmtPct(s.cur_visit_cov)}</div>
+              <div class="sub">visit coverage · revenue ${fmtPct(s.cur_rev_cov)}</div>
+            </div>
+            <div class="cmp-cell hs2">
+              <div class="cmp-title">HS2.0 scored set · ${esc(s.hs2_set_size.toLocaleString('nl-NL'))} urls</div>
+              <div class="big">${fmtPct(s.hs2_visit_cov)} ${badge(dV, 'pp')}</div>
+              <div class="sub">visit coverage · revenue ${fmtPct(s.hs2_rev_cov)} ${badge(dR, 'pp')}</div>
+            </div>
+          </div>
+          <div class="row text-center g-2">
+            <div class="col"><div class="stat-card"><h3 class="pos">+${fmtN(s.add_visits)}</h3><div class="label">visits added</div><div class="sub">${fmtEur(s.add_revenue)} · only-HS2.0</div></div></div>
+            <div class="col"><div class="stat-card"><h3 style="color:#c0392b;">−${fmtN(s.drop_visits)}</h3><div class="label">visits dropped</div><div class="sub">${fmtEur(s.drop_revenue)} · only-live</div></div></div>
+            <div class="col"><div class="stat-card"><h3>${fmtN(s.total_visits)}</h3><div class="label">total SEO visits</div><div class="sub">holdout ${esc(s.holdout_month)}</div></div></div>
+          </div>
+          <div class="muted-sm mt-2">Cap N=${esc(s.cap_n)} · run ${esc((s.run_ts || '').replace('T', ' ').slice(0, 16))}</div>`;
+    }
+
+    // ---- coverage history ----
+    function renderCoverage(rows) {
+        const el = document.getElementById('coverageBody');
+        if (!rows || !rows.length) { el.innerHTML = '<div class="text-muted">No coverage runs yet.</div>'; return; }
+        const byMonth = {};
+        rows.forEach(r => { (byMonth[r.target_month] = byMonth[r.target_month] || []).push(r); });
+        const months = Object.keys(byMonth).sort().reverse();
+        let html = '';
+        for (const m of months) {
+            const set = byMonth[m][0].set_url_count;
+            html += `<div class="mb-1 mt-3"><strong>${esc(m)}</strong> <span class="muted-sm">· live set ${fmtN(set)} urls</span></div>`;
+            html += '<div class="table-responsive"><table class="table table-sm hs-table mb-0"><thead><tr>'
+                  + '<th>URL type</th><th>SEO visits</th><th>in set</th><th>visit cov</th><th style="min-width:120px;">coverage</th><th>revenue cov</th></tr></thead><tbody>';
+            const ordered = byMonth[m].slice().sort((a, b) => (a.type_url === '__ALL__' ? -1 : b.type_url === '__ALL__' ? 1 : b.total_visits - a.total_visits));
+            for (const r of ordered) {
+                const isAll = r.type_url === '__ALL__';
+                const cov = r.visit_coverage_pct;
+                const gap = cov != null && cov < 50;
+                html += `<tr class="${isAll ? 'row-all' : ''}"><td>${isAll ? 'ALL (overall)' : esc(r.type_url)}</td>`
+                      + `<td>${fmtN(r.total_visits)}</td><td>${fmtN(r.in_set_visits)}</td><td>${fmtPct(cov)}</td>`
+                      + `<td><div class="cov-bar ${gap ? 'gap' : ''}"><span style="width:${cov != null ? Math.min(100, cov) : 0}%"></span></div></td>`
+                      + `<td>${fmtPct(r.revenue_coverage_pct)}</td></tr>`;
+            }
+            html += '</tbody></table></div>';
+        }
+        el.innerHTML = html;
+    }
+
+    // ---- sitemap composition ----
+    function renderSitemap(s) {
+        const el = document.getElementById('sitemapBody');
+        if (!s || s.as_of == null) { el.innerHTML = '<div class="text-muted">No sitemap built yet — run “Build sitemap selection”.</div>'; return; }
+        const chips = (arr, keyName) => arr.map(x => `<span class="chip me-1 mb-1">${esc(x[keyName])}: ${fmtN(x.n)}</span>`).join('');
+        el.innerHTML = `
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <div class="stat-card"><h3>${fmtN(s.total)}</h3><div class="label">total urls</div></div>
+            <div class="stat-card"><h3>${fmtN(s.categories)}</h3><div class="label">categories</div></div>
+            <div class="stat-card"><h3 style="font-size:1rem;">${esc(s.as_of)}</h3><div class="label">as-of</div></div>
+          </div>
+          <div class="mb-2"><div class="muted-sm mb-1">By source</div>${chips(s.by_source, 'source')}</div>
+          <div><div class="muted-sm mb-1">By URL type</div>${chips(s.by_type, 'type_url')}</div>`;
+    }
+
+    // ---- feature snapshot ----
+    function renderFeatures(s) {
+        const el = document.getElementById('featuresBody');
+        if (!s || s.as_of == null) { el.innerHTML = '<div class="text-muted">No feature snapshot yet.</div>'; return; }
+        const chips = s.by_type.map(x => `<span class="chip me-1 mb-1">${esc(x.type_url)}: ${fmtN(x.n)}</span>`).join('');
+        el.innerHTML = `
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <div class="stat-card"><h3>${fmtN(s.urls)}</h3><div class="label">urls scored</div></div>
+            <div class="stat-card"><h3>${fmtN(s.categories)}</h3><div class="label">categories</div></div>
+            <div class="stat-card"><h3>${fmtN(s.visits)}</h3><div class="label">90d SEO visits</div></div>
+            <div class="stat-card"><h3 style="font-size:1rem;">${esc(s.as_of)}</h3><div class="label">as-of</div></div>
+          </div>
+          <div><div class="muted-sm mb-1">By URL type</div>${chips}</div>`;
+    }
+
+    // ---- jobs ----
+    let jobsPoll = null;
+    function renderJobs(jobs) {
+        const el = document.getElementById('jobsBody');
+        if (!jobs || !jobs.length) { el.innerHTML = '<div class="text-muted muted-sm">No jobs this session.</div>'; return; }
+        el.innerHTML = jobs.slice(0, 8).map(j => {
+            const running = j.status === 'running' || j.status === 'queued';
+            const detail = j.status === 'error' ? esc(j.error)
+                         : j.status === 'done' ? 'done ' + esc((j.finished_at || '').slice(11, 16))
+                         : (j.started_at ? 'since ' + esc(j.started_at.slice(11, 16)) : 'queued');
+            return `<div class="job-row"><span class="job-status ${j.status}">${esc(j.action)}</span>`
+                 + `${running ? '<span class="spinner-inline"></span>' : ''}`
+                 + `<span class="muted-sm">${esc(j.params.month || '')}${j.action === 'sitemap' || j.action === 'shadow' ? ' · N=' + esc(j.params.cap_n) : ''}</span>`
+                 + `<span class="muted-sm ms-auto">${detail}</span></div>`;
+        }).join('');
+    }
+    function anyActive(jobs) { return jobs.some(j => j.status === 'running' || j.status === 'queued'); }
+    async function refreshJobs() {
+        try {
+            const {jobs} = await jget('/jobs');
+            renderJobs(jobs);
+            const active = anyActive(jobs);
+            setRunButtons(active);
+            if (active && !jobsPoll) jobsPoll = setInterval(refreshJobs, 2500);
+            if (!active && jobsPoll) { clearInterval(jobsPoll); jobsPoll = null; loadAll(); }  // a job finished → refresh data
+        } catch (e) { /* ignore */ }
+    }
+    function setRunButtons(disabled) {
+        ['btnShadow', 'btnCoverage', 'btnFeatures', 'btnSitemap'].forEach(id => {
+            document.getElementById(id).disabled = disabled;
+        });
+    }
+
+    async function trigger(action, monthEl, extra) {
+        try {
+            const body = Object.assign({action, month: (document.getElementById(monthEl).value || prevMonthStr())}, extra || {});
+            await jpost('/run', body);
+            setRunButtons(true);
+            refreshJobs();
+        } catch (e) {
+            alert('Could not start ' + action + ': ' + e.message);
+        }
+    }
+
+    // ---- initial + refresh ----
+    async function loadAll() {
+        try {
+            const [cov, sm, feat, sh] = await Promise.all([
+                jget('/coverage-history').catch(() => ({rows: []})),
+                jget('/sitemap-summary').catch(() => ({})),
+                jget('/features-summary').catch(() => ({})),
+                jget('/shadow').catch(() => ({rows: []})),
+            ]);
+            const latestShadow = (sh.rows && sh.rows[0]) || null;
+            renderStats(latestShadow, sm);
+            renderShadow(latestShadow);
+            renderCoverage(cov.rows);
+            renderSitemap(sm);
+            renderFeatures(feat);
+        } catch (e) {
+            document.getElementById('statsRow').innerHTML = '<div class="text-danger p-2">Load failed: ' + esc(e.message) + '</div>';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const pm = prevMonthStr();
+        ['shadowMonth', 'covMonth', 'runMonth'].forEach(id => { document.getElementById(id).value = pm; });
+        document.getElementById('btnShadow').onclick = () => trigger('shadow', 'shadowMonth', {cap_n: +document.getElementById('capN').value});
+        document.getElementById('btnCoverage').onclick = () => trigger('coverage', 'covMonth');
+        document.getElementById('btnFeatures').onclick = () => trigger('features', 'runMonth');
+        document.getElementById('btnSitemap').onclick = () => trigger('sitemap', 'runMonth', {cap_n: +document.getElementById('capN').value});
+        loadAll();
+        refreshJobs();
+    });
+    </script>
+</body>
+</html>
