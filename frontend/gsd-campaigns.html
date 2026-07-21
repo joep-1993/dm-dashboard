@@ -84,11 +84,15 @@
         /* Bordered, rounded container so tables sit INSIDE their card section
            (like the done run-table) instead of edge-to-edge under the header. */
         .gsd-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
-        /* Enabled/Paused history: keep cells on one line so Date/Shop/Shop ID
-           get their natural width; the wrap scrolls horizontally when needed. */
-        /* Natural column widths; the .gsd-table-wrap scrolls horizontally. */
-        .ll-history-table { width: max-content; min-width: 100%; }
-        .ll-history-table th, .ll-history-table td { white-space: nowrap; }
+        /* Enabled/Paused history: fixed column widths so they don't jump when
+           sorting or paginating swaps in rows with different content lengths. */
+        .ll-history-table { table-layout: fixed; width: 100%; }
+        .ll-history-table th, .ll-history-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ll-history-table th:nth-child(1), .ll-history-table td:nth-child(1) { width: 150px; }  /* Date */
+        .ll-history-table th:nth-child(2), .ll-history-table td:nth-child(2) { width: 220px; }  /* Shop */
+        .ll-history-table th:nth-child(3), .ll-history-table td:nth-child(3) { width: 90px; }   /* Country */
+        .ll-history-table th:nth-child(4), .ll-history-table td:nth-child(4) { width: 110px; }  /* Action */
+        /* Campaign (5th column) takes the remaining width. */
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
