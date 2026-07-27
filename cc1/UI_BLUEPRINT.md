@@ -82,6 +82,40 @@ other tool uses the grey default. New tools follow the grey default.
   The `.sortable` CSS shows a `⇅` idle glyph and `▲`/`▼` for the active sort
   direction (toggled by adding `sort-asc` / `sort-desc` to the active `<th>`).
 - All of this CSS is in the template's `<style>` block — keep it as-is.
+- **Loading state = skeleton rows, not a spinner.** While a table fetches, draw
+  shimmering placeholder rows so it reads as "the table is being drawn". The point
+  is **layout stability**: a skeleton row is the same height as a loaded row, so
+  the table neither collapses to nothing nor grows when data lands, and on a
+  *reload* it holds the current height instead of jumping. Copy from
+  `gsd-campaigns.html` (origin) or `seo-titles.html` — CSS is identical, only the
+  column count differs:
+  ```css
+  .skel-row td { vertical-align: middle; }
+  .skel-bar { display:block; height:1.45rem; border-radius:4px;
+      background: linear-gradient(90deg,#ececec 25%,#f6f6f6 37%,#ececec 63%);
+      background-size:400% 100%; animation: skelShimmer 1.4s ease infinite; }
+  @keyframes skelShimmer { 0%{background-position:100% 50%} 100%{background-position:0 50%} }
+  ```
+  ```js
+  function skeletonRows(n = 10) {            // n = rows to draw
+      const cell = '<td><span class="skel-bar"></span></td>';
+      return ('<tr class="skel-row">' + cell.repeat(COLS) + '</tr>').repeat(n);
+  }
+  ```
+  Set `COLS` to the table's real column count (checkbox and action columns
+  included) or the shimmer won't line up with the header. Cap the count at the
+  page size, and at ~10 when "Show all" is selected — don't draw 5,000 skeletons.
+- **Timestamp columns: convert to Europe/Amsterdam — the DB values are UTC.** The shared
+  Postgres runs `TimeZone=Etc/UTC` and our `created_at`/`applied_at` columns are
+  `TIMESTAMP` (no tz), so `now()` stores UTC and the backend's `.isoformat()` emits it
+  **with no offset**. Slicing that string (`replace("T"," ").slice(0,16)`) therefore shows
+  UTC as if it were local — 2h early in summer. This shipped in DMA Exclusions and was
+  fixed in `ef5c53e`; copy `fmtTs()` from `dma-exclusions.html` rather than re-deriving it.
+  The one thing you must not skip: append `"Z"` **before** `new Date()`, because JS parses
+  an offset-less date-time as LOCAL — so the obvious `new Date(s)` is a silent no-op in
+  CEST. Format with `toLocaleString("sv-SE", { timeZone: "Europe/Amsterdam", … })` to get
+  `YYYY-MM-DD HH:MM` with DST handled. Keep the raw value on a `title` tooltip, name the
+  timezone in the `<th>` title, and **sort the raw ISO field, not the formatted string**.
 
 ## Pagination — orange arrows, like "Enabled / Paused history"
 
@@ -168,6 +202,46 @@ label + percent line above it, and a **red-outline Cancel button** below. Same
 markup as the run/LL bars in GSD Campaigns. Drive it with `showStatus()` /
 `setStatus(pct, text)` / `hideStatus()` and honour `cancelRequested`
 (see the template JS).
+
+Two flavours — pick by whether the work is cancellable:
+
+1. **Full status area** (`#progressArea` + red-outline Cancel) for long
+   *cancellable* runs, e.g. the GSD run/LL bars and the SEO-Titles Generate run.
+2. **Inline bar, no Cancel** for a single blocking action you cannot abort
+   mid-flight — e.g. SEO Titles *Publish*, which pushes live to `/page-titles`.
+   Place it directly above the result box, same green striped bar, with a
+   label/percent row above it:
+   ```html
+   <div id="xProgress" class="mb-3" style="display:none;">
+     <div class="d-flex justify-content-between align-items-center small text-muted mb-1">
+       <span id="xProgressLabel">Working…</span><span id="xProgressPct">0%</span>
+     </div>
+     <div class="progress" style="height:1.1rem;">
+       <div id="xProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+            style="width:0%; background-color:#00b894;" role="progressbar"
+            aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+     </div>
+   </div>
+   ```
+
+**Never replace a banner with an *indeterminate* bar.** A bar implies "this much
+is done"; if you have no real number, an animated bar is a lie and the old text
+banner was more honest. To get real numbers from a synchronous POST, keep the
+endpoint as-is (FastAPI already runs it via `run_in_executor`, so it's off the
+event loop), have the service write progress into a module-level state dict, and
+add a `GET /<thing>-status` the frontend polls **while its own POST is still in
+flight** — see `seo_titles_service.py` `_pub_state` / `get_publish_status()` and
+`publish()` / `pollPublish()` in `seo-titles.html`. Two rules that pattern must
+follow: advance the counter only **after** the work is durably committed (so the
+bar never runs ahead of reality), and give the endpoint's `except` branch a
+`mark_*_error()` call — otherwise a raising handler leaves the bar spinning
+forever. Phases that are one opaque call get a **label change at the same
+percentage**, not fake movement.
+
+**Spinners** are for small inline "busy" hints, not for table or run progress.
+The markup has drifted (11 variants across the pages); the canonical form is
+`<span class="spinner-border spinner-border-sm d-none" role="status"></span>`
+toggled via `.d-none`, next to the button or label it belongs to.
 
 ## Footer
 
