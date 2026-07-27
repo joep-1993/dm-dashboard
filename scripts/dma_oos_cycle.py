@@ -66,24 +66,27 @@ def run_market(market: str) -> dict:
     summary["scan"] = {
         "oos_total": scan["oos_total"],
         "live_in_dma": scan["live_in_dma"],
-        "headline_matches": scan["live_in_dma"],
     }
 
-    # ── 2. Exclude headline matches that aren't already excluded ─────────
+    # ── 2. Exclude candidates that aren't already excluded ──────────────
     to_exclude = [c["item_id"] for c in candidates
-                  if c.get("headline_match") and not c.get("already_excluded")]
+                  if not c.get("already_excluded")]
     log.info("[%s] Excluding %d OOS items…", market, len(to_exclude))
     if to_exclude:
         exc = _post("/oos/exclude",
                      json_body={"market": market, "item_ids": to_exclude},
                      timeout=TIMEOUT_EXCLUDE)
+        exc_results = exc.get("results", [])
+        applied = sum(1 for r in exc_results if r.get("applied", 0) > 0)
+        skipped = exc["processed"] - applied
         summary["exclude"] = {
             "sent": len(to_exclude),
             "processed": exc["processed"],
-            "skipped": exc["skipped"],
+            "applied": applied,
+            "skipped": skipped,
         }
         log.info("[%s] Excluded %d (skipped %d)",
-                 market, exc["processed"] - exc["skipped"], exc["skipped"])
+                 market, applied, skipped)
     else:
         summary["exclude"] = {"sent": 0, "processed": 0, "skipped": 0}
         log.info("[%s] Nothing to exclude", market)
@@ -136,12 +139,11 @@ def _format_slack(results: list[dict], duration: str, ok: bool) -> str:
         scan = r["scan"]
         exc = r["exclude"]
         reen = r["reenable"]
-        excluded_count = exc["processed"] - exc["skipped"]
+        excluded_count = exc.get("applied", exc["processed"] - exc.get("skipped", 0))
 
         lines.append(f"\n*{mkt}*")
         lines.append(f"  Scan: {scan['live_in_dma']} live in DMA "
-                     f"({scan['headline_matches']} headline matches, "
-                     f"{scan['oos_total']} OOS total)")
+                     f"({scan['oos_total']} OOS total)")
         if exc["sent"] > 0:
             lines.append(f"  Excluded: {excluded_count} new"
                          + (f" ({exc['skipped']} skipped)" if exc["skipped"] else ""))
