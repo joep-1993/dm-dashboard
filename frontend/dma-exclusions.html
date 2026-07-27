@@ -295,7 +295,7 @@
                                     <col style="width:140px">
                                 </colgroup>
                                 <thead>
-                                    <tr><th><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th class="sortable" data-sort="item_id" onclick="setSavedSort('item_id')" style="cursor:pointer; user-select:none;">Item id<span class="sort-ind"></span></th><th class="sortable" data-sort="market" onclick="setSavedSort('market')" style="cursor:pointer; user-select:none;">Country<span class="sort-ind"></span></th><th class="sortable" data-sort="source" onclick="setSavedSort('source')" style="cursor:pointer; user-select:none;">Source<span class="sort-ind"></span></th><th class="sortable" data-sort="category" onclick="setSavedSort('category')" style="cursor:pointer; user-select:none;">Category<span class="sort-ind"></span></th><th class="sortable" data-sort="headline_shop" onclick="setSavedSort('headline_shop')" style="cursor:pointer; user-select:none;" title="Live bestOffer shop from Beslist's index.">Headline offer<span class="sort-ind"></span></th><th class="sortable" data-sort="status" onclick="setSavedSort('status')" style="cursor:pointer; user-select:none;">Status<span class="sort-ind"></span></th><th class="sortable" data-sort="applied_at" onclick="setSavedSort('applied_at')" style="cursor:pointer; user-select:none;">Timestamp<span class="sort-ind"></span></th></tr>
+                                    <tr><th><input type="checkbox" id="savedSelectAll" onclick="toggleAllSaved(this.checked)" title="Select all enable-able rows on this page"></th><th class="sortable" data-sort="item_id" onclick="setSavedSort('item_id')" style="cursor:pointer; user-select:none;">Item id<span class="sort-ind"></span></th><th class="sortable" data-sort="market" onclick="setSavedSort('market')" style="cursor:pointer; user-select:none;">Country<span class="sort-ind"></span></th><th class="sortable" data-sort="source" onclick="setSavedSort('source')" style="cursor:pointer; user-select:none;">Source<span class="sort-ind"></span></th><th class="sortable" data-sort="category" onclick="setSavedSort('category')" style="cursor:pointer; user-select:none;">Category<span class="sort-ind"></span></th><th class="sortable" data-sort="headline_shop" onclick="setSavedSort('headline_shop')" style="cursor:pointer; user-select:none;" title="Live bestOffer shop from Beslist's index.">Headline offer<span class="sort-ind"></span></th><th class="sortable" data-sort="status" onclick="setSavedSort('status')" style="cursor:pointer; user-select:none;">Status<span class="sort-ind"></span></th><th class="sortable" data-sort="applied_at" onclick="setSavedSort('applied_at')" style="cursor:pointer; user-select:none;" title="Local time (Europe/Amsterdam). Stored in UTC — hover a cell for the raw value.">Timestamp<span class="sort-ind"></span></th></tr>
                                 </thead>
                                 <tbody id="listBody">
                                     <tr><td colspan="8" class="text-center text-muted py-3">No exclusions yet.</td></tr>
@@ -339,6 +339,20 @@
         // (e.g. "Drogisterij store" -> "Drogisterij"). Stored value keeps the suffix.
         const catLabel = c => (c || "").replace(/\s+store$/i, "");
         const busy = on => document.getElementById("busy").style.display = on ? "inline" : "none";
+        // applied_at/created_at arrive as naive ISO strings holding UTC: the shared Postgres
+        // runs TimeZone=Etc/UTC and the columns are TIMESTAMP (no tz), so the backend's
+        // .isoformat() emits no offset. JS parses an offset-less date-time as LOCAL, which
+        // would shift it a second time — hence the explicit "Z". sv-SE formats as
+        // "YYYY-MM-DD HH:MM", keeping the shape this column always had.
+        const fmtTs = s => {
+            if (!s) return "—";
+            const d = new Date(/(Z|[+-]\d\d:?\d\d)$/.test(s) ? s : s + "Z");
+            return isNaN(d)
+                ? esc(String(s).replace("T", " ").slice(0, 16))
+                : d.toLocaleString("sv-SE", { timeZone: "Europe/Amsterdam",
+                    year: "numeric", month: "2-digit", day: "2-digit",
+                    hour: "2-digit", minute: "2-digit" });
+        };
 
         function actionLabel(t) {
             if (t.action === "subdivide_and_exclude")
@@ -581,7 +595,7 @@
                         <td title="${esc(x.category) || ""}">${esc(catLabel(x.category)) || "—"}</td>
                         <td title="${esc(x.headline_shop) || ""}">${esc(x.headline_shop) || "—"}</td>
                         <td>${statusBadge(x.status)}</td>
-                        <td class="small text-muted">${x.applied_at ? esc(x.applied_at).replace("T", " ").slice(0, 16) : "—"}</td>
+                        <td class="small text-muted"${x.applied_at ? ` title="${esc(x.applied_at)} UTC (stored value)"` : ""}>${fmtTs(x.applied_at)}</td>
                     </tr>`;
             }).join("");
             const emptyMsg = (document.getElementById("savedFilter").value || "").trim()
