@@ -60,6 +60,9 @@ COUNTRY_CODE = 'NL'
 TAIL_TITLE = 'kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl'
 # /page-titles rejects a title over this many characters (400 "too long").
 MAX_TITLE_LEN = 200
+# /page-titles enforces this on h1_title as well (learned the hard way: one 205-char
+# h1 got a whole 5000-record batch rejected with 400 "Invalid record values").
+MAX_H1_LEN = 200
 
 
 def canon_key(s):
@@ -166,7 +169,18 @@ def build_blueprint(cat_id, cat_name, types, rules):
         while tokens and len(_compose_title(' '.join(tokens))) > MAX_TITLE_LEN:
             tokens.pop()
         title = _compose_title(' '.join(tokens))
+    # /page-titles caps h1_title at MAX_H1_LEN too -- and it validates the whole
+    # POST atomically, so ONE overlong h1 gets a 5000-record batch rejected with
+    # 400 "Invalid record values" and flips all 5000 to 'failed'. Trim the same way
+    # as the title (drop trailing placeholders, never split one). `description` is
+    # deliberately NOT capped: the API accepts long ones (37k+ pushed rows exceed
+    # 200 chars), so leave that alone.
     h1 = phrase
+    if len(h1) > MAX_H1_LEN:
+        tokens = phrase.split(' ')
+        while tokens and len(' '.join(tokens)) > MAX_H1_LEN:
+            tokens.pop()
+        h1 = ' '.join(tokens)
     desc = (f'Zoek je {phrase}? &#10062; Vergelijk !!NR!! aanbiedingen en bespaar op je '
             f'aankoop &#10062; Shop {phrase} met !!DISCOUNT!! korting online! &#10062; beslist.nl')
     return {
@@ -398,6 +412,52 @@ def start_run(top_n=100, date_from=None, date_to=None):
     return {"started": True, "top_n": top_n}
 
 
+# ---------------------------------------------------------------------------
+# Publish progress
+# ---------------------------------------------------------------------------
+# publish_built() stays synchronous — /api/seo-titles/publish already runs it in
+# an executor, so the POST is off the event loop and the frontend can poll this
+# state WHILE its own fetch is still in flight. That keeps the endpoint contract
+# unchanged (the POST still returns the full result) and needs no extra thread.
+_pub_lock = threading.Lock()
+_pub_state = {"status": "idle"}
+
+
+def _pub_reset(env, total):
+    with _pub_lock:
+        _pub_state.clear()
+        _pub_state.update({
+            "status": "running", "phase": "starting", "env": env,
+            "total": total, "done": 0, "pushed": 0, "failed": 0,
+            "batch": 0, "batches": 0, "message": "",
+            "started_at": time.time(), "finished_at": None,
+        })
+
+
+def _pub_set(**kw):
+    with _pub_lock:
+        _pub_state.update(kw)
+
+
+def get_publish_status():
+    """Progress of the current/last publish. `pct` is derived here so every
+    caller shows the same number."""
+    with _pub_lock:
+        s = dict(_pub_state)
+    total, done = s.get("total") or 0, s.get("done") or 0
+    s["pct"] = round(100.0 * done / total, 1) if total else (100.0 if s.get("status") == "done" else 0.0)
+    return s
+
+
+def mark_publish_error(msg):
+    """Flag the publish state as failed. Called by the endpoint's except branch —
+    without it a raising publish_built() would leave the bar spinning forever."""
+    with _pub_lock:
+        if _pub_state.get("status") == "running":
+            _pub_state.update({"status": "error", "phase": "error",
+                               "message": str(msg), "finished_at": time.time()})
+
+
 def _run(top_n, date_from, date_to):
     try:
         # Try to keep the taxonomy slug->cat_id map warm.
@@ -598,6 +658,8 @@ def publish_built(env="production", push_unique_titles=True, combos=None):
     if env not in PAGE_TITLES_API:
         return {"success": False, "message": f"unknown env {env!r}"}
 
+    _pub_reset(env, 0)
+    _pub_set(phase="fetching")
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -617,13 +679,47 @@ def publish_built(env="production", push_unique_titles=True, combos=None):
         built = [r for r in built if (int(r['cat_id']), r['key']) in wanted]
 
     if not built:
+        _pub_set(status="done", phase="done", finished_at=time.time(),
+                 message="no matching built blueprints to publish")
         return {"success": True, "pushed": 0, "message": "no matching built blueprints to publish"}
+
+    # Pre-flight length check. /page-titles validates a POST atomically, so ONE
+    # oversized record 400s the whole 5000-row batch and flips all 5000 to
+    # 'failed'. Quarantine offenders up front so the rest of the batch still goes.
+    too_long = [r for r in built
+                if len(r['title'] or '') > MAX_TITLE_LEN or len(r['h1_title'] or '') > MAX_H1_LEN]
+    if too_long:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.executemany("""
+                UPDATE pa.seo_titles_blueprints
+                SET status='failed', last_error=%s
+                WHERE cat_id=%s AND key=%s
+            """, [(f"skipped before push: title {len(r['title'] or '')} / h1_title "
+                   f"{len(r['h1_title'] or '')} chars exceeds the {MAX_TITLE_LEN} cap",
+                   int(r['cat_id']), r['key']) for r in too_long])
+            conn.commit()
+        finally:
+            cur.close()
+            return_db_connection(conn)
+        skipped = {(int(r['cat_id']), r['key']) for r in too_long}
+        built = [r for r in built if (int(r['cat_id']), r['key']) not in skipped]
+        if not built:
+            _pub_set(status="done", phase="done", finished_at=time.time(),
+                     message=f"all {len(too_long)} candidates exceed the length cap")
+            return {"success": False, "pushed": 0, "failed": len(too_long),
+                    "message": f"all {len(too_long)} candidates exceed the length cap"}
+
+    _pub_set(phase="pushing", total=len(built), skipped_too_long=len(too_long),
+             batches=(len(built) + PUSH_BATCH - 1) // PUSH_BATCH)
 
     pushed = 0
     failed = 0
     batch_results = []
     for i in range(0, len(built), PUSH_BATCH):
         batch = built[i:i + PUSH_BATCH]
+        _pub_set(batch=i // PUSH_BATCH + 1)
         records = [{
             "cat_id": int(r['cat_id']),
             "key": r['key'],
@@ -657,24 +753,39 @@ def publish_built(env="production", push_unique_titles=True, combos=None):
         finally:
             cur2.close()
             return_db_connection(c2)
+        # count the batch as done only after its status flip is committed, so the
+        # bar never runs ahead of what is actually persisted
+        _pub_set(done=min(i + len(batch), len(built)), pushed=pushed, failed=failed)
 
     result = {
-        "success": failed == 0,
+        "success": failed == 0 and not too_long,
         "env": env,
         "pushed": pushed,
-        "failed": failed,
+        "failed": failed + len(too_long),
         "batches": batch_results,
     }
+    if too_long:
+        result["skipped_too_long"] = [
+            {"cat_id": int(r['cat_id']), "key": r['key'],
+             "title_len": len(r['title'] or ''), "h1_len": len(r['h1_title'] or '')}
+            for r in too_long
+        ]
 
-    # Push per-URL AI titles via the existing importer (full CSV upsert).
+    # Push per-URL AI titles via the existing importer (full CSV upsert). This is
+    # one opaque call, so the bar sits at 100% on a separate phase label rather
+    # than pretending to advance.
     if push_unique_titles and pushed:
+        _pub_set(phase="unique_titles")
         try:
             from backend.unique_titles import upload_titles_to_api
             result["unique_titles_push"] = upload_titles_to_api()
         except Exception as e:
             result["unique_titles_push"] = {"success": False, "error": str(e)}
 
+    _pub_set(phase="refreshing_dedup")
     load_existing_combos(force=True)  # refresh dedup set with the new pushes
+    _pub_set(status="done", phase="done", finished_at=time.time(),
+             message=f"pushed {pushed}, failed {failed}")
     return result
 
 

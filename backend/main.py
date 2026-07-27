@@ -3309,6 +3309,8 @@ from backend.seo_titles_service import (
     get_run_status as seo_titles_run_status,
     stop_run as seo_titles_stop_run,
     publish_built as seo_titles_publish,
+    get_publish_status as seo_titles_publish_status,
+    mark_publish_error as seo_titles_mark_publish_error,
     remove_blueprints as seo_titles_remove,
     update_blueprint as seo_titles_update,
     upsert_blueprint_built as seo_titles_upsert_built,
@@ -3369,6 +3371,17 @@ async def seo_titles_publish_endpoint(request: dict = None):
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: seo_titles_publish(env, push_unique, combos))
+    except Exception as e:
+        seo_titles_mark_publish_error(e)  # else the frontend's progress bar spins forever
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/seo-titles/publish-status")
+async def seo_titles_publish_status_endpoint():
+    """Progress of the current/last publish. Polled by the frontend WHILE its own
+    POST /publish is still in flight (that call runs in an executor)."""
+    try:
+        return seo_titles_publish_status()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

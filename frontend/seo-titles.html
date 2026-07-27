@@ -165,6 +165,21 @@
                     <h5 class="mb-0" id="previewTitle">Built titles</h5>
                 </div>
                 <div class="card-body">
+                    <!-- Publish progress. Hidden by default; driven by pollPublish()
+                         while POST /publish is in flight. Green striped bar per
+                         cc1/UI_BLUEPRINT.md "Status / progress bar". -->
+                    <div id="publishProgress" class="mb-3" style="display:none;">
+                        <div class="d-flex justify-content-between align-items-center small text-muted mb-1">
+                            <span id="publishProgressLabel">Publishing…</span>
+                            <span id="publishProgressPct">0%</span>
+                        </div>
+                        <div class="progress" style="height:1.1rem;">
+                            <div id="publishProgressBar"
+                                 class="progress-bar progress-bar-striped progress-bar-animated"
+                                 style="width:0%; background-color:#00b894;"
+                                 role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+                        </div>
+                    </div>
                     <div id="publishResult" class="mb-3"></div>
                     <div class="filter-row d-flex gap-2 align-items-center mb-3">
                         <input id="previewFilter" class="form-control form-control-sm" style="max-width:280px;" placeholder="filter" oninput="previewPage=1; renderPreview();">
@@ -682,7 +697,8 @@
             const btn = document.getElementById('btnPublish');
             btn.disabled = true; btn.textContent = 'Publishing…';
             const res = document.getElementById('publishResult');
-            res.innerHTML = '<div class="alert alert-info">Publishing… this can take a while for large batches.</div>';
+            res.innerHTML = '';
+            showPublishProgress(n || null);
             try {
                 const bodyReq = { env: 'production' };
                 if (n) bodyReq.combos = combos;
@@ -697,10 +713,61 @@
             } catch (e) {
                 res.innerHTML = `<div class="alert alert-danger">Publish error: ${esc(e.message)}</div>`;
             } finally {
+                hidePublishProgress();
                 btn.disabled = false;
                 previewSelected.clear();
                 loadStats(); loadPreview();
             }
+        }
+
+        // --- Publish progress -------------------------------------------------
+        // The POST above runs in a backend executor, so this polls
+        // /publish-status alongside it. `expected` seeds the label with the count
+        // we asked for, so the bar reads sensibly before the first poll lands.
+        let publishPollTimer = null;
+        const PUBLISH_PHASE_LABEL = {
+            starting: 'Starting…', fetching: 'Collecting blueprints…',
+            pushing: 'Pushing blueprints', unique_titles: 'Pushing AI unique titles…',
+            refreshing_dedup: 'Refreshing dedup set…', done: 'Done', error: 'Failed',
+        };
+
+        function setPublishProgress(pct, label) {
+            const bar = document.getElementById('publishProgressBar');
+            const p = Math.max(0, Math.min(100, pct));
+            bar.style.width = p + '%';
+            bar.setAttribute('aria-valuenow', String(Math.round(p)));
+            document.getElementById('publishProgressPct').textContent = Math.round(p) + '%';
+            document.getElementById('publishProgressLabel').textContent = label;
+        }
+
+        function showPublishProgress(expected) {
+            document.getElementById('publishProgress').style.display = '';
+            setPublishProgress(0, expected ? `Publishing ${expected} blueprint(s)…` : 'Publishing…');
+            clearInterval(publishPollTimer);
+            publishPollTimer = setInterval(pollPublish, 1000);
+        }
+
+        function hidePublishProgress() {
+            clearInterval(publishPollTimer);
+            publishPollTimer = null;
+            document.getElementById('publishProgress').style.display = 'none';
+        }
+
+        async function pollPublish() {
+            try {
+                const r = await fetch(`${API_BASE}/api/seo-titles/publish-status`);
+                const s = await r.json();
+                const phase = PUBLISH_PHASE_LABEL[s.phase] || s.phase || 'Publishing…';
+                // While pushing, show batch + row counts; the later phases are one
+                // opaque call each, so they only get a label.
+                let label = phase;
+                if (s.phase === 'pushing' && s.total) {
+                    label = `${phase} ${s.done || 0}/${s.total}`;
+                    if (s.batches > 1) label += ` (batch ${s.batch || 0}/${s.batches})`;
+                }
+                if (s.failed) label += ` — ${s.failed} failed`;
+                setPublishProgress(s.pct || 0, label);
+            } catch (e) { /* transient poll failure must not kill the publish */ }
         }
 
         // initial load
