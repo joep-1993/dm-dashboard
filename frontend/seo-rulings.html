@@ -496,13 +496,18 @@
                 ])
             ));
 
-            // Check 3 — Basement links
+            // Check 3 — Basement links. Column layout matches Check 1 exactly
+            // (no extra column, so the URL left-edge stays at x=600), but the
+            // Status pill carries the backend's `detail` as a tooltip — that
+            // string names which layout was found (pill vs legacy
+            // basementlinks) and how many links, which matters while the site
+            // is mid-migration between the two.
             detailsBody.appendChild(buildSection(
                 CHECK_LABELS.basement_links,
                 buildTable(details.basement_links || [], [
                     { label: "Category", width: "400px", get: r => r.name || "—" },
                     { label: "Cat ID",   width: "100px", get: r => r.cat_id || "—", align: "center" },
-                    { label: "Status",   width: "100px", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "Status",   width: "100px", get: r => `<span title="${escapeHtml(r.detail || "")}">${presenceCell(r.present, r.status)}</span>`, align: "center" },
                     { label: "URL",      width: "600px", get: r => linkCell(r.url) },
                 ])
             ));

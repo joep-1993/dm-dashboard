@@ -11,7 +11,9 @@ Checks:
                                  has seoPriority=true render a noScript header
                                  carrying the facet name
   3. Basement links            — sampled category pages have a basement-link
-                                 group AND at least one link inside it
+                                 group AND at least one link inside it, in
+                                 either the new pill layout or the legacy
+                                 basementlinks layout
   4. Title variables           — !!DISCOUNT!! / !!NR!! / !!JAAR!! placeholders
                                  stored in pa.unique_titles_content are
                                  properly substituted on the rendered page
@@ -67,8 +69,26 @@ HTML_SITEMAP_URLS = [
 SITEMAP_ITEM_CLASS = "sitemap__item--"
 
 NOSCRIPT_TITLE_CLASS = "noScript__title--LfAWg"
-BASEMENT_GROUP_CLASS = "basementlinks__group--igXdw"
-BASEMENT_LINK_CLASS = "basementlinks__link--2awhY"
+
+# Basement links — the block of internal links on a category page. The site is
+# migrating from the old "Trending" markup (`basementlinks__group` holding
+# `basementlinks__link` anchors) to the new "Populaire zoekopdrachten" pill
+# markup (`pillGroup__list` holding `pill--` anchors), and CloudFront serves
+# both side by side while the rollout drains: a stale edge copy can keep the old
+# layout for days (observed Age ~597k s = ~7 days), so two runs against the same
+# URL can legitimately land on different layouts. Either one counts as present.
+#
+# Like SITEMAP_ITEM_CLASS, the `--XXXXX` suffix on every class is a per-build
+# CSS-module hash, so match the stable prefix rather than a frozen hash — that
+# is what broke this check when the layout changed.
+#
+# The link pattern needs the `(?<![\w-])` guard because the carousel arrow
+# button carries `button--pill--nSyPj`, which contains `pill--` but is not a
+# basement link.
+BASEMENT_LAYOUTS = (
+    ("pills", re.compile(r"pillGroup__list--\w+"), re.compile(r"(?<![\w-])pill--\w+")),
+    ("basementlinks", re.compile(r"basementlinks__group--\w+"), re.compile(r"basementlinks__link--\w+")),
+)
 
 _SESSION = requests.Session()
 
@@ -346,12 +366,23 @@ def _check_html_sitemaps(urls: List[str]) -> Tuple[bool, List[Dict]]:
     return failed, details
 
 
-def _check_basement_links(html: str) -> Tuple[bool, str]:
-    if f'class="{BASEMENT_GROUP_CLASS}"' not in html:
-        return False, "basementlinks group div not found"
-    if BASEMENT_LINK_CLASS not in html:
-        return False, "basementlinks group present but no links inside"
-    return True, ""
+def _check_basement_links(html: str) -> Tuple[bool, str, Optional[str], int]:
+    """Confirm the page carries a basement-link group with at least one link
+    inside, in either the new pill layout or the legacy basementlinks layout
+    (see BASEMENT_LAYOUTS). Returns (ok, detail, layout, link_count); `layout`
+    is None when neither group container is present.
+
+    Presence is checked document-wide rather than scoped to the group element —
+    neither class prefix appears anywhere else on a category page, so this
+    avoids having to find the container's matching close tag."""
+    for layout, group_re, link_re in BASEMENT_LAYOUTS:
+        if not group_re.search(html):
+            continue
+        count = len(link_re.findall(html))
+        if count == 0:
+            return False, f"{layout} group present but no links inside", layout, 0
+        return True, f"{layout} layout — {count} link{'' if count == 1 else 's'}", layout, count
+    return False, "no basement-link group found (neither pills nor basementlinks)", None, 0
 
 
 # ---------------------------------------------------------------------------
@@ -668,9 +699,10 @@ def run_all_checks() -> Dict:
         if not present:
             no_script_failed = True
 
-        b_ok, b_msg = _check_basement_links(html)
+        b_ok, b_msg, b_layout, b_count = _check_basement_links(html)
         basement_details.append({
             **c, "present": b_ok, "detail": b_msg, "http_status": http_status,
+            "layout": b_layout, "link_count": b_count,
         })
         if not b_ok:
             basement_failed = True
