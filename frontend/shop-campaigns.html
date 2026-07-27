@@ -11,13 +11,33 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <style>
+        /* Tiles: 10 of them (# Campaigns + 9 metrics) must sit on ONE row.
+           `flex: 1 1 0; min-width: 0` makes them share the row equally and
+           shrink to fit whatever the container gives, so the row stays intact
+           if a metric is ever added or removed — no per-count width to retune.
+           Below 992px one row would make them illegibly narrow, so the row is
+           allowed to wrap again there (see the media query). */
+        #statsRow { flex-wrap: nowrap !important; }
         .stat-card {
             background: #fff; border: 1px solid #e6e3ef; border-radius: 10px;
-            padding: 0.75rem 0.5rem; flex: 1 1 105px; min-width: 105px; text-align: center;
+            padding: 0.6rem 0.35rem; flex: 1 1 0; min-width: 0; text-align: center;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
-        .stat-card h3 { margin: 0; font-size: 1.25rem; font-weight: 700; color: #5e4a90; }
-        .stat-card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
+        .stat-card h3 {
+            margin: 0; font-size: 1.02rem; font-weight: 700; color: #5e4a90;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .stat-card .label {
+            font-size: 0.61rem; text-transform: uppercase; letter-spacing: .02em;
+            color: #8a8a8a; margin-top: 2px; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        @media (max-width: 991.98px) {
+            #statsRow { flex-wrap: wrap !important; }
+            .stat-card { flex: 1 1 105px; min-width: 105px; }
+            .stat-card h3 { font-size: 1.25rem; }
+            .stat-card .label { font-size: 0.72rem; letter-spacing: .04em; }
+        }
         .metric-toggle {
             display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
             border: 1px solid #d9d4e8; border-radius: 20px; padding: 4px 12px;
@@ -282,6 +302,7 @@
 
         // metric key -> {label, unit group, color}
         const METRICS = {
+            impressions: { label: 'Impressions', unit: 'count', axis: 'impr',  color: '#00a8b5' },
             clicks:      { label: 'Clicks',      unit: 'count', axis: 'count', color: '#5e4a90' },
             revenue:     { label: 'Revenue',     unit: 'euro',  axis: 'euro',  color: '#00b894' },
             cost:        { label: 'Cost',        unit: 'euro',  axis: 'euro',  color: '#d63031' },
@@ -291,12 +312,16 @@
             conv_rate:   { label: 'Conv. rate',  unit: 'pct',   axis: 'pct',   color: '#fdcb6e' },
             avg_cpc:     { label: 'Avg CPC',     unit: 'cpc',   axis: 'cpc',   color: '#e84393' },
         };
-        const ORDER = ['clicks','revenue','cost','margin','conversions','ctr','conv_rate','avg_cpc'];
+        const ORDER = ['impressions','clicks','revenue','cost','margin','conversions','ctr','conv_rate','avg_cpc'];
+        // Impressions get their OWN axis rather than sharing 'count' with clicks:
+        // impressions run ~1-2 orders of magnitude higher, so a shared scale
+        // would flatten the clicks line to the baseline.
         const AXES = {
-            count: { title: 'Count', position: 'left' },
-            euro:  { title: '€',     position: 'right' },
-            pct:   { title: '%',     position: 'right' },
-            cpc:   { title: '€ CPC', position: 'right' },
+            count: { title: 'Count',       position: 'left' },
+            impr:  { title: 'Impressions', position: 'left' },
+            euro:  { title: '€',           position: 'right' },
+            pct:   { title: '%',           position: 'right' },
+            cpc:   { title: '€ CPC',       position: 'right' },
         };
         let selected = new Set(['clicks', 'revenue', 'cost']);
         let lastData = null;
@@ -335,6 +360,18 @@
             if (u === 'pct') return Number(v).toFixed(2) + '%';
             if (u === 'count') return Math.round(v).toLocaleString('nl-NL');
             return Number(v).toLocaleString('nl-NL', { maximumFractionDigits: 2 });
+        }
+        // Tile-only formatter. The tiles are narrow enough for 10-on-a-row that a
+        // full "1.234.567" impressions figure would be clipped, so large counts
+        // collapse to 1,2 mln / 123,4 k. Tables and CSV keep the exact number.
+        function fmtTile(key, v) {
+            if (v === null || v === undefined) return '–';
+            if (METRICS[key].unit === 'count') {
+                const n = Math.round(v);
+                if (n >= 1e6) return (n / 1e6).toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + ' mln';
+                if (n >= 1e5) return (n / 1e3).toLocaleString('nl-NL', { maximumFractionDigits: 0 }) + ' k';
+            }
+            return fmt(key, v);
         }
         function ymd(d) { return d.toISOString().slice(0, 10); }
 
@@ -411,18 +448,20 @@
                 };
             });
             const scales = { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } } };
-            let rightUsed = 0;
-            ['count','euro','pct','cpc'].forEach(ax => {
+            let rightUsed = 0, leftUsed = 0;
+            ['count','impr','euro','pct','cpc'].forEach(ax => {
                 if (!usedAxes.has(ax)) return;
                 const cfg = AXES[ax];
                 const isRight = cfg.position === 'right';
                 scales[ax] = {
                     position: cfg.position,
                     title: { display: true, text: cfg.title },
-                    grid: { drawOnChartArea: !(isRight && rightUsed > 0) },
+                    // Only the first axis on each side draws gridlines, so two
+                    // left axes (Count + Impressions) don't overlay two grids.
+                    grid: { drawOnChartArea: isRight ? rightUsed === 0 : leftUsed === 0 },
                     beginAtZero: true,
                 };
-                if (isRight) rightUsed++;
+                if (isRight) rightUsed++; else leftUsed++;
             });
             const cfg = {
                 type: 'line',
@@ -454,7 +493,10 @@
                 const cls = (key === 'margin' && v < 0) ? ' class="neg"' : '';
                 const card = document.createElement('div');
                 card.className = 'stat-card';
-                card.innerHTML = `<h3${cls}>${fmt(key, v)}</h3><div class="label">${METRICS[key].label}</div>`;
+                // title carries the exact value, since fmtTile may abbreviate it
+                // and the narrow tile may ellipsis it.
+                card.innerHTML = `<h3${cls} title="${fmt(key, v)}">${fmtTile(key, v)}</h3>`
+                    + `<div class="label" title="${METRICS[key].label}">${METRICS[key].label}</div>`;
                 row.appendChild(card);
             });
         }
@@ -562,13 +604,16 @@
                 `${d.campaign_total} campaigns tracked - last updated ${new Date(d.generated_at).toLocaleDateString('nl-NL')}` +
                 (d.accounts_failed && d.accounts_failed.length ? ` · ⚠ ${d.accounts_failed.length} account(s) failed` : '');
             const note = document.getElementById('infoNote');
-            const hasData = d.daily.some(r => r.clicks || r.revenue || r.cost);
+            // Impressions count as data: a range can serve impressions with zero
+            // clicks and cost, and that is a real (0% CTR) result to show rather
+            // than an "in this date range yet" empty state.
+            const hasData = d.daily.some(r => r.impressions || r.clicks || r.revenue || r.cost);
             const enabled = (d.campaign_by_status || {}).ENABLED || 0;
             if (!hasData) {
                 note.style.display = 'block';
                 note.innerHTML = enabled === 0
                     ? `No <code>SHOP/</code> campaign is currently enabled, so there is no performance data in this range yet.`
-                    : `No clicks/cost recorded in this date range yet.`;
+                    : `No impressions/clicks/cost recorded in this date range yet.`;
             } else {
                 note.style.display = 'none';
             }

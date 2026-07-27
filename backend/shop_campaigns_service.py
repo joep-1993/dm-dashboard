@@ -72,10 +72,12 @@ CANDIDATE_ACCOUNTS: List[str] = [
     "6271552035", "8755979133", "7938980174", "8276523186", "4192567576",
 ]
 
-# The 8 tracked metrics, in display order. Derived ones are computed from the
-# summed base components so day/total ratios stay correct.
+# The 9 tracked metrics, in display order. Derived ones are computed from the
+# summed base components so day/total ratios stay correct. `impressions` was
+# already fetched and summed for CTR; it is exposed as a metric in its own right.
 METRICS = [
-    "clicks", "revenue", "cost", "ctr", "conversions", "conv_rate", "avg_cpc", "margin",
+    "impressions", "clicks", "revenue", "cost", "ctr", "conversions", "conv_rate",
+    "avg_cpc", "margin",
 ]
 
 # ---------------------------------------------------------------------------
