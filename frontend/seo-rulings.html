@@ -425,9 +425,17 @@
             // Summary rows
             const rowsDiv = document.getElementById("summaryRows");
             rowsDiv.innerHTML = "";
+            // A check that only went green after the backend resampled a failing
+            // URL gets a "N resampled" pill next to its status, so a retry is
+            // never invisible in the summary. Counts come from summary.retries.
+            const retries = summary.retries || {};
             Object.keys(CHECK_LABELS).forEach((key) => {
                 const status = checks[key] || "pending";
                 const ok = status === "passed";
+                const n = retries[key] || 0;
+                const retryPill = n
+                    ? `<span class="check-status pending ms-2" title="${n} sampled URL(s) failed and were replaced by a freshly sampled URL">${n} resampled</span>`
+                    : "";
                 const row = document.createElement("div");
                 row.className = "check-row d-flex justify-content-between align-items-center";
                 row.innerHTML = `
@@ -435,7 +443,7 @@
                         <div class="check-title">${CHECK_LABELS[key]}</div>
                         <div class="check-sub">${describeCheck(key, details[key])}</div>
                     </div>
-                    <span class="check-status ${ok ? "pass" : "fail"}">${ok ? "passed" : "failed"}</span>
+                    <span>${retryPill}<span class="check-status ${ok ? "pass" : "fail"} ms-2">${ok ? "passed" : "failed"}</span></span>
                 `;
                 rowsDiv.appendChild(row);
             });
@@ -477,7 +485,7 @@
                 buildTable(details.no_script_categories || [], [
                     { label: "Category", width: "400px", get: r => r.name || "—" },
                     { label: "Cat ID",   width: "100px", get: r => r.cat_id || "—", align: "center" },
-                    { label: "Status",   width: "100px", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "Status",   width: "100px", get: r => withAttempt(r, presenceCell(r.present, r.status)), align: "center" },
                     { label: "URL",      width: "600px", get: r => linkCell(r.url) },
                 ])
             ));
@@ -491,7 +499,7 @@
                 buildTable(details.no_script_facet_links || [], [
                     { label: "Category/Facet", width: "400px", get: r => `${escapeHtml(r.cat_name || "—")} <span class="text-muted">/ ${escapeHtml(r.facet_name || "—")}</span>` },
                     { label: "Cat ID",         width: "100px", get: r => r.cat_id || "—", align: "center" },
-                    { label: "Status",         width: "100px", get: r => presenceCell(r.present, r.status), align: "center" },
+                    { label: "Status",         width: "100px", get: r => withAttempt(r, presenceCell(r.present, r.status)), align: "center" },
                     { label: "URL",            width: "600px", get: r => linkCell(r.cat_url) },
                 ])
             ));
@@ -507,7 +515,7 @@
                 buildTable(details.basement_links || [], [
                     { label: "Category", width: "400px", get: r => r.name || "—" },
                     { label: "Cat ID",   width: "100px", get: r => r.cat_id || "—", align: "center" },
-                    { label: "Status",   width: "100px", get: r => `<span title="${escapeHtml(r.detail || "")}">${presenceCell(r.present, r.status)}</span>`, align: "center" },
+                    { label: "Status",   width: "100px", get: r => withAttempt(r, `<span title="${escapeHtml(r.detail || "")}">${presenceCell(r.present, r.status)}</span>`), align: "center" },
                     { label: "URL",      width: "600px", get: r => linkCell(r.url) },
                 ])
             ));
@@ -640,6 +648,20 @@
             const n = Number(count);
             const cls = n > 0 ? "pass" : "fail";
             return `<span class="check-status ${cls}">${n}</span>`;
+        }
+
+        // Retry provenance for a details row. When the reported result is not
+        // the first sampled URL, append a "#N" marker whose tooltip lists the
+        // URLs that were resampled away — so a passing row that took two tries
+        // is visibly different from a clean first-attempt pass.
+        function withAttempt(r, inner) {
+            const n = r.attempt || 1;
+            if (n <= 1) return inner;
+            const prev = (r.superseded || [])
+                .map(s => `#${s.attempt}: ${s.url || s.cat_url || "?"} (${s.detail || s.status || "failed"})`)
+                .join("\n");
+            const tip = escapeHtml(`passed on attempt ${n}. Replaced:\n${prev}`);
+            return `${inner}<sup class="text-warning ms-1" style="cursor:help" title="${tip}">#${n}</sup>`;
         }
 
         function presenceCell(present, status) {

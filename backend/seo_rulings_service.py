@@ -21,6 +21,16 @@ Checks:
                                  reachable (200)
   6. HTML-Sitemaps             — HTML sitemap pages are reachable (200) and
                                  list at least one item
+
+Retry-on-failure (checks 1-4): these four sample URLs, so a single odd page used
+to red the whole run. When a sampled URL fails, it is replaced by a freshly
+sampled URL from the same slot and the check is re-run, up to
+RETRY_MAX_ATTEMPTS attempts; the first passing attempt is the reported result.
+A slot only fails once every attempt has failed — so a site-wide breakage still
+fails (every replacement fails too), while one-off bad pages no longer do.
+Superseded attempts are kept in each detail's `superseded` list and counted in
+summary.retries, and Slack marks any check that only went green after a
+resample. Checks 5-6 run over fixed URL lists, so there is nothing to resample.
 """
 import csv
 import json
@@ -187,18 +197,26 @@ def _load_cat_urls() -> List[Dict]:
 
 SAMPLE_MAX_TRIES = 50
 
+# A sampled URL that fails a check is replaced with a freshly sampled URL from
+# the same slot, up to this many attempts (1 initial + RETRY_MAX_ATTEMPTS-1
+# replacements). A slot only counts as failed once every attempt has failed, so
+# one dead/odd page no longer reds the whole run — but a site-wide breakage
+# still fails, because every replacement fails too.
+RETRY_MAX_ATTEMPTS = 3
 
-def _pick_one_live(
+
+def _iter_live(
     pool: List[Dict],
     build_url,
     cat_id_key: str = "cat_id",
-) -> Optional[Tuple[Dict, str]]:
-    """Shuffle the pool and return the first (row, url) where the category
-    is isEnabled=true in taxv2 AND the URL doesn't return 404. Caches the
-    fetched HTML so the check phase doesn't refetch. Tries up to
-    SAMPLE_MAX_TRIES candidates from the shuffled pool before giving up."""
+):
+    """Yield (row, url) for each pool candidate that is isEnabled=true in taxv2
+    AND whose URL doesn't 404. Lazy: pulling one candidate costs at most one
+    taxv2 lookup plus one page fetch, so a caller that needs a single sample
+    pays for a single sample. Walks up to SAMPLE_MAX_TRIES shuffled candidates.
+    """
     if not pool:
-        return None
+        return
     shuffled = list(pool)
     random.shuffle(shuffled)
     for row in shuffled[:SAMPLE_MAX_TRIES]:
@@ -210,76 +228,134 @@ def _pick_one_live(
         if status == 404 or status == 0:
             logger.info(f"[SEO_RULINGS] skipping cat {cat_id} ({url}) — status {status}")
             continue
-        return row, url
-    return None
+        yield row, url
 
 
-def _pick_sample_categories() -> List[Dict]:
-    """Pick 1 main, 1 subcat (depth=1) and 1 deepest (max depth), each one
-    verified isEnabled=true in taxv2 AND returning a non-404 status."""
+def _pick_one_live(
+    pool: List[Dict],
+    build_url,
+    cat_id_key: str = "cat_id",
+) -> Optional[Tuple[Dict, str]]:
+    """First live (row, url) from the pool, or None. See _iter_live."""
+    return next(_iter_live(pool, build_url, cat_id_key), None)
+
+
+class _CandidateSlot:
+    """One sampling slot (e.g. "Subcategory") backed by a lazy candidate stream.
+
+    Candidates are pulled on demand and cached, so several checks sharing a slot
+    all see the SAME url for attempt 1, the same replacement for attempt 2, and
+    so on — checks 1 and 3 stay comparable row-for-row while still being free to
+    retry independently.
+    """
+
+    def __init__(self, label: str, stream, meta_fn):
+        self.label = label
+        self._stream = stream
+        self._meta_fn = meta_fn
+        self._cache: List[Dict] = []
+
+    def candidate(self, index: int) -> Optional[Dict]:
+        """The index-th live candidate as a detail-shaped dict, or None once the
+        underlying pool is exhausted."""
+        while len(self._cache) <= index:
+            nxt = next(self._stream, None)
+            if nxt is None:
+                return None
+            row, url = nxt
+            self._cache.append(self._meta_fn(row, url))
+        return self._cache[index]
+
+
+def _run_slot_check(slot: "_CandidateSlot", evaluate) -> Tuple[Dict, List[Dict]]:
+    """Evaluate successive candidates for `slot` until one passes.
+
+    `evaluate(candidate) -> (ok, detail)`. Returns (used_detail, all_attempts).
+    The used detail is the first passing attempt, or the last failing one when
+    every attempt failed. Each detail carries `attempt` (1-based); the used one
+    also carries `superseded` — the failed attempts it replaced — so a retry is
+    always visible in the output rather than silently swallowed.
+    """
+    attempts: List[Dict] = []
+    for i in range(RETRY_MAX_ATTEMPTS):
+        cand = slot.candidate(i)
+        if cand is None:
+            break
+        ok, detail = evaluate(cand)
+        detail = {**detail, "attempt": i + 1}
+        attempts.append(detail)
+        if ok:
+            if i:
+                logger.info(
+                    f"[SEO_RULINGS] {slot.label}: passed on attempt {i + 1} "
+                    f"after {i} resample(s)"
+                )
+            return {**detail, "superseded": attempts[:-1]}, attempts
+    if not attempts:
+        return {"label": slot.label, "status": "no_sample"}, []
+    return {**attempts[-1], "superseded": attempts[:-1]}, attempts
+
+
+def _sample_category_slots() -> List[_CandidateSlot]:
+    """One slot per sampling level: Main category, Subcategory, Deepest
+    category. Each slot streams live (isEnabled=true, non-404) candidates at
+    that level, so a check that fails on the first URL can pull a replacement at
+    the SAME level and keep the sample's shape."""
     maincats = _load_maincats()
     cat_urls = _load_cat_urls()
     if not maincats:
         return []
     maincat_by_name = {m["name"]: m for m in maincats}
-
-    out: List[Dict] = []
-
-    main_pick = _pick_one_live(
-        maincats,
-        build_url=lambda r: f"{SITE_BASE}/products{r['maincat_url']}",
+    sub_url = lambda r: (  # noqa: E731
+        f"{SITE_BASE}/products/{maincat_by_name[r['maincat']]['slug']}{r['url_name']}"
     )
-    if main_pick:
-        row, url = main_pick
-        out.append({
-            "label": "Main category",
-            "name": row["name"],
-            "url": url,
-            "depth": 0,
-            "cat_id": row["cat_id"],
-        })
 
-    subs = [r for r in cat_urls if r["depth"] == 1 and r["maincat"] in maincat_by_name]
-    sub_pick = _pick_one_live(
-        subs,
-        build_url=lambda r: f"{SITE_BASE}/products/{maincat_by_name[r['maincat']]['slug']}{r['url_name']}",
-    )
-    if sub_pick:
-        row, url = sub_pick
-        out.append({
-            "label": "Subcategory",
-            "name": row["deepest_cat"],
-            "url": url,
-            "depth": row["depth"],
-            "cat_id": row["cat_id"],
-        })
+    slots: List[_CandidateSlot] = [
+        _CandidateSlot(
+            "Main category",
+            _iter_live(maincats, build_url=lambda r: f"{SITE_BASE}/products{r['maincat_url']}"),
+            lambda row, url: {
+                "label": "Main category", "name": row["name"],
+                "url": url, "depth": 0, "cat_id": row["cat_id"],
+            },
+        ),
+        _CandidateSlot(
+            "Subcategory",
+            _iter_live(
+                [r for r in cat_urls if r["depth"] == 1 and r["maincat"] in maincat_by_name],
+                build_url=sub_url,
+            ),
+            lambda row, url: {
+                "label": "Subcategory", "name": row["deepest_cat"],
+                "url": url, "depth": row["depth"], "cat_id": row["cat_id"],
+            },
+        ),
+    ]
 
-    # Walk depths from deepest down to 2, taking the first level that yields
-    # a live (isEnabled + non-404) candidate. Whole-pool stale slugs at the
-    # max depth (e.g. when a leaf branch got pruned from the live site but
-    # the CSV snapshot still lists it) then fall through to a shallower —
-    # but still "deeper than the subcategory" — pick.
+    # Deepest: walk depths from the deepest level down to 2 and chain them, so a
+    # level whose slugs are all stale in the CSV snapshot falls through to a
+    # shallower — but still deeper-than-subcategory — candidate. Chaining (rather
+    # than picking one level up front) also means a retry can cross levels once
+    # the deepest level's candidates are used up.
     max_depth = max((r["depth"] for r in cat_urls), default=1)
-    for d in range(max_depth, 1, -1):
-        deepest_pool = [
-            r for r in cat_urls
-            if r["depth"] == d and r["maincat"] in maincat_by_name
-        ]
-        deepest_pick = _pick_one_live(
-            deepest_pool,
-            build_url=lambda r: f"{SITE_BASE}/products/{maincat_by_name[r['maincat']]['slug']}{r['url_name']}",
-        )
-        if deepest_pick:
-            row, url = deepest_pick
-            out.append({
-                "label": "Deepest category",
-                "name": row["deepest_cat"],
-                "url": url,
-                "depth": row["depth"],
-                "cat_id": row["cat_id"],
-            })
-            break
-    return out
+
+    def _deepest_stream():
+        for d in range(max_depth, 1, -1):
+            pool = [
+                r for r in cat_urls
+                if r["depth"] == d and r["maincat"] in maincat_by_name
+            ]
+            yield from _iter_live(pool, build_url=sub_url)
+
+    slots.append(_CandidateSlot(
+        "Deepest category",
+        _deepest_stream(),
+        lambda row, url: {
+            "label": "Deepest category", "name": row["deepest_cat"],
+            "url": url, "depth": row["depth"], "cat_id": row["cat_id"],
+        },
+    ))
+    return slots
 
 
 # ---------------------------------------------------------------------------
@@ -388,20 +464,23 @@ def _check_basement_links(html: str) -> Tuple[bool, str, Optional[str], int]:
 # ---------------------------------------------------------------------------
 # Taxv2 — find category/facet combos where the facet has seoPriority=true
 # ---------------------------------------------------------------------------
-def _get_priority_facet_combos(n: int = 3) -> List[Dict]:
+def _iter_priority_facet_combos():
+    """Yield category/facet combos where the facet has seoPriority=true, one per
+    category. Lazy so the caller only pays for the combos it consumes — a failed
+    check can pull a fresh combo as a replacement without pre-fetching a batch.
+    """
     cat_urls = _load_cat_urls()
     maincats = _load_maincats()
     if not cat_urls or not maincats:
-        return []
+        return
     maincat_by_name = {m["name"]: m for m in maincats}
 
     eligible = [r for r in cat_urls if r["maincat"] in maincat_by_name]
     random.shuffle(eligible)
 
-    found: List[Dict] = []
     tries = 0
     for row in eligible:
-        if len(found) >= n or tries >= FACET_LOOKUP_MAX_TRIES:
+        if tries >= FACET_LOOKUP_MAX_TRIES:
             break
         tries += 1
         cat_id = row["cat_id"]
@@ -437,6 +516,7 @@ def _get_priority_facet_combos(n: int = 3) -> List[Dict]:
                 continue
             facets_data = facets_resp.json()
             facet_items = facets_data if isinstance(facets_data, list) else facets_data.get("items", [])
+            combo = None
             for cf in facet_items:
                 facet = cf.get("facet") or cf
                 fid = facet.get("id")
@@ -453,18 +533,25 @@ def _get_priority_facet_combos(n: int = 3) -> List[Dict]:
                 if cat_status == 404 or cat_status == 0:
                     logger.info(f"[SEO_RULINGS] skipping facet-combo cat {cat_id} ({cat_url}) — status {cat_status}")
                     break
-                found.append({
+                combo = {
                     "cat_id": cat_id,
                     "cat_name": row["deepest_cat"],
                     "cat_url": cat_url,
                     "facet_id": fid,
                     "facet_name": facet_name,
-                })
+                }
                 break  # only one combo per category
         except Exception as e:
             logger.warning(f"[SEO_RULINGS] facet lookup failed for cat {cat_id}: {e}")
             continue
-    return found[:n]
+        if combo:
+            yield combo
+
+
+def _get_priority_facet_combos(n: int = 3) -> List[Dict]:
+    """First `n` seoPriority facet combos. See _iter_priority_facet_combos."""
+    it = _iter_priority_facet_combos()
+    return [c for c in (next(it, None) for _ in range(n)) if c]
 
 
 # ---------------------------------------------------------------------------
@@ -509,9 +596,10 @@ def _check_variable(
             ORDER BY random()
             LIMIT %s
         """
-        # Fetch extra rows so we can skip 404s / redirected URLs and still
-        # have enough live candidates left to check.
-        cur.execute(sql, (f"%{placeholder}%", limit * 5))
+        # Fetch extra rows so we can skip 404s / redirected URLs AND retry a
+        # failed substitution on a fresh URL, and still have enough live
+        # candidates left to fill every slot.
+        cur.execute(sql, (f"%{placeholder}%", limit * (RETRY_MAX_ATTEMPTS + 5)))
         rows = cur.fetchall()
     finally:
         cur.close()
@@ -525,62 +613,80 @@ def _check_variable(
         })
         return findings
 
-    checked = 0
-    for row in rows:
-        if checked >= limit:
-            break
-        # Unique-titles DB stores paths as `/products/...`; absolutize before
-        # fetching and before returning so the frontend can link to them.
-        raw_url = row["url"]
-        url = raw_url if raw_url.startswith("http") else f"{SITE_BASE}{raw_url}"
-        html, http_status = _fetch(url)
-        if not html:
-            findings.append({
+    # Fill `limit` slots. Within a slot, keep drawing candidates until one
+    # renders correctly: dead/redirected pages are skipped as before, and a
+    # genuine substitution failure now also triggers a retry on a fresh URL. A
+    # slot only reports "failed" once RETRY_MAX_ATTEMPTS real candidates have
+    # all failed to substitute — the superseded failures ride along so the retry
+    # stays visible.
+    candidates = iter(rows)
+    for _slot in range(limit):
+        attempts: List[Dict] = []
+        used: Optional[Dict] = None
+        skipped: List[Dict] = []
+        while len(attempts) < RETRY_MAX_ATTEMPTS:
+            row = next(candidates, None)
+            if row is None:
+                break
+            # Unique-titles DB stores paths as `/products/...`; absolutize before
+            # fetching and before returning so the frontend can link to them.
+            raw_url = row["url"]
+            url = raw_url if raw_url.startswith("http") else f"{SITE_BASE}{raw_url}"
+            html, http_status = _fetch(url)
+            if not html:
+                skipped.append({
+                    "variable": placeholder, "url": url,
+                    "status": "fetch_error", "detail": f"HTTP {http_status}",
+                })
+                continue
+            # Non-200 (404, 503, …) — the URL is dead, not a substitution
+            # failure. Doesn't consume an attempt; try the next candidate.
+            if http_status != 200:
+                skipped.append({
+                    "variable": placeholder, "url": url,
+                    "status": "skipped", "detail": f"HTTP {http_status}",
+                })
+                continue
+            # Redirected to a different page — the rendered title belongs to the
+            # redirect target, not this template's page, so we can't verify
+            # substitution here. Also doesn't consume an attempt.
+            redirected, final_url = _REDIRECT_CACHE.get(url, (False, url))
+            if redirected:
+                skipped.append({
+                    "variable": placeholder, "url": url,
+                    "status": "skipped", "detail": f"redirected to {final_url}",
+                })
+                continue
+            rendered = _extract_title(html) if extract == "title" else _extract_description(html)
+            ok = placeholder not in rendered and bool(success_pattern.search(rendered))
+            detail = {
                 "variable": placeholder,
                 "url": url,
-                "status": "fetch_error",
-                "detail": f"HTTP {http_status}",
-            })
-            continue
-        # Skip non-200 pages (404, 503, etc.) — the URL is dead, not a
-        # variable-substitution failure.  Try the next candidate instead.
-        if http_status != 200:
-            findings.append({
-                "variable": placeholder,
-                "url": url,
-                "status": "skipped",
-                "detail": f"HTTP {http_status}",
-            })
-            continue
-        # Skip URLs that redirected to a different page — the rendered title
-        # then belongs to the redirect target, not this template's page, so
-        # we can't verify substitution here. Sample another candidate instead.
-        redirected, final_url = _REDIRECT_CACHE.get(url, (False, url))
-        if redirected:
-            findings.append({
-                "variable": placeholder,
-                "url": url,
-                "status": "skipped",
-                "detail": f"redirected to {final_url}",
-            })
-            continue
-        checked += 1
-        rendered = _extract_title(html) if extract == "title" else _extract_description(html)
-        if placeholder in rendered or not success_pattern.search(rendered):
-            findings.append({
-                "variable": placeholder,
-                "url": url,
-                "status": "failed",
+                "status": "ok" if ok else "failed",
                 "rendered": rendered[:240],
-                "template": (row["template"] or "")[:240],
-            })
-        else:
-            findings.append({
-                "variable": placeholder,
-                "url": url,
-                "status": "ok",
-                "rendered": rendered[:240],
-            })
+                "attempt": len(attempts) + 1,
+            }
+            if not ok:
+                detail["template"] = (row["template"] or "")[:240]
+            attempts.append(detail)
+            if ok:
+                if len(attempts) > 1:
+                    logger.info(
+                        f"[SEO_RULINGS] {placeholder}: substituted OK on attempt "
+                        f"{len(attempts)} ({url})"
+                    )
+                used = detail
+                break
+        if used is None:
+            if attempts:
+                used = attempts[-1]
+            elif skipped:
+                # Never got a verifiable candidate — surface the last skip so the
+                # slot isn't silently dropped from the report.
+                used = skipped[-1]
+            else:
+                break  # candidate pool exhausted; stop filling slots
+        findings.append({**used, "superseded": attempts[:-1] if attempts else [], "skipped": skipped})
     return findings
 
 
@@ -608,6 +714,19 @@ def _check_title_variables() -> Dict:
 # backend/daily_automation.py)
 # ---------------------------------------------------------------------------
 _SITEMAP_CHECK_KEYS = ("xml_sitemaps", "html_sitemaps")
+
+
+def _retry_counts(details: Dict[str, List[Dict]]) -> Dict[str, int]:
+    """Per-check total number of superseded (resampled-away) URLs. Used to flag
+    a check that only passed after a retry, in Slack and in the API payload."""
+    out: Dict[str, int] = {}
+    for key, rows in details.items():
+        if not isinstance(rows, list):
+            continue
+        n = sum(len(r.get("superseded") or []) for r in rows if isinstance(r, dict))
+        if n:
+            out[key] = n
+    return out
 
 
 def _sitemap_slack_lines(check_key: str, details: List[Dict]) -> List[str]:
@@ -672,62 +791,90 @@ def run_all_checks() -> Dict:
     started_at = datetime.utcnow()
     results: Dict = {"checks": {}, "details": {}}
 
-    cats = _pick_sample_categories()
-    results["details"]["sampled_categories"] = cats
+    slots = _sample_category_slots()
+    results["details"]["sampled_categories"] = [
+        c for c in (s.candidate(0) for s in slots) if c
+    ]
 
     # --- Check 1 (noScript "Kies categorie") + Check 3 (basement links) ---
-    no_script_failed = False
-    basement_failed = False
-    no_script_details: List[Dict] = []
-    basement_details: List[Dict] = []
-    if not cats:
-        no_script_failed = True
-        basement_failed = True
-        no_script_details.append({"status": "no_sample"})
-        basement_details.append({"status": "no_sample"})
-    for c in cats:
+    # Both run over the same three category slots. Each check retries its own
+    # slots independently (a URL that fails check 1 may well pass check 3), but
+    # because the slot caches its candidates they see the same URL per attempt
+    # number, so the two Details tables stay comparable row-for-row.
+    def _eval_noscript(c: Dict) -> Tuple[bool, Dict]:
         html, http_status = _fetch(c["url"])
         if not html:
-            no_script_failed = True
-            basement_failed = True
-            err = {**c, "status": "fetch_error", "http_status": http_status}
-            no_script_details.append(err)
-            basement_details.append(err)
-            continue
+            return False, {**c, "status": "fetch_error", "http_status": http_status}
         present = _has_noscript_title(html, "Kies categorie")
-        no_script_details.append({**c, "present": present, "http_status": http_status})
-        if not present:
-            no_script_failed = True
+        return present, {**c, "present": present, "http_status": http_status}
 
-        b_ok, b_msg, b_layout, b_count = _check_basement_links(html)
-        basement_details.append({
-            **c, "present": b_ok, "detail": b_msg, "http_status": http_status,
-            "layout": b_layout, "link_count": b_count,
-        })
-        if not b_ok:
-            basement_failed = True
+    def _eval_basement(c: Dict) -> Tuple[bool, Dict]:
+        html, http_status = _fetch(c["url"])
+        if not html:
+            return False, {**c, "status": "fetch_error", "http_status": http_status}
+        ok, msg, layout, count = _check_basement_links(html)
+        return ok, {
+            **c, "present": ok, "detail": msg, "http_status": http_status,
+            "layout": layout, "link_count": count,
+        }
 
-    results["checks"]["no_script_categories"] = "failed" if no_script_failed else "passed"
-    results["details"]["no_script_categories"] = no_script_details
-    results["checks"]["basement_links"] = "failed" if basement_failed else "passed"
-    results["details"]["basement_links"] = basement_details
+    for key, evaluate in (
+        ("no_script_categories", _eval_noscript),
+        ("basement_links", _eval_basement),
+    ):
+        details: List[Dict] = []
+        failed = not slots
+        if not slots:
+            details.append({"status": "no_sample"})
+        for slot in slots:
+            used, attempts = _run_slot_check(slot, evaluate)
+            details.append(used)
+            if not attempts or used.get("present") is not True:
+                failed = True
+        results["checks"][key] = "failed" if failed else "passed"
+        results["details"][key] = details
 
     # --- Check 2 (noScript facet-links) ---
-    combos = _get_priority_facet_combos(3)
-    facet_failed = False
-    facet_details: List[Dict] = []
-    if not combos:
-        facet_failed = True
-        facet_details.append({"status": "no_priority_facets_found"})
-    for combo in combos:
+    # Three slots drawn from one shared combo stream, so a retry consumes the
+    # NEXT unused combo — replacements never collide with another slot's URL.
+    combo_stream = _iter_priority_facet_combos()
+
+    def _eval_facet(combo: Dict) -> Tuple[bool, Dict]:
         html, http_status = _fetch(combo["cat_url"])
         if not html:
-            facet_failed = True
-            facet_details.append({**combo, "status": "fetch_error", "http_status": http_status})
-            continue
+            return False, {**combo, "status": "fetch_error", "http_status": http_status}
         present = _has_noscript_title(html, combo["facet_name"])
-        facet_details.append({**combo, "present": present, "http_status": http_status})
-        if not present:
+        return present, {**combo, "present": present, "http_status": http_status}
+
+    facet_failed = False
+    facet_details: List[Dict] = []
+    for _slot_i in range(3):
+        attempts: List[Dict] = []
+        used: Optional[Dict] = None
+        for attempt in range(RETRY_MAX_ATTEMPTS):
+            combo = next(combo_stream, None)
+            if combo is None:
+                break
+            ok, detail = _eval_facet(combo)
+            detail = {**detail, "attempt": attempt + 1}
+            attempts.append(detail)
+            if ok:
+                logger.info(
+                    f"[SEO_RULINGS] facet-links slot {_slot_i + 1}: passed on "
+                    f"attempt {attempt + 1}"
+                ) if attempt else None
+                used = detail
+                break
+        if used is None and attempts:
+            used = attempts[-1]
+        if used is None:
+            # Stream exhausted before this slot got any candidate at all.
+            if not facet_details:
+                facet_failed = True
+                facet_details.append({"status": "no_priority_facets_found"})
+            break
+        facet_details.append({**used, "superseded": attempts[:-1]})
+        if used.get("present") is not True:
             facet_failed = True
     results["checks"]["no_script_facet_links"] = "failed" if facet_failed else "passed"
     results["details"]["no_script_facet_links"] = facet_details
@@ -755,9 +902,14 @@ def run_all_checks() -> Dict:
     # (sitemap checks only) indented under its line so a failure shows exactly
     # which URL is down.
     summary_lines: List[str] = []
+    retries = _retry_counts(results["details"])
     for k in passed + failed:
         mark = ":white_check_mark:" if k in passed else ":x:"
-        summary_lines.append(f"{mark} {CHECK_LABELS[k]}")
+        # A check that only went green after resampling is flagged, so "passed"
+        # never hides the fact that the first URL(s) failed.
+        n = retries.get(k, 0)
+        suffix = f"  _(after {n} resample{'' if n == 1 else 's'})_" if n else ""
+        summary_lines.append(f"{mark} {CHECK_LABELS[k]}{suffix}")
         summary_lines.extend(_sitemap_slack_lines(k, results["details"].get(k, [])))
     slack_text = (
         f"{icon} *SEO Rulings — {len(failed)} failed, {len(passed)} passed*\n"
@@ -769,6 +921,7 @@ def run_all_checks() -> Dict:
     results["summary"] = {
         "passed": passed,
         "failed": failed,
+        "retries": retries,
         "slack": slack_result,
         "slack_text": slack_text,
     }
