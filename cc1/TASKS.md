@@ -4,6 +4,91 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+## suggestions.txt backlog — UI/feature list from Joep (opened 2026-07-28)
+
+Source of truth is `/home/joepvanschagen/projects/dm-dashboard/suggestions.txt`
+(untracked, 46 lines / 41 bullets). Item numbers below are that file's LINE
+numbers, which is the vocabulary used in the commits. **25 of 41 done**, all
+pushed in `569288a` (23 items) and `10f4152` (items 8 + 14).
+
+### Done
+3, 4, 5, 10, 12, 13, 16, 17, 21, 22, 23, 24, 26, 29, 30, 31, 32, 41, 42, 43, 44, 45, 46, 8, 14.
+Notes worth keeping: every button touched moved to the canonical classes in
+`style.css` (which also brings the grey-outline disabled state); the theme
+repaints Bootstrap's danger variants orange, so `#resetValidationBtn` and
+`.btn-remove` needed explicit red overrides; Healthscore is unlinked from 31
+navbars but the page is intact and still reachable by URL. Item 43's hover pencil
+was never seen rendered — it only appears once a Search Titles query returns rows.
+
+### Partly done
+- **15** — Shop-campaigns width fixed; **still to do:** per-page dropdown on Top
+  campaigns + Top ad groups, and a 10 option (defaulted) on Per-day overview.
+- **18** — GSD Budgets purple left border removed; **still to do:** Run History
+  table to the blueprint layout, and the date pickers to the blueprint picker.
+- **20** — DMA Bidding border removed and the sweep done (there were exactly two
+  `.run-card` borders in the whole frontend); **still to do:** the Run History
+  table restyle.
+
+### Not started — tables (same treatment each, do as one batch)
+- **11** IndexNow Submission History table → blueprint layout
+- **19** SEO stats table headers → blueprint design
+- **25** Auto-Redirects: 'cancelled' label in Recent runs orange not yellow, and
+  the table → blueprint design
+
+### Not started — features (one pass each)
+- **1** SEO Priority: maincat + deepest-cat dropdowns, deepest filtered by
+  maincat, both type-ahead
+- **2** Merge URL Checker into URL Validator as a bottom module "Check live URL's",
+  and make the Validator's output module look like the Checker's
+- **6** Move Performance Standup into SEO Stats (between Per-day overview and
+  Performance standup) and rename "Run Settings" → "Update Excel"
+- **7** Skeleton table "drawing" per UI_BLUEPRINT, everywhere a table loads
+  (cross-cutting; audit all tools)
+- **9** Keyword Redirect Results: blueprint table layout, centre Search Volume +
+  Products, add a Copy button, add an "old URL" column = category url + `/r/{keyword}/`
+- **33** Content Publishing info tiles fancier, like GSD Budgets' tiles but smaller
+- **39** Kopteksten Recent Results: drop "View full content", make rows expand on
+  click, keep the url href
+- **40** FAQ's Recent FAQ Results: same, drop "Show X FAQ's"
+- **47** R-Finder: add filter ROWS under URL-filters; each row is its own OR set
+  producing its own result set. Needs a backend change — `fetch_r_urls(filters)`
+  currently takes a flat list and ANDs it, so it becomes a list-of-lists plus
+  per-row result grouping in the UI (and Copy/Download).
+- **48** Top 5 facets per category by visits (all channels) → all combos as SEO
+  title blueprints. **BLOCKED on scope.** `canon_key` sorts facet types, so order
+  does NOT create distinct keys: "all combos of 5" = **31 per category**, not 325.
+  That is ~110k blueprints across all 3,543 categories, ~40k for deepest-only.
+  Recommend top-N categories by visits first — `/page-titles` validates a POST
+  atomically in 5,000-row batches, so one bad row fails 5,000 (see LEARNINGS
+  2026-07-27).
+
+### Where the wandpanelen thread ended (2026-07-28)
+Root cause fixed and pushed (`60dfe78`): category resolution is API-first with
+`cat_urls.csv` as a rewritten cache. Background walk **confirmed** in a
+long-lived process (0 → 3,543 categories at ~t=131s). The 5 wandpanelen urls
+regenerated **5/5 correct** ("Groene Woonaccessoires" → "Groene Wandpanelen").
+
+**Correction to the earlier measurement:** the "352 urls across 37 categories"
+figure was a substring heuristic and is mostly FALSE POSITIVES. Regenerating all
+347 of the rest scored only **~4 that now name the deepest cat** — the others are
+deliberate **type-facet overrides**, where a facet is meant to suppress the
+category name (e.g. `type_knikkerbaan` → "Knikkers" instead of "Knikkerbanen").
+So the real blast radius of the CSV bug was ~9 urls, not 352. Do NOT re-run that
+regeneration expecting a big win, and do not treat the heuristic as a bug list.
+
+**Open, needs Joep:** whether to tell the website team about the live page's own
+H1 (beslist.nl renders "Groene Woonaccessoires" for `/wandpanelen/` too — a
+separate gap in the site's title builder that this tool does not control).
+
+### Other loose ends
+- Prod (`win-htz-006:3003`) is behind: it has up to `c4b5c58`, so not the
+  backend-owned Activity Log write (`6db9c24`) nor the category resolver.
+- `cc1/GSD_LL_MYSTERY_RUN.md` has been uncommitted since 22 July and has now been
+  stash-cycled through six pushes. Commit it on its own.
+- Local `:8003` runs uvicorn in WSL with `--reload` (per `start-dm-tools.bat`);
+  startup blocks ~35s on `load_excel_data` retrying against a prod-only path.
+  The Task Scheduler launcher exited 1 on 28 Jul 09:08 — unexplained.
+
 - [x] **category_lookup is API-first, cat_urls.csv is now a cache of the API** (2026-07-28, backend). Root cause of Joep's "/wandpanelen/ titles say Woonaccessoires": the CSV only holds the old `slug_catid` url form, newer categories use a bare slug (`wandpanelen`, id 9005645), so `lookup_category()` missed and `faq_service` fell back to indexing the API product's `categories[]` by url depth — landing on an ancestor. 352 urls / 37 categories affected. Nothing in the repo had ever generated the CSV. Now: in-memory slug map from Taxonomy API v2 (1h TTL, `urlSlug` read from `labels[]` per locale), every successful walk rewrites the CSV atomically, CSV read only when the API is unreachable. **The walk must never run inline** — the first version took 167.8s on a cold call; it now runs on a daemon thread with an in-flight guard while callers answer from the CSV (0.01s). 3,543 categories; callers unchanged. Corrected in passing: Unique Titles scrapes nothing, it is API-based throughout. **Not yet verified: a background walk completing in a long-lived process** (test process exited first). **Not yet done: regenerating the 352 affected urls.** See LEARNINGS "cat_urls.csv kon nieuwe categorie-slugs NOOIT vinden". #claude-session:2026-07-28 #priority:high
 
 - [x] **UI batch from suggestions.txt — 25 of 41 items** (2026-07-28, commits `569288a` + `10f4152`). Canonical button classes throughout (which also brings the grey-outline disabled state), page-width audit with three tools fixed, Healthscore unlinked from 31 navbars, and the Keyword Redirects run state + Thema Ads button placement. Two colours needed forcing because the theme repaints Bootstrap's danger variants orange. Remaining: 15b, 18b, 20b, 11, 19, 25 (mechanical/tables) and 1, 2, 6, 7, 9, 33, 39, 40, 47, 48 (features). #claude-session:2026-07-28 #priority:medium
