@@ -1,6 +1,21 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Alleen BACKFILLED activity-entries hebben een Reset-knop — live gelogde LL-runs slaan hun undo-payload nooit op (2026-07-28)
+
+Joep: waarom hebben de laatste LL-runs (27-7 12:51:40 / 12:36:02, 24-7 12:28:12, 22-7 12:00:19) geen Reset-knop? Uitgezocht in `pa.jvs_gsd_activity_log`; de correlatie is 100% schoon:
+
+| | rijen | periode | undo |
+|---|---|---|---|
+| `entry_id LIKE 'backfill-%'` | 38 | 23 jun – 20 jul | **gevuld** → Reset |
+| live gelogd uit de browser | 5 | 22 jul – 28 jul | **NULL** → geen knop |
+
+- **`renderLog()` toont de knop alleen als er een undo-payload is.** Drie takken: `entry.reset` → grijs "reset"-label; `hasUndo` (`undo.created.length + undo.paused.length > 0`) → Reset; `entry.action === 'Run Script'` → Reset via reconstructie uit de Google Ads change-history. Die derde tak geldt alleen voor het GSD-create-pad, dus een LL-entry zonder undo valt in geen enkele tak → **lege cel**.
+- **`logActivity(action, details, success, extra)` heeft wél een `extra`-parameter**, maar van de zeven call-sites gebruikt alleen `Run Script` (regel ~2110) hem met `{ undo }`. Alle zes LL-call-sites geven hem niet mee → `undo` ontbreekt in de POST → NULL in de kolom. **Geen enkele LL-run heeft ooit zijn eigen undo live gelogd**; elke Reset-knop die je in de log ziet is gefabriceerd door `backfill_activity_from_ll()`, dat de payload reconstrueert uit `pa.jvs_gsd_ll_campaigns`. De grens rond 20/21 juli is simpelweg wanneer die backfill voor het laatst liep.
+- **De backfill nóg eens draaien repareert die 5 rijen NIET.** De entry_id-schema's verschillen: backfill gebruikt `backfill-{action}-{run_time}`, live-logging een browser-`crypto.randomUUID()`. De `ON CONFLICT (entry_id)` matcht dus nooit en je krijgt **dubbele** entries naast de bestaande, niet een gevulde undo.
+- **Echte fix (nog niet gedaan, zie BACKLOG):** `undo` meegeven bij het live loggen van een LL-run. Het resultaat heeft alles al in huis — `data.paused` / `data.enabled` bevatten `customer_id` + `campaign_id` + `campaign_name` per campagne. Let op de omkering die de backfill al toepast: undo van *paused* is re-enablen (dus `{created: [], paused: camps}`) en undo van *enabled* is pauzeren (`{created: camps, paused: []}`).
+- Terzijde: de tijden in de UI zijn `toLocaleString('nl-NL')` van een UTC-timestamp — 12:51:40 in de log is 10:51:40 in de kolom. Bij het matchen van een gemelde rij op de DB dus 2 uur (zomertijd) terugrekenen, zie ook [[postgres_utc_timestamps_display]].
+
 ## GSD LL Date-picker deed niets sinds de Excel-load de enige bron werd — nu een 7-daagse snapshot-tabel (2026-07-28)
 
 Joep: de Date-picker in "Pause / Enable low linkage shops" doet niets meer sinds de Excel-load van 09:50. Klopte: het was **dode input**.
