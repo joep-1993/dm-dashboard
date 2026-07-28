@@ -45,6 +45,40 @@
             box-shadow: none !important;
         }
 
+        /* ── "Check live URL's" module (was the separate URL Checker tool) ──
+           Scoped under #checkModule because this page already owns .url-cell and
+           .status-error with different meanings. */
+        /* Fixed layout + min-width forces the columns to honour their th widths
+           instead of reflowing around content; overflow-x adds the scrollbar. */
+        #checkModule .results-table { max-height: 600px; overflow: auto; }
+        #checkModule .results-table table { table-layout: fixed; min-width: 1900px; }
+        #checkModule .results-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #checkModule .url-cell { font-family: monospace; font-size: 0.85rem; max-width: none; }
+        #checkModule .url-cell.copyable { cursor: pointer; }
+        #checkModule .url-cell.copyable:hover { background-color: #e9ecef; }
+        #checkModule .url-cell.copied { background-color: #d4edda !important; transition: background-color 0.3s; }
+        #checkModule .meta-cell { font-size: 0.8rem; }
+        /* Hover-expand wraps text inside the fixed column width — the row grows
+           vertically, but nothing spills sideways, so no horizontal layout shift. */
+        #checkModule .meta-cell:hover, #checkModule .url-cell:hover { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+        .upload-zone { border: 2px dashed #dee2e6; border-radius: 8px; padding: 1.5rem; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .upload-zone:hover { border-color: #5e4a90; background: #f8f9fc; }
+        .upload-zone.dragover { border-color: #5e4a90; background: #f0eef5; }
+
+        /* Outline buttons that sit on the green results card-header. Brand purple
+           is too dark to read there, so this is the lighter #8b7bb5 the URL
+           Checker already used on that same header. */
+        .btn-outline-purple-on-dark { border-color: #8b7bb5; color: #fff; background: transparent; }
+        .btn-outline-purple-on-dark:hover, .btn-outline-purple-on-dark:focus { background-color: #8b7bb5; border-color: #8b7bb5; color: #fff; }
+        .btn-outline-orange-on-dark { border-color: #CC5500; color: #fff; background: transparent; }
+        .btn-outline-orange-on-dark:hover, .btn-outline-orange-on-dark:focus { background-color: #CC5500; border-color: #CC5500; color: #fff; }
+
+        /* The Validator's own results table now gets the Checker's treatment:
+           fixed columns inside a scroll box, hover to expand a truncated cell. */
+        #validatorResults .results-table { max-height: 600px; overflow: auto; }
+        #validatorResults .results-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #validatorResults .results-table td:hover { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+
         /* Pagination + result-count notice */
         .results-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; flex-wrap: wrap; }
         .results-footer .notice { color: #636e72; }
@@ -104,7 +138,6 @@
                         <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
                         <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
                         <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO stats</a>
-                        <a href="/static/url-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="6.5" cy="15" r="4"/><circle cx="17.5" cy="15" r="4"/><path d="M10.5 15h3"/><path d="M2.5 15H1"/><path d="M23 15h-1.5"/><path d="M6.5 11V8M17.5 11V8"/></svg> URL Checker</a>
                         <a href="/static/url-validator.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
                     </div>
                 </div>
@@ -161,59 +194,163 @@
                     </div>
                 </div>
 
-                <!-- Results -->
+                <!-- Results — same shape as the Check live URL's output below:
+                     a card with the actions in its header, a badge summary row,
+                     then the table inside a scroll box. -->
                 <div id="resultsSection" style="display:none;">
-                    <!-- Stats -->
-                    <div class="row mb-3 g-2">
-                        <div class="col-3"><div class="stat-box bg-light"><div class="num" id="statTotal">0</div><div class="label">Total</div></div></div>
-                        <div class="col-3"><div class="stat-box" style="background:#d1e7dd;"><div class="num status-valid" id="statValid">0</div><div class="label">Valid</div></div></div>
-                        <div class="col-3"><div class="stat-box" style="background:#fff3cd;"><div class="num status-warning" id="statWarnings">0</div><div class="label">Warnings</div></div></div>
-                        <div class="col-3"><div class="stat-box" style="background:#f8d7da;"><div class="num status-error" id="statErrors">0</div><div class="label">Errors</div></div></div>
-                    </div>
-
-                    <!-- Filter + Download -->
-                    <div class="d-flex justify-content-between mb-2">
-                        <div class="btn-group btn-group-sm filter-btn-group" role="group">
-                            <button class="btn btn-outline-secondary active" onclick="filterResults('all', this)">All</button>
-                            <button class="btn btn-outline-secondary" onclick="filterResults('valid', this)">Valid</button>
-                            <button class="btn btn-outline-secondary" onclick="filterResults('warning', this)">Warnings</button>
-                            <button class="btn btn-outline-secondary" onclick="filterResults('error', this)">Errors</button>
+                    <div class="card mb-4" id="validatorResults">
+                        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">Results</h5>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-purple-on-dark" onclick="copyForExcel()">Copy for Excel</button>
+                                <button class="btn btn-sm btn-outline-orange-on-dark" onclick="downloadResults()">Download Excel</button>
+                            </div>
                         </div>
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-sm btn-outline-primary" onclick="downloadResults()">Download Excel</button>
-                            <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyForExcel()">Copy for Excel</button>
+                        <div class="card-body">
+                            <!-- Summary badges -->
+                            <div class="d-flex gap-3 flex-wrap mb-3" id="summaryStats"></div>
+
+                            <!-- Filter -->
+                            <div class="d-flex justify-content-between mb-2">
+                                <div class="btn-group btn-group-sm filter-btn-group" role="group">
+                                    <button class="btn btn-outline-secondary active" onclick="filterResults('all', this)">All</button>
+                                    <button class="btn btn-outline-secondary" onclick="filterResults('valid', this)">Valid</button>
+                                    <button class="btn btn-outline-secondary" onclick="filterResults('warning', this)">Warnings</button>
+                                    <button class="btn btn-outline-secondary" onclick="filterResults('error', this)">Errors</button>
+                                </div>
+                            </div>
+
+                            <!-- Results table -->
+                            <div class="results-table">
+                                <table class="table table-sm table-bordered table-hover mb-0" id="resultsTable">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width:30px;">#</th>
+                                            <th>URL</th>
+                                            <th style="width:70px;">Status</th>
+                                            <th>Suggested URL</th>
+                                            <th>Issues</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="resultsBody"></tbody>
+                                </table>
+                            </div>
+
+                            <!-- Notice + Pagination -->
+                            <div class="results-footer" id="resultsFooter">
+                                <div class="notice" id="resultsNotice"></div>
+                                <div class="pagination-controls">
+                                    <span>Per page:</span>
+                                    <select class="form-select form-select-sm" id="perPage" onchange="currentPage=1; renderPage();">
+                                        <option value="25">25</option>
+                                        <option value="50" selected>50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                                    <span class="page-info" id="pageInfo">-</span>
+                                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Check live URL's ─────────────────────────────────────────
+                     Was the standalone URL Checker tool. Every id is chk-prefixed
+                     and the JS lives in its own IIFE, because this page already
+                     owns #urlInput, #fileInput, #progressCard, #progressBar and
+                     #resultsBody. -->
+                <div id="checkModule">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">Check live URL's</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Fetches each URL live and reports status, redirect target, canonical,
+                                title / description / H1 and the product count. Unlike the validator
+                                above, this does not check the URL's structure — it checks what the
+                                site actually returns.
+                            </p>
+                            <div class="row">
+                                <div class="col-md-7 pe-3">
+                                    <label for="chkUrlInput" class="form-label">Enter URLs</label>
+                                    <textarea class="form-control" id="chkUrlInput" style="height: calc(100% - 32px);" placeholder="url 1&#10;url 2&#10;url 3"></textarea>
+                                </div>
+                                <div class="col-md-2 px-0">
+                                    <label class="form-label">Upload file</label>
+                                    <div class="upload-zone" id="chkUploadZone" style="height: calc(100% - 32px); display: flex; flex-direction: column; justify-content: center;" onclick="document.getElementById('chkFileInput').click()">
+                                        <input type="file" id="chkFileInput" accept=".xlsx,.xls,.csv,.txt" style="display: none;">
+                                        <p class="mb-1"><strong>Drop file here</strong></p>
+                                        <small class="text-muted">.xlsx, .csv, or .txt</small>
+                                        <p class="mb-0 mt-1 text-success small" id="chkFileStatus" style="display: none;"></p>
+                                    </div>
+                                </div>
+                                <div class="col-md-3 ps-2">
+                                    <label class="form-label d-block" style="margin-left: calc(100% - 220px);">Settings</label>
+                                    <div class="d-flex flex-column gap-2 align-items-end">
+                                        <div class="input-group input-group-sm" style="width: 220px;">
+                                            <span class="input-group-text" style="flex: 1;">Parallel Workers</span>
+                                            <input type="number" class="form-control text-center" id="chkWorkersInput" value="10" min="1" max="10" style="max-width: 60px;">
+                                        </div>
+                                        <div class="input-group input-group-sm" style="width: 220px;">
+                                            <span class="input-group-text" style="flex: 1;">Requests/sec</span>
+                                            <input type="number" class="form-control text-center" id="chkRateInput" value="2" min="0.5" max="2" step="0.5" style="max-width: 60px;">
+                                        </div>
+                                        <div class="input-group input-group-sm" style="width: 220px;">
+                                            <span class="input-group-text" style="flex: 1;">Timeout (sec)</span>
+                                            <input type="number" class="form-control text-center" id="chkTimeoutInput" value="15" min="5" max="60" style="max-width: 60px;">
+                                        </div>
+                                        <button class="btn btn-run mt-2" style="width: 220px;" id="chkBtn">Check URLs</button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Results table -->
-                    <div class="table-responsive">
-                        <table class="table table-sm table-bordered mb-0" id="resultsTable">
-                            <thead>
-                                <tr>
-                                    <th style="width:30px;">#</th>
-                                    <th>URL</th>
-                                    <th style="width:70px;">Status</th>
-                                    <th>Suggested URL</th>
-                                    <th>Issues</th>
-                                </tr>
-                            </thead>
-                            <tbody id="resultsBody"></tbody>
-                        </table>
+                    <!-- Progress -->
+                    <div class="card mb-4" id="chkProgressCard" style="display: none;">
+                        <div class="card-header">
+                            <h5 class="mb-0">Progress</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="progress mb-2" style="height: 25px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" id="chkProgressBar" style="width: 0%">0%</div>
+                            </div>
+                            <p class="mb-0 text-muted" id="chkProgressText">Starting...</p>
+                        </div>
                     </div>
 
-                    <!-- Notice + Pagination -->
-                    <div class="results-footer" id="resultsFooter">
-                        <div class="notice" id="resultsNotice"></div>
-                        <div class="pagination-controls">
-                            <span>Per page:</span>
-                            <select class="form-select form-select-sm" id="perPage" onchange="currentPage=1; renderPage();">
-                                <option value="25">25</option>
-                                <option value="50" selected>50</option>
-                                <option value="100">100</option>
-                            </select>
-                            <button class="btn btn-outline-secondary btn-page" onclick="changePage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
-                            <span class="page-info" id="pageInfo">-</span>
-                            <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                    <!-- Results -->
+                    <div class="card mb-4" id="chkResultsCard" style="display: none;">
+                        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">Results</h5>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-purple-on-dark" id="chkCopyBtn">Copy for Excel</button>
+                                <button class="btn btn-sm btn-outline-orange-on-dark" id="chkDownloadBtn">Download Excel</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-flex gap-3 flex-wrap mb-3" id="chkSummaryStats"></div>
+                            <div class="results-table">
+                                <table class="table table-sm table-bordered table-hover">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width: 40px">#</th>
+                                            <th style="width: 280px">URL</th>
+                                            <th style="width: 70px" class="text-center">Status</th>
+                                            <th style="width: 240px">Redirect URL</th>
+                                            <th style="width: 280px">Canonical</th>
+                                            <th style="width: 100px" class="text-center">Verdict</th>
+                                            <th style="width: 260px">Title</th>
+                                            <th style="width: 300px">Description</th>
+                                            <th style="width: 250px">H1</th>
+                                            <th style="width: 80px">Results</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="chkResultsBody"></tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -235,15 +372,24 @@
     let uploadedUrls = null;
 
     // --- Cache ---
+    // #cacheContent is not in this page's markup (the cache card was removed at
+    // some point but this function stayed), so every one of these writes threw a
+    // TypeError on page load — including the one in the catch, which made the
+    // failure unhandled. Guarded rather than deleted: the endpoint still exists
+    // and refreshCache() is still reachable, so the display can come back by just
+    // adding the element.
     async function loadCache() {
+        const el = document.getElementById('cacheContent');
+        if (!el) return;
+        const notLoaded = `<p class="text-muted">Cache not loaded yet. Click Refresh to initialize.</p>`;
         try {
             const r = await fetch(`${API}/api/url-validator/cache-status`);
             const d = await r.json();
             if (d.detail || !d.maincats_loaded && d.maincats_loaded !== 0) {
-                document.getElementById('cacheContent').innerHTML = `<p class="text-muted">Cache not loaded yet. Click Refresh to initialize.</p>`;
+                el.innerHTML = notLoaded;
                 return;
             }
-            document.getElementById('cacheContent').innerHTML = `
+            el.innerHTML = `
                 <div class="row text-center">
                     <div class="col"><strong>${d.maincats_loaded || 0}</strong><br><small>Maincats</small></div>
                     <div class="col"><strong>${d.categories_loaded || 0}</strong><br><small>Categories</small></div>
@@ -252,7 +398,7 @@
                     <div class="col"><strong>${d.facet_values_cached || 0}</strong><br><small>Value sets cached</small></div>
                 </div>`;
         } catch (e) {
-            document.getElementById('cacheContent').innerHTML = `<p class="text-muted">Cache not loaded yet. Click Refresh to initialize.</p>`;
+            el.innerHTML = notLoaded;
         }
     }
 
@@ -375,10 +521,14 @@
 
     function showResults(data) {
         document.getElementById('resultsSection').style.display = 'block';
-        document.getElementById('statTotal').textContent = data.total;
-        document.getElementById('statValid').textContent = data.valid;
-        document.getElementById('statWarnings').textContent = data.warnings;
-        document.getElementById('statErrors').textContent = data.errors;
+        // Badge summary row, matching the Check live URL's output below (the four
+        // stat boxes this replaces carried the same four numbers).
+        document.getElementById('summaryStats').innerHTML = [
+            `<span class="badge" style="background-color: #CC5500;">Total: ${data.total}</span>`,
+            `<span class="badge bg-success">Valid: ${data.valid}</span>`,
+            `<span class="badge bg-warning text-dark">Warnings: ${data.warnings}</span>`,
+            `<span class="badge bg-danger">Errors: ${data.errors}</span>`,
+        ].join('');
         filteredResults = allResults;
         currentPage = 1;
         renderPage();
@@ -496,6 +646,319 @@
 
     // Init
     loadCache();
+    </script>
+
+    <!-- ── "Check live URL's" module ──────────────────────────────────────────
+         The former URL Checker tool. Wrapped in an IIFE so its `results`,
+         `showResults`, `escapeHtml` etc. cannot collide with the validator's
+         above; the only ids it touches are chk-prefixed. Uses event delegation
+         instead of the original inline onclick="copyToClipboard('...')", which
+         needed a JS-string escape of untrusted scraped text. -->
+    <script>
+    (function() {
+        const API_BASE = window.location.origin;
+        let results = [];
+        let selectedFile = null;
+
+        const uploadZone = document.getElementById('chkUploadZone');
+        const fileInput = document.getElementById('chkFileInput');
+        const checkBtn = document.getElementById('chkBtn');
+
+        uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) setFile(file);
+        });
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) setFile(file);
+        });
+        checkBtn.addEventListener('click', checkUrls);
+        document.getElementById('chkCopyBtn').addEventListener('click', copyAllToClipboard);
+        document.getElementById('chkDownloadBtn').addEventListener('click', downloadExcel);
+
+        // Copy-on-click for url cells, via delegation on the tbody.
+        document.getElementById('chkResultsBody').addEventListener('click', (e) => {
+            const cell = e.target.closest('td.copyable');
+            if (!cell) return;
+            navigator.clipboard.writeText(cell.dataset.copy || '').then(() => {
+                cell.classList.add('copied');
+                setTimeout(() => cell.classList.remove('copied'), 500);
+            });
+        });
+
+        function setFile(file) {
+            selectedFile = file;
+            const status = document.getElementById('chkFileStatus');
+            status.textContent = file.name;
+            status.style.display = 'block';
+        }
+
+        async function getUrlsFromInput() {
+            if (selectedFile) {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                const resp = await fetch(`${API_BASE}/api/url-checker/upload`, { method: 'POST', body: formData });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.detail || 'File upload failed');
+                }
+                const data = await resp.json();
+                return data.urls;
+            }
+            const urlInput = document.getElementById('chkUrlInput').value.trim();
+            if (!urlInput) return [];
+            return urlInput
+                .split(/[\n,]+/)
+                .map(u => u.trim())
+                .filter(u => u && (u.startsWith('http') || u.startsWith('/')));
+        }
+
+        async function checkUrls() {
+            let urls;
+            try {
+                urls = await getUrlsFromInput();
+            } catch (e) {
+                alert(e.message);
+                return;
+            }
+            if (!urls || urls.length === 0) {
+                alert('No valid URLs found. Enter URLs starting with http://, https://, or / (relative).');
+                return;
+            }
+
+            const workers = Math.min(parseInt(document.getElementById('chkWorkersInput').value) || 10, 10);
+            const rate = Math.min(parseFloat(document.getElementById('chkRateInput').value) || 2, 2);
+            const timeout = parseInt(document.getElementById('chkTimeoutInput').value) || 15;
+
+            document.getElementById('chkProgressCard').style.display = 'block';
+            document.getElementById('chkResultsCard').style.display = 'none';
+            checkBtn.disabled = true;
+
+            results = [];
+            const total = urls.length;
+            let completed = 0;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/url-checker/check`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ urls, workers, rate, timeout })
+                });
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const text = decoder.decode(value);
+                    const lines = text.split('\n').filter(l => l.trim());
+                    for (const line of lines) {
+                        try {
+                            const data = JSON.parse(line);
+                            if (data.type === 'result') {
+                                results.push(data.data);
+                                completed++;
+                                updateProgress(completed, total);
+                            } else if (data.type === 'done') {
+                                showCheckResults();
+                            }
+                        } catch (e) {}
+                    }
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+
+            checkBtn.disabled = false;
+            showCheckResults();
+        }
+
+        function updateProgress(completed, total) {
+            const pct = Math.round(100 * completed / total);
+            const bar = document.getElementById('chkProgressBar');
+            bar.style.width = pct + '%';
+            bar.textContent = pct + '%';
+            document.getElementById('chkProgressText').textContent = `Checked ${completed} of ${total} URLs`;
+        }
+
+        function showCheckResults() {
+            document.getElementById('chkProgressCard').style.display = 'none';
+            document.getElementById('chkResultsCard').style.display = 'block';
+
+            const statusCounts = {};
+            results.forEach(r => {
+                const status = String(r.status_code);
+                statusCounts[status] = (statusCounts[status] || 0) + 1;
+            });
+            let summaryHtml = `<span class="badge" style="background-color: #CC5500;">Total: ${results.length}</span>`;
+            Object.keys(statusCounts).sort().forEach(status => {
+                const badgeClass = status === '200' ? 'bg-success' :
+                                   status.startsWith('3') ? 'bg-warning text-dark' :
+                                   (status.startsWith('4') || status.startsWith('5')) ? 'bg-danger' : 'bg-secondary';
+                summaryHtml += `<span class="badge ${badgeClass}">${status}: ${statusCounts[status]}</span>`;
+            });
+            document.getElementById('chkSummaryStats').innerHTML = summaryHtml;
+
+            const tbody = document.getElementById('chkResultsBody');
+            tbody.innerHTML = '';
+            results.forEach((r, i) => {
+                const sc = r.status_code;
+                const scStr = String(sc);
+                const statusBadgeClass = sc === 200 ? 'bg-success'
+                    : scStr.startsWith('3') ? 'bg-warning text-dark'
+                    : scStr.startsWith('4') || scStr.startsWith('5') ? 'bg-danger'
+                    : 'bg-secondary';
+                const statusBadge = `<span class="badge ${statusBadgeClass}">${escapeHtml(scStr)}</span>`;
+
+                const inputUrlDisp = stripBeslist(r.input_url);
+                const redirectUrlDisp = stripBeslist(r.redirect_url);
+                const canonicalUrlDisp = stripBeslist(r.canonical_url);
+                const metaTitle = decodeEntities(r.meta_title);
+                const metaDescription = decodeEntities(r.meta_description);
+                const h1 = decodeEntities(r.h1);
+                const selfCanonical = computeSelfCanonical(r);
+
+                // data-copy carries the value for the delegated copy handler, so
+                // scraped text never has to survive a trip through a JS string
+                // literal inside an attribute.
+                const urlTd = (val) => val
+                    ? `<td class="url-cell copyable" title="${escapeAttr(val)}" data-copy="${escapeAttr(val)}">${escapeHtml(val)}</td>`
+                    : `<td class="url-cell">-</td>`;
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${i + 1}</td>
+                    ${urlTd(inputUrlDisp)}
+                    <td class="text-center">${statusBadge}</td>
+                    ${urlTd(redirectUrlDisp)}
+                    ${urlTd(canonicalUrlDisp)}
+                    <td class="text-center">${selfCanonical === null ? '<span class="text-muted">-</span>' : selfCanonical ? '<span class="badge bg-success">true</span>' : '<span class="badge bg-danger">false</span>'}</td>
+                    <td class="meta-cell" title="${escapeAttr(metaTitle || '')}">${escapeHtml(metaTitle || '-')}</td>
+                    <td class="meta-cell" title="${escapeAttr(metaDescription || '')}">${escapeHtml(metaDescription || '-')}</td>
+                    <td class="meta-cell" title="${escapeAttr(h1 || '')}">${escapeHtml(h1 || '-')}</td>
+                    <td>${r.product_count !== null && r.product_count !== undefined ? r.product_count : '-'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Strip the beslist host so exports + table cells show only the path —
+        // keeps shop URLs aligned with how users paste them into spreadsheets.
+        function stripBeslist(url) {
+            if (!url) return url;
+            return String(url).replace(/^https?:\/\/(www\.)?beslist\.(nl|be)/i, '');
+        }
+
+        // Normalize a URL for equality comparison: lowercase host+scheme, strip
+        // trailing slash on the path, keep query + hash. URL() throws on relative
+        // strings so fall back to a best-effort trim+lowercase for those.
+        function normalizeUrlForCompare(u) {
+            if (!u) return '';
+            try {
+                const p = new URL(u);
+                const path = p.pathname.replace(/\/+$/, '') || '/';
+                return (p.protocol + '//' + p.host.toLowerCase() + path + p.search + p.hash);
+            } catch (_) {
+                return String(u).trim().replace(/\/+$/, '').toLowerCase();
+            }
+        }
+
+        // True if the page's canonical URL points at the page itself (after
+        // following any redirect). Returns null when there is no canonical to
+        // compare — surfaces as "-" instead of a misleading "false".
+        function computeSelfCanonical(r) {
+            if (!r || !r.canonical_url) return null;
+            const effective = r.redirect_url || r.input_url;
+            if (!effective) return null;
+            return normalizeUrlForCompare(effective) === normalizeUrlForCompare(r.canonical_url);
+        }
+
+        // Decode HTML entities (e.g. &#x27; → ', &amp; → &) that the backend
+        // passes through from scraped markup. Uses a textarea roundtrip so every
+        // named + numeric entity is handled by the browser, no hand-rolled table.
+        // Loops up to 3 times because source pages are sometimes double-encoded —
+        // stops as soon as a pass changes nothing.
+        const _decodeHelper = document.createElement('textarea');
+        function decodeEntities(str) {
+            if (str == null) return str;
+            let current = String(str);
+            for (let i = 0; i < 3; i++) {
+                _decodeHelper.innerHTML = current;
+                const next = _decodeHelper.value;
+                if (next === current) break;
+                current = next;
+            }
+            return current;
+        }
+
+        // Export-ready copy of a result: URL fields stripped of the beslist host,
+        // meta fields entity-decoded, self_canonical populated so the export
+        // carries the same value the table shows.
+        function stripResult(r) {
+            return {
+                ...r,
+                input_url: stripBeslist(r.input_url),
+                redirect_url: stripBeslist(r.redirect_url),
+                canonical_url: stripBeslist(r.canonical_url),
+                meta_title: decodeEntities(r.meta_title),
+                meta_description: decodeEntities(r.meta_description),
+                h1: decodeEntities(r.h1),
+                self_canonical: computeSelfCanonical(r),
+            };
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function escapeAttr(text) {
+            if (!text) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function copyAllToClipboard() {
+            if (results.length === 0) return;
+            const headers = ['input_url', 'status_code', 'redirect_url', 'canonical_url', 'self_canonical', 'meta_title', 'meta_description', 'h1', 'product_count'];
+            // Embedded tab/newline in scraped meta fields breaks Excel's TSV
+            // parser mid-row — collapse all whitespace runs to a single space
+            // so each result stays on its own line.
+            const sanitize = v => v == null ? '' : String(v).replace(/[\t\r\n]+/g, ' ');
+            const tsv = [headers.join('\t')];
+            results.map(stripResult).forEach(r => {
+                tsv.push(headers.map(h => sanitize(r[h])).join('\t'));
+            });
+            navigator.clipboard.writeText(tsv.join('\n')).then(() => {
+                alert('Copied to clipboard! Paste directly into Excel.');
+            }).catch(err => {
+                console.error('Copy for Excel failed:', err);
+                alert('Failed to copy to clipboard: ' + (err && err.message ? err.message : err));
+            });
+        }
+
+        function downloadExcel() {
+            if (results.length === 0) return;
+            const exportResults = results.map(stripResult);
+            fetch(`${API_BASE}/api/url-checker/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ results: exportResults })
+            })
+            .then(r => r.blob())
+            .then(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'url_checker_results.xlsx';
+                a.click();
+            });
+        }
+    })();
     </script>
 </body>
 </html>
