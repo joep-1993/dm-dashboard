@@ -58,8 +58,9 @@
         #previewTable th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         #previewTable th.sort-asc::after { content: '▲'; opacity: 0.9; }
         #previewTable th.sort-desc::after { content: '▼'; opacity: 0.9; }
-        /* Collapse the publish-message box entirely when there's no message (no white bar above the table) */
-        #publishResult:empty { display: none; }
+        /* Done banner: keep the response dump readable but out of the way */
+        .done-text details pre { max-height: 220px; overflow: auto; background: rgba(0,0,0,0.03); padding: 0.5rem; border-radius: 4px; }
+        .done-text details summary { cursor: pointer; }
         #previewSelCount { display: inline-block; min-width: 82px; text-align: right; }  /* stable width as the count changes */
         /* theme makes .btn-outline-danger orange; force the Remove button truly red */
         #btnRemove { color:#dc3545; border-color:#dc3545; background-color:transparent; }
@@ -180,7 +181,12 @@
                                  role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
                         </div>
                     </div>
-                    <div id="publishResult" class="mb-3"></div>
+                    <!-- Done banner — replaces the publish bar when the push
+                         finishes (cc1/UI_BLUEPRINT.md "Done banner"). -->
+                    <div id="publishDone" class="alert alert-dismissible fade show mb-3" style="display:none;" role="alert">
+                        <span class="done-text"></span>
+                        <button type="button" class="btn-close" onclick="hideDoneBanner('publishDone')" aria-label="Close"></button>
+                    </div>
                     <div class="filter-row d-flex gap-2 align-items-center mb-3">
                         <input id="previewFilter" class="form-control form-control-sm" style="max-width:280px;" placeholder="filter" oninput="previewPage=1; renderPreview();">
                         <span id="previewFilterCount" class="small text-muted"></span>
@@ -254,7 +260,13 @@
                     </div>
 
                     <div id="progressWrap" class="mt-3" style="display:none;">
-                        <div class="d-flex justify-content-between mb-1">
+                        <!-- Done banner — replaces the label row + bar once the run
+                             finishes (cc1/UI_BLUEPRINT.md "Done banner"). -->
+                        <div id="genDone" class="alert alert-dismissible fade show mb-3" style="display:none;" role="alert">
+                            <span class="done-text"></span>
+                            <button type="button" class="btn-close" onclick="genDoneDismissed = true; hideDoneBanner('genDone')" aria-label="Close"></button>
+                        </div>
+                        <div class="d-flex justify-content-between mb-1" id="progressLabelRow">
                             <span id="progressText">Processing...</span>
                             <span id="progressPercent">0%</span>
                         </div>
@@ -306,6 +318,7 @@
         const API_BASE = '';
         let pollTimer = null;
         let sawRunning = false;  // true once a run has been observed running this page session
+        let genDoneDismissed = false;  // user closed the generate Done banner — don't re-show it on the next poll
 
         // default "to" = today
         document.getElementById('dateTo').value = new Date().toISOString().slice(0, 10);
@@ -318,6 +331,28 @@
         }
 
         function esc(s) { const d = document.createElement('div'); d.textContent = (s == null ? '' : s); return d.innerHTML; }
+        function num(v) { return (v ?? 0).toLocaleString(); }
+
+        // --- Done banner (cc1/UI_BLUEPRINT.md "Done banner") -------------------
+        // A finished run replaces its progress bar with one of these, so the page
+        // never shows a bar parked at 100%. tone: 'done' (yellow) | 'warning'
+        // (finished, but some rows failed) | 'error' (the run itself failed) |
+        // 'cancelled' (stopped by the user).
+        function showDoneBanner(id, html, tone = 'done') {
+            const b = document.getElementById(id);
+            if (!b) return;
+            const cls = tone === 'error' ? 'alert-danger'
+                      : tone === 'warning' ? 'alert-warning'
+                      : tone === 'cancelled' ? 'alert-info'
+                      : 'alert-done-yellow';
+            b.className = `alert alert-dismissible fade show mb-3 ${cls}`;
+            b.querySelector('.done-text').innerHTML = html;
+            b.style.display = 'block';
+        }
+        function hideDoneBanner(id) {
+            const b = document.getElementById(id);
+            if (b) b.style.display = 'none';
+        }
 
         async function loadStats() {
             try {
@@ -364,16 +399,18 @@
                 }
                 const isDone = run.status === 'done';
                 const isError = run.status === 'error';
+                const finished = isDone || isError;
                 const pt = document.getElementById('progressText');
                 pt.textContent = run.message || phaseNames[run.phase] || run.phase || run.status;
-                // "Done" renders as a green label/badge; error stays red bold text
-                pt.classList.toggle('badge', isDone);
-                pt.classList.toggle('bg-success', isDone);
                 pt.classList.toggle('text-danger', isError);
                 pt.classList.toggle('fw-bold', isError);
-                document.getElementById('progressPercent').textContent = (pct == null || isDone) ? '' : pct + '%';
-                // hide the bar once a run is finished; keep it (red) on error, animated while running
-                document.getElementById('progressBarOuter').style.display = isDone ? 'none' : '';
+                document.getElementById('progressPercent').textContent = pct == null ? '' : pct + '%';
+                // Once the run is finished, the label row + bar give way to the Done
+                // banner — never leave a bar parked at 100% (UI_BLUEPRINT.md).
+                document.getElementById('progressLabelRow').style.display = finished ? 'none' : '';
+                document.getElementById('progressBarOuter').style.display = finished ? 'none' : '';
+                if (finished && !genDoneDismissed) showGenDone(run, isError);
+                else hideDoneBanner('genDone');
                 bar.style.width = (pct == null ? 100 : pct) + '%';
                 bar.classList.toggle('progress-bar-animated', running);
                 bar.classList.toggle('progress-bar-striped', running);
@@ -396,11 +433,34 @@
             }
         }
 
+        // Headline for a finished generation run. The counters row below the banner
+        // carries the full breakdown, so keep this to the outcome numbers.
+        function showGenDone(run, isError) {
+            if (isError) {
+                showDoneBanner('genDone',
+                    `<strong>Run failed.</strong> ${esc(run.message || 'unknown error')}`, 'error');
+                return;
+            }
+            const bits = [`<strong>${num(run.new_combos)}</strong> new combo(s)`,
+                          `<strong>${num(run.titles_generated)}</strong> title(s) created`];
+            if (run.titles_skipped) bits.push(`<strong>${num(run.titles_skipped)}</strong> skipped`);
+            if (run.titles_failed) bits.push(`<strong>${num(run.titles_failed)}</strong> failed`);
+            // Stop lands as status='done' with should_stop still set — say so
+            // rather than claiming the run completed.
+            const stopped = !!run.should_stop;
+            const head = stopped ? 'Stopped — partial run.' : 'Done — generation finished.';
+            showDoneBanner('genDone',
+                `<strong>${head}</strong> ${bits.join(' · ')}`,
+                stopped ? 'cancelled' : run.titles_failed ? 'warning' : 'done');
+        }
+
         async function startRun() {
             const topN = parseInt(document.getElementById('topN').value) || 100;
             const df = document.getElementById('dateFrom').value;
             const dt = document.getElementById('dateTo').value;
             const qs = new URLSearchParams({ top_n: topN, date_from: df, date_to: dt });
+            genDoneDismissed = false;
+            hideDoneBanner('genDone');
             document.getElementById('btnGenerate').disabled = true;
             const r = await fetch(`${API_BASE}/api/seo-titles/start?${qs}`, { method: 'POST' });
             const d = await r.json();
@@ -696,8 +756,7 @@
             if (!confirm(`Push ${what} to PRODUCTION /page-titles (live)?\n\nThis also pushes the per-URL AI unique titles.`)) return;
             const btn = document.getElementById('btnPublish');
             btn.disabled = true; btn.textContent = 'Publishing…';
-            const res = document.getElementById('publishResult');
-            res.innerHTML = '';
+            hideDoneBanner('publishDone');
             showPublishProgress(n || null);
             try {
                 const bodyReq = { env: 'production' };
@@ -707,11 +766,24 @@
                     body: JSON.stringify(bodyReq)
                 });
                 const d = await r.json();
-                const cls = d.success ? 'alert-success' : 'alert-danger';
-                res.innerHTML = `<div class="alert ${cls}"><strong>Pushed ${d.pushed ?? 0}</strong>, failed ${d.failed ?? 0}.
-                    ${d.message ? esc(d.message) : ''}<pre class="mb-0 mt-2 small">${esc(JSON.stringify(d.batches || d, null, 2))}</pre></div>`;
+                // Backend rolls the pre-flight length skips into `failed`, so peel
+                // them back out — otherwise the same rows get counted twice here.
+                const skipped = d.skipped_too_long?.length || 0;
+                const failed = Math.max(0, (d.failed ?? 0) - skipped);
+                const ut = d.unique_titles_push;
+                const utFailed = ut && ut.success === false;
+                const bits = [`<strong>Done — pushed ${num(d.pushed)} blueprint(s) to production.</strong>`];
+                if (failed) bits.push(`<strong>${num(failed)}</strong> failed`);
+                if (skipped) bits.push(`<strong>${num(skipped)}</strong> skipped (over the length cap)`);
+                if (ut) bits.push(`AI unique titles: ${utFailed ? 'failed' : 'pushed'}`);
+                if (d.message) bits.push(esc(d.message));
+                // Raw response stays available, but folded away — the summary is the point.
+                const detail = `<details class="mt-2"><summary class="small">Response detail</summary>` +
+                    `<pre class="mb-0 mt-2 small">${esc(JSON.stringify(d.batches || d, null, 2))}</pre></details>`;
+                showDoneBanner('publishDone', bits.join(' · ') + detail,
+                    (failed || skipped || utFailed || d.success === false) ? 'warning' : 'done');
             } catch (e) {
-                res.innerHTML = `<div class="alert alert-danger">Publish error: ${esc(e.message)}</div>`;
+                showDoneBanner('publishDone', `<strong>Publish failed.</strong> ${esc(e.message)}`, 'error');
             } finally {
                 hidePublishProgress();
                 btn.disabled = false;

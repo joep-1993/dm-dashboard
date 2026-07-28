@@ -313,6 +313,16 @@ body {
     color: #333;
 }
 
+/* Light-yellow "Done" banner — the canonical end-of-run state (see
+   cc1/UI_BLUEPRINT.md "Done banner"). Needed because the rules above flatten
+   .alert-success / .alert-info to theme grey, which reads as "nothing
+   happened". Originated in dma-exclusions.html; shared from here since. */
+.alert-done-yellow {
+    background-color: #fff8e1 !important;
+    border-color: #f3e2a0 !important;
+    color: #6b5900 !important;
+}
+
 .progress-bar {
     /* Uniform green progress bars across all tools (matches FAQ / DMA tools).
        Was var(--color-button) (burnt orange). Bootstrap state classes
