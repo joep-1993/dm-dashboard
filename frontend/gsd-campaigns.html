@@ -152,7 +152,11 @@
         .ll-preview-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .ll-preview-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
         /* Expanded detail sub-table: full campaign names, single horizontal scroll on wrapper */
-        .ll-detail-table { white-space: nowrap; }
+        /* Centre the per-shop detail table in the expanded row. Auto margins on
+           the table (not flex on the scroll wrapper) — when the table is wider
+           than the row, auto margins collapse to 0 and it just scrolls from the
+           left, whereas centring the flex line would clip the overflowing start. */
+        .ll-detail-table { white-space: nowrap; margin-left: auto; margin-right: auto; }
         .ll-detail-table th { background: #f8f9fa; }  /* match the Enabled/Paused history header shade */
         .ll-detail-table td:last-child, .ll-detail-table th:last-child { text-align: center; }
 
