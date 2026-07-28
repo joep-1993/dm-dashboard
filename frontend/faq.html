@@ -160,22 +160,18 @@
                     <div class="card-body">
                         <p class="text-muted">Publish generated content (content_top + FAQ) to the website-configuration API</p>
 
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <div class="d-flex gap-3 mb-3" id="publishStats">
-                                    <div class="text-center">
-                                        <h5 class="mb-0" id="publishContentCount">-</h5>
-                                        <small class="text-muted">Content Top</small>
-                                    </div>
-                                    <div class="text-center">
-                                        <h5 class="mb-0" id="publishFaqCount">-</h5>
-                                        <small class="text-muted">FAQ</small>
-                                    </div>
-                                    <div class="text-center">
-                                        <h5 class="mb-0" id="publishTotalCount">-</h5>
-                                        <small class="text-muted">Total URLs</small>
-                                    </div>
-                                </div>
+                        <div class="d-flex flex-wrap gap-2 mb-3" id="publishStats">
+                            <div class="mini-stat-card">
+                                <div class="num" id="publishContentCount">-</div>
+                                <div class="label">Content Top</div>
+                            </div>
+                            <div class="mini-stat-card">
+                                <div class="num" id="publishFaqCount">-</div>
+                                <div class="label">FAQ</div>
+                            </div>
+                            <div class="mini-stat-card">
+                                <div class="num" id="publishTotalCount">-</div>
+                                <div class="label">Total URLs</div>
                             </div>
                         </div>
 

@@ -202,7 +202,7 @@ async function refreshFaqStatus() {
                 }
 
                 const itemDiv = document.createElement('div');
-                itemDiv.className = 'list-group-item';
+                itemDiv.className = 'list-group-item result-row-expandable';
                 itemDiv.id = `faq-result-item-${index}`;
 
                 const dateText = item.created_at ? new Date(item.created_at).toLocaleString() : '';
@@ -211,12 +211,17 @@ async function refreshFaqStatus() {
                 if (!window.faqDataMap) window.faqDataMap = {};
                 window.faqDataMap[index] = item.faq_json || '[]';
 
+                // No "Show N FAQs" button — the whole row is the toggle (handler
+                // below). The count moves to a badge so it stays visible, and the
+                // chevron is the affordance.
                 itemDiv.innerHTML = `
                     <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: start;">
                         <div style="overflow: hidden;">
                             <div class="d-flex justify-content-between align-items-start">
                                 <div style="min-width: 0; flex: 1;">
-                                    <h6 class="mb-1 text-truncate">${item.page_title || 'Untitled'}</h6>
+                                    <h6 class="mb-1 text-truncate"><span class="result-chevron" id="faq-chev-${index}">▸</span> ${item.page_title || 'Untitled'}
+                                        <span class="badge rounded-pill ms-1" style="background:#f1edfa; color:#5e4a90; font-size:0.68rem; font-weight:600;">${faqCount} FAQ${faqCount === 1 ? '' : 's'}</span>
+                                    </h6>
                                     <small class="text-muted d-block text-truncate"><a href="https://www.beslist.nl${item.url}" target="_blank" rel="noopener" class="text-decoration-none">${item.url}</a></small>
                                 </div>
                                 ${dateText ? `<small class="text-muted text-nowrap ms-2">${dateText}</small>` : ''}
@@ -226,9 +231,6 @@ async function refreshFaqStatus() {
                                 <div class="full-content d-none" id="faq-full-${index}">
                                     <div class="mb-1" style="font-size: 0.875rem;"></div>
                                 </div>
-                                <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="toggleFaqContent(${index})">
-                                    <span id="faq-toggle-text-${index}" data-faq-count="${faqCount}">Show ${faqCount} FAQs</span>
-                                </button>
                             </div>
                         </div>
                         <button class="btn btn-sm btn-danger-invert d-inline-flex align-items-center justify-content-center" style="width: 30px; height: 30px; padding: 0; font-size: 1.1rem; line-height: 1;" onclick="deleteFaqResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
@@ -236,6 +238,15 @@ async function refreshFaqStatus() {
                         </button>
                     </div>
                 `;
+
+                // Click anywhere on the row toggles — EXCEPT the url link, the
+                // delete button, and the expanded accordion's own question
+                // buttons (all <a>/<button>, so one check covers them).
+                itemDiv.addEventListener('click', (e) => {
+                    if (e.target.closest('a, button')) return;
+                    if (window.getSelection && String(window.getSelection()).length > 0) return;
+                    toggleFaqContent(index);
+                });
 
                 recentDiv.appendChild(itemDiv);
             });
@@ -483,7 +494,8 @@ function stopFaqProcessing() {
 function toggleFaqContent(index) {
     const preview = document.getElementById(`faq-preview-${index}`);
     const full = document.getElementById(`faq-full-${index}`);
-    const toggleText = document.getElementById(`faq-toggle-text-${index}`);
+    const chevron = document.getElementById(`faq-chev-${index}`);
+    if (!preview || !full) return;
 
     if (full.classList.contains('d-none')) {
         // Show full content - get FAQ data from global map
@@ -516,12 +528,11 @@ function toggleFaqContent(index) {
 
         preview.classList.add('d-none');
         full.classList.remove('d-none');
-        toggleText.textContent = 'Hide FAQs';
+        if (chevron) chevron.textContent = '▾';
     } else {
         preview.classList.remove('d-none');
         full.classList.add('d-none');
-        const count = toggleText.dataset.faqCount;
-        toggleText.textContent = count ? `Show ${count} FAQs` : 'Show FAQs';
+        if (chevron) chevron.textContent = '▸';
     }
 }
 

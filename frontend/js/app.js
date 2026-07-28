@@ -547,18 +547,21 @@ async function refreshStatus() {
 
                 // Create item container
                 const itemDiv = document.createElement('div');
-                itemDiv.className = 'list-group-item';
+                itemDiv.className = 'list-group-item' + (needsExpand ? ' result-row-expandable' : '');
                 itemDiv.id = `result-item-${index}`;
 
                 // Format date only if available
                 const dateText = item.created_at ? new Date(item.created_at).toLocaleString() : '';
 
-                // Build the structure
+                // Build the structure. There is no "View Full Content" button —
+                // the whole row is the toggle (see the click handler below); the
+                // chevron is just the affordance that says so.
                 itemDiv.innerHTML = `
                     <div class="d-flex w-100 justify-content-between align-items-start">
                         <div style="flex: 1;">
                             <div class="d-flex justify-content-between align-items-start">
-                                <h6 class="mb-1" style="word-break: break-all; ${dateText ? 'max-width: 85%;' : ''}"><a href="https://www.beslist.nl${item.url}" target="_blank" rel="noopener" class="text-decoration-none">${item.url}</a></h6>
+                                <h6 class="mb-1" style="word-break: break-all; ${dateText ? 'max-width: 85%;' : ''}">
+                                    ${needsExpand ? `<span class="result-chevron" id="chev-${index}">▸</span> ` : ''}<a href="https://www.beslist.nl${item.url}" target="_blank" rel="noopener" class="text-decoration-none">${item.url}</a></h6>
                                 ${dateText ? `<small class="text-muted text-nowrap ms-2">${dateText}</small>` : ''}
                             </div>
                             <div class="content-preview">
@@ -566,11 +569,6 @@ async function refreshStatus() {
                                 <div class="full-content d-none" id="full-${index}">
                                     <div class="mb-1" style="font-size: 0.875rem;"></div>
                                 </div>
-                                ${needsExpand ? `
-                                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="toggleContent(${index})">
-                                        <span id="toggle-text-${index}">View Full Content</span>
-                                    </button>
-                                ` : ''}
                             </div>
                         </div>
                         <button class="btn btn-sm btn-danger-invert ms-2" onclick="deleteResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
@@ -583,6 +581,14 @@ async function refreshStatus() {
                 itemDiv.querySelector(`#preview-${index}`).innerHTML = shortContent + (needsExpand ? '...' : '');
                 if (needsExpand) {
                     itemDiv.querySelector(`#full-${index} > div`).innerHTML = fullContent;
+                    // Click anywhere on the row toggles — EXCEPT on the url link
+                    // (which must still navigate) or the delete button. Also skip
+                    // it when the user was selecting text in the content.
+                    itemDiv.addEventListener('click', (e) => {
+                        if (e.target.closest('a, button')) return;
+                        if (window.getSelection && String(window.getSelection()).length > 0) return;
+                        toggleContent(index);
+                    });
                 }
 
                 recentDiv.appendChild(itemDiv);
@@ -784,17 +790,13 @@ async function processUploadUrls() {
 function toggleContent(index) {
     const preview = document.getElementById(`preview-${index}`);
     const full = document.getElementById(`full-${index}`);
-    const toggleText = document.getElementById(`toggle-text-${index}`);
+    const chevron = document.getElementById(`chev-${index}`);
+    if (!preview || !full) return;
 
-    if (full.classList.contains('d-none')) {
-        preview.classList.add('d-none');
-        full.classList.remove('d-none');
-        toggleText.textContent = 'Contract';
-    } else {
-        preview.classList.remove('d-none');
-        full.classList.add('d-none');
-        toggleText.textContent = 'View Full Content';
-    }
+    const expanding = full.classList.contains('d-none');
+    preview.classList.toggle('d-none', expanding);
+    full.classList.toggle('d-none', !expanding);
+    if (chevron) chevron.textContent = expanding ? '▾' : '▸';
 }
 
 // Delete result and reset URL to pending
