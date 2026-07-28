@@ -7,33 +7,52 @@ _Active tasks for immediate work_
 ## suggestions.txt backlog — UI/feature list from Joep (opened 2026-07-28)
 
 Source of truth is `/home/joepvanschagen/projects/dm-dashboard/suggestions.txt`
-(untracked, 46 lines / 41 bullets). Item numbers below are that file's LINE
-numbers, which is the vocabulary used in the commits. **25 of 41 done**, all
-pushed in `569288a` (23 items) and `10f4152` (items 8 + 14).
+(untracked, now 49 lines / 42 bullets — **item 49 was added after the first
+batch**). Item numbers below are that file's LINE numbers, which is the
+vocabulary used in the commits. **36 of 42 done**, in `569288a` (23 items),
+`10f4152` (8 + 14), `8be2ca1` (11, 15b, 18b, 19, 20b, 25, 49), `45a1339`
+(33, 39, 40) and `17916fe` (9).
 
 ### Done
-3, 4, 5, 10, 12, 13, 16, 17, 21, 22, 23, 24, 26, 29, 30, 31, 32, 41, 42, 43, 44, 45, 46, 8, 14.
-Notes worth keeping: every button touched moved to the canonical classes in
-`style.css` (which also brings the grey-outline disabled state); the theme
-repaints Bootstrap's danger variants orange, so `#resetValidationBtn` and
-`.btn-remove` needed explicit red overrides; Healthscore is unlinked from 31
-navbars but the page is intact and still reachable by URL. Item 43's hover pencil
-was never seen rendered — it only appears once a Search Titles query returns rows.
+3, 4, 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+29, 30, 31, 32, 33, 39, 40, 41, 42, 43, 44, 45, 46, 49, and 9.
 
-### Partly done
-- **15** — Shop-campaigns width fixed; **still to do:** per-page dropdown on Top
-  campaigns + Top ad groups, and a 10 option (defaulted) on Per-day overview.
-- **18** — GSD Budgets purple left border removed; **still to do:** Run History
-  table to the blueprint layout, and the date pickers to the blueprint picker.
-- **20** — DMA Bidding border removed and the sweep done (there were exactly two
-  `.run-card` borders in the whole frontend); **still to do:** the Run History
-  table restyle.
+Notes worth keeping from the first batch: every button touched moved to the
+canonical classes in `style.css` (which also brings the grey-outline disabled
+state); the theme repaints Bootstrap's danger variants orange, so
+`#resetValidationBtn` and `.btn-remove` needed explicit red overrides;
+Healthscore is unlinked from 31 navbars but the page is intact and still
+reachable by URL. Item 43's hover pencil was never seen rendered — it only
+appears once a Search Titles query returns rows.
 
-### Not started — tables (same treatment each, do as one batch)
-- **11** IndexNow Submission History table → blueprint layout
-- **19** SEO stats table headers → blueprint design
-- **25** Auto-Redirects: 'cancelled' label in Recent runs orange not yellow, and
-  the table → blueprint design
+Notes from the 2026-07-28 tables/features batch:
+- The four history tables (IndexNow, Auto-Redirects, GSD Budgets, DMA Bidding)
+  now share one shape: `.tool-table-wrap` + grey sticky 1rem headers + sortable
+  glyphs + skeleton rows. IndexNow's was a 4-column CSS grid, not a table.
+- **Sorting must key the raw value.** Timestamps sort as epoch; the Input and
+  Changes columns needed `_filename` / `_changes` flattened out of
+  `params`/`summary` at load time to be sortable at all.
+- **Item 18b's premise was wrong in the blueprint, not in the code.** GSD
+  Budgets already used the native `<input type="date">` UI_BLUEPRINT described;
+  what "the blueprint picker" means in practice is the purple **flatpickr** that
+  SEO stats / SEO titles / GSD Campaigns / Shop-campaigns all render. Added it
+  there and corrected UI_BLUEPRINT. Still native (deliberately, nobody asked):
+  DMA Bidding, SEO Priority, Performance Standup, R-Finder.
+- Item 9's Old URL is **not** the same string as the backend's redirect `old`.
+  The column is the category url with `/c/winkel~{shop}` swapped for
+  `/r/{keyword}/`; `keyword_redirect_service._kw_to_old_path` builds a site-wide
+  `/products/r/{keyword}/` instead. A row can produce several (final_keyword is a
+  `; `-joined combination set) — the cell lists them all.
+- Items 39/40: the row-click toggle bails on `closest('a, button')`, which is
+  what keeps the url link navigating, the delete × working, and the FAQ
+  accordion's own question buttons from collapsing the row around them. It also
+  bails while text is selected so drag-to-copy doesn't fold the row shut.
+- **Bug found by actually rendering the page:** IndexNow's Submission History
+  never drew a single row. `loadHistory()` was called during script evaluation
+  but reads a `let` declared further down the same block → temporal dead zone,
+  and the ReferenceError died silently inside the async function. Bootstrapping
+  from `DOMContentLoaded` fixes it. Worth checking for elsewhere: any page whose
+  init calls run at the top of a script block that later declares `let`/`const`.
 
 ### Not started — features (one pass each)
 - **1** SEO Priority: maincat + deepest-cat dropdowns, deepest filtered by
@@ -41,15 +60,12 @@ was never seen rendered — it only appears once a Search Titles query returns r
 - **2** Merge URL Checker into URL Validator as a bottom module "Check live URL's",
   and make the Validator's output module look like the Checker's
 - **6** Move Performance Standup into SEO Stats (between Per-day overview and
-  Performance standup) and rename "Run Settings" → "Update Excel"
+  Performance standup) and rename "Run Settings" → "Update Excel". Note SEO
+  Stats already *has* a "Performance standup" card — this is embedding the
+  separate `performance-standup.html` tool above it, not renaming that card.
 - **7** Skeleton table "drawing" per UI_BLUEPRINT, everywhere a table loads
-  (cross-cutting; audit all tools)
-- **9** Keyword Redirect Results: blueprint table layout, centre Search Volume +
-  Products, add a Copy button, add an "old URL" column = category url + `/r/{keyword}/`
-- **33** Content Publishing info tiles fancier, like GSD Budgets' tiles but smaller
-- **39** Kopteksten Recent Results: drop "View full content", make rows expand on
-  click, keep the url href
-- **40** FAQ's Recent FAQ Results: same, drop "Show X FAQ's"
+  (cross-cutting; audit all tools). Five tables got it in the 28 Jul batch
+  (the four history tables + Keyword Redirect Results) — the rest is the sweep.
 - **47** R-Finder: add filter ROWS under URL-filters; each row is its own OR set
   producing its own result set. Needs a backend change — `fetch_r_urls(filters)`
   currently takes a flat list and ANDs it, so it becomes a list-of-lists plus
