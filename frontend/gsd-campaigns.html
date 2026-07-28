@@ -1072,7 +1072,8 @@
                 applyPreviewFilter();
                 if (!dryRun) logActivity('LL Run',
                     `${data.paused_count ?? (data.paused || []).length} paused / ${data.enabled_count ?? (data.enabled || []).length} enabled`,
-                    (data.errors || []).length === 0);
+                    (data.errors || []).length === 0,
+                    llUndoFrom(data));
                 if (!dryRun) {
                     loadLLHistory();
                     loadCampaigns();
@@ -1159,7 +1160,8 @@
                 applyPreviewFilter();
                 logActivity('LL Run selected',
                     `${data.paused_count ?? (data.paused || []).length} paused / ${data.enabled_count ?? (data.enabled || []).length} enabled`,
-                    (data.errors || []).length === 0);
+                    (data.errors || []).length === 0,
+                    llUndoFrom(data));
                 loadLLHistory();
                 loadCampaigns();
                 loadStats();
@@ -2428,6 +2430,21 @@
                 `${start + 1}-${Math.min(end, total)} of ${total.toLocaleString()}`,
                 activityPage <= 1, activityPage >= totalPages,
             );
+        }
+
+        // Undo payload for an LL run: the campaigns it paused (undo re-enables
+        // them) and the ones it enabled (undo pauses them) — the same inversion
+        // backfill_activity_from_ll() applies. The `ll` marker is read by
+        // POST /undo, which then reverses through the LL path so the
+        // GSD_LL_PAUSED label is maintained too, rather than flipping status
+        // only. The rows carry shop_id/country because that path needs them.
+        // Routing server-side keeps one code path here and means an
+        // already-deployed frontend gets the label-aware behaviour for free.
+        function llUndoFrom(data) {
+            const created = (data || {}).enabled || [];   // it enabled them -> undo pauses them
+            const paused = (data || {}).paused || [];     // it paused them  -> undo re-enables them
+            if (!created.length && !paused.length) return undefined;
+            return { undo: { created, paused, ll: true } };
         }
 
         async function resetRun(id) {

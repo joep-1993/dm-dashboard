@@ -28,6 +28,7 @@ import io
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime, timedelta
@@ -1282,6 +1283,210 @@ def backfill_activity_from_ll(gap_minutes: int = 10) -> Dict[str, Any]:
                 inserted += cur.rowcount
         conn.commit()
         return {"backfilled": inserted, "total_runs": len(runs)}
+    finally:
+        return_db_connection(conn)
+
+
+def undo_ll_run(undo: Dict[str, Any]) -> Dict[str, Any]:
+    """Reverse an LL run: re-enable what it paused, re-pause what it enabled.
+
+    Takes an activity entry's undo payload — ``{"created": [...], "paused":
+    [...]}`` where *created* holds the campaigns the run ENABLED — and replays
+    it through apply_selected() with every action flipped.
+
+    Going through apply_selected rather than the generic undo_run() is the whole
+    point: undo_run only writes campaign status, which for LL is half a
+    reversal. A re-enabled campaign would keep its GSD_LL_PAUSED label, and — far
+    worse — a re-paused one would have none, and a paused-but-untagged campaign
+    is invisible to every future enable run, since that lookup finds candidates
+    BY the label (see run_low_linkage, which rolls a pause back rather than
+    leave a campaign in that state). apply_selected maintains the label in both
+    directions, honours the kill switch, and audits each action.
+
+    Returns the {paused_created, enabled_paused, errors} shape the /undo
+    endpoint already had, so a frontend that knows nothing about this still
+    reports it correctly, with the full apply result under "detail".
+    """
+    created = undo.get("created") or []     # run enabled them -> pause them back
+    paused = undo.get("paused") or []       # run paused them  -> re-enable them
+
+    def _entry(item: Dict[str, Any], action: str) -> Dict[str, Any]:
+        # campaign_label_resource is deliberately dropped: on a re-pause the
+        # stored link is the one the run detached (dead), and on a re-enable
+        # apply_selected re-looks it up from shop_id.
+        return {k: v for k, v in item.items()
+                if k != "campaign_label_resource"} | {"action": action}
+
+    entries = ([_entry(i, "Enabled") for i in paused]
+               + [_entry(i, "Paused") for i in created])
+    if not entries:
+        return {"paused_created": 0, "enabled_paused": 0, "errors": [], "ll": True}
+
+    # apply_selected has no lock of its own (start_ll_apply holds it), so guard
+    # here — a reversal racing a live run would fight over the same campaigns.
+    with _LL_LOCK:
+        if _LL_PROGRESS["running"]:
+            return {"busy": True, "paused_created": 0, "enabled_paused": 0, "ll": True,
+                    "errors": [{"error": "a low-linkage run is in progress — "
+                                         "wait for it to finish"}]}
+
+    logger.warning("GSD LL undo: reversing %d paused + %d enabled campaign(s)",
+                   len(paused), len(created))
+    res = apply_selected(entries)
+    return {
+        # We paused what the run had enabled, and enabled what it had paused.
+        "paused_created": res.get("paused_count", len(res.get("paused", []))),
+        "enabled_paused": res.get("enabled_count", len(res.get("enabled", []))),
+        "errors": res.get("errors", []),
+        "kill_switch_blocked": res.get("kill_switch_blocked", False),
+        "ll": True,
+        "detail": res,
+    }
+
+
+_LL_DETAILS_RE = re.compile(r"(\d+)\s+paused\s*/\s*(\d+)\s+enabled", re.I)
+
+
+def backfill_ll_undo(dry_run: bool = True, gap_seconds: int = 60,
+                     match_minutes: int = 30) -> Dict[str, Any]:
+    """Fill in the undo payload on live-logged LL entries that have none.
+
+    Runs logged straight from the browser never stored an undo payload (only
+    the GSD 'Run Script' call site passed one), so their Reset button never
+    appeared — every Reset visible in the log came from
+    backfill_activity_from_ll(). Re-running that is NOT a fix: it keys on
+    ``backfill-{action}-{run_time}`` while a live entry carries a browser UUID,
+    so ON CONFLICT never matches and it inserts duplicates beside them.
+
+    Attribution groups the audit table into runs (rows within ``gap_seconds``
+    of each other, ignoring action so a run's pause and enable rows stay
+    together) and matches each entry to the run finishing at most
+    ``match_minutes`` before it. Bounding by "the previous activity entry"
+    instead does NOT work: the audit table also holds runs that never logged an
+    entry at all — the 21 Jul zombie-APScheduler batch, and any run whose
+    browser tab closed before the frontend wrote its entry, since the entry is
+    written client-side after polling finishes. Those rows would silently be
+    attributed to the next entry.
+
+    The 60s default comes from the data: rows inside one run land 1-5s apart
+    (worst observed 46s), while separate runs sit 109s+ apart. There is no wide
+    cliff between the two, so treat it as a tuning knob, not a constant —
+    which is safe because of the check below. Splitting one run in two, or
+    merging two, both change the counts and are therefore rejected rather than
+    written.
+
+    Nothing is written unless the reconstructed counts equal the entry's own
+    details text ("N paused / M enabled"); a mismatch is reported instead of
+    guessed at, because a wrong undo payload resets the wrong campaigns.
+    """
+    ensure_activity_table()
+    ensure_admin_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT entry_id, time, details
+                FROM {ACTIVITY_TABLE}
+                WHERE action LIKE 'LL Run%%' AND undo IS NULL
+                ORDER BY time
+            """)
+            targets = cur.fetchall()
+            if not targets:
+                return {"dry_run": dry_run, "updated": 0, "matched": [], "skipped": []}
+
+            # Islands of audit rows = runs. Ignoring action keeps a run's pause
+            # and enable rows in one group (unlike backfill_activity_from_ll,
+            # which partitions per action because it emits one entry each).
+            cur.execute(f"""
+                WITH ordered AS (
+                    SELECT id, action, customer_id, campaign_id, campaign_name,
+                           shop_id, shop_name, country, linkage, created_at,
+                           LAG(created_at) OVER (ORDER BY created_at, id) AS prev_at
+                    FROM {ADMIN_TABLE}
+                ), grouped AS (
+                    SELECT *, SUM(CASE WHEN prev_at IS NULL
+                                         OR created_at - prev_at > interval '{int(gap_seconds)} seconds'
+                                       THEN 1 ELSE 0 END)
+                                  OVER (ORDER BY created_at, id) AS run_group
+                    FROM ordered
+                )
+                SELECT * FROM grouped ORDER BY run_group, id
+            """)
+            groups: Dict[int, Dict[str, Any]] = {}
+            for r in cur.fetchall():
+                g = groups.setdefault(r["run_group"], {
+                    "ended": r["created_at"], "paused": [], "enabled": [],
+                })
+                g["ended"] = max(g["ended"], r["created_at"])
+                g["paused" if r["action"] == "Paused" else "enabled"].append({
+                    "customer_id": str(r["customer_id"]),
+                    "campaign_id": str(r["campaign_id"]),
+                    "campaign_name": r["campaign_name"] or "",
+                    "shop_id": r["shop_id"],
+                    "shop_name": r["shop_name"] or "",
+                    "country": r["country"] or "",
+                    "linkage": float(r["linkage"]) if r["linkage"] is not None else None,
+                })
+
+            matched: List[Dict[str, Any]] = []
+            skipped: List[Dict[str, Any]] = []
+            used: Set[int] = set()
+            updated = 0
+
+            for t in targets:
+                when, details = t["time"], (t["details"] or "")
+                info = {"entry_id": t["entry_id"],
+                        "time": when.isoformat(timespec="seconds"),
+                        "details": details}
+
+                m = _LL_DETAILS_RE.search(details)
+                if not m:
+                    skipped.append({**info, "reason": "details carry no counts "
+                                                      "(error entry?) — nothing to verify against"})
+                    continue
+                want = (int(m.group(1)), int(m.group(2)))
+
+                cands = [(gid, g) for gid, g in groups.items()
+                         if gid not in used and g["ended"] <= when
+                         and (when - g["ended"]).total_seconds() <= match_minutes * 60]
+                if not cands:
+                    skipped.append({**info, "reason": f"no audit run ended within "
+                                                      f"{match_minutes} min before this entry"})
+                    continue
+                gid, g = max(cands, key=lambda kv: kv[1]["ended"])
+                got = (len(g["paused"]), len(g["enabled"]))
+                if got != want:
+                    skipped.append({**info, "reason": (
+                        f"count mismatch — audit run ending "
+                        f"{g['ended'].isoformat(timespec='seconds')} has "
+                        f"{got[0]} paused / {got[1]} enabled, entry says "
+                        f"{want[0]} / {want[1]}; not guessing which rows are its")})
+                    continue
+
+                # Same inversion as backfill_activity_from_ll: undoing a pause
+                # re-enables, undoing an enable pauses. 'll' routes the Reset
+                # through /ll/apply so the GSD_LL_PAUSED label is fixed too,
+                # which the status-only /undo endpoint cannot do.
+                undo = {"created": g["enabled"], "paused": g["paused"], "ll": True}
+                used.add(gid)
+                matched.append({**info,
+                                "rebuilt": f"{got[0]} paused / {got[1]} enabled",
+                                "run_ended": g["ended"].isoformat(timespec="seconds")})
+                if not dry_run:
+                    cur.execute(
+                        f"UPDATE {ACTIVITY_TABLE} SET undo = %s "
+                        f"WHERE entry_id = %s AND undo IS NULL",
+                        (json.dumps(undo), t["entry_id"]),
+                    )
+                    updated += cur.rowcount
+        if dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+        logger.info("GSD LL undo backfill (dry_run=%s): %d matched, %d skipped, %d updated",
+                    dry_run, len(matched), len(skipped), updated)
+        return {"dry_run": dry_run, "updated": updated,
+                "matched": matched, "skipped": skipped}
     finally:
         return_db_connection(conn)
 

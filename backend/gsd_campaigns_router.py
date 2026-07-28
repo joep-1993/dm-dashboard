@@ -36,6 +36,8 @@ from backend.gsd_ll_service import (
     mark_activity_reset,
     backfill_activity_from_ll,
     backfill_activity_from_gsd,
+    backfill_ll_undo,
+    undo_ll_run,
     kill_switch_status,
     set_kill_switch,
 )
@@ -278,6 +280,23 @@ async def activity_log_post(entry: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/ll/undo-backfill")
+async def ll_undo_backfill_endpoint(
+    dry_run: bool = Query(True, description="If true, report what would be filled in without writing"),
+):
+    """Fill the undo payload on LL activity entries that never stored one.
+
+    Defaults to a dry run. Only writes where the reconstructed counts match the
+    entry's own details text, so a mismatch is reported rather than guessed at.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(executor, backfill_ll_undo, dry_run)
+    except Exception as e:
+        logger.error(f"Error backfilling LL undo payloads: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/activity-log/{entry_id}/reset")
 async def activity_log_mark_reset(entry_id: str):
     """Mark an activity log entry as reset."""
@@ -357,11 +376,19 @@ async def undo_run_endpoint(payload: dict):
     Reverse a previous run: pause the campaigns it created and re-enable the
     campaigns it paused. Body: {"created": [...], "paused": [...]} where each
     item has customer_id and campaign_id.
+
+    A payload marked {"ll": true} came from a low-linkage run and is reversed
+    through the LL path instead, which also maintains the GSD_LL_PAUSED label —
+    a status-only flip would leave a re-paused campaign untagged and therefore
+    invisible to every future enable run. Routing here rather than in the
+    browser keeps one code path in the UI and covers an older deployed frontend.
     """
     try:
+        loop = asyncio.get_event_loop()
+        if payload.get("ll"):
+            return await loop.run_in_executor(executor, undo_ll_run, payload)
         created = payload.get("created") or []
         paused = payload.get("paused") or []
-        loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(executor, undo_run, created, paused)
         return result
     except Exception as e:
