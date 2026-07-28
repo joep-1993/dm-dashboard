@@ -7,16 +7,25 @@ _Active tasks for immediate work_
 ## suggestions.txt backlog — UI/feature list from Joep (opened 2026-07-28)
 
 Source of truth is `/home/joepvanschagen/projects/dm-dashboard/suggestions.txt`
-(untracked, now 49 lines / 42 bullets — **item 49 was added after the first
-batch**). Item numbers below are that file's LINE numbers, which is the
-vocabulary used in the commits. **ALL 42 done**, in `569288a` (23 items),
-`10f4152` (8 + 14), `8be2ca1` (11, 15b, 18b, 19, 20b, 25, 49), `45a1339`
-(33, 39, 40), `17916fe` (9), `57ccbb7` (7), `b593ca2` (6), `2493689` (1),
-`d6b8c91` (2), `7ddb91d` (48 dry run) and `5c2556e` (47).
+(untracked, now 50 lines / 43 bullets). **Joep appends to this file mid-session** —
+item 49 arrived after the first batch and item 50 after the second, so RE-READ it
+before reporting "nothing left" rather than trusting these notes. Item numbers
+below are that file's LINE numbers, which is the vocabulary used in the commits.
+**ALL 43 done**, in `569288a` (23 items), `10f4152` (8 + 14), `8be2ca1`
+(11, 15b, 18b, 19, 20b, 25, 49), `45a1339` (33, 39, 40), `17916fe` (9),
+`57ccbb7` (7), `b593ca2` (6), `2493689` (1), `d6b8c91` (2), `7ddb91d`
+(48 dry run), `b69bd20` (48 --write), `5c2556e` (47) and `2694478` (50).
 
 ### Done
 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-23, 24, 25, 26, 29, 30, 31, 32, 33, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49.
+23, 24, 25, 26, 29, 30, 31, 32, 33, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+50.
+
+Three "done" items keep a deliberate leftover reference, so don't treat a grep
+hit as unfinished work: item 46's `tsvOutput` and item 39's "View Full Content"
+survive only as **code comments** explaining what was removed, and item 13's
+Healthscore is still linked from `healthscore.html`'s OWN navbar (it is unlinked
+from the other 31 pages and the frontpage, which is what was asked).
 
 Notes worth keeping from the first batch: every button touched moved to the
 canonical classes in `style.css` (which also brings the grey-outline disabled
@@ -115,6 +124,30 @@ Notes from the 2026-07-28 tables/features batch:
   have hit **any** concurrent cold start, not just R-Finder.
   Also fixed: the CSV writer wrapped urls in bare quotes with no escaping, so a
   url containing `"` produced a broken row.
+- **50** — Redirect Tool: preview rows get a checkbox (+ select-all) and Submit
+  posts only the ticked ones, where before it always posted the whole preflight.
+  "Copy for Excel" → "Copy" (this tool only; URL Validator and R-Finder keep
+  theirs, which item 50 didn't mention). Label column gone from Recent results —
+  header, `<td>`, all three colspans and the skeleton width, now 8 columns.
+  **Selection is keyed on each row's ORIGINAL index into `preflight.processed`,
+  not its display position**, and lives outside the DOM: the table is sortable +
+  filterable and `renderPreviewTable()` rebuilds every `<tr>`, so a positional key
+  would submit the wrong rows the moment you sort.
+  Safety decisions, because this writes live redirects:
+  - Default = every submittable row selected, i.e. exactly what Submit did before.
+  - **Empty selection submits NOTHING**, no fallback to "all" — an accidentally
+    cleared selection must not become a full push.
+  - Submitting a subset confirms, naming N of the total.
+  - Skipped / already-correct rows get a dash, not a checkbox (no API call to
+    make, so a checkbox would imply otherwise).
+  - The "Replace existing" toggle moves rows in AND out of the selection —
+    without that, turning it off could leave a now-skipped row ticked.
+  - Select-all acts only on rows VISIBLE under the current filter.
+  - **Selection clears after a successful submit.** The preflight data is not
+    refreshed, so those rows still look submittable; leaving them ticked would let
+    a second click silently re-post what just went live.
+  `submit_rows()` iterates rows independently with no cross-row logic, so posting
+  a subset is safe — verified before wiring it up.
 - **48** Top 5 facets per category by visits (all channels) → all combos as SEO
   title blueprints. **Joep chose DRY RUN (2026-07-28): generate to Excel, push
   nothing.** Script: `scripts/pagetitles_top5_allchannel_combos.py`.
@@ -185,13 +218,28 @@ H1 (beslist.nl renders "Groene Woonaccessoires" for `/wandpanelen/` too — a
 separate gap in the site's title builder that this tool does not control).
 
 ### Other loose ends
-- Prod (`win-htz-006:3003`) is behind: it has up to `c4b5c58`, so not the
-  backend-owned Activity Log write (`6db9c24`) nor the category resolver.
-- `cc1/GSD_LL_MYSTERY_RUN.md` has been uncommitted since 22 July and has now been
-  stash-cycled through six pushes. Commit it on its own.
-- Local `:8003` runs uvicorn in WSL with `--reload` (per `start-dm-tools.bat`);
-  startup blocks ~35s on `load_excel_data` retrying against a prod-only path.
+- **Prod (`win-htz-006:3003`) is a long way behind.** Everything from 28 July is
+  local-only: the whole suggestions.txt sweep plus three BACKEND changes that need
+  a deploy to take effect there — `seo_prio_service` (category filter + the
+  `/api/seo-prio/categories` endpoint), `rfinder_service.fetch_r_urls_by_row`, and
+  the `database.py` pool-init lock. Without that last one, prod keeps the
+  concurrent-cold-start race described in LEARNINGS.
+- `cc1/GSD_LL_MYSTERY_RUN.md` was finally committed on its own (`b226780`) after
+  being stash-cycled through six pushes. The parallel session's tag_toppers cc1
+  notes got the same treatment (`a60fefa`) rather than being left to repeat it —
+  **if you find cc1 files dirty from another session, commit them separately
+  instead of sweeping them into your own commit.**
+- **Local `:8003` HAD `--reload` on 28 July**, so backend edits went live with no
+  restart (verified by hitting a brand-new endpoint right after saving). It did
+  **not** have it on 3 June. Run `ps -eo pid,args | grep 'uvicorn backend.main'`
+  before assuming either way — the start scripts are not proof.
+  Startup blocks ~35s on `load_excel_data` retrying against a prod-only path.
   The Task Scheduler launcher exited 1 on 28 Jul 09:08 — unexplained.
+- `backend/data/seo_prio_categories.json` is now gitignored (`10ceb4f`) — it is a
+  regenerable 24h cache, unlike `cat_urls.csv` which is also the offline fallback.
+- **Never committed, still only in this session's scratchpad:** nothing. All the
+  session's scripts landed in `scripts/`. (Contrast with the tag_toppers sync,
+  which is still scratchpad-only — see BACKLOG.)
 
 - [x] **category_lookup is API-first, cat_urls.csv is now a cache of the API** (2026-07-28, backend). Root cause of Joep's "/wandpanelen/ titles say Woonaccessoires": the CSV only holds the old `slug_catid` url form, newer categories use a bare slug (`wandpanelen`, id 9005645), so `lookup_category()` missed and `faq_service` fell back to indexing the API product's `categories[]` by url depth — landing on an ancestor. 352 urls / 37 categories affected. Nothing in the repo had ever generated the CSV. Now: in-memory slug map from Taxonomy API v2 (1h TTL, `urlSlug` read from `labels[]` per locale), every successful walk rewrites the CSV atomically, CSV read only when the API is unreachable. **The walk must never run inline** — the first version took 167.8s on a cold call; it now runs on a daemon thread with an in-flight guard while callers answer from the CSV (0.01s). 3,543 categories; callers unchanged. Corrected in passing: Unique Titles scrapes nothing, it is API-based throughout. **Not yet verified: a background walk completing in a long-lived process** (test process exited first). **Not yet done: regenerating the 352 affected urls.** See LEARNINGS "cat_urls.csv kon nieuwe categorie-slugs NOOIT vinden". #claude-session:2026-07-28 #priority:high
 

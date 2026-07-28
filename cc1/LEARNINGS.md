@@ -1,6 +1,82 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De connection-pools in `database.py` hadden een lazy-init RACE — "trying to put unkeyed connection" (2026-07-28)
+
+Gevonden bij het bouwen van R-Finder's per-rij-zoekopdracht (item 47), maar het is **shared code** en kon élke gelijktijdige koude start raken.
+
+- **Symptoom:** twee van de drie parallelle rijen faalden met psycopg2's `trying to put unkeyed connection`. Die tekst komt uit `putconn` wanneer de key niet in `self._used` zit.
+- **Oorzaak:** `_get_pg_pool()` / `_get_redshift_pool()` deden `global p; if p is None: p = ThreadedConnectionPool(...)` **zonder lock**. Drie threads die hun eerste DB-call tegelijk doen zien alle drie `None`, bouwen alle drie een eigen pool, en de laatste assignment wint. Thread A kreeg dus een connectie uit pool #1, maar `return_redshift_connection` haalde pool #3 op → die pool heeft die connectie nooit uitgegeven → knal.
+- **Waarom het nooit eerder opviel:** bestaande parallelle code (`seo_titles._generate_titles`, dma_exclusions) draait altijd *nadat* iets anders de pool al warm had gemaakt. Alleen als de **eerste** DB-call van het proces al concurrent is, bijt het. R-Finder's worker-threads waren precies dat.
+- **Fix:** double-checked locking met één `_pool_init_lock` voor beide pools (re-check binnen de lock, want een andere thread kan hem in de tussentijd gebouwd hebben).
+- **Reproductie die het hard maakt:** 12 threads op een `threading.Barrier`, pool geforceerd koud (`db._redshift_pool = None`). Vóór de fix meerdere pool-objecten + de unkeyed-fout; erna 1 pool-object, 0 fouten. Meet `len(set(id(pool)))`, niet alleen "geen exception" — dat laatste kan per toeval goed gaan.
+- **Terzijde geleerd:** `get_redshift_connection()` **raist** (`PoolError: connection pool exhausted`) als de pool leeg is, hij wacht niet. Met `maxconn=10` betekent dat: méér dan 10 gelijktijdige threads = harde fouten. Daarom staat R-Finder's rij-parallellisme op **4**, zodat er 6 over blijven voor de rest van de tools.
+
+## Een init-call bóven een latere `let` = temporal dead zone, en de fout verdwijnt geruisloos in een async functie (2026-07-28)
+
+IndexNow's Submission History tekende **nul rijen** — geen foutmelding, geen lege-staat, alleen een tabel met kopjes.
+
+- `loadHistory()` werd aangeroepen op regel 270, tijdens het uitvoeren van het script; de `let historyRows = []` die hij leest staat op regel 392 van datzelfde blok. `let` wordt gehoist maar zit tot z'n declaratie in de **temporal dead zone**, dus de toegang gooide `ReferenceError`.
+- **Waarom het onzichtbaar was:** de functie is `async`. De throw werd een *rejected promise* die niemand awaitte → geen console-fout op de plek waar je kijkt, en de twee `style.display`-regels die er vóór stonden hadden hun werk al gedaan. Vandaar het beeld: bericht verborgen, tabel zichtbaar, tbody leeg.
+- **Fix + regel:** bootstrap-calls hóren in `window.addEventListener('DOMContentLoaded', …)`. Dan is het hele script geëvalueerd en is er geen TDZ meer. `gsd-budgets.html` en `dma-bidding.html` deden dat al goed en hadden het probleem daarom niet, terwijl `rurl-optimizer.html` puur geluk had (z'n init staat ná de declaraties).
+- **Waar nog te checken:** elke pagina waarvan de init-calls bovenaan een scriptblok staan dat later `let`/`const` declareert.
+- **Meta-les:** dit was alléén te vinden door de pagina echt te **renderen**. Statisch lezen en `node --check` zeggen er niets over — de syntax is geldig.
+
+## `UI_BLUEPRINT` beschreef de date-picker verkeerd: flatpickr is de facto standaard, niet de native input (2026-07-28)
+
+Item 18 vroeg "update de date pickers in GSD Budgets naar de picker uit UI_BLUEPRINT". GSD Budgets gebruikte **al** exact wat het blueprint voorschreef (`<input type="date">`, "No JS date library anywhere").
+
+- De vraag kan dus alleen betekenen: de **paarse flatpickr** die SEO stats, SEO titles, GSD Campaigns en Shop-campaigns wél renderen. Vier tools tegen één regel in het doc: het doc was verouderd, niet de code.
+- Blueprint gecorrigeerd, mét het recept (CDN-regels, de `.flatpickr-*` paarse block, init in `DOMContentLoaded` **guarded op `window.flatpickr`** zodat een onbereikbare CDN terugvalt op de werkende native input).
+- **Val bij het toevoegen:** zet een default `.value` **vóór** de `flatpickr()`-call. flatpickr neemt de huidige waarde over en zet het veld op `type="text"`; daarna een `YYYY-MM-DD`-string toekennen werkt niet hetzelfde.
+- Nog steeds native (bewust, niemand vroeg erom): DMA Bidding, SEO Priority, Performance Standup, R-Finder.
+- **Algemene les:** als een verzoek "maak X zoals het doc zegt" en X doet dat al, is het doc de verdachte. Niet stilzwijgend "niets te doen" concluderen.
+
+## Skeleton-rijen vs. progress-bar: een skeleton belóóft dat data nú komt (2026-07-28)
+
+Item 7 vroeg skeleton-tabellen "overal waar een tabel laadt". De grens die ik heb aangehouden, staat nu ook in UI_BLUEPRINT:
+
+- **Skeleton** = een tabel die op het scherm staat (of zichtbaar wórdt) en door één vlotte fetch gevuld wordt. Toegepast op DMA+ history, GSD Campaigns LL-history, Redirect Tool runs, SEO Priority runs+results, SEO stats per-dag + beide Top-categorieën, Shop-campaigns per-dag + top-2, DMA Exclusions saved list + OOS-scan.
+- **Progress-bar blijft** bij lange multi-item runs die échte voortgang rapporteren (URL Checker/Validator, Index Checker, Redirect Checker/Generator, Canonicals, Thema Ads, Keyword Planner's twee Google-Ads-tabellen). Die tabellen zijn tijdens de run bovendien verborgen — er is niets om te laten shimmeren.
+- **Drie vallen die de sweep opleverde:**
+  1. **Elk failure-pad moet de skeleton vervangen.** Meerdere `catch`-blokken logden alleen, of schreven naar een samenvattingsregel érgens anders — dan shimmert de tabel voor eeuwig, wat leest als "nog bezig" voor een request die al dood is.
+  2. **Skeleton waar de fetch start, niet waar de render staat.** SEO stats' Top-categorieën worden gevuld door `loadDeltas()`, die pas ná de `/daily`-fetch loopt; zonder een eigen skeleton vooraf staan ze die hele eerste request leeg.
+  3. **Runtime-gebouwde headers:** lees de kolomtelling terug van de gerenderde `<th>` (`head.querySelectorAll('th').length`) met de kolomset-lengte als fallback voor de eerste load.
+- **CSS hoort in `style.css`, niet per pagina.** Zeven pagina's hadden elk hun eigen copy van `.skel-row`/`.skel-bar`/`@keyframes`; nu één keer gedeeld, alleen de `skeletonRows(cols, n)`-helper blijft per pagina (geen shared JS-bundle).
+
+## Aparte queries per filter-rij, niet één query met de rijen OR'd (R-Finder item 47) (2026-07-28)
+
+Elke rij is z'n eigen `/r/`-scan, en dat is een bewuste keuze, geen luiheid:
+
+- Eén gedeelde query met `AND ((rij1) OR (rij2))` laat een **brede** rij de hele `LIMIT` opeten, zodat een smalle rij niets teruggeeft — precies het tegenovergestelde van "rij 2 levert een eigen set". Aangetoond met `['/r/']` naast `['vloerkleed']` op limit 20: met aparte queries krijgen beide 20.
+- Kosten: één rij ≈ **17s**. Dus concurrent (3 rijen in 4,8s i.p.v. ~50s), gecapt op 4 vanwege `maxconn=10` hierboven.
+- Een falende rij rapporteert z'n eigen fout en gooit het werk van de andere rijen niet weg.
+- `filter_rows` is additief toegevoegd: `filters` en de `urls`/`total`-velden in de response blijven werken, zodat oudere callers ongemoeid blijven. Beide vormen live getest.
+
+## Een filter moet matchen op de kolom waaruit je de keuzelijst haalt (SEO Priority item 1) (2026-07-28)
+
+De maincat/deepest-cat-dropdowns filteren op `dv.main_cat_name` / `dv.deepest_subcat_name` in Redshift.
+
+- **De lijst moet dus uit diezelfde twee kolommen komen**, niet uit de Taxonomy API. De labels lopen niet altijd gelijk, en een mismatch geeft geen foutmelding maar een run die minuten later 0 rijen oplevert. Daarom weigert het frontend ook een naam die niet in de lijst staat, vóór het starten.
+- Die `DISTINCT` kost **~23s** voor 3.845 paren / 31 maincats → **nooit inline** (zelfde les als de taxonomy-walk in `category_lookup.py`). Daemon-thread, antwoord in ~40ms met `loading:true`, frontend polt. 24u in-memory cache + `backend/data/seo_prio_categories.json` zodat een restart warm terugkomt; een verouderde cache wordt meteen geserveerd en op de achtergrond ververst.
+- Een scope die niets matcht eindigt nu als **error die de scope noemt**, niet als stille 0-rijen-run.
+
+## `created_at` in de shared Postgres is UTC — stamp je undo-statement uit de DB, niet uit `datetime.now()` (2026-07-28)
+
+Eigen bug in de item-48 `--write`-run, en dezelfde val als de DMA Exclusions-timestamp van 27 juli.
+
+- Het script printte "0 rows carry this run's created_at" terwijl er 33.745 rijen stonden, én een undo-`DELETE` die **niets** verwijderd zou hebben.
+- Oorzaak: `created_at` is een naive `TIMESTAMP` gevuld door `now()` op een server met `TimeZone=Etc/UTC`; mijn stamp kwam uit `datetime.now()` (CEST) en lag dus 2 uur vóór. `created_at >= stamp` matcht dan niets.
+- **Regel:** haal zulke stamps uit de database zelf (`SELECT now() AT TIME ZONE 'UTC'`), en laat de verificatie **schreeuwen** als het aantal niet klopt met wat je schreef. Een verificatie die stil 0 teruggeeft is erger dan geen verificatie.
+
+## Testen van een pagina waarvan de state in script-scope zit: hook een tijdelijke copy (2026-07-28)
+
+Drie keer tegenaan gelopen deze sessie (`_catPairs`, `lastTsv`, `preflight`).
+
+- **`let x = …` op scriptniveau zet GEEN `window.x`.** Van buiten (een test-iframe) is die state dus onbereikbaar: `w.preflight = {...}` maakt een níeuwe window-property aan en de pagina blijft z'n eigen `null` lezen. Een assertion die dan "alle rijen geselecteerd" oplevert is vacuously true over een lege lijst — je test slaagt en meet niets.
+- **Wat wél werkt:** functies die via `onclick=` in gegenereerde HTML worden aangeroepen zijn per definitie global, dus die kun je aanroepen (`w.renderRowResults(...)`, `w.copyToClipboard()`). Voor echte state: schrijf een **tijdelijke copy** van de pagina met een klein `window.__t = { seed(p){ preflight = p; renderPreview(); } }` binnen hetzelfde scriptblok, test daartegen, en gooi de copy weg. De productiepagina blijft schoon.
+- **Verder:** `--virtual-time-budget` versnelt timers, maar wacht niet op echte netwerk-I/O. Test-flows die een live endpoint aanroepen lopen daarmee vast op "running…". Stub `fetch` in het iframe, of doe de assertion op een DOM-only pad.
+
 ## tag_toppers-negatives sync — `shop_id` is GEEN sleutel, campagnenamen zijn niet uniek, en de shop-naam verschilt in case (2026-07-28)
 
 Opdracht: per `[label:tag_toppers]`-campagne de negatieve zoekwoorden gelijktrekken met een **actieve** niet-tag_toppers `[channel:directshopping]`-campagne van dezelfde shop (match op shop-naam + shop_id uit de campagnenaam). Eindstand over 3 accounts: **881 campagnes in scope (NL 507 / BE 351 / DE 23), 1.122 negatives toegevoegd over 313 campagnes, 0 fouten**, alles teruggelezen via de API. Deliverable `Downloads\claude\tag_toppers_negatives.xlsx`. Scripts in de **session scratchpad** (`gads_client.py`, `tag_toppers_sync.py`, `resync_unmatched.py`, `audit_workbook.py`) — ⚠ ephemeral, persist voor hergebruik (zie BACKLOG).
