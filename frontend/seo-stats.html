@@ -30,7 +30,13 @@
         .metric-toggle.on { border-color: #5e4a90; background: #f3f0fa; font-weight: 600; }
         .metric-toggle.on .dot { opacity: 1; }
         .perf-table { font-size: 0.9rem; }
-        .perf-table th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        /* UI_BLUEPRINT table headers: grey #f8f9fa, sticky, 6px 14px, 1rem
+           (a touch larger than the 0.9rem body) — not the old purple uppercase. */
+        .perf-table th {
+            background: #f8f9fa; font-weight: 600;
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 14px; font-size: 1rem;
+        }
         .perf-table td, .perf-table th { white-space: nowrap; text-align: right; vertical-align: middle; }
         .perf-fixed { table-layout: fixed; width: 100%; }
         .perf-fixed th.col-weekday { width: 68px; }
@@ -52,12 +58,15 @@
         .loading-wrap.is-loading .loading-overlay { display: flex; }
         .standup-table { font-size: 0.85rem; }
         .standup-table th, .standup-table td { padding: 4px 10px; }
-        .standup-table th { font-size: 0.72rem; }
+        /* Two of these sit side by side in col-lg-6, so the blueprint's 1rem
+           header would wrap "Deepest cat". Keep the blueprint *relationship*
+           (header > body) at this table's smaller scale. */
+        .standup-table th { font-size: 0.9rem; }
         .perf-table td:first-child, .perf-table th:first-child { text-align: left; }
         .perf-table td.text-col, .perf-table th.text-col { text-align: left; }
         .perf-table tfoot td { font-weight: 700; background: #f3f0fa; border-top: 2px solid #5e4a90; }
-        .perf-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
-        .perf-table th.sortable:hover { opacity: 0.85; }
+        .perf-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
+        .perf-table th.sortable:hover { background: #e9ecef; }
         .perf-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .perf-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .perf-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
@@ -233,11 +242,8 @@
                     </div>
                 </div>
                 <div id="infoNote" class="info-note mb-3" style="display:none;"></div>
-                <div class="text-muted small mb-3" style="line-height:1.4;">
-                    Revenue = Beslist's own revenue (<em>onze omzet</em>, incl. affiliate) attributed by conversion date,
-                    matching the Qlik "Beslist omzet en clicks" report. The most recent 1&ndash;2 days undercount because
-                    conversions keep settling for up to ~180 days. Visits remain visit-based (real visits only).
-                </div>
+                <!-- The revenue-definition paragraph lived here too; it is the same
+                     text as the #revInfo "i" tooltip in this card's header. -->
                 <div class="d-flex flex-wrap gap-2 mb-3" id="metricToggles"></div>
                 <div class="chart-wrap"><canvas id="chart"></canvas></div>
             </div>

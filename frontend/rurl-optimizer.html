@@ -11,7 +11,39 @@
         .stat-box { text-align: center; padding: 10px; border-radius: 8px; }
         .stat-box .num { font-size: 1.4rem; font-weight: bold; }
         .stat-box .label { font-size: 0.72rem; text-transform: uppercase; color: #6c757d; }
-        .history-row { font-size: 0.85rem; }
+        /* Recent runs table — UI_BLUEPRINT layout */
+        .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
+        .tool-table { font-size: 0.9rem; margin-bottom: 0; }
+        /* Grey, sticky column headers. Header font is 1rem (slightly larger than body). */
+        .tool-table th {
+            background: #f8f9fa; white-space: nowrap;
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 14px; font-size: 1rem;
+        }
+        .tool-table td { vertical-align: middle; }
+        .tool-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
+        .tool-table th.sortable:hover { background: #e9ecef; }
+        .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
+        .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .tool-table .col-center { text-align: center; }
+        /* Loading state = skeleton rows, not a spinner (layout stays stable) */
+        .skel-row td { vertical-align: middle; }
+        .skel-bar { display: block; height: 1.45rem; border-radius: 4px;
+            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
+            background-size: 400% 100%; animation: skelShimmer 1.4s ease infinite; }
+        @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        /* 'cancelled' is ORANGE, not Bootstrap's yellow --bs-warning:
+           .status-cancelled = the outline badge in the Recent runs Status column,
+           .badge-cancelled  = the filled run badge above the progress bar. */
+        .status-cancelled { border-color: var(--color-button) !important; color: var(--color-button) !important; }
+        .badge-cancelled { background-color: var(--color-button); color: #fff; }
+        /* style.css themes .btn-outline-danger to orange, so a destructive button
+           needs an explicit red — and orange is now the 'cancelled' colour in the
+           same table. Disabled would stay grey (never red), per UI_BLUEPRINT. */
+        .btn-remove { color: #dc3545; border-color: #dc3545; background-color: transparent; }
+        .btn-remove:hover, .btn-remove:focus { background-color: #dc3545; border-color: #dc3545; color: #fff; }
+        .btn-remove:disabled { color: #6c757d; border-color: #6c757d; background-color: transparent; opacity: 1; }
         /* Round checkboxes to match the radio buttons above (File upload / Redshift / Manual input). */
         .form-check-input[type="checkbox"] { border-radius: 50%; }
     </style>
@@ -200,22 +232,24 @@
                         <h5 class="mb-0">Recent runs</h5>
                         <a href="/api/rurl/export-all" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" title="Download every URL ever processed (deduped, one row per URL) from the rurl_processed cache.">Export all</a>
                     </div>
-                    <div class="card-body p-0">
-                        <table class="table mb-0" id="historyTable">
-                            <thead class="table-light">
-                                <tr>
-                                    <th style="padding: 8px 12px;">Started</th>
-                                    <th style="padding: 8px 12px; text-align: center;">Version</th>
-                                    <th style="padding: 8px 12px;">Status</th>
-                                    <th style="padding: 8px 12px;">Input</th>
-                                    <th style="padding: 8px 12px;">Message</th>
-                                    <th style="padding: 8px 12px;">Output</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyBody">
-                                <tr><td colspan="6" class="text-muted text-center p-3">No runs yet</td></tr>
-                            </tbody>
-                        </table>
+                    <div class="card-body">
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm table-hover tool-table" id="historyTable">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="sortable" data-sort="started_at" onclick="sortHistory('started_at')" title="Times are shown in your local timezone">Started</th>
+                                        <th class="sortable col-center" data-sort="_version" onclick="sortHistory('_version')">Version</th>
+                                        <th class="sortable" data-sort="status" onclick="sortHistory('status')">Status</th>
+                                        <th class="sortable" data-sort="_filename" onclick="sortHistory('_filename')">Input</th>
+                                        <th>Message</th>
+                                        <th>Output</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="historyBody">
+                                    <tr><td colspan="6" class="text-muted text-center p-3">No runs yet</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -231,6 +265,11 @@
         function apiBase() {
             // v2 engine only (the v1/2.0 toggle was removed; 2.0 is now always used).
             return '/api/rurl-v2';
+        }
+
+        function escapeHtml(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         }
 
         // Workers: 0 → empty (so 'auto' placeholder is visible again)
@@ -368,9 +407,14 @@
             const badge = document.getElementById('statusBadge');
             const color = {
                 queued: 'secondary', running: 'primary',
-                completed: 'success', failed: 'danger', cancelled: 'warning'
+                completed: 'success', failed: 'danger'
             }[t.status] || 'secondary';
-            badge.className = 'badge bg-' + color + ' d-inline-flex align-items-center justify-content-center';
+            // 'cancelled' is orange here too — same state as the Recent runs
+            // Status column, so it must not be yellow in one place and orange in
+            // the other.
+            const cancelled = t.status === 'cancelled';
+            badge.className = 'badge d-inline-flex align-items-center justify-content-center'
+                + (cancelled ? ' badge-cancelled' : ' bg-' + color);
             badge.style.lineHeight = '1';
             badge.style.padding = '0.45em 0.7em';
             badge.textContent = t.status || 'unknown';
@@ -409,7 +453,89 @@
             }
         }
 
+        // --- Recent runs table ----------------------------------------------
+        let historyRows = [];
+        let historySortCol = 'started_at';
+        let historySortDir = 'desc';   // newest run first
+
+        function historySkeletonRows(n = 5) {
+            // 6 columns: Started, Version, Status, Input, Message, Output
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(6) + '</tr>').repeat(n);
+        }
+
+        function sortHistory(col) {
+            if (historySortCol === col) {
+                historySortDir = historySortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                historySortCol = col;
+                historySortDir = 'desc';
+            }
+            renderHistory();
+        }
+
+        function statusBadge(status) {
+            // 'cancelled' is orange (--color-button), not Bootstrap's yellow warning.
+            if (status === 'cancelled') {
+                return `<span class="badge border status-cancelled">cancelled</span>`;
+            }
+            const color = {
+                completed: 'success', failed: 'danger', running: 'primary'
+            }[status] || 'secondary';
+            return `<span class="badge border border-${color}" style="color: var(--bs-${color});">${escapeHtml(status || '')}</span>`;
+        }
+
+        function renderHistory() {
+            const tbody = document.getElementById('historyBody');
+            if (!historyRows.length) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">No runs yet</td></tr>';
+                return;
+            }
+            const dir = historySortDir === 'asc' ? 1 : -1;
+            // Sort the raw started_at, never the formatted local string.
+            const rows = historyRows.slice().sort((a, b) => {
+                if (historySortCol === 'started_at') {
+                    const da = a.started_at ? new Date(a.started_at).getTime() : 0;
+                    const db = b.started_at ? new Date(b.started_at).getTime() : 0;
+                    return (da - db) * dir;
+                }
+                return String(a[historySortCol] ?? '').localeCompare(String(b[historySortCol] ?? '')) * dir;
+            });
+
+            tbody.innerHTML = rows.map(h => {
+                const started = h.started_at ? new Date(h.started_at).toLocaleString() : '—';
+                const dl = h.status === 'completed' && h.task_id && h.output_in_db
+                    ? `<a href="${h._base}/download/${h.task_id}" class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Export</a>`
+                    : '';
+                const rm = h.task_id
+                    ? `<button type="button" class="btn btn-sm btn-outline-danger btn-remove" data-rm-base="${h._base}" data-rm-task="${h.task_id}" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Remove</button>`
+                    : '';
+                const actions = (dl || rm)
+                    ? `<div style="display: inline-flex; gap: 4px; align-items: center;">${dl}${rm}</div>`
+                    : '—';
+                return `<tr class="history-row">
+                    <td title="${escapeHtml(String(h.started_at || ''))}">${escapeHtml(started)}</td>
+                    <td class="col-center">${escapeHtml(h._version || '')}</td>
+                    <td>${statusBadge(h.status)}</td>
+                    <td>${escapeHtml(h._filename || '')}</td>
+                    <td>${escapeHtml(h.error || h.message || '')}</td>
+                    <td>${actions}</td>
+                </tr>`;
+            }).join('');
+
+            // Sort glyph: ⇅ idle, ▲/▼ on the active column.
+            document.querySelectorAll('#historyTable th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === historySortCol) {
+                    th.classList.add(historySortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        }
+
         async function loadHistory() {
+            // Skeleton rows while fetching, so the table keeps its height.
+            document.getElementById('historyBody').innerHTML =
+                historySkeletonRows(historyRows.length ? Math.min(historyRows.length, 10) : 5);
             try {
                 const [r1, r2] = await Promise.all([
                     fetch('/api/rurl/history').catch(() => null),
@@ -417,43 +543,15 @@
                 ]);
                 const rows1 = (r1 && r1.ok) ? (await r1.json()).map(h => ({ ...h, _version: 'v1', _base: '/api/rurl' })) : [];
                 const rows2 = (r2 && r2.ok) ? (await r2.json()).map(h => ({ ...h, _version: 'v2', _base: '/api/rurl-v2' })) : [];
-                const rows = [...rows1, ...rows2].sort((a, b) => {
-                    const da = a.started_at ? new Date(a.started_at).getTime() : 0;
-                    const db = b.started_at ? new Date(b.started_at).getTime() : 0;
-                    return db - da;
-                });
-                const tbody = document.getElementById('historyBody');
-                if (!rows.length) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center p-3">No runs yet</td></tr>';
-                    return;
-                }
-                tbody.innerHTML = rows.map(h => {
-                    const started = h.started_at ? new Date(h.started_at).toLocaleString() : '—';
-                    const color = {
-                        completed: 'success', failed: 'danger', cancelled: 'warning', running: 'primary'
-                    }[h.status] || 'secondary';
-                    const versionBadge = h._version === 'v2' ? 'v2' : 'v1';
-                    const filename = (h.params && h.params.filename) || '';
-                    const msg = h.error || h.message || '';
-                    const dl = h.status === 'completed' && h.task_id && h.output_in_db
-                        ? `<a href="${h._base}/download/${h.task_id}" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'">Export</a>`
-                        : '';
-                    const rm = h.task_id
-                        ? `<button type="button" class="btn btn-sm" data-rm-base="${h._base}" data-rm-task="${h.task_id}" style="border: 1px solid #d63031; color: #d63031; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'">Remove</button>`
-                        : '';
-                    const actions = (dl || rm)
-                        ? `<div style="display: inline-flex; gap: 4px; align-items: center;">${dl}${rm}</div>`
-                        : '—';
-                    return `<tr class="history-row">
-                        <td style="padding: 6px 12px;">${started}</td>
-                        <td style="padding: 6px 12px; text-align: center;">${versionBadge}</td>
-                        <td style="padding: 6px 12px;"><span class="badge border border-${color}" style="color: var(--bs-${color});">${h.status || ''}</span></td>
-                        <td style="padding: 6px 12px;">${filename}</td>
-                        <td style="padding: 6px 12px;">${msg}</td>
-                        <td style="padding: 6px 12px;">${actions}</td>
-                    </tr>`;
-                }).join('');
-            } catch (e) { console.error(e); }
+                // _filename is flattened out of params so the Input column is sortable.
+                historyRows = [...rows1, ...rows2].map(h => ({
+                    ...h, _filename: (h.params && h.params.filename) || ''
+                }));
+                renderHistory();
+            } catch (e) {
+                console.error(e);
+                renderHistory();
+            }
         }
 
         document.getElementById('historyBody').addEventListener('click', async (e) => {

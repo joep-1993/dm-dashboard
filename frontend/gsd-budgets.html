@@ -6,6 +6,8 @@
     <title>GSD Budgets</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <style>
         .stat-card {
             border-radius: 12px;
@@ -34,8 +36,43 @@
         .result-table .col-campaign { width: 30%; }
         .result-table .col-metric { width: 10%; }
 
-        .history-row { font-size: 0.85rem; }
-        .history-row td, #historyTable th { vertical-align: middle; }
+        /* Run History table — UI_BLUEPRINT layout */
+        .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
+        .tool-table { font-size: 0.9rem; margin-bottom: 0; }
+        /* Grey, sticky column headers. Header font is 1rem (slightly larger than body). */
+        .tool-table th {
+            background: #f8f9fa; white-space: nowrap;
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 14px; font-size: 1rem;
+        }
+        .tool-table td { vertical-align: middle; }
+        .tool-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
+        .tool-table th.sortable:hover { background: #e9ecef; }
+        .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
+        .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .tool-table .col-center { text-align: center; }
+        /* Loading state = skeleton rows, not a spinner (layout stays stable) */
+        .skel-row td { vertical-align: middle; }
+        .skel-bar { display: block; height: 1.45rem; border-radius: 4px;
+            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
+            background-size: 400% 100%; animation: skelShimmer 1.4s ease infinite; }
+        @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        /* style.css themes .btn-outline-danger to orange; Remove must read red. */
+        .btn-remove { color: #dc3545; border-color: #dc3545; background-color: transparent; }
+        .btn-remove:hover, .btn-remove:focus { background-color: #dc3545; border-color: #dc3545; color: #fff; }
+        .btn-remove:disabled { color: #6c757d; border-color: #6c757d; background-color: transparent; opacity: 1; }
+
+        /* flatpickr styling — same purple theme as SEO stats / GSD Campaigns */
+        .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
+        .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
+        .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+        .flatpickr-month, .flatpickr-current-month, .flatpickr-weekday { color: #5e4a90 !important; fill: #5e4a90 !important; }
+        .flatpickr-monthDropdown-months, .numInput { color: #5e4a90 !important; font-weight: 600; }
+        .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #5e4a90 !important; }
+        .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
+        .flatpickr-day.today { border-color: #5e4a90; }
+        .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
 
         .summary-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
         .summary-badges .badge { font-size: 0.85rem; padding: 0.5rem 0.75rem; }
@@ -226,22 +263,20 @@
                     <div class="card-header">
                         <h5 class="mb-0">Run History</h5>
                     </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-bordered mb-0" id="historyTable" style="min-width: 720px;">
-                                <thead>
-                                    <tr style="background:#f0f0f0; border-bottom: 2px solid #dee2e6;">
-                                        <th style="padding: 8px 12px;">Time</th>
-                                        <th style="padding: 8px 12px;">Country</th>
-                                        <th style="padding: 8px 12px;">Date Range</th>
-                                        <th style="padding: 8px 12px;">Changes</th>
-                                        <th style="padding: 8px 12px;">Status</th>
-                                        <th style="padding: 8px 12px; width: 70px;">Export</th>
+                    <div class="card-body">
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm table-hover tool-table" id="historyTable" style="min-width: 720px;">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="sortable" data-sort="timestamp" onclick="sortHistory('timestamp')">Time</th>
+                                        <th class="sortable" data-sort="country" onclick="sortHistory('country')">Country</th>
+                                        <th>Date Range</th>
+                                        <th class="sortable col-center" data-sort="_changes" onclick="sortHistory('_changes')">Changes</th>
+                                        <th class="sortable" data-sort="status" onclick="sortHistory('status')">Status</th>
+                                        <th class="col-center" style="width: 150px;">Export</th>
                                     </tr>
                                 </thead>
-                                <tbody id="historyTableBody">
-                                    <tr><td colspan="6" class="text-muted text-center">Loading history...</td></tr>
-                                </tbody>
+                                <tbody id="historyTableBody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -277,6 +312,15 @@
 
         window.addEventListener('DOMContentLoaded', () => {
             initDateDefaults();
+            // Date picker — same engine/theme as SEO stats, GSD Campaigns and
+            // SEO titles (flatpickr over the native input, so the input still
+            // works if the CDN is unreachable).
+            if (window.flatpickr) {
+                const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
+                                 disableMobile: true, locale: { firstDayOfWeek: 1 } };
+                flatpickr('#startDate', fpOpts);
+                flatpickr('#endDate', fpOpts);
+            }
             loadStats();
             loadHistory();
         });
@@ -630,46 +674,94 @@
             }
         }
 
+        // --- Run History table ----------------------------------------------
+        let historyRuns = [];
+        let historySortCol = 'timestamp';
+        let historySortDir = 'desc';   // newest run first
+
+        function historySkeletonRows(n = 5) {
+            // 6 columns: Time, Country, Date Range, Changes, Status, Export
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(6) + '</tr>').repeat(n);
+        }
+
+        function sortHistory(col) {
+            if (historySortCol === col) {
+                historySortDir = historySortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                historySortCol = col;
+                historySortDir = 'desc';
+            }
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const tbody = document.getElementById('historyTableBody');
+            if (!historyRuns.length) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">No runs yet</td></tr>';
+                return;
+            }
+            const dir = historySortDir === 'asc' ? 1 : -1;
+            // Sort the raw timestamp / numeric change count, never the rendered text.
+            const runs = historyRuns.slice().sort((a, b) => {
+                if (historySortCol === 'timestamp') {
+                    return ((new Date(a.timestamp).getTime() || 0) - (new Date(b.timestamp).getTime() || 0)) * dir;
+                }
+                const av = a[historySortCol], bv = b[historySortCol];
+                if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+                return String(av ?? '').localeCompare(String(bv ?? '')) * dir;
+            });
+
+            tbody.innerHTML = runs.map(r => {
+                const ts = new Date(r.timestamp).toLocaleString('nl-NL');
+                // Some legacy / mid-failure history entries lack date_range.
+                // Tolerate missing field instead of taking down the whole render.
+                const dr = r.date_range || {};
+                const range = (dr.start && dr.end) ? `${escHtml(dr.start)} → ${escHtml(dr.end)}` : '–';
+                const statusBadge = r.status === 'completed' || r.status === 'success'
+                    ? '<span class="badge" style="border: 1px solid #00b894; color: #00b894; background: transparent;">COMPLETED</span>'
+                    : `<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">${escHtml((r.status || 'failed').toUpperCase())}</span>`;
+                const dryRunBadge = r.dry_run
+                    ? ' <span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent; margin-left: 4px;">DRY RUN</span>'
+                    : '';
+                return `<tr class="history-row" style="cursor:pointer" onclick="showHistoryDetail(${r.run_id})">
+                    <td title="${escHtml(String(r.timestamp || ''))}">${escHtml(ts)}</td>
+                    <td>${escHtml(r.country || 'NL')}</td>
+                    <td>${range}</td>
+                    <td class="col-center">${r._changes}</td>
+                    <td>${statusBadge}${dryRunBadge}</td>
+                    <td class="col-center" style="white-space: nowrap;">
+                        <button class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;" onclick="downloadHistoryRun(event, ${r.run_id})">Export</button>
+                        <button class="btn btn-sm btn-outline-danger btn-remove" style="font-size: 0.75rem; padding: 0.15rem 0.5rem; margin-left: 4px;" onclick="removeHistoryRun(event, ${r.run_id})">Remove</button>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Sort glyph: ⇅ idle, ▲/▼ on the active column.
+            document.querySelectorAll('#historyTable th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === historySortCol) {
+                    th.classList.add(historySortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        }
+
         async function loadHistory() {
+            // Skeleton rows while fetching, so the table keeps its height.
+            document.getElementById('historyTableBody').innerHTML =
+                historySkeletonRows(historyRuns.length ? Math.min(historyRuns.length, 10) : 5);
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-budgets/history`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                const runs = data.runs || [];
-
-                const tbody = document.getElementById('historyTableBody');
-                if (runs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center">No runs yet</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = runs.map(r => {
-                    const ts = new Date(r.timestamp).toLocaleString('nl-NL');
-                    // Some legacy / mid-failure history entries lack date_range.
-                    // Tolerate missing field instead of taking down the whole render.
-                    const dr = r.date_range || {};
-                    const range = (dr.start && dr.end) ? `${dr.start} → ${dr.end}` : '–';
-                    const changes = (r.summary && r.summary.budget_changed) || 0;
-                    const statusBadge = r.status === 'completed' || r.status === 'success'
-                        ? '<span class="badge" style="border: 1px solid #00b894; color: #00b894; background: transparent;">COMPLETED</span>'
-                        : `<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">${escHtml((r.status || 'failed').toUpperCase())}</span>`;
-                    const dryRunBadge = r.dry_run
-                        ? ' <span class="badge" style="border: 1px solid #b45309; color: #b45309; background: transparent; margin-left: 4px;">DRY RUN</span>'
-                        : '';
-                    return `<tr class="history-row" style="cursor:pointer" onclick="showHistoryDetail(${r.run_id})">
-                        <td style="padding: 6px 12px;">${ts}</td>
-                        <td style="padding: 6px 12px;">${escHtml(r.country || 'NL')}</td>
-                        <td style="padding: 6px 12px;">${range}</td>
-                        <td style="padding: 6px 12px;">${changes}</td>
-                        <td style="padding: 6px 12px;">${statusBadge}${dryRunBadge}</td>
-                        <td style="padding: 6px 12px; text-align: center; white-space: nowrap;">
-                            <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="downloadHistoryRun(event, ${r.run_id})">Export</button>
-                            <button class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; margin-left: 4px;" onmouseover="this.style.background='#d63031';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#d63031'" onclick="removeHistoryRun(event, ${r.run_id})">Remove</button>
-                        </td>
-                    </tr>`;
-                }).join('');
+                // _changes is flattened out of summary so the column is sortable.
+                historyRuns = (data.runs || []).map(r => ({
+                    ...r, _changes: (r.summary && r.summary.budget_changed) || 0
+                }));
+                renderHistory();
             } catch (err) {
                 console.error('Failed to load history:', err);
+                historyRuns = [];
                 document.getElementById('historyTableBody').innerHTML =
                     `<tr><td colspan="6" class="text-center text-danger py-4">Failed to load history: ${escHtml(err.message || String(err))}</td></tr>`;
             }

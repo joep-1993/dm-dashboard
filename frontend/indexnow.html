@@ -8,9 +8,37 @@
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
         .result-badge { font-size: 0.85rem; }
-        .history-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0; font-size: 0.9rem; }
-        .history-grid .hg-header { font-weight: bold; padding: 0.5rem; border-bottom: 2px solid #dee2e6; text-align: center; }
-        .history-grid .hg-cell { padding: 0.5rem; border-bottom: 1px solid #dee2e6; display: flex; align-items: center; justify-content: center; }
+        /* Submission History table — UI_BLUEPRINT layout (was a 4-col CSS grid) */
+        .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
+        .tool-table { font-size: 0.9rem; margin-bottom: 0; }
+        /* Grey, sticky column headers. Header font is 1rem (slightly larger than body). */
+        .tool-table th {
+            background: #f8f9fa; white-space: nowrap;
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 14px; font-size: 1rem;
+        }
+        .tool-table td { vertical-align: middle; }
+        .tool-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
+        .tool-table th.sortable:hover { background: #e9ecef; }
+        .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
+        .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .tool-table .col-center { text-align: center; }
+        .tool-table .col-end { text-align: right; }
+        /* Fixed widths (blueprint: pick ONE strategy) — with only four short
+           columns, auto layout hands all the slack to Date and the values drift
+           away from their headers. */
+        #historyContent .tool-table { table-layout: fixed; width: 100%; }
+        #historyContent .col-date { width: 30%; }
+        #historyContent .col-resp { width: 20%; }
+        #historyContent .col-urls { width: 20%; }
+        #historyContent .col-export { width: 30%; }
+        /* Loading state = skeleton rows, not a spinner (layout stays stable) */
+        .skel-row td { vertical-align: middle; }
+        .skel-bar { display: block; height: 1.45rem; border-radius: 4px;
+            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
+            background-size: 400% 100%; animation: skelShimmer 1.4s ease infinite; }
+        @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
         .batch-row td { vertical-align: middle; }
         .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
@@ -184,8 +212,21 @@
                         <button class="btn btn-sm btn-outline-purple" onclick="loadHistory()">↻ Refresh</button>
                     </div>
                     <div class="card-body">
-                        <div id="historyContent">
-                            <p class="text-muted">Click Refresh to load history.</p>
+                        <div id="historyMessage" class="text-muted mb-0">Click Refresh to load history.</div>
+                        <div id="historyContent" style="display:none;">
+                            <div class="tool-table-wrap">
+                                <table class="table table-sm table-hover tool-table">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th class="sortable col-date" data-sort="date" onclick="sortHistory('date')">Date</th>
+                                            <th class="sortable col-center col-resp" data-sort="response_code" onclick="sortHistory('response_code')">Response</th>
+                                            <th class="sortable col-center col-urls" data-sort="url_count" onclick="sortHistory('url_count')">URLs</th>
+                                            <th class="col-end col-export">Export</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="historyBody"></tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -232,9 +273,15 @@
             } catch (e) { /* silent */ }
         }
 
-        // Load counter and history on page load
-        loadTodayCount();
-        loadHistory();
+        // Load counter and history on page load. This MUST stay inside a
+        // DOMContentLoaded handler: loadHistory() reads the `let historyRows`
+        // declared further down this same script block, and calling it during
+        // script evaluation hits the temporal dead zone (ReferenceError, silently
+        // swallowed by the async function — the table just renders empty).
+        window.addEventListener('DOMContentLoaded', () => {
+            loadTodayCount();
+            loadHistory();
+        });
 
         function setLoading(btnId, loading) {
             const btn = document.getElementById(btnId);
@@ -355,37 +402,90 @@
             }
         }
 
+        // --- Submission History table ---------------------------------------
+        let historyRows = [];
+        let historySortCol = 'date';
+        let historySortDir = 'desc';   // newest submission first
+
+        function historySkeletonRows(n = 10) {
+            // 4 columns: Date, Response, URLs, Export
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(4) + '</tr>').repeat(n);
+        }
+
+        function setHistoryMessage(html, cls = 'text-muted') {
+            const msg = document.getElementById('historyMessage');
+            msg.className = cls + ' mb-0';
+            msg.innerHTML = html;
+            msg.style.display = '';
+            document.getElementById('historyContent').style.display = 'none';
+        }
+
+        function sortHistory(col) {
+            if (historySortCol === col) {
+                historySortDir = historySortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                historySortCol = col;
+                historySortDir = 'desc';   // a fresh column starts high-to-low
+            }
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const dir = historySortDir === 'asc' ? 1 : -1;
+            const rows = historyRows.slice().sort((a, b) => {
+                const av = a[historySortCol], bv = b[historySortCol];
+                if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+                return String(av ?? '').localeCompare(String(bv ?? '')) * dir;
+            });
+
+            document.getElementById('historyBody').innerHTML = rows.map(h => {
+                let badgeStyle;
+                if (h.response_code === 200) badgeStyle = 'border: 1px solid #00b894; color: #00b894;';
+                else if (h.response_code >= 400 && h.response_code < 500) badgeStyle = 'border: 1px solid #e0a800; color: #e0a800;';
+                else badgeStyle = 'border: 1px solid #d63031; color: #d63031;';
+                const badge = `<span class="badge" style="${badgeStyle} background: transparent;">${h.response_code}</span>`;
+                const exportBtn = `<a href="${API_BASE}/api/indexnow/export/${h.date}" class="btn btn-sm btn-outline-purple" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">Export</a>`;
+                return `<tr>
+                    <td>${escapeHtml(String(h.date))}</td>
+                    <td class="col-center">${badge}</td>
+                    <td class="col-center">${(h.url_count || 0).toLocaleString()}</td>
+                    <td class="col-end">${exportBtn}</td>
+                </tr>`;
+            }).join('');
+
+            // Sort glyph: ⇅ idle, ▲/▼ on the active column.
+            document.querySelectorAll('#historyContent .tool-table th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === historySortCol) {
+                    th.classList.add(historySortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        }
+
         async function loadHistory() {
-            const container = document.getElementById('historyContent');
-            container.innerHTML = '<p class="text-muted">Loading...</p>';
+            // Skeleton rows while fetching, so the table reads as "being drawn"
+            // and keeps its height on a reload instead of collapsing.
+            document.getElementById('historyMessage').style.display = 'none';
+            document.getElementById('historyContent').style.display = '';
+            document.getElementById('historyBody').innerHTML = historySkeletonRows(historyRows.length
+                ? Math.min(historyRows.length, 10) : 10);
 
             try {
                 const response = await fetch(`${API_BASE}/api/indexnow/history`);
                 if (!response.ok) throw new Error('Failed to load history');
 
                 const data = await response.json();
-                const history = data.history || [];
+                historyRows = data.history || [];
 
-                if (history.length === 0) {
-                    container.innerHTML = '<p class="text-muted">No submissions yet.</p>';
+                if (historyRows.length === 0) {
+                    setHistoryMessage('No submissions yet.');
                     return;
                 }
-
-                let html = '<div class="history-grid">';
-                html += '<div class="hg-header">Date</div><div class="hg-header hg-center">Response</div><div class="hg-header">URLs</div><div class="hg-header hg-end">Export</div>';
-                history.forEach(h => {
-                    let badgeStyle;
-                    if (h.response_code === 200) badgeStyle = 'border: 1px solid #00b894; color: #00b894;';
-                    else if (h.response_code >= 400 && h.response_code < 500) badgeStyle = 'border: 1px solid #e0a800; color: #e0a800;';
-                    else badgeStyle = 'border: 1px solid #d63031; color: #d63031;';
-                    const badge = `<span class="badge" style="${badgeStyle} background: transparent;">${h.response_code}</span>`;
-                    const exportBtn = `<a href="${API_BASE}/api/indexnow/export/${h.date}" class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'">Export</a>`;
-                    html += `<div class="hg-cell">${h.date}</div><div class="hg-cell hg-center">${badge}</div><div class="hg-cell">${h.url_count.toLocaleString()}</div><div class="hg-cell hg-end">${exportBtn}</div>`;
-                });
-                html += '</div>';
-                container.innerHTML = html;
+                renderHistory();
             } catch (error) {
-                container.innerHTML = `<p class="text-danger">Error: ${escapeHtml(error.message)}</p>`;
+                historyRows = [];
+                setHistoryMessage(`Error: ${escapeHtml(error.message)}`, 'text-danger');
             }
         }
     </script>

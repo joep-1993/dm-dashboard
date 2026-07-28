@@ -226,8 +226,9 @@
                 <div class="pagination-controls" id="paginationControls">
                     <span>Per page:</span>
                     <select class="form-select form-select-sm" id="perPage" onchange="perfPage=1; renderPage();">
+                        <option value="10" selected>10</option>
                         <option value="25">25</option>
-                        <option value="50" selected>50</option>
+                        <option value="50">50</option>
                         <option value="100">100</option>
                         <option value="all">Show all</option>
                     </select>
@@ -244,12 +245,6 @@
                 <h5 class="mb-0">Top campaigns</h5>
                 <div class="d-flex align-items-center gap-2">
                     <input type="text" class="form-control form-control-sm" id="topCampFilter" placeholder="Filter campaigns…" style="width:200px;" oninput="topFilterChange('campaigns')">
-                    <select class="form-select form-select-sm" id="topCampPerPage" style="width:auto;" onchange="topPerPageChange('campaigns')">
-                        <option value="10" selected>10</option>
-                        <option value="50">50</option>
-                        <option value="100">100</option>
-                        <option value="all">All</option>
-                    </select>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -260,6 +255,14 @@
                     </table>
                 </div>
                 <div class="pagination-controls">
+                    <span>Per page:</span>
+                    <select class="form-select form-select-sm" id="topCampPerPage" onchange="topPerPageChange('campaigns')">
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">Show all</option>
+                    </select>
                     <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('campaigns',-1)" id="topCampPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
                     <span class="page-info" id="topCampInfo">-</span>
                     <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('campaigns',1)" id="topCampNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
@@ -273,12 +276,6 @@
                 <h5 class="mb-0">Top ad groups</h5>
                 <div class="d-flex align-items-center gap-2">
                     <input type="text" class="form-control form-control-sm" id="topAgFilter" placeholder="Filter ad groups / campaigns…" style="width:240px;" oninput="topFilterChange('ad_groups')">
-                    <select class="form-select form-select-sm" id="topAgPerPage" style="width:auto;" onchange="topPerPageChange('ad_groups')">
-                        <option value="10" selected>10</option>
-                        <option value="50">50</option>
-                        <option value="100">100</option>
-                        <option value="all">All</option>
-                    </select>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -289,6 +286,14 @@
                     </table>
                 </div>
                 <div class="pagination-controls">
+                    <span>Per page:</span>
+                    <select class="form-select form-select-sm" id="topAgPerPage" onchange="topPerPageChange('ad_groups')">
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">Show all</option>
+                    </select>
                     <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('ad_groups',-1)" id="topAgPrev"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
                     <span class="page-info" id="topAgInfo">-</span>
                     <button class="btn btn-outline-secondary btn-page" onclick="changeTopPage('ad_groups',1)" id="topAgNext"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>

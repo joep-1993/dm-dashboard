@@ -187,8 +187,34 @@ carries through automatically:
 
 - **Text / number inputs & selects**: `form-control` / `form-select`. Add `-sm`
   inside dense toolbars; set an explicit inline `width` when it shouldn't stretch.
-- **Date pickers**: native `<input type="date" class="form-control">` (or
-  `form-control-sm`, ~160px wide). No JS date library anywhere.
+- **Date pickers**: markup is always a native
+  `<input type="date" class="form-control">` (or `form-control-sm`, ~160px wide),
+  with **flatpickr layered on top** for the calendar itself — that is what SEO
+  stats, SEO titles, GSD Campaigns, GSD Budgets and Shop-campaigns all render, and
+  it is the canonical look (purple month/weekday headers, purple selected day).
+  This doc previously said "no JS date library anywhere", which was already untrue
+  when item 18 asked for GSD Budgets' pickers to "match the blueprint" — what was
+  meant was the purple calendar, not the bare OS one. To add it to a page:
+  1. In `<head>`, after `style.css`:
+     ```html
+     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+     <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
+     ```
+  2. Copy the `.flatpickr-*` purple block from `gsd-budgets.html` / `seo-stats.html`.
+  3. Init inside `DOMContentLoaded`, **guarded** so an unreachable CDN degrades to
+     the working native input rather than breaking the page:
+     ```js
+     if (window.flatpickr) {
+         const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
+                          disableMobile: true, locale: { firstDayOfWeek: 1 } };
+         flatpickr('#startDate', fpOpts);
+     }
+     ```
+  Set any default `.value` **before** the `flatpickr()` call — it adopts the
+  input's current value, and flatpickr swaps the field to `type="text"`, so
+  assigning a `YYYY-MM-DD` string afterwards is not equivalent.
+  Still-native (no flatpickr): DMA Bidding, SEO Priority, Performance Standup,
+  R-Finder.
 - **Checkboxes / radios**: `<input class="form-check-input" type="checkbox|radio">`
   in a `.form-check` with a `.form-check-label`. Keep the default Bootstrap accent —
   don't recolour. (Canonicals' bulk-select adds a `canon-select` class alongside
