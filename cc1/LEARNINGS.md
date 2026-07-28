@@ -1,6 +1,20 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## GSD LL Date-picker deed niets sinds de Excel-load de enige bron werd — nu een 7-daagse snapshot-tabel (2026-07-28)
+
+Joep: de Date-picker in "Pause / Enable low linkage shops" doet niets meer sinds de Excel-load van 09:50. Klopte: het was **dode input**.
+
+- **De oorzaak stond letterlijk in de docstring.** `run_low_linkage(..., date_str)` zei "Ignored when source='excel' (the Excel already contains the flags)", en sinds de data-source-toggle verdween staat `gsd-campaigns.html:962` hard op `const source = 'excel'`. Het frontend stuurde `date` dus wél mee (regel 972) en de backend gooide het weg. Bij `source='feed'` deed de picker altijd al maar de hálve klus: hij scope't `get_shop_flags()` op Redshift, nooit de linkage-feed zelf (die CSV is altijd "nu").
+- **`pa.jvs_gsd_ll_excel_load` bewaarde alleen METADATA** (file, loaded_at, counts — één singleton-rij voor de tooltip). De rijen zelf zaten uitsluitend in de in-memory `_EXCEL_DATA`-cache: één dag, weg bij elke restart. Er was dus niets om een eerdere dag uit te lezen.
+- **Nieuw: `pa.jvs_gsd_ll_excel_snapshots`**, PK `(data_date, shop_id)` → herladen van dezelfde dag upsert i.p.v. dupliceert. Retentie 7 kalenderdagen (`SNAPSHOT_RETENTION_DAYS`), geprund bij elke save. Aangemaakt via `ensure_excel_snapshot_table()` (geen losse DDL-stap).
+- **`data_date` = de mtime-datum van het Excel-bestand, niet `now()`** — exact dezelfde reden die al bij `loaded_at` staat: een restart leest hetzelfde bestand opnieuw en moet op dezelfde dag landen, niet een tweede snapshot onder de datum van vandaag maken.
+- **Prune relatief aan de dag die je schrijft, niet aan `current_date`.** `WHERE data_date < %s::date - 6` met de net geschreven datum: een oud bestand terugspelen pruned dan *minder*, nooit meer. Met `current_date` zou een backfill van een oude dag zichzelf meteen weer weggooien.
+- **Ontbrekende datum faalt hard, geen stille fallback naar het nieuwste bestand** — dat laatste ís de bug die we net weghaalden. De error noemt de beschikbare datums.
+- **Wél "meest recente op of vóór" de gekozen dag** (zelfde as-of-semantiek als `get_shop_flags()` al had, dus een zondag geeft vrijdag) — maar met een `snapshot_note` in het resultaat en een gele banner in de samenvatting. Een vervangen dag mag nooit onzichtbaar zijn.
+- **Backfill uit `EXCEL_DIR`** (`backfill_excel_snapshots()`, ook bij startup) zodat de picker niet een week met één dag staat. **Onbekend of dat werkt:** of het scheduled script zijn oude `gsd_shops_nl_be_*.xlsx` laat staan of er één overschrijft is van hier niet te zien (pad staat onder `C:\Users\l.davidowski\` op de prod-box). Bij overschrijven is het een no-op en begint de historie gewoon bij de volgende load.
+- **Testen zonder Google Ads aan te raken:** alle drie de date-paden in `run_low_linkage` returnen vóór `_get_client()` — de niet-gevonden-datum returnt direct, en met `shop_names=['__no_such_shop__'], included=True` valt de feed leeg vóór de client. Zo is de snapshot-branch end-to-end te testen (39 checks tegen de echte shared Postgres, synthetische 2020-datums, opgeruimd) zonder één API-call of mutatie. `dry_run=True` is hiervoor NIET veilig genoeg: die haalt wel de client op en `label_resource()` kan een label aanmaken.
+
 ## Een afgeronde run mag geen balk op 100% laten staan — "Done"-banner is nu de standaard, en waarom die GEEL is (2026-07-28)
 
 Joep: in SEO titles blijft de progressbalk na een publish-run op 100% in beeld staan; maak er een "Done"-banner van. Het patroon stond nergens in `UI_BLUEPRINT.md`, dus overgenomen uit DMA Exclusions (`showOosDone()`) en gegeneraliseerd. Zie UI_BLUEPRINT "Done banner".
