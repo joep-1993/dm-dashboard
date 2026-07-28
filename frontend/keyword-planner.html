@@ -216,9 +216,8 @@
                                 <button class="btn btn-outline-secondary w-100" onclick="downloadKeywordRedirects()" id="krDownloadBtn" disabled>Download Excel</button>
                             </div>
                             <div class="col-md-2">
-                                <button class="btn btn-primary w-100" onclick="getKeywordRedirects()">
+                                <button class="btn btn-run w-100" onclick="getKeywordRedirects()" id="krBtn">
                                     <span id="krBtnText">Generate</span>
-                                    <span id="krSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                                 </button>
                             </div>
                         </div>
@@ -232,8 +231,9 @@
                             <span id="krProgressText">Processing...</span>
                             <span id="krProgressPercent"></span>
                         </div>
-                        <div class="progress">
-                            <div class="progress-bar" id="krProgressBar" role="progressbar" style="width: 0%;"></div>
+                        <div class="progress" style="height:1.1rem;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" id="krProgressBar"
+                                 role="progressbar" style="width: 0%; background-color: #00b894;"></div>
                         </div>
                     </div>
                 </div>
@@ -475,13 +475,19 @@
             if (!shop) { alert('Please enter a shop name or id'); return; }
 
             const btnText = document.getElementById('krBtnText');
-            const spinner = document.getElementById('krSpinner');
-            btnText.textContent = 'Processing...';
-            spinner.classList.remove('d-none');
+            const btn = document.getElementById('krBtn');
+            // Grey outline + not clickable while it runs, no spinner — same as the
+            // other run buttons (cc1/UI_BLUEPRINT.md "Buttons").
+            btnText.textContent = 'Processing…';
+            btn.disabled = true;
             document.getElementById('krDownloadBtn').disabled = true;
 
             document.getElementById('krProgressCard').classList.remove('d-none');
-            document.getElementById('krProgressBar').style.width = '50%';
+            // One opaque call, so no honest percentage exists: a full animated bar
+            // says "working" without claiming progress it does not have.
+            const krBar = document.getElementById('krProgressBar');
+            krBar.classList.add('progress-bar-striped', 'progress-bar-animated');
+            krBar.style.width = '100%';
             document.getElementById('krProgressText').textContent = 'Querying Google Ads, taxonomy & shop-stats (this can take a minute)...';
             document.getElementById('krProgressPercent').textContent = '';
 
@@ -498,9 +504,9 @@
                 const data = await response.json();
                 krResultsData = data;
 
-                document.getElementById('krProgressBar').style.width = '100%';
+                krBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+                krBar.style.width = '100%';
                 document.getElementById('krProgressText').textContent = 'Complete!';
-                document.getElementById('krProgressPercent').textContent = '100%';
 
                 const shopInfo = data.shop || {};
                 document.getElementById('krShopBadge').textContent =
@@ -537,7 +543,7 @@
             }
 
             btnText.textContent = 'Generate';
-            spinner.classList.add('d-none');
+            btn.disabled = false;
         }
 
         async function downloadKeywordRedirects() {
