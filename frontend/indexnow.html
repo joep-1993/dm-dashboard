@@ -122,9 +122,9 @@
                                     <label for="urlInput" class="form-label">URLs (one per line)</label>
                                     <textarea class="form-control" id="urlInput" rows="8" placeholder="https://www.beslist.nl/products/...&#10;https://www.beslist.nl/products/..."></textarea>
                                 </div>
-                                <button class="btn btn-primary" onclick="submitManual()" id="submitManualBtn">
-                                    Submit to IndexNow
-                                </button>
+                                <div class="d-flex justify-content-end">
+                                    <button class="btn btn-run" onclick="submitManual()" id="submitManualBtn">Submit</button>
+                                </div>
                             </div>
 
                             <!-- Excel Upload Tab -->
@@ -133,9 +133,9 @@
                                     <label for="excelFile" class="form-label">Upload Excel file with URL column</label>
                                     <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
                                 </div>
-                                <button class="btn btn-primary" onclick="submitExcel()" id="submitExcelBtn">
-                                    Upload & Submit
-                                </button>
+                                <div class="d-flex justify-content-end">
+                                    <button class="btn btn-run" onclick="submitExcel()" id="submitExcelBtn">Upload &amp; Submit</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -180,9 +180,9 @@
 
                 <!-- History Section -->
                 <div class="card mb-4">
-                    <div class="card-header text-white d-flex justify-content-between align-items-center" style="background: #5e4a90;">
+                    <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Submission History</h5>
-                        <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: white;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='white';this.style.color='#5e4a90'" onclick="loadHistory()">↻ Refresh</button>
+                        <button class="btn btn-sm btn-outline-purple" onclick="loadHistory()">↻ Refresh</button>
                     </div>
                     <div class="card-body">
                         <div id="historyContent">
