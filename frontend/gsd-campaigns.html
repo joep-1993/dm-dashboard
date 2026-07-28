@@ -96,6 +96,8 @@
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
         .btn-remove:hover { background: #d63031; color: white; }
 
+        /* No leftover gap under the date input when there's no message to show. */
+        #llDateHint:empty { display: none; }
         #runDate, #llDate {
             border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
             box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
@@ -350,7 +352,7 @@
                     <div class="col-md-3" id="llDateCol">
                         <label for="llDate" class="form-label">Date (optional)</label>
                         <input type="date" class="form-control" id="llDate" placeholder="Leave empty for most recent">
-                        <div class="form-text" id="llDateHint" style="font-size:0.75rem;">&nbsp;</div>
+                        <div class="form-text" id="llDateHint" style="font-size:0.75rem;"></div>
                     </div>
                     <div class="col-md-5">
                         <label for="llShopNames" class="form-label">Shop names (optional, one per line)</label>
@@ -576,14 +578,10 @@
                     hint.title = '';
                     return;
                 }
-                const newest = llSnapshotDates[0];
-                hint.textContent = days.length === 1
-                    ? `1 day stored (${days[0]})`
-                    : `${days.length} days stored (${days[days.length - 1]} … ${days[0]})`;
-                hint.title = `Kept ${data.retention_days ?? 7} days. Newest: `
-                    + `${newest.shop_count} shops, ${newest.pause_count} to pause, `
-                    + `${newest.enable_count} to enable (${newest.file || 'unknown file'}). `
-                    + 'Leave the date empty to use the newest load.';
+                // Nothing to say when the window is healthy — the greyed-out days
+                // in the picker already show which dates exist.
+                hint.textContent = '';
+                hint.title = '';
             } catch (e) {
                 console.warn('Failed to load Excel snapshot dates', e);
                 if (hint) hint.textContent = 'Stored days unavailable.';
