@@ -232,7 +232,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Preview</h5>
                         <div class="d-flex gap-2">
-                            <button class="btn btn-sm btn-purple-outline" id="btnCopyPreview">Copy for Excel</button>
+                            <button class="btn btn-sm btn-purple-outline" id="btnCopyPreview">Copy</button>
                             <button class="btn btn-sm btn-purple-outline" id="btnClearPreview">Clear</button>
                         </div>
                     </div>
@@ -249,6 +249,9 @@
                             <table class="table table-sm preview-table">
                                 <thead>
                                     <tr>
+                                        <th style="width:36px;" title="Select the rows to submit. Rows that are skipped or already redirected cannot be selected — there is no call to make for them.">
+                                            <input class="form-check-input" type="checkbox" id="previewSelectAll">
+                                        </th>
                                         <th class="sortable" data-sort="index">#<span class="sort-arrow">↕</span></th>
                                         <th class="sortable" data-sort="from">From<span class="sort-arrow">↕</span></th>
                                         <th class="sortable" data-sort="to">To<span class="sort-arrow">↕</span></th>
@@ -332,7 +335,6 @@
                             <thead class="table-light">
                                 <tr>
                                     <th style="padding: 8px 12px; text-align: center;">Timestamp</th>
-                                    <th style="padding: 8px 12px; text-align: center;">Label</th>
                                     <th style="padding: 8px 12px; text-align: center;">Source</th>
                                     <th style="padding: 8px 12px; text-align: center;">Total</th>
                                     <th style="padding: 8px 12px; text-align: center;">Flattened</th>
@@ -342,7 +344,7 @@
                                     <th style="padding: 8px 12px; text-align: center;">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="runsBody"><tr><td colspan="9" class="text-muted text-center p-3">No runs yet</td></tr></tbody>
+                            <tbody id="runsBody"><tr><td colspan="8" class="text-muted text-center p-3">No runs yet</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -497,11 +499,87 @@
         // Persisted across re-renders; reset on each new preflight.
         let previewView = { filter: 'all', sortCol: null, sortDir: 'asc' };
 
+        // ---- Row selection ----------------------------------------------------
+        // Which rows Submit will send. Holds ORIGINAL indices into
+        // preflight.processed, never display positions — the table is sortable and
+        // filterable, so a positional key would select the wrong rows the moment
+        // you sort. Kept outside the DOM for the same reason: renderPreviewTable()
+        // rebuilds every <tr> on each filter/sort change.
+        let previewSelected = new Set();
+
+        // Only rows Submit would actually act on can be selected. A skipped or
+        // already-correct row has no API call to make, so offering a checkbox for
+        // it would imply something would happen.
+        function isSelectableRow(row) {
+            return !row.already_correct && !effectiveSkipReason(row);
+        }
+
+        // Default = every submittable row, i.e. exactly what Submit did before
+        // this existed. Deselecting is the opt-in, so the familiar flow (preflight
+        // → Submit) is unchanged.
+        function resetPreviewSelection() {
+            previewSelected = new Set();
+            if (!preflight) return;
+            preflight.processed.forEach((row, i) => {
+                if (isSelectableRow(row)) previewSelected.add(i);
+            });
+        }
+
+        // The "Replace existing" toggle changes which rows are submittable, so the
+        // selection has to follow it: newly-submittable rows join, rows that stop
+        // being submittable must leave or Submit would post a skipped row.
+        function reconcilePreviewSelection() {
+            if (!preflight) return;
+            preflight.processed.forEach((row, i) => {
+                if (isSelectableRow(row)) previewSelected.add(i);
+                else previewSelected.delete(i);
+            });
+        }
+
+        function selectedRowIndices() {
+            if (!preflight) return [];
+            // Filter against the live rows so a stale index can never leak into a
+            // submit payload.
+            return [...previewSelected]
+                .filter(i => preflight.processed[i] && isSelectableRow(preflight.processed[i]))
+                .sort((a, b) => a - b);
+        }
+
+        function updateSelectionUi() {
+            const n = selectedRowIndices().length;
+            const lbl = document.getElementById('submitLabel');
+            if (lbl && !lbl.dataset.busy) {
+                lbl.textContent = n ? `Submit ${n.toLocaleString()} selected` : 'Submit';
+            }
+            const btn = document.getElementById('btnSubmit');
+            if (btn && !btn.dataset.busy) btn.disabled = n === 0;
+
+            // Select-all reflects only the rows currently VISIBLE under the filter,
+            // otherwise it would claim "all" while hiding unselected rows.
+            const visible = visibleSelectableIndices();
+            const box = document.getElementById('previewSelectAll');
+            if (box) {
+                const chosen = visible.filter(i => previewSelected.has(i)).length;
+                box.checked = visible.length > 0 && chosen === visible.length;
+                box.indeterminate = chosen > 0 && chosen < visible.length;
+                box.disabled = visible.length === 0;
+            }
+        }
+
+        function visibleSelectableIndices() {
+            if (!preflight) return [];
+            return preflight.processed
+                .map((row, i) => ({ row, i }))
+                .filter(({ row }) => previewFilterMatch(row, previewView.filter) && isSelectableRow(row))
+                .map(({ i }) => i);
+        }
+
         function renderPreview() {
             document.getElementById('previewCard').style.display = '';
             const ready = recomputeStats();
             // Reset filter+sort to defaults whenever a fresh preflight lands.
             previewView = { filter: 'all', sortCol: null, sortDir: 'asc' };
+            resetPreviewSelection();
             renderPreviewTable();
             return ready;
         }
@@ -599,7 +677,17 @@
                     // rules on its fromUrl.
                     skipBadge += `<br><span class="badge badge-flatten">will rewire ${incomingCount} incoming rule${incomingCount === 1 ? '' : 's'} to → <code>${escapeHtml(row.final_new || row.input_new || '')}</code></span>`;
                 }
+                // data-idx carries the ORIGINAL index, so the delegated change
+                // handler stays correct under any sort or filter.
+                const selectable = isSelectableRow(row);
+                const checkCell = selectable
+                    ? `<td><input class="form-check-input preview-row-check" type="checkbox"
+                             data-idx="${origIndex}" ${previewSelected.has(origIndex) ? 'checked' : ''}></td>`
+                    : `<td><span class="small-muted" title="${row.already_correct
+                            ? 'Already redirected — nothing to submit'
+                            : 'Skipped — nothing to submit'}">—</span></td>`;
                 tr.innerHTML = `
+                    ${checkCell}
                     <td>${origIndex + 1}</td>
                     <td class="url-cell ${cellClass}">${escapeHtml(row.input_old || '')}${skipBadge}</td>
                     <td class="url-cell ${cellClass}">${escapeHtml(row.final_new || row.input_new || '')}${flattenBadge}</td>
@@ -612,6 +700,7 @@
 
             updateFilterTileActiveState();
             updateSortHeaderActiveState();
+            updateSelectionUi();
         }
 
         function previewFilterMatch(row, filter) {
@@ -731,6 +820,25 @@
         // ---------------------- Submit ----------------------
         async function submitRun() {
             if (!preflight) return;
+
+            // Only the selected rows go live. An empty selection submits NOTHING
+            // rather than falling back to "all" — this writes real redirects, so
+            // an accidentally-cleared selection must not become a full push.
+            const picked = selectedRowIndices();
+            if (!picked.length) {
+                alert('No rows selected. Tick the rows you want to submit — skipped and already-redirected rows cannot be selected.');
+                return;
+            }
+            const rowsToSubmit = picked.map(i => preflight.processed[i]);
+
+            // Named previewTotal, not total — the poll loop below has its own
+            // `total` (the task's row count) and shadowing it reads as a bug.
+            const previewTotal = preflight.processed.length;
+            if (rowsToSubmit.length < previewTotal) {
+                const n = rowsToSubmit.length;
+                if (!confirm(`Submit ${n.toLocaleString()} of ${previewTotal.toLocaleString()} previewed row(s) to the live redirect API?\n\nThe rows you did not select are left untouched.`)) return;
+            }
+
             const btn = document.getElementById('btnSubmit');
             const lbl = document.getElementById('submitLabel');
             const spin = document.getElementById('submitSpinner');
@@ -738,7 +846,12 @@
             const progBar = document.getElementById('submitProgressBar');
             const progText = document.getElementById('submitProgressText');
             const progPct = document.getElementById('submitProgressPercent');
+            let submitted = false;
 
+            // dataset.busy stops updateSelectionUi() from fighting the button's
+            // in-flight label/disabled state if a checkbox changes mid-submit.
+            btn.dataset.busy = '1';
+            lbl.dataset.busy = '1';
             btn.disabled = true;
             lbl.textContent = 'Submitting…';
             spin.style.display = '';
@@ -750,7 +863,7 @@
 
             try {
                 const payload = {
-                    processed: preflight.processed,
+                    processed: rowsToSubmit,
                     label: document.getElementById('runLabel').value.trim(),
                     input_method: cbManual.checked ? 'text' : (cbForm.checked ? 'form' : 'file'),
                     replace_existing: replaceExistingOn(),
@@ -786,13 +899,23 @@
                 }
                 renderSubmitResult(task.result);
                 loadRuns();
+                // Clear the selection once the rows are live. The preflight data
+                // is NOT refreshed after a submit, so those rows still look
+                // submittable — leaving them ticked would let a second click
+                // silently re-post everything that just went out. Re-select (or
+                // re-run Preview) to submit again.
+                submitted = true;
             } catch (e) {
                 alert(e.message);
             } finally {
-                btn.disabled = false;
-                lbl.textContent = 'Submit';
+                delete btn.dataset.busy;
+                delete lbl.dataset.busy;
                 spin.style.display = 'none';
                 progBox.classList.add('d-none');
+                // Keep the selection on failure so a retry doesn't mean re-ticking
+                // everything.
+                if (submitted) previewSelected.clear();
+                renderPreviewTable();   // calls updateSelectionUi(), which sets the label
             }
         }
 
@@ -894,13 +1017,13 @@
             const body = document.getElementById('runsBody');
             // Keeps the table's height across a reload, unlike the single
             // "Loading…" row this replaces.
-            body.innerHTML = skeletonRows(9, Math.min(Math.max(body.rows.length || 5, 3), 10));
+            body.innerHTML = skeletonRows(8, Math.min(Math.max(body.rows.length || 5, 3), 10));
             try {
                 const r = await fetch(`${API}/runs`);
                 if (!r.ok) throw new Error((await r.json()).detail || 'Failed to load runs');
                 const data = await r.json();
                 if (!data.runs.length) {
-                    body.innerHTML = '<tr><td colspan="9" class="text-center text-muted p-3">No runs yet.</td></tr>';
+                    body.innerHTML = '<tr><td colspan="8" class="text-center text-muted p-3">No runs yet.</td></tr>';
                     return;
                 }
                 body.innerHTML = '';
@@ -910,7 +1033,6 @@
                     const when = new Date(run.created_at).toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' });
                     tr.innerHTML = `
                         <td style="padding: 6px 12px; text-align: center;">${escapeHtml(when)}</td>
-                        <td style="padding: 6px 12px; text-align: center;">${escapeHtml(run.label || '')}</td>
                         <td style="padding: 6px 12px; text-align: center;">${redirectSourceBadge(run.input_method)}</td>
                         <td style="padding: 6px 12px; text-align: center;">${run.total_rows}</td>
                         <td style="padding: 6px 12px; text-align: center;">${run.flattened}</td>
@@ -927,7 +1049,7 @@
                     body.appendChild(tr);
                 });
             } catch (e) {
-                body.innerHTML = `<tr><td colspan="9" class="text-danger p-3">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
+                body.innerHTML = `<tr><td colspan="8" class="text-danger p-3">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
             }
         }
 
@@ -1152,6 +1274,29 @@
         document.getElementById('btnCopyPreview').addEventListener('click', copyPreviewForExcel);
         document.getElementById('cbReplaceExisting').addEventListener('change', () => {
             recomputeStats();
+            // The toggle changes which rows are submittable, so the selection has
+            // to follow before the table redraws.
+            reconcilePreviewSelection();
+            renderPreviewTable();
+        });
+
+        // Row checkboxes are delegated: renderPreviewTable() replaces every <tr>
+        // on each filter/sort change, so per-element listeners would be lost.
+        document.getElementById('previewBody').addEventListener('change', (e) => {
+            const box = e.target.closest('input.preview-row-check');
+            if (!box) return;
+            const idx = Number(box.dataset.idx);
+            if (box.checked) previewSelected.add(idx);
+            else previewSelected.delete(idx);
+            updateSelectionUi();
+        });
+
+        // Select-all acts on the rows currently VISIBLE under the filter, so
+        // filtering to "Skipped" and ticking the box cannot silently select rows
+        // you are not looking at.
+        document.getElementById('previewSelectAll').addEventListener('change', (e) => {
+            const visible = visibleSelectableIndices();
+            visible.forEach(i => e.target.checked ? previewSelected.add(i) : previewSelected.delete(i));
             renderPreviewTable();
         });
         document.getElementById('btnClearPreview').addEventListener('click', () => {
