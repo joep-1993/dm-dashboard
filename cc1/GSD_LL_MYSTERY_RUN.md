@@ -1,6 +1,31 @@
 # GSD Low-Linkage — the mysterious daily 09:50 run
 
-**Status:** under investigation (2026-07-21). Kill switch added as a safety net; root-cause trigger not yet identified.
+**Status:** ✅ **RESOLVED (2026-07-22)** — the tripwire fired and split the "mystery" into two independent sources. The truly-automatic leak is closed; the remaining run was a human. See RESOLUTION below. The original investigation notes are kept underneath for history (some earlier theories are now superseded — flagged inline).
+
+## RESOLUTION (2026-07-22)
+
+Investigation run by Claude Code on the **prod box** (win-htz-006) at l.davidowski's request; transcript saved at `C:\Users\JoepvanSchagen\Downloads\claude\gsd_ll_onderzoek_2026-07-22.txt`. DB audit counts and the prod log agree exactly (121 mutations = 50 paused / 71 enabled) → cross-validated.
+
+Prod = uvicorn `--port 3003` on **win-htz-006.colo.beslist.net** (worker PID 33416, started 21 Jul 16:39, HTTPS), log at `C:\Users\l.davidowski\dm-dashboard\logs\service.log` (~1.9 GB).
+
+**Two independent sources of real mutations:**
+
+1. **Internal APScheduler @ 09:50 CEST — the genuinely automatic one. CLOSED.**
+   Pre-fix scheduler code called `run_low_linkage(dry_run=False)` **directly** (no HTTP, no IP), running inside **zombie uvicorn instances on ports 8003/8098/8099** that served the OLD code. This produced the 18–21 Jul 09:50 batches. Zombies killed + scheduler changed to load-only on 21 Jul → **22 Jul 09:50 was clean (Excel load only, 0 mutations)**.
+
+2. **A HUMAN on IP `94.142.210.226` (Chrome 150 / Windows) via the dashboard — STILL POSSIBLE.**
+   Today's noon run was manual: `POST /ll/run?dry_run=true&source=excel` @ 11:50:51 → 6 min progress-polling → `POST /ll/apply` (121 entries) @ 11:58:07 → done 12:00:18. Classic preview→wait→Apply. **Not automatic — the tool did what someone clicked.** This is the only IP that ever hits `/ll/run`|`/ll/apply`; active since ≥10 Jul (277 real mutations that day). On 17 Jul BOTH sources fired.
+
+**Correction to the earlier theory (below):** the 09:50 automatic runs were **not** HTTP calls from `94.142.210.226` to a dev instance — they were the internal scheduler in zombie processes calling `run_low_linkage` directly. `94.142.210.226` is a **human browser** doing manual runs (incl. the noon ones), almost certainly the Beslist **office/VPN NAT egress** → it identifies the corporate network, not a named person.
+
+**Open items:**
+- **Who clicked Apply @ 11:58?** Shared egress IP → ask around (l.davidowski / colleague). If nobody owns it, dig deeper.
+- **No auth on `/ll/run` + `/ll/apply`** — anyone reaching the dashboard can trigger real mutations. Backlogged (see BACKLOG.md → "GSD LL: auth/confirm on real-mutation endpoints"). Interim guard: kill switch (was OFF on prod today).
+- Ensure only ONE prod instance runs + vestigial launchers disabled so the zombie-APScheduler can't return.
+
+---
+
+## Original investigation notes (2026-07-21) — kept for history
 
 ## Symptom
 
