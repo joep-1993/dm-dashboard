@@ -209,6 +209,9 @@ def start_ll_run(
     def _worker() -> None:
         try:
             res = run_low_linkage(dry_run, date_str, shop_names, included, source)
+            # Log before flipping to done, so the frontend's reload-on-done
+            # always finds the entry (and it lands even if nobody is watching).
+            log_run_activity("LL Run", res=res)
             _progress_set(
                 result=res, done=True, phase="Done",
                 processed=_LL_PROGRESS.get("total", 0),
@@ -219,6 +222,8 @@ def start_ll_run(
             )
         except Exception as ex:  # pragma: no cover - defensive
             logger.exception("GSD LL run crashed")
+            if not dry_run:
+                log_run_activity("LL Run", error=str(ex))
             _progress_set(error=str(ex), done=True, phase="Error")
         finally:
             _progress_set(running=False, finished_at=datetime.now().isoformat(timespec="seconds"))
@@ -249,6 +254,7 @@ def start_ll_apply(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     def _worker() -> None:
         try:
             res = apply_selected(entries)
+            log_run_activity("LL Run selected", res=res)
             _progress_set(
                 result=res, done=True, phase="Done",
                 processed=_LL_PROGRESS.get("total", 0),
@@ -259,6 +265,7 @@ def start_ll_apply(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
             )
         except Exception as ex:  # pragma: no cover - defensive
             logger.exception("GSD LL apply crashed")
+            log_run_activity("LL Run selected", error=str(ex))
             _progress_set(error=str(ex), done=True, phase="Error")
         finally:
             _progress_set(running=False, finished_at=datetime.now().isoformat(timespec="seconds"))
@@ -1133,6 +1140,79 @@ def ensure_activity_table() -> None:
         conn.commit()
     finally:
         return_db_connection(conn)
+
+
+def log_run_activity(kind: str, res: Optional[Dict[str, Any]] = None,
+                     error: Optional[str] = None,
+                     run_key: Optional[str] = None) -> Optional[str]:
+    """Write a finished LL run's Activity Log entry. Best effort.
+
+    This entry used to be written by the browser after polling reported done,
+    which made the log depend on the tab staying open: a run whose page closed
+    mutated campaigns and logged nothing. Two confirmed cases — the 21 Jul
+    zombie-APScheduler batch and 28 Jul 08:28 — existed only in ADMIN_TABLE, and
+    any reconstruction keyed off the log mis-attributed their rows. Writing it
+    here, beside the progress state and the audit rows this module already owns,
+    makes the log independent of whoever started the run.
+
+    Call it BEFORE flipping progress to done, so a frontend that reloads the log
+    as soon as it sees done=True finds the entry already there.
+
+    ``kind`` is the action string the UI groups on ('LL Run' / 'LL Run
+    selected'). Previews are not logged. Returns the entry_id, or None.
+    """
+    try:
+        # Aware on purpose. The column is TIMESTAMPTZ and the shared Postgres
+        # session runs Etc/UTC, so a naive datetime.now() (which is Amsterdam
+        # local on this host) would be read as UTC and land 2h late in summer —
+        # the same trap as the DMA Exclusions timestamp bug.
+        now = datetime.now(AMSTERDAM_TZ)
+        slug = "selected" if "selected" in kind.lower() else "run"
+        # Key the id on the RUN (its start), not on the moment we log: that makes
+        # one entry per run and a repeated write an update instead of a second
+        # row. Keying it on "now" collided whenever two writes shared a second.
+        if not run_key:
+            with _LL_LOCK:
+                run_key = _LL_PROGRESS.get("started_at")
+        entry: Dict[str, Any] = {
+            "id": f"ll-{slug}-{run_key or now.isoformat(timespec='seconds')}",
+            "time": now,
+            "action": kind,
+            "reset": False,
+        }
+
+        if error is not None:
+            entry.update({"details": f"Error: {error}", "success": False, "undo": None})
+        else:
+            res = res or {}
+            # A preview mutates nothing, so it is not activity. A run blocked by
+            # the kill switch also reports dry_run, but IS worth recording — an
+            # attempt that got stopped is exactly what someone would look for.
+            if res.get("dry_run") and not res.get("kill_switch_blocked"):
+                return None
+            paused = res.get("paused") or []
+            enabled = res.get("enabled") or []
+            details = (f"{res.get('paused_count', len(paused))} paused / "
+                       f"{res.get('enabled_count', len(enabled))} enabled")
+            if res.get("kill_switch_blocked"):
+                details += " — blocked by the kill switch"
+            if res.get("snapshot_date"):
+                details += f" (Excel data for {res['snapshot_date']})"
+            entry.update({
+                "details": details,
+                "success": not (res.get("errors") or []),
+                # Same inversion as backfill_activity_from_ll; 'll' makes
+                # POST /undo reverse through the label-aware path.
+                "undo": ({"created": enabled, "paused": paused, "ll": True}
+                         if (paused or enabled) else None),
+            })
+
+        save_activity(entry)
+        logger.info("GSD LL: logged activity entry %s (%s)", entry["id"], entry["details"])
+        return entry["id"]
+    except Exception:
+        logger.warning("GSD LL: failed to write the run's activity entry", exc_info=True)
+        return None
 
 
 def save_activity(entry: Dict[str, Any]) -> None:

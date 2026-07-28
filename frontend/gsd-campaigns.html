@@ -1065,20 +1065,20 @@
                 const prog = await pollLLUntilDone();
 
                 barWrap.classList.add('d-none');
+                // The backend writes this run's Activity Log entry itself, before
+                // it reports done — so just reload the log instead of logging
+                // from here. A run whose tab closes is still recorded.
                 if (prog.error) {
                     content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(prog.error)}</div>`;
-                    if (!dryRun) logActivity('LL Run', `Error: ${prog.error}`, false);
+                    if (!dryRun) loadActivityLog();
                     return;
                 }
 
                 const data = prog.result || {};
                 content.innerHTML = renderLLSummary(data);
                 applyPreviewFilter();
-                if (!dryRun) logActivity('LL Run',
-                    `${data.paused_count ?? (data.paused || []).length} paused / ${data.enabled_count ?? (data.enabled || []).length} enabled`,
-                    (data.errors || []).length === 0,
-                    llUndoFrom(data));
                 if (!dryRun) {
+                    loadActivityLog();
                     loadLLHistory();
                     loadCampaigns();
                     loadStats();
@@ -1087,7 +1087,9 @@
             } catch (err) {
                 barWrap.classList.add('d-none');
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
-                if (!dryRun) logActivity('LL Run', `Error: ${err.message}`, false);
+                // The run may well have completed server-side (this catch also
+                // covers a failed poll), so refresh rather than log a guess.
+                if (!dryRun) loadActivityLog();
             } finally {
                 previewBtn.disabled = false;
                 runBtn.disabled = false;
@@ -1153,26 +1155,24 @@
 
                 const prog = await pollLLUntilDone();
                 barWrap.classList.add('d-none');
+                // As in runLowLinkage: the backend owns this entry, we just reload.
                 if (prog.error) {
                     content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(prog.error)}</div>`;
-                    logActivity('LL Run selected', `Error: ${prog.error}`, false);
+                    loadActivityLog();
                     return;
                 }
 
                 const data = prog.result || {};
                 content.innerHTML = renderLLSummary(data);
                 applyPreviewFilter();
-                logActivity('LL Run selected',
-                    `${data.paused_count ?? (data.paused || []).length} paused / ${data.enabled_count ?? (data.enabled || []).length} enabled`,
-                    (data.errors || []).length === 0,
-                    llUndoFrom(data));
+                loadActivityLog();
                 loadLLHistory();
                 loadCampaigns();
                 loadStats();
             } catch (err) {
                 barWrap.classList.add('d-none');
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
-                logActivity('LL Run selected', `Error: ${err.message}`, false);
+                loadActivityLog();
             } finally {
                 previewBtn.disabled = false;
                 runBtn.disabled = false;
@@ -2329,6 +2329,7 @@
                 console.warn('Failed to load activity log from server:', e);
                 _activityCache = [];
             }
+            activityPage = 1;   // called on load and after a run — show the newest
             renderLog();
         }
 
@@ -2434,21 +2435,6 @@
                 `${start + 1}-${Math.min(end, total)} of ${total.toLocaleString()}`,
                 activityPage <= 1, activityPage >= totalPages,
             );
-        }
-
-        // Undo payload for an LL run: the campaigns it paused (undo re-enables
-        // them) and the ones it enabled (undo pauses them) — the same inversion
-        // backfill_activity_from_ll() applies. The `ll` marker is read by
-        // POST /undo, which then reverses through the LL path so the
-        // GSD_LL_PAUSED label is maintained too, rather than flipping status
-        // only. The rows carry shop_id/country because that path needs them.
-        // Routing server-side keeps one code path here and means an
-        // already-deployed frontend gets the label-aware behaviour for free.
-        function llUndoFrom(data) {
-            const created = (data || {}).enabled || [];   // it enabled them -> undo pauses them
-            const paused = (data || {}).paused || [];     // it paused them  -> undo re-enables them
-            if (!created.length && !paused.length) return undefined;
-            return { undo: { created, paused, ll: true } };
         }
 
         async function resetRun(id) {
