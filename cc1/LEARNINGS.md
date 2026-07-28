@@ -1,6 +1,19 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `cat_urls.csv` kon nieuwe categorie-slugs NOOIT vinden — category_lookup is nu API-first met de CSV als cache (2026-07-28)
+
+Joep: alle `/wandpanelen/`-urls in Unique Titles hebben "Woonaccessoires" in de titel. Uitgezocht t/m de wortel.
+
+- **Unique Titles SCRAPET niets** — dat had ik eerst verkeerd gezegd. Het pad is `process_single_url` → `fetch_products_api()` → `GET productsearch-v2.api.beslist.nl/search/products`, pure JSON. Geen BeautifulSoup in het titelpad; `USER_AGENT = "Beslist script voor SEO"` is alleen een request-header. `original_h1` is dus het **API**-veld `h1_title`, geen pagina-scrape.
+- **De echte oorzaak zat in `cat_urls.csv`.** `faq_service.py:307` doet eerst `lookup_category()` (CSV) en valt anders terug op *raden*: het indexeert `categories[]` van het API-product op url-diepte, en landt daarmee op een VOOROUDER. De CSV bevat alléén de oude `slug_catid`-vorm (`huis_tuin_505064`); nieuwe categorieën staan onder een **kale leesbare slug**. Wandpanelen = id 9005645, nl-NL urlSlug `wandpanelen` → kan per definitie niet matchen. 352 urls over 37 categorieën hadden die vingerafdruk.
+- **Niets in de repo bouwde die CSV.** Twee commits in de hele historie, waarvan één een mojibake-reparatie. Een statische export van onbekende leeftijd.
+- **`urlSlug` staat NIET op topniveau** in de Taxonomy API v2-respons: hij zit in `labels[]` per locale, dus lezen via het `nl-NL`-item. Ook: de maincat-root van Woonaccessoires is **165**, niet 9001549.
+- **Nu: API-first, CSV als cache van de API.** Elke geslaagde walk herschrijft `cat_urls.csv` (atomisch, best-effort), dus de fallback is de laatste goede API-snapshot i.p.v. een handmatige export — en een nieuwe categorie hoeft niet meer met de hand toegevoegd. DMA+ deed dit al zo (`dma_plus_service.py:261`); het titelpad had het precies omgekeerd.
+- **De walk mag NOOIT inline.** Eerste versie deed dat: koude call **167,8s** — de eerste titel na elke restart of TTL-verval had drie minuten geblokkeerd. Nu een daemon-thread + `_walk_in_flight`-guard, en de caller valt door naar de CSV (die dus vers is). Koude call: 0,01s, zelfde antwoord.
+- Cijfers: 3.543 enabled categorieën, CSV 3.558 → 3.544 regels (verschil = disabled categorieën die nu wegvallen). Callers ongewijzigd: zelfde functienaam/signatuur, dus `faq_service` én `scraper_service` profiteren.
+- **Blueprint-telling (item 48):** `canon_key` doet `'~'.join(sorted(types))`, dus facet-**volgorde** maakt geen aparte key. Alle combi's van 5 facetten = **31 per categorie**, niet 325. × 3.543 categorieën ≈ 110k; alleen deepest cats (~1.300) ≈ 40k.
+
 ## Activity-Log-write naar de backend + 5 oude rijen gerepareerd; en: prod liep al vooruit op mijn aannames (2026-07-28)
 
 Sluitstuk van [[#Alleen BACKFILLED activity-entries hebben een Reset-knop]] en [[#LL-undo gebouwd]].
