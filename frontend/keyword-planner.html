@@ -8,6 +8,31 @@
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
         .results-table { max-height: 600px; overflow-y: auto; }
+        /* Keyword Redirect Results — UI_BLUEPRINT table layout */
+        .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; max-height: 600px; }
+        .tool-table { font-size: 0.9rem; margin-bottom: 0; }
+        /* Grey, sticky column headers. Header font is 1rem (slightly larger than body). */
+        .tool-table th {
+            background: #f8f9fa; white-space: nowrap;
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 14px; font-size: 1rem;
+        }
+        .tool-table td { vertical-align: middle; }
+        .tool-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
+        .tool-table th.sortable:hover { background: #e9ecef; }
+        .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
+        .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .tool-table .col-center { text-align: center; }
+        /* URL columns can be long — wrap rather than stretch the table sideways. */
+        .tool-table .col-url { white-space: normal; overflow-wrap: anywhere; word-break: break-word; min-width: 260px; }
+        .tool-table .col-url a { overflow-wrap: anywhere; }
+        /* Loading state = skeleton rows, not a spinner (layout stays stable) */
+        .skel-row td { vertical-align: middle; }
+        .skel-bar { display: block; height: 1.45rem; border-radius: 4px;
+            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
+            background-size: 400% 100%; animation: skelShimmer 1.4s ease infinite; }
+        @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
         .volume-high { color: #198754; font-weight: bold; }
         .volume-medium { color: #0d6efd; }
         .volume-low { color: #636e72; }
@@ -244,25 +269,27 @@
                         <h5 class="mb-0">Keyword Redirect Results</h5>
                         <span class="badge bg-light text-dark" id="krShopBadge"></span>
                     </div>
-                    <div class="card-body p-0">
-                        <div class="results-table">
-                            <table class="table table-striped table-hover mb-0">
-                                <thead class="table-light sticky-top">
+                    <div class="card-body">
+                        <div class="d-flex gap-2 align-items-center mb-3">
+                            <button class="btn btn-sm btn-outline-purple ms-auto" id="krCopyBtn" onclick="copyKrResults()" title="Copy all rows as TSV, ready to paste into Excel">Copy</button>
+                        </div>
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm table-hover tool-table" id="krResultsTable">
+                                <thead class="table-light">
                                     <tr>
-                                        <th>#</th>
-                                        <th>Deepest Category</th>
-                                        <th class="text-end">Search Volume</th>
-                                        <th class="text-end">Products</th>
-                                        <th>URL</th>
+                                        <th class="col-center" style="width:52px;">#</th>
+                                        <th class="sortable" data-sort="deepest_cat" onclick="sortKr('deepest_cat')">Deepest Category</th>
+                                        <th class="sortable col-center" data-sort="search_volume_deepest_cat" onclick="sortKr('search_volume_deepest_cat')">Search Volume</th>
+                                        <th class="sortable col-center" data-sort="results" onclick="sortKr('results')">Products</th>
+                                        <th class="col-url">URL</th>
+                                        <th class="col-url">Old URL</th>
                                     </tr>
                                 </thead>
                                 <tbody id="krResultsBody">
                                 </tbody>
                             </table>
                         </div>
-                    </div>
-                    <div class="card-body pt-2 pb-2">
-                        <small class="text-muted" id="krStatsText"></small>
+                        <small class="text-muted d-block mt-2" id="krStatsText"></small>
                     </div>
                 </div>
 
@@ -512,27 +539,7 @@
                 document.getElementById('krShopBadge').textContent =
                     `${shopInfo.shop_name || '?'} · ${shopInfo.shop_id || '?'}`;
 
-                const tbody = document.getElementById('krResultsBody');
-                tbody.innerHTML = '';
-                (data.rows || []).slice(0, 500).forEach((r, i) => {
-                    const volumeClass = r.search_volume_deepest_cat >= 1000 ? 'volume-high' :
-                                        r.search_volume_deepest_cat >= 100 ? 'volume-medium' :
-                                        r.search_volume_deepest_cat > 0 ? 'volume-low' : 'volume-zero';
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${i + 1}</td>
-                        <td>${escapeHtml(r.deepest_cat)}</td>
-                        <td class="text-end ${volumeClass}">${(r.search_volume_deepest_cat || 0).toLocaleString()}</td>
-                        <td class="text-end">${(r.results || 0).toLocaleString()}</td>
-                        <td><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a></td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-
-                const stats = data.stats || {};
-                let note = `${stats.categories_with_products || 0} categories with products | ${stats.total_redirects || 0} redirects`;
-                if ((data.rows || []).length > 500) note += ` | showing first 500 of ${data.rows.length} rows (full set in download)`;
-                document.getElementById('krStatsText').textContent = note;
+                renderKrResults();
 
                 document.getElementById('krResultsCard').classList.remove('d-none');
                 document.getElementById('krDownloadBtn').disabled = (data.rows || []).length === 0;
@@ -544,6 +551,125 @@
 
             btnText.textContent = 'Generate';
             btn.disabled = false;
+        }
+
+        // ====== Keyword Redirect Results table ======
+        const KR_ROW_CAP = 500;          // rows drawn; the download always has the full set
+        let krSortCol = null;            // null = backend order (maincat, deepest_cat)
+        let krSortDir = 'desc';
+
+        // Old URL = the category url with its /c/winkel~{shop} filter swapped for
+        // /r/{keyword}/ — i.e. the category-scoped R-url that exists on the site
+        // today. NOT the same as the redirects list's `old`, which the backend
+        // builds as a site-wide /products/r/{keyword}/.
+        function krOldUrls(row) {
+            const base = String(row.url || '').replace(/\/c\/[^/]*\/?$/, '');
+            if (!base) return [];
+            // final_keyword holds the combinations the redirect is built from
+            // ("; "-joined); fall back to the keyword the row came from.
+            const kws = String(row.final_keyword || row.original_keyword || '')
+                .split(';').map(s => s.trim()).filter(Boolean);
+            return kws.map(kw => `${base}/r/${kw.split(/\s+/).join('_')}/`);
+        }
+
+        function sortKr(col) {
+            if (krSortCol === col) {
+                krSortDir = krSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                krSortCol = col;
+                krSortDir = 'desc';
+            }
+            renderKrResults();
+        }
+
+        function krSortedRows() {
+            const rows = (krResultsData && krResultsData.rows) ? krResultsData.rows.slice() : [];
+            if (!krSortCol) return rows;
+            const dir = krSortDir === 'asc' ? 1 : -1;
+            return rows.sort((a, b) => {
+                const av = a[krSortCol], bv = b[krSortCol];
+                if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+                return String(av ?? '').localeCompare(String(bv ?? '')) * dir;
+            });
+        }
+
+        function renderKrResults() {
+            const tbody = document.getElementById('krResultsBody');
+            const all = krSortedRows();
+            tbody.innerHTML = '';
+            all.slice(0, KR_ROW_CAP).forEach((r, i) => {
+                const volumeClass = r.search_volume_deepest_cat >= 1000 ? 'volume-high' :
+                                    r.search_volume_deepest_cat >= 100 ? 'volume-medium' :
+                                    r.search_volume_deepest_cat > 0 ? 'volume-low' : 'volume-zero';
+                const olds = krOldUrls(r);
+                const oldCell = olds.length
+                    ? olds.map(u => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>`).join('<br>')
+                    : '<span class="text-muted">—</span>';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="col-center">${i + 1}</td>
+                    <td>${escapeHtml(r.deepest_cat)}</td>
+                    <td class="col-center ${volumeClass}">${(r.search_volume_deepest_cat || 0).toLocaleString()}</td>
+                    <td class="col-center">${(r.results || 0).toLocaleString()}</td>
+                    <td class="col-url"><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a></td>
+                    <td class="col-url">${oldCell}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            const stats = (krResultsData && krResultsData.stats) || {};
+            let note = `${stats.categories_with_products || 0} categories with products | ${stats.total_redirects || 0} redirects`;
+            if (all.length > KR_ROW_CAP) note += ` | showing first ${KR_ROW_CAP} of ${all.length} rows (full set in download and Copy)`;
+            document.getElementById('krStatsText').textContent = note;
+
+            // Sort glyph: ⇅ idle, ▲/▼ on the active column.
+            document.querySelectorAll('#krResultsTable th.sortable').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === krSortCol) {
+                    th.classList.add(krSortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+        }
+
+        // Copy every row (not just the drawn 500) as TSV so it pastes straight
+        // into Excel. Multiple old urls for one row join with "; " to stay in one
+        // cell — a newline would break the row apart in Excel.
+        async function copyKrResults() {
+            const rows = krSortedRows();
+            if (!rows.length) return;
+            const header = ['#', 'Deepest Category', 'Search Volume', 'Products', 'URL', 'Old URL'];
+            const lines = [header.join('\t')];
+            rows.forEach((r, i) => {
+                lines.push([
+                    i + 1,
+                    r.deepest_cat || '',
+                    r.search_volume_deepest_cat || 0,
+                    r.results || 0,
+                    r.url || '',
+                    krOldUrls(r).join('; '),
+                ].map(v => String(v).replace(/[\t\r\n]+/g, ' ')).join('\t'));
+            });
+            const tsv = lines.join('\n');
+            const btn = document.getElementById('krCopyBtn');
+            const original = btn.textContent;
+            try {
+                await navigator.clipboard.writeText(tsv);
+            } catch (e) {
+                // Clipboard API needs a secure context; :8003 is plain http on
+                // some machines, so fall back to a hidden textarea + execCommand.
+                const ta = document.createElement('textarea');
+                ta.value = tsv;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                const ok = document.execCommand('copy');
+                document.body.removeChild(ta);
+                if (!ok) { alert('Copy failed — select the table and copy manually.'); return; }
+            }
+            btn.textContent = `Copied ${rows.length.toLocaleString()} rows`;
+            btn.disabled = true;
+            setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
         }
 
         async function downloadKeywordRedirects() {
