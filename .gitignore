@@ -42,6 +42,11 @@ backend/data/shop_campaigns_sa360.yaml
 # Service-account JSON for Google Sheets (copied locally, not tracked)
 backend/data/gsd-campaign-creation.json
 backend/data/ll_load_state.json
+# SEO Priority's category-dropdown cache — a warm-start copy of a ~23s Redshift
+# DISTINCT, rebuilt on a 24h TTL. Unlike cat_urls.csv it is not an offline
+# fallback (a cold cache just reports loading=true), so there is nothing for a
+# fresh checkout to gain from a stale 130KB copy of it.
+backend/data/seo_prio_categories.json
 
 # Large data files
 *.xlsx
