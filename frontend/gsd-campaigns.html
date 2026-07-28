@@ -455,6 +455,19 @@
                 <div class="activity-log gsd-table-wrap" id="activityLog">
                     <div class="text-muted text-center py-3">No activity yet.</div>
                 </div>
+                <div class="pagination-controls" id="activityPaginationControls">
+                    <span>Per page:</span>
+                    <select class="form-select form-select-sm" id="activityPerPage" onchange="activityPage=1; renderLog();">
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="all">Show all</option>
+                    </select>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changeActivityPage(-1)" id="activityPrevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                    <span class="page-info" id="activityPageInfo">-</span>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changeActivityPage(1)" id="activityNextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+                </div>
             </div>
         </div>
 
@@ -2298,6 +2311,7 @@
         // --- Activity Log ---
         // In-memory cache of the activity log, loaded from server.
         let _activityCache = [];
+        let activityPage = 1;
 
         async function loadActivityLog() {
             try {
@@ -2322,6 +2336,7 @@
                 ...(extra || {})
             };
             _activityCache.unshift(entry);
+            activityPage = 1;   // a new entry lands at the top — jump to where it is
             renderLog();
             // Persist to server (fire-and-forget).
             fetch(`${API_BASE}/api/gsd-campaigns/activity-log`, {
@@ -2340,17 +2355,42 @@
             return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; text-transform:uppercase; letter-spacing:0.4px;">${label}</span>`;
         }
 
+        function getActivityPerPage() {
+            const val = document.getElementById('activityPerPage').value;
+            return val === 'all' ? Infinity : parseInt(val, 10);
+        }
+
+        function changeActivityPage(delta) {
+            activityPage += delta;
+            renderLog();
+        }
+
+        function setActivityPageInfo(text, atFirst, atLast) {
+            document.getElementById('activityPageInfo').textContent = text;
+            document.getElementById('activityPrevBtn').disabled = atFirst;
+            document.getElementById('activityNextBtn').disabled = atLast;
+        }
+
         function renderLog() {
             // Preview/dry-runs are not shown in the Activity Log.
             const log = _activityCache.filter(e => !/preview/i.test(e.action || ''));
             const el = document.getElementById('activityLog');
             if (!log.length) {
                 el.innerHTML = '<div class="text-muted text-center py-3">No activity yet.</div>';
+                setActivityPageInfo('0 of 0', true, true);
                 return;
             }
+            // Paginate — newest first, 10 per page by default.
+            const total = log.length;
+            const perPage = getActivityPerPage();
+            const totalPages = perPage === Infinity ? 1 : Math.ceil(total / perPage);
+            if (activityPage > totalPages) activityPage = totalPages || 1;
+            if (activityPage < 1) activityPage = 1;
+            const start = perPage === Infinity ? 0 : (activityPage - 1) * perPage;
+            const end = perPage === Infinity ? total : start + perPage;
             const btnStyle = "border:1px solid #5e4a90; color:#5e4a90; background:transparent; padding:0.1rem 0.6rem; font-size:0.78rem;";
             const btnHover = "onmouseover=\"this.style.background='#5e4a90';this.style.color='white'\" onmouseout=\"this.style.background='transparent';this.style.color='#5e4a90'\"";
-            const rows = log.map(entry => {
+            const rows = log.slice(start, end).map(entry => {
                 const time = new Date(entry.time).toLocaleString('nl-NL');
                 const cls = entry.success ? 'log-success' : 'log-error';
                 const u = entry.undo || {};
@@ -2384,6 +2424,10 @@
                     </thead>
                     <tbody>${rows}</tbody>
                 </table>`;
+            setActivityPageInfo(
+                `${start + 1}-${Math.min(end, total)} of ${total.toLocaleString()}`,
+                activityPage <= 1, activityPage >= totalPages,
+            );
         }
 
         async function resetRun(id) {
