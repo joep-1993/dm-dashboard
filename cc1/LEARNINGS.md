@@ -1,6 +1,18 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een afgeronde run mag geen balk op 100% laten staan — "Done"-banner is nu de standaard, en waarom die GEEL is (2026-07-28)
+
+Joep: in SEO titles blijft de progressbalk na een publish-run op 100% in beeld staan; maak er een "Done"-banner van. Het patroon stond nergens in `UI_BLUEPRINT.md`, dus overgenomen uit DMA Exclusions (`showOosDone()`) en gegeneraliseerd. Zie UI_BLUEPRINT "Done banner".
+
+- **`style.css` plat `.alert-success` én `.alert-info` naar thema-grijs** (`rgba(232,233,235,0.5)` + `--color-section`, regels ~267 en ~310). Een Bootstrap success-alert is hier dus bijna onzichtbaar en leest als "er is niets gebeurd" — precies waarom de publish-afronding niet als afronding overkwam. DMA Exclusions had daar al een lokale `.alert-done-yellow` voor; die is nu **naar `css/style.css` verhuisd** (shared) en de dubbele lokale regel uit `dma-exclusions.html` gehaald (identieke hexes, geen visueel verschil). Nieuwe tools declareren hem niet opnieuw.
+- **Twee plekken in SEO titles, één helper.** `showDoneBanner(id, html, tone)` / `hideDoneBanner(id)`; tone = `done` (geel) / `warning` (klaar, maar rijen gefaald) / `error` (run zelf gefaald) / `cancelled` (gestopt, `alert-info`). Publish: balk weg, banner met `Done — pushed N blueprint(s) to production`, ruwe response in een dichtgeklapte `<details>` in plaats van een kale `<pre>`-dump. Retrieve URL data: label/percent-rij **én** balk verdwijnen (die stond de hele `generating_titles`-fase geanimeerd op 100%, want `pct` is daar `null` → `width: 100%`), banner erboven, counters-rij blijft.
+- **De faalpaden hadden helemaal geen eindstand.** Een mislukte publish liet de balk gewoon verdwijnen zonder uitleg; nu produceert ook de `catch` een banner. Regel voor volgende keer: elke `catch`/`finally` van een run-actie zet een banner.
+- **`d.failed` van `/publish` bevat de pre-flight lengte-skips al** (`"failed": failed + len(too_long)` in `seo_titles_service.py`), dus een naïeve samenvatting telt die rijen dubbel ("2 failed · 2 skipped" bij 2 rijen). Nu `failed = max(0, d.failed - skipped_too_long.length)`.
+- **Een gestopte generate-run landt als `status="done"`** met `should_stop` nog op `True` in `_seo_state` (en `get_run_status()` geeft de hele dict terug, dus het frontend kan erbij). Zonder die check zegt de banner "Done — generation finished" over een halve run; nu "Stopped — partial run" in `alert-info`.
+- **Poll + dismiss bijten elkaar.** De generate-banner wordt gezet vanuit `renderStatus()`, dat op een 2s-poll draait en ook vanuit `publish()`/`loadStats()` wordt aangeroepen — zonder `genDoneDismissed`-vlag (gereset in `startRun()`) komt een weggeklikte banner bij de volgende poll terug.
+- **Getest zonder browser:** de echte banner-code met een regex uit `seo-titles.html` gelicht en met een gestubde DOM door `node` gehaald, over de werkelijke response-vormen (clean / failures / length-cap / mixed / niets te pushen / unique-titles gefaald / stopped / error). Alle vier tones + de escaping kloppen. Visueel **niet** bekeken: `localhost:8003` is vanuit WSL niet bereikbaar (curl geeft 000), de server draait Windows-side.
+
 ## `/page-titles` capt ook `h1_title` op 200 én valideert een POST ATOMISCH — één rij sloopte 5.000 (2026-07-27)
 
 Joep publiceerde en kreeg `Pushed 34206, failed 5000`: batch 1 gaf `400 {"code":400,"message":"Invalid record values","errors":{"2026":["h1_title: This value is too long. It should have 200 characters or less."]}}`, batches 2–8 slaagden.

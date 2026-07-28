@@ -203,6 +203,9 @@ markup as the run/LL bars in GSD Campaigns. Drive it with `showStatus()` /
 `setStatus(pct, text)` / `hideStatus()` and honour `cancelRequested`
 (see the template JS).
 
+When the run ends, the bar comes **down** and a Done banner takes its place — see
+"Done banner" below.
+
 Two flavours — pick by whether the work is cancellable:
 
 1. **Full status area** (`#progressArea` + red-outline Cancel) for long
@@ -237,6 +240,65 @@ bar never runs ahead of reality), and give the endpoint's `except` branch a
 `mark_*_error()` call — otherwise a raising handler leaves the bar spinning
 forever. Phases that are one opaque call get a **label change at the same
 percentage**, not fake movement.
+
+## Done banner — how a run ends
+
+**A finished run never leaves its progress bar on screen.** A bar parked at 100%
+reads as "still working"; the moment the run ends, hide the bar (and its
+label/percent row) and put a **Done banner** in its place. Origin:
+`dma-exclusions.html` `showOosDone()`; also `seo-titles.html` (both the Publish
+push and the Retrieve-URL-data run).
+
+The banner is **light yellow**, because `style.css` flattens `.alert-success` and
+`.alert-info` to theme grey — a Bootstrap success alert is nearly invisible here
+and reads as "nothing happened". Use the shared class (in `style.css`, don't
+re-declare it per page):
+
+```css
+.alert-done-yellow { background-color:#fff8e1 !important; border-color:#f3e2a0 !important; color:#6b5900 !important; }
+```
+
+Markup — one dismissible banner per run, hidden by default, placed exactly where
+the progress bar was:
+
+```html
+<div id="xDone" class="alert alert-dismissible fade show mb-3" style="display:none;" role="alert">
+  <span class="done-text"></span>
+  <button type="button" class="btn-close" onclick="hideDoneBanner('xDone')" aria-label="Close"></button>
+</div>
+```
+
+Drive it with the two helpers from `seo-titles.html` (`showDoneBanner(id, html,
+tone)` / `hideDoneBanner(id)`). Tone picks the colour by **outcome**, not by
+step:
+
+| Tone | Class | When |
+|------|-------|------|
+| `done` | `alert-done-yellow` | ran to completion, nothing failed |
+| `warning` | `alert-warning` | completed, but some rows failed / were skipped |
+| `error` | `alert-danger` | the run itself failed |
+| `cancelled` | `alert-info` | user stopped/cancelled mid-run |
+
+Say "Stopped — partial run" for a cancelled run, not "Done". Watch for backends
+that land a stopped run as `status="done"` with a separate stop flag
+(`seo_titles_service.py` `should_stop`) — check the flag, or the banner lies.
+
+Content shape: a bold `Done — <headline>.` sentence, then ` · `-joined counts with
+the **numbers bold** (`<strong>12</strong> failed`). Keep it to the outcome
+numbers — if a counters row sits under the banner, that carries the full
+breakdown. A raw API response goes in a folded
+`<details><summary>Response detail</summary>` inside the banner, never as a bare
+`<pre>` dump.
+
+Two rules that are easy to get wrong:
+
+- **Re-show guard.** If a status poll keeps running after the banner appears,
+  dismissing it must stick — keep a `xDoneDismissed` flag, set it from the
+  `btn-close` handler, and reset it when the next run starts (see
+  `genDoneDismissed` in `seo-titles.html`).
+- **Show it on the failure path too.** The `catch`/`finally` of the action must
+  produce a banner as well, or a failed run just makes the bar vanish with no
+  explanation.
 
 **Spinners** are for small inline "busy" hints, not for table or run progress.
 The markup has drifted (11 variants across the pages); the canonical form is
