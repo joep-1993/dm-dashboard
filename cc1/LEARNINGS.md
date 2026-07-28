@@ -1,6 +1,19 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Activity-Log-write naar de backend + 5 oude rijen gerepareerd; en: prod liep al vooruit op mijn aannames (2026-07-28)
+
+Sluitstuk van [[#Alleen BACKFILLED activity-entries hebben een Reset-knop]] en [[#LL-undo gebouwd]].
+
+- **`log_run_activity()` schrijft de entry nu server-side, in `start_ll_run` en `start_ll_apply`, vóór de progress op `done` gaat.** Die volgorde is essentieel: het frontend herlaadt de log zodra het `done=True` ziet, dus de rij moet er dan al staan. Alle zes `logActivity('LL …')`-calls uit het frontend zijn weg (nu `loadActivityLog()`), en `llUndoFrom()` werd daarmee dode code — de backend bouwt de undo-payload zelf. Previews worden niet gelogd; een door de kill switch geblokkeerde poging **wél** ("— blocked by the kill switch"), want een geblokkeerde poging is precies wat je wil terugvinden.
+- **Twee dingen die de tests vonden, beide makkelijk mis te gaan:**
+  - **`datetime.now()` mag hier niet naïef.** `_LL_PROGRESS["started_at"]` is naïef *Amsterdam-lokaal*; in een `TIMESTAMPTZ` met sessie-TZ `Etc/UTC` wordt dat als UTC gelezen → entry staat 2u in de toekomst in de zomer. Zelfde vorm als de DMA-Exclusions-bug. Gebruik `datetime.now(AMSTERDAM_TZ)` (aware) en assert de opgeslagen instant tegen de wandklok. Zie [[postgres_utc_timestamps_display]].
+  - **Sleutel het `entry_id` op de RUN, niet op het moment van loggen.** Eerst `ll-{slug}-{now}`: vijf writes binnen één seconde werden twee rijen, want ze upsertten over elkaar. Nu `ll-{run|selected}-{started_at}` → één rij per run, en een herhaalde write is een update i.p.v. een tweede rij.
+- **Prod (win-htz-006:3003) had mijn commits al**, terwijl ik in drie berichten op rij "moet nog gedeployed worden" had gezegd. Read-only vastgesteld via `GET /openapi.json` — dat somt alle routes op zonder iets aan te roepen; ideale capability-probe op een live service. **Les: check de deploy-staat, ga er niet van uit.**
+- **Lokale `:8003` lag plat sinds 21 juli**: niets luisterde in WSL of op Windows, en Task Scheduler `DM Tools Dashboard` liep vandaag 09:08:25 met `LastTaskResult: 1`. Ook: de launcher (`start-dm-tools.bat`) draait uvicorn **in WSL** mét `--reload` en doet eerst een `git pull --rebase origin main` — dus voor de lokale instance is "manual kill + relaunch" niet nodig; dat geldt voor prod. Corrigeert [[dm_tools_backend_no_reload]] voor de lokale kant.
+- **`EXCEL_DIR` bewaart wél gedateerde bestanden per dag** (`gsd_shops_nl_be_2026-07-28_.xlsx`) — de openstaande vraag uit de snapshot-entry is daarmee beantwoord: `/ll/excel-dates` op prod gaf direct het volledige 7-daagse venster (22–28 jul), dus de Date-picker was meteen bruikbaar i.p.v. na een week opwarmen.
+- **De 5 undo-loze rijen zijn gerepareerd** via `POST /ll/undo-backfill?dry_run=false` op prod (dry-run eerst: 5 matched / 0 skipped, counts identiek aan hun eigen details). Eindstand: **0 van de 43 entries zonder Reset-knop**, en de 5 nieuwe payloads dragen `ll: true` dus ze reverten via het label-bewuste pad.
+
 ## LL-undo gebouwd: een status-only reset is een HALVE reset (label!), en de Activity Log is geen volledig logboek (2026-07-28)
 
 Vervolg op [[#Alleen BACKFILLED activity-entries hebben een Reset-knop]]. Drie dingen die je moet weten voordat je hier weer aan zit.
