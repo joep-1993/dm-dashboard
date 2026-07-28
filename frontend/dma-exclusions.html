@@ -559,7 +559,17 @@
             return { start, end, rows: data.slice(start, end) };
         }
 
+        // Loading state = skeleton rows, not a spinner (cc1/UI_BLUEPRINT.md
+        // "Tables"). CSS is shared in style.css.
+        function skeletonRows(cols, n = 10) {
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
+        }
+
         async function loadList() {
+            // 8 columns; hold the height on a reload rather than collapsing.
+            document.getElementById("listBody").innerHTML =
+                skeletonRows(8, Math.min(Math.max(savedData.length || 5, 3), 10));
             try {
                 const res = await fetch(`${API}/list`);
                 const data = await res.json();
@@ -568,7 +578,12 @@
                 const live = new Set(savedData.filter(savedEnableable).map(x => x.id));
                 [...savedSelected].forEach(id => { if (!live.has(id)) savedSelected.delete(id); });
                 renderSaved();  // clamps savedPage to the available pages itself
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                console.error(e);
+                // Must replace the skeleton, or a failed load shimmers forever.
+                document.getElementById("listBody").innerHTML =
+                    '<tr><td colspan="8" class="text-center text-danger py-3">Failed to load exclusions.</td></tr>';
+            }
         }
 
         function renderSaved() {
@@ -775,6 +790,10 @@
             const market = document.getElementById("oosMarket").value;
             const limit = document.getElementById("oosLimit").value.trim();
             document.getElementById("oosSummary").innerHTML = '<span class="spinner-border spinner-border-sm"></span> scanning OOS list + DMA…';
+            // Show the table being drawn rather than leaving a blank gap under
+            // the summary line (cc1/UI_BLUEPRINT.md "Tables"). 6 columns.
+            document.getElementById("oosBody").innerHTML = skeletonRows(6);
+            document.getElementById("oosTable").style.display = "table";
             try {
                 const res = await fetch(`${API}/oos/scan?market=${market}` + (limit ? `&limit=${encodeURIComponent(limit)}` : ""));
                 const data = await res.json();
@@ -795,6 +814,10 @@
                 renderOos();
             } catch (e) {
                 document.getElementById("oosSummary").textContent = "Scan failed: " + e.message;
+                // Take the skeleton table back down — the summary line carries
+                // the failure, and a shimmering table would contradict it.
+                document.getElementById("oosBody").innerHTML = "";
+                document.getElementById("oosTable").style.display = "none";
             }
         }
 

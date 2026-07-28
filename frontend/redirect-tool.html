@@ -885,9 +885,18 @@
             return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c}; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.4px;">${escapeHtml(method || '')}</span>`;
         }
 
+        // Loading state = skeleton rows, not a "Loading…" row or a spinner
+        // (cc1/UI_BLUEPRINT.md "Tables"). CSS is shared in style.css.
+        function skeletonRows(cols, n = 10) {
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(cols) + '</tr>').repeat(n);
+        }
+
         async function loadRuns() {
             const body = document.getElementById('runsBody');
-            body.innerHTML = '<tr><td colspan="9" class="text-center text-muted p-3">Loading…</td></tr>';
+            // Keeps the table's height across a reload, unlike the single
+            // "Loading…" row this replaces.
+            body.innerHTML = skeletonRows(9, Math.min(Math.max(body.rows.length || 5, 3), 10));
             try {
                 const r = await fetch(`${API}/runs`);
                 if (!r.ok) throw new Error((await r.json()).detail || 'Failed to load runs');

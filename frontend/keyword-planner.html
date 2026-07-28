@@ -27,12 +27,6 @@
         /* URL columns can be long — wrap rather than stretch the table sideways. */
         .tool-table .col-url { white-space: normal; overflow-wrap: anywhere; word-break: break-word; min-width: 260px; }
         .tool-table .col-url a { overflow-wrap: anywhere; }
-        /* Loading state = skeleton rows, not a spinner (layout stays stable) */
-        .skel-row td { vertical-align: middle; }
-        .skel-bar { display: block; height: 1.45rem; border-radius: 4px;
-            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
-            background-size: 400% 100%; animation: skelShimmer 1.4s ease infinite; }
-        @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
         .volume-high { color: #198754; font-weight: bold; }
         .volume-medium { color: #0d6efd; }
         .volume-low { color: #636e72; }

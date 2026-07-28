@@ -162,16 +162,6 @@
 
         /* Loading skeleton rows — keep the Campaigns table at full height while
            campaigns load so the layout below doesn't shift on first paint. */
-        /* Bar height ≈ the .btn-action height (0.8rem text + 0.5rem padding) so
-           a skeleton row is the same height as a loaded row → no grow on load. */
-        .skel-row td { vertical-align: middle; }
-        .skel-bar {
-            display: block; height: 1.45rem; border-radius: 4px;
-            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
-            background-size: 400% 100%;
-            animation: skelShimmer 1.4s ease infinite;
-        }
-        @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
     </style>
 </head>
 <body>
@@ -509,6 +499,13 @@
         let runResultFilterText = '';
         let runResultActiveTile = null;  // null | 'created' | 'paused' | 'skipped' | 'error'
         let runResultSort = { col: 'action', dir: 'asc' };
+
+        // Loading state = skeleton rows, not a spinner (cc1/UI_BLUEPRINT.md
+        // "Tables"). CSS lives in style.css; only the column count is per-table.
+        function skeletonRows(cols, n = 10) {
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(cols) + '</tr>').repeat(n);
+        }
 
         window.addEventListener('DOMContentLoaded', () => {
             if (window.flatpickr) {
@@ -1611,6 +1608,8 @@
 
         async function loadLLHistory() {
             const tbody = document.getElementById('llHistoryBody');
+            // Loading state = skeleton rows (cc1/UI_BLUEPRINT.md); 5 columns here.
+            tbody.innerHTML = skeletonRows(5, Math.min(Math.max(llHistory.length || 5, 3), 10));
             try {
                 const res = await fetch(`${API_BASE}/api/gsd-campaigns/ll/history?limit=500`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);

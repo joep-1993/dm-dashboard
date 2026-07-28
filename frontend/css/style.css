@@ -323,6 +323,26 @@ body {
     color: #6b5900 !important;
 }
 
+/* Table loading state = shimmering skeleton rows, never a spinner (see
+   cc1/UI_BLUEPRINT.md "Tables"). The point is layout stability: a skeleton row
+   is the same height as a loaded row, so the table neither collapses to nothing
+   nor grows when data lands. Shared from here so all tools shimmer identically;
+   each page still needs its own skeletonRows(cols, n) helper because the column
+   count differs and there is no shared JS bundle. */
+.skel-row td { vertical-align: middle; }
+.skel-bar {
+    display: block;
+    height: 1.45rem;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
+    background-size: 400% 100%;
+    animation: skelShimmer 1.4s ease infinite;
+}
+@keyframes skelShimmer {
+    0%   { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
 /* Small info tiles — GSD Budgets' .stat-card look at a smaller scale, for
    secondary counts that sit inside a card rather than heading the page.
    Shared because Kopteksten and FAQ's both use it in Content Publishing. */

@@ -27,12 +27,6 @@
         .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
         .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
         .tool-table .col-center { text-align: center; }
-        /* Loading state = skeleton rows, not a spinner (layout stays stable) */
-        .skel-row td { vertical-align: middle; }
-        .skel-bar { display: block; height: 1.45rem; border-radius: 4px;
-            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
-            background-size: 400% 100%; animation: skelShimmer 1.4s ease infinite; }
-        @keyframes skelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
         /* 'cancelled' is ORANGE, not Bootstrap's yellow --bs-warning:
            .status-cancelled = the outline badge in the Recent runs Status column,
            .badge-cancelled  = the filled run badge above the progress bar. */

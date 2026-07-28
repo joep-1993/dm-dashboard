@@ -270,8 +270,16 @@
             }
             params.append('countries', countries.join(','));
 
-            document.getElementById('loadingArea').style.display = 'block';
-            document.getElementById('resultsSection').style.display = 'none';
+            // Loading state = the results table drawn as skeleton rows, not a
+            // spinner over a hidden table (cc1/UI_BLUEPRINT.md "Tables").
+            // lastMode has to move up here: buildHeader() reads it via
+            // leadingColumns(), and it used to be assigned only after the fetch.
+            lastMode = mode;
+            buildHeader();
+            document.getElementById('resultsBody').innerHTML =
+                skeletonRows(document.getElementById('resultsHead').querySelectorAll('th').length);
+            document.getElementById('resultsSection').style.display = 'block';
+            document.getElementById('loadingArea').style.display = 'none';
             document.getElementById('errorArea').style.display = 'none';
             document.getElementById('searchBtn').disabled = true;
 
@@ -294,10 +302,21 @@
             } catch (err) {
                 document.getElementById('errorArea').textContent = `Error: ${err.message}`;
                 document.getElementById('errorArea').style.display = 'block';
+                // Hide the skeleton table again — the error banner is the state
+                // now, and a shimmering table next to it would claim otherwise.
+                document.getElementById('resultsSection').style.display = 'none';
+                document.getElementById('resultsBody').innerHTML = '';
             } finally {
                 document.getElementById('loadingArea').style.display = 'none';
                 document.getElementById('searchBtn').disabled = false;
             }
+        }
+
+        // Loading state = skeleton rows, not a spinner (cc1/UI_BLUEPRINT.md
+        // "Tables"). CSS is shared in style.css.
+        function skeletonRows(cols, n = 10) {
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
         }
 
         function buildHeader() {

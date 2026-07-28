@@ -240,8 +240,15 @@
             lastInputItems = items;
             lastInputCount = items.length;
 
-            document.getElementById('loadingArea').style.display = 'block';
-            document.getElementById('resultsSection').style.display = 'none';
+            // Loading state = the results table drawn as skeleton rows, not a
+            // spinner over a hidden table (cc1/UI_BLUEPRINT.md "Tables"). The
+            // header can be built before the fetch because currentColumns() only
+            // depends on `lastMode`, which is set just above.
+            buildHeader();
+            document.getElementById('resultsBody').innerHTML =
+                skeletonRows(currentColumns().length);
+            document.getElementById('resultsSection').style.display = 'block';
+            document.getElementById('loadingArea').style.display = 'none';
             document.getElementById('errorArea').style.display = 'none';
             document.getElementById('searchBtn').disabled = true;
 
@@ -285,10 +292,21 @@
             } catch (err) {
                 document.getElementById('errorArea').textContent = `Error: ${err.message}`;
                 document.getElementById('errorArea').style.display = 'block';
+                // Hide the skeleton table again — the error banner is the state
+                // now, and a shimmering table next to it would claim otherwise.
+                document.getElementById('resultsSection').style.display = 'none';
+                document.getElementById('resultsBody').innerHTML = '';
             } finally {
                 document.getElementById('loadingArea').style.display = 'none';
                 document.getElementById('searchBtn').disabled = false;
             }
+        }
+
+        // Loading state = skeleton rows, not a spinner (cc1/UI_BLUEPRINT.md
+        // "Tables"). CSS is shared in style.css.
+        function skeletonRows(cols, n = 10) {
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
         }
 
         function buildHeader() {

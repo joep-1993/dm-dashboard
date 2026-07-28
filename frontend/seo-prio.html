@@ -444,10 +444,18 @@ function statusBadgeClass(status) {
     );
 }
 
+// Loading state = skeleton rows, not a spinner (cc1/UI_BLUEPRINT.md "Tables").
+// CSS is shared in style.css; only the column count is per-table.
+function skeletonRows(cols, n = 10) {
+    const cell = '<td><span class="skel-bar"></span></td>';
+    return ('<tr class="skel-row">' + cell.repeat(cols) + '</tr>').repeat(n);
+}
+
 async function loadRuns() {
+    const body = document.getElementById('runsBody');
+    body.innerHTML = skeletonRows(6, Math.min(Math.max(body.rows.length || 5, 3), 10));
     const r = await fetch('/api/seo-prio/runs');
     const data = await r.json();
-    const body = document.getElementById('runsBody');
     body.innerHTML = '';
     if (!data.runs.length) {
         body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No runs yet.</td></tr>';
@@ -623,6 +631,7 @@ async function loadResults(runId) {
     document.getElementById('resultsRunId').textContent = runId;
     document.getElementById('resultsCount').textContent = 'loading…';
     card.classList.remove('d-none');
+    document.getElementById('resultsBody').innerHTML = skeletonRows(10);
     try {
         const r = await fetch(`/api/seo-prio/results/${runId}?limit=0`);
         if (!r.ok) throw new Error('results');
@@ -635,6 +644,9 @@ async function loadResults(runId) {
         renderResultsPage();
     } catch (e) {
         document.getElementById('resultsCount').textContent = 'failed to load';
+        // Must replace the skeleton, or a failed load shimmers forever.
+        document.getElementById('resultsBody').innerHTML =
+            '<tr><td colspan="10" class="text-center text-danger py-3">Failed to load results.</td></tr>';
         console.error(e);
     }
 }

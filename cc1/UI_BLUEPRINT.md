@@ -86,25 +86,45 @@ other tool uses the grey default. New tools follow the grey default.
   shimmering placeholder rows so it reads as "the table is being drawn". The point
   is **layout stability**: a skeleton row is the same height as a loaded row, so
   the table neither collapses to nothing nor grows when data lands, and on a
-  *reload* it holds the current height instead of jumping. Copy from
-  `gsd-campaigns.html` (origin) or `seo-titles.html` — CSS is identical, only the
-  column count differs:
-  ```css
-  .skel-row td { vertical-align: middle; }
-  .skel-bar { display:block; height:1.45rem; border-radius:4px;
-      background: linear-gradient(90deg,#ececec 25%,#f6f6f6 37%,#ececec 63%);
-      background-size:400% 100%; animation: skelShimmer 1.4s ease infinite; }
-  @keyframes skelShimmer { 0%{background-position:100% 50%} 100%{background-position:0 50%} }
-  ```
+  *reload* it holds the current height instead of jumping.
+
+  **The CSS is shared in `css/style.css`** (`.skel-row` / `.skel-bar` /
+  `@keyframes skelShimmer`) — do **not** re-declare it per page; it was duplicated
+  across seven pages and got consolidated. Only the JS helper is per-page, because
+  the column count differs and there is no shared JS bundle:
   ```js
-  function skeletonRows(n = 10) {            // n = rows to draw
+  function skeletonRows(cols, n = 10) {
       const cell = '<td><span class="skel-bar"></span></td>';
-      return ('<tr class="skel-row">' + cell.repeat(COLS) + '</tr>').repeat(n);
+      return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
   }
   ```
-  Set `COLS` to the table's real column count (checkbox and action columns
-  included) or the shimmer won't line up with the header. Cap the count at the
-  page size, and at ~10 when "Show all" is selected — don't draw 5,000 skeletons.
+  `cols` must be the table's real column count (checkbox and action columns
+  included) or the shimmer won't line up with the header. Where the header row is
+  built at runtime, read it back — `head.querySelectorAll('th').length` — with the
+  column-set length as the first-load fallback (see `seo-stats.html`,
+  `shop-campaigns.html`). Cap the row count at the page size, and at ~10 when
+  "Show all" is selected — don't draw 5,000 skeletons.
+
+  Three rules the sweep in 2026-07-28 turned up the hard way:
+  - **Every failure path must replace the skeleton.** A `catch` that only logs, or
+    only writes to a summary line elsewhere, leaves the table shimmering forever —
+    which reads as "still loading" for a request that already died.
+  - **Skeleton where the fetch starts, not where the render happens.** If table B
+    is filled by a function that only runs *after* table A's fetch resolves (SEO
+    stats: `loadDeltas()` runs at the end of `load()`), B sits blank for that whole
+    first request unless you also draw its skeleton up front.
+  - **A hidden table + spinner becomes a visible table + skeleton.** GSD Check and
+    MC ID Finder used to hide the results card and show a `#loadingArea` spinner;
+    they now build the header before the fetch and show the card with skeleton
+    rows. That requires any state the header depends on to be assigned *before* the
+    fetch (MC ID Finder's `lastMode` had to move up).
+
+  **When a progress bar is right instead.** Skeletons say "data is arriving now",
+  so they only fit a single fetch that returns promptly. Long multi-item runs that
+  already report real progress keep their bar — URL Checker, URL Validator, Index
+  Checker, Redirect Checker, Redirect Generator, Canonicals, Thema Ads, and Keyword
+  Planner's two Google-Ads tables. Those tables are also hidden until the run ends,
+  so there is nothing on screen to shimmer.
 - **Timestamp columns: convert to Europe/Amsterdam — the DB values are UTC.** The shared
   Postgres runs `TimeZone=Etc/UTC` and our `created_at`/`applied_at` columns are
   `TIMESTAMP` (no tz), so `now()` stores UTC and the backend's `.isoformat()` emits it

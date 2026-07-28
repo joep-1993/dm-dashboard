@@ -1125,7 +1125,15 @@
 
         async function loadDeltas(force) {
             const body = document.getElementById('standupBody');
+            // The Top-categories tables live in their own card, which the
+            // standup card's is-loading overlay does not cover — so they need
+            // their own skeleton. The overlay stays for the standup section
+            // because it also greys the tiles, which skeleton rows cannot.
             if (body) body.classList.add('is-loading');
+            document.getElementById('mainCatBody').innerHTML =
+                skeletonRows(catColumns(false).length);
+            document.getElementById('subCatBody').innerHTML =
+                skeletonRows(catColumns(true).length);
             try {
                 const params = new URLSearchParams();
                 const ref = document.getElementById('refDate').value;
@@ -1139,9 +1147,30 @@
             } catch (e) {
                 document.getElementById('standupTiles').innerHTML =
                     `<span class="text-danger">Failed to load deltas: ${e.message}</span>`;
+                // Must replace the skeletons, or a failed load shimmers forever.
+                ['mainCatBody', 'subCatBody'].forEach(id => {
+                    document.getElementById(id).innerHTML =
+                        '<tr><td class="text-center text-danger py-3">Failed to load.</td></tr>';
+                });
             } finally {
                 if (body) body.classList.remove('is-loading');
             }
+        }
+
+        // Loading state = skeleton rows, not a spinner (cc1/UI_BLUEPRINT.md
+        // "Tables"). CSS is shared in style.css; only the column count is
+        // per-table, and on this page the header row is built at runtime — so
+        // count the <th> that are actually rendered rather than hard-coding it.
+        function skeletonRows(cols, n = 10) {
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
+        }
+        function skeletonInto(bodyId, headId, n = 10) {
+            const body = document.getElementById(bodyId);
+            const head = document.getElementById(headId);
+            if (!body) return;
+            const cols = head ? head.querySelectorAll('th').length : 0;
+            body.innerHTML = skeletonRows(cols, n);
         }
 
         async function load(force) {
@@ -1149,6 +1178,16 @@
             const end = document.getElementById('endDate').value;
             const btn = document.getElementById('loadBtn');
             btn.disabled = true; btn.textContent = 'Loading…';
+            // Per-day head is drawn by initTable() after the fetch; on a first
+            // load there is no header yet, so fall back to the current column set.
+            const perDayCols = document.getElementById('tableHead').querySelectorAll('th').length
+                || (2 + TABLE_COLS.length + 1);
+            document.getElementById('tableBody').innerHTML = skeletonRows(perDayCols);
+            // The Top-categories tables are filled by loadDeltas(), which only
+            // starts after the /daily fetch below resolves — so skeleton them
+            // here as well, or they sit blank for the whole first request.
+            document.getElementById('mainCatBody').innerHTML = skeletonRows(catColumns(false).length);
+            document.getElementById('subCatBody').innerHTML = skeletonRows(catColumns(true).length);
             try {
                 const params = new URLSearchParams();
                 if (start) params.set('start_date', start);
@@ -1169,6 +1208,9 @@
                 loadTileDeltas();      // tile deltas vs the equal-length prior period
             } catch (e) {
                 document.getElementById('metaLine').innerHTML = `<span class="text-danger">Failed to load: ${e.message}</span>`;
+                // Must replace the skeleton, or a failed load shimmers forever.
+                document.getElementById('tableBody').innerHTML =
+                    `<tr><td colspan="${perDayCols}" class="text-center text-danger py-3">Failed to load.</td></tr>`;
             } finally {
                 btn.disabled = false; btn.textContent = 'Load';
             }

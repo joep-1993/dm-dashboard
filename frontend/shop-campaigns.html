@@ -627,11 +627,27 @@
             }
         }
 
+        // Loading state = skeleton rows, not a spinner (cc1/UI_BLUEPRINT.md
+        // "Tables"). CSS is shared in style.css; the column counts here come
+        // from the runtime column sets, since the headers are built in JS.
+        function skeletonRows(cols, n = 10) {
+            const cell = '<td><span class="skel-bar"></span></td>';
+            return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
+        }
+
         async function load(force) {
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
             const btn = document.getElementById('loadBtn');
             btn.disabled = true; btn.textContent = 'Loading…';
+            // Per-day head is drawn by initTable() after the fetch, so on a
+            // first load count the column set instead of the (absent) <th>.
+            const perDayCols = document.getElementById('tableHead').querySelectorAll('th').length
+                || (2 + ORDER.length);
+            document.getElementById('tableBody').innerHTML = skeletonRows(perDayCols);
+            Object.values(TOP_TABLES).forEach(t => {
+                document.getElementById(t.bodyId).innerHTML = skeletonRows(t.columns.length);
+            });
             try {
                 const params = new URLSearchParams();
                 if (start) params.set('start_date', start);
@@ -654,6 +670,12 @@
                 }
             } catch (e) {
                 document.getElementById('metaLine').innerHTML = `<span class="text-danger">Failed to load: ${e.message}</span>`;
+                // Must replace the skeletons, or a failed load shimmers forever.
+                const fail = cols => `<tr><td colspan="${cols}" class="text-center text-danger py-3">Failed to load.</td></tr>`;
+                document.getElementById('tableBody').innerHTML = fail(perDayCols);
+                Object.values(TOP_TABLES).forEach(t => {
+                    document.getElementById(t.bodyId).innerHTML = fail(t.columns.length);
+                });
             } finally {
                 btn.disabled = false; btn.textContent = 'Load';
             }

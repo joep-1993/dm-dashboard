@@ -595,7 +595,17 @@
     // --- History ---
     let historyData = [];
 
+    // Loading state = skeleton rows, not a spinner (cc1/UI_BLUEPRINT.md "Tables").
+    // CSS lives in style.css; only the column count is per-table.
+    function skeletonRows(cols, n = 10) {
+        const cell = '<td><span class="skel-bar"></span></td>';
+        return ('<tr class="skel-row">' + cell.repeat(cols) + '</tr>').repeat(n);
+    }
+
     async function loadHistory() {
+        const skelTarget = document.getElementById('historyBody');
+        // Hold the current height on a reload instead of collapsing to nothing.
+        skelTarget.innerHTML = skeletonRows(6, Math.min(Math.max(historyData.length || 5, 3), 10));
         try {
             const r = await fetch(`${API}/api/dma-plus/history`);
             historyData = await r.json();
@@ -624,7 +634,12 @@
                     </td>
                 </tr>`;
             }).join('');
-        } catch (e) { console.error('History error:', e); }
+        } catch (e) {
+            console.error('History error:', e);
+            // Must replace the skeleton, or a failed load shimmers forever.
+            skelTarget.innerHTML =
+                '<tr><td colspan="6" class="text-center text-danger py-3">Failed to load history.</td></tr>';
+        }
     }
 
     async function clearHistory() {
