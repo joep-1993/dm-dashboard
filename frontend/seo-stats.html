@@ -141,6 +141,16 @@
         .seg-toggle .btn { border: 1px solid #5e4a90; color: #5e4a90; background: transparent; }
         .seg-toggle .btn:hover { background: #5e4a90; color: #fff; }
         .seg-toggle .btn-check:checked + .btn { background: #5e4a90; color: #fff; border-color: #5e4a90; }
+        /* "Update Excel" module (the Performance Standup tool, moved in here).
+           ps- prefixed so nothing collides with this page's own .stat-card. */
+        .ps-result-card { border-left: 4px solid #27ae60; }
+        .ps-result-card.error { border-left-color: #e74c3c; }
+        .ps-result-card.warning { border-left-color: #f39c12; }
+        .ps-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+        .ps-stat { background: #f7f5fb; padding: 0.6rem 0.8rem; border-radius: 8px; }
+        .ps-stat .label { font-size: 0.75rem; color: #636e72; text-transform: uppercase; letter-spacing: 0.05em; }
+        .ps-stat .value { font-size: 1.2rem; font-weight: 600; color: #3a3a3a; }
+        ul.ps-warn-list { font-size: 0.85rem; max-height: 200px; overflow-y: auto; }
     </style>
 </head>
 <body>
@@ -189,7 +199,6 @@
                         <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
                         <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
-                        <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg> Performance Standup</a>
                         <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Redshift Upload</a>
                         <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> SEO Priority</a>
                         <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/><path d="M4 22h12"/></svg> SEO Rulings</a>
@@ -330,6 +339,41 @@
                     <span class="page-info" id="pageInfo">-</span>
                     <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Update Excel — the Performance Standup tool, moved in here from its
+             own page (suggestions.txt item 6). Every id is ps-prefixed because
+             this page already owns #startDate / #endDate for the chart range. -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Update Excel</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    The daterange controls which dates get filled on the per-day tabs ("SEO only" cols D-M and "GSaaS" col C).
+                    The comparison sheets always compare the latest date in range against that day a week earlier
+                    (visits: end vs end-7d; omzet: end-1 vs end-8d).
+                </p>
+                <div class="d-flex flex-wrap gap-3 align-items-end">
+                    <div>
+                        <label for="psStartDate" class="form-label small mb-1">Start date</label>
+                        <input type="date" class="form-control form-control-sm" id="psStartDate" style="width: 160px;">
+                    </div>
+                    <div>
+                        <label for="psEndDate" class="form-label small mb-1">End date</label>
+                        <input type="date" class="form-control form-control-sm" id="psEndDate" style="width: 160px;">
+                    </div>
+                    <div class="ms-auto">
+                        <button id="psRunBtn" class="btn btn-run">Run</button>
+                    </div>
+                </div>
+                <div id="psDatePreview" class="text-muted small mt-3"></div>
+                <div id="psLoadingArea" style="display:none;" class="text-center py-4">
+                    <div class="spinner-border" style="color:#CC5500;" role="status"></div>
+                    <div class="mt-2 text-muted">Querying Redshift and writing Excel…</div>
+                </div>
+                <div id="psResultArea" style="display:none;" class="mt-3"></div>
             </div>
         </div>
 
@@ -1318,6 +1362,138 @@
             setPreset(7);
         })();
     </script>
+
+    <!-- "Update Excel" module — the Performance Standup tool, moved in from
+         performance-standup.html (suggestions.txt item 6). Kept in its own IIFE,
+         exactly as it was on that page, so it shares no state with the stats
+         page above it; only the element ids gained a ps- prefix. -->
+    <script>
+    (function() {
+        const startEl = document.getElementById('psStartDate');
+        const endEl = document.getElementById('psEndDate');
+        const runBtn = document.getElementById('psRunBtn');
+        const preview = document.getElementById('psDatePreview');
+        const loading = document.getElementById('psLoadingArea');
+        const result = document.getElementById('psResultArea');
+
+        // Default: end = yesterday, start = 7 days ago
+        const today = new Date();
+        const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+        const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7);
+        endEl.value = yesterday.toISOString().slice(0, 10);
+        startEl.value = weekAgo.toISOString().slice(0, 10);
+
+        // flatpickr, same purple theme as the chart range above (the CSS is
+        // already on this page). Runs after the defaults are set, because it
+        // adopts the input's current value and swaps the field to type=text.
+        if (window.flatpickr) {
+            const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
+                             disableMobile: true, locale: { firstDayOfWeek: 1 } };
+            flatpickr(startEl, fpOpts);
+            flatpickr(endEl, fpOpts);
+        }
+
+        function addDays(iso, d) {
+            const dt = new Date(iso);
+            dt.setDate(dt.getDate() + d);
+            return dt.toISOString().slice(0, 10);
+        }
+
+        function updatePreview() {
+            const e = endEl.value;
+            if (!e) { preview.textContent = ''; return; }
+            preview.innerHTML =
+                `Comparison sheets will compare <b>${addDays(e, -7)}</b> vs <b>${e}</b> (visits) ` +
+                `and <b>${addDays(e, -8)}</b> vs <b>${addDays(e, -1)}</b> (omzet).`;
+        }
+        startEl.addEventListener('change', updatePreview);
+        endEl.addEventListener('change', updatePreview);
+        updatePreview();
+
+        runBtn.addEventListener('click', async () => {
+            if (!startEl.value || !endEl.value) {
+                alert('Please pick both dates.');
+                return;
+            }
+            if (startEl.value > endEl.value) {
+                alert('Start date must be on or before end date.');
+                return;
+            }
+            runBtn.disabled = true;
+            loading.style.display = '';
+            result.style.display = 'none';
+            try {
+                const r = await fetch('/api/performance-standup/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({start_date: startEl.value, end_date: endEl.value}),
+                });
+                const data = await r.json();
+                if (!r.ok) {
+                    renderError(data.detail || 'Unknown error');
+                } else {
+                    renderSuccess(data);
+                }
+            } catch (e) {
+                renderError(e.message);
+            } finally {
+                loading.style.display = 'none';
+                runBtn.disabled = false;
+            }
+        });
+
+        function renderError(msg) {
+            result.innerHTML =
+                `<div class="card ps-result-card error mb-0">
+                    <div class="card-body">
+                        <h6 class="mb-2">Failed</h6>
+                        <pre class="mb-0" style="white-space:pre-wrap;">${escapeHtml(msg)}</pre>
+                    </div>
+                </div>`;
+            result.style.display = '';
+        }
+
+        function renderSuccess(d) {
+            const w = d.warnings || [];
+            const cls = w.length ? 'warning' : '';
+            const rw = d.rows_written;
+            const cmp = d.comparison;
+            const warnHtml = w.length
+                ? `<h6 class="mt-3 mb-2 text-warning">Warnings</h6>
+                   <ul class="ps-warn-list">${w.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`
+                : '';
+            result.innerHTML =
+                `<div class="card ps-result-card ${cls} mb-0">
+                    <div class="card-body">
+                        <h6 class="mb-3">Done</h6>
+                        <p class="small text-muted mb-3">
+                            Range ${escapeHtml(d.date_range.start)} → ${escapeHtml(d.date_range.end)}.
+                            Comparison visits: ${escapeHtml(cmp.visits_p1)} vs ${escapeHtml(cmp.visits_p2)}.
+                            Comparison omzet: ${escapeHtml(cmp.omzet_p1)} vs ${escapeHtml(cmp.omzet_p2)}.
+                        </p>
+                        <div class="ps-stat-grid">
+                            <div class="ps-stat"><div class="label">Days in range</div><div class="value">${rw.seo_dates_in_range}</div></div>
+                            <div class="ps-stat"><div class="label">SEO days found</div><div class="value">${rw.seo_dates_found_in_data}</div></div>
+                            <div class="ps-stat"><div class="label">DMA organic days</div><div class="value">${rw.dma_dates_found_in_data}</div></div>
+                            <div class="ps-stat"><div class="label">GSAAS days</div><div class="value">${rw.gsaas_dates_found_in_data}</div></div>
+                            <div class="ps-stat"><div class="label">Bidcat visit rows</div><div class="value">${rw.bidcat_visits}</div></div>
+                            <div class="ps-stat"><div class="label">Bidcat omzet rows</div><div class="value">${rw.bidcat_omzet}</div></div>
+                            <div class="ps-stat"><div class="label">Maincat visit rows</div><div class="value">${rw.maincat_visits}</div></div>
+                        </div>
+                        ${warnHtml}
+                    </div>
+                </div>`;
+            result.style.display = '';
+        }
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+            }[c]));
+        }
+    })();
+    </script>
+
     <footer class="text-center py-4">
         <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
     </footer>
