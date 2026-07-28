@@ -9,13 +9,15 @@ _Active tasks for immediate work_
 Source of truth is `/home/joepvanschagen/projects/dm-dashboard/suggestions.txt`
 (untracked, now 49 lines / 42 bullets — **item 49 was added after the first
 batch**). Item numbers below are that file's LINE numbers, which is the
-vocabulary used in the commits. **36 of 42 done**, in `569288a` (23 items),
-`10f4152` (8 + 14), `8be2ca1` (11, 15b, 18b, 19, 20b, 25, 49), `45a1339`
-(33, 39, 40) and `17916fe` (9).
+vocabulary used in the commits. **41 of 42 done — only 47 is left**, in `569288a`
+(23 items), `10f4152` (8 + 14), `8be2ca1` (11, 15b, 18b, 19, 20b, 25, 49),
+`45a1339` (33, 39, 40), `17916fe` (9), `57ccbb7` (7), `b593ca2` (6), `2493689`
+(1) and `d6b8c91` (2). Item 48 shipped as a dry-run script by Joep's choice.
 
 ### Done
-3, 4, 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-29, 30, 31, 32, 33, 39, 40, 41, 42, 43, 44, 45, 46, 49, and 9.
+1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+23, 24, 25, 26, 29, 30, 31, 32, 33, 39, 40, 41, 42, 43, 44, 45, 46, 48 (dry run),
+and 49.
 
 Notes worth keeping from the first batch: every button touched moved to the
 canonical classes in `style.css` (which also brings the grey-outline disabled
@@ -54,29 +56,78 @@ Notes from the 2026-07-28 tables/features batch:
   from `DOMContentLoaded` fixes it. Worth checking for elsewhere: any page whose
   init calls run at the top of a script block that later declares `let`/`const`.
 
-### Not started — features (one pass each)
-- **1** SEO Priority: maincat + deepest-cat dropdowns, deepest filtered by
-  maincat, both type-ahead
-- **2** Merge URL Checker into URL Validator as a bottom module "Check live URL's",
-  and make the Validator's output module look like the Checker's
-- **6** Move Performance Standup into SEO Stats (between Per-day overview and
-  Performance standup) and rename "Run Settings" → "Update Excel". Note SEO
-  Stats already *has* a "Performance standup" card — this is embedding the
-  separate `performance-standup.html` tool above it, not renaming that card.
-- **7** Skeleton table "drawing" per UI_BLUEPRINT, everywhere a table loads
-  (cross-cutting; audit all tools). Five tables got it in the 28 Jul batch
-  (the four history tables + Keyword Redirect Results) — the rest is the sweep.
+### Features done 2026-07-28 (second half of the session)
+- **7** — skeleton CSS moved into `style.css` (it had been pasted into seven
+  pages); added to every table that is on screen and filled by a single fetch.
+  **Left on a progress bar on purpose:** long multi-item runs (URL
+  Checker/Validator, Index Checker, Redirect Checker/Generator, Canonicals,
+  Thema Ads, Keyword Planner's two Google-Ads tables) — a skeleton claims data is
+  arriving *now*, and those tables are hidden until the run ends anyway.
+  Three traps it surfaced: several `catch` blocks never replaced the skeleton (so
+  a failed load shimmered forever); a table filled by a function that runs after
+  *another* table's fetch needs its own up-front skeleton (SEO stats
+  `loadDeltas`); and runtime-built headers mean reading the column count back off
+  the rendered `<th>`.
+- **6** — the module from `performance-standup.html` now sits in SEO stats between
+  Per-day overview and the (different, pre-existing) "Performance standup" card,
+  renamed "Update Excel". **Every id is `ps`-prefixed** — the page already owns
+  `#startDate`/`#endDate` for the chart range, so an unprefixed paste would have
+  had the two fighting over the same inputs. Own IIFE, `ps-`namespaced CSS.
+  Standalone page unlinked from 32 navbars + its dashboard tile, still works by URL.
+- **1** — maincat + deepest-cat type-ahead (`<datalist>`, no JS library) on the SEO
+  Priority run form, deepest filtered by maincat. New
+  `GET /api/seo-prio/categories`. **The list must come from Redshift's
+  `dv.main_cat_name` / `dv.deepest_subcat_name`, not the taxonomy API** — the
+  labels don't always agree and a mismatch silently returns zero rows minutes into
+  a run. That DISTINCT costs ~23s for 3,845 pairs / 31 maincats, so it runs on a
+  daemon thread (~40ms response, `loading:true`, frontend polls) with a 24h
+  in-process cache + `backend/data/seo_prio_categories.json` so restarts are warm.
+  A scope that matches nothing now ends as an **error naming the scope**, not a
+  silent 0-row run.
+- **2** — URL Checker became the "Check live URL's" module at the bottom of URL
+  Validator, and the Validator's output is restyled to match the Checker's (card,
+  green header with the actions, badge summary, scrollable fixed-column table).
+  **The two collided on nearly every id** (`urlInput`, `fileInput`,
+  `progressCard`, `progressBar`, `resultsBody`, `resultsCard`) and on `results` /
+  `showResults` / `escapeHtml`, hence `chk`-prefixed ids + its own IIFE + CSS
+  scoped under `#checkModule`. The copyable url cells moved from
+  `onclick="copyToClipboard('…')"` (hand-rolled JS-string escaping over scraped
+  text) to tbody event delegation reading `data-copy`. Fixed in passing:
+  `loadCache()` wrote to `#cacheContent`, which is not in the markup — it threw on
+  every page load and the `catch` threw the same way, so it was unhandled.
+
+### Not started — features
 - **47** R-Finder: add filter ROWS under URL-filters; each row is its own OR set
   producing its own result set. Needs a backend change — `fetch_r_urls(filters)`
   currently takes a flat list and ANDs it, so it becomes a list-of-lists plus
   per-row result grouping in the UI (and Copy/Download).
 - **48** Top 5 facets per category by visits (all channels) → all combos as SEO
-  title blueprints. **BLOCKED on scope.** `canon_key` sorts facet types, so order
-  does NOT create distinct keys: "all combos of 5" = **31 per category**, not 325.
-  That is ~110k blueprints across all 3,543 categories, ~40k for deepest-only.
-  Recommend top-N categories by visits first — `/page-titles` validates a POST
-  atomically in 5,000-row batches, so one bad row fails 5,000 (see LEARNINGS
-  2026-07-27).
+  title blueprints. **Joep chose DRY RUN (2026-07-28): generate to Excel, push
+  nothing.** Script: `scripts/pagetitles_top5_allchannel_combos.py`.
+  `canon_key` sorts facet types, so order does NOT create distinct keys: "all
+  combos of 5" = **31 per category**, not 325 — verified empirically (the 31
+  combinations and all 325 permutations collapse to the same 31 canon_keys).
+  Not the same as the existing `scripts/pagetitles_topn_combinations.py`, which
+  ranks by **SEO** visits from a stale `/tmp/seo_traffic_rows.pkl`; item 48 wants
+  **all channels**, so the new script queries Redshift with no
+  `marketing_channel` filter and reuses `seo_titles_service.build_blueprint` (the
+  live push logic) rather than the archival script copy.
+  **Dry run of 2026-07-28** (`--from 2025-01-01 --url-limit 400000`, all channels,
+  20250101..20260728) →
+  `Downloads/claude/top5_facet_combos_allchannel_2026-07-28.xlsx`:
+  - 400,000 faceted /c/ urls / 11,198,978 visits → **3,441 categories**
+    (399,847 urls used; 83 unresolvable slug, 70 no facets)
+  - **73,105 blueprint rows — 33,612 NEW, 39,493 already exist**
+  - Not 3,441 × 31 = 106,671, because most categories have fewer than 5 distinct
+    facets in the traffic. So the old "~110k" estimate was the ceiling, and the
+    real ask is **~34k new rows**, not 110k.
+  - Sanity-checked: no duplicate (cat_id, key), titles capped at exactly 200
+    (the MAX_TITLE_LEN trim), longest h1 148.
+  - Sheet 2 `per_category` lists each category's ranked top facets with their
+    visit counts, so the ranking can be checked without reading 73k rows.
+  **Still pending before any push:** `/page-titles` validates a POST atomically in
+  5,000-row batches, so one bad row fails 5,000 (see LEARNINGS 2026-07-27) —
+  narrow with `--max-cats` rather than pushing the full sweep in one go.
 
 ### Where the wandpanelen thread ended (2026-07-28)
 Root cause fixed and pushed (`60dfe78`): category resolution is API-first with
