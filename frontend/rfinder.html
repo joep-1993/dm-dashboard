@@ -12,6 +12,13 @@
         .visits-cell { text-align: right; font-weight: bold; }
         .filter-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
         .filter-row input { flex: 1; }
+        /* Remove-a-filter-row X. Explicit red because style.css themes
+           .btn-outline-danger orange (see cc1/UI_BLUEPRINT.md "Buttons"). */
+        .btn-remove-row {
+            color: #dc3545; border: 1px solid #dc3545; background: transparent;
+            line-height: 1; padding: 0.15rem 0.45rem; font-size: 1rem;
+        }
+        .btn-remove-row:hover, .btn-remove-row:focus { background: #dc3545; color: #fff; }
         .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
         .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
@@ -107,23 +114,13 @@
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label small">URL-filters</label>
-                            <div id="filterContainer">
-                                <div class="row mb-2">
-                                    <div class="col-md-3">
-                                        <input type="text" class="form-control form-control-sm" id="filter1" placeholder="Filter 1">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <input type="text" class="form-control form-control-sm" id="filter2" placeholder="Filter 2">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <input type="text" class="form-control form-control-sm" id="filter3" placeholder="Filter 3">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <input type="text" class="form-control form-control-sm" id="filter4" placeholder="Filter 4">
-                                    </div>
-                                </div>
-                            </div>
+                            <label class="form-label small">URL-filters
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title>Boxes within one row are combined (a URL must contain all of them). Each ROW is searched separately and gets its own result set below, with its own limit — so a broad row can never swallow a narrow row's results.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
+                            </label>
+                            <!-- Rows are built by renderFilterRows(); each row is an
+                                 independent search producing its own result set. -->
+                            <div id="filterContainer"></div>
+                            <button class="btn btn-sm btn-outline-purple mt-1" onclick="addFilterRow()" id="addRowBtn">+ Add filter row</button>
                         </div>
 
                         <div class="d-flex gap-2 justify-content-end">
@@ -194,8 +191,10 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Store results for download
+        // Store results for download. currentResults is the deduplicated union
+        // across rows; currentRows keeps them separated per filter row.
         let currentResults = [];
+        let currentRows = [];
         // Current results as TSV for "Copy for Excel" — was read off the tsvOutput
         // textarea, which no longer exists.
         let lastTsv = '';
@@ -205,21 +204,77 @@
             const today = new Date();
             document.getElementById('endDate').value = today.toISOString().split('T')[0];
             document.getElementById('startDate').value = '2015-01-01';
+            renderFilterRows();
         });
 
         function getDateYYYYMMDD(dateStr) {
             return dateStr.replace(/-/g, '');
         }
 
-        function collectFilters() {
-            const filters = [];
-            for (let i = 1; i <= 4; i++) {
-                const val = document.getElementById(`filter${i}`).value.trim();
-                if (val) {
-                    filters.push(val);
-                }
-            }
-            return filters;
+        // ---- Filter rows -------------------------------------------------------
+        // Each row is 4 boxes ANDed together, and each row is its OWN search with
+        // its own result set. State lives here (not in the DOM) so re-rendering a
+        // row after an add/remove never loses what was typed in the others.
+        const BOXES_PER_ROW = 4;
+        const MAX_ROWS = 4;              // matches the backend's parallel cap
+        let filterRows = [['', '', '', '']];
+
+        function renderFilterRows() {
+            const c = document.getElementById('filterContainer');
+            c.innerHTML = filterRows.map((row, ri) => `
+                <div class="row mb-2 align-items-center g-2">
+                    <div class="col-auto" style="width: 3.2rem;">
+                        <span class="badge" style="background:#5e4a90;">${ri + 1}</span>
+                    </div>
+                    ${row.map((val, bi) => `
+                        <div class="col">
+                            <input type="text" class="form-control form-control-sm"
+                                   data-row="${ri}" data-box="${bi}"
+                                   value="${escapeAttr(val)}"
+                                   placeholder="Filter ${bi + 1}">
+                        </div>`).join('')}
+                    <div class="col-auto" style="width: 3rem;">
+                        ${filterRows.length > 1
+                            ? `<button class="btn btn-sm btn-remove-row" onclick="removeFilterRow(${ri})" title="Remove this row">&times;</button>`
+                            : ''}
+                    </div>
+                </div>`).join('');
+            // Keep state in sync as the user types.
+            c.querySelectorAll('input[data-row]').forEach(inp => {
+                inp.addEventListener('input', () => {
+                    filterRows[+inp.dataset.row][+inp.dataset.box] = inp.value;
+                });
+            });
+            const addBtn = document.getElementById('addRowBtn');
+            addBtn.disabled = filterRows.length >= MAX_ROWS;
+            addBtn.title = addBtn.disabled
+                ? `${MAX_ROWS} rows is the maximum — each row is a full ~17s Redshift scan.`
+                : '';
+        }
+
+        function addFilterRow() {
+            if (filterRows.length >= MAX_ROWS) return;
+            filterRows.push(Array(BOXES_PER_ROW).fill(''));
+            renderFilterRows();
+        }
+
+        function removeFilterRow(ri) {
+            if (filterRows.length <= 1) return;
+            filterRows.splice(ri, 1);
+            renderFilterRows();
+        }
+
+        // Rows with every box empty are dropped: an empty row would re-run the
+        // unfiltered search and just duplicate a sibling row's output.
+        function collectFilterRows() {
+            return filterRows
+                .map(row => row.map(v => v.trim()).filter(Boolean))
+                .filter(row => row.length > 0);
+        }
+
+        function escapeAttr(text) {
+            return String(text == null ? '' : text).replace(/[&<>"']/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         }
 
         async function searchUrls() {
@@ -231,8 +286,12 @@
             resultsContainer.innerHTML = '';
 
             try {
+                const rows = collectFilterRows();
                 const payload = {
-                    filters: collectFilters(),
+                    // filter_rows drives the per-row search; `filters` is still sent
+                    // so a rollback to an older backend keeps the first row working.
+                    filter_rows: rows.length ? rows : [[]],
+                    filters: rows[0] || [],
                     min_visits: parseInt(document.getElementById('minVisits').value) || 0,
                     start_date: getDateYYYYMMDD(document.getElementById('startDate').value),
                     end_date: getDateYYYYMMDD(document.getElementById('endDate').value),
@@ -252,13 +311,18 @@
                 }
 
                 currentResults = data.urls || [];
-                resultCount.textContent = `${data.total} URLs`;
+                // data.rows is absent on an older backend — fall back to one group.
+                currentRows = data.rows || [{
+                    index: 0, filters: rows[0] || [],
+                    total: currentResults.length, urls: currentResults, error: null,
+                }];
 
-                if (currentResults.length === 0) {
-                    resultsContainer.innerHTML = '<p class="text-muted text-center">No URLs found matching the filters.</p>';
-                } else {
-                    renderResults(currentResults);
-                }
+                const nRows = currentRows.length;
+                resultCount.textContent = nRows > 1
+                    ? `${data.total} URLs · ${nRows} rows`
+                    : `${data.total} URLs`;
+
+                renderRowResults(currentRows);
 
             } catch (error) {
                 resultsContainer.innerHTML = `<div class="alert alert-danger">${escapeHtml(error.message)}</div>`;
@@ -267,18 +331,10 @@
             }
         }
 
-        function renderResults(results) {
-            const container = document.getElementById('resultsContainer');
+        const toRelativeUrl = (url) => String(url).replace(/^https?:\/\/[^\/]+/, '');
 
-            // Calculate total visits
-            const totalVisits = results.reduce((sum, r) => sum + (r.visits || 0), 0);
-
-            // Create tab-separated text for Excel (tabs = columns) with relative URLs
-            const toRelativeUrl = (url) => url.replace(/^https?:\/\/[^\/]+/, '');
-            lastTsv = 'url\tvisits\n' + results.map(r => `${toRelativeUrl(r.url)}\t${r.visits}`).join('\n');
-
-            container.innerHTML = `
-                <p class="text-muted small mb-2">Total visits: <strong>${totalVisits.toLocaleString()}</strong></p>
+        function resultsTableHtml(results) {
+            return `
                 <div class="results-table">
                     <table class="table table-sm table-striped table-hover">
                         <thead class="sticky-top bg-white">
@@ -291,15 +347,62 @@
                             ${results.map(r => `
                                 <tr>
                                     <td class="url-cell">
-                                        <a href="${r.url.startsWith('http') ? r.url : 'https://www.beslist.nl' + r.url}" target="_blank" class="text-decoration-none">${escapeHtml(r.url)}</a>
+                                        <a href="${r.url.startsWith('http') ? escapeAttr(r.url) : 'https://www.beslist.nl' + escapeAttr(r.url)}" target="_blank" class="text-decoration-none">${escapeHtml(r.url)}</a>
                                     </td>
                                     <td class="visits-cell">${(r.visits || 0).toLocaleString()}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
                     </table>
-                </div>
-            `;
+                </div>`;
+        }
+
+        // One section per filter row. A single row renders exactly as before (no
+        // header clutter for the common case).
+        function renderRowResults(rows) {
+            const container = document.getElementById('resultsContainer');
+            const single = rows.length === 1;
+
+            // Copy for Excel spans every row; the `row` column is what tells them
+            // apart once pasted, so it is only added when there IS more than one.
+            const header = single ? 'url\tvisits' : 'row\tfilters\turl\tvisits';
+            const lines = [header];
+            rows.forEach(r => {
+                const label = (r.filters || []).join(' + ') || '(no filter)';
+                (r.urls || []).forEach(u => {
+                    lines.push(single
+                        ? `${toRelativeUrl(u.url)}\t${u.visits}`
+                        : `${r.index + 1}\t${label}\t${toRelativeUrl(u.url)}\t${u.visits}`);
+                });
+            });
+            lastTsv = lines.join('\n');
+
+            if (rows.every(r => !(r.urls || []).length && !r.error)) {
+                container.innerHTML = '<p class="text-muted text-center">No URLs found matching the filters.</p>';
+                return;
+            }
+
+            container.innerHTML = rows.map(r => {
+                const label = (r.filters || []).join(' + ') || '(no filter — every /r/ URL)';
+                const visits = (r.urls || []).reduce((s, u) => s + (u.visits || 0), 0);
+                const head = single ? '' : `
+                    <div class="d-flex align-items-center gap-2 mb-2 ${r.index ? 'mt-4' : ''}">
+                        <span class="badge" style="background:#5e4a90;">Row ${r.index + 1}</span>
+                        <code class="small">${escapeHtml(label)}</code>
+                        <span class="text-muted small ms-auto">
+                            ${(r.total || 0).toLocaleString()} URLs · ${visits.toLocaleString()} visits
+                        </span>
+                    </div>`;
+                if (r.error) {
+                    return head + `<div class="alert alert-danger py-2 mb-0">Row ${r.index + 1} failed: ${escapeHtml(r.error)}</div>`;
+                }
+                if (!(r.urls || []).length) {
+                    return head + `<p class="text-muted small">No URLs found for this row.</p>`;
+                }
+                return head
+                    + (single ? `<p class="text-muted small mb-2">Total visits: <strong>${visits.toLocaleString()}</strong></p>` : '')
+                    + resultsTableHtml(r.urls);
+            }).join('');
         }
 
         function copyToClipboard() {
@@ -313,9 +416,10 @@
         }
 
         function clearFilters() {
-            for (let i = 1; i <= 4; i++) {
-                document.getElementById(`filter${i}`).value = '';
-            }
+            // Back to a single empty row, not just empty boxes in the rows there
+            // are — "Clear Filters" should undo added rows too.
+            filterRows = [Array(BOXES_PER_ROW).fill('')];
+            renderFilterRows();
             document.getElementById('minVisits').value = '0';
             document.getElementById('limit').value = '4000';
 
@@ -330,9 +434,24 @@
                 alert('No results to download');
                 return;
             }
-
-            const csv = 'url;visits\n' +
-                currentResults.map(r => `"${r.url}";${r.visits}`).join('\n');
+            const single = currentRows.length <= 1;
+            // Same reasoning as the TSV: the row/filters columns only appear when
+            // there is more than one row to tell apart.
+            const csvEsc = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+            let csv;
+            if (single) {
+                csv = 'url;visits\n' +
+                    currentResults.map(r => `${csvEsc(r.url)};${r.visits}`).join('\n');
+            } else {
+                const lines = ['row;filters;url;visits'];
+                currentRows.forEach(r => {
+                    const label = (r.filters || []).join(' + ');
+                    (r.urls || []).forEach(u => {
+                        lines.push(`${r.index + 1};${csvEsc(label)};${csvEsc(u.url)};${u.visits}`);
+                    });
+                });
+                csv = lines.join('\n');
+            }
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement('a');

@@ -1,4 +1,5 @@
 import os
+import threading
 from dotenv import load_dotenv
 load_dotenv()
 import psycopg2
@@ -8,43 +9,56 @@ from psycopg2.extras import RealDictCursor
 # Connection pools for reusing connections across requests
 _pg_pool = None
 _redshift_pool = None
+# Guards the lazy init below. Without it, N threads whose FIRST db call races
+# each other all see `None`, each builds its own pool, and the last assignment
+# wins — so a connection handed out by an orphaned pool blows up on return with
+# psycopg2's "trying to put unkeyed connection". Found via R-Finder's per-row
+# parallel search (its worker threads were the first Redshift users in the
+# process), but it could bite any concurrent cold start.
+_pool_init_lock = threading.Lock()
 
 def _get_pg_pool():
     """Get or create PostgreSQL connection pool"""
     global _pg_pool
     if _pg_pool is None:
-        _pg_pool = pool.ThreadedConnectionPool(
-            minconn=5,
-            maxconn=60,  # Supports up to 50 parallel workers + headroom for stats queries
-            dsn=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/seo_tools"),
-            cursor_factory=RealDictCursor,
-            connect_timeout=10,
-            keepalives=1,
-            keepalives_idle=30,
-            keepalives_interval=10,
-            keepalives_count=5
-        )
+        with _pool_init_lock:
+            # Re-check inside the lock: another thread may have built it while
+            # this one was waiting.
+            if _pg_pool is None:
+                _pg_pool = pool.ThreadedConnectionPool(
+                    minconn=5,
+                    maxconn=60,  # Supports up to 50 parallel workers + headroom for stats queries
+                    dsn=os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/seo_tools"),
+                    cursor_factory=RealDictCursor,
+                    connect_timeout=10,
+                    keepalives=1,
+                    keepalives_idle=30,
+                    keepalives_interval=10,
+                    keepalives_count=5
+                )
     return _pg_pool
 
 def _get_redshift_pool():
     """Get or create Redshift connection pool"""
     global _redshift_pool
     if _redshift_pool is None:
-        _redshift_pool = pool.ThreadedConnectionPool(
-            minconn=1,
-            maxconn=10,  # Increased from 5 to support more parallel workers
-            host=os.getenv("REDSHIFT_HOST"),
-            port=os.getenv("REDSHIFT_PORT", "5439"),
-            dbname=os.getenv("REDSHIFT_DB"),
-            user=os.getenv("REDSHIFT_USER"),
-            password=os.getenv("REDSHIFT_PASSWORD"),
-            cursor_factory=RealDictCursor,
-            connect_timeout=10,
-            keepalives=1,
-            keepalives_idle=60,
-            keepalives_interval=10,
-            keepalives_count=5
-        )
+        with _pool_init_lock:
+            if _redshift_pool is None:
+                _redshift_pool = pool.ThreadedConnectionPool(
+                    minconn=1,
+                    maxconn=10,  # Increased from 5 to support more parallel workers
+                    host=os.getenv("REDSHIFT_HOST"),
+                    port=os.getenv("REDSHIFT_PORT", "5439"),
+                    dbname=os.getenv("REDSHIFT_DB"),
+                    user=os.getenv("REDSHIFT_USER"),
+                    password=os.getenv("REDSHIFT_PASSWORD"),
+                    cursor_factory=RealDictCursor,
+                    connect_timeout=10,
+                    keepalives=1,
+                    keepalives_idle=60,
+                    keepalives_interval=10,
+                    keepalives_count=5
+                )
     return _redshift_pool
 
 def get_db_connection():

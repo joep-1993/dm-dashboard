@@ -3878,12 +3878,16 @@ async def check_single_url_facets(url: str):
 # R-FINDER ENDPOINTS - Find /r/ URLs from Redshift
 # =============================================================================
 
-from backend.rfinder_service import fetch_r_urls, get_r_url_stats
+from backend.rfinder_service import fetch_r_urls, fetch_r_urls_by_row, get_r_url_stats
 
 
 class RFinderRequest(BaseModel):
     """Request model for R-finder search"""
     filters: Optional[List[str]] = []
+    # Multiple independent filter rows: each inner list is one row (AND within
+    # the row), each producing its OWN result set. Takes precedence over
+    # `filters`, which stays for the single-row callers.
+    filter_rows: Optional[List[List[str]]] = None
     min_visits: Optional[int] = 0
     start_date: Optional[str] = "20210101"
     end_date: Optional[str] = "20261231"
@@ -3900,23 +3904,40 @@ async def search_r_urls(request: RFinderRequest):
     - Excludes device=, /sitemap/, sortby=, /filters/, /page_, shop_id=, etc.
 
     Optional filters can be provided to narrow down results (e.g., category segments).
+
+    `filter_rows` runs each row as its own query and returns a result set per row
+    (see rfinder_service.fetch_r_urls_by_row). `urls`/`total` stay in the response
+    either way — deduplicated across rows — so older callers keep working.
     """
     try:
-        # Clean up filters - remove empty strings
-        filters = [f for f in (request.filters or []) if f and f.strip()]
+        rows_in = request.filter_rows
+        if rows_in is None:
+            # Single-row (legacy) shape: wrap it so there is one code path.
+            rows_in = [request.filters or []]
 
-        urls = fetch_r_urls(
-            filters=filters if filters else None,
+        rows = fetch_r_urls_by_row(
+            filter_rows=rows_in,
             min_visits=request.min_visits or 0,
             start_date=request.start_date or "20210101",
             end_date=request.end_date or "20261231",
-            limit=request.limit or 4000
+            limit=request.limit or 4000,
         )
+
+        # Flat union for the legacy fields. Dedup on url, keeping the highest
+        # visit count — the same url can come back under several rows.
+        merged = {}
+        for r in rows:
+            for u in r["urls"]:
+                prev = merged.get(u["url"])
+                if prev is None or (u.get("visits") or 0) > (prev.get("visits") or 0):
+                    merged[u["url"]] = u
+        urls = sorted(merged.values(), key=lambda u: -(u.get("visits") or 0))
 
         return {
             "status": "success",
             "total": len(urls),
-            "urls": urls
+            "urls": urls,
+            "rows": rows,
         }
 
     except Exception as e:
