@@ -64,6 +64,12 @@ SHOP_CYCLES_TABLE = "pa.jvs_gsd_ll_shop_cycles"
 # (the in-memory cache resets on every restart; this table does not).
 EXCEL_LOAD_TABLE = "pa.jvs_gsd_ll_excel_load"
 
+# One row per (data_date, shop) for each daily Excel load, so the Date picker
+# can replay an earlier day instead of always getting the newest file. Pruned
+# to a rolling SNAPSHOT_RETENTION_DAYS calendar-day window on every save.
+SNAPSHOT_TABLE = "pa.jvs_gsd_ll_excel_snapshots"
+SNAPSHOT_RETENTION_DAYS = 7
+
 # Map the shop_list GSD flag columns to a country code.
 FLAG_TO_COUNTRY = {
     "is_gsd_nl_shop": "NL",
@@ -432,6 +438,10 @@ def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_
     # Persist so the date survives restarts and is retrievable even before this
     # process has (re)loaded the file. Best-effort — never breaks the load.
     _record_excel_load(fname, loaded_at, len(feed), pause_n, enable_n)
+    # Keep the rows themselves for a week so the Date picker can replay this
+    # day later. Also best-effort: today's Preview/Run reads the in-memory
+    # cache above and must not depend on this write.
+    _save_excel_snapshot(feed, flags, fname, loaded_at)
     logger.info(
         "GSD LL Excel cache loaded: %d shops (%d pause, %d enable) from %s",
         status["shop_count"], pause_n, enable_n, fname,
@@ -519,6 +529,253 @@ def get_last_excel_load() -> Optional[Dict[str, Any]]:
     except Exception:
         logger.warning("GSD LL: failed to read persisted Excel load timestamp", exc_info=True)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Excel snapshots — the rows themselves, one day per data_date
+# ---------------------------------------------------------------------------
+# EXCEL_LOAD_TABLE above stores only *metadata* about the last load, and the
+# in-memory _EXCEL_DATA cache holds exactly one day. That left the Date picker
+# in the "Pause / Enable low linkage shops" card doing nothing once the daily
+# 09:50 Excel load became the only data source: run_low_linkage(source='excel')
+# had no earlier day to read, so it ignored date_str entirely. Persisting each
+# load's rows for a week gives the picker something real to select.
+
+
+def _snapshot_date(loaded_at: str) -> str:
+    """The Excel file's own date (its mtime, Amsterdam) — what the picker offers.
+
+    Deliberately NOT the wall-clock date of the load: a restart re-reads the
+    same file, and it must land on the same data_date rather than creating a
+    second snapshot under today's date. Same reasoning as ``loaded_at`` itself.
+    """
+    return datetime.fromisoformat(loaded_at).date().isoformat()
+
+
+def ensure_excel_snapshot_table() -> None:
+    """Create the per-day Excel snapshot table if it does not exist."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                CREATE TABLE IF NOT EXISTS {SNAPSHOT_TABLE} (
+                    data_date  DATE    NOT NULL,
+                    shop_id    INTEGER NOT NULL,
+                    shop_name  TEXT,
+                    linkage    DOUBLE PRECISION,
+                    gsd        SMALLINT,
+                    is_gsd_nl  SMALLINT,
+                    is_gsd_be  SMALLINT,
+                    is_gsd_de  SMALLINT,
+                    file       TEXT,
+                    loaded_at  TIMESTAMPTZ,
+                    PRIMARY KEY (data_date, shop_id)
+                )
+            """)
+        conn.commit()
+    finally:
+        return_db_connection(conn)
+
+
+def _save_excel_snapshot(feed: List[Dict[str, Any]],
+                         flags: Optional[Dict[int, Dict[str, int]]],
+                         file: Optional[str],
+                         loaded_at: str) -> Optional[str]:
+    """Store one day's Excel rows, then prune outside the retention window.
+
+    Best-effort, exactly like _record_excel_load: a DB hiccup must never break
+    the load itself, since the in-memory cache (and therefore today's Run) does
+    not depend on this succeeding. Returns the data_date written, else None.
+    """
+    from psycopg2.extras import execute_values
+
+    try:
+        data_date = _snapshot_date(loaded_at)
+        rows = []
+        for r in feed:
+            f = (flags or {}).get(r["shop_id"], {})
+            rows.append((
+                data_date, r["shop_id"], r["shop_name"], r["linkage"], r["gsd"],
+                f.get("is_gsd_nl_shop", 0), f.get("is_gsd_be_shop", 0),
+                f.get("is_gsd_de_shop", 0), file, loaded_at,
+            ))
+        if not rows:
+            return None
+        ensure_excel_snapshot_table()
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                execute_values(cur, f"""
+                    INSERT INTO {SNAPSHOT_TABLE}
+                        (data_date, shop_id, shop_name, linkage, gsd,
+                         is_gsd_nl, is_gsd_be, is_gsd_de, file, loaded_at)
+                    VALUES %s
+                    ON CONFLICT (data_date, shop_id) DO UPDATE SET
+                        shop_name = EXCLUDED.shop_name,
+                        linkage   = EXCLUDED.linkage,
+                        gsd       = EXCLUDED.gsd,
+                        is_gsd_nl = EXCLUDED.is_gsd_nl,
+                        is_gsd_be = EXCLUDED.is_gsd_be,
+                        is_gsd_de = EXCLUDED.is_gsd_de,
+                        file      = EXCLUDED.file,
+                        loaded_at = EXCLUDED.loaded_at
+                """, rows, page_size=1000)
+                # Retention relative to the date just written, not current_date:
+                # replaying an older file then prunes LESS, never more.
+                cur.execute(
+                    f"DELETE FROM {SNAPSHOT_TABLE} "
+                    f"WHERE data_date < %s::date - %s",
+                    (data_date, SNAPSHOT_RETENTION_DAYS - 1),
+                )
+                pruned = cur.rowcount
+            conn.commit()
+        finally:
+            return_db_connection(conn)
+        logger.info(
+            "GSD LL Excel snapshot: stored %d rows for %s (pruned %d row(s) "
+            "older than %d days)", len(rows), data_date, pruned,
+            SNAPSHOT_RETENTION_DAYS,
+        )
+        return data_date
+    except Exception:
+        logger.warning("GSD LL: failed to store Excel snapshot", exc_info=True)
+        return None
+
+
+def list_excel_snapshot_dates() -> List[Dict[str, Any]]:
+    """Stored snapshot dates, newest first — what the Date picker may offer."""
+    try:
+        ensure_excel_snapshot_table()
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT data_date,
+                           min(file)      AS file,
+                           max(loaded_at) AS loaded_at,
+                           count(*)                          AS shop_count,
+                           count(*) FILTER (WHERE gsd = 0)    AS pause_count,
+                           count(*) FILTER (WHERE gsd = 1)    AS enable_count
+                    FROM {SNAPSHOT_TABLE}
+                    GROUP BY data_date
+                    ORDER BY data_date DESC
+                """)
+                out = []
+                for row in cur.fetchall():
+                    r = dict(row)
+                    r["data_date"] = r["data_date"].isoformat()
+                    if r.get("loaded_at"):
+                        r["loaded_at"] = r["loaded_at"].isoformat(timespec="seconds")
+                    out.append(r)
+                return out
+        finally:
+            return_db_connection(conn)
+    except Exception:
+        logger.warning("GSD LL: failed to list Excel snapshot dates", exc_info=True)
+        return []
+
+
+def get_excel_snapshot(date_str: str) -> Optional[Dict[str, Any]]:
+    """Return one stored day in the same shape the in-memory cache has.
+
+    Resolves to the most recent snapshot **on or before** ``date_str`` — the
+    same "as of" semantics get_shop_flags() already uses for the Redshift
+    flags, so picking a weekend day falls back to Friday's data instead of
+    failing. The resolved ``data_date`` is returned so the caller can say which
+    day it actually used rather than quietly substituting one.
+    """
+    ensure_excel_snapshot_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT max(data_date) AS d FROM {SNAPSHOT_TABLE} "
+                f"WHERE data_date <= %s", (date_str,),
+            )
+            row = cur.fetchone()
+            resolved = row["d"] if row else None
+            if not resolved:
+                return None
+            cur.execute(f"""
+                SELECT shop_id, shop_name, linkage, gsd,
+                       is_gsd_nl, is_gsd_be, is_gsd_de, file, loaded_at
+                FROM {SNAPSHOT_TABLE}
+                WHERE data_date = %s
+                ORDER BY shop_id
+            """, (resolved,))
+            rows = cur.fetchall()
+    finally:
+        return_db_connection(conn)
+
+    if not rows:
+        return None
+    feed = [{
+        "shop_id": r["shop_id"],
+        "shop_name": r["shop_name"],
+        "linkage": r["linkage"],
+        "gsd": r["gsd"],
+    } for r in rows]
+    flags = {r["shop_id"]: {
+        "is_gsd_nl_shop": r["is_gsd_nl"] or 0,
+        "is_gsd_be_shop": r["is_gsd_be"] or 0,
+        "is_gsd_de_shop": r["is_gsd_de"] or 0,
+    } for r in rows}
+    loaded_at = rows[0]["loaded_at"]
+    return {
+        "feed": feed,
+        "flags": flags,
+        "file": rows[0]["file"],
+        "loaded_at": loaded_at.isoformat(timespec="seconds") if loaded_at else None,
+        "data_date": resolved.isoformat(),
+        "shop_count": len(feed),
+        "pause_count": sum(1 for r in feed if r["gsd"] == 0),
+        "enable_count": sum(1 for r in feed if r["gsd"] == 1),
+    }
+
+
+def backfill_excel_snapshots(max_files: int = SNAPSHOT_RETENTION_DAYS) -> Dict[str, Any]:
+    """Store snapshots for Excel files still on disk whose date is missing.
+
+    Without this the retention window only starts filling from the next daily
+    load, so the picker would have a single selectable day for a week. The
+    scheduled script leaves its earlier files in EXCEL_DIR, so the recent ones
+    can be replayed once. Reads at most ``max_files`` files oldest-first (so a
+    newer mtime wins any same-date upsert), skips dates already stored and
+    anything past the retention window, and never raises.
+    """
+    result: Dict[str, Any] = {"stored": [], "skipped": [], "errors": []}
+    try:
+        files = sorted(
+            glob_mod.glob(os.path.join(EXCEL_DIR, "gsd_shops_nl_be_*.xlsx")),
+            key=os.path.getmtime,
+        )[-max_files:]
+        if not files:
+            return result
+        have = {d["data_date"] for d in list_excel_snapshot_dates()}
+        cutoff = (datetime.now(AMSTERDAM_TZ).date()
+                  - timedelta(days=SNAPSHOT_RETENTION_DAYS - 1))
+        for path in files:
+            name = os.path.basename(path)
+            try:
+                loaded_at = datetime.fromtimestamp(
+                    os.path.getmtime(path), AMSTERDAM_TZ
+                ).isoformat(timespec="seconds")
+                data_date = _snapshot_date(loaded_at)
+                if data_date in have or datetime.fromisoformat(loaded_at).date() < cutoff:
+                    result["skipped"].append(data_date)
+                    continue
+                feed, flags, _ = fetch_feed_from_excel(path)
+                if _save_excel_snapshot(feed, flags, name, loaded_at):
+                    result["stored"].append(data_date)
+                    have.add(data_date)
+            except Exception as exc:
+                result["errors"].append({"file": name, "error": str(exc)})
+        if result["stored"]:
+            logger.info("GSD LL Excel snapshot backfill: stored %s",
+                        ", ".join(result["stored"]))
+    except Exception:
+        logger.warning("GSD LL: Excel snapshot backfill failed", exc_info=True)
+    return result
 
 
 def get_excel_data_status() -> Dict[str, Any]:
@@ -1388,9 +1645,13 @@ def run_low_linkage(
     ----------
     dry_run : if True, no Google Ads mutations or DB writes happen; the return
         value lists exactly what *would* be paused / enabled.
-    date_str : optional YYYY-MM-DD; evaluate the shop_list GSD flags as of this
-        date (most recent row on or before it). Defaults to the absolute latest.
-        Ignored when source='excel' (the Excel already contains the flags).
+    date_str : optional YYYY-MM-DD; which day's data to run against (most recent
+        available on or before it). Defaults to the latest.
+        With source='feed' this scopes the shop_list GSD flags from Redshift.
+        With source='excel' it replays that day's stored snapshot from
+        SNAPSHOT_TABLE — feed rows AND flags, since the Excel carries both —
+        and fails rather than silently using the newest file when the date has
+        no snapshot.
     shop_names : optional list of feed shop names to scope the run to.
     included : with shop_names, True = process ONLY those shops, False = process
         all EXCEPT those. Ignored when shop_names is empty.
@@ -1431,7 +1692,38 @@ def run_low_linkage(
 
     # 1. Feed — from cached Excel data, fresh Excel read, or pixel-monitor CSV
     excel_flags: Optional[Dict[int, Dict[str, int]]] = None
-    if source == "excel":
+    if source == "excel" and date_str:
+        # A picked date replays a stored snapshot. Deliberately does NOT fall
+        # back to today's file when the date has no data: silently running the
+        # newest Excel for a date the user chose is the behaviour this replaced.
+        _progress_set(phase=f"Loading stored Excel data for {date_str}…")
+        try:
+            snap = get_excel_snapshot(date_str)
+        except Exception as ex:
+            logger.error("GSD LL: failed to read Excel snapshot: %s", ex)
+            result["errors"].append({"step": "excel_snapshot", "error": str(ex)})
+            return result
+        if not snap:
+            available = [d["data_date"] for d in list_excel_snapshot_dates()]
+            result["errors"].append({"step": "excel_snapshot", "error": (
+                f"no stored Excel data on or before {date_str}"
+                + (f" — available: {', '.join(available)}" if available else
+                   " — no snapshots stored yet; they accumulate from the next "
+                   f"daily {SCHEDULE_HOUR:02d}:{SCHEDULE_MINUTE:02d} load")
+            )})
+            return result
+        feed = list(snap["feed"])              # shallow copy — safe to filter
+        excel_flags = snap["flags"]
+        result["excel_file"] = snap["file"]
+        result["snapshot_date"] = snap["data_date"]
+        if snap["data_date"] != date_str:
+            result["snapshot_note"] = (
+                f"no Excel data for {date_str}; used the most recent snapshot "
+                f"on or before it ({snap['data_date']})"
+            )
+        _progress_set(phase=(f"Using stored Excel data for {snap['data_date']} "
+                             f"({snap['file']})…"))
+    elif source == "excel":
         # Prefer the in-memory cache (populated daily by the scheduler or
         # manually via /ll/excel-load). Fall back to a direct file read if
         # the cache is empty (first start or after a server restart).
@@ -1907,6 +2199,10 @@ def start_excel_scheduler() -> None:
         logger.info("GSD LL Excel scheduler: no Excel file found yet, skipping startup pre-load")
     except Exception:
         logger.warning("GSD LL Excel scheduler: startup pre-load failed", exc_info=True)
+    # Fill the Date picker's window from the earlier files still on disk. A
+    # no-op once every date in the window is stored, so it costs one glob and
+    # one query per restart after the first.
+    backfill_excel_snapshots()
     _schedule_next_excel_run()
 
 

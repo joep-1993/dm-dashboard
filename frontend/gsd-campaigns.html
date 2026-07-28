@@ -350,6 +350,7 @@
                     <div class="col-md-3" id="llDateCol">
                         <label for="llDate" class="form-label">Date (optional)</label>
                         <input type="date" class="form-control" id="llDate" placeholder="Leave empty for most recent">
+                        <div class="form-text" id="llDateHint" style="font-size:0.75rem;">&nbsp;</div>
                     </div>
                     <div class="col-md-5">
                         <label for="llShopNames" class="form-label">Shop names (optional, one per line)</label>
@@ -495,7 +496,7 @@
             if (window.flatpickr) {
                 flatpickr('#runDate', { dateFormat: 'Y-m-d', allowInput: true,
                                         disableMobile: true, locale: { firstDayOfWeek: 1 } });
-                flatpickr('#llDate', { dateFormat: 'Y-m-d', allowInput: true,
+                llDatePicker = flatpickr('#llDate', { dateFormat: 'Y-m-d', allowInput: true,
                                        disableMobile: true, locale: { firstDayOfWeek: 1 } });
             }
             toggleShopMode();
@@ -504,6 +505,7 @@
             loadCampaigns();
             loadLLHistory();
             loadExcelSchedule();
+            loadExcelSnapshotDates();
             loadActivityLog();
         });
 
@@ -538,6 +540,54 @@
             const date = d.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
             const time = d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
             return `${date}, ${time}`;
+        }
+
+        // --- Date picker: the days we actually have Excel data for ------------
+        // The daily 09:50 load stores its rows per day (kept a week), so the
+        // picker is constrained to the dates that really exist instead of
+        // accepting any date and silently running the newest file.
+        let llDatePicker = null;
+        let llSnapshotDates = [];
+
+        async function loadExcelSnapshotDates() {
+            const hint = document.getElementById('llDateHint');
+            const input = document.getElementById('llDate');
+            try {
+                const res = await fetch(`${API_BASE}/api/gsd-campaigns/ll/excel-dates`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                llSnapshotDates = data.dates || [];
+                const days = llSnapshotDates.map(d => d.data_date);
+
+                if (llDatePicker) {
+                    // Grey out every day we have no snapshot for; flatpickr's
+                    // enable list is the only thing stopping a dead selection.
+                    llDatePicker.set('enable', days.length ? days : [() => false]);
+                    if (days.length) {
+                        llDatePicker.set('minDate', days[days.length - 1]);
+                        llDatePicker.set('maxDate', days[0]);
+                    }
+                }
+                if (input) input.disabled = !days.length;
+
+                if (!hint) return;
+                if (!days.length) {
+                    hint.textContent = 'No stored days yet — the daily load starts filling this.';
+                    hint.title = '';
+                    return;
+                }
+                const newest = llSnapshotDates[0];
+                hint.textContent = days.length === 1
+                    ? `1 day stored (${days[0]})`
+                    : `${days.length} days stored (${days[days.length - 1]} … ${days[0]})`;
+                hint.title = `Kept ${data.retention_days ?? 7} days. Newest: `
+                    + `${newest.shop_count} shops, ${newest.pause_count} to pause, `
+                    + `${newest.enable_count} to enable (${newest.file || 'unknown file'}). `
+                    + 'Leave the date empty to use the newest load.';
+            } catch (e) {
+                console.warn('Failed to load Excel snapshot dates', e);
+                if (hint) hint.textContent = 'Stored days unavailable.';
+            }
         }
 
         async function loadExcelSchedule() {
@@ -960,8 +1010,12 @@
 
             // Data-source toggle was removed; runs always use the daily-loaded Excel data.
             const source = 'excel';
+            // Read the date BEFORE confirming — a run against a stored day is a
+            // different action from a run against today, and the prompt says which.
+            const date = document.getElementById('llDate').value || '';
             if (!dryRun && !confirm(
-                'Run for real? This will PAUSE and RE-ENABLE live GSD campaigns based on the latest Excel file.'
+                'Run for real? This will PAUSE and RE-ENABLE live GSD campaigns based on '
+                + (date ? `the stored Excel data for ${date}.` : 'the latest Excel file.')
             )) {
                 return;
             }
@@ -969,7 +1023,6 @@
             const params = new URLSearchParams();
             params.set('dry_run', dryRun);
             params.set('source', source);
-            const date = document.getElementById('llDate').value || '';
             if (date) params.set('date', date);
             const shopText = document.getElementById('llShopNames').value.trim();
             if (shopText) params.set('shop_names', shopText.split('\n').map(s => s.trim()).filter(Boolean).join(','));
@@ -1147,7 +1200,14 @@
                 ${llTile('Skipped', skippedN, 'skipped', '#5e4a90', '#f3f0fa', '#5e4a90')}
                 ${llTile('Error', errorsN, 'errors', '#d63031', '#fdecea', '#d63031')}
             </div>
-            <div class="text-muted mb-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows</div>`;
+            <div class="text-muted mb-2" style="font-size:0.8rem;">from ${data.feed_rows || 0} feed rows${
+                data.snapshot_date ? ` · stored Excel data for <strong>${escapeHtml(data.snapshot_date)}</strong>` : ''
+            }${data.excel_file ? ` · ${escapeHtml(data.excel_file)}` : ''}</div>`;
+            // Say it out loud when the picked date had no snapshot and an
+            // earlier day was used instead — never substitute a day silently.
+            if (data.snapshot_note) {
+                html += `<div class="alert alert-warning py-1 px-2 mb-2" style="font-size:0.8rem;">${escapeHtml(data.snapshot_note)}</div>`;
+            }
 
             // Checkboxes/apply only make sense for a dry-run PREVIEW. After a real
             // run (full or "Run selected") the result is shown read-only so it

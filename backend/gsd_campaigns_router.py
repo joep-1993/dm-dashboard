@@ -28,6 +28,9 @@ from backend.gsd_ll_service import (
     toggle_excel_schedule,
     load_excel_data,
     get_excel_data_status,
+    list_excel_snapshot_dates,
+    backfill_excel_snapshots,
+    SNAPSHOT_RETENTION_DAYS,
     save_activity,
     get_activity_log,
     mark_activity_reset,
@@ -447,3 +450,31 @@ async def excel_load_endpoint():
 def excel_data_endpoint():
     """Return the cached Excel data status (file, counts, load time)."""
     return get_excel_data_status()
+
+
+@router.get("/ll/excel-dates")
+def excel_dates_endpoint():
+    """Stored Excel snapshot dates the Date picker can choose from.
+
+    Newest first, one entry per day inside the retention window, each with the
+    file it came from and its pause/enable counts.
+    """
+    return {
+        "dates": list_excel_snapshot_dates(),
+        "retention_days": SNAPSHOT_RETENTION_DAYS,
+    }
+
+
+@router.post("/ll/excel-dates/backfill")
+async def excel_dates_backfill_endpoint():
+    """Replay the Excel files still on disk into the snapshot table.
+
+    Runs on startup too; exposed so the picker's window can be filled without
+    waiting for a restart. Skips dates already stored, so it is safe to repeat.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(executor, backfill_excel_snapshots)
+    except Exception as e:
+        logger.error(f"Error backfilling Excel snapshots: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
