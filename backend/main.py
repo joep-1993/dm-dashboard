@@ -2957,8 +2957,21 @@ async def seo_prio_start(payload: dict):
         "start_date": str(start_date),
         "end_date": str(end_date),
         "thresholds": thresholds,
+        # Optional category scope. Empty string and null both mean "all".
+        "maincat": (payload.get("maincat") or "").strip() or None,
+        "deepest_cat": (payload.get("deepest_cat") or "").strip() or None,
     })
     return {"run_id": run_id}
+
+
+@app.get("/api/seo-prio/categories")
+async def seo_prio_categories(force: bool = False):
+    """(maincat, deepest cat) pairs for the run form's dropdowns.
+
+    Returns immediately even on a cold cache — the ~23s Redshift DISTINCT runs on
+    a background thread and the response carries loading=true until it lands.
+    """
+    return seo_prio_service.get_categories(force=force)
 
 
 @app.get("/api/seo-prio/status/{run_id}")

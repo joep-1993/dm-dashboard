@@ -13,6 +13,8 @@ Pipeline:
 Long-running. Started in a background thread; status polled by the frontend.
 """
 import io
+import json
+import os
 import re
 import threading
 import traceback
@@ -397,8 +399,25 @@ def list_runs(limit: int = 50) -> List[Dict]:
 
 # ───────────────────────────── Pipeline ─────────────────────────────
 
-def _fetch_redshift_rows(start_date: str, end_date: str) -> List[Dict]:
-    """Run the SEO-prio Redshift query (mirrors query.txt)."""
+def _fetch_redshift_rows(start_date: str, end_date: str,
+                         maincat: Optional[str] = None,
+                         deepest_cat: Optional[str] = None) -> List[Dict]:
+    """Run the SEO-prio Redshift query (mirrors query.txt).
+
+    maincat / deepest_cat narrow the run to one category. They match
+    dv.main_cat_name / dv.deepest_subcat_name exactly, which is why the
+    dropdowns are fed from get_categories() — the same two columns — rather than
+    from the taxonomy API, whose labels do not always agree with Redshift's.
+    """
+    extra = ""
+    args: List = [int(start_date), int(end_date)]
+    if maincat:
+        extra += "\n              AND dv.main_cat_name = %s"
+        args.append(maincat)
+    if deepest_cat:
+        extra += "\n              AND dv.deepest_subcat_name = %s"
+        args.append(deepest_cat)
+
     conn = get_redshift_connection()
     try:
         cur = conn.cursor()
@@ -427,15 +446,139 @@ def _fetch_redshift_rows(start_date: str, end_date: str) -> List[Dict]:
               AND dv.url NOT LIKE '%%/page_%%'
               AND dv.url NOT LIKE '%%#%%'
               AND dv.deepest_subcat_name IS NOT NULL
-              AND dv.main_cat_name IS NOT NULL
+              AND dv.main_cat_name IS NOT NULL""" + extra + """
             GROUP BY 1, 2, 3
             """,
-            (int(start_date), int(end_date)),
+            tuple(args),
         )
         rows = cur.fetchall()
         return [dict(r) for r in rows]
     finally:
         return_redshift_connection(conn)
+
+
+# ---------------------------------------------------------------------------
+# Category list for the run form's two dropdowns
+# ---------------------------------------------------------------------------
+# The DISTINCT scan over dim_visit takes ~23s, so it must NEVER run inline on a
+# page load — same lesson as the taxonomy walk in category_lookup.py. First
+# caller kicks off a background thread and gets {"loading": true}; the frontend
+# polls until the pairs arrive. Cached in-process for a day, plus a JSON file so
+# a backend restart comes back warm instead of paying the 23s again.
+_CAT_CACHE: Dict[str, object] = {"pairs": [], "fetched_at": None}
+_CAT_LOCK = threading.Lock()
+_CAT_INFLIGHT = False
+_CAT_TTL_SECONDS = 24 * 3600
+_CAT_CACHE_FILE = os.path.join(os.path.dirname(__file__), "data", "seo_prio_categories.json")
+
+
+def _cat_cache_load_file() -> None:
+    try:
+        with open(_CAT_CACHE_FILE, "r", encoding="utf-8") as f:
+            blob = json.load(f)
+        pairs = [(p[0], p[1]) for p in blob.get("pairs") or []]
+        if pairs:
+            _CAT_CACHE["pairs"] = pairs
+            _CAT_CACHE["fetched_at"] = blob.get("fetched_at")
+            print(f"[SEO_PRIO] category cache loaded from disk ({len(pairs)} pairs)")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[SEO_PRIO] could not read the category cache: {e}")
+
+
+def _cat_cache_write_file() -> None:
+    """Best-effort: the in-memory cache is already usable, so a write failure
+    must not break the request that triggered the refresh."""
+    try:
+        os.makedirs(os.path.dirname(_CAT_CACHE_FILE), exist_ok=True)
+        tmp = _CAT_CACHE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"fetched_at": _CAT_CACHE["fetched_at"],
+                       "pairs": [list(p) for p in _CAT_CACHE["pairs"]]}, f)
+        os.replace(tmp, _CAT_CACHE_FILE)
+    except Exception as e:
+        print(f"[SEO_PRIO] could not write the category cache: {e}")
+
+
+def _cat_cache_is_fresh() -> bool:
+    at = _CAT_CACHE.get("fetched_at")
+    if not _CAT_CACHE.get("pairs") or not at:
+        return False
+    try:
+        age = (datetime.now() - datetime.fromisoformat(str(at))).total_seconds()
+    except Exception:
+        return False
+    return age < _CAT_TTL_SECONDS
+
+
+def _refresh_categories() -> None:
+    global _CAT_INFLIGHT
+    try:
+        conn = get_redshift_connection()
+        try:
+            cur = conn.cursor()
+            # Same NOT-NULL + /c/ predicates the run uses, so the dropdowns can
+            # only ever offer a category the run can actually match. No date
+            # bound: a category the run may cover must be offerable even if it
+            # had no visits in the window the user happens to pick.
+            cur.execute(
+                """
+                SELECT dv.main_cat_name, dv.deepest_subcat_name
+                FROM datamart.dim_visit dv
+                WHERE dv.deleted_ind = 0
+                  AND dv.main_cat_name IS NOT NULL
+                  AND dv.deepest_subcat_name IS NOT NULL
+                  AND dv.url LIKE '%%beslist.nl%%'
+                  AND dv.url LIKE '%%/c/%%'
+                GROUP BY 1, 2
+                """
+            )
+            pairs = sorted({(r["main_cat_name"], r["deepest_subcat_name"])
+                            for r in cur.fetchall()})
+        finally:
+            return_redshift_connection(conn)
+        with _CAT_LOCK:
+            _CAT_CACHE["pairs"] = pairs
+            _CAT_CACHE["fetched_at"] = datetime.now().isoformat(timespec="seconds")
+        _cat_cache_write_file()
+        print(f"[SEO_PRIO] category cache refreshed ({len(pairs)} pairs)")
+    except Exception as e:
+        print(f"[SEO_PRIO] category refresh failed: {e}")
+    finally:
+        with _CAT_LOCK:
+            _CAT_INFLIGHT = False
+
+
+def get_categories(force: bool = False) -> Dict:
+    """{'maincats': [...], 'pairs': [[maincat, deepest], ...], 'loading': bool}.
+
+    Returns immediately, always. A cold or stale cache is refreshed on a daemon
+    thread while the caller is told `loading` so the UI can poll.
+    """
+    global _CAT_INFLIGHT
+    if not _CAT_CACHE.get("pairs"):
+        _cat_cache_load_file()
+
+    stale = force or not _cat_cache_is_fresh()
+    if stale:
+        with _CAT_LOCK:
+            if not _CAT_INFLIGHT:
+                _CAT_INFLIGHT = True
+                threading.Thread(target=_refresh_categories, daemon=True).start()
+
+    with _CAT_LOCK:
+        pairs = list(_CAT_CACHE.get("pairs") or [])
+        fetched_at = _CAT_CACHE.get("fetched_at")
+        inflight = _CAT_INFLIGHT
+    return {
+        "maincats": sorted({m for m, _ in pairs}),
+        "pairs": [list(p) for p in pairs],
+        "fetched_at": fetched_at,
+        # Only "loading" when there is nothing to show yet; a stale-but-present
+        # cache is served straight away and refreshed behind the user's back.
+        "loading": bool(inflight and not pairs),
+    }
 
 
 def _decide(row: Dict, t: Dict) -> Tuple[str, str, str]:
@@ -482,10 +625,20 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
         start_date = params["start_date"]
         end_date = params["end_date"]
         thresholds = {**DEFAULT_THRESHOLDS, **(params.get("thresholds") or {})}
+        maincat = (params.get("maincat") or "").strip() or None
+        deepest_cat = (params.get("deepest_cat") or "").strip() or None
 
-        rows = _fetch_redshift_rows(start_date, end_date)
+        rows = _fetch_redshift_rows(start_date, end_date, maincat, deepest_cat)
         if _should_stop(run_id):
             _set_status(run_id, status="stopped", progress_msg="stopped after Redshift")
+            return
+        # A category filter that matches nothing is worth saying out loud rather
+        # than finishing as a silent 0-row run.
+        if not rows and (maincat or deepest_cat):
+            scope = " / ".join(x for x in (maincat, deepest_cat) if x)
+            _set_status(run_id, status="error", progress_msg=(
+                f"no /c/ visits for {scope} between {start_date} and {end_date} "
+                f"— check the category name and the date range"))
             return
         _set_status(run_id, progress_msg=f"parsing {len(rows):,} URL rows", progress_total=len(rows))
 

@@ -138,7 +138,29 @@
                                 <label class="form-label">End date</label>
                                 <input type="date" class="form-control" id="endDate">
                             </div>
+                            <!-- Category scope. Type-ahead via a native <datalist>:
+                                 free text + suggestions, no JS library. Deepest is
+                                 filtered by the chosen maincat. -->
+                            <div class="col-md-3">
+                                <label class="form-label" for="maincatInput">Maincat
+                                    <span class="text-muted small">(optional)</span>
+                                </label>
+                                <input class="form-control" id="maincatInput" list="maincatList"
+                                       placeholder="all maincats" autocomplete="off"
+                                       oninput="onMaincatInput()">
+                                <datalist id="maincatList"></datalist>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" for="deepestInput">Deepest cat
+                                    <span class="text-muted small">(optional)</span>
+                                </label>
+                                <input class="form-control" id="deepestInput" list="deepestList"
+                                       placeholder="all deepest cats" autocomplete="off"
+                                       oninput="onDeepestInput()">
+                                <datalist id="deepestList"></datalist>
+                            </div>
                         </div>
+                        <div id="catHint" class="form-text mt-1"></div>
 
                         <div class="row g-3 mt-2">
                             <div class="col-md-6 border-end pe-4">
@@ -342,10 +364,119 @@ function resetThresholds() {
     document.getElementById('offRevenuePct').value = t.off_max_revenue_pct;
 }
 
+// ---- Category scope (maincat + deepest cat, both type-ahead) --------------
+// Fed from /api/seo-prio/categories, which reads the SAME two Redshift columns
+// the run filters on (dv.main_cat_name / dv.deepest_subcat_name) — taxonomy API
+// labels don't always agree with Redshift's, and a mismatch here would silently
+// return zero rows. The endpoint answers instantly and reports loading=true
+// while its ~23s DISTINCT runs in the background, so this polls.
+let _catPairs = [];          // [[maincat, deepest], ...]
+let _catPollTimer = null;
+
+function catHint(msg, cls = 'text-muted') {
+    const el = document.getElementById('catHint');
+    el.className = 'form-text mt-1 ' + cls;
+    el.textContent = msg;
+}
+
+function setCatInputsEnabled(on) {
+    document.getElementById('maincatInput').disabled = !on;
+    document.getElementById('deepestInput').disabled = !on;
+}
+
+async function loadCategories() {
+    try {
+        const r = await fetch('/api/seo-prio/categories');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        if (data.loading) {
+            setCatInputsEnabled(false);
+            catHint('Loading category names from Redshift (first time only, ~25s)…');
+            if (!_catPollTimer) _catPollTimer = setInterval(loadCategories, 4000);
+            return;
+        }
+        if (_catPollTimer) { clearInterval(_catPollTimer); _catPollTimer = null; }
+        _catPairs = data.pairs || [];
+        setCatInputsEnabled(true);
+        fillDatalist('maincatList', data.maincats || []);
+        refreshDeepestOptions();
+        catHint(_catPairs.length
+            ? 'Leave both empty to run over every category.'
+            : 'No category names available — the run will cover every category.');
+    } catch (e) {
+        if (_catPollTimer) { clearInterval(_catPollTimer); _catPollTimer = null; }
+        setCatInputsEnabled(true);   // never block the run on this
+        catHint('Could not load category names (' + e.message +
+                '). You can still type a name, or leave both empty for all.', 'text-danger');
+    }
+}
+
+function fillDatalist(id, values) {
+    document.getElementById(id).innerHTML =
+        values.map(v => `<option value="${escapeAttr(v)}"></option>`).join('');
+}
+
+function escapeAttr(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Deepest suggestions are scoped to the typed maincat when it matches one
+// exactly; otherwise every deepest cat is offered, so the two inputs stay
+// independent if you only know the deepest name.
+function refreshDeepestOptions() {
+    const main = document.getElementById('maincatInput').value.trim();
+    const scoped = main
+        ? _catPairs.filter(p => p[0] === main).map(p => p[1])
+        : _catPairs.map(p => p[1]);
+    fillDatalist('deepestList', [...new Set(scoped)].sort());
+}
+
+function onMaincatInput() {
+    const main = document.getElementById('maincatInput').value.trim();
+    const deepEl = document.getElementById('deepestInput');
+    // Changing maincat invalidates a deepest cat that isn't under it.
+    if (main && deepEl.value.trim() &&
+        !_catPairs.some(p => p[0] === main && p[1] === deepEl.value.trim())) {
+        deepEl.value = '';
+    }
+    refreshDeepestOptions();
+    deepEl.placeholder = main ? `all deepest cats in ${main}` : 'all deepest cats';
+}
+
+// Typing a deepest cat that belongs to exactly one maincat fills the maincat in.
+function onDeepestInput() {
+    const deep = document.getElementById('deepestInput').value.trim();
+    if (!deep) return;
+    const mains = [...new Set(_catPairs.filter(p => p[1] === deep).map(p => p[0]))];
+    if (mains.length === 1) {
+        document.getElementById('maincatInput').value = mains[0];
+        refreshDeepestOptions();
+    }
+}
+
 async function startRun() {
+    const maincat = document.getElementById('maincatInput').value.trim();
+    const deepest = document.getElementById('deepestInput').value.trim();
+    // A typo here means a 0-row run several minutes later, so check it up front
+    // while we still have the real list in hand.
+    if (_catPairs.length) {
+        if (maincat && !_catPairs.some(p => p[0] === maincat)) {
+            alert(`"${maincat}" is not a known maincat. Pick one from the suggestions, or clear the field to run over all.`);
+            return;
+        }
+        if (deepest && !_catPairs.some(p => p[1] === deepest && (!maincat || p[0] === maincat))) {
+            alert(maincat
+                ? `"${deepest}" is not a deepest cat under "${maincat}".`
+                : `"${deepest}" is not a known deepest cat.`);
+            return;
+        }
+    }
     const payload = {
         start_date: toYYYYMMDD(document.getElementById('startDate').value),
         end_date: toYYYYMMDD(document.getElementById('endDate').value),
+        maincat: maincat || null,
+        deepest_cat: deepest || null,
         thresholds: {
             on_min_visits_pct: parseFloat(document.getElementById('onVisitsPct').value),
             on_min_revenue_pct: parseFloat(document.getElementById('onRevenuePct').value),
@@ -466,12 +597,17 @@ async function loadRuns() {
         const badgeClass = statusBadgeClass(run.status);
         const dateRange = (params.start_date && params.end_date)
             ? `${fmtDate(params.start_date)} → ${fmtDate(params.end_date)}` : '';
+        // Show the category scope, or a scoped run is indistinguishable from a
+        // full one in the history (and its low row count looks like a failure).
+        const scope = [params.maincat, params.deepest_cat].filter(Boolean).join(' / ');
+        const scopeHtml = scope
+            ? `<div class="text-muted" style="font-size:0.75rem;">${escapeAttr(scope)}</div>` : '';
         tr.innerHTML = `
             <td class="font-monospace small"><a href="#" onclick="event.preventDefault(); resumeWatch('${run.run_id}')" class="text-decoration-none">${run.run_id}</a></td>
             <td>${run.started_at ? new Date(run.started_at).toLocaleString() : ''}</td>
             <td><span class="badge ${badgeClass} status-badge">${run.status}</span></td>
             <td>${(run.row_count || 0).toLocaleString()}</td>
-            <td class="small">${dateRange}</td>
+            <td class="small">${dateRange}${scopeHtml}</td>
             <td>
                 ${run.status === 'completed'
                     ? `<a class="btn btn-sm btn-outline-purple me-1" href="/api/seo-prio/export/${run.run_id}">Export</a>`
@@ -652,6 +788,7 @@ async function loadResults(runId) {
 
 loadDefaults();
 loadRuns();
+loadCategories();
 </script>
     <footer class="text-center py-4">
         <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
