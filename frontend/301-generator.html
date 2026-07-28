@@ -77,7 +77,6 @@
                     <button class="nav-dropdown-toggle">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
-                        <a href="/static/healthscore.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Healthscore</a>
                         <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
                         <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
@@ -114,14 +113,14 @@
                             </div>
                         </div>
                         <div class="text-end">
-                            <button class="btn btn-outline-secondary btn-sm mb-2" onclick="addCategoryRule()">+ Add Category Rule</button>
-                            <button class="btn btn-outline-info btn-sm mb-2 ms-2" onclick="toggleCategoryBulkInput()">Bulk Paste</button>
-                            <button class="btn btn-outline-danger btn-sm mb-2 ms-2" onclick="removeAllCategoryRules()">Remove All</button>
+                            <button class="btn btn-outline-purple btn-sm mb-2" onclick="addCategoryRule()">+ Add Category Rule</button>
+                            <button class="btn btn-outline-purple btn-sm mb-2 ms-2" onclick="toggleCategoryBulkInput()">Bulk Paste</button>
+                            <button class="btn btn-outline-purple btn-sm mb-2 ms-2" onclick="removeAllCategoryRules()">Remove All</button>
                         </div>
                         <div id="categoryBulkInput" class="d-none mb-3">
                             <small class="text-muted d-block mb-1">Paste from Excel (tab-separated): <code>old_category</code> → <code>new_category</code></small>
                             <textarea class="form-control form-control-sm mb-2" id="categoryBulkText" rows="4"></textarea>
-                            <button class="btn btn-info btn-sm" onclick="parseCategoryBulk()">Add Rules</button>
+                            <button class="btn btn-outline-purple btn-sm" onclick="parseCategoryBulk()">Add Rules</button>
                         </div>
 
                         <!-- Facet Rules -->
@@ -135,14 +134,14 @@
                             </div>
                         </div>
                         <div class="text-end">
-                            <button class="btn btn-outline-secondary btn-sm" onclick="addFacetRule()">+ Add Facet Rule</button>
-                            <button class="btn btn-outline-info btn-sm ms-2" onclick="toggleFacetBulkInput()">Bulk Paste</button>
-                            <button class="btn btn-outline-danger btn-sm ms-2" onclick="removeAllFacetRules()">Remove All</button>
+                            <button class="btn btn-outline-purple btn-sm" onclick="addFacetRule()">+ Add Facet Rule</button>
+                            <button class="btn btn-outline-purple btn-sm ms-2" onclick="toggleFacetBulkInput()">Bulk Paste</button>
+                            <button class="btn btn-outline-purple btn-sm ms-2" onclick="removeAllFacetRules()">Remove All</button>
                         </div>
                         <div id="facetBulkInput" class="d-none mt-2">
                             <small class="text-muted d-block mb-1">Paste from Excel (tab-separated): <code>old_facet</code> → <code>new_facet</code> → <code>category_filter</code> (optional)</small>
                             <textarea class="form-control form-control-sm mb-2" id="facetBulkText" rows="4"></textarea>
-                            <button class="btn btn-info btn-sm" onclick="parseFacetBulk()">Add Rules</button>
+                            <button class="btn btn-outline-purple btn-sm" onclick="parseFacetBulk()">Add Rules</button>
                         </div>
                     </div>
                 </div>
@@ -177,7 +176,7 @@
                                                 <input type="number" class="form-control form-control-sm" id="limitInput" value="10000">
                                             </div>
                                             <button class="btn btn-primary btn-sm ms-auto" onclick="generate()" id="generateBtn">
-                                                Generate 301 Redirects
+                                                Generate Redirects
                                             </button>
                                         </div>
                                     </div>
@@ -187,7 +186,7 @@
 /products/horloge/horloge_123/c/serie~456~~kleur~789"></textarea>
                                         <div class="d-flex justify-content-end">
                                             <button class="btn btn-primary mt-3" onclick="generate()" id="generateBtnManual">
-                                                Generate 301 Redirects
+                                                Generate Redirects
                                             </button>
                                         </div>
                                     </div>
@@ -213,8 +212,8 @@
                     <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Results</h5>
                         <div>
-                            <button class="btn btn-sm" style="border-color: #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyAllToClipboard()">Copy for Excel</button>
-                            <button class="btn btn-outline-warning btn-sm" onclick="downloadResults()">Download Excel</button>
+                            <button class="btn btn-sm btn-outline-purple" onclick="copyAllToClipboard()">Copy for Excel</button>
+                            <button class="btn btn-outline-purple btn-sm" onclick="downloadResults()">Download Excel</button>
                         </div>
                     </div>
                     <div class="card-body">

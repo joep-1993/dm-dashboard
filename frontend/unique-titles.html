@@ -10,6 +10,14 @@
         .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
         .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+        /* Hover pencil on a search result — same affordance as the Built-titles
+           table in seo-titles.html, anchored to the card instead of a table row. */
+        .result-row .row-edit { position: absolute; top: 0.4rem; right: 0.5rem;
+            display: inline-flex; visibility: hidden; align-items: center; justify-content: center;
+            cursor: pointer; color: #ced4da; background: #fff; border: 1px solid #e9ecef;
+            border-radius: 6px; padding: 3px; line-height: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+        .result-row:hover .row-edit { visibility: visible; }
+        .result-row .row-edit:hover { color: #6c757d; border-color: #ced4da; }
     </style>
 </head>
 <body>
@@ -55,7 +63,6 @@
                     <button class="nav-dropdown-toggle">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
-                        <a href="/static/healthscore.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Healthscore</a>
                         <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
                         <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
@@ -91,7 +98,7 @@
                             </div>
                         </div>
                         <div class="d-flex gap-2 flex-nowrap">
-                            <a href="/api/unique-titles/download-csv" class="btn btn-outline-secondary">Download CSV</a>
+                            <a href="/api/unique-titles/download-csv" class="btn btn-outline-purple">Download CSV</a>
                             <button id="publishBtn" class="btn btn-success">
                                 <span id="publishBtnText">Publish All</span>
                                 <span id="publishSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
@@ -110,7 +117,7 @@
                         <h5 class="mb-0">Processing Status</h5>
                     </div>
                     <div class="card-body">
-                        <div class="row">
+                        <div class="row align-items-center">
                             <div class="col-3 text-center">
                                 <h4 id="aiPending" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h4>
                                 <small class="text-muted">Pending</small>
@@ -124,9 +131,9 @@
                                 <small class="text-muted">Successful</small>
                             </div>
                             <div class="col-3 text-center">
-                                <h4 id="aiFailed" class="mb-0" style="color: #5e4a90; font-weight: 700;">-</h4>
+                                <h4 id="aiTotalFailed" class="mb-0" style="color: #5e4a90; font-weight: 700;" title="Persisted across sessions (ai_error IS NOT NULL)">-</h4>
                                 <small class="text-muted">Failed</small>
-                                <small id="aiTotalFailed" class="text-muted d-block" style="font-size: 0.7rem;" title="Persisted across sessions (ai_error IS NOT NULL)">total: -</small>
+                                <small id="aiFailed" class="text-muted d-block" style="font-size: 0.7rem;" title="Failed in the current run">this run: -</small>
                             </div>
                         </div>
                     </div>
@@ -174,11 +181,11 @@
                                 </div>
                             </div>
                             <div class="d-flex gap-2">
-                                <button id="aiStartBtn" class="btn btn-warning">
+                                <button id="aiStartBtn" class="btn btn-outline-orange">
                                     <span id="aiStartBtnText">Start Batch</span>
                                     <span id="aiStartSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                                 </button>
-                                <button id="aiProcessAllBtn" class="btn btn-outline-warning">
+                                <button id="aiProcessAllBtn" class="btn btn-run">
                                     <span id="aiProcessAllBtnText">Process All</span>
                                     <span id="aiProcessAllSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                                 </button>
@@ -274,7 +281,7 @@
                                     <span id="removeBtnText">Remove</span>
                                     <span id="removeSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                                 </button>
-                                <button type="button" class="btn btn-outline-secondary" id="clearBtn">Clear</button>
+                                <button type="button" class="btn btn-outline-purple" id="clearBtn">Clear</button>
                                 <button type="submit" class="btn btn-primary" id="saveBtn">
                                     <span id="saveBtnText">Save</span>
                                     <span id="saveSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
@@ -329,7 +336,7 @@
                                     </div>
                                     <div class="d-flex justify-content-end">
                                         <button type="submit" class="btn btn-secondary" id="importBtn">
-                                            <span id="importBtnText">Import to Database</span>
+                                            <span id="importBtnText">Import</span>
                                             <span id="importSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                                         </button>
                                     </div>
@@ -346,7 +353,7 @@
                                     </div>
                                     <div class="d-flex justify-content-end">
                                         <button type="submit" class="btn btn-secondary" id="manualImportBtn">
-                                            <span id="manualImportBtnText">Import to Database</span>
+                                            <span id="manualImportBtnText">Import</span>
                                             <span id="manualImportSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                                         </button>
                                     </div>
@@ -503,7 +510,7 @@
                 // Update stats
                 document.getElementById('aiPending').textContent = stats.pending?.toLocaleString() || '0';
                 document.getElementById('aiProcessed').textContent = stats.ai_processed?.toLocaleString() || '0';
-                document.getElementById('aiTotalFailed').textContent = 'total: ' + (stats.with_errors?.toLocaleString() || '0');
+                document.getElementById('aiTotalFailed').textContent = stats.with_errors?.toLocaleString() || '0';
 
                 // Update processing status
                 const statusBadge = document.getElementById('aiStatusBadge');
@@ -535,7 +542,7 @@
                     progressBar.textContent = `${processing.processed}/${processing.total_urls} (${progress}%)`;
 
                     document.getElementById('aiSuccessful').textContent = processing.successful?.toLocaleString() || '0';
-                    document.getElementById('aiFailed').textContent = processing.failed?.toLocaleString() || '0';
+                    document.getElementById('aiFailed').textContent = 'this run: ' + (processing.failed?.toLocaleString() || '0');
 
                     // Show current URL
                     if (processing.current_url) {
@@ -552,7 +559,7 @@
                     stopBtn.classList.add('d-none');
 
                     document.getElementById('aiSuccessful').textContent = '-';
-                    document.getElementById('aiFailed').textContent = '-';
+                    document.getElementById('aiFailed').textContent = 'this run: -';
                 }
 
                 // Show error if any
@@ -721,7 +728,7 @@
                 resultDiv.classList.remove('d-none');
 
                 if (result.status === 'success' && result.imported > 0) {
-                    resultAlert.className = 'alert alert-success';
+                    resultAlert.className = 'alert alert-done-yellow';
                     resultAlert.textContent = `Title saved successfully for: ${url}`;
                     loadStats();
                 } else {
@@ -770,7 +777,7 @@
                 resultDiv.classList.remove('d-none');
 
                 if (response.ok && result.status === 'success') {
-                    resultAlert.className = 'alert alert-success';
+                    resultAlert.className = 'alert alert-done-yellow';
                     resultAlert.textContent = `Title removed for: ${url}`;
                     document.getElementById('titleForm').reset();
                     document.getElementById('titleDescription').value = '\u2762 Vergelijk !!NR!! aanbiedingen en bespaar op je aankoop \u2762 beslist.nl';
@@ -820,7 +827,7 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    alertDiv.className = 'alert alert-success';
+                    alertDiv.className = 'alert alert-done-yellow';
                     alertDiv.innerHTML = `Added <strong>${data.added}</strong> new URL(s). `
                         + `Skipped (already in DB): <strong>${data.skipped}</strong>. `
                         + `Invalid: <strong>${data.invalid}</strong>.`;
@@ -866,7 +873,7 @@
                 resultDiv.classList.remove('d-none');
 
                 if (result.status === 'success') {
-                    resultAlert.className = 'alert alert-success';
+                    resultAlert.className = 'alert alert-done-yellow';
                     resultAlert.innerHTML = `
                         <strong>Import Successful!</strong><br>
                         Rows in file: ${result.rows_in_file?.toLocaleString()}<br>
@@ -899,7 +906,7 @@
                 document.getElementById('importBtn'),
                 document.getElementById('importBtnText'),
                 document.getElementById('importSpinner'),
-                'Import to Database'
+                'Import'
             );
         });
 
@@ -917,7 +924,7 @@
                 document.getElementById('manualImportBtn'),
                 document.getElementById('manualImportBtnText'),
                 document.getElementById('manualImportSpinner'),
-                'Import to Database'
+                'Import'
             );
         });
 
@@ -977,12 +984,15 @@
                 }
 
                 resultsDiv.innerHTML = data.results.map(item => `
-                    <div class="card mb-2">
-                        <div class="card-body py-2">
+                    <div class="card mb-2 result-row">
+                        <div class="card-body py-2 position-relative">
+                            <span class="row-edit" title="Edit this title"
+                                  onclick="editTitle('${encodeURIComponent(JSON.stringify(item)).replace(/'/g, '%27')}')">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                            </span>
                             <p class="mb-1 small"><strong>URL:</strong> <a href="https://www.beslist.nl${item.url}" target="_blank" rel="noopener" class="text-decoration-none"><code style="word-break: break-all; user-select: all;">${item.url}</code></a></p>
                             <p class="mb-1 small"><strong>Title:</strong> ${item.title}</p>
                             <p class="mb-1 small"><strong>H1:</strong> ${item.h1_title}</p>
-                            <button class="btn btn-sm btn-outline-primary" onclick="editTitle('${encodeURIComponent(JSON.stringify(item)).replace(/'/g, '%27')}')">Edit</button>
                         </div>
                     </div>
                 `).join('');

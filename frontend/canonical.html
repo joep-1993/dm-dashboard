@@ -11,6 +11,10 @@
         .rule-row { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; align-items: center; }
         .rule-row input { flex: 1; }
         .rule-row .btn-remove { flex: 0 0 auto; }
+        /* Theme maps .btn-outline-danger to orange; these X's must read as remove.
+           See cc1/UI_BLUEPRINT.md "Buttons". */
+        .btn-remove { color: #dc3545; border-color: #dc3545; background-color: transparent; }
+        .btn-remove:hover, .btn-remove:focus { background-color: #dc3545; border-color: #dc3545; color: #fff; }
         .results-table { max-height: 500px; overflow-y: auto; }
         .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
         .url-cell.copyable { cursor: pointer; }
@@ -70,7 +74,6 @@
                     <button class="nav-dropdown-toggle">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
-                        <a href="/static/healthscore.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Healthscore</a>
                         <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
                         <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
@@ -203,7 +206,7 @@
 
                         <!-- Actions -->
                         <div class="d-flex gap-2 justify-content-end">
-                            <button class="btn btn-outline-secondary btn-sm" onclick="previewUrls()">Preview URLs</button>
+                            <button class="btn btn-outline-purple btn-sm" onclick="previewUrls()">Preview URLs</button>
                             <button class="btn btn-secondary btn-sm" onclick="generateCanonicals()">Generate Canonicals</button>
                         </div>
                     </div>
@@ -237,7 +240,7 @@
                 <div class="card mb-4">
                     <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Recent results</h5>
-                        <button class="btn btn-sm" style="border: 1px solid #8b7bb5; color: #c3b6dd;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#c3b6dd'" onclick="loadCanonicalRuns()">↻ Refresh</button>
+                        <button class="btn btn-sm btn-outline-purple" onclick="loadCanonicalRuns()">↻ Refresh</button>
                     </div>
                     <div class="card-body">
                         <div id="canonRunsContainer">
@@ -825,7 +828,7 @@
                                         <td>${escapeHtml(String(r.changed))}</td>
                                         <td>${escapeHtml(String(r.total))}</td>
                                         <td>
-                                            <button class="btn btn-sm" style="border: 1px solid #8b7bb5; color: #8b7bb5;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="loadCanonicalRun(${Number(r.id) || 0})">Load</button>
+                                            <button class="btn btn-sm btn-outline-purple" onclick="loadCanonicalRun(${Number(r.id) || 0})">Load</button>
                                             <button class="btn btn-sm" style="border: 1px solid #dc3545; color: #dc3545;" onmouseover="this.style.backgroundColor='#dc3545';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#dc3545'" onclick="deleteCanonicalRun(${Number(r.id) || 0})">Delete</button>
                                         </td>
                                     </tr>

@@ -78,7 +78,6 @@
                     <button class="nav-dropdown-toggle">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
-                        <a href="/static/healthscore.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Healthscore</a>
                         <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
                         <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
@@ -119,12 +118,8 @@
                                 <label class="form-check-label" for="modeId">Shop ID</label>
                             </div>
                         </div>
-                        <label for="shopNames" class="form-label small" id="shopInputLabel">Shop Names</label>
-                        <textarea class="form-control" id="shopNames" rows="3" placeholder="one shop per line"></textarea>
-                    </div>
-                    <div>
-                        <label class="form-label small">Countries</label>
-                        <div class="d-flex gap-3 mt-1">
+                        <label class="form-label small d-block">Countries</label>
+                        <div class="d-flex gap-3 mb-2">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="chkNl" checked>
                                 <label class="form-check-label" for="chkNl">NL</label>
@@ -138,10 +133,12 @@
                                 <label class="form-check-label" for="chkDe">DE</label>
                             </div>
                         </div>
+                        <label for="shopNames" class="form-label small" id="shopInputLabel">Shop Names</label>
+                        <textarea class="form-control" id="shopNames" rows="3" placeholder="one shop per line"></textarea>
                     </div>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-primary" onclick="doSearch()" id="searchBtn">Search</button>
-                        <button class="btn btn-outline-secondary" onclick="clearForm()">Clear</button>
+                        <button class="btn btn-outline-purple" onclick="clearForm()">Clear</button>
+                        <button class="btn btn-run" onclick="doSearch()" id="searchBtn">Search</button>
                     </div>
                 </div>
             </div>

@@ -489,6 +489,30 @@ body {
     color: white;
 }
 
+/* Reset Validation (Kopteksten + FAQ's) must read as destructive, but the rule
+   above themes .btn-outline-danger to orange. Same override seo-titles.html
+   applies to #btnRemove. Disabled stays grey outline, never red — see
+   cc1/UI_BLUEPRINT.md "Buttons". */
+#resetValidationBtn {
+    color: #dc3545;
+    border-color: #dc3545;
+    background-color: transparent;
+}
+
+#resetValidationBtn:hover,
+#resetValidationBtn:focus {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: #fff;
+}
+
+#resetValidationBtn:disabled {
+    color: #6c757d;
+    border-color: #6c757d;
+    background-color: transparent;
+    opacity: 1;
+}
+
 /* Sticky top navbar must always sit above sticky table headers.
    Bootstrap defaults both .navbar.sticky-top and thead.sticky-top to
    z-index 1020, and at equal z-index the later DOM element wins — so

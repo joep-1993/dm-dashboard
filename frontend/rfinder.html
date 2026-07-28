@@ -61,7 +61,6 @@
                     <button class="nav-dropdown-toggle">SEO tools</button>
                     <div class="nav-dropdown-menu">
                         <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
-                        <a href="/static/healthscore.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Healthscore</a>
                         <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Index Checker</a>
                         <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> IndexNow</a>
                         <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> Keyword Planner</a>
@@ -85,10 +84,11 @@
                 <!-- Search Filters -->
                 <div class="card mb-4">
                     <div class="card-header bg-info text-white">
-                        <h5 class="mb-0">Search Filters</h5>
+                        <h5 class="mb-0 d-flex align-items-center gap-2">Search Filters
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title>Find /r/ URLs from Redshift visits data. Filter by category, minimum visits, and date range.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
+                        </h5>
                     </div>
                     <div class="card-body">
-                        <p class="text-muted">Find /r/ URLs from Redshift visits data. Filter by category, minimum visits, and date range.</p>
                         <div class="row mb-3">
                             <div class="col-md-6">
                                 <label class="form-label small">Date Range</label>
@@ -128,9 +128,9 @@
                             </div>
                         </div>
 
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-primary" onclick="searchUrls()">Search URLs</button>
-                            <button class="btn btn-outline-secondary" onclick="clearFilters()">Clear Filters</button>
+                        <div class="d-flex gap-2 justify-content-end">
+                            <button class="btn btn-outline-purple" onclick="clearFilters()">Clear Filters</button>
+                            <button class="btn btn-run" onclick="searchUrls()">Search URLs</button>
                         </div>
                     </div>
                 </div>
@@ -198,6 +198,9 @@
     <script>
         // Store results for download
         let currentResults = [];
+        // Current results as TSV for "Copy for Excel" — was read off the tsvOutput
+        // textarea, which no longer exists.
+        let lastTsv = '';
 
         // Initialize date range (2015-01-01 to today)
         document.addEventListener('DOMContentLoaded', () => {
@@ -274,11 +277,10 @@
 
             // Create tab-separated text for Excel (tabs = columns) with relative URLs
             const toRelativeUrl = (url) => url.replace(/^https?:\/\/[^\/]+/, '');
-            const tsvData = 'url\tvisits\n' + results.map(r => `${toRelativeUrl(r.url)}\t${r.visits}`).join('\n');
+            lastTsv = 'url\tvisits\n' + results.map(r => `${toRelativeUrl(r.url)}\t${r.visits}`).join('\n');
 
             container.innerHTML = `
                 <p class="text-muted small mb-2">Total visits: <strong>${totalVisits.toLocaleString()}</strong></p>
-                <textarea id="tsvOutput" class="form-control mb-3" rows="10" readonly style="font-family: monospace; font-size: 0.8rem;">${escapeHtml(tsvData)}</textarea>
                 <div class="results-table">
                     <table class="table table-sm table-striped table-hover">
                         <thead class="sticky-top bg-white">
@@ -303,10 +305,13 @@
         }
 
         function copyToClipboard() {
-            const textarea = document.getElementById('tsvOutput');
-            textarea.select();
-            document.execCommand('copy');
-            alert('Copied to clipboard! Paste directly into Excel.');
+            if (!lastTsv) {
+                alert('No results to copy');
+                return;
+            }
+            navigator.clipboard.writeText(lastTsv).then(() => {
+                alert('Copied to clipboard! Paste directly into Excel.');
+            });
         }
 
         function clearFilters() {
