@@ -9,15 +9,14 @@ _Active tasks for immediate work_
 Source of truth is `/home/joepvanschagen/projects/dm-dashboard/suggestions.txt`
 (untracked, now 49 lines / 42 bullets — **item 49 was added after the first
 batch**). Item numbers below are that file's LINE numbers, which is the
-vocabulary used in the commits. **41 of 42 done — only 47 is left**, in `569288a`
-(23 items), `10f4152` (8 + 14), `8be2ca1` (11, 15b, 18b, 19, 20b, 25, 49),
-`45a1339` (33, 39, 40), `17916fe` (9), `57ccbb7` (7), `b593ca2` (6), `2493689`
-(1) and `d6b8c91` (2). Item 48 shipped as a dry-run script by Joep's choice.
+vocabulary used in the commits. **ALL 42 done**, in `569288a` (23 items),
+`10f4152` (8 + 14), `8be2ca1` (11, 15b, 18b, 19, 20b, 25, 49), `45a1339`
+(33, 39, 40), `17916fe` (9), `57ccbb7` (7), `b593ca2` (6), `2493689` (1),
+`d6b8c91` (2), `7ddb91d` (48 dry run) and `5c2556e` (47).
 
 ### Done
 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-23, 24, 25, 26, 29, 30, 31, 32, 33, 39, 40, 41, 42, 43, 44, 45, 46, 48 (dry run),
-and 49.
+23, 24, 25, 26, 29, 30, 31, 32, 33, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49.
 
 Notes worth keeping from the first batch: every button touched moved to the
 canonical classes in `style.css` (which also brings the grey-outline disabled
@@ -96,11 +95,26 @@ Notes from the 2026-07-28 tables/features batch:
   `loadCache()` wrote to `#cacheContent`, which is not in the markup — it threw on
   every page load and the `catch` threw the same way, so it was unhandled.
 
-### Not started — features
-- **47** R-Finder: add filter ROWS under URL-filters; each row is its own OR set
-  producing its own result set. Needs a backend change — `fetch_r_urls(filters)`
-  currently takes a flat list and ANDs it, so it becomes a list-of-lists plus
-  per-row result grouping in the UI (and Copy/Download).
+- **47** — "+ Add filter row" in R-Finder; boxes within a row still AND, each ROW
+  is its own search with its own result set, its own limit, and its own lines in
+  Copy/Download (the row+filters columns appear only when there is more than one
+  row, so single-row output is byte-identical to before).
+  **Rows are separate QUERIES, not one query with the rows OR'd.** A shared query
+  lets a broad row eat the whole LIMIT and return nothing for a narrow one —
+  checked with `['/r/']` vs `['vloerkleed']` at limit 20, both still return 20.
+  One row = a full ~17s /r/ scan, so rows run concurrently (3 rows in 4.8s),
+  **capped at 4** — the Redshift pool is maxconn=10 and `get_redshift_connection`
+  *raises* rather than blocks when it is dry, so leaving 6 free is deliberate.
+  New `fetch_r_urls_by_row()`; `filters` and the `urls`/`total` response fields
+  still work for older callers.
+  **Found a latent bug in shared code doing this:** `database.py`'s pool getters
+  had an unguarded lazy init, so N threads racing their *first* DB call each built
+  a separate pool, last assignment won, and a connection from an orphaned pool
+  died on return with psycopg2 "trying to put unkeyed connection". Reproduced with
+  a 12-thread barrier on a cold pool; fixed with a double-checked lock. This could
+  have hit **any** concurrent cold start, not just R-Finder.
+  Also fixed: the CSV writer wrapped urls in bare quotes with no escaping, so a
+  url containing `"` produced a broken row.
 - **48** Top 5 facets per category by visits (all channels) → all combos as SEO
   title blueprints. **Joep chose DRY RUN (2026-07-28): generate to Excel, push
   nothing.** Script: `scripts/pagetitles_top5_allchannel_combos.py`.
@@ -125,9 +139,32 @@ Notes from the 2026-07-28 tables/features batch:
     (the MAX_TITLE_LEN trim), longest h1 148.
   - Sheet 2 `per_category` lists each category's ranked top facets with their
     visit counts, so the ranking can be checked without reading 73k rows.
+
+  **CREATED for real on 2026-07-28** (`--write`, second run): **33,745 rows in
+  `pa.seo_titles_blueprints` with status='built'**. Table is now
+  `pushed=43,874 | built=33,745`. Counts differ by ~130 from the dry run above
+  because the Redshift window moved on by a few hours between the two runs —
+  the ranking is recomputed each time, it is not a fixed snapshot.
+  **Nothing was pushed to /page-titles.**
+  - `source_url` is NULL by design: these combos are synthesised from the
+    ranking, not scraped from one URL. `publish_built()` only reads
+    cat_id/key/title/h1_title/description/country_code so that is safe, but it
+    does mean the optional per-URL AI-title push has nothing to do for them.
+  - ⚠️ **This changes what the SEO Titles "Publish" button does.** With no rows
+    selected it pushes ALL status='built' rows, and before this there were none.
+    Select rows to push a subset.
+  - Undo: `DELETE FROM pa.seo_titles_blueprints WHERE status='built' AND
+    created_at >= '2026-07-28 16:43:41';` — verified to match exactly 33,745 rows
+    and zero 'pushed' ones.
+  - **`created_at` is UTC.** The first `--write` run stamped `datetime.now()`
+    (CEST) and compared against a naive TIMESTAMP filled by `now()` on an
+    `Etc/UTC` server, so the verification count printed 0 and the printed undo
+    statement would have deleted nothing. The script now takes its stamp from
+    `SELECT now() AT TIME ZONE 'UTC'` and shouts if the count disagrees. Same
+    trap as [postgres_utc_timestamps_display].
   **Still pending before any push:** `/page-titles` validates a POST atomically in
   5,000-row batches, so one bad row fails 5,000 (see LEARNINGS 2026-07-27) —
-  narrow with `--max-cats` rather than pushing the full sweep in one go.
+  push a selected subset rather than all 33,745 in one go.
 
 ### Where the wandpanelen thread ended (2026-07-28)
 Root cause fixed and pushed (`60dfe78`): category resolution is API-first with

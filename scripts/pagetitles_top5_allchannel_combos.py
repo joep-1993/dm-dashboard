@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """
-suggestions.txt item 48 — DRY RUN.
+suggestions.txt item 48.
 
 Top 5 facets per category by visits **across all channels**, then a page-title
 blueprint for every non-empty combination of those 5.
 
-Pushes NOTHING. Writes one Excel workbook for review; Joep decides the scope
-before anything reaches /page-titles.
+Default is a DRY RUN: writes one Excel workbook and touches nothing else.
+`--write` additionally CREATES the new combos in `pa.seo_titles_blueprints` with
+status='built', i.e. staged in the SEO Titles tool and publishable from its UI.
+
+**Neither mode ever calls /page-titles.** Publishing stays a deliberate click.
+
+⚠️ `--write` changes what the SEO Titles "Publish" button does: with no rows
+selected it pushes ALL status='built' blueprints, and before this ran there were
+none (43,874 rows, every one already 'pushed'). The run prints the exact DELETE
+to undo itself.
 
 Why this is not scripts/pagetitles_topn_combinations.py
 ------------------------------------------------------
@@ -42,10 +50,14 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.database import get_redshift_connection, return_redshift_connection
+from backend.database import (
+    get_db_connection, return_db_connection,
+    get_redshift_connection, return_redshift_connection,
+)
 from backend.seo_titles_service import (
     build_blueprint, canon_key, load_rules, load_existing_combos,
-    parse_url, _resolve_cat, _yyyymmdd,
+    parse_url, _resolve_cat, _upsert_blueprint, _yyyymmdd,
+    init_seo_titles_table,
 )
 
 DEFAULT_OUT_DIR = '/mnt/c/Users/JoepvanSchagen/Downloads/claude'
@@ -144,6 +156,9 @@ def main():
     ap.add_argument('--max-cats', type=int, default=0,
                     help='0 = every category; otherwise the N with most visits')
     ap.add_argument('--out', default=None)
+    ap.add_argument('--write', action='store_true',
+                    help="create the NEW combos in pa.seo_titles_blueprints as "
+                         "status='built'. Never pushes to /page-titles.")
     args = ap.parse_args()
 
     dto_default = int(datetime.now().strftime('%Y%m%d'))
@@ -173,6 +188,7 @@ def main():
     print(f'[4/5] building blueprints for every non-empty subset of the top '
           f'{args.top_n} ({2 ** args.top_n - 1} per category)')
     out_rows = []
+    new_bps = []          # (blueprint, facet_visits) for the --write step
     n_new = n_existing = 0
     for cid, info in cats:
         ranked = info['ranked']
@@ -187,6 +203,8 @@ def main():
                 is_existing = ck in existing
                 n_existing += is_existing
                 n_new += (not is_existing)
+                if not is_existing:
+                    new_bps.append((bp, sum(visits_by_facet.get(t, 0) for t in combo)))
                 out_rows.append({
                     'cat_id': cid,
                     'cat_name': info['cat_name'],
@@ -235,8 +253,66 @@ def main():
         df.to_excel(xw, sheet_name=f'top{args.top_n}_combos', index=False)
         summary.to_excel(xw, sheet_name='per_category', index=False)
     print(f'      -> {out}')
-    print(f'\nDRY RUN — nothing was pushed to /page-titles.')
-    print(f'Of {len(out_rows):,} rows, {n_new:,} would be new blueprints.')
+
+    if not args.write:
+        print('\nDRY RUN — nothing was written and nothing was pushed.')
+        print(f'Of {len(out_rows):,} rows, {n_new:,} would be new blueprints.')
+        print('Re-run with --write to create them as status=\'built\'.')
+        return 0
+
+    # ---- --write: create the new combos as 'built' -------------------------
+    print(f"\n[write] creating {len(new_bps):,} new blueprints as status='built'")
+    init_seo_titles_table()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    written = 0
+    try:
+        # Stamp from the DB's clock, NOT datetime.now(). created_at is a naive
+        # TIMESTAMP filled by now() on a server running TimeZone=Etc/UTC, so a
+        # local (CEST) stamp is 2h ahead and every created_at >= stamp comparison
+        # matches nothing — which silently broke both the verification count and
+        # the printed undo statement on the first run.
+        cur.execute("SELECT now() AT TIME ZONE 'UTC' AS t")
+        stamp = cur.fetchone()['t']
+        for bp, fvisits in new_bps:
+            # source_url is NULL on purpose: these combos are synthesised from the
+            # top-5 ranking, not scraped from one URL. publish_built() only reads
+            # cat_id/key/title/h1_title/description/country_code, so that is safe;
+            # it does mean the optional per-URL AI-title push has nothing to do.
+            _upsert_blueprint(cur, bp, None, fvisits, None)
+            written += 1
+            if written % 2000 == 0:
+                conn.commit()
+                print(f'        {written:,}/{len(new_bps):,}')
+        conn.commit()
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+    # Verify against the DB rather than trusting the loop counter.
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT status, count(*) AS c FROM pa.seo_titles_blueprints GROUP BY 1 ORDER BY 2 DESC")
+        by_status = {r['status']: r['c'] for r in cur.fetchall()}
+        cur.execute("SELECT count(*) AS c FROM pa.seo_titles_blueprints WHERE created_at >= %s", (stamp,))
+        fresh = cur.fetchone()['c']
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+    print(f'      wrote {written:,}; {fresh:,} rows carry this run\'s created_at '
+          f'(stamp {stamp:%Y-%m-%d %H:%M:%S} UTC)')
+    if fresh != written:
+        print(f"      !! expected {written:,} — check the created_at timezone")
+    print(f'      pa.seo_titles_blueprints now: '
+          + ' | '.join(f'{k}={v:,}' for k, v in by_status.items()))
+    print('\nNOTHING was pushed to /page-titles — publishing stays a deliberate click.')
+    print('⚠️  SEO Titles → Publish with NO rows selected pushes ALL \'built\' rows,')
+    print(f'    which is now {by_status.get("built", 0):,}. Select rows to push a subset.')
+    print('\nTo undo this run exactly (created_at is UTC — the server is Etc/UTC):')
+    print(f"    DELETE FROM pa.seo_titles_blueprints"
+          f" WHERE status='built' AND created_at >= '{stamp:%Y-%m-%d %H:%M:%S}';")
     return 0
 
 
