@@ -15,7 +15,8 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── scraper_service.py    # Product Search API + web scraping
 │   ├── link_validator.py     # Elasticsearch plpUrl link validation
 │   ├── faq_service.py        # FAQ generation service
-│   ├── content_publisher.py  # Publishes content to website-configuration API
+│   ├── content_publisher.py  # Publishes content_top + FAQ blobs to website-configuration /automated-content
+│   ├── faq_v2_publisher.py   # "Publish 2.0": FAQ Q&A pairs -> website-configuration /faq (one record per QUESTION, incremental via pa.faq_v2_push_state)
 │   ├── ai_titles_service.py  # AI-powered title generation
 │   ├── canonical_service.py  # Canonical URL transformation
 │   ├── redirect_301_service.py # 301 redirect management
@@ -407,6 +408,15 @@ python-dotenv==1.0.0      # Environment variable management
 - `POST /api/content-publish?dry_run=true&environment=dev` - Publish content (dry_run=true returns stats, false starts background task)
 - `GET /api/content-publish/status/{task_id}` - Poll background task status (pending/running/completed/failed)
 - `GET /api/content-publish/last-push` - Get last successful production publish timestamp
+
+### FAQ "Publish 2.0" (a DIFFERENT store from Content Publishing above)
+Pushes to website-configuration **`/faq`**, one record per QUESTION, instead of
+`/automated-content`'s one-blob-per-URL. FAQ only — never kopteksten. Contract and
+gotchas are in `backend/faq_v2_publisher.py`'s docstring.
+- `GET  /api/faq/publish-v2/stats` - urls_total / urls_pending / urls_pushed / last_pushed_at + record estimates
+- `POST /api/faq/publish-v2` - body `{environment, mode, limit, replace}`; starts a background task.
+  `mode` = **`new`** (default: no state row, or md5(faq_json) changed — see `pa.faq_v2_push_state`) or `all` (~280,636 URLs / ~1.7M records)
+- `GET  /api/faq/publish-v2/status/{task_id}` - poll (queued/running/completed/failed) + per-batch progress
 
 ### DM Review (slide 2 refresh)
 - `GET /api/dm-review/health` - Health check
