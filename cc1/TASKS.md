@@ -105,9 +105,17 @@ have no matching bullet:
   `/faq` section is in the module docstring. It is **additive** (upsert on
   (url, question)), so stale questions survive a regeneration — `replace=True`
   exists but costs one DELETE per URL (~280k) so it is not the default.
-  Smoke-tested on prod with `limit=2` → 12 records, read back clean. **Never run
-  the unlimited push casually: ~280,636 URLs / ~1.7M records.** Note `schema_org`
-  has no home in `/faq` — the endpoint rejects the field.
+  Note `schema_org` has no home in `/faq` — the endpoint rejects the field.
+- **Publish 2.0 is incremental by default** (`fc095bd`): `pa.faq_v2_push_state`
+  (url_id PK, content_md5, records, pushed_at) tracks what was pushed;
+  `mode="new"` (default) sends only URLs with no state row or a changed
+  md5(faq_json), `mode="all"` re-pushes everything. The UI's "Publish 2.0" button
+  is incremental; the small **"all"** button beside it is the full ~1.7M re-push.
+  See LEARNINGS for why md5 beats an `updated_at` watermark, and for the testing
+  trap (with a `limit`, `mode=new` advances to the NEXT n URLs — judge it by
+  `pa.faq_v2_push_state`, not the record count).
+  **Still unexercised: the unbounded run** (largest test is 3 of 280,636 URLs)
+  **and the button in a real browser** — DOM wiring only verified statically.
 
 ### Open
 - Nothing in `suggestions_new.txt` as of 2026-07-29 15:05 — but RE-READ the file

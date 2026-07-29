@@ -103,6 +103,15 @@ Joep zag `/products/huis_tuin/wandpanelen/` met een generieke titel ("Goedkope w
 - **Twee kolomvallen onderweg:** (1) `pa.page_titles_existing` heeft **twee rij-layouts** ("normal" en "shifted", zie de comment bij `get_preview`) — detecteer met `title ILIKE '%beslist.nl%'`, anders lees je facet-keys als titels. (2) `canon_key` is voor shifted rijen berekend over de category-naam, dus onbruikbaar; normaliseer eerst.
 - **En de export is oud:** `page_titles_existing` komt uit `tblPageTitles.xlsx` van **6 juli**, terwijl er tussen 20 en 27 juli **43.874** combos gepusht zijn. "0 live combos" betekent dus "0 in de snapshot", niet "0 in productie" — dat verklaart een rij met `pushed=1, live=0`. `/page-titles` heeft geen GET, dus productie is niet terug te lezen.
 
+## Incrementeel pushen: md5-per-record, geen `updated_at`-watermark (2026-07-29)
+
+Publish 2.0 duwde eerst élke run de hele corpus (280.636 urls / ~1,7M records) opnieuw. Idempotent door de (url, question)-upsert, maar zinloos veel werk. `pa.faq_content_v2` heeft **geen** push-state (alleen url_id, page_title, faq_json, schema_org, created_at, updated_at), dus die is toegevoegd: `pa.faq_v2_push_state(url_id PK, content_md5, records, pushed_at)`.
+
+- **Waarom md5 en niet `updated_at > laatste run`:** een volle run is ~850 batches, dus een gedeeltelijke mislukking is waarschijnlijk. Een tijdstempel-watermark schuift ná de run op en slaat daarmee **stil** alles over wat halverwege faalde. Per-URL-state schuift alleen op voor urls wiens **eigen batch** slaagde → mislukkingen komen automatisch terug in de volgende run.
+- md5 wordt aan **beide** kanten door Postgres berekend (`md5(f.faq_json)` in de select én in de compare), dus geen Python/PG-hash-mismatch mogelijk. En het is niet afhankelijk van of de generator `updated_at` netjes bijwerkt.
+- **Structureel gevolg:** state wordt per batch gestempeld, dus **de records van één URL mogen nooit over twee batches vallen**. Daarom levert de iterator hele URL-groepen en wordt de batch geflusht *vóórdat* een groep hem zou laten overlopen. Wie dat omdraait, stempelt urls als gepusht waarvan de helft nog niet verstuurd is.
+- **Val bij het testen:** met een `limit` pakt `mode=new` elke run de **volgende** n urls. Twee opeenvolgende `limit=3`-runs die beide "18 records" melden, is dus **correct** — geen re-push. Kijk naar `pa.faq_v2_push_state` (distinct url_ids, pending-count), niet naar het records-getal. Ik dacht eerst dat mijn filter stuk was.
+
 ## Undocumented API? Laat de validator je het contract vertellen (2026-07-29)
 
 `https://website-configuration.api.beslist.nl/faq` had geen swagger (`/swagger.json`, `/openapi.json`, `/swagger/v1/swagger.json` → allemaal 404). Contract in ~6 read-only-plus-invalid calls compleet gekregen:
