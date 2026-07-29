@@ -48,9 +48,36 @@ graph above it.
 - **[22] Canonicals** — "Generate Canonicals" → "Generate", plus the placeholder
   sentence that quotes the button name.
 
+### Follow-up polish, asked over chat rather than added to the file (2026-07-29)
+
+Not numbered anywhere — if you are reconciling the file against the commits, these
+have no matching bullet:
+
+- SEO stats: chart legend forced onto one row (11px / padding 8 / 6px dots) and
+  `DMA Organic` shortened to `DMA` in `METRICS`, which also renames the table
+  header and the Excel column. Per-day WoW headers reduced to plain `WoW %` (the
+  metric name stays in the `title` **and** in the Excel export, where the strings
+  are object keys and a bare "WoW %" would collide and drop columns). Notes column
+  20% → 12% while Show deltas is on. Whitespace around the two Top-categories
+  sub-headings.
+- Thema Ads: orange CTAs right-aligned in every tab (Activate Ads, Download CSV,
+  Find & Remove Duplicates were left-aligned), and the Check-up pair taken out of
+  a `.btn-group`. Note `.btn-warning` / `.btn-success` are BOTH themed
+  `--color-button` orange here, so "the orange buttons" is nearly all of them.
+- All remove-× consolidated onto shared `btn btn-outline-red btn-remove-row` +
+  SVG: Redirect Generator (4), Canonicals (6), Kopteksten, FAQ's, R-Finder.
+  `.btn-danger-invert`, canonical's `.btn-remove` and rfinder's page-local
+  `.btn-remove-row` all deleted. See LEARNINGS — this is the item-8 follow-up that
+  came back because the inverted class was left in place the first time.
+
 ### Open
 - Nothing in `suggestions_new.txt` as of 2026-07-29 15:05 — but RE-READ the file
-  rather than trusting this line; Joep has appended to it three times this session.
+  rather than trusting this line; Joep has appended to it three times this session,
+  and several later requests arrived over chat without ever entering the file.
+- Still awaiting Joep's call: the chart palette's two colourblind-unsafe pairs
+  (needs a deviation from "the base row" to fix), and whether Thema Ads' Start /
+  Pause / Resume job controls should be right-aligned too (they are orange but sit
+  outside the tab block).
 
 ### Deliberately not done (reported to Joep, not refused)
 - Thema Ads' seven other `.alert-info` blocks are collapse disclosure content,

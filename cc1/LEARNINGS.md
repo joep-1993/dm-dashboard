@@ -92,6 +92,31 @@ Item 21 vroeg een potloodje in Unique Titles' Recent Results, precies zoals Sear
 - Fix: `c.description` toegevoegd aan de SELECT, plus `?? ''` in `editTitle` omdat een *mislukte* rij NULL-content heeft (LEFT JOIN op `unique_titles_content`) en `null` óók als `"null"` in het veld zou landen.
 - **Regel:** bij hergebruik van een edit-handler voor een tweede lijst: vergelijk de veldenlijst van beide endpoints tegen wat de save verstuurt. Een read-only lijst mag velden missen; zodra je hem editable maakt, mag dat niet meer.
 
+## Eén control, vier implementaties — waarvan één met de hover omgekeerd (2026-07-29)
+
+Joep: "de X-buttons in Redirect Generator hebben nog het oude gedrag" en daarna "swap alle X-buttons naar het nieuwe ontwerp". Bij het opruimen bleek dezelfde remove-× **vier keer** los te bestaan:
+
+| plek | kleur | geometrie | hover |
+|---|---|---|---|
+| `.btn-danger-invert` (301-generator) | vol rood | `btn-sm` | → outline (**omgekeerd**) |
+| `.btn-remove` (canonical) | rode outline | `btn-sm` | → vol rood |
+| `.btn-remove-row` (rfinder, page-local) | rode outline | vaste box + SVG | → vol rood |
+| inline style (faq.js) | rode outline | `style="width:30px;height:30px;padding:0;font-size:1.1rem"` | → vol rood |
+
+- **Dit is precies waarom item 8 terugkwam.** Ik had bij item 8 alléén de FAQ/Kopteksten-× omgezet en `.btn-danger-invert` bewust laten staan "want 301-generator gebruikt hem nog". Dat liet twee tegengestelde hover-richtingen naast elkaar bestaan, en dus kwam de klacht een dag later terug voor de andere pagina. **Les: als je een gedrag omdraait, draai het overal om of verwijder de tegenhanger — een half doorgevoerde conventie is een bug met vertraging.**
+- Opgelost door te splitsen in **kleur** (`.btn-outline-red`) en **geometrie** (`.btn-remove-row`), beide in `style.css`. Zo kan een niet-destructieve icon-button dezelfde geometrie met een andere kleur pakken, en staat de vaste box op één plek. De drie page-locals en `.btn-danger-invert` zijn weg.
+- **Grep-tip:** zoeken op `>×<` vindt ze niet allemaal — in app.js/faq.js stond de `×` op een eigen regel binnen de template string. Grep op het karakter zelf en filter ruis (`600 × 500ms`, `viewBox`) eruit.
+- Bewuste uitzondering: de clear-het-veld-× in een `input-group` (Canonicals' resultatenfilter). Die is neutraal, niet destructief, en een vaste vierkante box breekt de hoogte-afstemming van de input-group. Staat als uitzondering in UI_BLUEPRINT.
+- Niet meegenomen: `.btn-remove` in gsd-budgets / rurl-optimizer / gsd-campaigns zijn **tekst-**knoppen ("Remove"), geen icon-only ×. Die hebben de hover al goed.
+
+## `.btn-group` zet knoppen tegen elkaar aan — dat is z'n functie, niet een marge-bug (2026-07-29)
+
+"In Check-up staan Run Checkup en Reset Labels te dicht op elkaar." Ze stonden niet dicht op elkaar, ze **raakten** elkaar: de twee zaten in een `<div class="btn-group">`, en dat is Bootstraps segmented-control — die haalt de tussenruimte er expres uit en rondt alleen de buitenhoeken af.
+
+- Fix is de `btn-group` weggooien, niet een marge toevoegen: `d-flex justify-content-end gap-2`. Een `me-2` erop plakken had de gezamenlijke rand-radius laten staan en dus half-lelijk gebleven.
+- Er zat bovendien een `d-flex justify-content-end` **binnen** de btn-group om één knop heen — die doet daar niets. Symptoom van eerder "rechts uitlijnen" proberen zonder de btn-group te herkennen.
+- **Regel:** `.btn-group` alleen voor knoppen die één control vormen (filter-segmenten, presets zoals 7d/14d/30d). Losse acties naast elkaar = `d-flex gap-2`.
+
 ## `cc1/` staat in `.gitignore` maar de bestanden zijn tracked (2026-07-29)
 
 `git add cc1/UI_BLUEPRINT.md` faalt met "The following paths are ignored" en de héle `git add` doet dan niets (atomisch) — ook de 20 frontend-bestanden niet.
