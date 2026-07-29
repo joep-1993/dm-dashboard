@@ -12,20 +12,9 @@
         .visits-cell { text-align: right; font-weight: bold; }
         .filter-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
         .filter-row input { flex: 1; }
-        /* Remove-a-filter-row X. Explicit red because style.css themes
-           .btn-outline-danger orange (see cc1/UI_BLUEPRINT.md "Buttons"). */
-        /* The glyph is an SVG, not "×": a text × sits high in its line box, so it
-           never lands in the optical centre no matter what line-height/padding
-           you throw at it. inline-flex + an SVG that is symmetric about its own
-           viewBox centre is exactly centred, both axes, at any size.
-           See cc1/UI_BLUEPRINT.md "Icon-only buttons". */
-        .btn-remove-row {
-            color: #dc3545; border: 1px solid #dc3545; background: transparent;
-            display: inline-flex; align-items: center; justify-content: center;
-            width: 1.75rem; height: 1.75rem; padding: 0; line-height: 1;
-        }
-        .btn-remove-row svg { display: block; }
-        .btn-remove-row:hover, .btn-remove-row:focus { background: #dc3545; color: #fff; }
+        /* Remove-a-filter-row X: .btn-outline-red + .btn-remove-row, both shared
+           in css/style.css. btn-outline-red rather than btn-outline-danger
+           because style.css themes the latter orange (UI_BLUEPRINT "Buttons"). */
         .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
         .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
@@ -242,7 +231,7 @@
                         </div>`).join('')}
                     <div class="col-auto" style="width: 3rem;">
                         ${filterRows.length > 1
-                            ? `<button class="btn btn-remove-row" onclick="removeFilterRow(${ri})" title="Remove this row" aria-label="Remove this row"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>`
+                            ? `<button class="btn btn-outline-red btn-remove-row" onclick="removeFilterRow(${ri})" title="Remove this row" aria-label="Remove this row"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>`
                             : ''}
                     </div>
                 </div>`).join('');

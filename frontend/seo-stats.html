@@ -44,6 +44,10 @@
         .perf-fixed { table-layout: fixed; width: 100%; }
         .perf-fixed th.col-weekday { width: 68px; }
         .perf-fixed th.col-notes { width: 20%; }
+        /* "Show deltas" adds a WoW column per metric — up to 6 more on a
+           table-layout:fixed grid, which squeezes every number. Notes gives some
+           width back; it is a short free-text field and still scrolls its input. */
+        .perf-fixed.with-deltas th.col-notes { width: 12%; }
         .perf-fixed th { white-space: normal; }
         .perf-fixed td, .perf-fixed th { text-align: center; }
         .perf-fixed td:first-child, .perf-fixed th:first-child,
@@ -121,8 +125,8 @@
         /* nowrap, or the series name is the only shrinkable item in the row and
            wraps onto a second line as soon as the value + WoW pill get wider —
            which made the tooltip's height jump between days (a 5-digit visit
-           count wraps "DMA Organic visits", a 4-digit one doesn't). The row now
-           widens the tooltip instead of growing it taller. */
+           count wrapped the longest series name, a 4-digit one didn't). The row
+           now widens the tooltip instead of growing it taller. */
         .chart-tooltip .ct-label { flex: 1 1 auto; color: #6a6a78; white-space: nowrap; }
         .chart-tooltip .ct-val { font-weight: 600; margin-left: 16px; white-space: nowrap; }
         .chart-tooltip .ct-wow { margin-left: 10px; font-weight: 700; font-size: 11px; padding: 1px 7px; border-radius: 20px; color: #2d2a3a; min-width: 52px; text-align: center; white-space: nowrap; }
@@ -293,15 +297,18 @@
                 </div>
             </div>
             <div class="card-body">
-                <h6 class="text-muted mb-2">Top maincats</h6>
-                <div class="table-responsive mb-4">
+                <!-- Both sub-headings get breathing room above and below. The
+                     tables carry mb-2 rather than mb-4 so the next heading's mt-4
+                     isn't stacked on top of a big bottom margin. -->
+                <h6 class="text-muted mt-2 mb-3">Top maincats</h6>
+                <div class="table-responsive mb-2">
                     <table class="table table-hover perf-table mb-0">
                         <thead><tr id="mainCatHead"></tr></thead>
                         <tbody id="mainCatBody"></tbody>
                     </table>
                 </div>
-                <h6 class="text-muted mb-2">Top deepest cats</h6>
-                <div class="table-responsive">
+                <h6 class="text-muted mt-4 mb-3">Top deepest cats</h6>
+                <div class="table-responsive mb-2">
                     <table class="table table-hover perf-table mb-0">
                         <thead><tr id="subCatHead"></tr></thead>
                         <tbody id="subCatBody"></tbody>
@@ -317,7 +324,7 @@
                 <div class="d-flex align-items-center gap-3">
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="showExtraRev" onchange="toggleExtraRev()">
-                        <label class="form-check-label" for="showExtraRev" style="font-size:0.85rem; cursor:pointer;">Show DMA Organic &amp; GSAAS revenue</label>
+                        <label class="form-check-label" for="showExtraRev" style="font-size:0.85rem; cursor:pointer;">Show DMA &amp; GSAAS revenue</label>
                     </div>
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="showDeltas" onchange="toggleDeltas()">
@@ -442,10 +449,10 @@
         // and this order is one of the ones that keeps them apart.
         const METRICS = {
             seo_visits:   { label: 'SEO visits',          unit: 'count', axis: 'count', color: '#1f99c4' },  // primary-500
-            dma_visits:   { label: 'DMA Organic visits',  unit: 'count', axis: 'count', color: '#8459cf' },  // violet-500
+            dma_visits:   { label: 'DMA visits',          unit: 'count', axis: 'count', color: '#8459cf' },  // violet-500
             gsaas_visits: { label: 'GSAAS visits',        unit: 'count', axis: 'count', color: '#91c34e' },  // accent-500
             seo_omzet:    { label: 'SEO revenue',         unit: 'euro',  axis: 'euro',  color: '#be4693' },  // secondary-500
-            dma_omzet:    { label: 'DMA Organic revenue', unit: 'euro',  axis: 'euro',  color: '#ce9516' },  // yellow-500
+            dma_omzet:    { label: 'DMA revenue',         unit: 'euro',  axis: 'euro',  color: '#ce9516' },  // yellow-500
             gsaas_omzet:  { label: 'GSAAS revenue',       unit: 'euro',  axis: 'euro',  color: '#1dafa3' },  // teal-500
             seo_ctr:      { label: 'SEO CTR',             unit: 'percent', axis: 'percent', color: '#f37632' },  // cta-500
             seo_bounce:   { label: 'SEO Bounce',          unit: 'percent', axis: 'percent', color: '#26a660' },  // green-500
@@ -461,7 +468,7 @@
         const ORDER = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','dma_omzet','gsaas_omzet',
                        'seo_ctr','seo_bounce'];
         // Per-day overview columns. DMA Organic & GSAAS revenue are
-        // optional, shown via the "Show DMA Organic & GSAAS…" toggle (toggleExtraRev).
+        // optional, shown via the "Show DMA & GSAAS…" toggle (toggleExtraRev).
         const TABLE_COLS_BASE = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','seo_ctr','seo_bounce'];
         const TABLE_COLS_EXTRA = ['dma_omzet','gsaas_omzet'];
         let TABLE_COLS = TABLE_COLS_BASE.slice();
@@ -668,7 +675,22 @@
                     responsive: true, maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
-                        legend: { position: 'top', labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8, padding: 16 } },
+                        // Ten series now. At Chart.js' default 12px font and
+                        // padding 16 the row measures ~1030px against a ~1080px
+                        // canvas, so it wrapped to two rows and the chart lost
+                        // height. Shorter labels ("DMA" not "DMA Organic", agreed
+                        // with Joep) plus 11px / padding 8 / 6px dots bring it to
+                        // ~700px — comfortably one row, with room for a future
+                        // series. It will still wrap on a narrow viewport, which
+                        // is the right responsive behaviour, not a regression.
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true, pointStyle: 'circle',
+                                boxWidth: 6, boxHeight: 6, padding: 8,
+                                font: { size: 11 },
+                            },
+                        },
                         tooltip: { enabled: false, external: externalTooltip },
                     },
                     scales,
@@ -800,12 +822,23 @@
         // Rate metrics (percent) are excluded from the WoW % delta columns.
         function hasWow(k) { return METRICS[k].unit !== 'percent'; }
 
+        // Header is just "WoW %" — the column always sits immediately right of the
+        // metric it belongs to, so repeating the metric name was noise (and
+        // "DMA Organic visits WoW %" was long enough to wrap the header row).
+        // The qualified name stays in the title for anyone hovering, and in the
+        // Excel export, where the column names have to stand on their own.
         function deltaHeaderFor(k) {
             if (!showDeltas || !hasWow(k)) return '';
-            return `<th class="sortable" data-sort="${k}_wow" onclick="sortBy('${k}_wow')">${METRICS[k].label} WoW %</th>`;
+            return `<th class="sortable" data-sort="${k}_wow" onclick="sortBy('${k}_wow')"`
+                 + ` title="${METRICS[k].label} WoW %">WoW %</th>`;
         }
         function renderHead() {
             const head = document.getElementById('tableHead');
+            // Drives the narrower Notes column. Set here rather than in
+            // toggleDeltas() so every path that redraws the header (initTable, the
+            // column switch) lands on the right width — it can't drift out of sync.
+            const table = head.closest('table');
+            if (table) table.classList.toggle('with-deltas', showDeltas);
             head.innerHTML = '<th class="sortable" data-sort="date" onclick="sortBy(\'date\')">Date</th>' +
                 '<th class="text-col col-weekday">Day</th>' +
                 TABLE_COLS.map(k => `<th class="sortable" data-sort="${k}" onclick="sortBy('${k}')">${METRICS[k].label}</th>` + deltaHeaderFor(k)).join('') +
@@ -1374,6 +1407,9 @@
                     o[METRICS[k].label] = r[k];
                     if (showDeltas && hasWow(k)) {
                         const w = r[`${k}_wow`];
+                        // Keeps the metric name, unlike the on-screen header: these
+                        // are object keys, so a bare "WoW %" would collide and
+                        // every delta column but the last would vanish from the sheet.
                         o[`${METRICS[k].label} WoW %`] = (w === null || w === undefined) ? '' : Math.round(w * 10) / 10;
                     }
                 });

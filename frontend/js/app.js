@@ -571,9 +571,7 @@ async function refreshStatus() {
                                 </div>
                             </div>
                         </div>
-                        <button class="btn btn-sm btn-outline-red ms-2" onclick="deleteResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
-                            ×
-                        </button>
+                        <button class="btn btn-outline-red btn-remove-row ms-2" onclick="deleteResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending" aria-label="Delete and reset to pending"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
                     </div>
                 `;
 

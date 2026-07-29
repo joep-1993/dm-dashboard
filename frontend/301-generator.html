@@ -256,7 +256,7 @@
                     <div class="d-flex align-items-center gap-2">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., fietsen_484521_484542" data-field="old_cat">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., fietsen_484521" data-field="new_cat">
-                        <button class="btn btn-sm btn-danger-invert flex-shrink-0" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
+                        <button class="btn btn-outline-red btn-remove-row" onclick="removeCategoryRule(${categoryRuleCount})" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
                     </div>
                 </div>
             `;
@@ -276,7 +276,7 @@
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., merk~123 or merk" data-field="old_facet">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" placeholder="e.g., materiaal~456 or materiaal" data-field="new_facet">
                         <input type="text" class="form-control form-control-sm" style="flex: 0.75;" placeholder="e.g., /fietsen/" data-field="category">
-                        <button class="btn btn-sm btn-danger-invert flex-shrink-0" onclick="removeFacetRule(${facetRuleCount})">×</button>
+                        <button class="btn btn-outline-red btn-remove-row" onclick="removeFacetRule(${facetRuleCount})" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
                     </div>
                 </div>
             `;
@@ -372,7 +372,7 @@
                     <div class="d-flex align-items-center gap-2">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${oldCat}" data-field="old_cat">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${newCat}" data-field="new_cat">
-                        <button class="btn btn-sm btn-danger-invert flex-shrink-0" onclick="removeCategoryRule(${categoryRuleCount})">×</button>
+                        <button class="btn btn-outline-red btn-remove-row" onclick="removeCategoryRule(${categoryRuleCount})" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
                     </div>
                 </div>
             `;
@@ -388,7 +388,7 @@
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${oldFacet}" data-field="old_facet">
                         <input type="text" class="form-control form-control-sm" style="flex: 1;" value="${newFacet}" data-field="new_facet">
                         <input type="text" class="form-control form-control-sm" style="flex: 0.75;" value="${category}" data-field="category">
-                        <button class="btn btn-sm btn-danger-invert flex-shrink-0" onclick="removeFacetRule(${facetRuleCount})">×</button>
+                        <button class="btn btn-outline-red btn-remove-row" onclick="removeFacetRule(${facetRuleCount})" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
                     </div>
                 </div>
             `;

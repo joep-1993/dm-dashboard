@@ -10,11 +10,8 @@
         .rule-section { margin-bottom: 1rem; }
         .rule-row { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; align-items: center; }
         .rule-row input { flex: 1; }
-        .rule-row .btn-remove { flex: 0 0 auto; }
-        /* Theme maps .btn-outline-danger to orange; these X's must read as remove.
-           See cc1/UI_BLUEPRINT.md "Buttons". */
-        .btn-remove { color: #dc3545; border-color: #dc3545; background-color: transparent; }
-        .btn-remove:hover, .btn-remove:focus { background-color: #dc3545; border-color: #dc3545; color: #fff; }
+        /* The remove-× uses the shared .btn-outline-red + .btn-remove-row from
+           css/style.css (which also carries flex:0 0 auto for this row). */
         .results-table { max-height: 500px; overflow-y: auto; }
         .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
         .url-cell.copyable { cursor: pointer; }
@@ -306,7 +303,7 @@
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430884" data-field="old_cat">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430885" data-field="new_cat">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen (optional)" data-field="new_maincat">
-                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+                <button class="btn btn-outline-red btn-remove-row" onclick="this.parentElement.remove()" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
             `;
             container.appendChild(row);
         }
@@ -319,7 +316,7 @@
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. merk" data-field="old_facet">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie" data-field="new_facet">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881 (opt)" data-field="cat">
-                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+                <button class="btn btn-outline-red btn-remove-row" onclick="this.parentElement.remove()" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
             `;
             container.appendChild(row);
         }
@@ -332,7 +329,7 @@
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie" data-field="facet">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881_430956" data-field="canon_cat">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881 (opt)" data-field="cat">
-                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+                <button class="btn btn-outline-red btn-remove-row" onclick="this.parentElement.remove()" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
             `;
             container.appendChild(row);
         }
@@ -345,7 +342,7 @@
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie" data-field="facet">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881_430956" data-field="canon_cat">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881 (opt)" data-field="cat">
-                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+                <button class="btn btn-outline-red btn-remove-row" onclick="this.parentElement.remove()" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
             `;
             container.appendChild(row);
         }
@@ -357,7 +354,7 @@
             row.innerHTML = `
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. merk~23597985" data-field="old_bucket">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie~2590809" data-field="new_bucket">
-                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+                <button class="btn btn-outline-red btn-remove-row" onclick="this.parentElement.remove()" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
             `;
             container.appendChild(row);
         }
@@ -369,7 +366,7 @@
             row.innerHTML = `
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. populaire_serie" data-field="bucket">
                 <input type="text" class="form-control form-control-sm" placeholder="e.g. schoenen_430881 (opt)" data-field="cat">
-                <button class="btn btn-sm btn-outline-danger btn-remove" onclick="this.parentElement.remove()">×</button>
+                <button class="btn btn-outline-red btn-remove-row" onclick="this.parentElement.remove()" title="Remove this rule" aria-label="Remove this rule"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg></button>
             `;
             container.appendChild(row);
         }

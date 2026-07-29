@@ -511,17 +511,10 @@ body {
     cursor: not-allowed;
 }
 
-.btn-danger-invert {
-    background-color: #dc3545;
-    border: 1px solid #dc3545;
-    color: white;
-}
-
-.btn-danger-invert:hover {
-    background-color: transparent;
-    border-color: #dc3545;
-    color: #dc3545;
-}
+/* .btn-danger-invert (solid red at rest, outline on hover) is GONE. It was the
+   mirror image of .btn-outline-red below and the two coexisting meant identical
+   × controls behaved oppositely per page. Everything now uses .btn-outline-red:
+   outline at rest, fills solid red on hover. Don't reintroduce the inverse. */
 
 /* Danger buttons - keep red for destructive actions */
 .btn-danger {
@@ -596,6 +589,41 @@ body {
     background-color: transparent;
     opacity: 1;
 }
+
+/* ------------------------------------------------------------------ *
+ * The canonical remove-× . GEOMETRY ONLY — pair it with a colour:
+ *   <button class="btn btn-outline-red btn-remove-row" ...>
+ *
+ * The glyph MUST be the SVG below, never a text "×" / &times;. A text ×
+ * sits high in its line box, so it cannot be optically centred with any
+ * amount of padding / line-height / font-size — this bug kept coming
+ * back per page. Fixed width AND height keeps it square, padding:0
+ * because the box sets the size. Do NOT add btn-sm; its padding fights
+ * the explicit box. See cc1/UI_BLUEPRINT.md "Icon-only buttons".
+ *
+ *   <button class="btn btn-outline-red btn-remove-row"
+ *           title="Remove this row" aria-label="Remove this row">
+ *     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"
+ *          viewBox="0 0 12 12" fill="none" stroke="currentColor"
+ *          stroke-width="2" stroke-linecap="round">
+ *       <path d="M2 2 L10 10 M10 2 L2 10"/></svg>
+ *   </button>
+ *
+ * Was duplicated three ways before this: rfinder's own .btn-remove-row,
+ * canonical's .btn-remove, and .btn-danger-invert (which inverted the
+ * hover direction on top of it).
+ * ------------------------------------------------------------------ */
+.btn-remove-row {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    line-height: 1;
+    flex: 0 0 auto;
+}
+.btn-remove-row svg { display: block; }
 
 /* Sticky top navbar must always sit above sticky table headers.
    Bootstrap defaults both .navbar.sticky-top and thead.sticky-top to

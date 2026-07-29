@@ -173,32 +173,46 @@ background:transparent; opacity:1; }` (see seo-titles.html `#btnStop` /
 
 ## Icon-only buttons — never a text glyph
 
-For a small square button whose whole content is one icon (the remove-row `×` in
-R-Finder's Search Filters, and anything like it), use an **SVG**, not a text
-character. A text `×` / `&times;` sits high in its line box, so it is optically
-above centre no matter what `line-height`, `padding` or `font-size` you try —
-this is the bug that keeps coming back. The fix is geometric, not typographic:
+For a small square button whose whole content is one icon — every remove-`×` in
+the app — use **`btn btn-outline-red btn-remove-row`** with the SVG below. Both
+classes are in `style.css`; `.btn-outline-red` supplies the colour and
+`.btn-remove-row` the geometry, so a non-destructive icon button can pair the
+same geometry with a different colour.
 
-```css
-.btn-remove-row {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 1.75rem; height: 1.75rem; padding: 0; line-height: 1;
-}
-.btn-remove-row svg { display: block; }
-```
 ```html
-<button class="btn btn-remove-row" title="Remove this row" aria-label="Remove this row">
+<button class="btn btn-outline-red btn-remove-row"
+        title="Remove this row" aria-label="Remove this row">
   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"
        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
     <path d="M2 2 L10 10 M10 2 L2 10"/></svg>
 </button>
 ```
 
-Rules: fixed `width` **and** `height` (so it is square and cannot be squeezed by
-its text), `padding: 0`, `inline-flex` centring, an SVG symmetric about its own
-viewBox centre, `stroke="currentColor"` so it inherits the hover colour, and an
-`aria-label` because there is no text to read. Don't add `btn-sm` — the explicit
-box already sets the size, and `btn-sm`'s padding fights it.
+**Never a text `×` / `&times;`.** It sits high in its line box, so it is
+optically above centre no matter what `line-height`, `padding` or `font-size` you
+try. This is the bug that kept coming back page by page; the fix is geometric,
+not typographic. The rules baked into `.btn-remove-row`: fixed `width` **and**
+`height` (square, and can't be squeezed by its content), `padding: 0`,
+`inline-flex` centring, `flex: 0 0 auto` for flex rows, and `svg{display:block}`
+to kill the inline-baseline gap. Plus, in the markup: an SVG symmetric about its
+own viewBox centre, `stroke="currentColor"` so it inherits the hover colour, and
+an `aria-label` because there is no text to read.
+
+Do **not** add `btn-sm` — the explicit box sets the size and `btn-sm`'s padding
+fights it. Do **not** hand-roll the box inline (`style="width:30px;height:30px;
+padding:0;font-size:1.1rem"` was FAQ's old version of exactly this).
+
+**Direction of the hover, and why the class is `-red`:** outline at rest →
+**fills solid red on hover**, never the reverse. A `.btn-danger-invert` used to do
+it backwards and made identical `×` controls behave oppositely per page; it has
+been deleted, so don't reintroduce it. And it is `btn-outline-red`, not
+`btn-outline-danger`, because `style.css` themes the Bootstrap name **orange**.
+
+In use: R-Finder filter rows, Redirect Generator + Canonicals rule rows,
+Kopteksten + FAQ's Recent Results. The one deliberate exception is an
+input-group's clear-the-field `×` (Canonicals' result filter): that is neutral,
+not destructive, and a fixed square box would break the input-group's height
+matching.
 
 ## Info banners — yellow, never grey
 
