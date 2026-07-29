@@ -468,7 +468,11 @@ def _fetch_redshift_rows(start_date: str, end_date: str,
 _CAT_CACHE: Dict[str, object] = {"pairs": [], "fetched_at": None}
 _CAT_LOCK = threading.Lock()
 _CAT_INFLIGHT = False
-_CAT_TTL_SECONDS = 24 * 3600
+# A week, not a day: category and deepest-subcat names barely move, the scan is
+# expensive and growing, and a stale cache is served immediately anyway (the
+# refresh happens behind the user's back). Daily just meant re-paying for a list
+# that had not changed.
+_CAT_TTL_SECONDS = 7 * 24 * 3600
 _CAT_CACHE_FILE = os.path.join(os.path.dirname(__file__), "data", "seo_prio_categories.json")
 
 

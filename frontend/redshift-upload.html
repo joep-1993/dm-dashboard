@@ -111,7 +111,7 @@
                     <div class="col-md-3">
                         <label for="chunkSize" class="form-label">Chunk Size</label>
                         <input type="number" class="form-control" id="chunkSize" value="5000" min="100" max="10000" step="100">
-                        <small class="text-muted">Max 10,000 rows per chunk.</small>
+                        <small class="text-muted">Max 10.000 rows per chunk.</small>
                     </div>
                 </div>
             </div>
@@ -142,9 +142,10 @@
                         </div>
                         <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none" onchange="handleFile(this.files[0])">
                         <div id="filePreview" class="paste-area mt-3" style="display:none;"></div>
-                        <div class="mt-3 d-flex gap-2">
-                            <button class="btn btn-run" onclick="uploadFile()" id="uploadFileBtn" disabled>Upload</button>
+                        <!-- Run CTA far right, Clear to its left (UI_BLUEPRINT "Buttons"). -->
+                        <div class="mt-3 d-flex gap-2 justify-content-end">
                             <button class="btn btn-outline-purple" onclick="clearFile()">Clear</button>
+                            <button class="btn btn-run" onclick="uploadFile()" id="uploadFileBtn" disabled>Upload</button>
                         </div>
                         </div>
                     </div>
@@ -154,14 +155,14 @@
                         <div class="pt-3">
                         <label class="form-label">Paste tab-separated data (including header row)</label>
                         <textarea class="form-control" id="pasteArea" rows="8" placeholder="Paste data from Excel or Google Sheets here...&#10;&#10;col1&#9;col2&#9;col3&#10;val1&#9;val2&#9;val3"></textarea>
-                        <div class="mt-2 d-flex gap-2">
-                            <button class="btn btn-sm btn-outline-primary" onclick="parsePaste()">Parse Data</button>
-                            <button class="btn btn-sm btn-outline-purple" onclick="clearPaste()">Clear</button>
-                        </div>
-                        <div id="pastePreview" class="paste-area mt-3" style="display:none;"></div>
-                        <div class="mt-3">
+                        <!-- All three actions on one right-aligned row, Upload last.
+                             btn-sm dropped so they match Upload's height. -->
+                        <div class="mt-3 d-flex gap-2 justify-content-end">
+                            <button class="btn btn-outline-primary" onclick="parsePaste()">Parse</button>
+                            <button class="btn btn-outline-purple" onclick="clearPaste()">Clear</button>
                             <button class="btn btn-run" onclick="uploadPaste()" id="uploadPasteBtn" disabled>Upload</button>
                         </div>
+                        <div id="pastePreview" class="paste-area mt-3" style="display:none;"></div>
                         </div>
                     </div>
                 </div>

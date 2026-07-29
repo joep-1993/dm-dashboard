@@ -307,14 +307,11 @@
                 <div class="card mb-3">
                     <div class="card-header"><h5 class="mb-0">Check redirect</h5></div>
                     <div class="card-body">
-                        <div class="row g-2 align-items-end">
-                            <div class="col">
-                                <label class="form-label small-muted mb-1">URL (full URL or path)</label>
-                                <input type="text" id="checkUrlInput" class="form-control" placeholder="https://www.beslist.nl/products/r/...">
-                            </div>
-                            <div class="col-auto d-flex align-items-end ms-auto">
-                                <button class="btn btn-outline-orange" id="btnCheck">Check</button>
-                            </div>
+                        <!-- Button welded to the field, same as URL Lookup in Kopteksten. -->
+                        <label class="form-label small-muted mb-1" for="checkUrlInput">URL (full URL or path)</label>
+                        <div class="input-group">
+                            <input type="text" id="checkUrlInput" class="form-control" placeholder="https://www.beslist.nl/products/r/...">
+                            <button class="btn btn-outline-orange" id="btnCheck">Check</button>
                         </div>
                         <div id="checkResult"></div>
                     </div>

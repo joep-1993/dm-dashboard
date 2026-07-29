@@ -96,8 +96,8 @@
                                 </div>
                             </div>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-info" onclick="processFaqUrls()" id="processBtn">Process URLs</button>
-                                <button class="btn btn-primary" onclick="processAllFaqUrls()" id="processAllBtn">Process All URLs</button>
+                                <button class="btn btn-outline-orange" style="width: 150px;" onclick="processFaqUrls()" id="processBtn">Process Batch</button>
+                                <button class="btn btn-primary" style="width: 150px;" onclick="processAllFaqUrls()" id="processAllBtn">Process All</button>
                                 <button class="btn btn-danger d-none" onclick="stopFaqProcessing()" id="stopBtn">Stop</button>
                             </div>
                         </div>
@@ -141,9 +141,9 @@
                             </div>
                             <div class="d-flex gap-2">
                                 <button class="btn btn-outline-purple" onclick="recheckSkippedFaqUrls()" id="recheckSkippedBtn" title="Re-check skipped URLs to see if products are now available">Recheck Skipped</button>
-                                <button class="btn btn-outline-danger" onclick="resetFaqValidationHistory()" id="resetValidationBtn">Reset Validation</button>
-                                <button class="btn btn-outline-orange" onclick="validateFaqLinks()" id="validateBtn">Validate Links</button>
-                                <button class="btn btn-run" onclick="validateAllFaqLinks()" id="validateAllBtn">Validate All</button>
+                                <button class="btn btn-outline-orange" onclick="resetFaqValidationHistory()" id="resetValidationBtn">Reset Validation</button>
+                                <button class="btn btn-outline-orange" style="width: 150px;" onclick="validateFaqLinks()" id="validateBtn">Validate Batch</button>
+                                <button class="btn btn-run" style="width: 150px;" onclick="validateAllFaqLinks()" id="validateAllBtn">Validate All</button>
                             </div>
                         </div>
                         <div id="validateResult" class="mt-3"></div>
@@ -156,8 +156,6 @@
                         <h5 class="mb-0">Content Publishing</h5>
                     </div>
                     <div class="card-body">
-                        <p class="text-muted">Publish generated content (content_top + FAQ) to the website-configuration API</p>
-
                         <div class="d-flex flex-wrap gap-2 mb-3" id="publishStats">
                             <div class="mini-stat-card">
                                 <div class="num" id="publishContentCount">-</div>

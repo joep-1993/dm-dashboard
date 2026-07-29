@@ -48,13 +48,21 @@
         .metric-toggle.on { border-color: #5e4a90; background: #f3f0fa; font-weight: 600; }
         .metric-toggle.on .dot { opacity: 1; }
         .perf-table { font-size: 0.9rem; }
-        .perf-table th { background: #5e4a90; color: #fff; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        /* UI_BLUEPRINT table headers: grey #f8f9fa, sticky, 6px 14px, 1rem
+           (a touch larger than the 0.9rem body), bold — not the old purple
+           uppercase. Covers Per-day overview, Top campaigns and Top ad groups,
+           which all use .perf-table. */
+        .perf-table th {
+            background: #f8f9fa; color: inherit; font-weight: 700;
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 14px; font-size: 1rem;
+        }
         .perf-table td, .perf-table th { white-space: nowrap; text-align: right; vertical-align: middle; }
         .perf-table td:first-child, .perf-table th:first-child { text-align: left; }
         .perf-table td.text-col, .perf-table th.text-col { text-align: left; }
         .perf-table tfoot td { font-weight: 700; background: #f3f0fa; border-top: 2px solid #5e4a90; }
         .perf-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
-        .perf-table th.sortable:hover { opacity: 0.85; }
+        .perf-table th.sortable:hover { background: #e9ecef; }
         .perf-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .perf-table th.sort-asc::after { content: '▲'; opacity: 0.9; }
         .perf-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
@@ -100,7 +108,7 @@
         .chart-tooltip .ct-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
         .chart-tooltip .ct-label { flex: 1 1 auto; color: #6a6a78; }
         .chart-tooltip .ct-val { font-weight: 600; margin-left: 16px; white-space: nowrap; }
-        .info-note { background: #fff8ed; border: 1px solid #f0d9b5; color: #8a5a00; border-radius: 8px; padding: 10px 14px; font-size: 0.88rem; }
+        /* .info-note now lives in css/style.css (shared) — see UI_BLUEPRINT "Info banners". */
     </style>
 </head>
 <body>
@@ -186,7 +194,7 @@
                     </div>
                     <div class="ms-auto">
                         <button class="btn btn-sm text-white" style="background:#CC5500; border:1px solid #CC5500; min-width:90px; transition: background-color 0.2s ease, border-color 0.2s ease;" onmouseover="this.style.backgroundColor='#E97451';this.style.borderColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500';this.style.borderColor='#CC5500'" onclick="load(false)" id="loadBtn">Load</button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="load(true)" title="Bypass cache and re-query SA360">Refresh</button>
+                        <button class="btn btn-sm btn-outline-purple" onclick="load(true)" title="Bypass cache and re-query SA360">↻ Refresh</button>
                     </div>
                 </div>
                 <div id="infoNote" class="info-note mt-4" style="display:none;"></div>

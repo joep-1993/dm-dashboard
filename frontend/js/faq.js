@@ -233,7 +233,7 @@ async function refreshFaqStatus() {
                                 </div>
                             </div>
                         </div>
-                        <button class="btn btn-sm btn-danger-invert d-inline-flex align-items-center justify-content-center" style="width: 30px; height: 30px; padding: 0; font-size: 1.1rem; line-height: 1;" onclick="deleteFaqResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
+                        <button class="btn btn-sm btn-outline-red d-inline-flex align-items-center justify-content-center" style="width: 30px; height: 30px; padding: 0; font-size: 1.1rem; line-height: 1;" onclick="deleteFaqResult('${item.url.replace(/'/g, "\\'")}', ${index})" title="Delete and reset to pending">
                             ×
                         </button>
                     </div>
@@ -334,7 +334,7 @@ async function processFaqUrls() {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
-        btn.textContent = 'Process URLs';
+        btn.textContent = 'Process Batch';
         btn.classList.remove('btn-outline-secondary');
         btn.classList.add('btn-info');
     }
@@ -637,7 +637,7 @@ async function validateFaqLinks() {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
     } finally {
         btn.disabled = false;
-        btn.textContent = 'Validate Links';
+        btn.textContent = 'Validate Batch';
     }
 }
 
@@ -813,7 +813,7 @@ async function resetFaqValidationHistory() {
 
     resetBtn.disabled = true;
     resetBtn.textContent = 'Resetting...';
-    resetBtn.classList.replace('btn-outline-danger', 'btn-outline-secondary');  // grey outline while in progress
+    resetBtn.classList.replace('btn-outline-orange', 'btn-outline-secondary');  // grey outline while in progress
     resultDiv.innerHTML = '<div class="alert alert-warning">Resetting validation history and skipped URLs...</div>';
 
     try {
@@ -849,7 +849,7 @@ async function resetFaqValidationHistory() {
     } finally {
         resetBtn.disabled = false;
         resetBtn.textContent = 'Reset Validation';
-        resetBtn.classList.replace('btn-outline-secondary', 'btn-outline-danger');  // restore red outline
+        resetBtn.classList.replace('btn-outline-secondary', 'btn-outline-orange');  // restore orange outline
     }
 }
 

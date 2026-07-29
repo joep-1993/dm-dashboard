@@ -549,24 +549,48 @@ body {
     color: white;
 }
 
-/* Reset Validation (Kopteksten + FAQ's) must read as destructive, but the rule
-   above themes .btn-outline-danger to orange. Same override seo-titles.html
-   applies to #btnRemove. Disabled stays grey outline, never red — see
-   cc1/UI_BLUEPRINT.md "Buttons". */
-#resetValidationBtn {
+/* Reset Validation (Kopteksten + FAQ's) used to force red here, overriding the
+   orange .btn-outline-danger theme above. It now wears the canonical
+   btn-outline-orange instead, so the override is gone — orange is the house
+   style for a non-run action, and Reset only re-queues URLs, it deletes nothing.
+   (seo-titles.html still overrides #btnRemove to red on its own page.) */
+
+/* ------------------------------------------------------------------ *
+ * Info banner — the canonical "here is a standing note about this
+ * section" block. Yellow/amber, never grey: a grey banner reads as
+ * disabled chrome and gets skipped. Note .alert-info is themed grey
+ * a few rules up, so it is NOT the thing to reach for — same
+ * reasoning as .alert-done-yellow above. See
+ * cc1/UI_BLUEPRINT.md "Info banners". Was duplicated verbatim in
+ * seo-stats / healthscore / shop-campaigns; consolidated here.
+ * ------------------------------------------------------------------ */
+.info-note {
+    background: #fff8ed;
+    border: 1px solid #f0d9b5;
+    color: #8a5a00;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.88rem;
+}
+
+/* Red outline that fills solid red on hover — for genuinely destructive
+   per-row controls (the × in Recent Results). Note the direction: outline at
+   rest, solid on hover. .btn-danger-invert is the opposite (solid at rest) and
+   is still used by the 301-generator rule rows. */
+.btn-outline-red {
     color: #dc3545;
-    border-color: #dc3545;
+    border: 1px solid #dc3545;
     background-color: transparent;
 }
 
-#resetValidationBtn:hover,
-#resetValidationBtn:focus {
+.btn-outline-red:hover,
+.btn-outline-red:focus {
     background-color: #dc3545;
     border-color: #dc3545;
     color: #fff;
 }
 
-#resetValidationBtn:disabled {
+.btn-outline-red:disabled {
     color: #6c757d;
     border-color: #6c757d;
     background-color: transparent;

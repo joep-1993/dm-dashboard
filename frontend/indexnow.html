@@ -213,7 +213,7 @@
                                             <th class="sortable col-date" data-sort="date" onclick="sortHistory('date')">Date</th>
                                             <th class="sortable col-center col-resp" data-sort="response_code" onclick="sortHistory('response_code')">Response</th>
                                             <th class="sortable col-center col-urls" data-sort="url_count" onclick="sortHistory('url_count')">URLs</th>
-                                            <th class="col-end col-export">Export</th>
+                                            <th class="col-center col-export">Export</th>
                                         </tr>
                                     </thead>
                                     <tbody id="historyBody"></tbody>
@@ -442,7 +442,7 @@
                     <td>${escapeHtml(String(h.date))}</td>
                     <td class="col-center">${badge}</td>
                     <td class="col-center">${(h.url_count || 0).toLocaleString()}</td>
-                    <td class="col-end">${exportBtn}</td>
+                    <td class="col-center">${exportBtn}</td>
                 </tr>`;
             }).join('');
 

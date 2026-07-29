@@ -171,6 +171,54 @@ add an explicit `#id:disabled { color:#6c757d; border-color:#6c757d;
 background:transparent; opacity:1; }` (see seo-titles.html `#btnStop` /
 `#btnRemove`) so red never shows in the unavailable state.
 
+## Icon-only buttons — never a text glyph
+
+For a small square button whose whole content is one icon (the remove-row `×` in
+R-Finder's Search Filters, and anything like it), use an **SVG**, not a text
+character. A text `×` / `&times;` sits high in its line box, so it is optically
+above centre no matter what `line-height`, `padding` or `font-size` you try —
+this is the bug that keeps coming back. The fix is geometric, not typographic:
+
+```css
+.btn-remove-row {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.75rem; height: 1.75rem; padding: 0; line-height: 1;
+}
+.btn-remove-row svg { display: block; }
+```
+```html
+<button class="btn btn-remove-row" title="Remove this row" aria-label="Remove this row">
+  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"
+       fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <path d="M2 2 L10 10 M10 2 L2 10"/></svg>
+</button>
+```
+
+Rules: fixed `width` **and** `height` (so it is square and cannot be squeezed by
+its text), `padding: 0`, `inline-flex` centring, an SVG symmetric about its own
+viewBox centre, `stroke="currentColor"` so it inherits the hover colour, and an
+`aria-label` because there is no text to read. Don't add `btn-sm` — the explicit
+box already sets the size, and `btn-sm`'s padding fights it.
+
+## Info banners — yellow, never grey
+
+A standing note about a section (not a hover hint — that's the "i" button below)
+uses the shared **`.info-note`** class from `style.css`:
+
+```html
+<div class="info-note mb-3">Auto-Queue: jobs will start automatically…</div>
+```
+
+Yellow/amber — `background #fff8ed`, `border #f0d9b5`, text `#8a5a00`, radius
+`8px`, `padding 10px 14px`, `font-size 0.88rem`. **Do not use grey**, and in
+particular don't reach for `.alert-info` — `style.css` themes it grey
+(`rgba(232,233,235,.5)`), so it reads as disabled chrome and gets skipped. Same
+reasoning as `.alert-done-yellow` for end-of-run banners, and as "don't use grey
+as a label colour".
+The class is declared **once** in `css/style.css`; never re-declare it per page
+(it was duplicated verbatim in seo-stats / healthscore / shop-campaigns before
+being consolidated). In use in SEO stats, Healthscore, Shop-campaigns, Thema Ads.
+
 ## Info tooltips — the "i" button
 
 For a "what is this?" hint next to a header or field, use the inline

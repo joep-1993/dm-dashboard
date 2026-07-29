@@ -126,11 +126,13 @@
                                 <div class="mb-3">
                                     <label for="excelFile" class="form-label">Upload Excel file with URL column</label>
                                     <input type="file" class="form-control" id="excelFile" accept=".xlsx,.xls">
-                                    <small class="text-muted">Expects a column named "URL" or uses the first column.</small>
                                 </div>
-                                <button class="btn btn-primary" onclick="submitExcel()" id="submitExcelBtn">
-                                    Upload & Check
-                                </button>
+                                <!-- Right-aligned, matching Check Index in the Manual tab. -->
+                                <div class="d-flex justify-content-end">
+                                    <button class="btn btn-primary" onclick="submitExcel()" id="submitExcelBtn">
+                                        Upload &amp; Check
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

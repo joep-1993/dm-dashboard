@@ -118,8 +118,8 @@
                                 </div>
                             </div>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-info" onclick="processUrls()" id="processBtn">Process URLs</button>
-                                <button class="btn btn-primary" onclick="processAllUrls()" id="processAllBtn">Process All URLs</button>
+                                <button class="btn btn-outline-orange" style="width: 150px;" onclick="processUrls()" id="processBtn">Process Batch</button>
+                                <button class="btn btn-primary" style="width: 150px;" onclick="processAllUrls()" id="processAllBtn">Process All</button>
                                 <button class="btn btn-danger d-none" onclick="stopProcessing()" id="stopBtn">Stop</button>
                             </div>
                         </div>
@@ -163,9 +163,9 @@
                             </div>
                             <div class="d-flex gap-2">
                                 <button class="btn btn-outline-purple" onclick="recheckSkippedUrls()" id="recheckSkippedBtn" title="Re-check skipped URLs to see if products are now available">Recheck Skipped</button>
-                                <button class="btn btn-outline-danger" onclick="resetValidationHistory()" id="resetValidationBtn" title="Reset validation history to re-check all URLs">Reset Validation</button>
-                                <button class="btn btn-outline-orange" onclick="validateLinks()" id="validateBtn">Validate Links</button>
-                                <button class="btn btn-run" onclick="validateAllLinks()" id="validateAllBtn">Validate All</button>
+                                <button class="btn btn-outline-orange" onclick="resetValidationHistory()" id="resetValidationBtn" title="Reset validation history to re-check all URLs">Reset Validation</button>
+                                <button class="btn btn-outline-orange" style="width: 150px;" onclick="validateLinks()" id="validateBtn">Validate Batch</button>
+                                <button class="btn btn-run" style="width: 150px;" onclick="validateAllLinks()" id="validateAllBtn">Validate All</button>
                             </div>
                         </div>
                         <div id="validationResult" class="mt-3"></div>
@@ -178,8 +178,6 @@
                         <h5 class="mb-0">Content Publishing</h5>
                     </div>
                     <div class="card-body">
-                        <p class="text-muted">Publish generated content (content_top + FAQ) to the website-configuration API</p>
-
                         <div class="d-flex flex-wrap gap-2 mb-3" id="publishStats">
                             <div class="mini-stat-card">
                                 <div class="num" id="publishContentCount">-</div>

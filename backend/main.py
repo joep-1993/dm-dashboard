@@ -231,6 +231,15 @@ async def startup_event():
     from backend.gsd_ll_service import start_excel_scheduler
     start_excel_scheduler()
 
+    # SEO Priority's two category dropdowns are fed by a DISTINCT over
+    # datamart.dim_visit that costs 25s+ (and grows with the table). Warm the
+    # cache here — reads the on-disk copy, and refreshes on a background thread
+    # if it's stale — so opening the run form never pays for the scan. Without
+    # this, the first visitor after a cold start watches the filters sit
+    # disabled for minutes. Threaded so a slow disk read can't stall startup.
+    from backend import seo_prio_service
+    threading.Thread(target=seo_prio_service.get_categories, daemon=True).start()
+
 
 @app.on_event("shutdown")
 async def shutdown_event():

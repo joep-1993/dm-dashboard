@@ -378,25 +378,25 @@ function catHint(msg, cls = 'text-muted') {
     el.textContent = msg;
 }
 
-function setCatInputsEnabled(on) {
-    document.getElementById('maincatInput').disabled = !on;
-    document.getElementById('deepestInput').disabled = !on;
-}
-
 async function loadCategories() {
     try {
         const r = await fetch('/api/seo-prio/categories');
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
         if (data.loading) {
-            setCatInputsEnabled(false);
-            catHint('Loading category names from Redshift (first time only, ~25s)…');
+            // Both fields stay usable while the list is on its way: the backend
+            // only reports `loading` when it has nothing cached at all, and the
+            // scan behind it can run for minutes. Disabling them used to make
+            // the whole run form look broken for that entire time. Typing works
+            // — you just get no suggestions yet, and startRun() skips the
+            // known-name check while the pair list is empty.
+            catHint('Still loading category names from Redshift — you can type a name already, ' +
+                    'suggestions will appear when the list lands.');
             if (!_catPollTimer) _catPollTimer = setInterval(loadCategories, 4000);
             return;
         }
         if (_catPollTimer) { clearInterval(_catPollTimer); _catPollTimer = null; }
         _catPairs = data.pairs || [];
-        setCatInputsEnabled(true);
         fillDatalist('maincatList', data.maincats || []);
         refreshDeepestOptions();
         catHint(_catPairs.length
@@ -404,7 +404,6 @@ async function loadCategories() {
             : 'No category names available — the run will cover every category.');
     } catch (e) {
         if (_catPollTimer) { clearInterval(_catPollTimer); _catPollTimer = null; }
-        setCatInputsEnabled(true);   // never block the run on this
         catHint('Could not load category names (' + e.message +
                 '). You can still type a name, or leave both empty for all.', 'text-danger');
     }
