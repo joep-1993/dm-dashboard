@@ -92,6 +92,34 @@ Item 21 vroeg een potloodje in Unique Titles' Recent Results, precies zoals Sear
 - Fix: `c.description` toegevoegd aan de SELECT, plus `?? ''` in `editTitle` omdat een *mislukte* rij NULL-content heeft (LEFT JOIN op `unique_titles_content`) en `null` óók als `"null"` in het veld zou landen.
 - **Regel:** bij hergebruik van een edit-handler voor een tweede lijst: vergelijk de veldenlijst van beide endpoints tegen wat de save verstuurt. Een read-only lijst mag velden missen; zodra je hem editable maakt, mag dat niet meer.
 
+## De Kleursysteem base-rij is een MERK-palet, geen categorisch chart-palet (2026-07-29)
+
+Dit is de kern van de hele kleuren-draad rond SEO stats' grafiek, en het geldt voor elke tool die ooit >4 series tekent.
+
+- Gemeten in OKLab (ΔE ×100; vloeren: **8** voor kleurenblind zicht, **15** voor normaal zicht) faalden bij de pure base-500-rij **10 van de 45 paren**. Erger nog: onder de **zes** series die Joep niet wilde wijzigen zaten al **5 falende paren onderling** — dus geen enkele keuze voor de andere vier kon de set schoon maken.
+- Dat is geen fout in het voorstel. Het artefact is gebouwd voor banners, buttons en reviewsterren, en z'n eigen toegankelijkheids-sectie gaat over **tekst-op-achtergrond**-contrast. Series-onderscheid is een ander probleem: daar concurreren 9 hues op ongeveer dezelfde lightness, en juist lightness is het enige kanaal dat kleurenblindheid niet aantast.
+- **Regel: gebruik het merk-palet voor merk-oppervlakken, niet als categorische reeks.** Wil je >4 lijnen, dan moet je de lightness-as gebruiken (donkere/lichte stops) of een tweede kanaal (dash-patronen).
+- Eindstand na Joeps keuzes (DMA revenue → bordeaux `#722F37`, GSAAS revenue → navy `#001F3F`): **5 van 45**, en alle 5 zitten tussen de ongewijzigde base-500-merkhues. Staat met meetwaarden in de `METRICS`-comment zodat de volgende sessie niet opnieuw gaat gokken.
+- Werk altijd met `validate_palette.js` uit de `dataviz`-skill. Bruikbare exports: `validate(pal,{mode,pairs})` en `contrast(a,b)`. **Niet** geëxporteerd: `oklab`/`cvd` — per-paar-afstanden haal je door `validate([a,b],{pairs:'all'})` te callen en de ΔE uit de report-string te parsen. Cache die calls, anders is een zoektocht over honderden combinaties tergend langzaam.
+
+## De ΔE-vloer halen ≠ "ziet er anders uit" (2026-07-29)
+
+Total visits stond op `primary-800 #135369` (donkerblauw) naast GSAAS revenue op navy `#001F3F`. Dat paar **haalde** beide vloeren — ΔE 17.9, ruim boven 15 — en Joep zei alsnog: "die lijken erg op elkaar".
+
+- Hij had gelijk en de validator ook. De vloeren zijn een **minimum voor "technisch te onderscheiden"**, geen garantie voor "leest in één oogopslag als iets anders". Twee donkerblauwen op ~dezelfde lightness blijven verwarrend, ook bij ΔE 17.9.
+- Nieuwe kleur `#107063` (diep turquoise) zit op ΔE **26.9** van navy. ~50% meer ruimte.
+- **Les: de validator is een ondergrens-check, niet het eindoordeel. Het oog van de gebruiker is de grondwaarheid** — als iemand zegt dat twee lijnen op elkaar lijken, ga niet het getal verdedigen.
+
+## Bij 10 series cascadeert elke kleurwijziging (2026-07-29)
+
+"Maak DMA revenue bordeaux en GSAAS revenue navy" klinkt als twee edits. Het waren vier.
+
+- Bordeaux botste met **Total revenue** (`secondary-900 #451c36`, donker pruim) → die moest naar `yellow-800 #936305`.
+- Navy botste zichtbaar met **Total visits** (`primary-800`, donkerblauw) → die moest naar diep turquoise.
+- Oorzaak: de aggregaten stonden juist op **donkere** stops omdat de mid-lightness band al vol was. Zodra er twee nieuwe donkere kleuren bijkomen, zijn er vier donkere lijnen en dat kan niet.
+- **Turquoise was bovendien ingeklemd:** mid-lightness turquoise zit precies tussen `primary-500` (cyaan) en `green-500`, dus botst met beide. `teal-200` is wél schoon maar heeft **1.5:1** contrast — onzichtbaar als dunne lijn. Alleen een *donkere* turquoise werkt. Neem bij zulke zoektochten dus **altijd een contrast-vloer mee** (≥3:1 voor lijnen), anders kiest de optimizer bleke kleuren die "schoon" scoren omdat ze qua lightness ver van alles staan.
+- Praktisch: zoek niet handmatig. Zet de vaste kleuren vast, laat de vrije slots variëren over alle families/stops, en scoor op (aantal falende paren, kleinste marge) mét contrast-filter.
+
 ## Eén control, vier implementaties — waarvan één met de hover omgekeerd (2026-07-29)
 
 Joep: "de X-buttons in Redirect Generator hebben nog het oude gedrag" en daarna "swap alle X-buttons naar het nieuwe ontwerp". Bij het opruimen bleek dezelfde remove-× **vier keer** los te bestaan:

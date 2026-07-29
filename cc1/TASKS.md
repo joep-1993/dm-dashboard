@@ -69,15 +69,32 @@ have no matching bullet:
   `.btn-danger-invert`, canonical's `.btn-remove` and rfinder's page-local
   `.btn-remove-row` all deleted. See LEARNINGS — this is the item-8 follow-up that
   came back because the inverted class was left in place the first time.
+- Thema Ads' Start / Pause / Resume right-aligned too — also a `.btn-group`, also
+  three independent actions (only one visible at a time). No `btn-group` left on
+  that page.
+- **Chart palette resolved** (was the open decision). Joep chose DMA revenue →
+  bordeaux `#722F37` and GSAAS revenue → navy `#001F3F`; that forced Total revenue
+  off dark plum to `yellow-800 #936305`, and Total visits off dark blue to deep
+  turquoise `#107063` after Joep found it too close to navy. Failing pairs 10/45 →
+  **5/45**, all five between the untouched brand base-500 hues. Measurements are in
+  the `METRICS` comment in seo-stats.html — read it before touching any of it.
+- Frontpage (`dashboard.html`) tools alphabetised within each category. Only
+  Google Ads was wrong (GSD Check after MC ID Finder; Thema Ads before
+  Shop-campaigns). Uses the **navbar's** order, not a strict string sort: a literal
+  sort puts `DMA+` after `DMA Exclusions` (space sorts before `+`), which would
+  make the frontpage disagree with the nav on all 33 pages.
 
 ### Open
 - Nothing in `suggestions_new.txt` as of 2026-07-29 15:05 — but RE-READ the file
   rather than trusting this line; Joep has appended to it three times this session,
   and several later requests arrived over chat without ever entering the file.
-- Still awaiting Joep's call: the chart palette's two colourblind-unsafe pairs
-  (needs a deviation from "the base row" to fix), and whether Thema Ads' Start /
-  Pause / Resume job controls should be right-aligned too (they are orange but sit
-  outside the tab block).
+- Optional, never asked for: the last 5 colourblind-unsafe pairs in SEO stats'
+  chart all sit between brand base-500 hues (GSAAS visits ↔ SEO CTR is the worst
+  at CVD 4.9). Fixing them means moving GSAAS visits and SEO Bounce off their 500
+  stops — i.e. editing brand colours, so don't do it unprompted.
+- Also never asked for: `thema-ads.html` ~line 365 (Activation Plan Refresh) still
+  uses `btn-outline-primary` (orange here) rather than purple, unlike the
+  Processing Jobs Refresh that was fixed.
 
 ### Deliberately not done (reported to Joep, not refused)
 - Thema Ads' seven other `.alert-info` blocks are collapse disclosure content,
