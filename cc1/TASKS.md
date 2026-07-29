@@ -34,11 +34,23 @@ meant two *chart series* in "Visits & revenue per day". The column version was
 removed. See LEARNINGS — "Per-day overview" in this file has twice meant the
 graph above it.
 
+[21] and [22] done in `7170e43`:
+
+- **[21] Unique titles** — pencil centred (`top:50%` + `translateY(-50%)`, was
+  `top:0.4rem`); `this run: -` gone from the Failed tile (element **and** the two
+  JS writes to `#aiFailed`); Start Batch → Process Batch (markup + the restore in
+  the finally-block); edit pencil added to Recent Results.
+  **This one needed a backend change**: `get_recent_results` did not select
+  `c.description`, and the save form posts all four fields as CSV — so the new
+  pencil would have written `"undefined"` over a good description. Added the
+  column, and hardened `editTitle` with `?? ''` because a failed row's content
+  columns are NULL (LEFT JOIN on `unique_titles_content`).
+- **[22] Canonicals** — "Generate Canonicals" → "Generate", plus the placeholder
+  sentence that quotes the button name.
+
 ### Open
-- **[21] Unique titles** — four things: centre the pencil vertically in Search
-  Titles' `card mb-2 result-row`; drop `this run: -` from the Failed tile; rename
-  Start Batch to Process Batch; add a pencil to edit results in Recent Results.
-- **[22] Canonicals** — rename "Generate Canonicals" to "Generate".
+- Nothing in `suggestions_new.txt` as of 2026-07-29 15:05 — but RE-READ the file
+  rather than trusting this line; Joep has appended to it three times this session.
 
 ### Deliberately not done (reported to Joep, not refused)
 - Thema Ads' seven other `.alert-info` blocks are collapse disclosure content,

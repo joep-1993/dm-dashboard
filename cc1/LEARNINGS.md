@@ -83,6 +83,15 @@ Item 1 luidde: 'In SEO Stats, can we add "Total visits" and "Total Revenue" as o
 - **Structurele les:** als een verzoek op twee aangrenzende UI-blokken kan landen en de implementaties verschillen wezenlijk, is dat precies het geval om te vragen — ook al lijkt de tekst expliciet.
 - Technisch resterend detail: de aggregaten mogen **niet** in `ORDER`, want die lijst voedt de summary-tiles én `SUM_KEYS`, en een totaal mag nooit naast z'n eigen onderdelen opgeteld worden. Vandaar een aparte `CHART_ORDER = ORDER.concat(TOTAL_KEYS)`, die `buildToggles` / `renderChart` / `externalTooltip` **alle drie** moeten gebruiken — de tooltip mapt Chart.js' `datasetIndex` positioneel terug naar een metric-key, dus één afwijkende lijst verkeerd-labelt elke rij.
 
+## Een edit-affordance toevoegen aan een lijst = check of die lijst élk veld levert dat de save post (2026-07-29)
+
+Item 21 vroeg een potloodje in Unique Titles' Recent Results, precies zoals Search Titles er al een heeft. Dezelfde `editTitle()` hergebruiken lijkt gratis, maar de twee lijsten komen uit **verschillende endpoints**.
+
+- `/api/unique-titles/search` levert `description`, `get_recent_results()` **niet** (die selecteert url, title, h1_title, original_h1, updated_at, last_error).
+- Het save-formulier bouwt een CSV met **alle vier** de velden. Dus: potlood op een Recent-Results-rij → Description krijgt `undefined` → opslaan schrijft letterlijk `"undefined"` over een goede description. Alle velden zijn `required`, dus een *leeg* veld was tegengehouden — een gevulde met `"undefined"` niet. Stille corruptie.
+- Fix: `c.description` toegevoegd aan de SELECT, plus `?? ''` in `editTitle` omdat een *mislukte* rij NULL-content heeft (LEFT JOIN op `unique_titles_content`) en `null` óók als `"null"` in het veld zou landen.
+- **Regel:** bij hergebruik van een edit-handler voor een tweede lijst: vergelijk de veldenlijst van beide endpoints tegen wat de save verstuurt. Een read-only lijst mag velden missen; zodra je hem editable maakt, mag dat niet meer.
+
 ## `cc1/` staat in `.gitignore` maar de bestanden zijn tracked (2026-07-29)
 
 `git add cc1/UI_BLUEPRINT.md` faalt met "The following paths are ignored" en de héle `git add` doet dan niets (atomisch) — ook de 20 frontend-bestanden niet.
