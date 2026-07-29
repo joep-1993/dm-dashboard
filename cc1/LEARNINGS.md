@@ -92,6 +92,30 @@ Item 21 vroeg een potloodje in Unique Titles' Recent Results, precies zoals Sear
 - Fix: `c.description` toegevoegd aan de SELECT, plus `?? ''` in `editTitle` omdat een *mislukte* rij NULL-content heeft (LEFT JOIN op `unique_titles_content`) en `null` óók als `"null"` in het veld zou landen.
 - **Regel:** bij hergebruik van een edit-handler voor een tweede lijst: vergelijk de veldenlijst van beide endpoints tegen wat de save verstuurt. Een read-only lijst mag velden missen; zodra je hem editable maakt, mag dat niet meer.
 
+## De titel van een BLOTE categoriepagina komt uit Unique Titles, niet uit tblPageTitles (2026-07-29)
+
+Joep zag `/products/huis_tuin/wandpanelen/` met een generieke titel ("Goedkope wandpanelen kopen op beslist.nl") en vroeg of alle categorieën een titel hebben. Mijn eerste hypothese — "geen tblPageTitles-blueprint ⇒ fallback" — was **fout**, en Joep wees zelf de juiste bron aan.
+
+- **Bewijs dat het onderscheidt:** 6 categorieën met **nul** rijen in `pa.page_titles_existing` tonen tóch een nette titel; 7 met de generieke fallback zitten **niet in `pa.urls`**. De nette titels komen letterlijk overeen met `pa.unique_titles_content.title` (`Wijnvaten kopen? ✔️ Tot !!DISCOUNT!! korting!` → live "Tot 58% korting"; de `!!VAR!!` wordt bij render gesubstitueerd).
+- **Dus:** `tblPageTitles` (= `/page-titles`) dekt **facet-gefilterde** pagina's — 0 van de 539.214 rijen heeft een lege facet-key. De **blote** categoriepagina wordt gevoed door Unique Titles. Twee verschillende systemen; verwar ze niet.
+- **Dekking gemeten:** 3.435 / 3.543 (97,0%) categorieën hebben een Unique-Titles-titel. De 108 zonder zijn **allemaal simpelweg afwezig in `pa.urls`** (geen enkele is aanwezig-maar-leeg). **Muziekinstrumenten is de uitschieter: 53,1% (45 van 96 mist)** — dat ruikt naar een maincat die nooit geladen is, niet naar toeval. Alle andere maincats ≥89%.
+- Van die 108 geven **95 HTTP 200 en 13 een 404** (dode categorieën: Tefal Easy Fry-varianten, Philips 1000/2000, Antwoordapparaten, Walkmans-achtigen). Alleen de 95 geladen — voor een 404 AI-titels genereren is weggegooid werk.
+- **Twee kolomvallen onderweg:** (1) `pa.page_titles_existing` heeft **twee rij-layouts** ("normal" en "shifted", zie de comment bij `get_preview`) — detecteer met `title ILIKE '%beslist.nl%'`, anders lees je facet-keys als titels. (2) `canon_key` is voor shifted rijen berekend over de category-naam, dus onbruikbaar; normaliseer eerst.
+- **En de export is oud:** `page_titles_existing` komt uit `tblPageTitles.xlsx` van **6 juli**, terwijl er tussen 20 en 27 juli **43.874** combos gepusht zijn. "0 live combos" betekent dus "0 in de snapshot", niet "0 in productie" — dat verklaart een rij met `pushed=1, live=0`. `/page-titles` heeft geen GET, dus productie is niet terug te lezen.
+
+## Undocumented API? Laat de validator je het contract vertellen (2026-07-29)
+
+`https://website-configuration.api.beslist.nl/faq` had geen swagger (`/swagger.json`, `/openapi.json`, `/swagger/v1/swagger.json` → allemaal 404). Contract in ~6 read-only-plus-invalid calls compleet gekregen:
+
+1. **Bestaat het?** Unauthenticated `GET` → **401**, niet 404. Endpoint bestaat.
+2. **Welke key?** Zelfde host, verschillende secties gebruiken verschillende keys: prod `/page-titles` wil `UNIQUE_TITLES_API_KEY`, `/automated-content` en `/faq` willen `CONTENT_API_KEY_PROD`. Staging-key op prod → 401. **Probeer ze allemaal.**
+3. **Body-vorm?** `POST []` en `POST {}` → *"Request body must be a non-empty JSON array of records"*.
+4. **Verplichte velden?** `POST [{}]` → *"url: This field is missing. question: … answer: …"*. **Nul schrijfacties, volledig veldenlijstje.**
+5. **Optionele + verboden velden?** POST één record met een hoop speculatieve velden → *"position/page_title/schema_org/content_faq: This field was not expected."* De niet-genoemde (`country_code`, `sort_order`) zijn dús geldig. Weer zonder te schrijven, want validatie gaat vóór de write.
+6. **Upsert of append?** Pas hierna één echte write, onder een **nep-URL** (`/products/__claude_api_probe__/`), en daarna `DELETE ?url=` om op te ruimen.
+
+**Regels:** begin met invalide payloads — een goede validator geeft het hele contract gratis en schrijft niks. Schrijf pas als het moet, altijd onder een herkenbare nep-key, en zoek eerst je opruim-primitief (hier `DELETE ?url=`; `PUT` was 405). En: `id: 1` op de eerste probe verraadde dat de store **helemaal leeg** was — nieuwe sectie, nog nooit naar gepusht.
+
 ## De Kleursysteem base-rij is een MERK-palet, geen categorisch chart-palet (2026-07-29)
 
 Dit is de kern van de hele kleuren-draad rond SEO stats' grafiek, en het geldt voor elke tool die ooit >4 series tekent.

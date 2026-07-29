@@ -84,6 +84,31 @@ have no matching bullet:
   sort puts `DMA+` after `DMA Exclusions` (space sorts before `+`), which would
   make the frontpage disagree with the nav on all 33 pages.
 
+### Category title coverage + FAQ Publish 2.0 (2026-07-29, all over chat)
+
+- **Bare category page titles come from Unique Titles, NOT tblPageTitles** — see
+  LEARNINGS. Coverage 3,435/3,543 (97.0%); the 108 gaps were all just missing from
+  `pa.urls`. **Muziekinstrumenten is 53.1% covered (45 of 96 missing)** and looks
+  like a maincat that was never loaded — worth a proper look.
+- Loaded the **95 live** of those 108 into `pa.urls` + queued `pending` in
+  `pa.unique_titles_jobs` ONLY (faq/kopteksten untouched). 13 were 404 and skipped.
+  Rollback tag: `notes = 'category bare-url unique-titles gap 2026-07-29'`
+  (delete from unique_titles_jobs first, then pa.urls). Generation runs behind the
+  existing ~22.5k pending backlog.
+- Pushed Wandpanelen's 15 built blueprint combos to prod `/page-titles`
+  (`{"status":"OK","records":15}`). **Two dangerous defaults in `publish_built()`**:
+  `combos=None` pushes ALL 33,745 built rows, and `push_unique_titles=True` fires a
+  full CSV upsert of the entire unique-titles corpus. Always pass both explicitly.
+- **FAQ "Publish 2.0"** shipped (`ed1a4ed`): `backend/faq_v2_publisher.py` +
+  `POST /api/faq/publish-v2` (+ `/status/{id}`, `/stats`) + a button between Refresh
+  and Publish in FAQ's Content Publishing. Full contract for the undocumented
+  `/faq` section is in the module docstring. It is **additive** (upsert on
+  (url, question)), so stale questions survive a regeneration — `replace=True`
+  exists but costs one DELETE per URL (~280k) so it is not the default.
+  Smoke-tested on prod with `limit=2` → 12 records, read back clean. **Never run
+  the unlimited push casually: ~280,636 URLs / ~1.7M records.** Note `schema_org`
+  has no home in `/faq` — the endpoint rejects the field.
+
 ### Open
 - Nothing in `suggestions_new.txt` as of 2026-07-29 15:05 — but RE-READ the file
   rather than trusting this line; Joep has appended to it three times this session,
