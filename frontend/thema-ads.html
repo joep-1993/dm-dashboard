@@ -542,8 +542,10 @@
                             </div>
                         </div>
 
-                        <!-- Action Buttons -->
-                        <div class="btn-group" role="group">
+                        <!-- Action Buttons. Was a .btn-group, same as Check-up's pair:
+                             these are three independent actions (and only one is ever
+                             visible at a time), not a segmented control. -->
+                        <div class="d-flex justify-content-end gap-2">
                             <button class="btn btn-success" onclick="startJob()" id="startBtn">Start</button>
                             <button class="btn btn-warning" onclick="pauseJob()" id="pauseBtn" style="display:none;">Pause</button>
                             <button class="btn btn-info" onclick="resumeJob()" id="resumeBtn" style="display:none;">Resume</button>

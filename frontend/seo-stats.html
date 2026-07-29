@@ -434,36 +434,58 @@
     <script>
         const API = window.location.origin + '/api/seo-stats';
 
-        // Chart line colours come from the Beslist "Kleursysteem" proposal
-        // (TWEB-32452): the base row — every family's 500 stop — with the red
-        // family left out. That is exactly 8 hues for 8 series, so the only
-        // freedom is which series gets which hue.
+        // Chart line colours: mostly the Beslist "Kleursysteem" base row (every
+        // family's 500 stop, TWEB-32452), with three deliberate departures.
         //
-        // The assignment is not cosmetic. Ordered this way, the three visit
-        // series (default-on) and the three revenue series each clear the
-        // colourblind-separation and normal-vision floors as a group, and no
-        // two neighbours in the legend collide. Both brand bases land on the
-        // headline SEO series. Don't reshuffle without re-checking: the base
-        // row has two inherently close pairs — cta/yellow (indistinguishable
-        // under deuteranopia) and green/teal (close even in normal vision) —
-        // and this order is one of the ones that keeps them apart.
+        // WHY THE DEPARTURES. That base row is a BRAND palette — banners,
+        // buttons, review stars — not a categorical chart palette, and it does
+        // not survive ten simultaneous lines. Measured in OKLab (ΔE ×100; the
+        // floors are 8 for colourblind vision, 15 for normal vision), the pure
+        // base row had 10 of 45 pairs under a floor, the worst being
+        // yellow-500 ↔ cta-500 at ΔE 0.8 under deuteranopia — literally the same
+        // colour for ~1 in 12 men. Moving DMA revenue to bordeaux and GSAAS
+        // revenue to navy (Joep's call) drops that to 5 of 45.
+        //
+        // Total revenue had to move too: it was secondary-900 dark plum, which
+        // bordeaux collides with. yellow-800 keeps it dark without clashing.
+        //
+        // The 5 remaining failures are ALL between untouched base-500 series
+        // (see the list below), so fixing them means changing brand hues —
+        // Joep's call, not a silent edit. Mitigation meanwhile: the legend and
+        // the tooltip both name every series, so identity never rests on hue,
+        // and only one failing pair shares a y-axis.
+        //
+        //   GSAAS visits ↔ SEO CTR      CVD  4.9   (accent-500 vs cta-500)
+        //   SEO CTR      ↔ SEO Bounce   CVD  6.1
+        //   SEO visits   ↔ SEO revenue  CVD  7.7
+        //   DMA visits   ↔ SEO revenue  normal 14.1
+        //   GSAAS visits ↔ SEO Bounce   normal 13.4
+        //
+        // Re-validate with the `dataviz` skill's validate_palette.js before
+        // touching any of this; do not eyeball ΔE.
         const METRICS = {
             seo_visits:   { label: 'SEO visits',          unit: 'count', axis: 'count', color: '#1f99c4' },  // primary-500
             dma_visits:   { label: 'DMA visits',          unit: 'count', axis: 'count', color: '#8459cf' },  // violet-500
             gsaas_visits: { label: 'GSAAS visits',        unit: 'count', axis: 'count', color: '#91c34e' },  // accent-500
             seo_omzet:    { label: 'SEO revenue',         unit: 'euro',  axis: 'euro',  color: '#be4693' },  // secondary-500
-            dma_omzet:    { label: 'DMA revenue',         unit: 'euro',  axis: 'euro',  color: '#ce9516' },  // yellow-500
-            gsaas_omzet:  { label: 'GSAAS revenue',       unit: 'euro',  axis: 'euro',  color: '#1dafa3' },  // teal-500
+            dma_omzet:    { label: 'DMA revenue',         unit: 'euro',  axis: 'euro',  color: '#722F37' },  // bordeaux
+            gsaas_omzet:  { label: 'GSAAS revenue',       unit: 'euro',  axis: 'euro',  color: '#001F3F' },  // navy
             seo_ctr:      { label: 'SEO CTR',             unit: 'percent', axis: 'percent', color: '#f37632' },  // cta-500
             seo_bounce:   { label: 'SEO Bounce',          unit: 'percent', axis: 'percent', color: '#26a660' },  // green-500
-            // All-channel aggregates (see TOTALS). The base row is exhausted at
-            // 8 hues, so these take the DARKEST stop of the family their SEO
-            // counterpart already owns — Total visits reads as "the heavy blue
-            // one" next to SEO visits, Total revenue likewise in plum. Each is
-            // ~22 ΔE from its own 500 sibling, and the pair clears the adjacent
-            // check as the last two entries in CHART_ORDER.
-            total_visits: { label: 'Total visits',        unit: 'count', axis: 'count', color: '#135369' },  // primary-800
-            total_omzet:  { label: 'Total revenue',       unit: 'euro',  axis: 'euro',  color: '#451c36' },  // secondary-900
+            // All-channel aggregates (see TOTALS) — dark, so they read as the
+            // heavy version of the components they sum. Both had to move once
+            // GSAAS revenue took navy and DMA revenue took bordeaux:
+            //   Total visits  was primary-800 #135369 — a dark blue, which Joep
+            //     found too close to navy in practice even though it measured
+            //     ΔE 17.9. Deep turquoise instead: ΔE 26.9 from navy, and it is
+            //     the one turquoise that is far enough from BOTH primary-500
+            //     (cyan) and green-500 while staying visible as a thin line —
+            //     mid-lightness turquoise sits right between those two, and the
+            //     clean-but-pale teal-200 only manages 1.5:1 contrast.
+            //   Total revenue was secondary-900 dark plum, which bordeaux
+            //     collides with. yellow-800: still dark, no clash.
+            total_visits: { label: 'Total visits',        unit: 'count', axis: 'count', color: '#107063' },  // deep turquoise
+            total_omzet:  { label: 'Total revenue',       unit: 'euro',  axis: 'euro',  color: '#936305' },  // yellow-800
         };
         const ORDER = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','dma_omzet','gsaas_omzet',
                        'seo_ctr','seo_bounce'];
