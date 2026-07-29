@@ -2869,16 +2869,21 @@ async def faq_publish_v2(request: dict = None):
     section (one record per QUESTION), not the /automated-content blob endpoint
     the plain Publish button uses. FAQ only; kopteksten is untouched.
 
-    Body: {environment, limit, replace}. See backend/faq_v2_publisher for why
-    `replace` defaults to false (the endpoint is additive, and a true replace
-    costs one DELETE per URL — ~280k of them).
+    Body: {environment, mode, limit, replace}. `mode` defaults to "new" — only
+    URLs never pushed or whose faq_json changed since their last successful push,
+    tracked in pa.faq_v2_push_state. "all" re-pushes everything (~1.7M records).
+    See backend/faq_v2_publisher for why `replace` defaults to false (the endpoint
+    is additive, and a true replace costs one DELETE per URL — ~280k of them).
     """
     request = request or {}
     env = request.get("environment", "production")
+    mode = request.get("mode", "new")
     limit = request.get("limit")
     replace = bool(request.get("replace", False))
     if env not in ("dev", "staging", "production"):
         raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+    if mode not in ("new", "all"):
+        raise HTTPException(status_code=400, detail="Invalid mode. Use: new, all")
     if limit is not None:
         try:
             limit = int(limit)
@@ -2888,9 +2893,9 @@ async def faq_publish_v2(request: dict = None):
             raise HTTPException(status_code=400, detail="limit must be a positive integer")
     try:
         from backend.faq_v2_publisher import start_faq_v2_task
-        task_id = start_faq_v2_task(env=env, limit=limit, replace=replace)
+        task_id = start_faq_v2_task(env=env, limit=limit, replace=replace, mode=mode)
         return {"status": "started", "task_id": task_id, "environment": env,
-                "limit": limit, "replace": replace}
+                "mode": mode, "limit": limit, "replace": replace}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

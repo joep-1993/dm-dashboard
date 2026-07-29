@@ -1102,52 +1102,72 @@ function escapeHtml(text) {
 // to /automated-content. /faq takes one record per QUESTION (url/question/answer
 // + optional country_code/sort_order) and upserts on (url, question).
 //
-// Two things the confirm dialog has to say out loud:
-//  * the volume — ~280k URLs / ~1.7M records, so this is a long run, and
-//  * the endpoint is ADDITIVE: questions we no longer generate stay live. A true
-//    replace needs one DELETE per URL, which is why it is not the default.
+// Defaults to mode="new": only URLs never pushed or whose faq_json changed, via
+// pa.faq_v2_push_state. `full=true` re-pushes everything (~1.7M records) and is
+// deliberately a separate, secondary control — not something a stray click hits.
+//
+// The confirm dialog must say two things out loud: the real volume, and that the
+// endpoint is ADDITIVE, so questions we no longer generate stay live.
 // ---------------------------------------------------------------------------
-async function publishFaqV2() {
+async function publishFaqV2(full = false) {
     const btn = document.getElementById('publishV2Btn');
+    const fullBtn = document.getElementById('publishV2FullBtn');
     const resultDiv = document.getElementById('publishV2Result');
     const envSelect = document.getElementById('publishEnvironment');
     const environment = envSelect ? envSelect.value : 'production';
 
-    // State the real size before asking; guessing is how someone fires 1.7M
-    // records at production thinking it is a quick action.
     let stats = null;
     try {
         const r = await fetch(`${API_BASE}/api/faq/publish-v2/stats`);
         if (r.ok) stats = await r.json();
     } catch (e) { /* fall through to a generic warning */ }
 
-    const size = stats
-        ? `${stats.urls.toLocaleString('nl-NL')} URLs (~${stats.est_records.toLocaleString('nl-NL')} Q&A records)`
-        : 'the full FAQ set';
-    if (!confirm(
-        `Publish 2.0 → ${environment}\n\n` +
-        `Pushes ${size} to the /faq section, one record per question.\n\n` +
-        `This endpoint is ADDITIVE: it upserts on (url, question), so questions ` +
-        `that are no longer generated stay live until deleted.\n\n` +
-        `Continue?`)) {
+    const nf = n => (n || 0).toLocaleString('nl-NL');
+    let mode = full ? 'all' : 'new';
+
+    if (stats) {
+        if (!full && stats.urls_pending === 0) {
+            // Nothing changed — offer the full re-push rather than a no-op run.
+            if (!confirm(
+                `Nothing new to push — all ${nf(stats.urls_total)} URLs are up to date` +
+                (stats.last_pushed_at ? ` (last push ${stats.last_pushed_at.slice(0, 16).replace('T', ' ')})` : '') +
+                `.\n\nRe-push ALL ${nf(stats.urls_total)} URLs (~${nf(stats.est_records_total)} records) anyway?`)) {
+                return;
+            }
+            mode = 'all';
+        } else {
+            const what = mode === 'all'
+                ? `ALL ${nf(stats.urls_total)} URLs (~${nf(stats.est_records_total)} records)`
+                : `${nf(stats.urls_pending)} new/changed URLs (~${nf(stats.est_records_pending)} records)`;
+            if (!confirm(
+                `Publish 2.0 → ${environment}\n\n` +
+                `Pushes ${what} to the /faq section, one record per question.\n` +
+                `${nf(stats.urls_pushed)} of ${nf(stats.urls_total)} URLs already pushed.\n\n` +
+                `This endpoint is ADDITIVE: it upserts on (url, question), so questions ` +
+                `that are no longer generated stay live until deleted.\n\nContinue?`)) {
+                return;
+            }
+        }
+    } else if (!confirm(`Publish 2.0 → ${environment}\n\nCould not read the counts. Continue anyway?`)) {
         return;
     }
 
     btn.disabled = true;
-    resultDiv.innerHTML = `<div class="alert alert-warning">Starting Publish 2.0 to ${escapeHtml(environment)}…</div>`;
+    if (fullBtn) fullBtn.disabled = true;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Starting Publish 2.0 (${escapeHtml(mode)}) to ${escapeHtml(environment)}…</div>`;
 
     try {
         const res = await fetch(`${API_BASE}/api/faq/publish-v2`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ environment }),
+            body: JSON.stringify({ environment, mode }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
 
         resultDiv.innerHTML = `
             <div class="alert alert-warning">
-                <strong>Publish 2.0 running…</strong><br>
+                <strong>Publish 2.0 running…</strong> <span class="badge bg-secondary">${escapeHtml(mode)}</span><br>
                 Task ID: <code>${escapeHtml(data.task_id)}</code><br>
                 Target: <code>${escapeHtml(environment)}</code> /faq<br>
                 <div class="mt-2">
@@ -1159,10 +1179,13 @@ async function publishFaqV2() {
     } catch (e) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Failed to start: ${escapeHtml(e.message)}</div>`;
         btn.disabled = false;
+        if (fullBtn) fullBtn.disabled = false;
     }
 }
 
 function pollFaqV2(taskId, btn, resultDiv) {
+    const nf = n => (n || 0).toLocaleString('nl-NL');
+    const fullBtn = document.getElementById('publishV2FullBtn');
     const timer = setInterval(async () => {
         let data;
         try {
@@ -1176,33 +1199,36 @@ function pollFaqV2(taskId, btn, resultDiv) {
         if (txt) {
             txt.textContent = p.phase === 'counting'
                 ? 'Counting…'
-                : `${(p.urls_done || 0).toLocaleString('nl-NL')}/${(p.total_urls || 0).toLocaleString('nl-NL')} URLs · `
-                  + `${(p.records_pushed || 0).toLocaleString('nl-NL')} records pushed`
-                  + (p.failed ? ` · ${p.failed.toLocaleString('nl-NL')} failed` : '');
+                : `${nf(p.urls_done)}/${nf(p.total_urls)} URLs · ${nf(p.records_pushed)} records pushed`
+                  + (p.failed ? ` · ${nf(p.failed)} failed` : '');
         }
         if (data.status === 'completed' || data.status === 'failed') {
             clearInterval(timer);
             btn.disabled = false;
+            if (fullBtn) fullBtn.disabled = false;
             const r = data.result || {};
             if (data.status === 'failed' || r.success === false) {
                 resultDiv.innerHTML = `
                     <div class="alert alert-danger">
                         <strong>Publish 2.0 finished with errors</strong><br>
-                        ${escapeHtml(data.error || '')}
+                        ${escapeHtml(data.error || r.message || '')}
                         ${r.records_pushed !== undefined
-                            ? `Pushed ${r.records_pushed.toLocaleString('nl-NL')}, failed ${(r.records_failed || 0).toLocaleString('nl-NL')}.` : ''}
+                            ? `Pushed ${nf(r.records_pushed)}, failed ${nf(r.records_failed)} `
+                              + `(${nf(r.urls_failed)} URLs — these stay unpushed and will be retried next run).` : ''}
                         ${r.failed_batches ? `<pre class="mb-0 mt-2" style="white-space:pre-wrap;">${escapeHtml(JSON.stringify(r.failed_batches, null, 2))}</pre>` : ''}
                     </div>`;
+            } else if (r.urls_processed === 0) {
+                resultDiv.innerHTML = `<div class="alert alert-done-yellow"><strong>Nothing to push</strong> — everything is already up to date.</div>`;
             } else {
                 resultDiv.innerHTML = `
                     <div class="alert alert-done-yellow">
-                        <strong>Publish 2.0 done</strong><br>
-                        ${r.records_pushed.toLocaleString('nl-NL')} records across
-                        ${r.urls_processed.toLocaleString('nl-NL')} URLs in ${r.batches} batches
-                        (${r.duration_sec}s) → <code>${escapeHtml(r.api_url || '')}</code>
-                        ${r.skipped_count ? `<br><span class="text-muted">${r.skipped_count} URL(s) skipped (unparseable faq_json)</span>` : ''}
+                        <strong>Publish 2.0 done</strong> <span class="badge bg-secondary">${escapeHtml(r.mode || '')}</span><br>
+                        ${nf(r.records_pushed)} records across ${nf(r.urls_processed)} URLs
+                        in ${r.batches} batches (${r.duration_sec}s) → <code>${escapeHtml(r.api_url || '')}</code>
+                        ${r.skipped_count ? `<br><span class="text-muted">${r.skipped_count} URL(s) skipped (unusable faq_json)</span>` : ''}
                     </div>`;
             }
+            if (typeof refreshPublishStats === 'function') refreshPublishStats();
         }
     }, 2000);
 }

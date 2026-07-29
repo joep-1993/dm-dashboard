@@ -196,9 +196,14 @@
                                 <button class="btn btn-outline-purple" onclick="refreshPublishStats()">↻ Refresh</button>
                                 <!-- Publish 2.0 → the /faq section (one record per question),
                                      a different store from Publish's /automated-content blob.
-                                     FAQ only; kopteksten is never touched by this. -->
+                                     FAQ only; kopteksten is never touched by this.
+                                     Default is incremental (new/changed only); the full
+                                     ~1.7M-record re-push is the separate small button so a
+                                     stray click cannot trigger it. -->
                                 <button class="btn btn-outline-orange" onclick="publishFaqV2()" id="publishV2Btn"
-                                        title="Push FAQ Q&amp;A pairs to the website-configuration /faq section">Publish 2.0</button>
+                                        title="Push new &amp; changed FAQ Q&amp;A pairs to the website-configuration /faq section">Publish 2.0</button>
+                                <button class="btn btn-outline-purple btn-sm" onclick="publishFaqV2(true)" id="publishV2FullBtn"
+                                        title="Re-push EVERY FAQ Q&amp;A pair (~1.7M records), not just new/changed ones">all</button>
                                 <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">Publish</button>
                             </div>
                         </div>
