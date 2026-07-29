@@ -3022,6 +3022,10 @@ def get_recent_results(limit: int = 20) -> List[Dict]:
         cur.execute("""
             SELECT u.url,
                    c.title,
+                   -- description feeds the Recent Results edit pencil: the save
+                   -- form posts all four fields, so without it the edit would
+                   -- write an empty/"undefined" description over a good one.
+                   c.description,
                    c.h1_title,
                    c.original_h1,
                    j.updated_at AS ai_processed_at,

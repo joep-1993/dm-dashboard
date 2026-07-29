@@ -12,7 +12,7 @@
         .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
         /* Hover pencil on a search result — same affordance as the Built-titles
            table in seo-titles.html, anchored to the card instead of a table row. */
-        .result-row .row-edit { position: absolute; top: 0.4rem; right: 0.5rem;
+        .result-row .row-edit { position: absolute; top: 50%; right: 0.5rem; transform: translateY(-50%);
             display: inline-flex; visibility: hidden; align-items: center; justify-content: center;
             cursor: pointer; color: #ced4da; background: #fff; border: 1px solid #e9ecef;
             border-radius: 6px; padding: 3px; line-height: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
@@ -131,7 +131,6 @@
                             <div class="col-3 text-center">
                                 <h4 id="aiTotalFailed" class="mb-0" style="color: #5e4a90; font-weight: 700;" title="Persisted across sessions (ai_error IS NOT NULL)">-</h4>
                                 <small class="text-muted">Failed</small>
-                                <small id="aiFailed" class="text-muted d-block" style="font-size: 0.7rem;" title="Failed in the current run">this run: -</small>
                             </div>
                         </div>
                     </div>
@@ -180,7 +179,7 @@
                             </div>
                             <div class="d-flex gap-2">
                                 <button id="aiStartBtn" class="btn btn-outline-orange">
-                                    <span id="aiStartBtnText">Start Batch</span>
+                                    <span id="aiStartBtnText">Process Batch</span>
                                     <span id="aiStartSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                                 </button>
                                 <button id="aiProcessAllBtn" class="btn btn-run">
@@ -540,7 +539,6 @@
                     progressBar.textContent = `${processing.processed}/${processing.total_urls} (${progress}%)`;
 
                     document.getElementById('aiSuccessful').textContent = processing.successful?.toLocaleString() || '0';
-                    document.getElementById('aiFailed').textContent = 'this run: ' + (processing.failed?.toLocaleString() || '0');
 
                     // Show current URL
                     if (processing.current_url) {
@@ -557,7 +555,6 @@
                     stopBtn.classList.add('d-none');
 
                     document.getElementById('aiSuccessful').textContent = '-';
-                    document.getElementById('aiFailed').textContent = 'this run: -';
                 }
 
                 // Show error if any
@@ -608,7 +605,7 @@
             } finally {
                 startBtn.disabled = false;
                 processAllBtn.disabled = false;
-                startBtnText.textContent = 'Start Batch';
+                startBtnText.textContent = 'Process Batch';
                 startSpinner.classList.add('d-none');
                 processAllBtnText.textContent = 'Process All';
                 processAllSpinner.classList.add('d-none');
@@ -655,10 +652,17 @@
                     return;
                 }
 
+                // Same hover pencil as Search Titles: .result-row on the card,
+                // position-relative on the body, and the badge row gets right
+                // padding so the OK/Error badge never sits under the pencil.
                 container.innerHTML = data.results.map(item => `
-                    <div class="card mb-2">
-                        <div class="card-body py-2 px-3">
-                            <div class="d-flex justify-content-between align-items-start">
+                    <div class="card mb-2 result-row">
+                        <div class="card-body py-2 px-3 position-relative">
+                            <span class="row-edit" title="Edit this title"
+                                  onclick="editTitle('${encodeURIComponent(JSON.stringify(item)).replace(/'/g, '%27')}')">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                            </span>
+                            <div class="d-flex justify-content-between align-items-start pe-4">
                                 <a href="https://www.beslist.nl${item.url}" target="_blank" rel="noopener" class="text-decoration-none"><code class="small" style="word-break: break-all; user-select: all;">${item.url}</code></a>
                                 ${item.ai_error
                                     ? '<span class="badge bg-danger ms-2">Error</span>'
@@ -1002,10 +1006,14 @@
 
         function editTitle(encodedItem) {
             const item = JSON.parse(decodeURIComponent(encodedItem));
-            document.getElementById('titleUrl').value = item.url;
-            document.getElementById('titleTitle').value = item.title;
-            document.getElementById('titleDescription').value = item.description;
-            document.getElementById('titleH1').value = item.h1_title;
+            // `?? ''`, not the raw value: Recent Results can hand us a failed row
+            // whose content columns are NULL (LEFT JOIN on unique_titles_content).
+            // Assigning null/undefined would put the literal "null" / "undefined"
+            // in the field, and the save posts all four fields verbatim.
+            document.getElementById('titleUrl').value = item.url ?? '';
+            document.getElementById('titleTitle').value = item.title ?? '';
+            document.getElementById('titleDescription').value = item.description ?? '';
+            document.getElementById('titleH1').value = item.h1_title ?? '';
             document.getElementById('titleUrl').focus();
             // Remove button is meaningful only when editing an existing title.
             document.getElementById('removeBtn').classList.remove('d-none');
