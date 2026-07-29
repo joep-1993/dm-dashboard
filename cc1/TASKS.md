@@ -4,6 +4,51 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+## suggestions_new.txt backlog — second UI/feature list from Joep (opened 2026-07-29)
+
+Source of truth is `/home/joepvanschagen/projects/dm-dashboard/suggestions_new.txt`
+(untracked). A **new** file, separate from `suggestions.txt` — don't confuse them.
+
+**BEWARE: this file gets RENUMBERED.** It opened with 10 bullets + two blank
+lines, then grew to 22 bullets with the blanks removed — so what were items 13-22
+during the work became **lines 11-20**. Item numbers in the first commit message
+(`f39e9df`, "items 1-22") are the numbering *at the time of that commit*, which no
+longer matches the file. Always re-read and re-count; never trust a remembered
+line number here. Joep also appends mid-session (11-20 arrived after 1-10 were
+reported done, then 21-22 after that) — same warning as the first list.
+
+Done in `f39e9df` — current line numbers in brackets:
+1 [1] SEO stats Total visits / Total revenue, 2 [2] Top categories Yesterday
+swap, 3 [3] chart palette, 4 [4] Update Excel "i" hover, 5 [5] URL Validator
+layout + rename, 6 [6] table-header weight, 7 [7] Reset outlined orange, 8 [8]
+Recent Results × direction, 9 [9] Process/Validate Batch renames, 10 [10] SEO
+Priority filter warm-up, [11] Redshift upload buttons, [12] Keyword Planner
+button spacing, [13] Keyword Redirects progress bar, [14] IndexNow Export
+centring, [15] Index Checker button + info text, [16] Thema Ads three fixes,
+[17] Shop-campaigns headers + Refresh, [18] Redirect Tool input-group, [19]
+Redirect Generator button height, [20] R-Finder × SVG. Plus the chart-tooltip
+height jump, which came in over chat and is not in the file at all.
+
+**Item 1 was rebuilt**: first read as two Per-day-overview *columns*, actually
+meant two *chart series* in "Visits & revenue per day". The column version was
+removed. See LEARNINGS — "Per-day overview" in this file has twice meant the
+graph above it.
+
+### Open
+- **[21] Unique titles** — four things: centre the pencil vertically in Search
+  Titles' `card mb-2 result-row`; drop `this run: -` from the Failed tile; rename
+  Start Batch to Process Batch; add a pencil to edit results in Recent Results.
+- **[22] Canonicals** — rename "Generate Canonicals" to "Generate".
+
+### Deliberately not done (reported to Joep, not refused)
+- Thema Ads' seven other `.alert-info` blocks are collapse disclosure content,
+  not banners, so they stay grey. Only the Auto-Queue banner was asked about.
+- `thema-ads.html` ~line 365 (Activation Plan Refresh) has the same
+  `btn-outline-primary` vs purple inconsistency as [16]'s Processing Jobs
+  Refresh, in a section that was not mentioned.
+- The chart palette keeps two colourblind-unsafe pairs that only a deviation from
+  "the base row" can fix — see LEARNINGS. Joep was told; awaiting a call.
+
 ## suggestions.txt backlog — UI/feature list from Joep (opened 2026-07-28)
 
 Source of truth is `/home/joepvanschagen/projects/dm-dashboard/suggestions.txt`

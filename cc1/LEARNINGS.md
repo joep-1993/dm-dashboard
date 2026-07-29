@@ -1,6 +1,95 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een page-local tabelklasse die `font-weight` zét, wijkt af van álle blueprint-tabellen (2026-07-29)
+
+"De table headers in SEO Stats lijken anders dan bij andere tools. Misschien zijn ze niet bold?" — klopte, en de oorzaak is contra-intuïtief.
+
+- `.perf-table th` (seo-stats, shop-campaigns) zette **`font-weight: 600`**. Elke andere tool gebruikt `.tool-table th`, en die zet **géén** font-weight — dus erft hij de **browser-default `th { font-weight: bold }` = 700**.
+- Het verschil is dus 600 vs 700: expliciet "vrij zwaar" zetten leverde *lichter* dan niets zetten. Precies het geval dat je bij lezen overslaat, want 600 ziet uit als een bewuste blueprint-waarde.
+- **Regel:** neem in een page-local tabelklasse `font-weight` **niet** op, tenzij je 700 bedoelt. UI_BLUEPRINT noemt background/sticky/padding/font-size maar geen weight, precies omdat de default al goed is.
+- Wie een tabel van seo-stats kopieert, kopieert deze bug mee. Shop-campaigns had hem ook (daar bovendien met paarse uppercase-headers, item 19).
+
+## Bij een voorgeschreven palet is de kleurkeuze klaar — de *toewijzing* is het werk (2026-07-29)
+
+Item 3: gebruik het Kleursysteem-voorstel (TWEB-32452), de base-rij (stop 500), zonder rood. Dat zijn exact 8 tinten voor 8 chart-series, dus er valt niets te kiezen behalve wie welke krijgt.
+
+- Twee paren in die base-rij zijn **niet** te scheiden op één lightness: `cta #f37632` ↔ `yellow #ce9516` is **ΔE 0.8** onder deuteranopie (praktisch identiek voor roodgroenblinden), en `green #26a660` ↔ `teal #1dafa3` is **ΔE 9.0 bij normaal zicht** — onder de vloer van 15, dus ook met volledig kleurenzicht moeilijk.
+- **Niet op het oog beoordelen.** Gevalideerd met de `dataviz`-skill z'n `validate_palette.js`, en de 8! ordeningen ge-brute-forced op: adjacent-paren OK **én** het default-aan visits-trio OK als groep **én** het revenue-trio OK als groep. 872 van de 40.320 ordeningen halen dat.
+- **Adjacent vs. all-pairs is de hele truc.** De verzameling kleuren staat vast, dus de all-pairs-worst is *invariant* onder toewijzing — daar valt niets te winnen. Wat je wél stuurt: legenda-buren, en welke series in dezelfde semantische groep vallen (die vergelijkt iemand écht). De botsende paren staan nu in verschillende groepen en niet naast elkaar.
+- Gekozen ordening zet beide merk-bases (primary blauw, secondary roze) op de twee SEO-hoofdseries. Staat als waarschuwing in de `METRICS`-comment: niet herschikken zonder hervalidatie.
+- **Echt oplossen** vereist twee series één stop donkerder (teal-700, yellow-700) — dat breekt "gebruik de base-rij", dus expliciet aan Joep teruggelegd in plaats van stil afgeweken.
+- **Vervolg (item 1, na herformulering):** er kwamen twee series bij (Total visits / Total revenue), dus 10 lijnen op een base-rij van 8. Oplossing: de **donkerste stop van de familie die de SEO-tegenhanger al heeft** — `primary-800 #135369` en `secondary-900 #451c36`. Leest als "de zware versie van hetzelfde", zit ~22 ΔE van z'n eigen 500-broertje, en het paar haalt de adjacent-check. Willekeurige donkere paren doen dat níet: `primary-800 ↔ secondary-800` is ΔE 4.9 deutan. 707 van de geteste combinaties halen het — dus zoeken, niet gokken.
+- De twee resterende all-pairs-failures blijven de base-rij zelf (cta/yellow, green/teal); toevoegen van de aggregaten maakt het niet erger.
+
+## `.btn-outline-danger` is hier ORANJE en `.alert-info`/`.alert-success` zijn GRIJS — de Bootstrap-namen liegen (2026-07-29)
+
+Twee losse items (7 en 18) bleken hetzelfde patroon: `style.css` overschrijft Bootstrap-semantiek, dus de klassenaam voorspelt de kleur niet.
+
+- `.btn-outline-danger` → `var(--color-button)` = oranje. "Reset Validation" was alleen rood door een **`#resetValidationBtn`-override**. Item 7 was dus niet "maak hem oranje" maar "haal de override weg".
+- Voor de omgekeerde richting (rode outline die op hover vólloopt) bestond niets — vandaar `.btn-outline-red`. `.btn-danger-invert` is de *andere* richting (vol rood, outline op hover) en blijft, want 301-generator's rule-rows gebruiken hem nog. Twee klassen die elkaars spiegel zijn: check de richting vóór je hergebruikt.
+- `.alert-info` → `rgba(232,233,235,.5)` = grijs. Vandaar Joeps "lichtgrijze banner". `.alert-success` idem — daarom bestond `.alert-done-yellow` al voor eind-van-run.
+- **Regel:** grijp nooit naar een Bootstrap-alert/knopklasse op naam; grep eerst `style.css`. De informatieve tegenhanger is nu `.info-note` (geel), shared en in UI_BLUEPRINT.
+- `.info-note` stond **drie keer identiek** page-local (seo-stats, healthscore, shop-campaigns). Geconsolideerd naar `style.css`. Zelfde fout als de skeleton-CSS die over zeven pagina's gedupliceerd stond.
+
+## Een indeterminate progress-bar op width:100% léést als "klaar" (2026-07-29)
+
+Keyword Redirects is één opake backend-call, dus er is geen eerlijk percentage. De vorige oplossing — volle bar + stripes — was qua *intentie* juist ("ik claim geen voortgang die ik niet heb") maar qua *encoding* fout: vol = af.
+
+- Fix: `.progress.indeterminate` met een segment van 35% dat over de baan schuift (`margin-left: -35% → 100%`). Beweging zegt "bezig", lengte claimt niets. Pas bij terugkomst de klasse eraf en écht `width: 100%`.
+- Ook de error-branch moet de klasse opruimen, anders start een volgende run midden in de animatie.
+- **Generieke les:** onbekende duur encodeer je in *beweging over een deel van de baan*, nooit in vulling. Zie ook de skeleton-vs-progressbar-grens van 28 juli.
+
+## In een flex-rij wrapt precies het item dat géén `nowrap` heeft — en dus springt de hoogte mee met de data (2026-07-29)
+
+Joep zag de chart-tooltip in SEO stats per dag van hoogte verschillen: op 27 juli over meerdere regels, op 25 juli niet.
+
+- `.ct-val` en `.ct-wow` hadden `white-space: nowrap`, `.ct-label` niet. Bij een 5-cijferig bezoekaantal worden waarde + WoW-pil breder, houdt het label minder ruimte over en wrapt "DMA Organic visits" naar een tweede regel. Bij 4 cijfers niet. Dus: **de tooltip-hoogte hing af van de ordegrootte van de data.**
+- Fix is één regel `white-space: nowrap` op `.ct-label`: de rij maakt de tooltip nu *breder* in plaats van hoger (absoluut gepositioneerd, dus width is shrink-to-fit — er is ruimte).
+- **Patroon om te herkennen:** in elke label/waarde-rij waar de waarden nowrap zijn, is het label de enige krimpbare — die wrapt als eerste, en alleen bij bepaalde data. Symptoom lijkt willekeurig, is het niet.
+
+## Een tekst-`×` is niet te centreren; gebruik een SVG (2026-07-29)
+
+R-Finder's remove-row-X stond verticaal net te hoog. Dat is geen padding-probleem: het `×`-glyph zit hoog in z'n line-box, dus met `line-height`/`padding`/`font-size` schuif je de *box* wel maar het *glyph* nooit naar het optische midden.
+
+- Fix is geometrisch: vaste `width` **en** `height`, `padding: 0`, `inline-flex` centrering, en een SVG die symmetrisch is om z'n eigen viewBox-midden. `stroke="currentColor"` zodat hij de hover-kleur meepakt, plus `aria-label` want er is geen tekst.
+- Géén `btn-sm` erbij: die padding vecht met de expliciete box.
+- Staat nu als "Icon-only buttons — never a text glyph" in UI_BLUEPRINT, want dit komt steeds terug.
+
+## Een cache die minuten koud staat mag de UI niet dichtzetten (2026-07-29)
+
+Item 10 (SEO Priority's maincat/deepest-cat filters "minuten grijs") was al deels gefixt door de disk-cache van 28 juli — het endpoint antwoordt warm in **13ms**. Wat overbleef was de koude start, en daar zaten drie dingen fout.
+
+- **Warm de dure cache bij startup**, niet bij de eerste page-open. De `DISTINCT` over `datamart.dim_visit` kost 25s+ en groeit; nu draait die tijdens het booten in een thread. Zonder dat betaalt de eerste bezoeker na een restart de volle rekening.
+- **TTL 24h → 7d.** Een verouderde cache wordt tóch direct geserveerd (refresh gebeurt achter de gebruiker om), dus een korte TTL levert niets op behalve dagelijks opnieuw die scan.
+- **Zet de inputs niet `disabled`.** `loading` is alleen true als er *niets* gecached is, en dat kan minuten duren — het uitgrijzen is wat het hele run-formulier stuk liet lijken. Typen kan gewoon; `startRun`'s bekende-naam-check was al gegated op een lege parenlijst, dus vroeg typen is veilig. Hint aangepast naar "je kunt al typen".
+- **Generieke regel:** "nog aan het laden" mag de rest van een formulier niet blokkeren zolang de validatie het aankan.
+
+## Tabs weghalen verandert het contract over welke input geldt (2026-07-29)
+
+URL Validator's Paste/Upload-tabs vervielen bij het overnemen van de "Check live URL's"-layout (item 5). De oude `startValidation` bepaalde de bron via `manualTab.classList.contains('active')` — met een expliciete comment dat er géén cross-source fallback mocht zijn.
+
+- Zonder tabs moet er een nieuwe regel zijn. Overgenomen van de check-module ernaast: **bestand wint, anders het tekstvak.**
+- Dat introduceert wél een val: na een upload valideert plakken stil het bestand. Daarom de file-status-regel klikbaar gemaakt om te wissen (met `stopPropagation`, anders heropent de drop-zone de file-dialog).
+- **Les:** een layout-item dat een keuze-UI verwijdert, is nooit alleen layout — zoek de code die op die UI-staat leest.
+
+## "In X" in een suggestie noemt de *pagina*, niet de *sectie* — vraag door bij twee kandidaten (2026-07-29)
+
+Item 1 luidde: 'In SEO Stats, can we add "Total visits" and "Total Revenue" as options in **Per-day overview**?' Gebouwd als twee kolommen achter een switch in Per-day overview. Bedoeld waren **opties in de grafiek** "Visits & revenue per day". Twee keer teruggekomen voordat het duidelijk werd.
+
+- Het woord "options" was de hint die ik gemist heb: de grafiek heeft letterlijk toggle-*pills* (opties), de tabel heeft kolommen. "Options" past op de eerste, niet op de tweede.
+- Zelfde patroon als item 3 diezelfde dag, waar "in Per-day overview, use the colors…" óók de grafiek bleek te zijn. **Beide keren stond "Per-day overview" in de tekst en werd de grafiek bedoeld** — die twee blokken staan onder elkaar op de pagina. Bij een volgende suggestie die "Per-day overview" zegt: eerst checken of het niet de grafiek is.
+- Kosten: een volledige implementatie weggegooid (kolomtoggle, HEAT_KEYS, WOW_BY_KEY, een `applyColumnToggle` die twee switches componeerde). Bij item 3 heb ik wél doorgevraagd en dat kostte één vraag.
+- **Structurele les:** als een verzoek op twee aangrenzende UI-blokken kan landen en de implementaties verschillen wezenlijk, is dat precies het geval om te vragen — ook al lijkt de tekst expliciet.
+- Technisch resterend detail: de aggregaten mogen **niet** in `ORDER`, want die lijst voedt de summary-tiles én `SUM_KEYS`, en een totaal mag nooit naast z'n eigen onderdelen opgeteld worden. Vandaar een aparte `CHART_ORDER = ORDER.concat(TOTAL_KEYS)`, die `buildToggles` / `renderChart` / `externalTooltip` **alle drie** moeten gebruiken — de tooltip mapt Chart.js' `datasetIndex` positioneel terug naar een metric-key, dus één afwijkende lijst verkeerd-labelt elke rij.
+
+## `cc1/` staat in `.gitignore` maar de bestanden zijn tracked (2026-07-29)
+
+`git add cc1/UI_BLUEPRINT.md` faalt met "The following paths are ignored" en de héle `git add` doet dan niets (atomisch) — ook de 20 frontend-bestanden niet.
+
+- Tracked bestanden negeren `.gitignore` voor commits, maar `git add` weigert het pad alsnog. Gebruik **`git add -f cc1/<file>`**, of stage cc1 in een aparte call.
+- Handig te weten omdat cc1 bij elke sessie meegaat en dit anders stil je hele staging leegkiept.
+
 ## De connection-pools in `database.py` hadden een lazy-init RACE — "trying to put unkeyed connection" (2026-07-28)
 
 Gevonden bij het bouwen van R-Finder's per-rij-zoekopdracht (item 47), maar het is **shared code** en kon élke gelijktijdige koude start raken.
