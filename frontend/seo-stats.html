@@ -316,12 +316,8 @@
                 <h5 class="mb-0">Per-day overview</h5>
                 <div class="d-flex align-items-center gap-3">
                     <div class="form-check form-switch mb-0">
-                        <input class="form-check-input" type="checkbox" id="showExtraRev" onchange="applyColumnToggle()">
+                        <input class="form-check-input" type="checkbox" id="showExtraRev" onchange="toggleExtraRev()">
                         <label class="form-check-label" for="showExtraRev" style="font-size:0.85rem; cursor:pointer;">Show DMA Organic &amp; GSAAS revenue</label>
-                    </div>
-                    <div class="form-check form-switch mb-0">
-                        <input class="form-check-input" type="checkbox" id="showTotals" onchange="applyColumnToggle()">
-                        <label class="form-check-label" for="showTotals" style="font-size:0.85rem; cursor:pointer;">Show Total visits &amp; Total revenue</label>
                     </div>
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" id="showDeltas" onchange="toggleDeltas()">
@@ -453,26 +449,28 @@
             gsaas_omzet:  { label: 'GSAAS revenue',       unit: 'euro',  axis: 'euro',  color: '#1dafa3' },  // teal-500
             seo_ctr:      { label: 'SEO CTR',             unit: 'percent', axis: 'percent', color: '#f37632' },  // cta-500
             seo_bounce:   { label: 'SEO Bounce',          unit: 'percent', axis: 'percent', color: '#26a660' },  // green-500
-            // Table-only derived columns (see TOTALS) — never chart series, so
-            // these two carry body ink rather than a palette hue.
-            total_visits: { label: 'Total visits',        unit: 'count', axis: 'count', color: '#2d2a3a' },
-            total_omzet:  { label: 'Total revenue',       unit: 'euro',  axis: 'euro',  color: '#2d2a3a' },
+            // All-channel aggregates (see TOTALS). The base row is exhausted at
+            // 8 hues, so these take the DARKEST stop of the family their SEO
+            // counterpart already owns — Total visits reads as "the heavy blue
+            // one" next to SEO visits, Total revenue likewise in plum. Each is
+            // ~22 ΔE from its own 500 sibling, and the pair clears the adjacent
+            // check as the last two entries in CHART_ORDER.
+            total_visits: { label: 'Total visits',        unit: 'count', axis: 'count', color: '#135369' },  // primary-800
+            total_omzet:  { label: 'Total revenue',       unit: 'euro',  axis: 'euro',  color: '#451c36' },  // secondary-900
         };
         const ORDER = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','dma_omzet','gsaas_omzet',
                        'seo_ctr','seo_bounce'];
         // Per-day overview columns. DMA Organic & GSAAS revenue are
-        // optional, shown via the "Show DMA Organic & GSAAS…" switch; the
-        // all-channel totals are optional too. Both go through applyColumnToggle.
+        // optional, shown via the "Show DMA Organic & GSAAS…" toggle (toggleExtraRev).
         const TABLE_COLS_BASE = ['seo_visits','dma_visits','gsaas_visits','seo_omzet','seo_ctr','seo_bounce'];
         const TABLE_COLS_EXTRA = ['dma_omzet','gsaas_omzet'];
-        const TABLE_COLS_TOTALS = ['total_visits','total_omzet'];
         let TABLE_COLS = TABLE_COLS_BASE.slice();
-        // All-channel totals (SEO + DMA Organic + GSAAS), behind the "Show
-        // totals" switch. Deliberately absent from ORDER: they are per-day
-        // table columns only, not chart series and not summary tiles — so they
-        // need their own derive step (row level) and their own branch in
-        // aggregate() (period level, summed from the parts, never re-summed
-        // from the daily totals).
+        // All-channel totals (SEO + DMA Organic + GSAAS) — chart series only,
+        // toggled from the pills under the chart. Deliberately NOT in ORDER: that
+        // list drives the summary tiles and the additive-metric summing, and a
+        // total must never be summed alongside its own parts. They are derived
+        // per row (deriveTotals) and, at period level, from the summed parts
+        // inside aggregate() — never re-summed from the daily totals.
         const TOTALS = [
             { key: 'total_visits', parts: ['seo_visits', 'dma_visits', 'gsaas_visits'] },
             { key: 'total_omzet',  parts: ['seo_omzet',  'dma_omzet',  'gsaas_omzet'] },
@@ -483,6 +481,11 @@
                 r[key] = parts.reduce((s, p) => s + (Number(r[p]) || 0), 0);
             }));
         }
+        // Series shown in the chart + the order of the toggle pills. ORDER plus the
+        // two aggregates. buildToggles / renderChart / externalTooltip must all use
+        // THIS list and nothing else — the tooltip maps Chart.js datasetIndex back
+        // to a metric key positionally, so any divergence mislabels every row.
+        const CHART_ORDER = ORDER.concat(TOTAL_KEYS);
         // Derived ratio metrics: <key> = <num> / <den> * 100. Numerators (CTR: bvb +
         // outclicks; Bounce: visits with no product click) are sent raw per row and
         // kept raw so totals aggregate as Σnum / Σden — never a mean of daily ratios.
@@ -579,7 +582,7 @@
         function buildToggles() {
             const wrap = document.getElementById('metricToggles');
             wrap.innerHTML = '';
-            ORDER.forEach(key => {
+            CHART_ORDER.forEach(key => {
                 const m = METRICS[key];
                 const on = selected.has(key);
                 const lab = document.createElement('label');
@@ -603,7 +606,7 @@
                 chart.canvas.parentNode.appendChild(el);
             }
             if (tooltip.opacity === 0) { el.style.opacity = 0; return; }
-            const keys = ORDER.filter(k => selected.has(k));
+            const keys = CHART_ORDER.filter(k => selected.has(k));
             const title = (tooltip.title && tooltip.title[0]) || '';
             const rows = (tooltip.dataPoints || []).map(dp => {
                 const key = keys[dp.datasetIndex];
@@ -630,7 +633,7 @@
             if (!lastData) return;
             const labels = lastData.daily.map(r => r.date);
             const usedAxes = new Set();
-            const datasets = ORDER.filter(k => selected.has(k)).map(key => {
+            const datasets = CHART_ORDER.filter(k => selected.has(k)).map(key => {
                 const m = METRICS[key];
                 usedAxes.add(m.axis);
                 return {
@@ -829,13 +832,9 @@
             renderPage();
         }
 
-        // Shared by both column switches ("Show DMA Organic & GSAAS revenue" and
-        // "Show totals"): reassemble the column set from whatever is checked, so
-        // the two switches compose instead of overwriting each other.
-        function applyColumnToggle() {
-            TABLE_COLS = TABLE_COLS_BASE.slice();
-            if (document.getElementById('showExtraRev').checked) TABLE_COLS = TABLE_COLS.concat(TABLE_COLS_EXTRA);
-            if (document.getElementById('showTotals').checked) TABLE_COLS = TABLE_COLS.concat(TABLE_COLS_TOTALS);
+        function toggleExtraRev() {
+            const on = document.getElementById('showExtraRev').checked;
+            TABLE_COLS = on ? TABLE_COLS_BASE.concat(TABLE_COLS_EXTRA) : TABLE_COLS_BASE.slice();
             if (!lastData) return;
             // If sorting on a column that's now hidden, fall back to Date.
             const sortableNow = TABLE_COLS.concat(TABLE_COLS.map(k => k + '_wow'), ['date']);
@@ -936,7 +935,7 @@
         const VISIT_KEYS = ORDER.filter(k => METRICS[k].unit === 'count');
         // Columns that get the diverging red→green heatmap in the per-day table:
         // all visit counts plus SEO revenue, SEO CTR and SEO Bounce.
-        const HEAT_KEYS = [...VISIT_KEYS, 'seo_omzet', 'seo_ctr', 'seo_bounce', ...TOTAL_KEYS];
+        const HEAT_KEYS = [...VISIT_KEYS, 'seo_omzet', 'seo_ctr', 'seo_bounce'];
         // Heatmap columns where high = bad: their scale is inverted so a high value
         // fades red (not green). Bounce rate is the "lower is better" case.
         const HEAT_INVERT_KEYS = ['seo_bounce'];
@@ -955,8 +954,7 @@
 
         // Heatmap columns with a WoW hover tooltip → their precomputed wow-pct field.
         // Cover base + extra so WoW lookups work whichever columns are toggled on.
-        const WOW_BY_KEY = Object.fromEntries(
-            TABLE_COLS_BASE.concat(TABLE_COLS_EXTRA, TABLE_COLS_TOTALS).map(k => [k, k + '_wow']));
+        const WOW_BY_KEY = Object.fromEntries(TABLE_COLS_BASE.concat(TABLE_COLS_EXTRA).map(k => [k, k + '_wow']));
         function wowText(pct) {
             if (pct === null || pct === undefined) return 'n/a';
             return (pct > 0 ? '+' : '') + pct.toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + '%';
