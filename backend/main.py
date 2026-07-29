@@ -2863,6 +2863,57 @@ async def get_publish_status(task_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/faq/publish-v2")
+async def faq_publish_v2(request: dict = None):
+    """"Publish 2.0" — push FAQ Q&A pairs to the website-configuration /faq
+    section (one record per QUESTION), not the /automated-content blob endpoint
+    the plain Publish button uses. FAQ only; kopteksten is untouched.
+
+    Body: {environment, limit, replace}. See backend/faq_v2_publisher for why
+    `replace` defaults to false (the endpoint is additive, and a true replace
+    costs one DELETE per URL — ~280k of them).
+    """
+    request = request or {}
+    env = request.get("environment", "production")
+    limit = request.get("limit")
+    replace = bool(request.get("replace", False))
+    if env not in ("dev", "staging", "production"):
+        raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+    if limit is not None:
+        try:
+            limit = int(limit)
+            if limit < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="limit must be a positive integer")
+    try:
+        from backend.faq_v2_publisher import start_faq_v2_task
+        task_id = start_faq_v2_task(env=env, limit=limit, replace=replace)
+        return {"status": "started", "task_id": task_id, "environment": env,
+                "limit": limit, "replace": replace}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/faq/publish-v2/status/{task_id}")
+async def faq_publish_v2_status(task_id: str):
+    from backend.faq_v2_publisher import get_faq_v2_status
+    status = get_faq_v2_status(task_id)
+    if status.get("error") == "Task not found":
+        raise HTTPException(status_code=404, detail="Task not found")
+    return status
+
+
+@app.get("/api/faq/publish-v2/stats")
+async def faq_publish_v2_stats():
+    """URL/record counts so the button can state the size before running."""
+    try:
+        from backend.faq_v2_publisher import get_faq_v2_stats
+        return get_faq_v2_stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/content-publish/last-push")
 async def get_last_publish():
     """Get the timestamp of the last successful publish to production."""

@@ -194,11 +194,17 @@
                             </div>
                             <div class="d-flex gap-2">
                                 <button class="btn btn-outline-purple" onclick="refreshPublishStats()">↻ Refresh</button>
+                                <!-- Publish 2.0 → the /faq section (one record per question),
+                                     a different store from Publish's /automated-content blob.
+                                     FAQ only; kopteksten is never touched by this. -->
+                                <button class="btn btn-outline-orange" onclick="publishFaqV2()" id="publishV2Btn"
+                                        title="Push FAQ Q&amp;A pairs to the website-configuration /faq section">Publish 2.0</button>
                                 <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">Publish</button>
                             </div>
                         </div>
 
                         <div id="publishResult" class="mt-3"></div>
+                        <div id="publishV2Result" class="mt-3"></div>
                     </div>
                 </div>
 

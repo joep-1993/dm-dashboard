@@ -1094,3 +1094,115 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
+// ---------------------------------------------------------------------------
+// Publish 2.0 — FAQ Q&A pairs -> website-configuration /faq
+//
+// A DIFFERENT store from the plain Publish button, which posts one blob per URL
+// to /automated-content. /faq takes one record per QUESTION (url/question/answer
+// + optional country_code/sort_order) and upserts on (url, question).
+//
+// Two things the confirm dialog has to say out loud:
+//  * the volume — ~280k URLs / ~1.7M records, so this is a long run, and
+//  * the endpoint is ADDITIVE: questions we no longer generate stay live. A true
+//    replace needs one DELETE per URL, which is why it is not the default.
+// ---------------------------------------------------------------------------
+async function publishFaqV2() {
+    const btn = document.getElementById('publishV2Btn');
+    const resultDiv = document.getElementById('publishV2Result');
+    const envSelect = document.getElementById('publishEnvironment');
+    const environment = envSelect ? envSelect.value : 'production';
+
+    // State the real size before asking; guessing is how someone fires 1.7M
+    // records at production thinking it is a quick action.
+    let stats = null;
+    try {
+        const r = await fetch(`${API_BASE}/api/faq/publish-v2/stats`);
+        if (r.ok) stats = await r.json();
+    } catch (e) { /* fall through to a generic warning */ }
+
+    const size = stats
+        ? `${stats.urls.toLocaleString('nl-NL')} URLs (~${stats.est_records.toLocaleString('nl-NL')} Q&A records)`
+        : 'the full FAQ set';
+    if (!confirm(
+        `Publish 2.0 → ${environment}\n\n` +
+        `Pushes ${size} to the /faq section, one record per question.\n\n` +
+        `This endpoint is ADDITIVE: it upserts on (url, question), so questions ` +
+        `that are no longer generated stay live until deleted.\n\n` +
+        `Continue?`)) {
+        return;
+    }
+
+    btn.disabled = true;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Starting Publish 2.0 to ${escapeHtml(environment)}…</div>`;
+
+    try {
+        const res = await fetch(`${API_BASE}/api/faq/publish-v2`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ environment }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+        resultDiv.innerHTML = `
+            <div class="alert alert-warning">
+                <strong>Publish 2.0 running…</strong><br>
+                Task ID: <code>${escapeHtml(data.task_id)}</code><br>
+                Target: <code>${escapeHtml(environment)}</code> /faq<br>
+                <div class="mt-2">
+                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                    <span id="publishV2StatusText">Counting…</span>
+                </div>
+            </div>`;
+        pollFaqV2(data.task_id, btn, resultDiv);
+    } catch (e) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Failed to start: ${escapeHtml(e.message)}</div>`;
+        btn.disabled = false;
+    }
+}
+
+function pollFaqV2(taskId, btn, resultDiv) {
+    const timer = setInterval(async () => {
+        let data;
+        try {
+            const r = await fetch(`${API_BASE}/api/faq/publish-v2/status/${taskId}`);
+            data = await r.json();
+        } catch (e) {
+            return;   // transient; keep polling rather than killing the run's UI
+        }
+        const p = data.progress || {};
+        const txt = document.getElementById('publishV2StatusText');
+        if (txt) {
+            txt.textContent = p.phase === 'counting'
+                ? 'Counting…'
+                : `${(p.urls_done || 0).toLocaleString('nl-NL')}/${(p.total_urls || 0).toLocaleString('nl-NL')} URLs · `
+                  + `${(p.records_pushed || 0).toLocaleString('nl-NL')} records pushed`
+                  + (p.failed ? ` · ${p.failed.toLocaleString('nl-NL')} failed` : '');
+        }
+        if (data.status === 'completed' || data.status === 'failed') {
+            clearInterval(timer);
+            btn.disabled = false;
+            const r = data.result || {};
+            if (data.status === 'failed' || r.success === false) {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Publish 2.0 finished with errors</strong><br>
+                        ${escapeHtml(data.error || '')}
+                        ${r.records_pushed !== undefined
+                            ? `Pushed ${r.records_pushed.toLocaleString('nl-NL')}, failed ${(r.records_failed || 0).toLocaleString('nl-NL')}.` : ''}
+                        ${r.failed_batches ? `<pre class="mb-0 mt-2" style="white-space:pre-wrap;">${escapeHtml(JSON.stringify(r.failed_batches, null, 2))}</pre>` : ''}
+                    </div>`;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-done-yellow">
+                        <strong>Publish 2.0 done</strong><br>
+                        ${r.records_pushed.toLocaleString('nl-NL')} records across
+                        ${r.urls_processed.toLocaleString('nl-NL')} URLs in ${r.batches} batches
+                        (${r.duration_sec}s) → <code>${escapeHtml(r.api_url || '')}</code>
+                        ${r.skipped_count ? `<br><span class="text-muted">${r.skipped_count} URL(s) skipped (unparseable faq_json)</span>` : ''}
+                    </div>`;
+            }
+        }
+    }, 2000);
+}

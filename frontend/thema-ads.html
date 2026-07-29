@@ -365,9 +365,13 @@
 
                                 <!-- Current Plan Display -->
                                 <div class="card mb-3">
-                                    <div class="card-header">
+                                    <!-- Refresh is purple + ↻ (UI_BLUEPRINT "Buttons"). It was
+                                         btn-outline-primary, which style.css themes ORANGE — the
+                                         Bootstrap name says nothing about the colour here. Header
+                                         is flex like every other one on the page, not float-end. -->
+                                    <div class="card-header d-flex justify-content-between align-items-center">
                                         <strong>Current Plan</strong>
-                                        <button class="btn btn-sm btn-outline-primary float-end" onclick="loadActivationPlan()">↻ Refresh</button>
+                                        <button class="btn btn-sm btn-outline-purple" onclick="loadActivationPlan()">↻ Refresh</button>
                                     </div>
                                     <div class="card-body">
                                         <div id="currentPlan">Loading...</div>
