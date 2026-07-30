@@ -520,3 +520,137 @@ def get_deltas(ref_date: Optional[str] = None, force: bool = False) -> Dict:
     }
     _cache_set(cache_key, result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Dashboard tile view (suggestions_new item 4)
+# ---------------------------------------------------------------------------
+# Device is derived from the USER AGENT on both sides of the split, because
+# neither datamart.fct_visits nor dim_visit carries a devicetype column, and the
+# one table that does (bt.websession_on_dataplatform) cannot reach the revenue
+# grain. bt.cpa_outclicks_transactional carries its own `useragent`, so the same
+# CASE applied to both tables keeps the two distributions comparable — which a
+# devicetype-for-visits / useragent-for-revenue mix would not.
+#
+# Order matters: tablet before mobile. An iPad UA contains neither "mobi" nor
+# "iphone", but plenty of Android tablets DO contain "android", so testing mobile
+# first would swallow them. Measured 2026-07-29 (SEO): 72.2/25.1/2.6% of visits
+# and 70.6/27.8/1.6% of revenue, with zero unknowns on either side.
+_DEVICE_ORDER = ["mobile", "tablet", "desktop", "unknown"]
+
+
+def _device_case(col: str) -> str:
+    return f"""
+        CASE WHEN lower({col}) LIKE '%%ipad%%' OR lower({col}) LIKE '%%tablet%%' THEN 'tablet'
+             WHEN lower({col}) LIKE '%%mobi%%' OR lower({col}) LIKE '%%iphone%%'
+                  OR lower({col}) LIKE '%%android%%' THEN 'mobile'
+             WHEN {col} IS NULL OR {col} = '' THEN 'unknown'
+             ELSE 'desktop' END
+    """
+
+
+def _fetch_device_split(conn, d: date) -> Dict[str, Dict[str, float]]:
+    """{'visits': {device: n}, 'revenue': {device: eur}} for SEO on one day.
+
+    Both queries carry the same channel derivation and filters as _fetch_daily, so
+    the totals here add up to that day's seo_visits / seo_omzet.
+    """
+    vis_sql = f"""
+        SELECT {_device_case('dv.useragent')} AS device, COUNT(*) AS visits
+        FROM datamart.fct_visits fv
+        JOIN datamart.dim_visit dv ON fv.dim_visit_key = dv.dim_visit_key
+        JOIN chan_deriv.ref_channel_derivation_stats c
+          ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
+        WHERE fv.dim_date_key = %s
+          AND c.marketing_channel = 'SEO'
+          AND dv.is_real_visit = 1
+        GROUP BY 1
+    """
+    rev_sql = f"""
+        SELECT {_device_case('tac.useragent')} AS device,
+               SUM(tac.click_revenue) AS omzet
+        FROM bt.cpa_outclicks_transactional tac
+        JOIN chan_deriv.ref_channel_derivation_stats c
+          ON tac.aff_id = c.aff_id AND tac.channel_id = c.channel_id
+         AND c.deleted_ind = 0
+        WHERE tac.date = %s
+          AND c.marketing_channel = 'SEO'
+          AND {REV_TABLE_FILTERS}
+        GROUP BY 1
+    """
+    visits: Dict[str, float] = {}
+    revenue: Dict[str, float] = {}
+    with conn.cursor() as cur:
+        cur.execute(vis_sql, (_date_key(d),))
+        for r in cur.fetchall():
+            visits[r["device"]] = int(r["visits"] or 0)
+        cur.execute(rev_sql, (d,))
+        for r in cur.fetchall():
+            revenue[r["device"]] = float(r["omzet"] or 0.0)
+    return {"visits": visits, "revenue": revenue}
+
+
+def _as_distribution(raw: Dict[str, float]) -> List[Dict]:
+    """Device dict -> ordered list with shares. Devices absent from the day are
+    dropped rather than shown as a 0% slice."""
+    total = sum(raw.values())
+    out = []
+    for dev in _DEVICE_ORDER:
+        v = raw.get(dev)
+        if not v:
+            continue
+        out.append({"device": dev, "value": round(v, 2),
+                    "share": round(100.0 * v / total, 1) if total else None})
+    return out
+
+
+def get_dashboard(target_date: Optional[str] = None, force: bool = False) -> Dict:
+    """Single-day SEO tile view: device split, CTR, Bounce, OPB and WoW deltas.
+
+    Defaults to yesterday (the latest complete day). Every headline figure comes
+    from _fetch_daily for `date` and `date - 7d`, so the tiles cannot drift from
+    the chart above them; only the device breakdown is queried separately.
+    """
+    today = date.today()
+    d = _parse_date(target_date, today - timedelta(days=1))
+    prev = d - timedelta(days=7)
+
+    cache_key = f"dashboard:{d.isoformat()}"
+    if not force:
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+
+    conn = get_redshift_connection()
+    try:
+        daily = _fetch_daily(conn, [prev, d])
+        devices = _fetch_device_split(conn, d)
+    finally:
+        return_redshift_connection(conn)
+
+    cur = daily.get(d, {})
+    pre = daily.get(prev, {})
+    visits = int(cur.get("seo_visits") or 0)
+    clicks = int(cur.get("seo_clicks") or 0)
+    noprod = int(cur.get("seo_noprod") or 0)
+    omzet = float(cur.get("seo_omzet") or 0.0)
+
+    result = {
+        "date": d.isoformat(),
+        "compare_date": prev.isoformat(),
+        "visits": visits,
+        "revenue": round(omzet, 2),
+        # CTR is clicks-per-visit (bvb + outclicks) and CAN exceed 100% — same
+        # definition as the chart, deliberately not a bounded rate.
+        "ctr": round(100.0 * clicks / visits, 1) if visits else None,
+        "bounce": round(100.0 * noprod / visits, 1) if visits else None,
+        # OPB = omzet per bezoek, in euro per visit (not a percentage).
+        "opb": round(omzet / visits, 3) if visits else None,
+        "visits_wow": _pct_delta(int(pre.get("seo_visits") or 0), visits),
+        "revenue_wow": _pct_delta(float(pre.get("seo_omzet") or 0.0), omzet),
+        "devices_visits": _as_distribution(devices["visits"]),
+        "devices_revenue": _as_distribution(devices["revenue"]),
+        "generated_at": datetime.now().isoformat(),
+    }
+    _cache_set(cache_key, result)
+    return result

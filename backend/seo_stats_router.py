@@ -5,7 +5,9 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from backend.seo_stats_service import get_daily, get_deltas, get_notes, set_note
+from backend.seo_stats_service import (
+    get_daily, get_dashboard, get_deltas, get_notes, set_note,
+)
 
 
 class NoteIn(BaseModel):
@@ -55,6 +57,22 @@ async def deltas(
         return result
     except Exception as e:
         logger.error(f"Error fetching seo-stats deltas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/dashboard")
+async def dashboard(
+    date: Optional[str] = Query(None, description="Day YYYY-MM-DD (default: yesterday)"),
+    force: bool = Query(False, description="Bypass the 5-min cache and re-query Redshift"),
+):
+    """Single-day SEO tiles: device split (visits + revenue), CTR, Bounce, OPB,
+    and week-over-week deltas against the same weekday 7 days earlier."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(executor, get_dashboard, date, force)
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching seo-stats dashboard: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

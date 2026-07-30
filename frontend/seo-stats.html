@@ -43,6 +43,13 @@
         .perf-table td, .perf-table th { white-space: nowrap; text-align: right; vertical-align: middle; }
         .perf-fixed { table-layout: fixed; width: 100%; }
         .perf-fixed th.col-weekday { width: 68px; }
+        /* Day column doubles as a weekday filter (click a value). Affordance is
+           the pointer + hover tint; the active weekday gets the brand tint so it
+           is obvious a filter is on even when scrolled away from the header. */
+        .perf-table td.weekday-cell { cursor: pointer; user-select: none; }
+        .perf-table td.weekday-cell:hover { background: #f1edfa; }
+        .perf-table td.weekday-cell.wd-active,
+        .perf-table th.col-weekday.wd-active { background: #e6dff5; font-weight: 700; }
         .perf-fixed th.col-notes { width: 20%; }
         /* "Show deltas" adds a WoW column per metric — up to 6 more on a
            table-layout:fixed grid, which squeezes every number. Notes gives some
@@ -109,28 +116,40 @@
         .btn-preset:hover, .btn-preset:focus { background: #5e4a90; color: #fff; }
         .btn-group .btn-preset:not(:first-child) { border-left: 1px solid #5e4a90; }
         .chart-wrap { position: relative; height: 420px; }
+        /* Dark hover card (#242628, Joep's pick). Everything inside had to be
+           re-toned for a dark ground, not just the background swapped:
+           the old label grey #6a6a78 lands at ~1.9:1 here, which is unreadable. */
         .chart-tooltip {
             position: absolute; pointer-events: none; z-index: 10;
-            background: #f1f1f4; color: #2d2a3a;
-            border: 1px solid #e3e3ea; border-radius: 12px;
+            background: #242628; color: #f0f0f3;
+            border-radius: 12px;
             padding: 12px 14px; min-width: 160px;
-            box-shadow: 0 6px 20px rgba(45,42,58,0.16);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.45);
             font-size: 12.5px; opacity: 0; transition: opacity .12s ease;
             transform: translate(-50%, calc(-100% - 14px));
         }
         .chart-tooltip .ct-title { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
-        .chart-tooltip .ct-sub { font-size: 10px; font-weight: 600; color: #9a9aa6; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 8px; }
+        .chart-tooltip .ct-sub { font-size: 10px; font-weight: 600; color: #a9a9b5; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 8px; }
         .chart-tooltip .ct-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-        .chart-tooltip .ct-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+        /* The series dots carry the line colours, and two of those are very dark
+           (DMA revenue bordeaux #722F37, GSAAS revenue navy #001F3F) — on #242628
+           they all but disappear. A hairline light ring keeps every dot visible
+           without altering the colour it is identifying. */
+        .chart-tooltip .ct-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
+                                 box-shadow: 0 0 0 1px rgba(255,255,255,0.45); }
         /* nowrap, or the series name is the only shrinkable item in the row and
            wraps onto a second line as soon as the value + WoW pill get wider —
            which made the tooltip's height jump between days (a 5-digit visit
            count wrapped the longest series name, a 4-digit one didn't). The row
            now widens the tooltip instead of growing it taller. */
-        .chart-tooltip .ct-label { flex: 1 1 auto; color: #6a6a78; white-space: nowrap; }
+        .chart-tooltip .ct-label { flex: 1 1 auto; color: #b9b9c4; white-space: nowrap; }
         .chart-tooltip .ct-val { font-weight: 600; margin-left: 16px; white-space: nowrap; }
+        /* The WoW pill keeps its dark text: its background is set inline from
+           wowColor(), which is a light red→white→green fade, so the pill stays
+           light even on the dark card. Only the "n/a" pill needed re-toning —
+           a light-grey chip with grey text was the one unreadable combination. */
         .chart-tooltip .ct-wow { margin-left: 10px; font-weight: 700; font-size: 11px; padding: 1px 7px; border-radius: 20px; color: #2d2a3a; min-width: 52px; text-align: center; white-space: nowrap; }
-        .chart-tooltip .ct-wow.flat { background: #e3e3ea; color: #9a9aa6; }
+        .chart-tooltip .ct-wow.flat { background: rgba(255,255,255,0.14); color: #c2c2cc; }
         /* .info-note now lives in css/style.css (shared) — see UI_BLUEPRINT "Info banners". */
         /* Channel delta cards */
         .delta-card {
@@ -163,6 +182,37 @@
         .ps-stat .label { font-size: 0.75rem; color: #636e72; text-transform: uppercase; letter-spacing: 0.05em; }
         .ps-stat .value { font-size: 1.2rem; font-weight: 600; color: #3a3a3a; }
         ul.ps-warn-list { font-size: 0.85rem; max-height: 200px; overflow-y: auto; }
+        /* ---- Dagoverzicht (single-day tiles + device split) ----
+           Part-to-whole is a 100% STACKED BAR, not a donut: the dataviz skill's
+           form table sends part-to-whole to a stacked bar, and its anti-pattern
+           list calls out donuts for comparing close values (desktop vs tablet
+           differ by ~10x here, but mobile-vs-desktop revenue is close enough to
+           matter). The 2013 GA dashboard in the reference uses pies; this reads
+           the shares more precisely at the same glance cost.
+           Colours are brand hues already on this page — primary-500 / cta-500 /
+           violet-500 — and that trio PASSES all six checks of
+           scripts/validate_palette.js (worst adjacent ΔE 19.5 protan). The
+           blue/orange/green trio was tried first and only WARNed (6.1 protan),
+           so it was rejected. Do not re-hue without re-running the validator. */
+        /* Donut per Joep's request (the stacked bars this replaced are in git
+           history). Modern-ring look: wide cutout, 2px surface gap between arcs,
+           rounded arc ends, and the total as a hero number in the hole. Hover
+           lifts the arc (hoverOffset) and shows a dark tooltip. */
+        .donut-wrap { position: relative; height: 200px; margin-bottom: 10px; }
+        .donut-center { position: absolute; inset: 0; display: flex; flex-direction: column;
+                        align-items: center; justify-content: center; pointer-events: none; }
+        .donut-center .dc-total { font-size: 1.35rem; font-weight: 700; color: #2d2a3a; line-height: 1.1; }
+        .donut-center .dc-cap { font-size: 0.68rem; text-transform: uppercase;
+                                letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
+        /* cta-500 sits at 2.75:1 on white, which the validator flags as needing
+           relief — the legend below each donut carries the visible value + share
+           for every arc, which is that relief. */
+        .dev-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.8rem; }
+        .dev-legend .dev-key { display: inline-flex; align-items: center; gap: 6px; }
+        .dev-legend .dev-dot { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
+        .dev-legend .dev-val { color: #6a6a78; }
+        .dash-sub { font-size: 0.78rem; text-transform: uppercase; letter-spacing: .04em;
+                    color: #8a8a8a; margin-bottom: 6px; }
     </style>
 </head>
 <body>
@@ -272,6 +322,51 @@
             </div>
         </div>
 
+        <!-- Dagoverzicht — single-day tiles + device split (suggestions_new item 4).
+             Own date picker, defaulting to yesterday, independent of the chart
+             range above: this section answers "how was yesterday", not "how was
+             the period". -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
+                <div class="d-flex align-items-center gap-2">
+                    <h5 class="mb-0">Dagoverzicht</h5>
+                    <svg id="dashInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
+                        <title>SEO-kanaal, één dag. CTR = (bvb + outclicks) / bezoeken en kan boven 100% uitkomen — zelfde definitie als de grafiek. Bounce = aandeel bezoeken zonder productklik. OPB = omzet per bezoek. Δ% vergelijkt met dezelfde weekdag 7 dagen eerder. Apparaat komt uit de user agent, op dezelfde manier voor bezoeken én omzet.</title>
+                        <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
+                        <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                        <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                    </svg>
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <label for="dashDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Dag:</label>
+                    <input type="date" class="form-control form-control-sm" id="dashDate" style="width:150px;" onchange="loadDashboard(false)">
+                    <button class="btn btn-sm btn-outline-light" onclick="loadDashboard(true)" title="Bypass cache and re-query Redshift">↻</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="dashTiles"></div>
+                <div class="row g-4">
+                    <div class="col-lg-6">
+                        <div class="dash-sub">Verdeling apparaten — bezoeken</div>
+                        <div class="donut-wrap">
+                            <canvas id="dashDonutVisits"></canvas>
+                            <div class="donut-center" id="dashCenterVisits"></div>
+                        </div>
+                        <div class="dev-legend" id="dashLegendVisits"></div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="dash-sub">Verdeling apparaten — omzet</div>
+                        <div class="donut-wrap">
+                            <canvas id="dashDonutRevenue"></canvas>
+                            <div class="donut-center" id="dashCenterRevenue"></div>
+                        </div>
+                        <div class="dev-legend" id="dashLegendRevenue"></div>
+                    </div>
+                </div>
+                <div id="dashNote" class="text-muted mt-3" style="font-size:0.78rem;"></div>
+            </div>
+        </div>
+
         <!-- Top categories -->
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
@@ -284,7 +379,18 @@
                         <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
                     </svg>
                 </div>
-                <div class="d-flex align-items-center gap-2 flex-wrap">
+                <!-- Collapsed by default (suggestions_new item 5): the section is a
+                     drill-down, not something you need on every page load. The
+                     metric + Top-N controls moved from here into the body — a
+                     collapsed card should not carry controls for content that
+                     isn't on screen, and the header then reads as a plain banner. -->
+                <button class="btn btn-sm btn-light" id="catToggleBtn" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#catCollapse"
+                        aria-expanded="false" aria-controls="catCollapse">Show categories</button>
+            </div>
+            <div class="collapse" id="catCollapse">
+            <div class="card-body">
+                <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
                     <div class="btn-group btn-group-sm seg-toggle" role="group">
                         <input type="radio" class="btn-check" name="catMetric" id="catVisits" autocomplete="off" checked onchange="catMetric='visits'; renderCats();">
                         <label class="btn" for="catVisits">Visits</label>
@@ -298,8 +404,6 @@
                         <option value="all">All</option>
                     </select>
                 </div>
-            </div>
-            <div class="card-body">
                 <!-- Both sub-headings get breathing room above and below. The
                      tables carry mb-2 rather than mb-4 so the next heading's mt-4
                      isn't stacked on top of a big bottom margin. -->
@@ -317,6 +421,7 @@
                         <tbody id="subCatBody"></tbody>
                     </table>
                 </div>
+            </div>
             </div>
         </div>
 
@@ -539,6 +644,29 @@
             euro:    { title: '€',      position: 'right' },
             percent: { title: '%',      position: 'right' },
         };
+        // Axis titles are off (see renderChart): the unit rides on the tick label
+        // instead, which is what the reference look does — "€1,2 mln" / "6,7%"
+        // needs no separate axis caption. Compact notation keeps the gutter narrow
+        // so the plot itself gets the width.
+        const COMPACT_NL = new Intl.NumberFormat('nl-NL', { notation: 'compact', maximumFractionDigits: 1 });
+        function axisTick(ax, v) {
+            if (ax === 'euro') return '€' + COMPACT_NL.format(v);
+            if (ax === 'percent') return Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+            return COMPACT_NL.format(v);
+        }
+        // Shared chart chrome — muted ticks, no axis borders, no tick marks.
+        const TICK_COLOR = '#9a9aa6';
+        const GRID_COLOR = '#eef0f2';
+        // x-axis tick label: "Jul 29" instead of the raw 2026-07-29.
+        // The chart's LABELS stay ISO on purpose — the external tooltip reads
+        // tooltip.title[0] back as a date (weekdayLongOf parses it), so shortening
+        // the labels themselves would break the tooltip's "2026-07-29 (woensdag)"
+        // heading. Only the tick display is reformatted.
+        function shortDateLabel(iso) {
+            if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+            const [y, m, d] = iso.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
         let selected = new Set(['seo_visits', 'dma_visits', 'gsaas_visits']);
         let lastData = null;
         let chart = null;
@@ -556,7 +684,7 @@
         let perfSortCol = 'date';
         let perfSortDir = 'asc';
         let perfPage = 1;
-        let fpStart = null, fpEnd = null, fpRef = null;
+        let fpStart = null, fpEnd = null, fpRef = null, fpDash = null;
         let notesMap = {};   // date -> { note, color }
         // 6 preset pastel note colors (yellow, green, blue, pink, purple, orange).
         const PRESET_COLORS = ['#fff3b0', '#c7f0d2', '#cfe3fc', '#fdd2d2', '#e3d4f7', '#ffe0c2'];
@@ -673,12 +801,36 @@
                     borderColor: m.color,
                     backgroundColor: m.color + '22',
                     yAxisID: m.axis,
-                    tension: 0.25,
-                    pointRadius: 2,
+                    tension: 0.35,
+                    // Points only on hover: with up to 10 series and 90 days, a
+                    // permanent dot per day is what makes the chart look busy.
+                    // The line stays hoverable because interaction is index-mode,
+                    // and pointHitRadius keeps the grab area generous.
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    pointHitRadius: 12,
+                    pointBackgroundColor: m.color,
+                    pointHoverBorderColor: '#fff',
+                    pointHoverBorderWidth: 2,
                     borderWidth: 2,
+                    borderCapStyle: 'round',
+                    borderJoinStyle: 'round',
                 };
             });
-            const scales = { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } } };
+            // x: no gridlines, no axis border, no tick marks — horizontal rules
+            // alone carry the reading, which is the whole look.
+            const scales = {
+                x: {
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16,
+                             color: TICK_COLOR, font: { size: 11 }, padding: 8,
+                             // Not an arrow function: `this` must be the scale so
+                             // getLabelForValue() can turn the tick index back into
+                             // the ISO label before it is shortened.
+                             callback(value) { return shortDateLabel(this.getLabelForValue(value)); } },
+                },
+            };
             let rightUsed = 0;
             ['count','euro','percent'].forEach(ax => {
                 if (!usedAxes.has(ax)) return;
@@ -686,8 +838,16 @@
                 const isRight = cfg.position === 'right';
                 scales[ax] = {
                     position: cfg.position,
-                    title: { display: true, text: cfg.title },
-                    grid: { drawOnChartArea: !(isRight && rightUsed > 0) },
+                    // Title off; axisTick() carries the unit instead.
+                    title: { display: false, text: cfg.title },
+                    grid: {
+                        drawOnChartArea: !(isRight && rightUsed > 0),
+                        color: GRID_COLOR,
+                        drawTicks: false,
+                    },
+                    border: { display: false },
+                    ticks: { color: TICK_COLOR, font: { size: 11 }, padding: 8,
+                             maxTicksLimit: 6, callback: v => axisTick(ax, v) },
                     beginAtZero: true,
                 };
                 if (isRight) rightUsed++;
@@ -698,23 +858,25 @@
                 options: {
                     responsive: true, maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
+                    // Breathing room instead of a frame: the plot has no border
+                    // now, so the padding is what separates it from the card.
+                    layout: { padding: { top: 12, right: 12, bottom: 0, left: 0 } },
                     plugins: {
-                        // Ten series now. At Chart.js' default 12px font and
-                        // padding 16 the row measures ~1030px against a ~1080px
-                        // canvas, so it wrapped to two rows and the chart lost
-                        // height. Shorter labels ("DMA" not "DMA Organic", agreed
-                        // with Joep) plus 11px / padding 8 / 6px dots bring it to
-                        // ~700px — comfortably one row, with room for a future
-                        // series. It will still wrap on a narrow viewport, which
-                        // is the right responsive behaviour, not a regression.
-                        legend: {
-                            position: 'top',
-                            labels: {
-                                usePointStyle: true, pointStyle: 'circle',
-                                boxWidth: 6, boxHeight: 6, padding: 8,
-                                font: { size: 11 },
-                            },
-                        },
+                        // Chart.js' own legend is OFF. It listed exactly the
+                        // series that are switched on, i.e. the same names and
+                        // colour dots as the #metricToggles pills right above the
+                        // canvas — two legends for one chart, and the duplicate
+                        // was the single biggest source of visual noise up top.
+                        // The pills are the better one: they carry the same dot +
+                        // label AND toggle series, which the built-in legend only
+                        // did for series already drawn.
+                        //
+                        // (Kept the sizing note for whoever turns it back on: at
+                        // Chart.js' default 12px font and padding 16, ten series
+                        // measured ~1030px against a ~1080px canvas and wrapped
+                        // to two rows, costing chart height. 11px / padding 8 /
+                        // 6px dots brought it to ~700px.)
+                        legend: { display: false },
                         tooltip: { enabled: false, external: externalTooltip },
                     },
                     scales,
@@ -864,7 +1026,9 @@
             const table = head.closest('table');
             if (table) table.classList.toggle('with-deltas', showDeltas);
             head.innerHTML = '<th class="sortable" data-sort="date" onclick="sortBy(\'date\')">Date</th>' +
-                '<th class="text-col col-weekday">Day</th>' +
+                `<th class="text-col col-weekday${weekdayFilter ? ' wd-active' : ''}"`
+                + ` title="${weekdayFilter ? `Filtered to ${weekdayFilter} — click a Day value to clear` : 'Click a Day value to filter on that weekday'}">`
+                + `Day${weekdayFilter ? ` · ${weekdayFilter}` : ''}</th>` +
                 TABLE_COLS.map(k => `<th class="sortable" data-sort="${k}" onclick="sortBy('${k}')">${METRICS[k].label}</th>` + deltaHeaderFor(k)).join('') +
                 '<th class="text-col col-notes">Notes</th>';
         }
@@ -906,6 +1070,9 @@
         function initTable() {
             perfRows = lastData.daily.slice();
             perfPage = 1;
+            // A new range means a new set of days; carrying a weekday filter over
+            // would silently hide most of what was just loaded.
+            weekdayFilter = null;
             // Week-over-week % delta for every column: compare each day to the
             // same weekday 7 days earlier. The -7 day for the first 7 visible days
             // falls outside the range, so `wowBase` (the 7 days before the range,
@@ -973,18 +1140,61 @@
 
         function changePage(delta) { perfPage += delta; renderPage(); }
 
+        // Clicking a value in the Day column filters the table to that weekday;
+        // clicking any Day value again clears it. Filter state is a weekday label
+        // ("ma", "di", …) as produced by weekdayOf(), not an index — the cell text
+        // and the filter are then the same value and cannot drift apart.
+        let weekdayFilter = null;
+        function visibleRows() {
+            return weekdayFilter ? perfRows.filter(r => weekdayOf(r.date) === weekdayFilter) : perfRows;
+        }
+        // `cell` is the clicked <td>; it anchors the scroll position. Filtering
+        // removes rows above the clicked one, so without this the page yanks
+        // upward and you lose the row you just clicked.
+        function toggleWeekdayFilter(day, cell) {
+            const anchorDate = cell && cell.parentElement.firstElementChild
+                ? cell.parentElement.firstElementChild.textContent.trim() : null;
+            const beforeTop = cell ? cell.getBoundingClientRect().top : null;
+
+            weekdayFilter = (weekdayFilter === day) ? null : day;
+
+            // Jump to the PAGE holding the clicked date rather than back to page 1.
+            // Clearing a filter grows every row's index, so the anchor row can fall
+            // onto a later page — resetting to 1 would scroll to a row that is no
+            // longer rendered.
+            const rows = visibleRows();
+            const per = getPerPage();
+            const idx = anchorDate ? rows.findIndex(r => r.date === anchorDate) : -1;
+            perfPage = (idx < 0 || per === Infinity) ? 1 : Math.floor(idx / per) + 1;
+
+            renderHead();                 // reflects the active filter in the <th>
+            updateSortIndicators();
+            renderFoot();                 // totals follow what is on screen
+            renderPage();
+
+            // Put the anchor row back under the cursor: shift the window by however
+            // far the row moved. Same row, same screen position, shorter table.
+            if (anchorDate && beforeTop !== null) {
+                const row = document.querySelector(`#tableBody tr[data-date="${anchorDate}"]`);
+                if (row) window.scrollBy(0, row.getBoundingClientRect().top - beforeTop);
+            }
+        }
+
         function renderPage() {
             const perPage = getPerPage();
-            const total = perfRows.length;
+            const rows = visibleRows();
+            const total = rows.length;
             const totalPages = perPage === Infinity ? 1 : Math.ceil(total / perPage);
             if (perfPage > totalPages) perfPage = totalPages || 1;
             const start = perPage === Infinity ? 0 : (perfPage - 1) * perPage;
             const end = perPage === Infinity ? total : start + perPage;
-            renderBody(perfRows.slice(start, end));
+            renderBody(rows.slice(start, end));
             document.getElementById('prevBtn').disabled = perfPage <= 1;
             document.getElementById('nextBtn').disabled = perfPage >= totalPages;
             const showing = total === 0 ? '0' : `${start + 1}-${Math.min(end, total)}`;
-            document.getElementById('pageInfo').textContent = `${showing} of ${total.toLocaleString()} days`;
+            document.getElementById('pageInfo').textContent =
+                `${showing} of ${total.toLocaleString()} days`
+                + (weekdayFilter ? ` (${weekdayFilter} only)` : '');
         }
 
         // Heatmap columns (visits + SEO revenue) get a red→green heatmap, scaled
@@ -1081,13 +1291,22 @@
                 const noteCell = `<td class="text-col"><div class="note-wrap">` +
                     `<input type="text" class="note-input" data-date="${r.date}" value="${escapeHtml(noteText)}" style="${style}" placeholder="…" onchange="saveNoteFrom(this)">` +
                     swatches + `</div></td>`;
-                return `<tr><td>${r.date}</td><td class="text-col">${weekdayOf(r.date)}</td>${cells}${noteCell}</tr>`;
+                const wd = weekdayOf(r.date);
+                const wdCell = `<td class="text-col weekday-cell${weekdayFilter === wd ? ' wd-active' : ''}"`
+                    + ` onclick="toggleWeekdayFilter('${wd}', this)"`
+                    + ` title="${weekdayFilter === wd ? 'Clear the weekday filter' : `Show only ${wd}`}">${wd}</td>`;
+                // data-date is the scroll anchor for the weekday filter.
+                return `<tr data-date="${r.date}"><td>${r.date}</td>${wdCell}${cells}${noteCell}</tr>`;
             }).join('');
         }
 
         function renderFoot() {
             const foot = document.getElementById('tableFoot');
-            const t = computeTotals();
+            // Totals follow the weekday filter — a filtered table whose Total row
+            // still sums the whole range is worse than no total. computeTotals()
+            // stays whole-range for the tiles and the export, which are about the
+            // period, not the current view.
+            const t = weekdayFilter ? aggregate(visibleRows()) : computeTotals();
             foot.innerHTML = '<td>Total</td><td></td>' + TABLE_COLS.map(k => `<td>${fmt(k, t[k])}</td>` + ((showDeltas && hasWow(k)) ? '<td></td>' : '')).join('') + '<td></td>';
         }
 
@@ -1495,6 +1714,172 @@
             XLSX.writeFile(wb, `seo-stats_${lastData.start_date}_${lastData.end_date}.xlsx`);
         }
 
+        // ---- Dagoverzicht (single-day tiles + device split) ----
+        // Device colours: brand hues that PASS validate_palette.js as a trio (see
+        // the .dev-bar comment). Fixed per device, never by rank — a day with no
+        // tablet traffic must not repaint desktop.
+        const DEVICE_STYLE = {
+            mobile:  { label: 'Mobiel',  color: '#1f99c4' },   // primary-500
+            desktop: { label: 'Desktop', color: '#f37632' },   // cta-500
+            tablet:  { label: 'Tablet',  color: '#8459cf' },   // violet-500
+            unknown: { label: 'Onbekend', color: '#9a9aa6' },
+        };
+
+        function dashTile(label, value, delta) {
+            const d = (delta === null || delta === undefined)
+                ? '' : `<div class="stat-delta">${pctBadge(delta)}` +
+                       `<span class="stat-delta-cap">vs. 7d</span></div>`;
+            return `<div class="stat-card"><h3>${value}</h3>` +
+                   `<div class="label">${label}</div>${d}</div>`;
+        }
+
+        // One Chart.js doughnut per distribution. Hover is the point of the form
+        // here, so it gets a real hover layer: the arc lifts and a dark tooltip
+        // names the device with its value and share.
+        //
+        // The legend is ours, not Chart.js', for two reasons: it shows the value
+        // AND the share per arc (the visible-label relief the palette validator
+        // requires for cta-orange), and clicking Chart.js' own legend would hide
+        // an arc and silently make the remaining shares wrong for a part-to-whole.
+        const donuts = { visits: null, revenue: null };
+
+        function nlPct(v) {
+            return (v === null || v === undefined) ? '–' : String(v).replace('.', ',') + '%';
+        }
+
+        function renderDeviceDonut(which, canvasId, centerId, legendId, dist, fmtValue, caption) {
+            const center = document.getElementById(centerId);
+            const legend = document.getElementById(legendId);
+            if (donuts[which]) { donuts[which].destroy(); donuts[which] = null; }
+            if (!dist || !dist.length) {
+                center.innerHTML = '<div class="dc-cap">Geen data</div>';
+                legend.innerHTML = '';
+                return;
+            }
+            const styles = dist.map(d => DEVICE_STYLE[d.device] || DEVICE_STYLE.unknown);
+            const total = dist.reduce((s, d) => s + Number(d.value || 0), 0);
+            donuts[which] = new Chart(document.getElementById(canvasId), {
+                type: 'doughnut',
+                data: {
+                    labels: styles.map(s => s.label),
+                    datasets: [{
+                        data: dist.map(d => d.value),
+                        backgroundColor: styles.map(s => s.color),
+                        borderColor: '#fff',
+                        borderWidth: 2,
+                        borderRadius: 6,
+                        spacing: 2,
+                        hoverOffset: 10,
+                        hoverBorderColor: '#fff',
+                    }],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    cutout: '68%',
+                    layout: { padding: 6 },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#242628',
+                            titleColor: '#f0f0f3',
+                            bodyColor: '#b9b9c4',
+                            borderWidth: 0,
+                            padding: 10,
+                            cornerRadius: 10,
+                            displayColors: true,
+                            usePointStyle: true,
+                            callbacks: {
+                                label(ctx) {
+                                    const share = dist[ctx.dataIndex]?.share;
+                                    return ` ${fmtValue(ctx.parsed)} · ${nlPct(share)}`;
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+            center.innerHTML = `<div class="dc-total">${fmtValue(total)}</div>`
+                             + `<div class="dc-cap">${caption}</div>`;
+            legend.innerHTML = dist.map((d, i) =>
+                `<span class="dev-key"><span class="dev-dot" style="background:${styles[i].color}"></span>`
+                + `${styles[i].label} <span class="dev-val">${fmtValue(d.value)} · ${nlPct(d.share)}</span></span>`
+            ).join('');
+        }
+
+        function dashSkeleton() {
+            document.getElementById('dashTiles').innerHTML = [
+                'Bezoeken', 'Omzet', 'CTR', 'Bounce', 'OPB',
+            ].map(l => `<div class="stat-card"><h3><span class="skel-bar" style="width:70%; margin:0 auto;"></span></h3>`
+                     + `<div class="label">${l}</div></div>`).join('');
+            // Donuts: drop any live chart (or it keeps painting under the
+            // skeleton) and shimmer the ring's footprint + the legend.
+            ['visits', 'revenue'].forEach(k => {
+                if (donuts[k]) { donuts[k].destroy(); donuts[k] = null; }
+            });
+            [['dashCenterVisits', 'dashLegendVisits'], ['dashCenterRevenue', 'dashLegendRevenue']]
+                .forEach(([cid, lid]) => {
+                    document.getElementById(cid).innerHTML =
+                        '<span class="skel-bar" style="width:120px; height:120px; border-radius:50%;"></span>';
+                    document.getElementById(lid).innerHTML =
+                        '<span class="skel-bar" style="width:220px;"></span>';
+                });
+        }
+
+        async function loadDashboard(force) {
+            const day = document.getElementById('dashDate').value;
+            dashSkeleton();
+            document.getElementById('dashNote').textContent = '';
+            try {
+                const params = new URLSearchParams();
+                if (day) params.set('date', day);
+                if (force) params.set('force', 'true');
+                const res = await fetch(`${API}/dashboard?${params}`);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const d = await res.json();
+                const pct = v => (v === null || v === undefined)
+                    ? '–' : Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+                const opb = (d.opb === null || d.opb === undefined)
+                    ? '–' : '€' + Number(d.opb).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                document.getElementById('dashTiles').innerHTML =
+                    dashTile('SEO-bezoeken', fmtInt(d.visits), d.visits_wow) +
+                    dashTile('SEO-omzet', fmtEuro(d.revenue), d.revenue_wow) +
+                    dashTile('CTR', pct(d.ctr), null) +
+                    dashTile('Bounce', pct(d.bounce), null) +
+                    dashTile('OPB', opb, null);
+                renderDeviceDonut('visits', 'dashDonutVisits', 'dashCenterVisits',
+                                  'dashLegendVisits', d.devices_visits, fmtInt, 'bezoeken');
+                renderDeviceDonut('revenue', 'dashDonutRevenue', 'dashCenterRevenue',
+                                  'dashLegendRevenue', d.devices_revenue, fmtEuro, 'omzet');
+                document.getElementById('dashNote').textContent =
+                    `${d.date} · Δ% vergeleken met ${d.compare_date} · apparaat afgeleid uit de user agent`;
+            } catch (e) {
+                // Every failure path clears the skeleton (UI_BLUEPRINT) — a dead
+                // request must not shimmer forever.
+                document.getElementById('dashTiles').innerHTML =
+                    `<span class="text-danger">Dagoverzicht laden mislukt: ${escapeHtml(e.message)}</span>`;
+                ['visits', 'revenue'].forEach(k => {
+                    if (donuts[k]) { donuts[k].destroy(); donuts[k] = null; }
+                });
+                [['dashCenterVisits', 'dashLegendVisits'],
+                 ['dashCenterRevenue', 'dashLegendRevenue']].forEach(([cid, lid]) => {
+                    document.getElementById(cid).innerHTML =
+                        '<div class="dc-cap text-danger">Laden mislukt</div>';
+                    document.getElementById(lid).innerHTML = '';
+                });
+            }
+        }
+
+        // Top categories is collapsed on load; the button says what the click will
+        // do, so it flips on Bootstrap's collapse events rather than on click —
+        // that way a collapse triggered from anywhere else stays in sync.
+        (function () {
+            const pane = document.getElementById('catCollapse');
+            const btn = document.getElementById('catToggleBtn');
+            if (!pane || !btn) return;
+            pane.addEventListener('show.bs.collapse', () => { btn.textContent = 'Hide categories'; });
+            pane.addEventListener('hide.bs.collapse', () => { btn.textContent = 'Show categories'; });
+        })();
+
         // Init: default last 7 days (ending yesterday)
         (function () {
             buildToggles();
@@ -1506,11 +1891,16 @@
                 fpStart = flatpickr('#startDate', fpOpts);
                 fpEnd = flatpickr('#endDate', fpOpts);
                 fpRef = flatpickr('#refDate', { ...fpOpts, defaultDate: yesterday });
+                fpDash = flatpickr('#dashDate', { ...fpOpts, defaultDate: yesterday });
             } else {
                 document.getElementById('refDate').value = ymd(yesterday);
+                document.getElementById('dashDate').value = ymd(yesterday);
             }
             // Default range: last 7 days (ending yesterday); also enables the tile WoW deltas.
             setPreset(7);
+            // Own fetch, own date — deliberately not chained to load(), so a slow
+            // single-day Redshift query never delays the chart above it.
+            loadDashboard(false);
         })();
     </script>
 
