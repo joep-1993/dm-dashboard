@@ -538,6 +538,11 @@ def get_deltas(ref_date: Optional[str] = None, force: bool = False) -> Dict:
 # and 70.6/27.8/1.6% of revenue, with zero unknowns on either side.
 _DEVICE_ORDER = ["mobile", "tablet", "desktop", "unknown"]
 
+# Days plotted in each tile's sparkline, ending on the selected day. 14 covers two
+# full weeks, so a weekday pattern is visible and the -7d comparison day is inside
+# the line rather than off the edge of it.
+SPARK_WINDOW = 14
+
 
 def _device_case(col: str) -> str:
     return f"""
@@ -590,18 +595,116 @@ def _fetch_device_split(conn, d: date) -> Dict[str, Dict[str, float]]:
     return {"visits": visits, "revenue": revenue}
 
 
-def _as_distribution(raw: Dict[str, float]) -> List[Dict]:
-    """Device dict -> ordered list with shares. Devices absent from the day are
-    dropped rather than shown as a 0% slice."""
+# URL type is classified from the PATH, not from dim_visit.type_url: that column is
+# NULL for ~30% of rows (all /p/ among them), which would silently dump PLP into an
+# "unknown" slice. Order matters — /r/ before /c/, because a URL can carry both and
+# the R-part is the more specific one.
+#
+# NO REVENUE COUNTERPART EXISTS. cpa_outclicks_transactional.vis_url is the OUTBOUND
+# SHOP url (sextoyland.nl, awin1.com, partner.bol.com…), not the beslist landing page,
+# so classifying it produced 81.8% unclassified and a few coincidental substring hits.
+# Anything claiming revenue-by-url-type would have to change the revenue definition
+# (visit-grain instead of conversion-date click_revenue) and would then not tie to the
+# headline figure. Visits only, deliberately.
+_URLTYPE_ORDER = ["R-url", "C-url", "PLP", "Browse", "Overig"]
+
+
+def _urltype_case(col: str) -> str:
+    return f"""
+        CASE WHEN {col} LIKE '%%/r/%%'        THEN 'R-url'
+             WHEN {col} LIKE '%%/c/%%'        THEN 'C-url'
+             WHEN {col} LIKE '%%/p/%%'        THEN 'PLP'
+             WHEN {col} LIKE '%%/products/%%' THEN 'Browse'
+             ELSE 'Overig' END
+    """
+
+
+def _fetch_urltype_split(conn, d: date) -> Dict[str, int]:
+    """{url_type: visits} for SEO on one day. Same joins/filters as _fetch_daily, so
+    the parts sum to that day's seo_visits."""
+    sql = f"""
+        SELECT {_urltype_case('dv.url')} AS t, COUNT(*) AS visits
+        FROM datamart.fct_visits fv
+        JOIN datamart.dim_visit dv ON fv.dim_visit_key = dv.dim_visit_key
+        JOIN chan_deriv.ref_channel_derivation_stats c
+          ON dv.aff_id = c.aff_id AND dv.channel_id = c.channel_id
+        WHERE fv.dim_date_key = %s
+          AND c.marketing_channel = 'SEO'
+          AND dv.is_real_visit = 1
+        GROUP BY 1
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (_date_key(d),))
+        return {r["t"]: int(r["visits"] or 0) for r in cur.fetchall()}
+
+
+def _as_distribution(raw: Dict[str, float], order: Optional[List[str]] = None) -> List[Dict]:
+    """{bucket: value} -> ordered list with shares. Buckets absent from the day are
+    dropped rather than shown as a 0% slice. `order` fixes the slice sequence so it
+    never follows the day's ranking (colour must follow the entity, not its rank)."""
     total = sum(raw.values())
     out = []
-    for dev in _DEVICE_ORDER:
+    for dev in (order or _DEVICE_ORDER):
         v = raw.get(dev)
         if not v:
             continue
         out.append({"device": dev, "value": round(v, 2),
                     "share": round(100.0 * v / total, 1) if total else None})
+    # any bucket the order list does not mention still has to be counted somewhere
+    for dev, v in raw.items():
+        if v and dev not in (order or _DEVICE_ORDER):
+            out.append({"device": dev, "value": round(v, 2),
+                        "share": round(100.0 * v / total, 1) if total else None})
     return out
+
+
+def _ratio(row: Dict, num_key: str) -> Optional[float]:
+    """A per-day rate in percent: <num_key> / seo_visits * 100. None with no visits."""
+    v = int((row or {}).get("seo_visits") or 0)
+    if not v:
+        return None
+    return 100.0 * int((row or {}).get(num_key) or 0) / v
+
+
+def _opb(row: Dict) -> Optional[float]:
+    """Omzet per bezoek for one day. None with no visits."""
+    v = int((row or {}).get("seo_visits") or 0)
+    if not v:
+        return None
+    return float((row or {}).get("seo_omzet") or 0.0) / v
+
+
+def _pp_delta(p1: Optional[float], p2: Optional[float]) -> Optional[float]:
+    """Percentage-POINT change between two rates. None when either side is unknown,
+    so a missing day shows as n/a instead of as a swing from zero."""
+    if p1 is None or p2 is None:
+        return None
+    return p2 - p1
+
+
+def _spark_series(daily: Dict[date, Dict], days: List[date]) -> Dict[str, List]:
+    """Per-metric trailing series for the tile sparklines.
+
+    Derived from the same _fetch_daily rows as the headline tiles, so a tile's value
+    is always the last point of its own line. CTR/Bounce/OPB are ratios and are
+    recomputed per day (never averaged): a day with no visits yields None, which
+    Chart.js renders as a gap rather than as a zero that looks like a crash.
+    """
+    dates, visits, revenue, ctr, bounce, opb = [], [], [], [], [], []
+    for day in days:
+        row = daily.get(day, {})
+        v = int(row.get("seo_visits") or 0)
+        c = int(row.get("seo_clicks") or 0)
+        np_ = int(row.get("seo_noprod") or 0)
+        m = float(row.get("seo_omzet") or 0.0)
+        dates.append(day.isoformat())
+        visits.append(v)
+        revenue.append(round(m, 2))
+        ctr.append(round(100.0 * c / v, 1) if v else None)
+        bounce.append(round(100.0 * np_ / v, 1) if v else None)
+        opb.append(round(m / v, 3) if v else None)
+    return {"dates": dates, "visits": visits, "revenue": revenue,
+            "ctr": ctr, "bounce": bounce, "opb": opb}
 
 
 def get_dashboard(target_date: Optional[str] = None, force: bool = False) -> Dict:
@@ -614,6 +717,10 @@ def get_dashboard(target_date: Optional[str] = None, force: bool = False) -> Dic
     today = date.today()
     d = _parse_date(target_date, today - timedelta(days=1))
     prev = d - timedelta(days=7)
+    # Trailing window for the tile sparklines. It INCLUDES prev (d-7), so the
+    # week-over-week comparison day is one of the plotted points rather than a
+    # separate query.
+    spark_days = [d - timedelta(days=i) for i in range(SPARK_WINDOW - 1, -1, -1)]
 
     cache_key = f"dashboard:{d.isoformat()}"
     if not force:
@@ -623,8 +730,12 @@ def get_dashboard(target_date: Optional[str] = None, force: bool = False) -> Dic
 
     conn = get_redshift_connection()
     try:
-        daily = _fetch_daily(conn, [prev, d])
+        # One _fetch_daily over the whole window: it already returns every metric per
+        # day, so the tiles, the WoW deltas and the sparklines all come from the same
+        # rows and cannot disagree with each other.
+        daily = _fetch_daily(conn, spark_days)
         devices = _fetch_device_split(conn, d)
+        urltypes = _fetch_urltype_split(conn, d)
     finally:
         return_redshift_connection(conn)
 
@@ -648,8 +759,18 @@ def get_dashboard(target_date: Optional[str] = None, force: bool = False) -> Dic
         "opb": round(omzet / visits, 3) if visits else None,
         "visits_wow": _pct_delta(int(pre.get("seo_visits") or 0), visits),
         "revenue_wow": _pct_delta(float(pre.get("seo_omzet") or 0.0), omzet),
+        # CTR and Bounce are RATES, so their week-over-week move is in percentage
+        # POINTS, not a percentage of a percentage ("+2,1pp", not "+3,1%"). That is
+        # also why the per-day table excludes percent metrics from its WoW % columns
+        # (hasWow()) — a %-of-% reads as if the rate itself changed by that much.
+        # OPB is euro-per-visit, so a percentage change is the natural comparison.
+        "ctr_wow_pp": _pp_delta(_ratio(pre, "seo_clicks"), _ratio(cur, "seo_clicks")),
+        "bounce_wow_pp": _pp_delta(_ratio(pre, "seo_noprod"), _ratio(cur, "seo_noprod")),
+        "opb_wow": _pct_delta(_opb(pre), _opb(cur)),
         "devices_visits": _as_distribution(devices["visits"]),
         "devices_revenue": _as_distribution(devices["revenue"]),
+        "urltypes_visits": _as_distribution(urltypes, _URLTYPE_ORDER),
+        "series": _spark_series(daily, spark_days),
         "generated_at": datetime.now().isoformat(),
     }
     _cache_set(cache_key, result)

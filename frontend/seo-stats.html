@@ -212,10 +212,35 @@
         /* cta-500 sits at 2.75:1 on white, which the validator flags as needing
            relief — the legend below each donut carries the visible value + share
            for every arc, which is that relief. */
-        .dev-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.8rem; }
-        .dev-legend .dev-key { display: inline-flex; align-items: center; gap: 6px; }
-        .dev-legend .dev-dot { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
-        .dev-legend .dev-val { color: #6a6a78; }
+        /* The donut legend was removed on request; identity now rests on the hover
+           tooltip plus the share printed in each arc. (.dev-legend CSS deleted with
+           it — nothing referenced it any more.) */
+        /* Sparkline inside a stat tile: the tile is the headline number, the line is
+           the 14-day shape behind it. Hover is on the canvas, so the tile stays
+           readable at a glance and only gives per-day figures on demand. */
+        .tile-spark { position: relative; height: 34px; margin-top: 6px; }
+        /* Chart.js paints its built-in tooltip INSIDE the canvas, and these canvases
+           are 34px tall, so the tooltip was clipped to a sliver. This one is a fixed
+           element on <body>, so it can overflow the tile and the card freely. */
+        .spark-tip {
+            position: fixed; z-index: 3000; pointer-events: none;
+            background: #242628; color: #f0f0f3; border-radius: 8px;
+            padding: 6px 10px; font-size: 12px; line-height: 1.35; white-space: nowrap;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+            opacity: 0; transition: opacity .1s ease;
+            transform: translate(-50%, -100%);
+        }
+        .spark-tip .st-date { color: #a9a9b5; font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; }
+        .spark-tip .st-val { font-weight: 700; }
+        /* CTR/Bounce/OPB have no WoW badge, so without this their sparkline floated
+           in the middle of the tile with dead space underneath while SEO-bezoeken and
+           SEO-omzet had theirs on the bottom edge. Flex column + margin-top:auto
+           pushes every sparkline to the bottom, so the freed badge row becomes space
+           ABOVE the line and all five tiles share one geometry. Scoped to #dashTiles:
+           .stat-card is also used by the summary row and the standup tiles, which have
+           no sparkline and must keep their current centring. */
+        #dashTiles .stat-card, #statsRow .stat-card { display: flex; flex-direction: column; }
+        #dashTiles .stat-card .tile-spark, #statsRow .stat-card .tile-spark { margin-top: auto; }
         .dash-sub { font-size: 0.78rem; text-transform: uppercase; letter-spacing: .04em;
                     color: #8a8a8a; margin-bottom: 6px; }
         /* Top-categories toggle: a wide banner-button under the header, not a small
@@ -354,33 +379,45 @@
                         <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
                     </svg>
                 </div>
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <label for="dashDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Dag:</label>
-                    <input type="date" class="form-control form-control-sm" id="dashDate" style="width:150px;" onchange="loadDashboard(false)">
-                    <button class="btn btn-sm btn-outline-light" onclick="loadDashboard(true)" title="Bypass cache and re-query Redshift">↻</button>
-                </div>
             </div>
             <div class="card-body">
+                <!-- Day picker + Refresh live in the BODY, not the purple header: the
+                     blueprint's Refresh is `btn btn-outline-purple` with a ↻ glyph, and
+                     purple-on-purple is unreadable. Same arrangement as the chart card
+                     above (controls left, actions pushed right with ms-auto). -->
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                    <label for="dashDate" class="form-label small mb-0">Dag</label>
+                    <input type="date" class="form-control form-control-sm" id="dashDate" style="width:150px;" onchange="loadDashboard(false)">
+                    <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadDashboard(true)"
+                            title="Bypass cache and re-query Redshift">↻ Refresh</button>
+                </div>
                 <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="dashTiles"></div>
                 <div class="row g-4">
-                    <div class="col-lg-6">
-                        <div class="dash-sub">Verdeling apparaten — bezoeken</div>
+                    <div class="col-lg-4">
+                        <div class="dash-sub">Apparaten - Visits</div>
                         <div class="donut-wrap">
                             <canvas id="dashDonutVisits"></canvas>
                             <div class="donut-center" id="dashCenterVisits"></div>
                         </div>
-                        <div class="dev-legend" id="dashLegendVisits"></div>
                     </div>
-                    <div class="col-lg-6">
-                        <div class="dash-sub">Verdeling apparaten — omzet</div>
+                    <div class="col-lg-4">
+                        <div class="dash-sub">Apparaten - Omzet</div>
                         <div class="donut-wrap">
                             <canvas id="dashDonutRevenue"></canvas>
                             <div class="donut-center" id="dashCenterRevenue"></div>
                         </div>
-                        <div class="dev-legend" id="dashLegendRevenue"></div>
+                    </div>
+                    <!-- Visits only: the revenue table carries no beslist landing URL
+                         (vis_url is the OUTBOUND shop url), so a url-type revenue
+                         donut cannot be built on the same revenue definition. -->
+                    <div class="col-lg-4">
+                        <div class="dash-sub">Type urls - Visits</div>
+                        <div class="donut-wrap">
+                            <canvas id="dashDonutUrlType"></canvas>
+                            <div class="donut-center" id="dashCenterUrlType"></div>
+                        </div>
                     </div>
                 </div>
-                <div id="dashNote" class="text-muted mt-3" style="font-size:0.78rem;"></div>
             </div>
         </div>
 
@@ -959,6 +996,7 @@
         function renderStats() {
             const t = computeTotals();
             const row = document.getElementById('statsRow');
+            destroySparks('stat_');
             row.innerHTML = '';
             ORDER.forEach(key => {
                 const card = document.createElement('div');
@@ -967,8 +1005,17 @@
                 if (tileDeltas) {
                     html += `<div class="stat-delta">${pctBadge(tileDeltas[key])}<span class="stat-delta-cap">vs prev ${tileDeltaDays}d</span></div>`;
                 }
+                // Same tile shape as Dagoverzicht: value, delta, then the trend behind
+                // it. No extra request — the per-day series is already in lastData.
+                html += `<div class="tile-spark"><canvas id="stat_${key}"></canvas></div>`;
                 card.innerHTML = html;
                 row.appendChild(card);
+            });
+            if (!lastData || !lastData.daily) return;
+            const dates = lastData.daily.map(r => r.date);
+            ORDER.forEach(key => {
+                renderSpark(`stat_${key}`, dates, lastData.daily.map(r => r[key]),
+                            METRICS[key].color, v => fmt(key, v));
             });
         }
 
@@ -1743,19 +1790,141 @@
         // Device colours: brand hues that PASS validate_palette.js as a trio (see
         // the .dev-bar comment). Fixed per device, never by rank — a day with no
         // tablet traffic must not repaint desktop.
+        // Joep's colours. Validated as a trio with the dataviz validator: all six
+        // checks pass, worst adjacent pair #7BAB3A↔#1f99c4 at ΔE 20.6 protan / 21.0
+        // normal. Do not re-hue without re-running that script.
+        //
+        // #7BAB3A sits at 2.65:1 on white, which the validator flags as needing
+        // visible relief. The legend that used to provide it was removed on request,
+        // so the relief is now the hover tooltip (which names the device and gives
+        // value + share) plus the share printed inside each arc.
+        // URL-type slices. Validated as a set with the dataviz validator in THIS
+        // order (blue, violet, amber, green): all six checks pass, worst adjacent pair
+        // ΔE 22.7 protan. The blue/amber/magenta/green variant also passed but put the
+        // weakest pair next to itself; do not re-order without re-running the script.
+        // "Overig" is deliberately neutral grey: it is a 0,3% residual bucket, not a
+        // category, so it gets the de-emphasis colour rather than a hue of its own
+        // (a grey fails the validator's chroma floor precisely because it is not
+        // meant to read as a category).
+        const URLTYPE_STYLE = {
+            'R-url':  { label: 'R-url',  color: '#1f99c4' },
+            'C-url':  { label: 'C-url',  color: '#8459cf' },
+            'PLP':    { label: 'PLP',    color: '#e8a21e' },
+            'Browse': { label: 'Browse', color: '#26a660' },
+            'Overig': { label: 'Overig', color: '#9a9aa6' },
+        };
+
         const DEVICE_STYLE = {
-            mobile:  { label: 'Mobiel',  color: '#1f99c4' },   // primary-500
-            desktop: { label: 'Desktop', color: '#f37632' },   // cta-500
-            tablet:  { label: 'Tablet',  color: '#8459cf' },   // violet-500
+            mobile:  { label: 'Mobiel',  color: '#1f99c4' },
+            desktop: { label: 'Desktop', color: '#7BAB3A' },
+            tablet:  { label: 'Tablet',  color: '#AA3A95' },
             unknown: { label: 'Onbekend', color: '#9a9aa6' },
         };
 
-        function dashTile(label, value, delta) {
-            const d = (delta === null || delta === undefined)
-                ? '' : `<div class="stat-delta">${pctBadge(delta)}` +
-                       `<span class="stat-delta-cap">vs. 7d</span></div>`;
+        // Each tile is value + WoW delta + a 14-day sparkline (the dataviz form for
+        // "a single current value plus a trend"). The canvas id lets the chart be
+        // attached after the innerHTML write and destroyed on the next load.
+        function dashTile(label, value, delta, sparkId, badgeHtml) {
+            // `badgeHtml` wins when given: rates pass a pp badge, everything else a
+            // numeric % delta. Either way the "vs. 7d" caption is identical.
+            const inner = badgeHtml || ((delta === null || delta === undefined) ? '' : pctBadge(delta));
+            const d = inner
+                ? `<div class="stat-delta">${inner}<span class="stat-delta-cap">vs. 7d</span></div>`
+                : '';
+            const spark = sparkId ? `<div class="tile-spark"><canvas id="${sparkId}"></canvas></div>` : '';
             return `<div class="stat-card"><h3>${value}</h3>` +
-                   `<div class="label">${label}</div>${d}</div>`;
+                   `<div class="label">${label}</div>${d}${spark}</div>`;
+        }
+
+        // Sparklines live in their own registry so a reload cannot leak Chart.js
+        // instances (the same trap the donuts had).
+        const sparks = {};
+        // Prefix-scoped: the summary row ('stat_') and Dagoverzicht ('spark') both
+        // hold sparklines, and clearing one must not kill the other's charts.
+        function destroySparks(prefix) {
+            Object.keys(sparks).forEach(k => {
+                if (prefix && !k.startsWith(prefix)) return;
+                if (sparks[k]) { sparks[k].destroy(); delete sparks[k]; }
+            });
+            const t = document.getElementById('sparkTip');
+            if (t) t.style.opacity = 0;   // never leave a tooltip floating over a redraw
+        }
+        // percentage-POINT badge, for rates. Same colours as pctBadge but a "pp"
+        // suffix, because a percentage change of a percentage reads as if the rate
+        // itself moved by that much.
+        function ppBadge(pp, digits = 1) {
+            if (pp === null || pp === undefined) return '<span class="delta-badge flat">n/a</span>';
+            const cls = pp > 0 ? 'up' : (pp < 0 ? 'down' : 'flat');
+            const sign = pp > 0 ? '+' : '';
+            return `<span class="delta-badge ${cls}">${sign}${pp.toLocaleString('nl-NL', { maximumFractionDigits: digits })}pp</span>`;
+        }
+
+        // One shared tooltip node for every sparkline: five canvases do not need five
+        // elements, and a single node cannot leave a stale copy behind on redraw.
+        function sparkTip() {
+            let el = document.getElementById('sparkTip');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'sparkTip';
+                el.className = 'spark-tip';
+                document.body.appendChild(el);
+            }
+            return el;
+        }
+        function sparkExternalTooltip(ctx, fmt) {
+            const { chart, tooltip } = ctx;
+            const el = sparkTip();
+            if (!tooltip.opacity) { el.style.opacity = 0; return; }
+            const dp = (tooltip.dataPoints || [])[0];
+            if (!dp) { el.style.opacity = 0; return; }
+            const val = dp.parsed.y === null ? '–' : fmt(dp.parsed.y);
+            el.innerHTML = `<div class="st-date">${shortDateLabel(dp.label)}</div>`
+                         + `<div class="st-val">${val}</div>`;
+            // Fixed positioning off the canvas' viewport rect, so the tooltip is not
+            // clipped by the tile. Clamped horizontally so an edge tile still shows it.
+            const r = chart.canvas.getBoundingClientRect();
+            const x = Math.min(Math.max(r.left + tooltip.caretX, 60), window.innerWidth - 60);
+            el.style.left = x + 'px';
+            el.style.top = (r.top - 6) + 'px';
+            el.style.opacity = 1;
+        }
+
+        function renderSpark(id, dates, values, colour, fmt) {
+            const el = document.getElementById(id);
+            if (!el || !values || !values.length) return;
+            if (sparks[id]) sparks[id].destroy();
+            sparks[id] = new Chart(el, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        data: values,
+                        borderColor: colour,
+                        backgroundColor: colour + '22',
+                        borderWidth: 1.75,
+                        fill: true,
+                        tension: 0.35,
+                        pointRadius: 0,
+                        pointHoverRadius: 3,
+                        pointHitRadius: 14,
+                        pointHoverBackgroundColor: colour,
+                        pointHoverBorderColor: '#fff',
+                        spanGaps: false,   // a null day stays a gap, not a dive to zero
+                    }],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    layout: { padding: 0 },
+                    // No axes at all: the tile already states the number and the unit;
+                    // the line is only there for shape.
+                    scales: { x: { display: false }, y: { display: false } },
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false, external: c => sparkExternalTooltip(c, fmt) },
+                    },
+                },
+            });
         }
 
         // One Chart.js doughnut per distribution. Hover is the point of the form
@@ -1766,22 +1935,22 @@
         // AND the share per arc (the visible-label relief the palette validator
         // requires for cta-orange), and clicking Chart.js' own legend would hide
         // an arc and silently make the remaining shares wrong for a part-to-whole.
-        const donuts = { visits: null, revenue: null };
+        const donuts = { visits: null, revenue: null, urltype: null };
 
         function nlPct(v) {
             return (v === null || v === undefined) ? '–' : String(v).replace('.', ',') + '%';
         }
 
-        function renderDeviceDonut(which, canvasId, centerId, legendId, dist, fmtValue, caption) {
+        function renderDeviceDonut(which, canvasId, centerId, dist, fmtValue, caption,
+                                   styleMap = DEVICE_STYLE) {
             const center = document.getElementById(centerId);
-            const legend = document.getElementById(legendId);
             if (donuts[which]) { donuts[which].destroy(); donuts[which] = null; }
             if (!dist || !dist.length) {
                 center.innerHTML = '<div class="dc-cap">Geen data</div>';
-                legend.innerHTML = '';
                 return;
             }
-            const styles = dist.map(d => DEVICE_STYLE[d.device] || DEVICE_STYLE.unknown);
+            const styles = dist.map(d => styleMap[d.device]
+                                        || { label: d.device, color: '#9a9aa6' });
             const total = dist.reduce((s, d) => s + Number(d.value || 0), 0);
             donuts[which] = new Chart(document.getElementById(canvasId), {
                 type: 'doughnut',
@@ -1825,35 +1994,28 @@
             });
             center.innerHTML = `<div class="dc-total">${fmtValue(total)}</div>`
                              + `<div class="dc-cap">${caption}</div>`;
-            legend.innerHTML = dist.map((d, i) =>
-                `<span class="dev-key"><span class="dev-dot" style="background:${styles[i].color}"></span>`
-                + `${styles[i].label} <span class="dev-val">${fmtValue(d.value)} · ${nlPct(d.share)}</span></span>`
-            ).join('');
         }
 
         function dashSkeleton() {
+            destroySparks('spark');
             document.getElementById('dashTiles').innerHTML = [
                 'Bezoeken', 'Omzet', 'CTR', 'Bounce', 'OPB',
             ].map(l => `<div class="stat-card"><h3><span class="skel-bar" style="width:70%; margin:0 auto;"></span></h3>`
                      + `<div class="label">${l}</div></div>`).join('');
             // Donuts: drop any live chart (or it keeps painting under the
             // skeleton) and shimmer the ring's footprint + the legend.
-            ['visits', 'revenue'].forEach(k => {
+            ['visits', 'revenue', 'urltype'].forEach(k => {
                 if (donuts[k]) { donuts[k].destroy(); donuts[k] = null; }
             });
-            [['dashCenterVisits', 'dashLegendVisits'], ['dashCenterRevenue', 'dashLegendRevenue']]
-                .forEach(([cid, lid]) => {
-                    document.getElementById(cid).innerHTML =
-                        '<span class="skel-bar" style="width:120px; height:120px; border-radius:50%;"></span>';
-                    document.getElementById(lid).innerHTML =
-                        '<span class="skel-bar" style="width:220px;"></span>';
-                });
+            ['dashCenterVisits', 'dashCenterRevenue', 'dashCenterUrlType'].forEach(cid => {
+                document.getElementById(cid).innerHTML =
+                    '<span class="skel-bar" style="width:120px; height:120px; border-radius:50%;"></span>';
+            });
         }
 
         async function loadDashboard(force) {
             const day = document.getElementById('dashDate').value;
             dashSkeleton();
-            document.getElementById('dashNote').textContent = '';
             try {
                 const params = new URLSearchParams();
                 if (day) params.set('date', day);
@@ -1865,31 +2027,40 @@
                     ? '–' : Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
                 const opb = (d.opb === null || d.opb === undefined)
                     ? '–' : '€' + Number(d.opb).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                destroySparks('spark');
                 document.getElementById('dashTiles').innerHTML =
-                    dashTile('SEO-bezoeken', fmtInt(d.visits), d.visits_wow) +
-                    dashTile('SEO-omzet', fmtEuro(d.revenue), d.revenue_wow) +
-                    dashTile('CTR', pct(d.ctr), null) +
-                    dashTile('Bounce', pct(d.bounce), null) +
-                    dashTile('OPB', opb, null);
+                    dashTile('SEO-bezoeken', fmtInt(d.visits), d.visits_wow, 'sparkVisits') +
+                    dashTile('SEO-omzet', fmtEuro(d.revenue), d.revenue_wow, 'sparkRevenue') +
+                    dashTile('CTR', pct(d.ctr), null, 'sparkCtr', ppBadge(d.ctr_wow_pp)) +
+                    dashTile('Bounce', pct(d.bounce), null, 'sparkBounce', ppBadge(d.bounce_wow_pp)) +
+                    dashTile('OPB', opb, d.opb_wow, 'sparkOpb');
+                const s = d.series || {};
+                const eur2 = v => '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                // Each sparkline wears its tile's own metric colour from METRICS, so a
+                // tile and the chart above it never disagree about what blue means.
+                renderSpark('sparkVisits',  s.dates, s.visits,  METRICS.seo_visits.color, fmtInt);
+                renderSpark('sparkRevenue', s.dates, s.revenue, METRICS.seo_omzet.color,  fmtEuro);
+                renderSpark('sparkCtr',     s.dates, s.ctr,     METRICS.seo_ctr.color,    pct);
+                renderSpark('sparkBounce',  s.dates, s.bounce,  METRICS.seo_bounce.color, pct);
+                renderSpark('sparkOpb',     s.dates, s.opb,     '#936305',                eur2);
                 renderDeviceDonut('visits', 'dashDonutVisits', 'dashCenterVisits',
-                                  'dashLegendVisits', d.devices_visits, fmtInt, 'bezoeken');
+                                  d.devices_visits, fmtInt, 'visits');
                 renderDeviceDonut('revenue', 'dashDonutRevenue', 'dashCenterRevenue',
-                                  'dashLegendRevenue', d.devices_revenue, fmtEuro, 'omzet');
-                document.getElementById('dashNote').textContent =
-                    `${d.date} · Δ% vergeleken met ${d.compare_date} · apparaat afgeleid uit de user agent`;
+                                  d.devices_revenue, fmtEuro, 'omzet');
+                renderDeviceDonut('urltype', 'dashDonutUrlType', 'dashCenterUrlType',
+                                  d.urltypes_visits, fmtInt, 'visits', URLTYPE_STYLE);
             } catch (e) {
                 // Every failure path clears the skeleton (UI_BLUEPRINT) — a dead
                 // request must not shimmer forever.
+                destroySparks('spark');
                 document.getElementById('dashTiles').innerHTML =
                     `<span class="text-danger">Dagoverzicht laden mislukt: ${escapeHtml(e.message)}</span>`;
-                ['visits', 'revenue'].forEach(k => {
+                ['visits', 'revenue', 'urltype'].forEach(k => {
                     if (donuts[k]) { donuts[k].destroy(); donuts[k] = null; }
                 });
-                [['dashCenterVisits', 'dashLegendVisits'],
-                 ['dashCenterRevenue', 'dashLegendRevenue']].forEach(([cid, lid]) => {
+                ['dashCenterVisits', 'dashCenterRevenue', 'dashCenterUrlType'].forEach(cid => {
                     document.getElementById(cid).innerHTML =
                         '<div class="dc-cap text-danger">Laden mislukt</div>';
-                    document.getElementById(lid).innerHTML = '';
                 });
             }
         }
