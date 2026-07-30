@@ -31,20 +31,24 @@ hexes inline, use the token or the class that references it:
   vs the native toggles' `normal` makes that unreliable). The apps button is
   deliberately **excluded from the responsive `@media` padding/font rules** (fixed
   `2.75rem`-wide box at every breakpoint). Icon markup is hand-duplicated per page.
-- **Fixed width wrapper — same on every tool:**
-  `container mt-5 pb-5` › `row` › `col-lg-11 mx-auto` (~1045px). Do not use
-  `col-md-10`, `container-fluid`, or a bare container.
-  **Changed 2026-07-30:** the standard used to be `col-md-10 mx-auto` (~950px),
-  with `col-lg-11` called out here as a legacy outlier. Joep's call went the other
-  way — `col-lg-11` is now the standard and all 32 tool pages were converted to it
-  in one pass. Reason: SEO stats and Healthscore had a *bare* container (~1140px)
-  and so read visibly wider than the rest; at `col-md-10` those two pages break
-  badly (SEO stats' 8 summary tiles wrap 7+1 and its 10 metric pills go to two
-  rows), because this app's widest pages carry more horizontal content than
-  `col-md-10` affords. `col-lg-11` removes the odd-page-out effect without
-  squeezing the wide tables.
-  `dashboard.html` is deliberately excluded — it is the Apps launcher, a
-  `col-lg-4 col-md-6` card grid in a bare container, not a tool page.
+- **Fixed width wrapper — two sanctioned widths, decided 2026-07-30:**
+  - **Default: `container mt-5 pb-5` › `row` › `col-md-10 mx-auto`** (~950px at a
+    1200-1399px window, ~1074px at ≥1400px). Every tool uses this unless it is on
+    the list below.
+  - **Data-dense exception: `col-lg-11 mx-auto`** (~1045px / ~1184px) for the four
+    pages whose content genuinely needs it: **SEO stats, Healthscore, SEO titles,
+    DMA Exclusions**. SEO stats and Healthscore ran on a *bare* container (~1140px /
+    ~1320px) until this date, which is why they read visibly wider than the rest of
+    the app; `col-lg-11` brings them into a sanctioned width without squeezing
+    them. At `col-md-10`, SEO stats' 8 summary tiles wrap 7+1 and its 10 metric
+    pills spill onto two rows.
+  - Never `container-fluid` or a bare container.
+  - The px figures move with the viewport because `.container` itself does (1140px
+    at 1200-1399, 1320px at ≥1400) — quote the class, not the pixels.
+  - Measured, not estimated: at a 1500px window `col-md-10` renders 1074px of
+    content and `col-lg-11` renders 1184px.
+  - `dashboard.html` is deliberately excluded — it is the Apps launcher, a
+    `col-lg-4 col-md-6` card grid in a bare container, not a tool page.
 - Each logical block is a `card mb-4` with a `card-header` + `card-body`.
 
 ## Section / card headers
