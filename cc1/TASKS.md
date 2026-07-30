@@ -241,8 +241,13 @@ have no matching bullet:
 
 - **Bare category page titles come from Unique Titles, NOT tblPageTitles** — see
   LEARNINGS. Coverage 3,435/3,543 (97.0%); the 108 gaps were all just missing from
-  `pa.urls`. **Muziekinstrumenten is 53.1% covered (45 of 96 missing)** and looks
-  like a maincat that was never loaded — worth a proper look.
+  `pa.urls`. Worst maincat was **Muziekinstrumenten: 45 of 96 lacked a TITLE**
+  (i.e. no `unique_titles_content` row) — say it that way, not "missing from
+  pa.urls", which is what an earlier version of this line said and it cost a
+  round trip on 29 Jul: someone read it as still-to-load work when the load had
+  already happened in the batch below. **Muziekinstrumenten is DONE** — 95/96 in
+  `pa.urls`, 44 queued pending, 51 already titled; the 96th
+  (Contrabaskammen `9000570`) is a 404 and deliberately excluded.
 - Loaded the **95 live** of those 108 into `pa.urls` + queued `pending` in
   `pa.unique_titles_jobs` ONLY (faq/kopteksten untouched). 13 were 404 and skipped.
   Rollback tag: `notes = 'category bare-url unique-titles gap 2026-07-29'`
@@ -278,18 +283,21 @@ have no matching bullet:
   chart all sit between brand base-500 hues (GSAAS visits ↔ SEO CTR is the worst
   at CVD 4.9). Fixing them means moving GSAAS visits and SEO Bounce off their 500
   stops — i.e. editing brand colours, so don't do it unprompted.
-- Also never asked for: `thema-ads.html` ~line 365 (Activation Plan Refresh) still
-  uses `btn-outline-primary` (orange here) rather than purple, unlike the
-  Processing Jobs Refresh that was fixed.
 
 ### Deliberately not done (reported to Joep, not refused)
 - Thema Ads' seven other `.alert-info` blocks are collapse disclosure content,
   not banners, so they stay grey. Only the Auto-Queue banner was asked about.
-- `thema-ads.html` ~line 365 (Activation Plan Refresh) has the same
-  `btn-outline-primary` vs purple inconsistency as [16]'s Processing Jobs
-  Refresh, in a section that was not mentioned.
-- The chart palette keeps two colourblind-unsafe pairs that only a deviation from
-  "the base row" can fix — see LEARNINGS. Joep was told; awaiting a call.
+- ~~`thema-ads.html` Activation Plan Refresh~~ — **DONE** in `ed1a4ed`: was the
+  last `btn-outline-primary` Refresh in the app (that class is themed ORANGE
+  here), now `btn-outline-purple`, and its card header moved from `float-end` to
+  flex. Four other `btn-outline-primary` buttons remain app-wide (redshift-upload
+  Parse, dma-plus Copy Results, dma-exclusions Preview + Re-enable) — all orange,
+  none a Refresh, none asked about.
+- The chart palette's colourblind-unsafe pairs: **resolved, no longer awaiting a
+  call.** Joep chose bordeaux + navy (see the section above), taking it from 10 of
+  45 failing pairs to 5 — and all 5 that remain sit between untouched brand
+  base-500 hues, so closing them means editing brand colours. Left alone
+  deliberately; measurements are in seo-stats.html's METRICS comment.
 
 ## suggestions.txt backlog — UI/feature list from Joep (opened 2026-07-28)
 
