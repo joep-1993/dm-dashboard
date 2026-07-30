@@ -1,6 +1,62 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een dag-op-dag CTR-dip najagen vóór je het jaar bekijkt (2026-07-30)
+
+Vraag was "SEO gisteren (29 jul) vs vorige week (22 jul), wat valt op?". Ik vond een
+facet-pagina-CTR-daling van −5,4pp, noemde die "het enige dat naar een on-site oorzaak
+ruikt", en ging drie rondes diep: mix-decompositie over 2.443 categorieën, uur-mix,
+device-split, facet-diepte, per-URL. Pas toen Joep vroeg "droogt de long tail op?" keek
+ik naar 12 maanden — en daar stond het echte verhaal.
+
+- **De /c/ outclicks-per-visit erodeert structureel ~15% in 12 maanden**, op élke
+  facet-diepte: 1-facet 0,942 → 0,800, 2-facet 0,970 → 0,829, 3+-facet 0,889 → 0,765.
+  Decompositie: **98% binnen-diepte, 1,6% diepte-mix** — dus geen compositie-artefact.
+- **De grootste stap zit op 10 maart 2026**, van de ene dag op de andere en op alle
+  diepten tegelijk: 9 mrt 0,897 → 10 mrt 0,815 (−9%), visits ongewijzigd (~17k/dag).
+  Dat is de **bol.com-cliff** die al als omzet-driver bekend stond, nu zichtbaar op
+  *rate*-niveau: bol-tegels verdwenen uit de listings, dus dezelfde visits leverden
+  minder outclicks. Herstel tot ~0,85 in april, nooit terug naar 0,89–0,90. Omdat het
+  een permanente niveau-verschuiving is, herstelt die rate niet vanzelf en blijft elke
+  YoY-vergelijking dit gat tonen tot maart 2027.
+- **De 29-juli-dip zelf was ruis.** 3+-facet stond op 0,678 (−2,5σ), maar dat bakje
+  heeft 2× de sd van /c/ totaal (0,036 vs 0,017) puur door compositie-churn, 22 juli
+  was juist een hóge woensdag, en op 28 juli zat de zwakte in een ánder bakje
+  (1-facet). Bij 3 bakjes × 29 dagen is één −2,5σ-cel wat je van kans verwacht.
+- **De long tail droogt NIET op** — hij is juist het enige groeiende deel van /c/:
+  visits/dag YoY 1-facet 13.442 → 11.012 (−18%), 2-facet 7.078 → 5.717 (−19%),
+  3+-facet 2.322 → 2.642 (**+14%**). Aantal unieke deep-URL's met traffic staat op een
+  dag-record. De *kop* krimpt, de staart verbreedt.
+- **Les: bij een WoW-delta eerst de reeks over maanden trekken, dan pas decomponeren.**
+  Anders decomponeer je ruis met steeds fijnere messen. Eén dag tegen één andere dag
+  geeft geen variantie-context: 22 juli bleek zowel de bódem van de hittecyclus als
+  een hoge CTR-dag. Twee keer een misleidende basis in dezelfde vergelijking.
+
+## Welke `fct_visits`-kolommen "gisteren" al kloppen — en welke niet (2026-07-30)
+
+- **Omzet en transacties settelen niet op D-1.** Op 30 juli stond voor 29 juli
+  `affiliate_revenue` op €587 tegen ~€2.200 normaal en `transactions` op 476 tegen
+  ~24.000, met `dm_update_date` nog NULL. Vergelijk omzet dus **D-1 vs D-8**, precies
+  zoals `/api/seo-stats/deltas` al doet. Visits en pageviews zijn wél compleet.
+- **Outclicks zijn dat wél.** `number_of_outclicks` en `number_of_outclicks_revenue`
+  bewegen samen (ratio ~1,02, óók op de onvolledige dag), dus een daling daarin is echt
+  gedrag en geen attributie-achterstand. Die check hoort standaard vooraf: eerst
+  uitsluiten dat een "daling" gewoon settlement is.
+- **`bt.search_console` heeft ~3 backfill-loads nodig.** Een dag met 1 load toont ~40%
+  van de impressies (1,22M vs 3,06M) én een *beter* lijkende avg_position (7,54 → 4,90)
+  omdat juist de long-tail-rijen missen. Check `MIN/MAX(load_date)` per datum vóór je er
+  ranking-conclusies aan hangt.
+- **`c_terms`-format**: `~~` scheidt facetten, `~` scheidt facetnaam en waarde, dus
+  `pl_tand~20127023~~type_tand~104474` = 2 facetten. Diepte =
+  `REGEXP_COUNT(c_terms,'~~')+1`; signature zonder waarden =
+  `REGEXP_REPLACE(c_terms,'~[0-9]+','')`. Met de verkeerde separator gokken levert
+  stilzwijgend één bakje op in plaats van een foutmelding.
+- **3+-facet /c/ is niet op URL-niveau te analyseren**: 38.696 visits over 15 dagen
+  verdeeld over **25.888 URL's** (1,49 visits/URL), 79% daarvan met precies één visit
+  per twee weken, drukste deep-URL 62 visits/15d, en maar 2 URL's boven 5 visits op één
+  dag. Per-URL CTR-delta's bestaan daar niet; aggregeer naar facet-signature of
+  categorie — en zelfs dan haalt bijna geen signature een zinnige drempel.
+
 ## Een before/after-vlag naast `order_index` is géén verbetering — de type-facet is de noun (2026-07-30)
 
 Ik ráádde Joep een `side`-kolom aan (before/after) ter vervanging van het magische

@@ -4,6 +4,31 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-07-30 (analysis) — SEO 29 vs 22 Jul read, and the /c/ CTR erosion root cause
+
+Redshift-only session, no code changes. Asked for a yesterday-vs-last-week SEO read;
+ended up finding a 12-month structural decline behind it.
+
+- **29 vs 22 Jul**: SEO visits +1,1% (55.978 vs 55.375), but that flat headline hides a
+  rotation. A heat cluster gained +2.974 visits (Tuinartikelen +32%, Huishoudelijk +34%,
+  Sport & outdoor +29%; Klimaatbeheersing +180%, Zwembaden +172%, Parasols +207%) while
+  the rest of the site lost −2.371 (−5,2%). Same move in SEA (+35% in those cats) →
+  weather/demand, not SEO. 22 Jul was the trough of the heat cycle, so the WoW
+  comparison flatters. Growth was mobile-only (+3,0% vs desktop −3,8%).
+- **Root cause found for the "facet CTR drop"**: /c/ outclicks-per-visit is down ~15%
+  over 12 months on every facet depth, with a hard step on **10 March 2026** (0,897 →
+  0,815 overnight, all depths at once, visits flat) = the bol.com cliff seen at rate
+  level rather than volume. The 29-July dip itself was noise (−2,5σ in the noisiest
+  bucket). Ruled out along the way: settlement lag, category mix, hour mix, device,
+  low-intent traffic dilution, and any single broken facet combination.
+- **Not confirmed**: the 3+-facet long tail is *not* drying up — it is the only growing
+  part of /c/ (visits/day +14% YoY) while 1-facet is −18% and 2-facet −19%.
+- Settled-revenue read (28 vs 21 Jul, since D-1 revenue is unsettled): −6,5% on +1,9%
+  visits. Largest mover Sanitair −€413 is lumpy CPR attribution on ~1.300 visits, not a
+  trend. Heat traffic monetises below average (Sport & outdoor visits +13%, revenue −32%).
+- Both LEARNINGS entries logged; memory `c_facet_outclick_rate_erosion` written. One
+  open follow-up in BACKLOG (is the post-cliff drift a second decline?).
+
 ### Done 2026-07-30 (SEO titles blueprints) — facet order, impossible + junk combos
 
 **Facet order (DB-only, `pa.facet_position_rules`; no code change).** The category

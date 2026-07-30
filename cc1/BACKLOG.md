@@ -8,6 +8,19 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### Is the post-cliff /c/ rate drift a second decline? (logged 2026-07-30)
+- [ ] **Separate the post-10-March drift from seasonal category mix.** After the
+  bol.com cliff, /c/ outclicks-per-visit recovered to ~0,85 (April) and then drifted
+  down again to 0,800 by July (1-facet: 0,836 apr → 0,811 may → 0,798 jun → 0,800 jul).
+  Unknown whether that is a second, still-running erosion or just summer mix — summer
+  categories demonstrably monetise lower (Sport & outdoor OPB fell €188 → €114 per
+  1.000 visits while its visits rose 13%). Method: repeat the month-over-month
+  within-depth decomposition (which came out 98% within-depth / 1,6% depth-mix for the
+  full year) but with a *category*-mix counterfactual per month. Worth doing because it
+  decides whether anything is still actively degrading, or whether the whole level shift
+  is already explained by 10 March and needs no further action. See LEARNINGS "Een
+  dag-op-dag CTR-dip najagen vóór je het jaar bekijkt".
+
 ### SEO Titles — example URL per built combo (logged 2026-07-30)
 - [ ] **Give Built-titles rows an example URL so the Facets column can link.** The
   frontend already renders the Facets value as a link when `source_url` is absolute
