@@ -1116,14 +1116,28 @@ async function publishFaqV2(full = false) {
     const envSelect = document.getElementById('publishEnvironment');
     const environment = envSelect ? envSelect.value : 'production';
 
+    // Counts are per environment (push state is keyed on url_id + env), so the
+    // dialog must quote the numbers for the env that is about to be pushed —
+    // staging's "pending" is not production's.
     let stats = null;
     try {
-        const r = await fetch(`${API_BASE}/api/faq/publish-v2/stats`);
+        const r = await fetch(`${API_BASE}/api/faq/publish-v2/stats?environment=${encodeURIComponent(environment)}`);
         if (r.ok) stats = await r.json();
     } catch (e) { /* fall through to a generic warning */ }
 
     const nf = n => (n || 0).toLocaleString('nl-NL');
     let mode = full ? 'all' : 'new';
+
+    // No key for this env means the run would fail on the first batch; say so
+    // here instead of after a confirm + a started task.
+    if (stats && stats.has_api_key === false) {
+        // Var names are DEV / STAGING / PROD — production's is NOT "PRODUCTION".
+        const keyVar = { dev: 'DEV', staging: 'STAGING', production: 'PROD' }[environment] || '?';
+        resultDiv.innerHTML = `<div class="alert alert-danger">No API key configured for `
+            + `<code>${escapeHtml(environment)}</code> — set <code>CONTENT_API_KEY_${keyVar}</code>`
+            + ` in the backend .env.</div>`;
+        return;
+    }
 
     if (stats) {
         if (!full && stats.urls_pending === 0) {

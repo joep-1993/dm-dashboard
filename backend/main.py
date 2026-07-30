@@ -2910,11 +2910,18 @@ async def faq_publish_v2_status(task_id: str):
 
 
 @app.get("/api/faq/publish-v2/stats")
-async def faq_publish_v2_stats():
-    """URL/record counts so the button can state the size before running."""
+async def faq_publish_v2_stats(environment: str = "production"):
+    """URL/record counts so the button can state the size before running.
+
+    Env-scoped: push state is per (url_id, env), so staging and production have
+    their own pending counts. Also reports whether that env has an API key, so
+    the frontend can say so before starting a run that would fail immediately.
+    """
+    if environment not in ("dev", "staging", "production"):
+        raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
     try:
         from backend.faq_v2_publisher import get_faq_v2_stats
-        return get_faq_v2_stats()
+        return get_faq_v2_stats(env=environment)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

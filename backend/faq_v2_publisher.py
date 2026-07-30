@@ -80,21 +80,47 @@ CURSOR_ITERSIZE = 2000
 _tasks = {}
 _task_lock = threading.Lock()
 
+# Push state is per (url_id, ENV). It has to be: pushing a URL to staging must not
+# make the next production "new" run skip it. The original table was keyed on
+# url_id alone, which silently coupled the two environments.
 STATE_DDL = """
 CREATE TABLE IF NOT EXISTS pa.faq_v2_push_state (
-    url_id      BIGINT PRIMARY KEY,
+    url_id      BIGINT NOT NULL,
+    env         TEXT   NOT NULL DEFAULT 'production',
     content_md5 TEXT NOT NULL,
     records     INTEGER,
-    pushed_at   TIMESTAMP DEFAULT now()
+    pushed_at   TIMESTAMP DEFAULT now(),
+    PRIMARY KEY (url_id, env)
 );
+"""
+
+# In-place migration of the pre-env table. Idempotent, so it can stay in the
+# startup path: the ADD COLUMN default backfills existing rows as 'production',
+# which is right — every push before this change went to production.
+STATE_MIGRATE = """
+ALTER TABLE pa.faq_v2_push_state ADD COLUMN IF NOT EXISTS env TEXT NOT NULL DEFAULT 'production';
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'pa.faq_v2_push_state'::regclass
+                  AND conname  = 'faq_v2_push_state_pkey'
+                  AND pg_get_constraintdef(oid) = 'PRIMARY KEY (url_id)') THEN
+        ALTER TABLE pa.faq_v2_push_state DROP CONSTRAINT faq_v2_push_state_pkey;
+        ALTER TABLE pa.faq_v2_push_state ADD PRIMARY KEY (url_id, env);
+    END IF;
+END $$;
 """
 
 # md5(f.faq_json) is computed by Postgres on both the read and the compare side,
 # so there is no chance of a Python/Postgres hashing mismatch.
+#
+# The state join is env-scoped, so every query built on _BASE_FROM takes the env
+# as its FIRST bind parameter — a URL is "already pushed" only for the env it was
+# pushed to.
 _BASE_FROM = """
     FROM pa.faq_content_v2 f
     JOIN pa.urls u ON u.url_id = f.url_id
-    LEFT JOIN pa.faq_v2_push_state s ON s.url_id = f.url_id
+    LEFT JOIN pa.faq_v2_push_state s ON s.url_id = f.url_id AND s.env = %s
     WHERE f.faq_json IS NOT NULL AND f.faq_json <> ''
 """
 _NEW_ONLY = " AND (s.url_id IS NULL OR s.content_md5 <> md5(f.faq_json))"
@@ -102,6 +128,7 @@ _NEW_ONLY = " AND (s.url_id IS NULL OR s.content_md5 <> md5(f.faq_json))"
 
 def _ensure_state_table(cur):
     cur.execute(STATE_DDL)
+    cur.execute(STATE_MIGRATE)
 
 
 def _set_progress(task_id, **kw):
@@ -113,7 +140,7 @@ def _set_progress(task_id, **kw):
             t.setdefault("progress", {}).update(kw)
 
 
-def _iter_url_groups(cur, limit=None, mode="new"):
+def _iter_url_groups(cur, limit=None, mode="new", env="production"):
     """Yield (url_id, url, md5, [records]) — one group per URL, streaming.
 
     Whole URLs, never partial: the caller stamps push state per batch, which is
@@ -129,9 +156,9 @@ def _iter_url_groups(cur, limit=None, mode="new"):
            + " ORDER BY f.url_id")
     if limit:
         sql += " LIMIT %s"
-        cur.execute(sql, (limit,))
+        cur.execute(sql, (env, limit))
     else:
-        cur.execute(sql)
+        cur.execute(sql, (env,))
 
     for row in cur:
         url_id, url, raw, md5 = row["url_id"], row["url"], row["faq_json"], row["md5"]
@@ -182,22 +209,22 @@ def _delete_url(url, env):
     return 200 <= r.status_code < 300, r.status_code
 
 
-def _stamp_state(rows):
-    """Record (url_id, md5, n) as successfully pushed. Own connection + commit:
-    state must survive even if a later batch dies."""
+def _stamp_state(rows, env):
+    """Record (url_id, md5, n) as successfully pushed to `env`. Own connection +
+    commit: state must survive even if a later batch dies."""
     if not rows:
         return
     conn = get_db_connection()
     try:
         cur = conn.cursor()
         cur.executemany("""
-            INSERT INTO pa.faq_v2_push_state (url_id, content_md5, records, pushed_at)
-            VALUES (%s, %s, %s, now())
-            ON CONFLICT (url_id) DO UPDATE
+            INSERT INTO pa.faq_v2_push_state (url_id, env, content_md5, records, pushed_at)
+            VALUES (%s, %s, %s, %s, now())
+            ON CONFLICT (url_id, env) DO UPDATE
               SET content_md5 = EXCLUDED.content_md5,
                   records     = EXCLUDED.records,
                   pushed_at   = now()
-        """, rows)
+        """, [(url_id, env, md5, n) for url_id, md5, n in rows])
         conn.commit()
         cur.close()
     finally:
@@ -229,7 +256,8 @@ def publish_faq_v2(env="production", limit=None, replace=False, mode="new", task
         cur = conn.cursor()
         _ensure_state_table(cur)
         conn.commit()
-        cur.execute("SELECT count(*) AS n" + _BASE_FROM + (_NEW_ONLY if mode == "new" else ""))
+        cur.execute("SELECT count(*) AS n" + _BASE_FROM + (_NEW_ONLY if mode == "new" else ""),
+                    (env,))
         total_urls = cur.fetchone()["n"]
         cur.close()
         if limit:
@@ -253,7 +281,7 @@ def publish_faq_v2(env="production", limit=None, replace=False, mode="new", task
                                   "status_code": code, "response": "" if ok else text})
             if ok:
                 pushed += len(batch)
-                _stamp_state(batch_state)      # only successful URLs advance
+                _stamp_state(batch_state, env)   # only successful URLs advance, per env
             else:
                 failed += len(batch)
                 urls_failed += len(batch_state)
@@ -261,7 +289,7 @@ def publish_faq_v2(env="production", limit=None, replace=False, mode="new", task
             _set_progress(task_id, records_pushed=pushed, failed=failed,
                           batches=len(batch_results), urls_done=urls_done)
 
-        for url_id, url, md5, recs, skip_reason in _iter_url_groups(cur, limit, mode):
+        for url_id, url, md5, recs, skip_reason in _iter_url_groups(cur, limit, mode, env):
             if skip_reason:
                 if len(skipped) < 50:
                     skipped.append({"url": url, "reason": skip_reason})
@@ -340,22 +368,30 @@ def get_faq_v2_status(task_id):
         return dict(t) if t else {"error": "Task not found"}
 
 
-def get_faq_v2_stats():
+def get_faq_v2_stats(env="production"):
     """Counts for the button's confirm dialog: how much a "new" run would push
-    versus the whole corpus, plus when anything was last pushed."""
+    versus the whole corpus, plus when anything was last pushed.
+
+    Env-scoped, because push state is: staging and production each have their own
+    pending count, and the dialog has to quote the one the user is about to run.
+    """
+    if env not in FAQ_API_URLS:
+        env = "production"
     conn = get_db_connection()
     try:
         cur = conn.cursor()
         _ensure_state_table(cur)
         conn.commit()
-        cur.execute("SELECT count(*) AS n" + _BASE_FROM)
+        cur.execute("SELECT count(*) AS n" + _BASE_FROM, (env,))
         total = cur.fetchone()["n"]
-        cur.execute("SELECT count(*) AS n" + _BASE_FROM + _NEW_ONLY)
+        cur.execute("SELECT count(*) AS n" + _BASE_FROM + _NEW_ONLY, (env,))
         pending = cur.fetchone()["n"]
-        cur.execute("SELECT max(pushed_at) AS last, count(*) AS n FROM pa.faq_v2_push_state")
+        cur.execute("""SELECT max(pushed_at) AS last, count(*) AS n
+                       FROM pa.faq_v2_push_state WHERE env = %s""", (env,))
         r = cur.fetchone()
         cur.close()
         return {
+            "env": env,
             "urls_total": total,
             "urls_pending": pending,
             "urls_pushed": r["n"],
@@ -363,7 +399,8 @@ def get_faq_v2_stats():
             # ~6 Q&A per URL, measured over a 200-row sample.
             "est_records_pending": pending * 6,
             "est_records_total": total * 6,
-            "api_url": FAQ_API_URLS["production"],
+            "api_url": FAQ_API_URLS[env],
+            "has_api_key": bool(FAQ_API_KEYS[env]()),
         }
     finally:
         return_db_connection(conn)
