@@ -54,7 +54,15 @@ PUSH_BATCH = 5000
 # ---------------------------------------------------------------------------
 SUBCATEGORY_ORDER = 1700
 SUBCATEGORY_PH = '!!sub_category!!'
-UNKNOWN_ORDER = 1500
+# Fallback order for a facet with no row in pa.facet_position_rules.
+#
+# This used to be 1500, i.e. BELOW SUBCATEGORY_ORDER (1700), so any facet nobody had
+# written a rule for silently rendered BEFORE the category noun — "Rood <newfacet>
+# Sneakers" instead of "Rood Sneakers <newfacet>". The default now sits just above
+# the category, so an unruled facet trails the noun, which is the safe reading for a
+# facet whose meaning we do not know yet. New facets appear in URLs before anyone
+# writes a rule, so this default IS the behaviour for them until someone does.
+UNKNOWN_ORDER = 1750
 IGNORE_FACETS = {'pricemin', 'pricemax'}
 COUNTRY_CODE = 'NL'
 TAIL_TITLE = 'kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl'
@@ -82,7 +90,13 @@ def parse_url(url):
     types = set()
     for pair in fstr.split('~~'):
         bits = pair.split('~')
-        if len(bits) >= 2 and bits[0]:
+        # A facet needs BOTH a name and a VALUE. Requiring only bits[0] let URLs
+        # ending in "<name>~" through — real traffic contains junk/bot URLs like
+        # .../c/merkm~ , .../c/me~ , .../c/kleur_mode_accessoi~ — and the generator
+        # turned each into a (cat_id, key) combo, producing blueprints whose phrase
+        # holds a placeholder like !!merkm!! that can never resolve. 321 such rows
+        # existed (one already pushed) before this guard; see LEARNINGS 2026-07-30.
+        if len(bits) >= 2 and bits[0] and bits[1]:
             t = unquote(bits[0])
             if t not in IGNORE_FACETS:
                 types.add(t)
