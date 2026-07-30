@@ -4,6 +4,44 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-07-30 — SEO stats blueprint pass, Windows launcher, FAQ Publish 2.0 staging
+
+**SEO stats (4 chat items + 1 follow-up)** — `frontend/seo-stats.html`:
+- Refresh in "Visits & revenue per day": `btn-outline-secondary` (which style.css
+  themes **orange**, so it read as a second CTA next to Load) → `btn-outline-purple`
+  with the `↻` glyph.
+- Performance standup now draws skeletons instead of a grey spinner overlay
+  (tiles + both lists; also drawn in `load()` because `loadDeltas()` starts only
+  after `/daily` resolves; failure path clears them). Overlay CSS deleted.
+- `HEAT_KEYS` gained `dma_omzet`/`gsaas_omzet` — the two columns behind "Show DMA &
+  GSAAS revenue" rendered white between shaded neighbours.
+- "Export Excel" → "Export"; Export and Load both moved from inline hexes to
+  `btn-outline-purple` / `btn-run`, so `disabled` renders grey (blueprint: unavailable
+  wins over colour). Blueprint actually prescribes **orange** for Export-type
+  actions — left purple deliberately, flagged to Joep.
+
+**Windows task "DM Tools Dashboard" fixed** — failed every morning with result 1.
+Root cause reproduced: `wsl.exe -e bash -c "… &"` never leaves a live process.
+Rewrote `C:\Users\JoepvanSchagen\scripts\start-dm-dashboard.ps1` (backup
+`.bak-20260730`): `nohup setsid`, WSL-readiness retry, 120s deadline poll,
+idempotent (skips if :8003 answers → no duplicate GSD-LL APScheduler), logs to
+`%LOCALAPPDATA%\dm-dashboard-launcher.log` + `logs/uvicorn-8003.log`, no `ReadKey`.
+Task definition untouched. See LEARNINGS for the two self-inflicted bugs
+(`&&`-chain + `&` precedence; PowerShell 5.1 quote mangling).
+- **Open:** `Microsoft-Windows-TaskScheduler/Operational` is disabled on this
+  machine, so there is no per-run history. Enable it if this recurs.
+
+**FAQ Publish 2.0 → staging** — `backend/faq_v2_publisher.py`, `backend/main.py`,
+`frontend/js/faq.js`. Push state is now per `(url_id, env)` (idempotent in-place
+migration, existing rows → `production`); stats endpoint takes `?environment=` and
+reports `has_api_key`; frontend quotes the selected env's counts. The staging key
+was **already** in `.env` and identical to the one Joep sent — nothing added.
+Verified with a `limit=3` staging push (18 records) and no cross-env leakage.
+- **Open:** those 3 URLs now have live FAQ records in staging (harmless; the
+  endpoint upserts on `(url, question)`). Cleanup = 3 × `DELETE /faq?url=` plus
+  deleting their `env='staging'` state rows.
+- **Open:** the staging key is in the chat transcript — worth rotating.
+
 ## suggestions_new.txt backlog — second UI/feature list from Joep (opened 2026-07-29)
 
 Source of truth is `/home/joepvanschagen/projects/dm-dashboard/suggestions_new.txt`

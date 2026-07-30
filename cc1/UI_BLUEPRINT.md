@@ -118,6 +118,14 @@ other tool uses the grey default. New tools follow the grey default.
     they now build the header before the fetch and show the card with skeleton
     rows. That requires any state the header depends on to be assigned *before* the
     fetch (MC ID Finder's `lastMode` had to move up).
+  - **A grey overlay + spinner is not a substitute — it hides the drawing effect.**
+    SEO stats' Performance-standup card kept a page-local `.loading-overlay`
+    (removed 2026-07-30) on the argument that it also greyed the stat tiles, which
+    skeleton rows can't. That argument is wrong: **tiles take a skeleton too** —
+    keep the label (it is known before the fetch) and shimmer only the value, e.g.
+    `<h3><span class="skel-bar" style="width:60%;margin:0 auto;"></span></h3>`.
+    Match the skeleton row count to what actually renders (both standup lists
+    `slice(0, 3)`, so 3 rows), or the height still jumps on load.
 
   **When a progress bar is right instead.** Skeletons say "data is arriving now",
   so they only fit a single fetch that returns promptly. Long multi-item runs that

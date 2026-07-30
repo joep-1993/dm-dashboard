@@ -1,6 +1,102 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `wsl.exe -e bash -c "… &"` start GEEN service op — de Task-Scheduler-launcher faalde elke ochtend (2026-07-30)
+
+"De DM Tools Dashboard windows task faalt elke ochtend." `Last Result: 1` kwam uit
+de `exit 1` van `C:\Users\JoepvanSchagen\scripts\start-dm-dashboard.ps1` zelf.
+Gereproduceerd op een vrije poort: **nooit iets aan het luisteren**, niet op t=5s
+en niet op t=45s, en geen overlevend proces.
+
+- **Oorzaak:** de afsluitende `&` zet uvicorn in de achtergrond van een bash die
+  meteen daarna exit. WSL breekt de sessie af en neemt het achtergrondproces mee.
+  Fix: `nohup setsid venv/bin/uvicorn … >> log 2>&1 < /dev/null &`. Getest:
+  proces leeft door nadat `wsl.exe` weg is.
+- **Twee eigen fouten onderweg, beide nu als comment in het script** zodat ze niet
+  terugkomen:
+  1. `cd … && … && nohup setsid uvicorn … &` — in bash bindt een afsluitende `&`
+     aan de **hele `&&`-keten**, niet aan het laatste commando. Dus stond de keten
+     zélf op de achtergrond van een exitende shell: exact dezelfde bug, één
+     niveau hoger. Scheiden met `;`, dan bindt `&` alleen aan het `nohup`-commando.
+  2. Windows PowerShell 5.1 **verhaspelt embedded double quotes** in een argument
+     naar een native command. Een `echo "=== start ==="`-banner in de string zorgde
+     dat bash niets uitvoerde — en `wsl.exe` geeft dan **nog steeds exit 0**, dus
+     de launcher denkt dat hij gelanceerd heeft. Geen dubbele quotes in de
+     `$inner`-string; `date -Is >> log` heeft ze niet nodig.
+- **De probe was óók fout:** één `Invoke-WebRequest` op t=5s terwijl een koude
+  start ~12-15s nodig heeft (imports + SEO_PRIO-categoriecache van disk). Nu een
+  poll op een **deadline** (120s wall clock) i.p.v. `foreach (1..40)` met 3s sleep
+  — dat laatste kost per mislukte probe ook z'n eigen connect-tijd en liep in de
+  praktijk ~5 minuten.
+- **Launcher is nu idempotent:** antwoordt :8003 al, dan exit 0 zonder te starten.
+  Niet netheid maar veiligheid — een tweede uvicorn betekent een **dubbele
+  GSD-LL APScheduler**, precies wat de mystery low-linkage run van juli veroorzaakte.
+- **Geen `ReadKey` in het faalpad**: dat laat de taak eeuwig in "Running" staan.
+  In plaats daarvan loggen naar `%LOCALAPPDATA%\dm-dashboard-launcher.log` + de
+  app-output naar `logs/uvicorn-8003.log`, zodat een slechte ochtend te
+  diagnosticeren is.
+- **Geen run-historie beschikbaar:** `Microsoft-Windows-TaskScheduler/Operational`
+  staat op deze machine **disabled**, dus `Last Result` is alles wat Windows
+  bewaart. Aanzetten als dit weer speelt.
+- Origineel bewaard als `start-dm-dashboard.ps1.bak-20260730`; de taakdefinitie
+  zelf is niet aangeraakt (readiness-wachten zit nu in het script, dus een
+  trigger-delay is niet nodig).
+
+## Push-state zonder `env`-kolom koppelt staging stil aan productie (2026-07-30)
+
+FAQ "Publish 2.0" leek al env-aware: de knop leest de Environment-dropdown, de
+endpoint valideert `dev|staging|production` en `faq_v2_publisher` kende de
+staging-URL en -key al. Toch kon je staging niet gebruiken.
+
+- **De blokkade zat in `pa.faq_v2_push_state`**: PK op **alleen `url_id`**. Omdat
+  `mode="new"` bepaalt wát het pusht door `content_md5` tegen die tabel te
+  vergelijken, zou één staging-push die URL's als gedaan stempelen en de
+  **volgende productie-run ze laten overslaan** — stil, en blijvend tot de content
+  weer wijzigt. "Staging" kiezen had dus productie-dekking beschadigd.
+- Fix: state per `(url_id, env)`. Nieuwe PK, `env`-kolom, env-scoped join in
+  `_BASE_FROM` (env is nu de **eerste bind-parameter** van elke query die daarop
+  bouwt), `_stamp_state(rows, env)`. Migratie is idempotent en staat in
+  `_ensure_state_table`, dus hij past zichzelf toe; `ADD COLUMN … DEFAULT
+  'production'` backfilt bestaande rijen goed, want elke push vóór vandaag ging
+  naar productie.
+- `get_faq_v2_stats(env)` hardcodede `FAQ_API_URLS["production"]` — de
+  confirm-dialog noemde dus altijd de productie-URL, ook bij een staging-run. Nu
+  env-scoped, plus `has_api_key` zodat de frontend een ontbrekende key meldt
+  vóór de confirm i.p.v. na een gestarte task.
+- **Env-var-namen zijn `DEV`/`STAGING`/`PROD`** — productie is *niet*
+  `CONTENT_API_KEY_PRODUCTION`. Een foutmelding die de naam uit de env-waarde
+  samenstelt, liegt; expliciet mappen.
+- Verificatie: migratie live (PK `(url_id, env)`, 6 bestaande rijen als
+  `production`), staging-push van 3 URL's = 18 records, en productie's pending
+  bleef 269.260 met `pushed_at` nog op gisteren — geen kruisbesmetting.
+
+## Een grijze spinner-overlay is geen skeleton — hij verbérgt juist het "tekenen" (2026-07-30)
+
+"Bij Performance standup zie ik het tabel-teken-effect niet." Klopte: die kaart
+was de laatste plek met een **page-local `.loading-overlay`** (grijs vlak +
+spinner) i.p.v. skeleton-rows, met als comment-argument "de overlay blijft, want
+hij vergrijst óók de tiles, wat skeleton-rows niet kunnen".
+
+- Dat argument is fout: **tiles kunnen prima een skeleton krijgen** — labels
+  blijven staan (ze zijn vóór de fetch al bekend) en alleen de waarde shimmert.
+  Overlay + CSS zijn weg.
+- Aantal skeleton-rows = het aantal rijen dat het echt wordt (beide lijsten doen
+  `slice(0, 3)`), anders springt de hoogte alsnog bij inladen.
+- De blueprint-regel "skeleton waar de fetch start, niet waar gerenderd wordt"
+  gold hier dubbel: `loadDeltas()` start pas ná de `/daily`-fetch, dus de kaart
+  stond de hele eerste request leeg. `standupSkeleton()` staat nu óók in `load()`.
+- Faalpad moet **elk** skeleton vervangen: de bestaande `catch` schreef alleen
+  naar `#standupTiles` en de cat-tabellen, dus de twee standup-lijsten hadden
+  eeuwig door geshimmerd.
+- Zelfde sessie, zelfde thema: `HEAT_KEYS` miste `dma_omzet`/`gsaas_omzet`, dus de
+  twee kolommen achter "Show DMA & GSAAS revenue" bleven wit tussen gekleurde
+  buren. En een **inline-gestylede** knop (`style="border:1px solid #5e4a90…"` +
+  `onmouseover`) krijgt de blueprint-regel "disabled wint van kleur" **niet**
+  gratis: Export stond paars terwijl hij onklikbaar was. Canonieke klasse
+  (`btn-outline-purple` / `btn-run`) regelt dat wél. Let op: `btn-run` en
+  `text-white` samen is fout — Bootstrap's `.text-white` is `!important` en houdt
+  de disabled-grijs wit.
+
 ## Een page-local tabelklasse die `font-weight` zét, wijkt af van álle blueprint-tabellen (2026-07-29)
 
 "De table headers in SEO Stats lijken anders dan bij andere tools. Misschien zijn ze niet bold?" — klopte, en de oorzaak is contra-intuïtief.
