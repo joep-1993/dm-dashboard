@@ -196,14 +196,17 @@
                                 <button class="btn btn-outline-purple" onclick="refreshPublishStats()">↻ Refresh</button>
                                 <!-- Publish 2.0 → the /faq section (one record per question),
                                      a different store from Publish's /automated-content blob.
-                                     FAQ only; kopteksten is never touched by this.
-                                     Default is incremental (new/changed only); the full
-                                     ~1.7M-record re-push is the separate small button so a
-                                     stray click cannot trigger it. -->
+                                     FAQ only; kopteksten is never touched by this, and the
+                                     Content Type dropdown does NOT apply (only publishContent
+                                     reads it).
+                                     Default is incremental (new/changed only). "Publish all 2.0"
+                                     is the full ~1.7M-record re-push: it stays a btn-sm so it
+                                     reads as the secondary control, and its confirm dialog
+                                     states the full volume before anything is sent. -->
                                 <button class="btn btn-outline-orange" onclick="publishFaqV2()" id="publishV2Btn"
                                         title="Push new &amp; changed FAQ Q&amp;A pairs to the website-configuration /faq section">Publish 2.0</button>
-                                <button class="btn btn-outline-purple btn-sm" onclick="publishFaqV2(true)" id="publishV2FullBtn"
-                                        title="Re-push EVERY FAQ Q&amp;A pair (~1.7M records), not just new/changed ones">all</button>
+                                <button class="btn btn-outline-orange btn-sm" onclick="publishFaqV2(true)" id="publishV2FullBtn"
+                                        title="Re-push EVERY FAQ Q&amp;A pair (~1.7M records), not just new/changed ones">Publish all 2.0</button>
                                 <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">Publish</button>
                             </div>
                         </div>
