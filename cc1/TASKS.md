@@ -4,6 +4,48 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-07-30 (later) — suggestions_new.txt items 1-7 complete, page widths, Healthscore deck
+
+`suggestions_new.txt` is **fully worked through**. Commits: `daf5eea` `73a77ae`
+`2bcdfc5` `cb3acc4` `9cfa834` `6f2d5af` `75c25f8` `7a1a0e4` `b83e3d1` `db7092d`.
+
+- **[1] weekday filter** in Per-day overview — click a Day value to filter, click
+  again to clear. Totals follow the filter; tiles + export stay whole-range.
+- **[7] no view-jump** on that filter: the clicked row keeps its screen position
+  (capture its viewport offset, shift the window by however far it moved). It jumps
+  to the page **holding the clicked date**, not page 1 — clearing a filter grows
+  every index, so the anchor row can land on a later page.
+- **[3] chart chrome + dark hover card**, **[6]** x-ticks read "Jul 29" while the
+  labels stay ISO (the tooltip parses them as dates). Vertical gridlines were
+  removed and then **re-added on request**, in the faint grid colour.
+- **[4] Dagoverzicht** — new single-day section + `GET /api/seo-stats/dashboard`.
+  Device split from `useragent` on BOTH tables (Joep's choice); tablet tested before
+  mobile (an iPad UA has neither "mobi" nor "iphone", Android tablets have
+  "android"). Donuts with hover, validated palette. Tie-out verified against the
+  headline figures.
+- **[5] Top categories collapsed** behind a wide centred banner-button under the
+  title bar (moved out of the header on request).
+- **[2] Healthscore deck** → `Downloads/claude/Healthscore_2.0_vs_1.0.pptx` + `.pdf`,
+  builder in `scripts/analysis/healthscore_hs2_presentation.py`. Style sampled from
+  the GEO deck; every figure from `pa.hs2_shadow` / `pa.healthscore_coverage` /
+  `pa.hs2_sitemap`, seasonal caps recomputed from the CSV (70,2→84,7 visits).
+- **Page widths** — now two sanctioned widths, `col-md-10` default and `col-lg-11`
+  for SEO stats / Healthscore / SEO titles / DMA Exclusions. See UI_BLUEPRINT and
+  LEARNINGS; net effect is only that the two bare-container pages came inside.
+- **Export dropdown** on Recent (FAQ) Results replacing three buttons, both pages.
+- **IndexNow** Submission History table capped at 800px and centred.
+
+**Open / next:**
+- **Example-URL links on Built titles' Facets column — needs a decision.** The link
+  already works where a URL exists; built rows have none *by design*. Two options in
+  BACKLOG; recommendation is the Redshift traffic match with no-link fallback.
+- **Export endpoints are `async def` doing full-corpus work** — one Combined export
+  from the UI freezes the dashboard for everyone. See BACKLOG + LEARNINGS.
+- **healthscore.html's Apps button** renders oversized: its grid SVG has no
+  `width`/`height` (only a viewBox) and it lacks `title="Apps"`/`aria-label="Apps"`.
+- Dagoverzicht costs ~25s on a date not queried before (5-min cache after). A nightly
+  pre-warm of yesterday would hide it; not built.
+
 ### Done 2026-07-30 — SEO stats blueprint pass, Windows launcher, FAQ Publish 2.0 staging
 
 **SEO stats (4 chat items + 1 follow-up)** — `frontend/seo-stats.html`:

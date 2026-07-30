@@ -1,6 +1,93 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `async def` op een full-corpus export blokkeert de héle dashboard-event-loop (2026-07-30)
+
+Tijdens het verifiëren van de nieuwe Export-dropdown vuurde ik alle vijf
+export-endpoints tegelijk af. Gevolg: SEO Stats (en al het andere) reageerde
+minutenlang niet. Joep merkte het terecht op als "doet SEO Stats het niet meer?".
+
+- `/api/export/xlsx`, `/api/faq/export/xlsx`, `/api/export/combined/xlsx` en de twee
+  JSON-varianten zijn **`async def`** en doen daarin blokkerend DB- + workbook-werk
+  over de héle corpus (460.860 URL's, 257.655 met content). FastAPI draait een
+  `async def` **op de event loop**; blokkeert die, dan staat élk ander request stil.
+  Een `def` (zonder async) had FastAPI in de threadpool gezet.
+- Diagnose-signaal dat ik bijna miste: `ss -lnt` toonde **Recv-Q 11** op de
+  listen-socket — elf verbindingen die wachtten om geaccepteerd te worden. Een
+  luisterende socket met een oplopende Recv-Q = de app accepteert niet meer, ook al
+  "leeft" het proces.
+- Nasleep: het proces hield daarna **3,8 GB** resident vast (Python geeft heap niet
+  terug). Restart via de launcher bracht het naar 0,19 GB.
+- **Regel: nooit een endpoint smoke-testen waarvan de kosten de hele corpus zijn.**
+  Kijk eerst naar de handler-vorm (`async def` + blokkerend werk = landmijn) en
+  test desnoods bounded en één-voor-één. De bug zelf staat er nog: één klik op
+  "Combined" uit de UI bevriest het dashboard voor iedereen (BACKLOG).
+- De nieuwe `/api/seo-stats/dashboard` doet het daarom expliciet wél goed: de
+  router draait hem via `run_in_executor`, dus een koude query van ~25s vertraagt
+  niemand anders.
+
+## Een gesynthetiseerde combo heeft géén source-URL — en dat is opzet (2026-07-30)
+
+"Zet example-URL-links op de Facets-waarden in Built titles." De link bestond al
+(`renderPreview()` maakt er een `<a>` van zodra `source_url` absoluut is) en werkt
+in **Pushed titles**, maar in **Built titles** nooit.
+
+- Cijfers: pushed 43.874 van 43.889 rijen hebben een `source_url`; built **0 van
+  33.730**. Existing komt uit een andere tabel en selecteert `NULL::text`.
+- Oorzaak is geen bug: alle huidige built-rijen komen uit
+  `scripts/pagetitles_top5_allchannel_combos.py --write`, dat `source_url=None`
+  meegeeft met de comment "these combos are synthesised from the top-5 ranking, not
+  scraped from one URL". Het zijn cartesische producten van de top-5 facetten per
+  categorie — juist daarom hadden ze nog geen blueprint.
+- **Je kunt zo'n URL niet construeren uit de opgeslagen data:** `key` bevat
+  facet-*namen* (`doelgroep_feestkleding`), niet de facet-*value-ids* die een echte
+  `/c/`-URL nodig heeft. Een voorbeeld-URL moet dus **opgezocht** worden — via een
+  Redshift-traffic-match op `(cat_id, canon_key)` (hergebruikt `parse_url` +
+  `canon_key`) of via de Search API. Opties + advies staan in BACKLOG.
+- Les voor dit soort verzoeken: eerst kijken of het veld leeg is of ontbreekt.
+  "Voeg links toe" bleek "de data bestaat niet, en met reden".
+
+## Part-to-whole: de skill zegt staafdiagram, de gebruiker koos donut — beide keer valideren (2026-07-30)
+
+Dagoverzicht kreeg eerst een 100% gestapelde balk (de `dataviz`-skill stuurt
+part-to-whole daarheen en noemt donuts-voor-nabije-waarden een anti-patroon), en na
+Joeps expliciete verzoek een Chart.js-donut met hover.
+
+- Wat in béide vormen hetzelfde blijft: de kleuren zijn **gevalideerd, niet gekozen
+  op het oog**. `scripts/validate_palette.js` op het merk-trio blauw/oranje/**groen**
+  gaf WARN (adjacent ΔE 6,1 protan); blauw/oranje/**violet** haalt alles (ΔE 19,5).
+  Niet her-kleuren zonder de validator opnieuw te draaien.
+- cta-oranje staat op 2,75:1 tegen wit → de validator eist dan **zichtbare labels**.
+  De legenda onder elke donut draagt daarom waarde **én** aandeel; dat is geen
+  decoratie maar de toegankelijkheids-relief.
+- Chart.js' eigen legenda staat uit: erop klikken verbergt een arc, en dan zijn de
+  overige aandelen van een part-to-whole stil verkeerd.
+- Bij herbouwen: de vorige render-elementen moeten écht opgeruimd (`chart.destroy()`
+  in zowel de skeleton- als de faalpad-branch), anders tekent een oude donut door
+  onder het skelet.
+
+## Paginabreedte: drie breedtes, en de px hangt van de viewport af (2026-07-30)
+
+SEO Stats "leek breder dan de andere tools" — klopte: de app had **drie** breedtes.
+`col-md-10 mx-auto` (meeste tools), `col-lg-11 mx-auto` (SEO titles,
+DMA Exclusions) en een **kale container** (SEO Stats, Healthscore).
+
+- Eerst alles naar `col-lg-11` gezet; op Joeps verzoek teruggedraaid naar **twee
+  gesanctioneerde breedtes**: `col-md-10` als default, `col-lg-11` voor de vier
+  data-dichte pagina's. Netto is alleen de kale-container-pagina's naar binnen
+  gehaald. Staat nu zo in UI_BLUEPRINT.
+- **Quote de klasse, niet de pixels.** Bootstrap's `.container` schaalt zelf mee:
+  1140px op 1200-1399 en 1320px vanaf 1400. Gemeten op een 1500px-venster:
+  `col-md-10` = 1074px content, `col-lg-11` = 1184px. Mijn eerdere "~950 / ~1045"
+  gold dus alleen voor een 1200-1399px venster.
+- Meten kan zonder gokken: render de oude versie uit git (`git show HEAD~1:<pad>`)
+  naar een tijdelijk bestand in `frontend/`, screenshot beide via headless Chrome en
+  zoek de kaartranden in de pixels.
+- Waarom `col-md-10` voor SEO Stats knelt: 8 samenvattings-tegels wikkelen naar 7+1
+  en de 10 metric-pillen naar twee rijen. Een losse gewrapte tegel groeide bovendien
+  tot volle rijbreedte — `.stat-card` heeft nu een `max-width` zodat hij de breedte
+  van z'n buren houdt.
+
 ## `wsl.exe -e bash -c "… &"` start GEEN service op — de Task-Scheduler-launcher faalde elke ochtend (2026-07-30)
 
 "De DM Tools Dashboard windows task faalt elke ochtend." `Last Result: 1` kwam uit

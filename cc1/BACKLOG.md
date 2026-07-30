@@ -8,6 +8,37 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### SEO Titles — example URL per built combo (logged 2026-07-30)
+- [ ] **Give Built-titles rows an example URL so the Facets column can link.** The
+  frontend already renders the Facets value as a link when `source_url` is absolute
+  (works in Pushed titles: 43.874/43.889 rows). Built rows have **0 of 33.730**,
+  deliberately: they come from `scripts/pagetitles_top5_allchannel_combos.py --write`,
+  which synthesises combos as cartesian products of each category's top-5 facets and
+  passes `source_url=None` — they were never a single URL, which is why they had no
+  blueprint. And it cannot be constructed from stored data: `key` holds facet *names*,
+  not the facet *value ids* a `/c/` URL needs. Two ways to look one up:
+  **(a) Redshift traffic match (recommended)** — scan faceted `/c/` URLs, compute
+  `(cat_id, canon_key)` per URL with the existing `parse_url` + `canon_key`, store the
+  highest-traffic match as `example_url`. Reuses the generation path's own code; a
+  combo with no traffic simply gets no link, which is honest. **(b) Search API
+  construction** — resolve one facet value per facet name and build the URL; covers
+  zero-traffic combos but can produce a link to an empty PLP. Either way it needs a
+  new nullable column plus a backfill over the 33.730 built rows. See LEARNINGS
+  "Een gesynthetiseerde combo heeft géén source-URL".
+
+### Content/FAQ export endpoints block the whole app (logged 2026-07-30)
+- [ ] **Make the five export endpoints non-blocking.** `/api/export/xlsx`,
+  `/api/export/json`, `/api/faq/export/xlsx`, `/api/faq/export/json` and
+  `/api/export/combined/xlsx` are `async def` and do blocking DB + workbook work over
+  the entire corpus (460.860 URL's) — so they run **on the event loop** and every
+  other request queues behind them. Surfaced when a smoke test of all five made the
+  dashboard unresponsive for minutes (`ss -lnt` showed Recv-Q 11 on the listen
+  socket) and left the process holding 3,8 GB. One user clicking the new Export
+  dropdown's "Combined" reproduces it. Fix is small: drop `async` (FastAPI then uses
+  the threadpool) or wrap the work in `run_in_executor`, as
+  `seo_stats_router.dashboard` already does. Consider also streaming the workbook or
+  capping the row count. See LEARNINGS "`async def` op een full-corpus export".
+
 ### Auto-Redirects (rurl_optimizer_v2)
 - [ ] **Live subcat probe before accepting a `[maincat]` cross-subcat rescue** (logged 2026-07-21). The Refresh-facets button + auto-refresh (LEARNINGS 2026-07-21) fix *staleness* of `facets.csv`, but not the underlying **Search-API drop**: a rebuild only captures what the bare per-subcat Search-API call returns, and that call non-deterministically omits facets/whole subcats (verified: subcat `389409` had **0 rows** in the snapshot even though its `/c/merk~4874240` is live). So pass-1 `filter_by_subcategory` finds nothing in the source subcat and the engine falls through to the maincat-wide rescue, emitting a `[maincat]` redirect to a *different* subcat (often thin — the Riviera Maison target had count=1). Durable fix: before accepting a `[maincat]` result, **live-probe the source subcat** (`facet_probe.py` already has `_subcat_keyword_facet`/`_fetch_subcat_facets`) for the matched facet value; if it exists there, prefer the same-subcat `/c/...` target over the cross-subcat one. Additive, one throttled call per `[maincat]` candidate. Could also log/flag `[maincat]` cross-subcat rescues for review. See LEARNINGS "Auto-Redirects — a 'cross-subcat' redirect traced to a stale `facets.csv`…".
 
