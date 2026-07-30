@@ -1,6 +1,32 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `/page-titles` is POST-only: er is geen unpublish (2026-07-30)
+
+Joep vroeg impossible/junk-blueprints te "unpublishen". Dat kán niet:
+`OPTIONS /page-titles` → 405 met **`Allow: POST`**. Geen DELETE, geen GET.
+
+- Gevolg: onze rij weggooien is de slechtste optie — de blueprint blijft **live** én
+  verdwijnt uit de dedup-log, dus de generator bouwt en pusht dezelfde combo later
+  opnieuw. Daarom laten alle purge-scripts `status='pushed'` staan.
+- Wat wél kan: (a) de API-eigenaar om een delete-verb vragen, of (b) een neutrale
+  titel over die (cat_id, key) heen upserten — het endpoint is een upsert.
+- Dezelfde upsert-eigenschap maakt een **re-push** wél triviaal: rijen tijdelijk naar
+  `built` zetten, de nieuwe waarden schrijven, `publish_built(combos=…)` en ze
+  flippen terug. Dat is `scripts/analysis/seo_titles_repush_stale.py`; faalt de push,
+  dan blijven ze als `built` met de nieuwe waarden staan — correct, alleen nog niet
+  live. `publish_built()` leest namelijk alléén `status='built'`.
+- Verifieer verbs met OPTIONS vóór je een "verwijder"-opdracht belooft.
+
+## Twee delete-modi met hetzelfde backup-pad = geen backup (2026-07-30)
+
+Mijn purge-script schreef beide modi (`--delete-built`, `--delete-retired-built`)
+naar één CSV. De tweede run overschreef de backup van de eerste: 356 gedumpte
+junk-rijen werden 37 retired-rijen, en de junk-rijen waren al uit de DB. Praktische
+schade nihil (onbruikbare placeholder-rijen die de parser nu weigert), maar de
+belofte "backup vóór delete" hield niet. **Eén bestand per modus**, nooit een pad
+delen tussen twee destructieve paden.
+
 ## Een dag-op-dag CTR-dip najagen vóór je het jaar bekijkt (2026-07-30)
 
 Vraag was "SEO gisteren (29 jul) vs vorige week (22 jul), wat valt op?". Ik vond een

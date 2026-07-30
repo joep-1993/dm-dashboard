@@ -59,23 +59,53 @@ sit below 1700).
 
 Blueprints now: **31.997 built / 43.889 pushed** (was 33.730 / 43.889).
 
+**Done since:**
+- **Stale pushed rows re-pushed.** A facet-order edit only changes future builds;
+  94 pushed rows still carried the old phrase. `scripts/analysis/
+  seo_titles_repush_stale.py` flips exactly those to `built`, rewrites them, and
+  publishes that combo set (`/page-titles` is an upsert). Ran to production:
+  `HTTP 200 {"records":94}`, all back to `pushed`. 66 of the 94 were the
+  `geschikte_leeftijd` pin, so live Speelgoed titles changed too — intended.
+- **Built rows rebuilt for the new order** — 72 rows, via
+  `scripts/analysis/seo_titles_reorder_preview.py --apply`. The "rebuild all 31.997"
+  framing was wrong: only 166 rows differed at all.
+- **RETIRED built rows purged** (37). The other 37 are `pushed` — see below.
+- **Dependency check wired into the generation path.** `pa.facet_dependencies`
+  (711 rows: 504 children need `merk`, 43 need `kleur`) is refreshed with
+  `seo_titles_dependency_audit.py --refresh-cache`, which probes EVERY taxonomy
+  facet so a dependent facet is covered the first time it appears in a URL. The
+  generation loop skips such combos and counts them in a new **Impossible** counter
+  shown in the run stats. An empty cache degrades to the old behaviour (build
+  everything) rather than dropping every combo. Full replace on refresh, so a
+  dependency removed upstream stops blocking.
+
 **Open:**
-- **176 pushed impossible + 4 pushed junk rows** not deleted: removing a pushed row
-  leaves the blueprint LIVE while dropping it from the dedup log, so the combo gets
-  rebuilt and re-pushed. Needs unpublishing at `/page-titles` first — decision open.
-- **74 RETIRED rows** (facet no longer in the taxonomy: `houtsoort_materiaal` 43,
-  `soort_kamerplant` 20, `thema_stickers` 11) — left alone; arguably also dead.
-- **Add the dependency check to the generation path** so impossible combos are never
-  built again (currently only audited after the fact).
-- **Rebuild the 31.997 built rows** so they pick up the new facet order; they still
-  carry titles generated under the old ordering. Deterministic from cat_id+key+rules.
-- **AI check on facet order** (step c of the agreed plan): calibrate against the
-  2.546 existing human rules FIRST, then backfill only genuine gaps, and report
-  disagreements ranked by blueprint impact rather than mass-updating. Note the
-  practical gap is small: of 5.469 taxonomy slugs without a rule only **4** are used
-  in blueprints.
+- **`/page-titles` CANNOT unpublish** — verified: it answers `Allow: POST`, no DELETE,
+  no GET. So the **176 pushed impossible + 4 pushed junk + 37 pushed RETIRED** rows
+  can't be removed from the live site by us. Two routes: ask the API owner for a
+  delete verb, or upsert a neutral title over those combos. Deleting our own row is
+  the wrong move — it leaves the blueprint live AND drops it from the dedup log, so
+  the combo gets rebuilt and re-pushed.
+- **AI check on facet order — agreed plan, not started.** Sequence, in this order:
+  1. **Calibrate before trusting.** Run the classifier over facets that ALREADY have
+     a human rule and measure agreement on (side before/after, is-type-facet). If it
+     can't reproduce human judgement where the answer is known, it doesn't get to
+     fill gaps. Inputs need no extra work: `GET /api/Facets` returns slug + Dutch
+     label for all 3.668 facets.
+  2. **Backfill only genuine gaps**, stamped `source='ai'` with a `reasoning` line so
+     AI rows stay distinguishable from manual ones.
+  3. **Report disagreements** on existing rules ranked by how many blueprint rows
+     they touch — a shortlist to review, never a mass update.
+  Keep expectations calibrated: of 5.469 taxonomy slugs with no rule only **4** are
+  used in blueprints, so the payoff is mostly future-proofing, not a backlog fix.
+  Remember `ai_titles_service` reads the same table, so any change moves the AI
+  unique titles too.
 - **74 non-type facets sitting exactly at 1700** — behaviour is right (they land
   after the category) but by an alphabetical tie-break, not by declaration.
+- **`t_zandspeelg` needed no change** — it is already `is_type_facet=true` (order
+  1031) and the live H1 "Hape Speelgoedemmers Strandspeelgoed" proves it: the
+  category *Zandspeelgoed* is suppressed. If anything reads wrong there it is
+  `thema_speelgoed` (order 1929 + `position=end`) trailing the noun — open question.
 
 ### Done 2026-07-30 (later) — suggestions_new.txt items 1-7 complete, page widths, Healthscore deck
 
