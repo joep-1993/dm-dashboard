@@ -1,6 +1,67 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `vis_url` in de omzet-tabel is de UITGAANDE shop-url, niet de beslist-landingspagina (2026-07-30)
+
+"Kopieer de Apparaten-donuts ook voor Type urls." Visits lukt (R-url 50,9% / C-url
+32,4% / PLP 14,7% — sluit aan op de bekende ~51% R-url), omzet niet.
+
+- Een URL-type-CASE op `bt.cpa_outclicks_transactional.vis_url` gaf **81,8% Overig**.
+  Steekproef van die rijen: `sextoyland.nl/...`, `awin1.com/pclick.php`,
+  `partner.bol.com/click`, `go.wehkamp.nl/ra/...`. Dat veld is de **outclick-bestemming**,
+  niet de beslist-URL waarop het bezoek landde.
+- De paar procenten R-url/C-url die het wél toewees waren *toevallige* substring-hits
+  in shop-URL's — gevaarlijker dan 0%, want op een donut ziet dat plausibel uit.
+- Er is dus **geen** omzet-per-URL-type op dezelfde omzetdefinitie (conversiedatum
+  `click_revenue`). Kan alleen via visit-grain omzet (`fct_visits`) of een join op
+  `visit_id`, en dan telt de donut niet meer op tot het headline-bedrag. Bewust
+  alleen "Type urls - Visits" geleverd.
+- **Les:** een nieuwe uitsplitsing van omzet altijd eerst op "hoeveel valt in de
+  restbak" toetsen. 81,8% Overig is het signaal dat je het verkeerde veld hebt, niet
+  dat de data rommelig is.
+- Ook: classificeer URL-type uit het **pad**, niet uit `dim_visit.type_url` — die is
+  NULL voor ~30% van de rijen (incl. álle `/p/`), dus PLP zou stil in "onbekend"
+  belanden.
+
+## Chart.js tekent zijn tooltip IN de canvas — op een 34px sparkline is dat een streepje (2026-07-30)
+
+De tegel-sparklines kregen een hover-tooltip die afgekapt werd. Oorzaak: de ingebouwde
+tooltip wordt op het canvas gerenderd en het canvas is 34px hoog.
+
+- Fix: `tooltip: { enabled: false, external: … }` + één gedeeld `position: fixed`
+  element op `<body>`, gepositioneerd via `chart.canvas.getBoundingClientRect()` +
+  `tooltip.caretX`. Zo mag hij buiten de tegel én buiten de kaart vallen.
+- Eén node voor alle sparklines (niet vijf), en `destroySparks()` zet hem op
+  `opacity:0` — anders blijft er een tooltip boven een hertekende tegel hangen.
+- `destroySparks(prefix)` is prefix-scoped: de samenvattingsrij (`stat_`) en
+  Dagoverzicht (`spark`) hebben beide sparklines en mogen elkaars charts niet slopen.
+- Tegel zonder delta-badge liet z'n sparkline middenin zweven: `.stat-card` als
+  flex-column + `margin-top:auto` op `.tile-spark` zet elke lijn op de onderrand, dus
+  de vrijgekomen badge-rij wordt ruimte *boven* de lijn.
+
+## WoW op een RATIO hoort in procentpunten (2026-07-30)
+
+CTR/Bounce kregen op verzoek ook een WoW-badge. Een %-verandering van een % leest als
+of het percentage zelf zoveel bewoog, dus die twee tonen **pp** (`-1,2pp`), OPB (€ per
+bezoek) een gewone %-verandering. Dat is dezelfde reden waarom de per-dag-tabel
+percentage-metrics uit z'n WoW-kolommen weglaat (`hasWow()`); nu staat de motivatie op
+beide plekken.
+
+## Unique Titles dekt 1,02M URL's, SEO titles mist 66k van hun combo's (2026-07-30)
+
+Nieuw script `scripts/analysis/unique_titles_vs_seo_titles_gap.py`: welke
+(cat_id, facet-combo) heeft wél een Unique Title maar géén page-title-blueprint?
+
+- 1.022.296 URL's met unique title → 901.520 vallen in een gedekte combo,
+  **67.498 combo's niet**. Daarvan **66.416 buildable** (113.175 URL's) en
+  **1.082 impossible** (dependency-gat, die weigert de generator nu terecht).
+- Concentratie is groot: Laptops alleen al 9.870 URL's, dan Smartwatches 2.093,
+  Schoenen 1.538, Tablets 1.387. Veel diepe 4-facet-combo's
+  (`conditie_systemen~kleur~productlijn_laptop~schermgrootte_laptop`).
+- Het script hergebruikt bewust `parse_url` / `canon_key` / `_resolve_cat` /
+  `load_existing_combos` uit de generator, zodat "al gedekt" exact hetzelfde betekent
+  als daar en een gat écht iets is dat een run zou bouwen.
+
 ## `/page-titles` is POST-only: er is geen unpublish (2026-07-30)
 
 Joep vroeg impossible/junk-blueprints te "unpublishen". Dat kán niet:

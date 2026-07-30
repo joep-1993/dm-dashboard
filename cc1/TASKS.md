@@ -29,6 +29,37 @@ ended up finding a 12-month structural decline behind it.
 - Both LEARNINGS entries logged; memory `c_facet_outclick_rate_erosion` written. One
   open follow-up in BACKLOG (is the post-cliff drift a second decline?).
 
+### Done 2026-07-30 (Dagoverzicht v2 + SEO-titles gap analysis)
+
+**SEO stats — Dagoverzicht.** Legend and the info line removed; headings are now
+"Apparaten - Visits" / "Apparaten - Omzet"; Desktop `#7BAB3A` and Tablet `#AA3A95`
+(trio re-validated: all six checks pass, worst adjacent ΔE 20.6 protan). Day picker +
+Refresh moved out of the purple header into the card body as `btn-outline-purple` with
+`↻ Refresh` — purple-on-purple was unreadable.
+
+**Tiles are sparkline tiles now**, in Dagoverzicht AND the top summary row. The
+Dagoverzicht ones come from a new `series` block on `/api/seo-stats/dashboard` (14
+days, same `_fetch_daily` rows as the tiles, so each series' last point IS the tile
+value); the summary row needs no request — `lastData.daily` is already in memory.
+CTR/Bounce/OPB gained WoW badges: **pp** for the two rates, % for OPB.
+
+**Third donut: "Type urls - Visits"** (R-url 50,9% / C-url 32,4% / PLP 14,7% /
+Browse / Overig), classified from the URL path, summing exactly to the headline
+visits. **No revenue counterpart** — see LEARNINGS: the revenue table's `vis_url` is
+the outbound shop URL.
+
+**Gap analysis: Unique Titles vs SEO titles.**
+`scripts/analysis/unique_titles_vs_seo_titles_gap.py` — of 1.022.296 URLs with a
+unique title, 901.520 fall in a covered (cat, combo); **67.498 combos are not
+covered**: 66.416 buildable (113.175 URLs) + 1.082 impossible. Laptops dominates
+(9.870 URLs), then Smartwatches, Schoenen, Tablets. CSV:
+`Downloads/claude/unique_titles_without_seo_title.csv`.
+**Open decision:** whether to run a generation pass for those 66.416 buildable combos
+— they are mostly deep 4-facet combos, so it would grow the blueprint set by ~2x.
+
+**Rebuild status confirmed:** re-running the reorder check over all 75.849 rows now
+reports **0 changes** — every built AND pushed blueprint matches the current rules.
+
 ### Done 2026-07-30 (SEO titles blueprints) — facet order, impossible + junk combos
 
 **Facet order (DB-only, `pa.facet_position_rules`; no code change).** The category
