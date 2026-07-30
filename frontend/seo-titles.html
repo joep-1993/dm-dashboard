@@ -409,6 +409,9 @@
                 const c = [
                     ['URLs fetched', run.urls_fetched], ['Scanned', run.scanned],
                     ['Dup', run.dup], ['No cat', run.no_cat], ['No facets', run.no_facets],
+                    // Combos skipped because a dependent facet's parent is absent
+                    // (type_parfum without merk etc.) — they cannot exist on the site.
+                    ['Impossible', run.impossible],
                     ['Skipped (exist)', run.skipped_existing], ['New combos', run.new_combos],
                     ['Created', run.titles_generated], ['Titles skipped', run.titles_skipped], ['Failed', run.titles_failed],
                 ];

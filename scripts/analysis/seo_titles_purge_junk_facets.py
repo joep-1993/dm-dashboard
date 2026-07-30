@@ -35,8 +35,12 @@ from backend.database import get_db_connection, return_db_connection  # noqa: E4
 
 API = "http://producttaxonomyunifiedapi-prod.azure.api.beslist.nl"
 HEADERS = {"X-User-Name": "SEO_JOEP"}
-BACKUP = ("/mnt/c/Users/JoepvanSchagen/Downloads/claude/"
-          "seo_titles_deleted_junk_facets_backup.csv")
+# One file PER MODE. These used to share a path, and running --delete-retired-built
+# after --delete-built overwrote the first run's backup with the second's rows — the
+# backup guarantee silently broke. Distinct names, so neither run can clobber the other.
+BACKUP_DIR = "/mnt/c/Users/JoepvanSchagen/Downloads/claude"
+BACKUP_UNKNOWN = f"{BACKUP_DIR}/seo_titles_deleted_junk_facets_backup.csv"
+BACKUP_RETIRED = f"{BACKUP_DIR}/seo_titles_deleted_retired_facets_backup.csv"
 
 
 def taxonomy_slugs():
@@ -53,7 +57,12 @@ def taxonomy_slugs():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--delete-built", action="store_true")
+    ap.add_argument("--delete-built", action="store_true",
+                    help="delete the UNKNOWN (parse-artefact) built rows")
+    ap.add_argument("--delete-retired-built", action="store_true",
+                    help="also delete the RETIRED built rows — combos naming a facet "
+                         "that has since been removed from the taxonomy, so the URL "
+                         "cannot exist any more either")
     args = ap.parse_args()
 
     tax = taxonomy_slugs()
@@ -98,13 +107,24 @@ def main():
     summary("UNKNOWN (parse artefacts — junk)", unknown, unk_slugs)
     summary("RETIRED (facet removed since build — left alone)", retired, ret_slugs)
 
-    if not args.delete_built:
-        print("\n[3/3] dry run — pass --delete-built to remove the UNKNOWN built rows")
+    if not (args.delete_built or args.delete_retired_built):
+        print("\n[3/3] dry run — pass --delete-built and/or --delete-retired-built")
         return
 
-    targets = [(r["cat_id"], r["key"]) for r, _ in unknown if r["status"] == "built"]
-    skipped = sum(1 for r, _ in unknown if r["status"] != "built")
-    print(f"\n[3/3] deleting {len(targets):,} built rows ({skipped:,} non-built left alone)")
+    jobs = []
+    if args.delete_built:
+        jobs.append(("UNKNOWN", unknown, BACKUP_UNKNOWN))
+    if args.delete_retired_built:
+        jobs.append(("RETIRED", retired, BACKUP_RETIRED))
+    for label, items, backup in jobs:
+        _purge(label, items, backup)
+
+
+def _purge(label, items, backup):
+    targets = [(r["cat_id"], r["key"]) for r, _ in items if r["status"] == "built"]
+    skipped = sum(1 for r, _ in items if r["status"] != "built")
+    print(f"\n[3/3] {label}: deleting {len(targets):,} built rows "
+          f"({skipped:,} non-built left alone)")
     if not targets:
         return
     conn = get_db_connection()
@@ -113,13 +133,13 @@ def main():
         cur.execute("""SELECT * FROM pa.seo_titles_blueprints
                        WHERE status='built' AND (cat_id, key) IN %s""", (tuple(targets),))
         dump = [dict(r) for r in cur.fetchall()]
-        with open(BACKUP, "w", newline="", encoding="utf-8") as fh:
+        with open(backup, "w", newline="", encoding="utf-8") as fh:
             if dump:
                 w = csv.DictWriter(fh, fieldnames=list(dump[0].keys()))
                 w.writeheader()
                 for d in dump:
                     w.writerow(d)
-        print(f"      backup: {len(dump):,} rows -> {BACKUP}")
+        print(f"      backup: {len(dump):,} rows -> {backup}")
         cur.execute("""DELETE FROM pa.seo_titles_blueprints
                        WHERE status='built' AND (cat_id, key) IN %s""", (tuple(targets),))
         print(f"      deleted: {cur.rowcount:,} rows")

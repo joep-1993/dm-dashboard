@@ -116,6 +116,55 @@ def _resolve_cat(taxonomy_cache, leaf):
     return None
 
 
+# ---------------------------------------------------------------------------
+# Facet dependencies: a child facet is only selectable once a specific parent
+# facet value is chosen, so a combo naming the child WITHOUT the parent describes
+# a URL nobody can reach. type_parfum ("Collectie") needs merk; every
+# pl_*/productlijnen-* facet needs merk; the kleurtint_* family needs kleur.
+#
+# The map is cached in Postgres rather than fetched per run: deriving it costs one
+# Taxonomy API call per distinct facet (~2.200), which is fine as an occasional
+# refresh and far too slow inside a generation run. Refresh with
+#   venv/bin/python scripts/analysis/seo_titles_dependency_audit.py --refresh-cache
+# ---------------------------------------------------------------------------
+FACET_DEPS_DDL = """
+CREATE TABLE IF NOT EXISTS pa.facet_dependencies (
+    child_slug   TEXT PRIMARY KEY,
+    parent_slug  TEXT NOT NULL,
+    child_id     INTEGER,
+    parent_id    INTEGER,
+    refreshed_at TIMESTAMP DEFAULT now()
+);
+"""
+
+
+def load_facet_deps():
+    """child_slug -> parent_slug. Empty dict when the cache table is absent/empty,
+    which degrades to the old behaviour (build everything) rather than to a run
+    that silently drops every combo."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(FACET_DEPS_DDL)
+        conn.commit()
+        cur.execute("SELECT child_slug, parent_slug FROM pa.facet_dependencies")
+        return {r["child_slug"]: r["parent_slug"] for r in cur.fetchall()}
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def impossible_reason(types, deps):
+    """'<child> needs <parent>' when the combo names a dependent facet without its
+    parent, else None. `types` is the set of facet slugs in the combo."""
+    have = set(types)
+    for t in types:
+        parent = deps.get(t)
+        if parent and parent not in have:
+            return f"{t} needs {parent}"
+    return None
+
+
 def load_rules():
     """facet_slug -> (order_index, is_type_facet) from pa.facet_position_rules."""
     conn = get_db_connection()
@@ -483,6 +532,9 @@ def _run(top_n, date_from, date_to):
 
         rules = load_rules()
         existing = load_existing_combos(force=True)
+        # Facet dependencies, so combos that cannot exist on the site are never
+        # built. Empty map = cache not populated yet -> behave as before.
+        deps = load_facet_deps()
 
         _set(phase="building_blueprints")
         seen = set()          # every (cat_id, canon_key) examined this run
@@ -506,6 +558,14 @@ def _run(top_n, date_from, date_to):
                     continue
                 if not types:
                     _inc("no_facets")
+                    continue
+                # A dependent facet without its parent cannot be reached, so the
+                # blueprint would be dead weight. Checked BEFORE the dedup/existing
+                # checks so the counter reflects every such URL seen, not just the
+                # first occurrence of each combo.
+                bad = impossible_reason(types, deps)
+                if bad:
+                    _inc("impossible")
                     continue
                 # dedup on the canonical (cat_id, key) — identical form used by
                 # load_existing_combos, so the same combo is never counted twice

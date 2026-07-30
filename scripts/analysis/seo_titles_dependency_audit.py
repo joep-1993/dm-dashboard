@@ -116,6 +116,11 @@ def main():
                          "and re-pushed later — strictly worse than leaving the record.")
     ap.add_argument("--backup", default="/mnt/c/Users/JoepvanSchagen/Downloads/claude/"
                                         "seo_titles_deleted_impossible_backup.csv")
+    ap.add_argument("--refresh-cache", action="store_true",
+                    help="write the child->parent map to pa.facet_dependencies, which "
+                         "the generation path reads to skip impossible combos. Probes "
+                         "EVERY taxonomy facet, not just the ones already in use, so a "
+                         "facet appearing in tomorrow's URLs is covered too.")
     args = ap.parse_args()
 
     rows = load_blueprints(args.status)
@@ -131,7 +136,10 @@ def main():
     by_slug, by_id = facet_slug_map()
     print(f"[2/4] taxonomy facets: {len(by_slug):,} slugs")
 
-    slugs = [s for s, _ in used.most_common()]
+    # For the cache we probe EVERY taxonomy facet, not only the ones already used:
+    # the point is to catch a dependent facet the first time it shows up in a URL,
+    # before any blueprint exists for it.
+    slugs = sorted(by_slug) if args.refresh_cache else [s for s, _ in used.most_common()]
     if args.limit_facets:
         slugs = slugs[:args.limit_facets]
     known = [(s, by_slug[s]) for s in slugs if s in by_slug]
@@ -147,6 +155,28 @@ def main():
     print(f"      dependent facets found: {len(parents):,}")
     for child, par in sorted(parents.items(), key=lambda kv: -used[kv[0]])[:15]:
         print(f"        {child:34} needs {par:20} (in {used[child]:,} blueprint rows)")
+
+    if args.refresh_cache:
+        from backend.seo_titles_service import FACET_DEPS_DDL
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(FACET_DEPS_DDL)
+            # Full replace, not an upsert: a dependency REMOVED in the taxonomy must
+            # disappear here too, or generation keeps skipping combos that are valid
+            # again. Same transaction, so the table is never empty for a reader.
+            cur.execute("DELETE FROM pa.facet_dependencies")
+            cur.executemany(
+                """INSERT INTO pa.facet_dependencies
+                       (child_slug, parent_slug, child_id, parent_id, refreshed_at)
+                   VALUES (%s, %s, %s, %s, now())""",
+                [(child, parent, by_slug.get(child), by_slug.get(parent))
+                 for child, parent in parents.items()])
+            conn.commit()
+            print(f"      cache: pa.facet_dependencies replaced with {len(parents):,} rows")
+        finally:
+            cur.close()
+            return_db_connection(conn)
 
     print("[4/4] scanning combos")
     bad = []
