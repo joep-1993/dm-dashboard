@@ -218,6 +218,11 @@
         .dev-legend .dev-val { color: #6a6a78; }
         .dash-sub { font-size: 0.78rem; text-transform: uppercase; letter-spacing: .04em;
                     color: #8a8a8a; margin-bottom: 6px; }
+        /* Top-categories toggle: a wide banner-button under the header, not a small
+           header control. Colour comes from the canonical .btn-outline-purple; this
+           class only sets geometry. */
+        .cat-banner-btn { width: 100%; max-width: 460px; padding: 0.65rem 1.5rem;
+                          font-size: 1rem; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -391,12 +396,16 @@
                         <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
                     </svg>
                 </div>
-                <!-- Collapsed by default (suggestions_new item 5): the section is a
-                     drill-down, not something you need on every page load. The
-                     metric + Top-N controls moved from here into the body — a
-                     collapsed card should not carry controls for content that
-                     isn't on screen, and the header then reads as a plain banner. -->
-                <button class="btn btn-sm btn-light" id="catToggleBtn" type="button"
+            </div>
+            <!-- The toggle is a full-width banner-button UNDER the header rather than
+                 a small control inside it: collapsed, this card is just a title bar,
+                 and the thing you are meant to click should be the obvious target.
+                 Collapsed by default (suggestions_new item 5) — the section is a
+                 drill-down, not something you need on every page load. The metric +
+                 Top-N controls moved into the collapse body, since a collapsed card
+                 should not carry controls for content that isn't on screen. -->
+            <div class="card-body py-3 text-center">
+                <button class="btn btn-outline-purple cat-banner-btn" id="catToggleBtn" type="button"
                         data-bs-toggle="collapse" data-bs-target="#catCollapse"
                         aria-expanded="false" aria-controls="catCollapse">Show categories</button>
             </div>
