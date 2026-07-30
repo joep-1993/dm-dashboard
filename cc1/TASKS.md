@@ -4,6 +4,54 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-07-30 (SEO titles blueprints) — facet order, impossible + junk combos
+
+**Facet order (DB-only, `pa.facet_position_rules`; no code change).** The category
+placeholder sits at `SUBCATEGORY_ORDER = 1700`, so `order_index < 1700` renders
+before the noun and `> 1700` after. Moved after the category on Joep's request:
+`verpakking` 613→2295, `verpakking_bier` 1609→2296, then the contents family
+`inhoud_parfum_ml` 962→2301, `inhoud_aquarium` 957→2302, `inhoud_glijmiddel`
+1500→2303, `inhoud_jerrycan` 1504→2304, `motorinhoud` 1508→2305. Packaging sits
+BEFORE contents deliberately — Dutch titles end with the size ("navulling 100 ml").
+Every row's `reasoning` records the old value. **This table is also read by
+`ai_titles_service`, so the AI unique titles reorder too.**
+
+**Impossible combos (facet dependencies).** The Taxonomy API models them:
+`type_parfum` (3432) depends on `merk` (3027) via `dependentMetadata` /
+`/api/Facets/{id}/value-dependencies`. Audit found **1.553 of 77.619 rows (2,00%)**
+impossible — whole families, not one facet (`pl_*`/`productlijnen-*` need `merk`,
+`kleurtint_*` need `kleur`). **1.377 built rows deleted** (backup in
+Downloads/claude). Script: `scripts/analysis/seo_titles_dependency_audit.py`.
+
+**Junk combos.** `parse_url` accepted a facet with an empty value, so junk URLs
+(`/c/merkm~`) became blueprints. Parser fixed; **356 built rows deleted** of 360
+found. Script: `scripts/analysis/seo_titles_purge_junk_facets.py`.
+
+**Default order fixed:** `UNKNOWN_ORDER` 1500 → 1750, so a facet with no rule now
+trails the noun instead of preceding it. The `side`-column refactor was recommended
+and then WITHDRAWN — see LEARNINGS for why (type facets are the noun and 699 of 747
+sit below 1700).
+
+Blueprints now: **31.997 built / 43.889 pushed** (was 33.730 / 43.889).
+
+**Open:**
+- **176 pushed impossible + 4 pushed junk rows** not deleted: removing a pushed row
+  leaves the blueprint LIVE while dropping it from the dedup log, so the combo gets
+  rebuilt and re-pushed. Needs unpublishing at `/page-titles` first — decision open.
+- **74 RETIRED rows** (facet no longer in the taxonomy: `houtsoort_materiaal` 43,
+  `soort_kamerplant` 20, `thema_stickers` 11) — left alone; arguably also dead.
+- **Add the dependency check to the generation path** so impossible combos are never
+  built again (currently only audited after the fact).
+- **Rebuild the 31.997 built rows** so they pick up the new facet order; they still
+  carry titles generated under the old ordering. Deterministic from cat_id+key+rules.
+- **AI check on facet order** (step c of the agreed plan): calibrate against the
+  2.546 existing human rules FIRST, then backfill only genuine gaps, and report
+  disagreements ranked by blueprint impact rather than mass-updating. Note the
+  practical gap is small: of 5.469 taxonomy slugs without a rule only **4** are used
+  in blueprints.
+- **74 non-type facets sitting exactly at 1700** — behaviour is right (they land
+  after the category) but by an alphabetical tie-break, not by declaration.
+
 ### Done 2026-07-30 (later) — suggestions_new.txt items 1-7 complete, page widths, Healthscore deck
 
 `suggestions_new.txt` is **fully worked through**. Commits: `daf5eea` `73a77ae`

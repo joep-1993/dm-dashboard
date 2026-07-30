@@ -1,6 +1,54 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een before/after-vlag naast `order_index` is géén verbetering — de type-facet is de noun (2026-07-30)
+
+Ik ráádde Joep een `side`-kolom aan (before/after) ter vervanging van het magische
+1700, en trok dat na meting weer in. Wat de data zegt:
+
+- **699 van de 747 type-facetten staan ONDER 1700**, één op order **15**. Een
+  type-facet *vervangt* de categorie, dus de noun staat op de positie van die facet
+  — niet op een vaste plek. `pl_gopro @ 15` geeft
+  `!!pl_gopro!! !!geschikte_leeftijd!! !!kleur!!`.
+- Staat er een type-facet in de combo, dan is er **geen** `!!sub_category!!`. "Voor
+  of na de categorie" is dan niet eens definieerbaar.
+- `geschikte_leeftijd` pint op `noun_order + 0.5` — dat vereist de order-as.
+- Conclusie: de enkele as doet echt werk (positioneren t.o.v. wélke noun het ook is).
+  Een side-vlag zou een **vierde** mechanisme zijn dat de as niet vervangt. Les:
+  meet de verdeling vóór je een schema-refactor aanbeveelt; ik was er zonder die
+  meting middenin de migratie achter gekomen.
+- **Wat wél stuk was: de default viel de verkeerde kant op.** `UNKNOWN_ORDER` was
+  1500, onder `SUBCATEGORY_ORDER` 1700, dus een facet zonder regel rendert *voor* de
+  noun. Nu 1750. Eén constante, geen migratie; gecontroleerd op 4.000 echte keys:
+  0 bevatten een ongeregelde facet, dus geen bestaande blueprint verandert. Nieuwe
+  facetten verschijnen in URL's vóórdat iemand een regel schrijft — voor die groep
+  *is* deze default het gedrag.
+- Restwrat: **74 niet-type-facetten staan exact op 1700**; die tie wordt alfabetisch
+  gebroken tegen de categorie (slug `''` sorteert eerst), dus ze landen ná de
+  categorie. Gedrag is goed, intentie is impliciet.
+
+## `parse_url` eiste een facet-naam maar geen facet-WAARDE — 360 blueprints uit junk-URL's (2026-07-30)
+
+Bij het zoeken naar "facetten zonder order" bleken de ongeregelde slugs in
+blueprint-keys geen facetten: `merkm`, `c`, `me`, `maat_`, `pop`, `populai`,
+`kleur_mode_accessoi`.
+
+- Geen truncatie aan onze kant: de bron-URL's zijn 90-101 tekens en eindigen
+  letterlijk op `/c/<naam>~` — een facetnaam met een **lege waarde**. Junk- of
+  bot-URL's in de traffic-data.
+- De check was `if len(bits) >= 2 and bits[0]` — naam niet-leeg, waarde nooit
+  getoetst. `['merkm','']` haalt dat. Nu `and bits[1]` erbij.
+- Gevolg was een blueprint met een placeholder als `!!merkm!!` die nooit resolvet.
+  **360 rijen** (356 built, 4 pushed), o.a. `kleur_mode_accessoi~merk` in
+  *Brandwerende kluizen* en `c~geschikte_leeftijd` in *Telramen*.
+- **Definieer "junk" principieel, niet met een fragmentlijst.** Mijn handmatige regex
+  vond 321 rijen; "slug niet in de taxonomie én geen regel" vond 360. Zelfde script
+  scheidt een tweede klasse: **RETIRED** (74 rijen) = slug niet meer in de taxonomie
+  maar mét regel — een facet die is opgeheven ná de build. Dat is historie, geen
+  corruptie, dus die blijven staan (open vraag of ze ook dood zijn).
+- Script: `scripts/analysis/seo_titles_purge_junk_facets.py` (dry-run default,
+  backup-CSV vóór delete, verwijdert alleen `built`).
+
 ## `async def` op een full-corpus export blokkeert de héle dashboard-event-loop (2026-07-30)
 
 Tijdens het verifiëren van de nieuwe Export-dropdown vuurde ik alle vijf
