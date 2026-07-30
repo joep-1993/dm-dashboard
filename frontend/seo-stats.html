@@ -15,6 +15,11 @@
             background: #fff; border: 1px solid #e6e3ef; border-radius: 10px;
             padding: 0.75rem 0.5rem; flex: 1 1 130px; min-width: 130px; text-align: center;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            /* max-width matters at the narrower page width: without it, a tile that
+               wraps onto its own row (8 summary tiles, or 5 in Dagoverzicht) grows to
+               the full row and reads as a different component. Capped, the wrapped
+               tile keeps its siblings' width and the centred row looks deliberate. */
+            max-width: 220px;
         }
         .stat-card h3 { margin: 0; font-size: 1.2rem; font-weight: 700; color: #5e4a90; }
         .stat-card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
@@ -273,7 +278,14 @@
         </div>
     </nav>
 
-    <div class="container mt-4 pb-5">
+    <!-- Page width: the blueprint's fixed wrapper (container > row >
+         col-lg-11 mx-auto, ~950px), so this page matches every other tool. It used
+         to be a bare container (~1140px), which is why SEO Stats read wider than
+         the rest of the app. To go back to full width, drop the row/col wrapper
+         (and its two closing divs at the bottom of the container). -->
+    <div class="container mt-5 pb-5">
+      <div class="row">
+        <div class="col-lg-11 mx-auto">
         <div id="metaLine" class="text-muted text-end mb-2" style="font-size:0.82rem;"></div>
 
         <!-- Summary cards -->
@@ -535,6 +547,8 @@
                 </div>
             </div>
         </div>
+        </div>
+      </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -817,11 +831,13 @@
                     borderJoinStyle: 'round',
                 };
             });
-            // x: no gridlines, no axis border, no tick marks — horizontal rules
-            // alone carry the reading, which is the whole look.
+            // x: vertical gridlines ON (Joep's call, re-added after the modern-look
+            // pass dropped them) — same faint GRID_COLOR as the horizontal rules, so
+            // they read as a recessive grid rather than as chart furniture. Axis
+            // border and tick marks stay off.
             const scales = {
                 x: {
-                    grid: { display: false },
+                    grid: { display: true, color: GRID_COLOR, drawTicks: false },
                     border: { display: false },
                     ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16,
                              color: TICK_COLOR, font: { size: 11 }, padding: 8,

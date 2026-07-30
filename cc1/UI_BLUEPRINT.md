@@ -32,9 +32,19 @@ hexes inline, use the token or the class that references it:
   deliberately **excluded from the responsive `@media` padding/font rules** (fixed
   `2.75rem`-wide box at every breakpoint). Icon markup is hand-duplicated per page.
 - **Fixed width wrapper — same on every tool:**
-  `container mt-5 pb-5` › `row` › `col-md-10 mx-auto`. Do not use `col-lg-11`,
-  `container-fluid`, or a bare container (dma-exclusions' `col-lg-11` is a legacy
-  outlier — do not copy it).
+  `container mt-5 pb-5` › `row` › `col-lg-11 mx-auto` (~1045px). Do not use
+  `col-md-10`, `container-fluid`, or a bare container.
+  **Changed 2026-07-30:** the standard used to be `col-md-10 mx-auto` (~950px),
+  with `col-lg-11` called out here as a legacy outlier. Joep's call went the other
+  way — `col-lg-11` is now the standard and all 32 tool pages were converted to it
+  in one pass. Reason: SEO stats and Healthscore had a *bare* container (~1140px)
+  and so read visibly wider than the rest; at `col-md-10` those two pages break
+  badly (SEO stats' 8 summary tiles wrap 7+1 and its 10 metric pills go to two
+  rows), because this app's widest pages carry more horizontal content than
+  `col-md-10` affords. `col-lg-11` removes the odd-page-out effect without
+  squeezing the wide tables.
+  `dashboard.html` is deliberately excluded — it is the Apps launcher, a
+  `col-lg-4 col-md-6` card grid in a bare container, not a tool page.
 - Each logical block is a `card mb-4` with a `card-header` + `card-body`.
 
 ## Section / card headers
