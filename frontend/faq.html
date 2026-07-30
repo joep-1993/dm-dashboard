@@ -200,12 +200,14 @@
                                      Content Type dropdown does NOT apply (only publishContent
                                      reads it).
                                      Default is incremental (new/changed only). "Publish All 2.0"
-                                     is the full ~1.7M-record re-push: it stays a btn-sm so it
-                                     reads as the secondary control, and its confirm dialog
-                                     states the full volume before anything is sent. -->
+                                     is the full ~1.7M-record re-push. It carries no btn-sm: the
+                                     whole row is default-size, so shrinking one button made its
+                                     label read smaller than its neighbours. What guards the full
+                                     push is its confirm dialog, which states the real volume for
+                                     the selected environment before anything is sent. -->
                                 <button class="btn btn-outline-orange" onclick="publishFaqV2()" id="publishV2Btn"
                                         title="Push new &amp; changed FAQ Q&amp;A pairs to the website-configuration /faq section">Publish 2.0</button>
-                                <button class="btn btn-outline-orange btn-sm" onclick="publishFaqV2(true)" id="publishV2FullBtn"
+                                <button class="btn btn-outline-orange" onclick="publishFaqV2(true)" id="publishV2FullBtn"
                                         title="Re-push EVERY FAQ Q&amp;A pair (~1.7M records), not just new/changed ones">Publish All 2.0</button>
                                 <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">Publish</button>
                             </div>
@@ -252,16 +254,18 @@
                 <div class="card mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Recent FAQ Results</h5>
-                        <div>
-                            <button class="btn btn-sm btn-outline-purple" onclick="exportFaqXLSX()">
-                                Export Excel
-                            </button>
-                            <button class="btn btn-sm btn-outline-purple" onclick="exportFaqJSON()">
-                                Export JSON
-                            </button>
-                            <button class="btn btn-sm btn-outline-purple" onclick="exportCombined()" title="Export FAQ + Content combined">
-                                Export Combined
-                            </button>
+                        <!-- One Export button; the dropdown picks what gets exported.
+                             The three options are not just file formats: Excel/JSON are
+                             FAQ-only, Combined is a different endpoint (FAQ + content_top
+                             in one workbook), which is why the title spells it out. -->
+                        <div class="d-flex align-items-center gap-2">
+                            <select class="form-select form-select-sm" id="faqExportFormat" style="width: auto;"
+                                    title="Excel / JSON export the FAQs only. Combined exports FAQ + content_top together in one workbook.">
+                                <option value="xlsx" selected>Excel</option>
+                                <option value="json">JSON</option>
+                                <option value="combined">Combined</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-purple" onclick="exportFaqResults()">Export</button>
                         </div>
                     </div>
                     <div class="card-body">

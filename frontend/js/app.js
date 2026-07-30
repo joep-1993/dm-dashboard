@@ -836,27 +836,31 @@ async function deleteResult(url, index) {
 }
 
 // Export functions
-async function exportXLSX() {
+// Recent Results export: one button, the #exportFormat dropdown decides the target.
+// Replaced three separate Export Excel / JSON / Combined buttons. Same shape as
+// exportFaqResults() in faq.js, with this page's content endpoints.
+//
+// "combined" is a different endpoint (FAQ + content_top in one workbook), not a
+// content-only export in another format — kept in the same list because from the
+// user's side it is still "what do I want out of here".
+const EXPORT_PATHS = {
+    xlsx:     '/api/export/xlsx',
+    json:     '/api/export/json',
+    combined: '/api/export/combined/xlsx',
+};
+
+function exportResults() {
+    const sel = document.getElementById('exportFormat');
+    const fmt = sel ? sel.value : 'xlsx';
+    const path = EXPORT_PATHS[fmt];
+    if (!path) {
+        alert(`Unknown export format: ${fmt}`);
+        return;
+    }
     try {
-        window.location.href = `${API_BASE}/api/export/xlsx`;
+        window.location.href = `${API_BASE}${path}`;
     } catch (error) {
         alert(`Export failed: ${escapeHtml(error.message)}`);
-    }
-}
-
-async function exportJSON() {
-    try {
-        window.location.href = `${API_BASE}/api/export/json`;
-    } catch (error) {
-        alert(`Export failed: ${escapeHtml(error.message)}`);
-    }
-}
-
-async function exportCombined() {
-    try {
-        window.location.href = `${API_BASE}/api/export/combined/xlsx`;
-    } catch (error) {
-        alert(`Combined export failed: ${escapeHtml(error.message)}`);
     }
 }
 

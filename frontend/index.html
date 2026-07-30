@@ -260,16 +260,19 @@
                 <div class="card mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Recent Results</h5>
-                        <div>
-                            <button class="btn btn-sm btn-outline-purple" onclick="exportXLSX()">
-                                Export Excel
-                            </button>
-                            <button class="btn btn-sm btn-outline-purple" onclick="exportJSON()">
-                                Export JSON
-                            </button>
-                            <button class="btn btn-sm btn-outline-purple" onclick="exportCombined()" title="Export FAQ + Content combined">
-                                Export Combined
-                            </button>
+                        <!-- One Export button; the dropdown picks what gets exported.
+                             The three options are not just file formats: Excel/JSON are
+                             content-only, Combined is a different endpoint (FAQ +
+                             content_top in one workbook), which is why the title spells
+                             it out. Mirrors Recent FAQ Results in faq.html. -->
+                        <div class="d-flex align-items-center gap-2">
+                            <select class="form-select form-select-sm" id="exportFormat" style="width: auto;"
+                                    title="Excel / JSON export the generated content only. Combined exports FAQ + content_top together in one workbook.">
+                                <option value="xlsx" selected>Excel</option>
+                                <option value="json">JSON</option>
+                                <option value="combined">Combined</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-purple" onclick="exportResults()">Export</button>
                         </div>
                     </div>
                     <div class="card-body">
