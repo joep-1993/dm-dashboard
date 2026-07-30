@@ -1798,19 +1798,25 @@
         // visible relief. The legend that used to provide it was removed on request,
         // so the relief is now the hover tooltip (which names the device and gives
         // value + share) plus the share printed inside each arc.
-        // URL-type slices. Validated as a set with the dataviz validator in THIS
-        // order (blue, violet, amber, green): all six checks pass, worst adjacent pair
-        // ΔE 22.7 protan. The blue/amber/magenta/green variant also passed but put the
-        // weakest pair next to itself; do not re-order without re-running the script.
-        // "Overig" is deliberately neutral grey: it is a 0,3% residual bucket, not a
-        // category, so it gets the de-emphasis colour rather than a hue of its own
-        // (a grey fails the validator's chroma floor precisely because it is not
-        // meant to read as a category).
+        // URL-type slices reuse the Apparaten palette (Joep's call): R-url takes
+        // mobile's blue, C-url desktop's green, Browse tablet's magenta, and PLP keeps
+        // the amber it already had.
+        //
+        // KNOWN TRADE-OFF, measured not guessed: #7BAB3A (C-url) vs #e8a21e (PLP) is
+        // ΔE 2.7 under protanopia — indistinguishable for ~1% of men, and it is an
+        // ALL-PAIRS failure, so re-ordering the ring does not help. It ships because
+        // the colour choice is deliberate; the mitigation is the share printed inside
+        // each arc plus the hover tooltip, which name the slice without relying on
+        // hue. If it ever needs fixing, changing PLP off amber is the one-line fix
+        // (re-run scripts/validate_palette.js in the dataviz skill afterwards).
+        //
+        // "Overig" stays neutral grey on purpose: a 0,3% residual bucket, not a
+        // category, so it gets the de-emphasis colour rather than a hue of its own.
         const URLTYPE_STYLE = {
             'R-url':  { label: 'R-url',  color: '#1f99c4' },
-            'C-url':  { label: 'C-url',  color: '#8459cf' },
+            'C-url':  { label: 'C-url',  color: '#7BAB3A' },
             'PLP':    { label: 'PLP',    color: '#e8a21e' },
-            'Browse': { label: 'Browse', color: '#26a660' },
+            'Browse': { label: 'Browse', color: '#AA3A95' },
             'Overig': { label: 'Overig', color: '#9a9aa6' },
         };
 
