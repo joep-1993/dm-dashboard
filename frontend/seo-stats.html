@@ -60,9 +60,9 @@
         .swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.15); cursor: pointer; padding: 0; }
         .swatch.sel { outline: 2px solid #5e4a90; outline-offset: 1px; }
         .standup-head { background: transparent; color: #5e4a90; font-weight: 600; font-size: 0.9rem; padding: 4px 2px; }
-        .loading-wrap { position: relative; }
-        .loading-overlay { position: absolute; inset: 0; z-index: 5; display: none; align-items: center; justify-content: center; background: rgba(120,120,130,0.28); border-radius: 0 0 .375rem .375rem; }
-        .loading-wrap.is-loading .loading-overlay { display: flex; }
+        /* This card used to grey itself out behind a spinner overlay while
+           /deltas was in flight; it now draws skeleton rows like every other
+           table (UI_BLUEPRINT "Tables"), so the overlay CSS is gone. */
         .standup-table { font-size: 0.85rem; }
         .standup-table th, .standup-table td { padding: 4px 10px; }
         /* Two of these sit side by side in col-lg-6, so the blueprint's 1rem
@@ -257,8 +257,11 @@
                         <button class="btn btn-preset" onclick="setPreset(90)">90d</button>
                     </div>
                     <div class="ms-auto">
-                        <button class="btn btn-sm text-white" style="background:#CC5500; border:1px solid #CC5500; min-width:90px; transition: background-color 0.2s ease, border-color 0.2s ease;" onmouseover="this.style.backgroundColor='#E97451';this.style.borderColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500';this.style.borderColor='#CC5500'" onclick="load(false)" id="loadBtn">Load</button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="load(true)" title="Bypass cache and re-query Redshift">Refresh</button>
+                        <!-- min-width stays inline: it is geometry, not colour —
+                             it keeps the button from resizing when the label
+                             swaps to "Loading…" mid-fetch. -->
+                        <button class="btn btn-sm btn-run" style="min-width:90px;" onclick="load(false)" id="loadBtn">Load</button>
+                        <button class="btn btn-sm btn-outline-purple" onclick="load(true)" title="Bypass cache and re-query Redshift">↻ Refresh</button>
                     </div>
                 </div>
                 <div id="infoNote" class="info-note mb-3" style="display:none;"></div>
@@ -330,7 +333,7 @@
                         <input class="form-check-input" type="checkbox" id="showDeltas" onchange="toggleDeltas()">
                         <label class="form-check-label" for="showDeltas" style="font-size:0.85rem; cursor:pointer;">Show deltas</label>
                     </div>
-                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportXlsx()" id="exportBtn" disabled>Export Excel</button>
+                    <button class="btn btn-sm btn-outline-purple" onclick="exportXlsx()" id="exportBtn" disabled>Export</button>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -413,8 +416,7 @@
                     </svg>
                 </div>
             </div>
-            <div class="card-body loading-wrap" id="standupBody">
-                <div class="loading-overlay"><div class="spinner-border" style="color:#CC5500;" role="status"><span class="visually-hidden">Loading…</span></div></div>
+            <div class="card-body" id="standupBody">
                 <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="standupTiles"></div>
                 <div class="row g-4">
                     <div class="col-lg-6">
@@ -989,8 +991,13 @@
         // independently per column across the full range (not just the visible page).
         const VISIT_KEYS = ORDER.filter(k => METRICS[k].unit === 'count');
         // Columns that get the diverging red→green heatmap in the per-day table:
-        // all visit counts plus SEO revenue, SEO CTR and SEO Bounce.
-        const HEAT_KEYS = [...VISIT_KEYS, 'seo_omzet', 'seo_ctr', 'seo_bounce'];
+        // all visit counts, all three revenue columns, SEO CTR and SEO Bounce —
+        // i.e. every metric column the table can show. DMA/GSAAS revenue are
+        // included even though they only appear with the "Show DMA & GSAAS
+        // revenue" toggle on: without them those two columns rendered plain
+        // white while every neighbour was shaded. Each column is scaled
+        // independently (visitColScales), so adding them changes nothing else.
+        const HEAT_KEYS = [...VISIT_KEYS, 'seo_omzet', 'dma_omzet', 'gsaas_omzet', 'seo_ctr', 'seo_bounce'];
         // Heatmap columns where high = bad: their scale is inverted so a high value
         // fades red (not green). Bounce rate is the "lower is better" case.
         const HEAT_INVERT_KEYS = ['seo_bounce'];
@@ -1273,6 +1280,30 @@
             document.getElementById('standupRevenueList').innerHTML = standupList(revItems, false, revUp);
         }
 
+        // Loading state for this card = skeleton tiles + skeleton rows, same as
+        // every other table on the page (UI_BLUEPRINT "Tables"). It used to be a
+        // grey overlay + spinner, which hid the table-drawing effect entirely.
+        // The channel labels are the ones /deltas sends back (CHANNEL_LABELS in
+        // seo_stats_service.py); only the numbers shimmer, because the labels are
+        // known before the fetch and a placeholder for them would be noise.
+        const STANDUP_CHANNELS = ['SEO', 'DMA Organic', 'GSAAS'];
+        // 3 rows: both lists slice(0, 3), so the skeleton holds the loaded height.
+        function standupSkeletonTable(n = 3) {
+            return `<table class="table table-sm table-hover perf-table standup-table fixed-cols mb-0">
+                <thead><tr><th class="text-col">Deepest cat</th><th class="text-col">Maincat</th>` +
+                `<th style="width:110px">Δ</th><th style="width:80px">Δ%</th></tr></thead>
+                <tbody>${skeletonRows(4, n)}</tbody>
+            </table>`;
+        }
+        function standupSkeleton() {
+            document.getElementById('standupTiles').innerHTML = STANDUP_CHANNELS.map(label =>
+                `<div class="stat-card"><h3><span class="skel-bar" style="width:60%; margin:0 auto;"></span></h3>` +
+                `<div class="label">${label} visits Δ</div></div>`).join('');
+            ['standupVisitsList', 'standupRevenueList'].forEach(id => {
+                document.getElementById(id).innerHTML = standupSkeletonTable();
+            });
+        }
+
         // Per-table sort override for the standup lists: null = auto (follow SEO
         // delta sign), 'up' = most positive first, 'down' = most negative first.
         let standupSort = { visits: null, revenue: null };
@@ -1282,12 +1313,9 @@
         }
 
         async function loadDeltas(force) {
-            const body = document.getElementById('standupBody');
-            // The Top-categories tables live in their own card, which the
-            // standup card's is-loading overlay does not cover — so they need
-            // their own skeleton. The overlay stays for the standup section
-            // because it also greys the tiles, which skeleton rows cannot.
-            if (body) body.classList.add('is-loading');
+            // Both cards this fetch fills get skeletons: the standup card's own
+            // tiles + lists, and the Top-categories tables (a separate card).
+            standupSkeleton();
             document.getElementById('mainCatBody').innerHTML =
                 skeletonRows(catColumns(false).length);
             document.getElementById('subCatBody').innerHTML =
@@ -1305,13 +1333,15 @@
             } catch (e) {
                 document.getElementById('standupTiles').innerHTML =
                     `<span class="text-danger">Failed to load deltas: ${e.message}</span>`;
-                // Must replace the skeletons, or a failed load shimmers forever.
+                // Must replace every skeleton, or a failed load shimmers forever.
                 ['mainCatBody', 'subCatBody'].forEach(id => {
                     document.getElementById(id).innerHTML =
                         '<tr><td class="text-center text-danger py-3">Failed to load.</td></tr>';
                 });
-            } finally {
-                if (body) body.classList.remove('is-loading');
+                ['standupVisitsList', 'standupRevenueList'].forEach(id => {
+                    document.getElementById(id).innerHTML =
+                        '<div class="text-danger px-2 py-2">Failed to load.</div>';
+                });
             }
         }
 
@@ -1341,11 +1371,13 @@
             const perDayCols = document.getElementById('tableHead').querySelectorAll('th').length
                 || (2 + TABLE_COLS.length + 1);
             document.getElementById('tableBody').innerHTML = skeletonRows(perDayCols);
-            // The Top-categories tables are filled by loadDeltas(), which only
-            // starts after the /daily fetch below resolves — so skeleton them
-            // here as well, or they sit blank for the whole first request.
+            // The Top-categories and Performance-standup tables are filled by
+            // loadDeltas(), which only starts after the /daily fetch below
+            // resolves — so skeleton them here as well, or they sit blank for
+            // the whole first request.
             document.getElementById('mainCatBody').innerHTML = skeletonRows(catColumns(false).length);
             document.getElementById('subCatBody').innerHTML = skeletonRows(catColumns(true).length);
+            standupSkeleton();
             try {
                 const params = new URLSearchParams();
                 if (start) params.set('start_date', start);
