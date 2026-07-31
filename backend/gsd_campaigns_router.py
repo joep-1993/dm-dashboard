@@ -45,7 +45,7 @@ from backend.gsd_ll_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/gsd-campaigns", tags=["gsd-campaigns"])
-executor = ThreadPoolExecutor(max_workers=2)
+executor = ThreadPoolExecutor(max_workers=6)
 
 
 @router.get("/health")

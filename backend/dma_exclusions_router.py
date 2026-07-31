@@ -34,7 +34,7 @@ class OosExcludeBody(BaseModel):
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/dma-exclusions", tags=["dma-exclusions"])
-executor = ThreadPoolExecutor(max_workers=2)
+executor = ThreadPoolExecutor(max_workers=6)
 
 
 async def _run(fn, *args):
