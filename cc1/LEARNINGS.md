@@ -1,6 +1,50 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Twee valkuilen in `cpa_outclicks_transactional`: ~2 rijen per outclick, en shop_name-renames (2026-07-31)
+
+Onderzoek naar "is de CTR-daling sinds 10 maart puur bol Plaza?". Ik ging er twéé keer
+in, en beide keren zat de fout in de sleutel, niet in de conclusie.
+
+**1. Sinds ~10 maart 2026 staan er ~1,9 rijen per outclick in de tabel.**
+Gemeten tegen `fct_visits.number_of_outclicks` (SEO):
+
+| dag | fct outclicks | cpa `COUNT(*)` | cpa `COUNT(DISTINCT sent_outclick_id_stat)` |
+|---|---|---|---|
+| 5 mrt | 44.506 | 45.408 (1,02×) | 44.904 ✓ |
+| 5 apr | 51.714 | 100.429 (**1,94×**) | 51.751 ✓ |
+| 15 jul | 48.113 | 86.493 (**1,80×**) | 48.949 ✓ |
+
+`COUNT(*)` maakte Amazon +346% en liet de totale CTR *stijgen* naar 1,04 — het
+tegenovergestelde van de werkelijkheid. **Gebruik altijd
+`COUNT(DISTINCT sent_outclick_id_stat)`**; dat matcht `fct_visits` binnen 1% aan
+beide zijden van de breuk. Alles wat met `COUNT(*)` over 10 maart heen is gemeten is
+post-change ~2× te hoog.
+
+**2. `shop_name` is GEEN sleutel — bol is op dezelfde shop_id omgedoopt.**
+`shop_id 1`: `bol.com` → `bol.com|Plaza NL`. `shop_id 333289`: `bol.com | Belgie` →
+`bol.com|Plaza BE`. Groeperen op naam over die rename gaf "twee retail-entries naar
+exact 0" — puur artefact. Er verdween niets; de naam veranderde. Daarnaast zijn er
+**twee nieuwe ids** bijgekomen: 665181 `bol.com|NL` en 665180 `bol.com|BE`, oplopend
+vanaf februari. **Groepeer bol (en waarschijnlijk elke marketplace) op `shop_id`.**
+
+**Wat er ná die correcties overblijft — het effect is echt, maar kleiner:**
+- Bol per id, alle 4 accounts: jan 1.199.082 · feb 1.057.946 · mrt 819.864 ·
+  apr 650.340 · mei 720.230 · jun 649.014 · jul 709.053. **Feb→apr −38,5%**, en in juli
+  nog ~40% onder januari. Mijn eerdere "−59,6%" was te hoog: het pre-venster lag vóór
+  de ramp van de nieuwe ids.
+- De **10-maart-stap is echt** en zichtbaar per id: bol 40.802 (9 mrt) → 25.862
+  (10 mrt), −37% in één dag; site-brede SEO-CTR 0,769 → 0,701 diezelfde dag, bij
+  gelijk verkeer (~66k visits).
+- **Substitutie vangt ~70% op.** CTR-decompositie 30d voor/na: bol −0,192,
+  amazon +0,057, rest +0,078 → **netto −0,057** (−7,5%), niet −0,19.
+- **Twee gebeurtenissen die ik eerst samennam**: de rename (namen → 0) en de
+  volumedaling (−38,5%) zijn los van elkaar, weken na elkaar.
+
+**Nog te verifiëren:** de "stervende staart" (fonQ, Naduvi, Aliexpress NL CSS,
+Hema.be → ~0) heb ik óók alleen op naam gemeten — kan dus net zo goed een rename zijn.
+Niet als bevinding gebruiken vóór een check op `shop_id`.
+
 ## Een bar op 100% met een latere fase-tekst leest als "vastgelopen" — maar de run liep gewoon (2026-07-31)
 
 "SEO titles heeft geen done-banner, de statusbar staat nog op 100% met 'Pushing AI

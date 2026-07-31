@@ -4,6 +4,18 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Open — bol/CTR follow-ups (2026-07-31)
+- **Re-check the "dying tail" by `shop_id`.** fonQ, Beckhuis, Naduvi, Aliexpress NL CSS,
+  PetsHome, Hema.be all read as going to ~0 across 10 March, but that was measured on
+  `shop_name` — the exact trap that made the bol reading wrong twice. May be renames.
+- **The residual −0,057 CTR after substitution**: is it listing density (fewer tiles per
+  page) or mix? Amazon + rest recovered ~70% of bol's loss; the rest reached the metric.
+- **What the two new bol ids (665180/665181) actually are** — retail moving to its own
+  account (re-composition) or incremental volume? They carry ~185k/month combined now.
+- Both memories were corrected on 2026-07-31: the event is bol measured BY ID, not a
+  "Plaza cliff", and any number from `cpa_outclicks_transactional` needs
+  `COUNT(DISTINCT sent_outclick_id_stat)`.
+
 ### Done 2026-07-30 (analysis) — SEO 29 vs 22 Jul read, and the /c/ CTR erosion root cause
 
 Redshift-only session, no code changes. Asked for a yesterday-vs-last-week SEO read;
