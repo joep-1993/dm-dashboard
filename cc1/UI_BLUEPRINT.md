@@ -357,9 +357,39 @@ Two flavours — pick by whether the work is cancellable:
    </div>
    ```
 
+### The status-bar lifecycle — three rules (added 2026-07-31)
+
+Learned from SEO Titles' Publish, which sat at **100% / "Pushing AI unique titles…"**
+and never produced a banner. Nothing was broken — the run genuinely had ~30 minutes of
+work left — but the UI made a working run look hung. Apply these to **every**
+status-bar process, not just this one.
+
+1. **A later opaque phase must NOT hold a determinate bar at 100%.** When the measured
+   phase (batch pushing) finishes and an unmeasurable one starts (per-URL AI titles,
+   dedup refresh), switch the track to **`.progress.indeterminate`** — the shared CSS in
+   `style.css` slides a 35% segment across it — and blank the percent readout. Movement
+   says "busy", the length claims nothing. A full bar reads as *finished and stuck*,
+   which is precisely how it was misread.
+2. **Completion must not depend on the client's own request resolving.** A long POST is
+   the least reliable thing in the flow: reload the tab, lose the response to a proxy
+   timeout, open a second tab, and the `finally` that hides the bar never runs. Poll a
+   **server-side status endpoint** and let *whichever notices first* close the run out —
+   funnel both paths through one `finalise…()` guarded by a boolean so the banner is
+   written once. If the POST does come back it carries more detail (per-batch responses),
+   so let it reset the guard and overwrite the poller's simpler banner.
+3. **Adopt a run already in progress on page load.** If the status endpoint says
+   `running`, show the bar and start polling instead of rendering an idle page. Otherwise
+   a reload during a 30-minute push looks like nothing is happening, and the user starts
+   a second one.
+
+Corollary for the failure path: a dropped response on a long push does **not** mean the
+push failed. Say "request lost — the push may still be running" (tone `warning`), not
+"failed" — and only if the poller has not already reported success.
+
 **Never replace a banner with an *indeterminate* bar.** A bar implies "this much
 is done"; if you have no real number, an animated bar is a lie and the old text
-banner was more honest. To get real numbers from a synchronous POST, keep the
+banner was more honest. (Rule 1 above is the opposite case: an indeterminate bar
+*during* a phase that is still running, not in place of a finished run's banner.) To get real numbers from a synchronous POST, keep the
 endpoint as-is (FastAPI already runs it via `run_in_executor`, so it's off the
 event loop), have the service write progress into a module-level state dict, and
 add a `GET /<thing>-status` the frontend polls **while its own POST is still in

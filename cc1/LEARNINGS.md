@@ -1,6 +1,30 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een bar op 100% met een latere fase-tekst leest als "vastgelopen" — maar de run liep gewoon (2026-07-31)
+
+"SEO titles heeft geen done-banner, de statusbar staat nog op 100% met 'Pushing AI
+unique titles…'." Eerste reflex zou zijn: bug in het faalpad. Meten zei iets anders —
+`/publish-status` gaf `status: running, phase: unique_titles`, 33.749/33.749 blueprints
+gepusht, 0 failed, al 18 minuten bezig. **De bar had gelijk; de presentatie niet.**
+
+- De `pct` dekt alleen de *gemeten* fase (batch-push). Daarna volgt een fase van één
+  opake call (AI-titels per URL), en die stond dus op 100% met een andere tekst. Precies
+  het beeld van "klaar maar hangt". Fix: track op `.progress.indeterminate` (shared CSS
+  toegevoegd aan `style.css`) en het percentage leegmaken.
+- **Tweede, echte fragiliteit:** het afronden hing volledig aan het resolven van de eigen
+  POST. Tab herladen, respons kwijt door een proxy-timeout, tweede tab open — en de
+  `finally` die de bar opruimt loopt nooit. Nu sluit ook de **poller** de run af zodra de
+  server `done`/`error` meldt, via één `finalisePublish()` met een guard-boolean; komt de
+  POST alsnog terug, dan wint die (meer detail) door de guard te resetten.
+- En: bij page-load een lopende run **adopteren** (`status: running` → bar + poll), anders
+  ziet een reload tijdens een 30-minuten-push uit als "niets gebeurt" en start iemand een
+  tweede push.
+- Faalpad-nuance: een verloren respons op een lange push is géén mislukte push. Meld
+  "request lost — may still be running" (tone `warning`), niet "failed".
+- Regels staan nu in UI_BLUEPRINT onder "The status-bar lifecycle" — geldt voor élk
+  statusbar-proces, niet alleen deze.
+
 ## URL-aantallen zijn een slechte proxy voor waarde — en let op de hardcoded `date_to` (2026-07-31)
 
 "66.416 ongedekte combo's, Laptops 9.870 URL's" klonk als een berg werk die zich
