@@ -1,6 +1,30 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## URL-aantallen zijn een slechte proxy voor waarde — en let op de hardcoded `date_to` (2026-07-31)
+
+"66.416 ongedekte combo's, Laptops 9.870 URL's" klonk als een berg werk die zich
+terugbetaalt. Met échte SEO-bezoeken erbij (365d) verdampt dat: **40.156 buildable
+combo's = 73.086 bezoeken/jaar en EUR 5.419**, ~1,8 bezoek per combo per jaar, en
+**geen enkele** ongedekte combo haalt één bezoek per week (beste: 35/jaar).
+
+- Ik had eerst "bouw diepte 3-4 voor Laptops" voorgesteld op basis van URL-aantallen.
+  Fout: per diepte is het 1,5-3,6 bezoek/combo — er zit geen rijke laag in. Laptops,
+  dat op URL's de grootste leek (9.870), is **569 bezoeken/jaar**.
+- Bruikbare drempelcurve: >=3 = 6.616 combo's/45% · **>=6 = 1.789/21%** · >=12 = 284/5,7%
+  · >=52 = 0. Gebouwd is de >=6-snede: 4,5% van de combo's voor een vijfde van het
+  verkeer, +2,4% blueprintset i.p.v. +53%.
+- **`fetch_top_urls()` heeft een hardcoded `date_to=20260608`.** Een run met alleen
+  `--date-from 20260501` meet dus 39 dagen, niet "3 maanden" — precies de fout die ik
+  eerst maakte, en die alle seizoensvraag verborg (Kerstversiering staat 3× in de top 12
+  over een jaar, en 0× in het korte venster). Geef altijd beide datums mee.
+- Meet waarde met de **query die de generator zelf gebruikt** (`fetch_top_urls`), niet
+  met een eigen variant: dan is "wat deze combo krijgt" per definitie wat de generator
+  gezien zou hebben.
+- Wat dit NIET meet: potentieel. Als dunne pagina's slecht ranken *doordat* ze geen
+  titel hebben, onderschat huidig verkeer de winst. Dat argument is legitiem maar niet
+  met deze data te beslechten — expliciet als open punt in TASKS gezet.
+
 ## `vis_url` in de omzet-tabel is de UITGAANDE shop-url, niet de beslist-landingspagina (2026-07-30)
 
 "Kopieer de Apparaten-donuts ook voor Type urls." Visits lukt (R-url 50,9% / C-url

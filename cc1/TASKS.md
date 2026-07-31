@@ -29,6 +29,44 @@ ended up finding a 12-month structural decline behind it.
 - Both LEARNINGS entries logged; memory `c_facet_outclick_rate_erosion` written. One
   open follow-up in BACKLOG (is the post-cliff drift a second decline?).
 
+### Done 2026-07-31 — gap combos measured on TRAFFIC, then 1.789 built
+
+**The gap is almost all dead traffic — URL counts were a bad proxy.** The earlier
+"66.416 buildable gaps, Laptops 9.870 URLs" framing counted URLs, which says nothing
+about demand. `scripts/analysis/seo_titles_gap_traffic.py` attaches real SEO visits via
+`fetch_top_urls()` (the generator's OWN query, so a combo's number is what the
+generator would have seen).
+
+Measured 2025-07-30..2026-07-30 (365d): **40.156** buildable uncovered combos drew
+**73.086 visits/yr** and **EUR 5.419** — ~1,8 visits and 13 eurocent per combo per
+year. Not one uncovered combo reaches a visit per WEEK (best: 35/yr, Bouwstenen). Depth
+does NOT stratify: 1,5-3,6 visits/combo at every level, so there is no rich seam — the
+"just build depth 3-4" idea was wrong for the same reason.
+
+Threshold curve: >=3 visits/yr = 6.616 combos / 45% of gap traffic · **>=6 = 1.789
+combos / 21%** · >=12 = 284 / 5,7% · >=52 = **0**.
+
+**Built the >=6 cut: 1.789 blueprints** via
+`scripts/analysis/seo_titles_build_gap_combos.py --apply` — 4,5% of the combos for a
+fifth of the traffic, growing the set ~2,4% instead of ~53%. status='built' (Publish
+stays a deliberate click) and each row carries its sample_url as `source_url`, so these
+are the FIRST built rows whose Facets column links to a live example. Blueprints now
+**33.749 built / 43.889 pushed**. Undo is printed by the script.
+
+**WATCH THE DATE WINDOW.** `fetch_top_urls()` defaults `date_to` to a hardcoded
+**20260608**, so a run without `--date-to` silently stops there. A first pass with only
+`--date-from 20260501` therefore measured 39 days, not 3 months, and hid all
+seasonality (Kerstversiering is 3 of the top 12 over a full year). Always pass both.
+
+**Answered:** the 31.960 built titles did NOT need regenerating for the facet-order
+work — the reorder check reports 0 stale rows across all 75.849 blueprints. Note there
+is no before/after COLUMN; what changed was order values plus UNKNOWN_ORDER 1500->1750.
+
+**Open:** whether to also build the 3-5 visits/yr band (4.827 more combos, another 24%
+of gap traffic). Counter-argument worth weighing: this measures existing demand, not
+headroom — if thin pages underperform *because* they lack a title, current visits
+understate the upside, and the 3+-facet tail grows +14% YoY.
+
 ### Done 2026-07-30 (Dagoverzicht v2 + SEO-titles gap analysis)
 
 **SEO stats — Dagoverzicht.** Legend and the info line removed; headings are now
