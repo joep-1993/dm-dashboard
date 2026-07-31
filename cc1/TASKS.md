@@ -4,6 +4,29 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-07-31 (evening) — suggestions_new round 3 (SEO Stats layout + GSD dates)
+
+New bullets in `suggestions_new.txt` (5 SEO Stats / 2 GSD Campaigns), all shipped:
+
+- **Refresh in Performance per day is transparant** — de witte pil eraf, override
+  verwijderd. Zie LEARNINGS: die card-headers renderen grijs, niet paars
+  (`!important` in style.css verslaat de inline stijl). UI_BLUEPRINT herschreven.
+- **Sectie-orde**: Performance per day → **Per-day overview → Top categories** →
+  Dagoverzicht → Performance standup.
+- **"Update Excel" module weg uit de frontend** (kaart + `ps-` CSS + IIFE).
+  `performance-standup.html` en `/api/performance-standup/run` bestaan nog en werken
+  nog; alleen de ingangen zijn weg (comment in dashboard.html bijgewerkt).
+- **DMA Organic visits Δ sparkline = `#d63384`**, via `STANDUP_SPARK_COLORS` — alleen
+  in Performance standup, `METRICS.dma_visits` (chart + topregel) blijft violet.
+- **GSD Country-header niet meer afgekapt**: kolom 3 van `.ll-history-table` van 90px
+  naar 120px (14px padding + 1,2rem sorteer-gutter vraagt ~92px). Meteen ook de
+  "All Countrie" selects van 120 → 145px, in beide tabellen.
+- **GSD Date-kolom is 100% gevuld** (was 47 van 2.793 leeg): root cause +
+  code-fix + change_event-backfill, zie LEARNINGS. **Prod (win-htz-006) heeft de
+  code-fix nog niet** — tot een deploy blijven nieuwe creaties leeg en is
+  `POST /api/gsd-campaigns/campaigns/backfill-created-dates?days=29` de tijdelijke
+  vulling (change_event bewaart ~30 dagen, dus niet langer laten liggen).
+
 ### Done 2026-07-31 (later) — SEO Stats interaction pass + FAQ publish bar
 
 - **"Visits & revenue per day" → "Performance per day".**

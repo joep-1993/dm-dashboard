@@ -155,7 +155,16 @@ BIDS_C = [0.08, 0.09, 0.11, 0.12, 0.14, 0.14, 0.17, 0.18, 0.22, 0.26, 0.29, 0.29
 
 GEO_TARGETS = {"NL": "2528", "BE": "2056", "DE": "2276"}
 
-CAMPAIGN_NAME_REGEX = re.compile(r"\[shop:([^\]]+)\].*?\[shop_id:(\d+)\].*?\[label:([^\]]+)\]")
+# One regex PER FIELD, deliberately not one combined all-or-nothing pattern. The
+# old `\[shop:…\].*?\[shop_id:(\d+)\].*?\[label:…\]` returned shop_name = shop_id =
+# label = None for any name that deviated even slightly — e.g.
+# "[sWalkworld.nl] [shop_id:664923] … [label:a]" (mangled shop tag) or
+# "[shop:Petgamma.com] [shop_id:655526] … [merk:royal_canin]" (no [label:]) — which
+# dropped those campaigns out of every shop_id-keyed join, including the
+# Campaigns-created Date column, whose date was in the table all along.
+SHOP_NAME_REGEX = re.compile(r"\[shop:([^\]]+)\]")
+SHOP_ID_REGEX = re.compile(r"\[shop_id:(\d+)\]")
+LABEL_REGEX = re.compile(r"\[label:([^\]]+)\]")
 COUNTRY_REGEX = re.compile(r"\[domein:(\w+)\]")
 
 # Default daily budget in micros. 10 EUR = 10_000_000 micros, matching the
@@ -512,18 +521,36 @@ def record_created_campaigns(
     if created_date is None:
         created_date = datetime.now().strftime("%Y-%m-%d")
     seen: Dict[tuple, tuple] = {}
+    dropped = 0
     for e in entries or []:
+        # Second source for shop_id/country: the campaign name itself. The run
+        # loop is supposed to attach both, and once did not — a missing key made
+        # this function insert nothing at all, silently. Re-deriving from the name
+        # means a caller can only lose a date if the name is unparseable too.
+        parsed = _parse_campaign_name(e.get("campaign_name") or "")
+        raw_id = e.get("shop_id") or parsed.get("shop_id")
         try:
-            shop_id_int = int(e["shop_id"]) if e.get("shop_id") else None
+            shop_id_int = int(raw_id) if raw_id else None
         except (TypeError, ValueError):
             shop_id_int = None
-        country = (e.get("country") or "").upper()
+        country = (e.get("country") or parsed.get("country") or "").upper()
         if shop_id_int is None or not country:
+            dropped += 1
             continue
         key = (shop_id_int, country)
         if key not in seen:
-            seen[key] = (shop_id_int, country, created_date, e.get("shop_name"))
-    return upsert_created_dates(list(seen.values()))
+            seen[key] = (shop_id_int, country, created_date,
+                         e.get("shop_name") or parsed.get("shop_name"))
+    if dropped:
+        # Loud, because the failure mode is invisible otherwise: the run reports
+        # success, the table just never grows.
+        logger.warning(
+            "record_created_campaigns: %d/%d created entries had no usable "
+            "(shop_id, country) and got NO creation date", dropped, len(entries or []),
+        )
+    result = upsert_created_dates(list(seen.values()))
+    result["dropped"] = dropped
+    return result
 
 
 def get_created_dates() -> Dict[str, str]:
@@ -657,11 +684,12 @@ def _parse_campaign_name(name: str) -> Dict[str, Optional[str]]:
         "label": None,
         "country": "NL",
     }
-    m = CAMPAIGN_NAME_REGEX.search(name)
-    if m:
-        result["shop_name"] = m.group(1)
-        result["shop_id"] = m.group(2)
-        result["label"] = m.group(3)
+    # Field by field: a missing/mangled shop tag must not cost us the shop_id.
+    for key, rx in (("shop_name", SHOP_NAME_REGEX), ("shop_id", SHOP_ID_REGEX),
+                    ("label", LABEL_REGEX)):
+        m = rx.search(name)
+        if m:
+            result[key] = m.group(1)
     cm = COUNTRY_REGEX.search(name)
     if cm:
         result["country"] = cm.group(1).upper()
@@ -2855,6 +2883,12 @@ def run_gsd_script(
 
                 for cr in campaign_results:
                     cr["shop_name"] = shop_name
+                    # shop_id is NOT decoration: record_created_campaigns() keys the
+                    # creation-date table on (shop_id, country) and skips any entry
+                    # without it. Omitting it here made every post-run date log a
+                    # silent no-op, which is why the Campaigns-created Date column
+                    # went blank for everything created after the 2026-07-16 seed.
+                    cr["shop_id"] = shop_id
                     cr["country"] = country
                     cr["type"] = campaign_type
                     cr["customer_id"] = customer_id

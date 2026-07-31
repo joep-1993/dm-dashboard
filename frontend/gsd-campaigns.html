@@ -90,7 +90,11 @@
         .ll-history-table th, .ll-history-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .ll-history-table th:nth-child(1), .ll-history-table td:nth-child(1) { width: 150px; }  /* Date */
         .ll-history-table th:nth-child(2), .ll-history-table td:nth-child(2) { width: 220px; }  /* Shop */
-        .ll-history-table th:nth-child(3), .ll-history-table td:nth-child(3) { width: 90px; }   /* Country */
+        /* Country: 90px used to clip the header to "Countr…". The word needs ~58px, on
+           top of 14px left padding and the .sortable 1.2rem right gutter that reserves
+           room for the ⇅ glyph — so anything under ~92px truncates. 120px leaves slack
+           for the ▲/▼ swap when sorted; the values themselves are 2-letter codes. */
+        .ll-history-table th:nth-child(3), .ll-history-table td:nth-child(3) { width: 120px; }  /* Country */
         .ll-history-table th:nth-child(4), .ll-history-table td:nth-child(4) { width: 110px; }  /* Action */
         /* Campaign (5th column) takes the remaining width. */
         .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
@@ -273,7 +277,7 @@
             </div>
             <div class="card-body">
                 <div class="filter-row d-flex gap-2 align-items-center mb-3">
-                    <select class="form-select form-select-sm" id="filterCountry" style="max-width: 120px;" onchange="applyFilters()">
+                    <select class="form-select form-select-sm" id="filterCountry" style="max-width: 145px;" onchange="applyFilters()">
                         <option value="">All Countries</option>
                         <option value="NL">NL</option>
                         <option value="BE">BE</option>
@@ -387,7 +391,8 @@
             </div>
             <div class="card-body">
                 <div class="filter-row d-flex gap-2 align-items-center mb-3">
-                    <select class="form-select form-select-sm" id="llFilterCountry" style="max-width: 120px;" onchange="applyLLFilter()">
+                    <!-- 120px clipped the label to "All Countrie"; the caret needs ~20px of the box. -->
+                    <select class="form-select form-select-sm" id="llFilterCountry" style="max-width: 145px;" onchange="applyLLFilter()">
                         <option value="">All Countries</option>
                         <option value="NL">NL</option>
                         <option value="BE">BE</option>

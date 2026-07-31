@@ -1,6 +1,53 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De paarse card-headers in SEO Stats zijn NOOIT paars geweest (2026-07-31)
+
+Joep: *"de Refresh button in Performance per day moet transparant zijn (is nu wit)."*
+Ik had die witte pil er zelf opgezet, met als argument "de header is paars, dus een
+transparante paarse button verdwijnt". Dat argument was **fout**, en de screenshot
+bewees het:
+
+- `style.css` heeft `.card-header { background-color: var(--color-section) !important;
+  color:#333 !important }`. Een `!important` in een stylesheet **verslaat een inline
+  declaratie** — dus `style="background:#5e4a90; color:#fff"` op die headers is dode
+  CSS en elke header rendert standaard lichtgrijs.
+- Gevolg: de canonieke `btn-outline-purple` (transparant, paarse rand/tekst) was al
+  goed; mijn "fix" maakte er de enige witte pil van de hele app van. Twee ronden
+  redeneren over hover-specificiteit gingen over een probleem dat niet bestond.
+- **Les:** kleur waartegen je iets zet, meet je in de browser (of via een headless
+  screenshot), niet in de HTML. `!important` in de shared CSS betekent dat de inline
+  stijl naast je neus liegt. Staat nu zo in UI_BLUEPRINT.
+- Bijkomend: die inline `background:#5e4a90` op vijf headers in `seo-stats.html` is
+  misleidend maar onschadelijk; laat staan of ruim op, maar geloof hem niet.
+
+## GSD "Campaigns created" Date bleef leeg omdat de created-entries geen shop_id meekregen (2026-07-31)
+
+47 van 2.793 regels hadden `-` in de Date-kolom, en omdat de tabel op campaign_id DESC
+sorteert stonden 45 daarvan op pagina 1 — het leek dus veel erger dan 1,7%. Twee losse
+oorzaken:
+
+1. **De echte bug.** `record_created_campaigns()` keyt op `(shop_id, country)` en slaat
+   elke entry zonder shop_id over. De run-loop verrijkte de created-dicts met
+   `shop_name`/`country`/`type`/`customer_id`/`campaign_id` — **maar niet met
+   `shop_id`**. Dus elke run logde stilzwijgend 0 datums. Bewijs: alle 761 rijen in
+   `pa.jvs_gsd_campaign_created` hadden `recorded_at` op 2026-07-16 (de seed), geen
+   enkele erna, terwijl er wél campagnes bij kwamen. `cr["shop_id"] = shop_id` +
+   fallback op de naam + een `logger.warning` als er entries afvallen (een
+   best-effort logger die 0 inserts doet mag niet onzichtbaar blijven).
+2. **All-or-nothing naamregex.** `CAMPAIGN_NAME_REGEX` eiste `[shop:…]` én
+   `[shop_id:…]` én `[label:…]` in één match, dus voor
+   `[sWalkworld.nl] [shop_id:664923] … [label:a]` (verminkte shop-tag) en voor een
+   `[merk:royal_canin]`-campagne zonder `[label:]` was **ook shop_id None** — hun datum
+   stond de hele tijd wél in de tabel. Nu één regex per veld.
+
+Vullen: `POST /campaigns/backfill-created-dates?days=29` haalt de CREATE-datum uit
+`change_event` (retentie ~30 dagen) → 9 shops ingevoegd, 0 regels nog zonder datum.
+Wie de campagnes van vandaag maakte: **prod** (win-htz-006:3003, run liep nog op
+12:52, `{"current":12,"total":16}`), niet deze laptop — vandaar ook geen activity-log
+regel, die schrijft de frontend pas ná afloop. Prod krijgt de fix pas bij een deploy;
+tot die tijd is de backfill het net onder het trapeze.
+
 ## Klikbaar én hoverbaar op dezelfde plek vecht met zichzelf (2026-07-31)
 
 Joep vroeg de samenvattingstegels in SEO Stats klikbaar te maken als metric-toggle, en
