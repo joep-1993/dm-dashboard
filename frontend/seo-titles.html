@@ -751,6 +751,7 @@
             const btn = document.getElementById('btnPublish');
             btn.disabled = true; btn.textContent = 'Publishing…';
             hideDoneBanner('publishDone');
+            publishFinalised = false;
             showPublishProgress(n || null);
             try {
                 const bodyReq = { env: 'production' };
@@ -774,15 +775,22 @@
                 // Raw response stays available, but folded away — the summary is the point.
                 const detail = `<details class="mt-2"><summary class="small">Response detail</summary>` +
                     `<pre class="mb-0 mt-2 small">${esc(JSON.stringify(d.batches || d, null, 2))}</pre></details>`;
-                showDoneBanner('publishDone', bits.join(' · ') + detail,
+                // The POST carries more detail than the status endpoint (per-batch
+                // response, unique-titles outcome), so if it does come back it wins:
+                // reset the guard and overwrite whatever the poller wrote.
+                publishFinalised = false;
+                finalisePublish(bits.join(' · ') + detail,
                     (failed || skipped || utFailed || d.success === false) ? 'warning' : 'done');
             } catch (e) {
-                showDoneBanner('publishDone', `<strong>Publish failed.</strong> ${esc(e.message)}`, 'error');
+                // Only claim failure if the poller has not already reported success —
+                // a dropped response on a 30-minute push does not mean the push failed.
+                if (!publishFinalised) {
+                    finalisePublish(`<strong>Publish request lost.</strong> ${esc(e.message)}`
+                        + ` The push may still be running — reopen this page to see its status.`, 'warning');
+                }
             } finally {
-                hidePublishProgress();
                 btn.disabled = false;
-                previewSelected.clear();
-                loadStats(); loadPreview();
+                btn.textContent = 'Publish';
             }
         }
 
@@ -797,12 +805,25 @@
             refreshing_dedup: 'Refreshing dedup set…', done: 'Done', error: 'Failed',
         };
 
-        function setPublishProgress(pct, label) {
+        // Phases that are ONE opaque backend call have no honest percentage, so the
+        // bar goes indeterminate instead of parking at 100% — a full bar reads as
+        // "finished and hung", which is exactly how the AI-unique-titles phase looked.
+        const PUBLISH_OPAQUE_PHASES = new Set(['unique_titles', 'refreshing_dedup']);
+
+        function setPublishProgress(pct, label, indeterminate = false) {
             const bar = document.getElementById('publishProgressBar');
-            const p = Math.max(0, Math.min(100, pct));
-            bar.style.width = p + '%';
-            bar.setAttribute('aria-valuenow', String(Math.round(p)));
-            document.getElementById('publishProgressPct').textContent = Math.round(p) + '%';
+            const track = bar.parentElement;
+            track.classList.toggle('indeterminate', !!indeterminate);
+            if (indeterminate) {
+                bar.style.width = '';                       // the CSS animation owns it
+                bar.removeAttribute('aria-valuenow');
+                document.getElementById('publishProgressPct').textContent = '';
+            } else {
+                const p = Math.max(0, Math.min(100, pct));
+                bar.style.width = p + '%';
+                bar.setAttribute('aria-valuenow', String(Math.round(p)));
+                document.getElementById('publishProgressPct').textContent = Math.round(p) + '%';
+            }
             document.getElementById('publishProgressLabel').textContent = label;
         }
 
@@ -816,7 +837,27 @@
         function hidePublishProgress() {
             clearInterval(publishPollTimer);
             publishPollTimer = null;
+            const bar = document.getElementById('publishProgressBar');
+            if (bar) bar.parentElement.classList.remove('indeterminate');
             document.getElementById('publishProgress').style.display = 'none';
+        }
+
+        // A run can end in two ways: our own POST resolves, or the STATUS endpoint
+        // reports a terminal state first. The second matters — the POST is long-lived
+        // (33.749 blueprints + their AI titles ran ~30 min) and a reloaded tab, a lost
+        // response or a proxy timeout would otherwise leave the bar up forever with no
+        // banner. Both paths funnel through here, and `publishFinalised` makes sure the
+        // banner is written once.
+        let publishFinalised = false;
+        function finalisePublish(html, tone) {
+            if (publishFinalised) return;
+            publishFinalised = true;
+            hidePublishProgress();
+            showDoneBanner('publishDone', html, tone);
+            const btn = document.getElementById('btnPublish');
+            if (btn) { btn.disabled = false; btn.textContent = 'Publish'; }
+            previewSelected.clear();
+            loadStats(); loadPreview();
         }
 
         async function pollPublish() {
@@ -832,13 +873,44 @@
                     if (s.batches > 1) label += ` (batch ${s.batch || 0}/${s.batches})`;
                 }
                 if (s.failed) label += ` — ${s.failed} failed`;
-                setPublishProgress(s.pct || 0, label);
+                setPublishProgress(s.pct || 0, label, PUBLISH_OPAQUE_PHASES.has(s.phase));
+
+                // Server says it is over: close it out from here rather than waiting
+                // for our own POST, which may never come back to this tab.
+                if (s.status === 'done' || s.status === 'error') {
+                    const bits = [s.status === 'error'
+                        ? `<strong>Publish failed.</strong>`
+                        : `<strong>Done — pushed ${num(s.pushed || 0)} blueprint(s) to production.</strong>`];
+                    if (s.failed) bits.push(`<strong>${num(s.failed)}</strong> failed`);
+                    if (s.skipped_too_long) bits.push(`<strong>${num(s.skipped_too_long)}</strong> skipped (over the length cap)`);
+                    if (s.message) bits.push(esc(s.message));
+                    finalisePublish(bits.join(' · '),
+                                    s.status === 'error' ? 'error' : (s.failed ? 'warning' : 'done'));
+                }
             } catch (e) { /* transient poll failure must not kill the publish */ }
         }
 
         // initial load
         loadStats();
         showView('built');  // default view + highlight the Built tile
+
+        // A publish started in another tab (or before a reload) is still running on the
+        // server. Adopt it, so the page shows the bar and gets the done banner instead
+        // of looking idle while 30 minutes of pushing happens invisibly.
+        (async function adoptRunningPublish() {
+            try {
+                const r = await fetch(`${API_BASE}/api/seo-titles/publish-status`);
+                const s = await r.json();
+                if (s && s.status === 'running') {
+                    document.getElementById('btnPublish').disabled = true;
+                    document.getElementById('publishProgress').style.display = '';
+                    publishFinalised = false;
+                    clearInterval(publishPollTimer);
+                    publishPollTimer = setInterval(pollPublish, 1000);
+                    pollPublish();
+                }
+            } catch (e) { /* no status endpoint yet, or offline — nothing to adopt */ }
+        })();
     </script>
 </body>
 </html>
