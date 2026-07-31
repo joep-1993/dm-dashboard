@@ -1,6 +1,31 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## 59,7% van de legacy-blueprints wijkt af, maar de pin-wijziging verklaart er 2% van (2026-07-31)
+
+Joep vroeg na de before/after-wijziging: moeten alle titels opnieuw? De eigen corpus van de
+tool was al bij (1.187 herpusht, 0 stale), dus de vraag ging over de **legacy**-rijen in
+`pa.page_titles_existing` (de tblPageTitles-export, door dedup buiten de tool gehouden).
+
+- Ruwe diff: **92.329 van 154.721 NL-rijen (59,7%)** zou anders geformuleerd worden. Dat
+  cijfer alleen zou "ja, alles opnieuw" suggereren — en dat is fout.
+- **Classificeer vóór je concludeert.** Attributie: pin-facetten 1.933 · categorie verschoven
+  4.144 · overige herordening 4.293 · `merk` naar voren 2.147 · placeholder toegevoegd of
+  onderdrukt 3.360 · handgeschreven tekst 3.208 · rest vooral de
+  `!!sub_category_lower!!`-vocabulaire-swap. De wijziging van vandaag is dus **2% van de
+  verschillen**; de rest is jaren oude divergentie die niets met de pins te maken heeft.
+- **Normaliseer de vocabulaire vóór je ordening vergelijkt**, anders is alles "anders":
+  39.631 rijen verschillen *alleen* in `sub_category_lower` vs `sub_category`.
+- Twee harde blokkades voor bulk-convergentie: 3.208 rijen bevatten **redactionele woorden**
+  die een rebuild wist, en 116.132 rijen gebruiken `sub_category_lower` (omzetten
+  kapitaliseert het categoriewoord in live H1's).
+- Bijvangst: **384.493 van de 539.214 rijen hebben geen landcode in `country_code`** — de
+  export is buiten NL kolom-verschoven. Altijd op `country_code='NL'` scopen.
+- En één die geld kost als je hem mist: `build_blueprint()` **hersorteert de facet-tokens**,
+  terwijl /page-titles upsert op `(cat_id, key)` als STRING. Een hersorteerde key schrijft
+  dus een TWEEDE record en laat het live record staan. 616 legacy NL-rijen hebben
+  `key <> canon_key`; bij het adopteren van 1.846 rijen viel er precies één stil om.
+
 ## Een stille fallback is erger dan een crash — OpenAI zonder credits (2026-07-31)
 
 De key was leeg en de dashboards deden alsof er niets aan de hand was: v3 vangt een

@@ -8,6 +8,23 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### SEO titles — converge the legacy tblPageTitles corpus, or accept the split (logged 2026-07-31)
+- [ ] **Decide whether the legacy blueprints should follow the current builder at all.**
+  Audited 2026-07-31: of 154.721 legacy NL rows in `pa.page_titles_existing`, **92.329
+  (59,7%) would be phrased differently** by today's builder. Today's position-pin work
+  explained only 1.933 of those (all now regenerated); the rest is years-old divergence —
+  `merk` position (2.147), category placement (4.144), other reordering (4.293), added or
+  suppressed placeholders (3.360), and a long tail dominated by the
+  `!!sub_category_lower!!` vocabulary. Two hard blockers before any bulk convergence:
+  **3.208 rows contain hand-written words** ("voor kinderen", "maat", "Ontwormen") that a
+  rebuild deletes, and **116.132 rows use `!!sub_category_lower!!`** — switching those to
+  `!!sub_category!!` capitalises the category word in live H1s. Also unknown from our side:
+  whether `pa.page_titles_existing` still reflects MySQL, and which store the site prefers
+  when both hold a `(cat_id, key)`. Data-quality note: **384.493 of its 539.214 rows have a
+  non-country value in `country_code`** (the export is column-misaligned outside NL), so
+  scope every query to `country_code='NL'`. Full diff:
+  `Downloads/claude/seo_titles_legacy_vs_current_20260731.csv`.
+
 ### BLOCKER — the OpenAI key has no credits (found 2026-07-31)
 - [ ] **Top up / repoint the OpenAI key: every AI-titles call returns
   `429 insufficient_quota / credit_balance_exhausted`.** v3 falls back to its
@@ -28,11 +45,16 @@ _What are we building and why?_
   them manageable in one go, which is a deliberate decision, not a bugfix. The legacy-named
   8.565 are a separate call. Scan pattern: `scratchpad/gsd_unlabeled_split.py`
   (re-create under `scripts/analysis/` when approved). See LEARNINGS.
+  **PARTLY SELF-HEALING since 2026-07-31:** the create path adopts a matched campaign and
+  the pause path labels anything it pauses by name, so a campaign gets its label the first
+  time its shop flips on or off. That only reaches shops that appear in the changes feed —
+  a full backfill is still the only way to fix the whole estate at once.
 
 ### GSD — the SA360 bid-strategy pairing queue (logged 2026-07-31)
 - [ ] **Surface the "awaiting bid strategy" list as a worklist, not just a preview count.**
-  105 GSD campaigns sit PAUSED on MANUAL_CPC waiting for the manual target-ROAS pairing in
-  SA360 (70 of them created 2026-07-31). The run refuses to enable them (correct — see
+  105 GSD campaigns sat PAUSED on MANUAL_CPC waiting for the manual target-ROAS pairing in
+  SA360 (70 of them created 2026-07-31; by the end of that afternoon 55 of those 70 were
+  paired and ENABLED, 15 were not — the queue moves, but only a person can see where it is). The run refuses to enable them (correct — see
   LEARNINGS) and the preview shows the count, but the people doing the pairing have no
   list. A small read-only endpoint/table (shop, country, label, campaign id, created date)
   would make the handover explicit; `Downloads/claude/gsd_would_activate_20260731.csv` is
