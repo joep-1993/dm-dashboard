@@ -130,41 +130,71 @@ def _resolve_cat(taxonomy_cache, leaf):
 # refresh and far too slow inside a generation run. Refresh with
 #   venv/bin/python scripts/analysis/seo_titles_dependency_audit.py --refresh-cache
 # ---------------------------------------------------------------------------
+# NOTE THE PRIMARY KEY: (child_slug, parent_slug), not child_slug alone. One slug can
+# belong to SEVERAL facet ids — 551 of 7.910 slugs do — and each id can depend on a
+# different parent. `kleurtint_bruin` exists as six facets: under `kleur` in most
+# categories and under `kleur_mode_accessoires` in the mode tree. A single-parent table
+# picked whichever id came first and then called the other categories' valid combos
+# impossible; live URL .../c/kleur_mode_accessoires~457466~~kleurtint_bruin~7742283 is
+# exactly such a combo.
 FACET_DEPS_DDL = """
 CREATE TABLE IF NOT EXISTS pa.facet_dependencies (
-    child_slug   TEXT PRIMARY KEY,
+    child_slug   TEXT NOT NULL,
     parent_slug  TEXT NOT NULL,
     child_id     INTEGER,
     parent_id    INTEGER,
-    refreshed_at TIMESTAMP DEFAULT now()
+    refreshed_at TIMESTAMP DEFAULT now(),
+    PRIMARY KEY (child_slug, parent_slug)
 );
+"""
+FACET_DEPS_MIGRATE = """
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'pa.facet_dependencies'::regclass
+                  AND contype = 'p'
+                  AND pg_get_constraintdef(oid) = 'PRIMARY KEY (child_slug)') THEN
+        ALTER TABLE pa.facet_dependencies DROP CONSTRAINT facet_dependencies_pkey;
+        ALTER TABLE pa.facet_dependencies ADD PRIMARY KEY (child_slug, parent_slug);
+    END IF;
+END $$;
 """
 
 
 def load_facet_deps():
-    """child_slug -> parent_slug. Empty dict when the cache table is absent/empty,
-    which degrades to the old behaviour (build everything) rather than to a run
-    that silently drops every combo."""
+    """child_slug -> SET of acceptable parent slugs. Empty dict when the cache table is
+    absent/empty, which degrades to the old behaviour (build everything) rather than to
+    a run that silently drops every combo."""
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute(FACET_DEPS_DDL)
+        cur.execute(FACET_DEPS_MIGRATE)
         conn.commit()
         cur.execute("SELECT child_slug, parent_slug FROM pa.facet_dependencies")
-        return {r["child_slug"]: r["parent_slug"] for r in cur.fetchall()}
+        out = {}
+        for r in cur.fetchall():
+            out.setdefault(r["child_slug"], set()).add(r["parent_slug"])
+        return out
     finally:
         cur.close()
         return_db_connection(conn)
 
 
 def impossible_reason(types, deps):
-    """'<child> needs <parent>' when the combo names a dependent facet without its
-    parent, else None. `types` is the set of facet slugs in the combo."""
+    """'<child> needs <parent>' when the combo names a dependent facet and NONE of its
+    acceptable parents is present, else None.
+
+    ANY parent satisfies it, because the same child slug exists as several facets with
+    different parents depending on the category tree (kleurtint_bruin sits under `kleur`
+    in most categories and under `kleur_mode_accessoires` in mode). Requiring one
+    specific parent marked live, reachable URLs as impossible.
+    """
     have = set(types)
     for t in types:
-        parent = deps.get(t)
-        if parent and parent not in have:
-            return f"{t} needs {parent}"
+        parents = deps.get(t)
+        if parents and not (parents & have):
+            return f"{t} needs " + " or ".join(sorted(parents))
     return None
 
 

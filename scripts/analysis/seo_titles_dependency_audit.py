@@ -14,11 +14,15 @@ Two API shapes expose this; this script uses the cheaper one:
                                          responses.
   * GET /api/Facets/{id}/value-dependencies  -> rows whose parentFacetValue.facet
                                          gives the parent. 204 = no dependency.
-                                         Keyed by FACET, so it is one call per
-                                         distinct facet (2.226) and the answer is
-                                         global rather than per category.
-The facet-scoped view is what we want anyway: if a facet needs a parent at all, a
-combo naming the child without the parent is impossible in every category.
+                                         Keyed by FACET ID, one call each.
+
+A SLUG IS NOT A FACET. 551 of 7.910 slugs map to several facet ids — `kleurtint_bruin`
+is six facets (4253, 4352, 4412, 4449, 5927, 5929), one per category family, and their
+parents differ: `kleur` in most trees, `kleur_mode_accessoires` in mode. So every id
+behind a slug is probed and the parents are UNIONED, and a combo counts as impossible
+only when NONE of the acceptable parents is present. The earlier version kept the first
+id per slug and therefore called live URLs impossible — e.g.
+.../c/kleur_mode_accessoires~457466~~kleurtint_bruin~7742283 in Sjaals.
 
 NOTE ON `parentFacetId`: the dependency row's own `parentFacetId` is 0 in the live
 data — read the parent from `parentFacetValue.facetId` instead. Trusting the
@@ -50,7 +54,13 @@ TIMEOUT = 60
 
 
 def facet_slug_map():
-    """urlSlug -> facetId, from the full facet list (one call)."""
+    """(slug -> {facetIds}), (facetId -> slug).
+
+    A slug maps to a SET of ids: 551 of 7.910 slugs belong to more than one facet
+    (`kleurtint_bruin` is six facets, one per category family, each with its own
+    parent). Keeping only the first id — which this function used to do — makes the
+    dependency map wrong for every other category and flags live URLs as impossible.
+    """
     r = requests.get(f"{API}/api/Facets", headers=HEADERS, timeout=TIMEOUT)
     r.raise_for_status()
     by_slug, by_id = {}, {}
@@ -58,7 +68,7 @@ def facet_slug_map():
         for lab in (f.get("labels") or []):
             slug = (lab.get("urlSlug") or "").strip()
             if slug:
-                by_slug.setdefault(slug, f["id"])
+                by_slug.setdefault(slug, set()).add(f["id"])
                 by_id.setdefault(f["id"], slug)
     return by_slug, by_id
 
@@ -142,26 +152,57 @@ def main():
     slugs = sorted(by_slug) if args.refresh_cache else [s for s, _ in used.most_common()]
     if args.limit_facets:
         slugs = slugs[:args.limit_facets]
-    known = [(s, by_slug[s]) for s in slugs if s in by_slug]
     unknown = [s for s in slugs if s not in by_slug]
-    print(f"[3/4] probing dependencies for {len(known):,} facets "
-          f"({len(unknown):,} slugs not found in the taxonomy — reported, not probed)")
+    # Probe each facet ID ONCE and fan the answer back out to every slug that id
+    # carries: `merk`, `brand` and `marke` are the same 29 facets, so probing per
+    # (slug, id) pair would triple the work for no new information.
+    unique_ids = sorted({fid for s in slugs if s in by_slug for fid in by_slug[s]})
+    print(f"[3/4] probing {len(unique_ids):,} facet IDS behind "
+          f"{len(slugs) - len(unknown):,} slugs "
+          f"({len(unknown):,} slugs not in the taxonomy — reported, not probed)")
 
-    parents = {}
+    id_parent = {}
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        for (slug, fid), pid in zip(known, ex.map(lambda kv: parent_of(kv[1]), known)):
+        for fid, pid in zip(unique_ids, ex.map(parent_of, unique_ids)):
             if pid and pid != "error":
-                parents[slug] = by_id.get(pid, f"facet:{pid}")
+                id_parent[fid] = pid
+    # ENFORCE ONLY WHEN UNAMBIGUOUS. A slug is treated as dependent only if EVERY facet
+    # id behind it has a dependency. `type` is 40+ facets: a few need merk or
+    # populaire_serie, most need nothing — so in those categories `type` alone is a
+    # perfectly reachable URL, and demanding any-of-that-union flagged 3.863 valid rows.
+    # `kleurtint_bruin` is the opposite: all six ids are dependent (on kleur or
+    # kleur_mode_accessoires), so requiring one of those two is right.
+    parents, partial = {}, {}
+    for slug in slugs:
+        ids = by_slug.get(slug) or set()
+        if not ids:
+            continue
+        found = {by_id.get(id_parent[f], f"facet:{id_parent[f]}") for f in ids if f in id_parent}
+        if not found:
+            continue
+        dependent_ids = sum(1 for f in ids if f in id_parent)
+        if dependent_ids == len(ids):
+            parents[slug] = found
+        else:
+            # Some ids free-standing: cannot conclude from the slug alone. Reported so the
+            # ambiguity is visible rather than silently ignored.
+            partial[slug] = (dependent_ids, len(ids), found)
+    if partial:
+        print(f"      NOT enforced ({len(partial):,} slugs are dependent for only SOME of "
+              f"their facet ids — free-standing elsewhere):")
+        for slug, (d, n, f) in sorted(partial.items(), key=lambda kv: -used[kv[0]])[:8]:
+            print(f"        {slug:28} {d}/{n} ids dependent  ({', '.join(sorted(f))[:48]})")
     print(f"      dependent facets found: {len(parents):,}")
     for child, par in sorted(parents.items(), key=lambda kv: -used[kv[0]])[:15]:
-        print(f"        {child:34} needs {par:20} (in {used[child]:,} blueprint rows)")
+        print(f"        {child:34} needs {' or '.join(sorted(par)):40} (in {used[child]:,} blueprint rows)")
 
     if args.refresh_cache:
-        from backend.seo_titles_service import FACET_DEPS_DDL
+        from backend.seo_titles_service import FACET_DEPS_DDL, FACET_DEPS_MIGRATE
         conn = get_db_connection()
         cur = conn.cursor()
         try:
             cur.execute(FACET_DEPS_DDL)
+            cur.execute(FACET_DEPS_MIGRATE)
             # Full replace, not an upsert: a dependency REMOVED in the taxonomy must
             # disappear here too, or generation keeps skipping combos that are valid
             # again. Same transaction, so the table is never empty for a reader.
@@ -169,11 +210,12 @@ def main():
             cur.executemany(
                 """INSERT INTO pa.facet_dependencies
                        (child_slug, parent_slug, child_id, parent_id, refreshed_at)
-                   VALUES (%s, %s, %s, %s, now())""",
-                [(child, parent, by_slug.get(child), by_slug.get(parent))
-                 for child, parent in parents.items()])
+                   VALUES (%s, %s, NULL, NULL, now())""",
+                [(child, parent) for child, ps in parents.items() for parent in sorted(ps)])
             conn.commit()
-            print(f"      cache: pa.facet_dependencies replaced with {len(parents):,} rows")
+            print(f"      cache: pa.facet_dependencies replaced with "
+                  f"{sum(len(v) for v in parents.values()):,} rows "
+                  f"({len(parents):,} children)")
         finally:
             cur.close()
             return_db_connection(conn)
