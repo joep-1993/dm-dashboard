@@ -4,6 +4,41 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-07-31 (late) — legacy pin rows adopted + GSD pause matched by identity
+
+**1.846 legacy blueprints regenerated and pushed** (`scripts/analysis/seo_titles_adopt_pin_rows.py`).
+These are tblPageTitles rows containing a position-pinned facet whose phrase the current
+builder orders differently. Pushing them **adopts** the combo into /page-titles, so this
+tool now owns them instead of the MySQL export.
+- **87 rows deliberately skipped**: their live phrase contains hand-written words
+  ("Ontwormen !!dier_dierenbenodigdheden!!", "… supplementen"). A rebuild deletes editorial
+  text, which is a content call. CSV: `seo_titles_pin_skipped_editorial_*.csv`.
+- **TRAP: never re-sort a legacy key.** `build_blueprint()` sorts the facet tokens and
+  /page-titles upserts on `(cat_id, key)` as a STRING, so a re-sorted key writes a SECOND
+  record and leaves the live one untouched. **616 legacy NL rows have `key <> canon_key`**;
+  one was in this batch (`9000953 dier_dierenbenodigdheden~d_voer~merk~s_voer`) and silently
+  failed to publish (1.845 of 1.846). Script now pins `bp["key"] = r["key"]`; that row was
+  cleaned up and pushed under its legacy key. Final: 1.846 pushed.
+
+**GSD pause now matches by identity, and a shop can no longer vanish.** Joep: "the preview
+says it will pause Elektroshop.nl, the run pauses nothing, and Elektroshop is missing from
+the output entirely."
+- Cause: `_pause_campaigns_for_shop` only touched campaigns carrying GSD_SCRIPT, and
+  Elektroshop's five ENABLED campaigns carry **no label at all** (one of the 2.954). The
+  empty result list meant no rows were appended, so the shop disappeared from the output.
+- Fix: pause a campaign when it carries GSD_SCRIPT **or** is ours by identity (name variant
+  + shop_id + one of this run's label tokens, macro/micro/OUD excluded) — the same test the
+  create path uses. A campaign matched only by name gets GSD_SCRIPT attached, so the
+  unlabelled estate converges instead of growing. Preview mirrors it and marks those rows
+  "matched by name (no GSD_SCRIPT label)".
+- **"Nothing to pause" is now a visible `skipped` row** with reason
+  `no_live_campaigns_to_pause`. Silence was the actual reporting bug.
+- Verified: preview now reports `to_pause 5` for Elektroshop with all five flagged.
+
+**Live-data note:** 55 of the 70 campaigns from this morning's activation list are now
+ENABLED + TARGET_ROAS (paired in SA360 while we worked); 15 remain PAUSED + MANUAL_CPC and
+are exactly what the bid-strategy guard still refuses to enable.
+
 ### Done 2026-07-31 (late) — OpenAI credit guard: signalled in the UI, generation stopped
 
 The key ran out of credits and **nothing said so**: v3 catches a failing polish call and

@@ -2722,72 +2722,109 @@ def _pause_campaigns_for_shop(
     client: GoogleAdsClient,
     customer_id: str,
     shop_name: str,
+    shop_id: Any = None,
+    country: str = "NL",
+    campaign_type: str = "CPR",
+    label_resource_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Pause all active GSD campaigns for a shop in a given account.
-    Only pauses campaigns that carry the GSD_SCRIPT label.
-    Returns a list of result dicts.
+    Pause this shop's live GSD campaigns in one account. Returns a list of result dicts —
+    including one when there was NOTHING to pause, so the shop can never vanish from the
+    run output.
+
+    TWO WAYS IN, because the GSD_SCRIPT label alone was not enough (Joep, 2026-07-31:
+    "the preview says it will pause Elektroshop.nl, the run pauses nothing, and the shop
+    is missing from the output"):
+      * the campaign carries GSD_SCRIPT — the original rule; or
+      * the campaign IS one of ours by identity (shop-name variant + [shop_id:N] +
+        one of this run's [label:X] tokens, macro/micro/OUD excluded) — the same test the
+        create path uses. Elektroshop.nl's five ENABLED campaigns are canonical GSD names
+        carrying NO label at all (2.954 campaigns are in that state, because the label is
+        applied in a separate best-effort call after the create), so the label filter left
+        a switched-off shop spending.
+    A campaign matched only by identity gets GSD_SCRIPT attached, so the estate converges
+    instead of drifting further.
     """
     results = []
+    label_tokens = {f"[label:{l}]".lower()
+                    for l in (LABELS_CPR if campaign_type == "CPR" else LABELS_CPC)}
+    name_tokens = [f"[shop:{v}]".lower() for v in _shop_name_variants(shop_name)]
 
-    # Find this shop's ENABLED campaigns that carry the GSD_SCRIPT label.
-    # Match the exact "[shop:NAME]" token via REGEXP_MATCH (LIKE with brackets
-    # matches the whole account — see _name_contains_regexp) AND restrict to the
-    # GSD_SCRIPT label so only script-managed campaigns are ever paused.
+    def _is_ours(name: str) -> bool:
+        low = (name or "").lower()
+        if not any(t in low for t in label_tokens):
+            return False
+        if not any(t in low for t in name_tokens):
+            return False
+        return not (_MACRO_MICRO_RE.search(name) or _RETIRED_RE.search(name))
+
     ga_service = client.get_service("GoogleAdsService")
-    # One query per shop-name variant, deduped by campaign id: a shop whose Redshift
-    # name gained a '|NL' would otherwise keep its bare-name campaigns ENABLED forever,
-    # because this lookup matches the '[shop:NAME]' token exactly.
-    seen_ids: set = set()
-    rows_to_pause = []
+    by_id: Dict[str, Any] = {}
     try:
+        # (a) label-based, per shop-name variant — a shop whose Redshift name gained a
+        # '|NL' would otherwise keep its bare-name campaigns ENABLED forever.
         for variant in _shop_name_variants(shop_name):
             name_pattern = _name_contains_regexp(f"[shop:{variant}]")
-            query = f"""
-                SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name
-                FROM campaign_label
-                WHERE campaign.name REGEXP_MATCH '{name_pattern}'
-                  AND campaign.status = 'ENABLED'
-                  AND label.name = '{SCRIPT_LABEL}'
-            """
-            for row in ga_service.search(customer_id=customer_id, query=query):
-                if str(row.campaign.id) not in seen_ids:
-                    seen_ids.add(str(row.campaign.id))
-                    rows_to_pause.append(row)
+            for row in ga_service.search(customer_id=customer_id, query=f"""
+                    SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name
+                    FROM campaign_label
+                    WHERE campaign.name REGEXP_MATCH '{name_pattern}'
+                      AND campaign.status = 'ENABLED'
+                      AND label.name = '{SCRIPT_LABEL}'"""):
+                by_id.setdefault(str(row.campaign.id), {
+                    "campaign_name": row.campaign.name,
+                    "resource_name": row.campaign.resource_name,
+                    "labelled": True,
+                })
+        # (b) identity-based over everything this shop_id has in the account.
+        if shop_id is not None:
+            for c in _fetch_shop_campaign_candidates(client, customer_id, shop_id):
+                if c["status"] != "ENABLED" or not _is_ours(c["campaign_name"]):
+                    continue
+                by_id.setdefault(c["campaign_id"], {
+                    "campaign_name": c["campaign_name"],
+                    "resource_name": c["resource_name"],
+                    "labelled": bool(label_resource_name
+                                     and label_resource_name in (c["labels"] or [])),
+                })
     except GoogleAdsException as ex:
         # A failed lookup must NOT fall through to "nothing to pause" — that would
         # silently leave a switched-off shop's campaigns running.
         logger.error("Error finding campaigns to pause for '%s': %s", shop_name, ex)
         return [{"shop_name": shop_name, "action": "error", "reason": str(ex)}]
 
-    try:
-        for row in rows_to_pause:
-            campaign_id = str(row.campaign.id)
-            campaign_name = row.campaign.name
-            result = pause_campaign(customer_id, campaign_id)
-            action = "paused" if result["success"] else "error"
-            if action == "paused":
-                logger.info(
-                    "Paused campaign '%s' (id=%s) in account %s for shop '%s'",
-                    campaign_name, campaign_id, customer_id, shop_name,
-                )
-            else:
-                logger.error(
-                    "Failed to pause campaign '%s' (id=%s) in account %s: %s",
-                    campaign_name, campaign_id, customer_id, result,
-                )
-            results.append({
-                "campaign_name": campaign_name,
-                "campaign_id": campaign_id,
-                "action": action,
-                "detail": result,
-            })
-    except GoogleAdsException as ex:
-        logger.error("Error pausing campaigns for '%s': %s", shop_name, ex)
+    if not by_id:
+        # Visible, not silent: the shop appears in the run output as skipped with a reason.
+        logger.info("Nothing to pause for '%s' in %s — no live GSD campaigns matched",
+                    shop_name, customer_id)
+        return [{"shop_name": shop_name, "campaign_name": f"[shop:{shop_name}]",
+                 "action": "skipped", "reason": "no_live_campaigns_to_pause"}]
+
+    for campaign_id, info in by_id.items():
+        campaign_name = info["campaign_name"]
+        result = pause_campaign(customer_id, campaign_id)
+        action = "paused" if result["success"] else "error"
+        if action == "paused":
+            logger.info(
+                "Paused campaign '%s' (id=%s) in account %s for shop '%s'%s",
+                campaign_name, campaign_id, customer_id, shop_name,
+                "" if info["labelled"] else " (matched by name, not by label)",
+            )
+            # Adopt it, so next time the label alone finds it.
+            if not info["labelled"] and label_resource_name:
+                _apply_label_to_campaign(client, customer_id, info["resource_name"],
+                                         label_resource_name)
+        else:
+            logger.error(
+                "Failed to pause campaign '%s' (id=%s) in account %s: %s",
+                campaign_name, campaign_id, customer_id, result,
+            )
         results.append({
-            "shop_name": shop_name,
-            "action": "error",
-            "reason": str(ex),
+            "campaign_name": campaign_name,
+            "campaign_id": campaign_id,
+            "action": action,
+            "detail": result,
+            "reason": None if info["labelled"] else "matched_by_name",
         })
 
     return results
@@ -2948,26 +2985,34 @@ def preview_gsd_script(
                         "type": campaign_type,
                     })
             elif actie == "uit":
-                # Pause hits every ENABLED campaign for this shop that carries
-                # GSD_SCRIPT — the label filter mirrors _pause_campaigns_for_shop, which
-                # refuses to touch anything the script does not manage. Looked up
-                # read-only (NOT ensure_campaign_label_exists, which would create it).
+                # Mirrors _pause_campaigns_for_shop: an ENABLED campaign is paused when it
+                # carries GSD_SCRIPT **or** when it is ours by identity (name variant +
+                # shop_id + one of this run's label tokens, macro/micro/OUD excluded).
+                # Label looked up read-only — ensure_campaign_label_exists() would create it,
+                # and a preview must mutate nothing.
                 gsd_label_rn = _lookup_label_resource(client, customer_id, SCRIPT_LABEL)
                 name_tokens = [f"[shop:{v}]".lower() for v in _shop_name_variants(shop_name)]
+                label_tokens = {f"[label:{l}]".lower() for l in labels}
                 for c in candidates:
                     if c["status"] != "ENABLED":
                         continue
-                    if not any(tok in (c["campaign_name"] or "").lower() for tok in name_tokens):
+                    name = c["campaign_name"] or ""
+                    low = name.lower()
+                    if not any(tok in low for tok in name_tokens):
                         continue
-                    if gsd_label_rn and gsd_label_rn not in (c["labels"] or []):
+                    labelled = bool(gsd_label_rn and gsd_label_rn in (c["labels"] or []))
+                    ours = (any(tok in low for tok in label_tokens)
+                            and not (_MACRO_MICRO_RE.search(name) or _RETIRED_RE.search(name)))
+                    if not (labelled or ours):
                         continue
                     shop_row["to_pause"] += 1
                     summary["campaigns"].append({
-                        "campaign_name": c["campaign_name"],
+                        "campaign_name": name,
                         "action": "pause",
                         "shop_name": shop_name,
                         "country": country,
                         "type": campaign_type,
+                        "detail": "" if labelled else "matched by name (no GSD_SCRIPT label)",
                     })
 
         summary["to_create"] += shop_row["to_create"]
@@ -3276,6 +3321,11 @@ def run_gsd_script(
                     client=client,
                     customer_id=customer_id,
                     shop_name=shop_name,
+                    shop_id=shop_id,
+                    country=country,
+                    campaign_type=campaign_type,
+                    label_resource_name=ensure_campaign_label_exists(
+                        client, customer_id, SCRIPT_LABEL),
                 )
 
                 for pr in pause_results:
@@ -3285,6 +3335,10 @@ def run_gsd_script(
                     pr["customer_id"] = customer_id
                     if pr["action"] == "paused":
                         overall_results["paused"].append(pr)
+                    elif pr["action"] == "skipped":
+                        # "nothing to pause" is information, not an error — but it MUST be
+                        # in the output, or the shop silently disappears from the run.
+                        overall_results["skipped"].append(pr)
                     else:
                         overall_results["errors"].append(pr)
 
