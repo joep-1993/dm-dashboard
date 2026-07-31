@@ -44,6 +44,17 @@ MCC_CUSTOMER_ID = "3011145605"
 
 SCRIPT_LABEL = "GSD_SCRIPT"
 
+# Mirrors gsd_ll_service.LL_LABEL — importing it would be circular (that module imports
+# from this one). A campaign carrying it was paused by the low-linkage flow on purpose,
+# so the create-run must not switch it back on; the LL run re-enables it when linkage
+# recovers. Keep the two spellings in sync.
+LL_PAUSED_LABEL = "GSD_LL_PAUSED"
+
+# How far back the post-run reconcile looks for unlogged creations. change_event keeps
+# ~30 days (hard limit), and a week covers "it broke on Friday, someone ran it on Monday"
+# without re-reading a month of history on every run.
+RECONCILE_WINDOW_DAYS = 7
+
 # Persistent per-(shop, country) creation dates (n8n-vector-db PostgreSQL). The
 # Google Ads API exposes no campaign creation-date field (campaign.start_date was
 # removed in v24) and change_event only retains ~30 days, so we log each shop's
@@ -116,18 +127,33 @@ def _gads_err(ex) -> str:
 _last_mc_error = {"msg": None}
 
 
+# Which service-account key the Content API is actually using, filled in by
+# _get_mc_service(). Purely for error messages: "the caller does not have access" is
+# useless without knowing WHICH caller.
+_mc_service_account = {"file": None, "email": None}
+
+
 def _mc_err(ex) -> str:
-    """Concise message from a Content API HttpError (prefers the API reason+message)."""
+    """Concise message from a Content API HttpError (prefers the API reason+message).
+
+    Access errors get the service-account email appended, because the API's own wording
+    ("The caller does not have access to the accounts: [5342886105]") never says who the
+    caller is — which cost a DE run a confusing error on 2026-07-31.
+    """
+    out = str(ex)[:400]
     try:
         details = ex.error_details  # googleapiclient HttpError, list of dicts
         if details:
             d = details[0]
             reason = d.get("reason", "")
             msg = d.get("message", "")
-            return (f"{reason}: {msg}" if reason else msg or str(ex))[:400]
+            out = (f"{reason}: {msg}" if reason else msg or str(ex))[:400]
     except Exception:
         pass
-    return str(ex)[:400]
+    low = out.lower()
+    if _mc_service_account.get("email") and ("access" in low or "denied" in low or "401" in low):
+        out = f"{out} [caller: {_mc_service_account['email']}]"
+    return out[:600]
 
 TRACKING_TEMPLATES = {
     "NL": (
@@ -653,21 +679,36 @@ def backfill_campaign_created_dates(days: int = 30, dry_run: bool = False) -> Di
 
 
 def _get_mc_service():
-    """Build a Merchant Center Content API service using a service account."""
+    """Build a Merchant Center Content API service using a service account.
+
+    ONLY ONE of the keys in backend/service_accounts/ has Merchant Center access
+    (measured 2026-07-31: acoustic-racer's beslist-index-checker@… reaches NL 5592708765,
+    BE 5588879919 and DE 5342886105; the other three get 401 "The caller does not have
+    access to the accounts" on all of them). The auto-detect used to take
+    `os.listdir()[0]` — arbitrary directory order — so a machine without
+    GSD_SERVICE_ACCOUNT_FILE set could silently pick a key with no access and fail
+    mid-run with exactly that message. Sorted now, and the chosen file is logged.
+    """
     sa_file = os.environ.get("GSD_SERVICE_ACCOUNT_FILE", "")
     if not sa_file:
-        # Auto-detect: use first .json in service_accounts dir
         sa_dir = os.path.join(os.path.dirname(__file__), "service_accounts")
         if os.path.isdir(sa_dir):
-            json_files = [f for f in os.listdir(sa_dir) if f.endswith(".json")]
+            json_files = sorted(f for f in os.listdir(sa_dir) if f.endswith(".json"))
             if json_files:
                 sa_file = os.path.join(sa_dir, json_files[0])
+                logger.warning(
+                    "GSD_SERVICE_ACCOUNT_FILE is not set; falling back to %s out of %d "
+                    "key(s) in %s. Only one of them has Merchant Center access — set the "
+                    "env var explicitly.", json_files[0], len(json_files), sa_dir,
+                )
     if not sa_file or not os.path.exists(sa_file):
         raise RuntimeError(
             "Service account file not found. Set GSD_SERVICE_ACCOUNT_FILE env var "
             "or place a .json key file in backend/service_accounts/"
         )
     credentials = service_account.Credentials.from_service_account_file(sa_file, scopes=MC_SCOPES)
+    _mc_service_account["file"] = sa_file
+    _mc_service_account["email"] = getattr(credentials, "service_account_email", "") or ""
     return build("content", "v2.1", credentials=credentials, cache_discovery=False)
 
 
@@ -704,6 +745,142 @@ def _build_campaign_name(
     if country.upper() != "NL":
         base = f"[domein:{country.upper()}] {base}"
     return base
+
+
+def _shop_name_variants(shop_name: Optional[str]) -> List[str]:
+    """The shop name as Redshift gives it, plus the same name without a trailing
+    '|<addition>' marker.
+
+    Redshift hands us names like 'Hbm-machines.com|NL' or 'Woodselections.com|DE' — the
+    '|XX' disambiguates one brand selling on several locales. It can appear (or change)
+    AFTER campaigns were created under the bare name, and every lookup in this module
+    matches the '[shop:NAME]' token EXACTLY. So the bare campaign reads as absent and
+    the run creates a near-identical second set:
+        [shop:Hbm-machines.com]    [shop_id:207860] … [label:a]   <- already there
+        [shop:Hbm-machines.com|NL] [shop_id:207860] … [label:a]   <- created anyway
+    and, on the way out, a shop switched off keeps its bare-name campaigns ENABLED
+    because the pause query never sees them. Both directions are fixed by looking for
+    every variant instead of only the current spelling (Joep, 2026-07-31).
+
+    NOT covered on purpose: the reverse spelling drift (Redshift drops a suffix the
+    campaign still carries) and the pre-2025 naming generation
+    ('[label_test] … [branche:H&L] [label:a]'), which needs a decision about whether an
+    old paused test campaign should count as "this shop already has campaigns".
+    """
+    name = (shop_name or "").strip()
+    variants = [name] if name else []
+    if "|" in name:
+        bare = name.split("|", 1)[0].strip()
+        if bare and bare not in variants:
+            variants.append(bare)
+    return variants
+
+
+def _campaign_name_variants(country: str, shop_name: str, shop_id: Any, label: str) -> List[str]:
+    """Every campaign name this (shop, label) could legitimately already live under."""
+    return [_build_campaign_name(country, v, shop_id, label)
+            for v in _shop_name_variants(shop_name)]
+
+
+# --- Identity of a GSD campaign, independent of naming generation ----------
+#
+# Exact-name matching only ever recognised campaigns built by the CURRENT naming
+# convention. Everything older carries extra tokens — `[label_test]`, `[branche:H&L]`,
+# `[macro]`, `[limit]`, `[OUD]`, `#4` — so the run read them as absent and created a
+# second set next to them (Toolstation.nl on 2026-07-31: 5 canonical campaigns created
+# beside 15 pre-existing `[label_test] … [branche:H&L]` ones).
+#
+# Joep's rule (2026-07-31): a campaign is THE SAME campaign when shop name, shop_id and
+# custom label match, ignoring every other token — except macro/micro variants, which
+# are a separate test structure and must never be adopted.
+#
+# Two guards of my own, both reversible by deleting one line:
+#   * `[OUD]` (Dutch for "old") marks a deliberately retired campaign. Adopting one
+#     would make the run rebuild something a human archived on purpose.
+#   * a `[domein:CC]` mismatch is rejected, so an NL run can never adopt a BE campaign
+#     that happens to sit in the same customer id (NL_CPR and NL_CPC share 7938980174).
+_MACRO_MICRO_RE = re.compile(r"\[[^\]]*\b(?:macro|micro)\b[^\]]*\]", re.I)
+_RETIRED_RE = re.compile(r"\[\s*oud\s*\]", re.I)
+_DOMEIN_RE = re.compile(r"\[domein:([^\]]+)\]", re.I)
+
+
+def _fetch_shop_campaign_candidates(
+    client: GoogleAdsClient, customer_id: str, shop_id: Any
+) -> List[Dict[str, Any]]:
+    """Non-REMOVED SHOPPING campaigns in this account whose name carries [shop_id:N].
+
+    One query per (shop, account) — cheaper than the previous one-exact-name-query per
+    label — and the same `[shop_id:{id}]` key the low-linkage service already trusts
+    (gsd_ll_service._find_enabled_campaigns). SHOPPING-only so no Search/PMax campaign
+    can ever be adopted.
+    """
+    try:
+        shop_id_int = int(shop_id)
+    except (TypeError, ValueError):
+        return []
+    ga = client.get_service("GoogleAdsService")
+    pattern = _name_contains_regexp(f"[shop_id:{shop_id_int}]")
+    query = f"""
+        SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name,
+               campaign.labels
+        FROM campaign
+        WHERE campaign.name REGEXP_MATCH '{pattern}'
+          AND campaign.status != 'REMOVED'
+          AND campaign.advertising_channel_type = 'SHOPPING'
+    """
+    out: List[Dict[str, Any]] = []
+    try:
+        for row in ga.search(customer_id=customer_id, query=query):
+            out.append({
+                "campaign_id": str(row.campaign.id),
+                "campaign_name": row.campaign.name,
+                "status": row.campaign.status.name,
+                "resource_name": row.campaign.resource_name,
+                "labels": list(row.campaign.labels),
+            })
+    except GoogleAdsException as ex:
+        logger.error("Campaign candidate lookup failed (%s, shop_id=%s): %s",
+                     customer_id, shop_id, ex)
+        raise
+    return out
+
+
+def _match_existing_campaign(
+    candidates: List[Dict[str, Any]], country: str, shop_name: str, shop_id: Any, label: str
+) -> Optional[Dict[str, Any]]:
+    """The campaign among `candidates` that IS this (shop, shop_id, label), or None.
+
+    Ranking when several match: the canonical name first, then ENABLED over PAUSED, then
+    the newest id. Without it a run could adopt a 2024 shell while a current campaign
+    sits right next to it.
+    """
+    want_country = (country or "NL").upper()
+    name_tokens = [f"[shop:{v}]".lower() for v in _shop_name_variants(shop_name)]
+    label_token = f"[label:{label}]".lower()
+    canonical = _build_campaign_name(country, shop_name, shop_id, label)
+    matches = []
+    for c in candidates:
+        name = c["campaign_name"] or ""
+        low = name.lower()
+        if label_token not in low:
+            continue
+        if not any(tok in low for tok in name_tokens):
+            continue
+        if _MACRO_MICRO_RE.search(name) or _RETIRED_RE.search(name):
+            continue
+        dm = _DOMEIN_RE.search(name)
+        found_country = (dm.group(1).strip().upper() if dm else "NL")
+        if found_country != want_country:
+            continue
+        matches.append(c)
+    if not matches:
+        return None
+    matches.sort(key=lambda c: (
+        0 if c["campaign_name"] == canonical else 1,
+        0 if c["status"] == "ENABLED" else 1,
+        -int(c["campaign_id"]),
+    ))
+    return matches[0]
 
 
 def _name_contains_regexp(substring: str) -> str:
@@ -1289,6 +1466,26 @@ _LABEL_META = {
 _label_resource_cache: Dict[tuple, str] = {}
 
 
+def _lookup_label_resource(
+    client: GoogleAdsClient, customer_id: str, label_name: str = SCRIPT_LABEL
+) -> Optional[str]:
+    """Resource name of an existing label, or None. READ-ONLY, unlike
+    ensure_campaign_label_exists, which creates the label when it is missing — the
+    preview promises to mutate nothing, so it must use this one."""
+    cache_key = (customer_id, label_name)
+    if cache_key in _label_resource_cache:
+        return _label_resource_cache[cache_key]
+    ga_service = client.get_service("GoogleAdsService")
+    query = f"SELECT label.resource_name FROM label WHERE label.name = '{label_name}'"
+    try:
+        for row in ga_service.search(customer_id=customer_id, query=query):
+            _label_resource_cache[cache_key] = row.label.resource_name
+            return row.label.resource_name
+    except GoogleAdsException as ex:
+        logger.warning("Label lookup failed (%s, %s): %s", customer_id, label_name, ex)
+    return None
+
+
 def ensure_campaign_label_exists(
     client: GoogleAdsClient, customer_id: str, label_name: str = SCRIPT_LABEL
 ) -> str:
@@ -1357,8 +1554,16 @@ def _apply_branded_label(client, customer_id, campaign_resource, branded) -> Non
 
 def _apply_label_to_campaign(
     client: GoogleAdsClient, customer_id: str, campaign_resource_name: str, label_resource_name: str
-) -> None:
-    """Apply a label to a campaign."""
+) -> bool:
+    """Apply a label to a campaign. True when the label is on it afterwards.
+
+    Returns a value on purpose: for GSD_SCRIPT this call decides whether the campaign is
+    visible to the tool at all (get_gsd_campaigns, _pause_campaigns_for_shop and the
+    creation-date log all filter on that label). A silently swallowed failure leaves a
+    perfectly normal-looking campaign that the tool can neither show nor pause — 2.954
+    canonical campaigns across 416 shops are in exactly that state (measured
+    2026-07-31). An already-applied label counts as success.
+    """
     campaign_label_service = client.get_service("CampaignLabelService")
     op = client.get_type("CampaignLabelOperation")
     op.create.campaign = campaign_resource_name
@@ -1371,9 +1576,13 @@ def _apply_label_to_campaign(
                 customer_id=customer_id, operations=[op]
             ),
         )
+        return True
     except GoogleAdsException as ex:
-        # Label may already be applied
-        logger.warning("Could not apply label to campaign: %s", ex)
+        msg = _gads_err(ex) or str(ex)
+        if "DUPLICATE" in msg.upper() or "ALREADY" in msg.upper():
+            return True          # the label is on the campaign, which is what we wanted
+        logger.warning("Could not apply label to campaign %s: %s", campaign_resource_name, msg)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1383,8 +1592,13 @@ def _apply_label_to_campaign(
 
 def check_campaign(client: GoogleAdsClient, customer_id: str, campaign_name: str) -> Optional[str]:
     """
-    Check if a campaign with the given name already exists (non-REMOVED).
+    Check if a campaign with the given EXACT name already exists (non-REMOVED).
     Returns campaign resource name if found, else None.
+
+    No longer the run's existence check: exact-name matching missed every older naming
+    generation and produced duplicate sets. The run uses
+    _fetch_shop_campaign_candidates + _match_existing_campaign (shop name, shop_id,
+    custom label). This stays as a primitive for one-off name probes.
     """
     ga_service = client.get_service("GoogleAdsService")
     escaped_name = campaign_name.replace("'", "\\'")
@@ -1687,8 +1901,17 @@ def add_standard_shopping_campaign(
     except GoogleAdsException as ex:
         logger.warning("Failed to add location targeting: %s", ex)
 
-    # Step 4: Apply GSD_SCRIPT label
-    _apply_label_to_campaign(client, customer_id, campaign_resource, label_resource_name)
+    # Step 4: Apply GSD_SCRIPT label. NOT cosmetic: without it the campaign is invisible
+    # to get_gsd_campaigns / _pause_campaigns_for_shop / the creation-date log, so it can
+    # never be switched off by this tool again. Loud on failure — a silent warning here is
+    # how 2.954 canonical campaigns ended up unmanageable.
+    if not _apply_label_to_campaign(client, customer_id, campaign_resource, label_resource_name):
+        logger.error(
+            "UNMANAGED CAMPAIGN: '%s' (%s) was created but the %s label could not be "
+            "applied — it will not show in Campaigns created and cannot be paused by "
+            "this tool until the label is attached",
+            campaign_name, campaign_resource, SCRIPT_LABEL,
+        )
 
     logger.info("Created campaign '%s' -> %s", campaign_name, campaign_resource)
     return campaign_resource
@@ -2303,18 +2526,74 @@ def _create_campaigns_for_shop(
     tracking_template = TRACKING_TEMPLATES.get(country.upper(), TRACKING_TEMPLATES["NL"])
     results = []
 
+    # One lookup of everything this shop_id already has in this account, matched per
+    # label below on (shop name, shop_id, custom label) instead of the exact name.
+    # A lookup failure must NOT read as "nothing exists" — that is how duplicate sets
+    # get created — so the exception propagates to run_gsd_script's per-shop handler.
+    candidates = _fetch_shop_campaign_candidates(client, customer_id, shop_id)
+
     for label in labels:
         if _run_cancel["cancel"]:
             break  # stop before the next campaign; run_gsd_script marks the run cancelled
         campaign_name = _build_campaign_name(country, shop_name, shop_id, label)
         _last_gads_error["msg"] = None  # cleared per label; helpers set it on failure
 
-        # Existing campaign? Complete an incomplete shell, else skip.
-        existing = check_campaign(client, customer_id, campaign_name)
-        if existing:
+        # Existing campaign? Complete an incomplete shell, else skip. Matched on shop
+        # name (any variant) + shop_id + [label:X], ignoring naming-generation tokens
+        # like [label_test] / [branche:H&L], excluding macro/micro variants.
+        match = _match_existing_campaign(candidates, country, shop_name, shop_id, label)
+        if match:
+            existing = match["resource_name"]
+            existing_name = match["campaign_name"]
+            if existing_name != campaign_name:
+                logger.info(
+                    "Shop '%s' already has '%s' (id=%s, %s) — adopting that campaign "
+                    "instead of creating '%s'",
+                    shop_name, existing_name, match["campaign_id"], match["status"], campaign_name,
+                )
+                # Adopt it into the GSD-managed set. Without GSD_SCRIPT the campaign is
+                # invisible to get_gsd_campaigns (the Campaigns-created table), to
+                # _pause_campaigns_for_shop (which filters on that label) and to the
+                # creation-date log — i.e. skipping the create would drop the shop out
+                # of the tool entirely. Every legacy Toolstation campaign carries
+                # 'Floodlight test jan 2026' or no label at all, never GSD_SCRIPT.
+                if label_resource_name and label_resource_name not in (match.get("labels") or []):
+                    _apply_label_to_campaign(client, customer_id, existing, label_resource_name)
             _apply_branded_label(client, customer_id, existing, branded)
-            results.append(_repair_campaign(
-                client, customer_id, existing, campaign_name, campaign_type, label, shop_name=shop_name))
+            # Report the name that actually EXISTS, not the one we would have built:
+            # _repair_campaign parses the label out of it and the run result feeds the
+            # activity log / undo payload, which must point at the real campaign.
+            res = _repair_campaign(
+                client, customer_id, existing, existing_name, campaign_type, label, shop_name=shop_name)
+            # A shop Redshift just switched ON whose campaigns already exist gets them
+            # ENABLED (Joep, 2026-07-31). Brand-new campaigns still go live PAUSED — the
+            # difference is that an existing campaign has already been vetted once.
+            # Three conditions, all of them load-bearing:
+            #   * the repair must not have errored — enabling a campaign with no ad group
+            #     or listing tree would serve nothing and hide the breakage;
+            #   * the campaign must not carry GSD_LL_PAUSED — the low-linkage flow paused
+            #     it deliberately and re-enables it itself once linkage recovers;
+            #   * it must actually be PAUSED, so a no-op mutate is never sent.
+            if res.get("action") != "error" and match["status"] == "PAUSED":
+                ll_rn = _lookup_label_resource(client, customer_id, LL_PAUSED_LABEL)
+                if ll_rn and ll_rn in (match.get("labels") or []):
+                    logger.info(
+                        "Not enabling '%s': it carries %s, so low-linkage owns its status",
+                        existing_name, LL_PAUSED_LABEL,
+                    )
+                    res["reason"] = "ll_paused_left_alone"
+                elif _set_campaign_status_by_resource(client, customer_id, existing, "ENABLED"):
+                    logger.info("Enabled existing campaign '%s' for shop '%s'", existing_name, shop_name)
+                    # 'activated' rather than 'created': the run turned something ON, which
+                    # the undo must be able to pause again — run_gsd_script therefore files
+                    # it with the created ones, and the UI shows it as its own action.
+                    res["action"] = "activated"
+                    res["enabled_from"] = "PAUSED"
+                else:
+                    res["enable_error"] = _last_gads_error["msg"] or "enable failed"
+                    logger.error("Failed to enable existing campaign '%s': %s",
+                                 existing_name, res["enable_error"])
+            results.append(res)
             continue
 
         # Create campaign
@@ -2423,18 +2702,33 @@ def _pause_campaigns_for_shop(
     # matches the whole account — see _name_contains_regexp) AND restrict to the
     # GSD_SCRIPT label so only script-managed campaigns are ever paused.
     ga_service = client.get_service("GoogleAdsService")
-    name_pattern = _name_contains_regexp(f"[shop:{shop_name}]")
-    query = f"""
-        SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name
-        FROM campaign_label
-        WHERE campaign.name REGEXP_MATCH '{name_pattern}'
-          AND campaign.status = 'ENABLED'
-          AND label.name = '{SCRIPT_LABEL}'
-    """
+    # One query per shop-name variant, deduped by campaign id: a shop whose Redshift
+    # name gained a '|NL' would otherwise keep its bare-name campaigns ENABLED forever,
+    # because this lookup matches the '[shop:NAME]' token exactly.
+    seen_ids: set = set()
+    rows_to_pause = []
+    try:
+        for variant in _shop_name_variants(shop_name):
+            name_pattern = _name_contains_regexp(f"[shop:{variant}]")
+            query = f"""
+                SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name
+                FROM campaign_label
+                WHERE campaign.name REGEXP_MATCH '{name_pattern}'
+                  AND campaign.status = 'ENABLED'
+                  AND label.name = '{SCRIPT_LABEL}'
+            """
+            for row in ga_service.search(customer_id=customer_id, query=query):
+                if str(row.campaign.id) not in seen_ids:
+                    seen_ids.add(str(row.campaign.id))
+                    rows_to_pause.append(row)
+    except GoogleAdsException as ex:
+        # A failed lookup must NOT fall through to "nothing to pause" — that would
+        # silently leave a switched-off shop's campaigns running.
+        logger.error("Error finding campaigns to pause for '%s': %s", shop_name, ex)
+        return [{"shop_name": shop_name, "action": "error", "reason": str(ex)}]
 
     try:
-        response = ga_service.search(customer_id=customer_id, query=query)
-        for row in response:
+        for row in rows_to_pause:
             campaign_id = str(row.campaign.id)
             campaign_name = row.campaign.name
             result = pause_campaign(customer_id, campaign_id)
@@ -2456,7 +2750,7 @@ def _pause_campaigns_for_shop(
                 "detail": result,
             })
     except GoogleAdsException as ex:
-        logger.error("Error finding campaigns to pause for '%s': %s", shop_name, ex)
+        logger.error("Error pausing campaigns for '%s': %s", shop_name, ex)
         results.append({
             "shop_name": shop_name,
             "action": "error",
@@ -2498,12 +2792,15 @@ def preview_gsd_script(
         "preview": True,
         "to_create": 0,
         "already_exists": 0,
+        # Subset of already_exists: matches this run would switch ON (existing campaign,
+        # currently PAUSED, not held by the low-linkage flow).
+        "to_activate": 0,
         "to_pause": 0,
         "shops_aan": 0,
         "shops_uit": 0,
         "by_shop": [],
         # Flat list of the affected campaigns for a table view.
-        # Each: {campaign_name, action: create|pause|skip, shop_name, country, type}
+        # Each: {campaign_name, action: create|activate|skip|pause, shop_name, country, type}
         "campaigns": [],
         "errors": [],
     }
@@ -2549,6 +2846,7 @@ def preview_gsd_script(
             "type": campaign_type,
             "to_create": 0,
             "already_exists": 0,
+            "to_activate": 0,
             "to_pause": 0,
         }
         if actie == "aan":
@@ -2568,18 +2866,11 @@ def preview_gsd_script(
                 continue
             customer_id = account_info["customer_id"]
 
-            # One read-only lookup of this shop's existing (non-removed) campaigns
-            # in this account, reused for both the create and pause counts.
-            # REGEXP_MATCH (not LIKE) — see _name_contains_regexp for why.
-            name_pattern = _name_contains_regexp(f"[shop:{shop_name}]")
-            query = f"""
-                SELECT campaign.name, campaign.status
-                FROM campaign
-                WHERE campaign.name REGEXP_MATCH '{name_pattern}'
-                  AND campaign.status != 'REMOVED'
-            """
+            # One read-only lookup of everything this shop_id has in this account,
+            # reused for both the create and the pause count. Same helper the run uses,
+            # so preview and run can never disagree about what "already exists" means.
             try:
-                rows = list(ga_service.search(customer_id=customer_id, query=query))
+                candidates = _fetch_shop_campaign_candidates(client, customer_id, shop_id)
             except GoogleAdsException as ex:
                 logger.error("Preview: campaign lookup failed for '%s' in %s: %s",
                              shop_name, country, ex)
@@ -2591,47 +2882,68 @@ def preview_gsd_script(
                 continue
 
             if actie == "aan":
-                # A campaign is created only when its exact name doesn't exist yet
-                # (matches check_campaign in _create_campaigns_for_shop).
-                existing_names = {r.campaign.name for r in rows}
+                # Created only when no campaign matches (shop name variant, shop_id,
+                # custom label) — matches _create_campaigns_for_shop. Reports the name
+                # that really exists, so the table shows what will be adopted.
+                ll_rn = _lookup_label_resource(client, customer_id, LL_PAUSED_LABEL)
                 for label in labels:
                     campaign_name = _build_campaign_name(country, shop_name, shop_id, label)
-                    exists = campaign_name in existing_names
-                    if exists:
+                    match = _match_existing_campaign(candidates, country, shop_name, shop_id, label)
+                    if match:
                         shop_row["already_exists"] += 1
                     else:
                         shop_row["to_create"] += 1
+                    # Same three conditions the run applies before enabling a match, so
+                    # the preview says "activate" exactly when the run would.
+                    will_activate = bool(
+                        match and match["status"] == "PAUSED"
+                        and not (ll_rn and ll_rn in (match.get("labels") or []))
+                    )
+                    if will_activate:
+                        shop_row["to_activate"] = shop_row.get("to_activate", 0) + 1
                     summary["campaigns"].append({
-                        "campaign_name": campaign_name,
-                        "action": "skip" if exists else "create",
+                        "campaign_name": match["campaign_name"] if match else campaign_name,
+                        "action": "activate" if will_activate else ("skip" if match else "create"),
                         "shop_name": shop_name,
                         "country": country,
                         "type": campaign_type,
                     })
             elif actie == "uit":
-                # Pause hits every currently-ENABLED campaign for the shop
-                # (matches _pause_campaigns_for_shop).
-                for r in rows:
-                    if r.campaign.status.name == "ENABLED":
-                        shop_row["to_pause"] += 1
-                        summary["campaigns"].append({
-                            "campaign_name": r.campaign.name,
-                            "action": "pause",
-                            "shop_name": shop_name,
-                            "country": country,
-                            "type": campaign_type,
-                        })
+                # Pause hits every ENABLED campaign for this shop that carries
+                # GSD_SCRIPT — the label filter mirrors _pause_campaigns_for_shop, which
+                # refuses to touch anything the script does not manage. Looked up
+                # read-only (NOT ensure_campaign_label_exists, which would create it).
+                gsd_label_rn = _lookup_label_resource(client, customer_id, SCRIPT_LABEL)
+                name_tokens = [f"[shop:{v}]".lower() for v in _shop_name_variants(shop_name)]
+                for c in candidates:
+                    if c["status"] != "ENABLED":
+                        continue
+                    if not any(tok in (c["campaign_name"] or "").lower() for tok in name_tokens):
+                        continue
+                    if gsd_label_rn and gsd_label_rn not in (c["labels"] or []):
+                        continue
+                    shop_row["to_pause"] += 1
+                    summary["campaigns"].append({
+                        "campaign_name": c["campaign_name"],
+                        "action": "pause",
+                        "shop_name": shop_name,
+                        "country": country,
+                        "type": campaign_type,
+                    })
 
         summary["to_create"] += shop_row["to_create"]
         summary["already_exists"] += shop_row["already_exists"]
+        summary["to_activate"] += shop_row.get("to_activate", 0)
         summary["to_pause"] += shop_row["to_pause"]
         summary["by_shop"].append(shop_row)
         _preview_progress["current"] += 1
 
     _preview_progress["running"] = False
     logger.info(
-        "GSD preview: %d to create, %d to pause, %d already exist across %d shops",
-        summary["to_create"], summary["to_pause"], summary["already_exists"], len(changes),
+        "GSD preview: %d to create, %d to activate, %d to pause, %d already exist "
+        "across %d shops",
+        summary["to_create"], summary["to_activate"], summary["to_pause"],
+        summary["already_exists"], len(changes),
     )
     return summary
 
@@ -2897,7 +3209,11 @@ def run_gsd_script(
                     res = cr.get("campaign_resource") or ""
                     if res:
                         cr["campaign_id"] = res.rstrip("/").split("/")[-1]
-                    if cr["action"] == "created":
+                    # 'activated' (an existing campaign this run switched ON) files with
+                    # the created ones: the undo/reset payload is built from this list and
+                    # pausing it again is the correct inverse. The action string survives,
+                    # so the UI can still show it as its own thing.
+                    if cr["action"] in ("created", "activated"):
                         overall_results["created"].append(cr)
                     elif cr["action"] == "skipped":
                         overall_results["skipped"].append(cr)
@@ -2977,6 +3293,18 @@ def run_gsd_script(
     # never fails the run) so the Campaigns-created Date column stays populated
     # going forward, independent of change_event's ~30-day retention.
     overall_results["created_dates_logged"] = record_created_campaigns(overall_results["created"])
+
+    # Heal the side-logs of EARLIER runs that never got this far. All three logging steps
+    # above sit AFTER the whole create loop, so a cancelled run, a crash or a uvicorn
+    # restart leaves real campaigns with no sheet row, no MC id in Redshift and no creation
+    # date (2026-07-31: three unfinished runs left 14 shop/country combos unlogged).
+    # Comparing against change_event and writing only what is missing turns that into a
+    # "just run it again" problem. Idempotent, best-effort, never fails the run.
+    try:
+        overall_results["reconciled"] = reconcile_run_logs(days=RECONCILE_WINDOW_DAYS)
+    except Exception as ex:
+        logger.error("Post-run reconcile failed: %s", ex)
+        overall_results["reconciled"] = {"error": str(ex)[:300]}
 
     # Final structural check of everything created/repaired this run (best-effort;
     # never fails the run). Flags any campaign left without an ad group / product
@@ -3198,4 +3526,287 @@ def backfill_recent_mc_ids_to_redshift(
     }
     if not dry_run:
         summary["push_result"] = push_mc_ids_to_redshift(rows)
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Side-log reconciliation ("just run it again")
+# ---------------------------------------------------------------------------
+# A GSD run writes three side-logs, and all three happen AFTER the create loop:
+#   1. pa.jvs_gsd_campaign_created   (PostgreSQL) — the Date column in Campaigns created
+#   2. pa.mc_ids_efficy              (Redshift)   — Merchant Center ids for Efficy
+#   3. the "campaigns_created" sheet (Sheets)     — the human run log
+# A run that is cancelled, crashes, or dies on a backend restart therefore creates real
+# campaigns and writes NONE of the three (Joep, 2026-07-31: "ran a couple times today
+# but didn't finish"). Rather than a one-off repair script, the run now reconciles the
+# three logs against Google Ads on every run, so a missed log is a "just run it again"
+# problem. Ground truth is change_event, which keeps ~30 days.
+
+
+def _sheet_type_from_label(label: Optional[str]) -> str:
+    """CPC labels are comma-joined ('a,b'), CPR labels are single tokens ('a')."""
+    return "CPC" if label and "," in label else "CPR"
+
+
+def _norm_sheet_date(value: Any) -> Optional[str]:
+    """'31-07-2026' / '1-7-2026' / '2026-07-31' -> 'YYYY-MM-DD', else None.
+
+    The sheet's own history is inconsistent (rows from 2025 are '12-6-2025', 2026 rows are
+    zero-padded), so string comparison would miss existing rows and duplicate them.
+    """
+    s = str(value or "").strip()
+    if not s:
+        return None
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def _inventory_recent_creations(client: GoogleAdsClient, days: int) -> Dict[tuple, Dict[str, Any]]:
+    """{(shop_id, country): {...}} for GSD campaigns CREATEd in the last `days`.
+
+    One entry per shop+country (the sheet and both tables are per shop+country, not per
+    label), carrying the earliest creation date seen and the data the logs need.
+    """
+    ga = client.get_service("GoogleAdsService")
+    days = min(max(int(days), 1), 29)          # change_event retains ~30 days, strictly
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    out: Dict[tuple, Dict[str, Any]] = {}
+    # NL_CPR and NL_CPC share one customer_id — query each DISTINCT id once, or every
+    # NL campaign is inventoried twice.
+    for cid in sorted({info["customer_id"] for info in ACCOUNTS.values()}):
+        created_on: Dict[str, str] = {}
+        try:
+            for r in ga.search(customer_id=cid, query=f"""
+                    SELECT change_event.campaign, change_event.change_date_time
+                    FROM change_event
+                    WHERE change_event.change_date_time >= '{cutoff} 00:00:00'
+                      AND change_event.change_date_time <= '{now_str}'
+                      AND change_event.change_resource_type = 'CAMPAIGN'
+                      AND change_event.resource_change_operation = 'CREATE'
+                    ORDER BY change_event.change_date_time DESC
+                    LIMIT 10000"""):
+                camp = r.change_event.campaign.rstrip("/").split("/")[-1]
+                d = r.change_event.change_date_time[:10]
+                if camp not in created_on or d < created_on[camp]:
+                    created_on[camp] = d
+        except GoogleAdsException as ex:
+            logger.warning("Reconcile: change_event query failed for %s: %s", cid, ex)
+            continue
+        if not created_on:
+            continue
+        # Read-only lookups: this function also backs a dry run, and
+        # ensure_campaign_label_exists() would CREATE a missing label.
+        gsd_rn = _lookup_label_resource(client, cid, SCRIPT_LABEL)
+        if not gsd_rn:
+            logger.warning("Reconcile: no %s label in %s — skipping account", SCRIPT_LABEL, cid)
+            continue
+        b0_rn = _lookup_label_resource(client, cid, "BRANDED_0")
+        b1_rn = _lookup_label_resource(client, cid, "BRANDED_1")
+        try:
+            for r in ga.search(customer_id=cid, query=f"""
+                    SELECT campaign.id, campaign.name, campaign.labels,
+                           campaign.shopping_setting.merchant_id
+                    FROM campaign
+                    WHERE campaign.labels CONTAINS ANY ('{gsd_rn}')
+                      AND campaign.status != 'REMOVED'"""):
+                camp_id = str(r.campaign.id)
+                if camp_id not in created_on:
+                    continue
+                parsed = _parse_campaign_name(r.campaign.name)
+                try:
+                    shop_id_int = int(parsed["shop_id"]) if parsed.get("shop_id") else None
+                except (TypeError, ValueError):
+                    shop_id_int = None
+                country = (parsed.get("country") or "").upper()
+                if shop_id_int is None or not country:
+                    continue
+                labels = set(r.campaign.labels)
+                key = (shop_id_int, country)
+                date = created_on[camp_id]
+                rec = out.get(key)
+                if rec is None or date < rec["date"]:
+                    out[key] = {
+                        "shop_id": shop_id_int,
+                        "shop_name": parsed.get("shop_name") or "",
+                        "country": country,
+                        "date": date,
+                        "customer_id": cid,
+                        "merchant_id": int(r.campaign.shopping_setting.merchant_id or 0) or None,
+                        "type": _sheet_type_from_label(parsed.get("label")),
+                        "branded": ("ja" if (b1_rn and b1_rn in labels)
+                                    else "nee" if (b0_rn and b0_rn in labels) else ""),
+                    }
+        except GoogleAdsException as ex:
+            logger.warning("Reconcile: campaign query failed for %s: %s", cid, ex)
+            continue
+    return out
+
+
+def _existing_mc_id_keys(shop_ids: List[int]) -> set:
+    """{(shop_id, country, merchant_id)} already in pa.mc_ids_efficy for these shops."""
+    if not shop_ids:
+        return set()
+    keys = set()
+    conn = _get_redshift_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT shop_id, domain, mc_created FROM pa.mc_ids_efficy WHERE shop_id IN (%s)"
+                % ",".join(str(int(s)) for s in shop_ids)
+            )
+            for shop_id, domain, mc in cur.fetchall():
+                keys.add((int(shop_id) if shop_id is not None else None,
+                          (domain or "").upper(),
+                          int(mc) if mc is not None else None))
+    finally:
+        conn.close()
+    return keys
+
+
+# A creation is considered already logged when a sheet row for the same shop+country sits
+# within this many days of it. Not zero: the sheet's datum is the RUN date while
+# change_event reports the campaign's own creation timestamp in the account's timezone, and
+# the two drift — Hoopo.eu/Zurbrueggen/Scentulp/Geurfris BE are logged 14-07-2026 while
+# their campaigns date to 15-07. Exact matching would have duplicated all four.
+SHEET_DATE_TOLERANCE_DAYS = 2
+
+
+def _existing_sheet_keys() -> Dict[tuple, List[str]]:
+    """{(shop_id, country): [YYYY-MM-DD, ...]} already logged in the campaigns_created sheet."""
+    creds = service_account.Credentials.from_service_account_file(
+        SHEETS_SA_FILE, scopes=SHEETS_SCOPES
+    )
+    svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
+    rows = svc.spreadsheets().values().get(
+        spreadsheetId=LOG_SPREADSHEET_ID, range=f"{LOG_WORKSHEET}!A:I"
+    ).execute().get("values", [])
+    keys: Dict[tuple, List[str]] = {}
+    for r in rows[1:]:
+        if len(r) < 6:
+            continue
+        d = _norm_sheet_date(r[0])
+        if not d:
+            continue
+        try:
+            shop_id = int(str(r[1]).strip())
+        except (TypeError, ValueError):
+            continue
+        keys.setdefault((shop_id, (r[5] or "").strip().upper()), []).append(d)
+    return keys
+
+
+def _sheet_has_row(have: Dict[tuple, List[str]], shop_id: int, country: str, date: str) -> bool:
+    """True when the sheet already logs this shop+country near this date."""
+    dates = have.get((shop_id, country)) or []
+    if not dates:
+        return False
+    target = datetime.strptime(date, "%Y-%m-%d")
+    for d in dates:
+        try:
+            if abs((datetime.strptime(d, "%Y-%m-%d") - target).days) <= SHEET_DATE_TOLERANCE_DAYS:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
+    """Fill in side-logs missing for recently created campaigns. Idempotent.
+
+    Compares Google Ads (change_event, ground truth) against all three logs and writes
+    only what is absent, so running it twice changes nothing the second time. Returns a
+    per-sink summary; never raises — a reconcile failure must not fail a run.
+
+    NOTE on pa.mc_ids_efficy: a run logs a Merchant Center id only when it CREATED that
+    sub-account. The Content API exposes no account creation date, so here the rule is
+    "the (shop_id, country, merchant_id) triple is not in the table yet" — for a shop
+    whose MC account already existed and was already logged, nothing is added.
+    """
+    summary: Dict[str, Any] = {
+        "days": days, "dry_run": dry_run, "shops_seen": 0,
+        "created_dates": {"missing": 0, "inserted": 0},
+        "mc_ids": {"missing": 0, "inserted": 0},
+        "sheet": {"missing": 0, "logged": 0},
+        "errors": [],
+    }
+    try:
+        client = _get_client()
+        inv = _inventory_recent_creations(client, days)
+    except Exception as ex:
+        logger.error("Reconcile: inventory failed: %s", ex)
+        summary["errors"].append({"step": "inventory", "error": str(ex)[:300]})
+        return summary
+    summary["shops_seen"] = len(inv)
+    if not inv:
+        return summary
+
+    # --- 1. creation dates (PostgreSQL) — ON CONFLICT DO NOTHING keeps the first date
+    try:
+        have_dates = get_created_dates()
+        rows = [(r["shop_id"], r["country"], r["date"], r["shop_name"])
+                for k, r in inv.items() if _created_key(k[0], k[1]) not in have_dates]
+        summary["created_dates"]["missing"] = len(rows)
+        if rows and not dry_run:
+            summary["created_dates"]["inserted"] = upsert_created_dates(rows)["inserted"]
+    except Exception as ex:
+        logger.error("Reconcile: creation dates failed: %s", ex)
+        summary["errors"].append({"step": "created_dates", "error": str(ex)[:300]})
+
+    # --- 2. Merchant Center ids (Redshift)
+    try:
+        have_mc = _existing_mc_id_keys([k[0] for k in inv])
+        rows = []
+        for r in inv.values():
+            if not r["merchant_id"]:
+                continue
+            if (r["shop_id"], r["country"], r["merchant_id"]) in have_mc:
+                continue
+            rows.append((r["shop_name"], r["shop_id"], r["merchant_id"], r["country"],
+                         r["date"].replace("-", "")))
+        summary["mc_ids"]["missing"] = len(rows)
+        summary["mc_ids"]["rows"] = rows
+        if rows and not dry_run:
+            summary["mc_ids"]["inserted"] = push_mc_ids_to_redshift(rows)["inserted"]
+    except Exception as ex:
+        logger.error("Reconcile: mc ids failed: %s", ex)
+        summary["errors"].append({"step": "mc_ids", "error": str(ex)[:300]})
+
+    # --- 3. the run-log sheet
+    try:
+        have_sheet = _existing_sheet_keys()
+        sheet_rows = []
+        for r in sorted(inv.values(), key=lambda x: (x["date"], x["shop_id"], x["country"])):
+            if _sheet_has_row(have_sheet, r["shop_id"], r["country"], r["date"]):
+                continue
+            sheet_rows.append([
+                datetime.strptime(r["date"], "%Y-%m-%d").strftime("%d-%m-%Y"),
+                str(r["shop_id"]), r["shop_name"], r["type"],
+                str(r["merchant_id"] or ""), r["country"],
+                r["branded"], "ja", "aan",
+            ])
+        summary["sheet"]["missing"] = len(sheet_rows)
+        summary["sheet"]["rows"] = sheet_rows
+        if sheet_rows and not dry_run:
+            res = _log_run_to_sheet(sheet_rows)
+            summary["sheet"]["logged"] = res.get("logged", 0)
+            summary["sheet"]["first_row"] = res.get("first_row")
+            if res.get("error"):
+                summary["errors"].append({"step": "sheet", "error": res["error"]})
+    except Exception as ex:
+        logger.error("Reconcile: sheet failed: %s", ex)
+        summary["errors"].append({"step": "sheet", "error": str(ex)[:300]})
+
+    logger.info(
+        "Reconcile (%d days, dry_run=%s): %d shop/country combos — dates %d/%d, "
+        "mc ids %d/%d, sheet %d/%d",
+        days, dry_run, summary["shops_seen"],
+        summary["created_dates"]["inserted"], summary["created_dates"]["missing"],
+        summary["mc_ids"]["inserted"], summary["mc_ids"]["missing"],
+        summary["sheet"]["logged"], summary["sheet"]["missing"],
+    )
     return summary

@@ -1870,9 +1870,12 @@
             }
         }
 
-        // Outlined action pill (green create / orange pause / purple skip).
+        // Outlined action pill (green create / teal activate / orange pause / purple skip).
+        // 'activate' = the campaign already exists and this run will switch it ON; it is
+        // a subset of already_exists, so the skip tile still counts it.
         function previewActionLabel(a) {
-            const c = a === 'create' ? '#00b894' : a === 'pause' ? '#e65100' : '#5e4a90';
+            const c = a === 'create' ? '#00b894' : a === 'activate' ? '#00838f'
+                    : a === 'pause' ? '#e65100' : '#5e4a90';
             return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c};">${escapeHtml(a || '')}</span>`;
         }
 
@@ -1904,7 +1907,7 @@
             // campaigns (create/skip for 'aan', pause for 'uit') — this reflects
             // exactly what the script will do, not a model-based guess.
             const countriesFor = (s) => {
-                const want = s.actie === 'uit' ? ['pause'] : ['create', 'skip'];
+                const want = s.actie === 'uit' ? ['pause'] : ['create', 'activate', 'skip'];
                 const set = new Set();
                 previewCampaigns.forEach(c => {
                     if (c.shop_name === s.shop_name && want.includes(c.action) && c.country) set.add(c.country);
@@ -1945,8 +1948,9 @@
                 <div class="fw-bold mb-2">Done <span class="badge" style="background:#CC5500;color:#fff;">dry run</span></div>
                 <div class="d-flex flex-wrap gap-3 mb-2">
                     ${tile('create', m.to_create, 'campaigns to create', '#00b894', '#e8f7f3', '#00b894')}
+                    ${tile('activate', m.to_activate || 0, 'existing to activate', '#00838f', '#e0f4f6', '#00838f')}
                     ${tile('pause', m.to_pause, 'campaigns to pause', '#e65100', '#fff3e0', '#fb8c00')}
-                    ${tile('skip', m.already_exists, 'already exist (skipped)', '#5e4a90', '#f3f0fa', '#5e4a90')}
+                    ${tile('skip', m.already_exists, 'already exist', '#5e4a90', '#f3f0fa', '#5e4a90')}
                 </div>
                 <div class="mb-2" style="font-size:0.82rem;">
                     <span onclick="selectPreviewTile('shops')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; color:${previewActiveTile === 'shops' ? '#5e4a90' : '#636e72'}; font-weight:${previewActiveTile === 'shops' ? '600' : '400'};" title="Click to see which shops">
@@ -1984,7 +1988,9 @@
         function getPreviewView() {
             const q = (previewFilterText || '').toLowerCase();
             let rows = previewCampaigns;
-            if (['create', 'pause', 'skip'].includes(previewActiveTile)) rows = rows.filter(c => c.action === previewActiveTile);
+            if (['create', 'activate', 'pause'].includes(previewActiveTile)) rows = rows.filter(c => c.action === previewActiveTile);
+            // 'skip' means "already exists", which includes the ones about to be activated.
+            else if (previewActiveTile === 'skip') rows = rows.filter(c => c.action === 'skip' || c.action === 'activate');
             if (q) rows = rows.filter(c =>
                 (c.campaign_name || '').toLowerCase().includes(q) ||
                 (c.shop_name || '').toLowerCase().includes(q) ||
@@ -2149,7 +2155,9 @@
 
         // ---- Run-result table (mirrors the preview panel) ----
         function runActionLabel(a) {
-            const c = a === 'created' ? '#00b894' : a === 'repaired' ? '#0984e3' : a === 'paused' ? '#e65100' : a === 'skipped' ? '#5e4a90' : '#d63031';
+            const c = a === 'created' ? '#00b894' : a === 'activated' ? '#00838f'
+                    : a === 'repaired' ? '#0984e3' : a === 'paused' ? '#e65100'
+                    : a === 'skipped' ? '#5e4a90' : '#d63031';
             return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c};">${escapeHtml(a)}</span>`;
         }
 
@@ -2159,7 +2167,13 @@
 
         function buildRunRows(data) {
             const rows = [];
-            (data.created || []).forEach(c => rows.push({ action: isRepaired(c) ? 'repaired' : 'created', name: c.campaign_name || '', country: c.country || '', detail: isRepaired(c) ? c.reason : '' }));
+            // The backend files 'activated' entries with the created ones (so undo can pause
+            // them again); the action string on the entry keeps them distinguishable.
+            (data.created || []).forEach(c => rows.push({
+                action: c.action === 'activated' ? 'activated' : (isRepaired(c) ? 'repaired' : 'created'),
+                name: c.campaign_name || '', country: c.country || '',
+                detail: c.action === 'activated' ? (c.reason === 'already_exists' ? 'existing campaign enabled' : `${c.reason} + enabled`)
+                        : (isRepaired(c) ? c.reason : '') }));
             (data.paused  || []).forEach(c => rows.push({ action: 'paused',  name: c.campaign_name || '', country: c.country || '', detail: '' }));
             (data.skipped || []).forEach(c => rows.push({ action: 'skipped', name: c.campaign_name || '', country: c.country || '', detail: c.reason || '' }));
             (data.errors  || []).forEach(c => rows.push({ action: 'error',   name: c.campaign_name || c.shop_name || '', country: c.country || '', detail: c.error || c.reason || c.step || '' }));
@@ -2183,9 +2197,11 @@
         function renderRunResultShell() {
             const d = runResultData;
             const created = (d.created || []);
+            const isActivated = c => c.action === 'activated';
             const counts = {
-                created:  created.filter(c => !isRepaired(c)).length,
-                repaired: created.filter(isRepaired).length,
+                created:  created.filter(c => !isRepaired(c) && !isActivated(c)).length,
+                activated: created.filter(isActivated).length,
+                repaired: created.filter(c => isRepaired(c) && !isActivated(c)).length,
                 paused:   (d.paused  || []).length,
                 skipped:  (d.skipped || []).length,
                 error:    (d.errors  || []).length,
@@ -2206,10 +2222,11 @@
                 ${heading}
                 <div class="d-flex flex-wrap gap-3 mb-2">
                     <div id="runTile-all" data-border="#adb5bd" class="p-2 px-3 rounded" style="background:#f1f3f5; border:1px solid #adb5bd; cursor:pointer;${allActive ? ' box-shadow:0 0 0 2px #adb5bd inset;' : ''}" onclick="selectRunTile('all')" title="Show all rows">
-                        <div style="font-size:1.5rem; font-weight:700; color:#495057;">${counts.created + counts.repaired + counts.paused + counts.skipped + counts.error}</div>
+                        <div style="font-size:1.5rem; font-weight:700; color:#495057;">${counts.created + counts.activated + counts.repaired + counts.paused + counts.skipped + counts.error}</div>
                         <div style="font-size:0.8rem; color:#495057;">all rows</div>
                     </div>
                     ${tile('created',  counts.created,  'created',  '#00b894', '#e8f7f3', '#00b894')}
+                    ${tile('activated', counts.activated, 'activated', '#00838f', '#e0f4f6', '#00838f')}
                     ${tile('repaired', counts.repaired, 'repaired', '#0984e3', '#e8f2fc', '#0984e3')}
                     ${tile('paused',  counts.paused,  'paused',  '#e65100', '#fff3e0', '#fb8c00')}
                     ${tile('skipped', counts.skipped, 'skipped', '#5e4a90', '#f3f0fa', '#5e4a90')}
