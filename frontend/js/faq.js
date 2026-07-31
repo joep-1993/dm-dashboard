@@ -1182,14 +1182,24 @@ async function publishFaqV2(full = false) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
 
+        // The backend reports urls_done / total_urls / records_pushed, so this gets a
+        // REAL progress bar rather than a spinner. While phase='counting' there is no
+        // total yet, so the bar runs indeterminate (UI_BLUEPRINT "status-bar lifecycle":
+        // never fake a percentage, and never park a determinate bar where the number is
+        // unknown).
         resultDiv.innerHTML = `
             <div class="alert alert-warning">
-                <strong>Publish 2.0 running…</strong> <span class="badge bg-secondary">${escapeHtml(mode)}</span><br>
+                <strong>Publish 2.0 running…</strong> <span class="badge badge-purple">${escapeHtml(mode)}</span><br>
                 Task ID: <code>${escapeHtml(data.task_id)}</code><br>
-                Target: <code>${escapeHtml(environment)}</code> /faq<br>
-                <div class="mt-2">
-                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                Target: <code>${escapeHtml(environment)}</code> /faq
+                <div class="d-flex justify-content-between align-items-center small text-muted mt-2 mb-1">
                     <span id="publishV2StatusText">Counting…</span>
+                    <span id="publishV2Pct"></span>
+                </div>
+                <div class="progress indeterminate" id="publishV2Track" style="height:1.1rem;">
+                    <div id="publishV2Bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                         style="background-color:#00b894;" role="progressbar"
+                         aria-valuemin="0" aria-valuemax="100"></div>
                 </div>
             </div>`;
         pollFaqV2(data.task_id, btn, resultDiv);
@@ -1219,6 +1229,24 @@ function pollFaqV2(taskId, btn, resultDiv) {
                 : `${nf(p.urls_done)}/${nf(p.total_urls)} URLs · ${nf(p.records_pushed)} records pushed`
                   + (p.failed ? ` · ${nf(p.failed)} failed` : '');
         }
+        // Determinate as soon as a total exists; indeterminate before that.
+        const track = document.getElementById('publishV2Track');
+        const bar = document.getElementById('publishV2Bar');
+        const pctEl = document.getElementById('publishV2Pct');
+        if (track && bar) {
+            const total = Number(p.total_urls) || 0;
+            if (total > 0) {
+                const pct = Math.max(0, Math.min(100, 100 * (Number(p.urls_done) || 0) / total));
+                track.classList.remove('indeterminate');
+                bar.style.width = pct + '%';
+                bar.setAttribute('aria-valuenow', String(Math.round(pct)));
+                if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+            } else {
+                track.classList.add('indeterminate');
+                bar.style.width = '';
+                if (pctEl) pctEl.textContent = '';
+            }
+        }
         if (data.status === 'completed' || data.status === 'failed') {
             clearInterval(timer);
             btn.disabled = false;
@@ -1239,7 +1267,7 @@ function pollFaqV2(taskId, btn, resultDiv) {
             } else {
                 resultDiv.innerHTML = `
                     <div class="alert alert-done-yellow">
-                        <strong>Publish 2.0 done</strong> <span class="badge bg-secondary">${escapeHtml(r.mode || '')}</span><br>
+                        <strong>Publish 2.0 done</strong> <span class="badge badge-purple">${escapeHtml(r.mode || '')}</span><br>
                         ${nf(r.records_pushed)} records across ${nf(r.urls_processed)} URLs
                         in ${r.batches} batches (${r.duration_sec}s) → <code>${escapeHtml(r.api_url || '')}</code>
                         ${r.skipped_count ? `<br><span class="text-muted">${r.skipped_count} URL(s) skipped (unusable faq_json)</span>` : ''}

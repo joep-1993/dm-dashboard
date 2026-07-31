@@ -329,6 +329,14 @@ body {
    nor grows when data lands. Shared from here so all tools shimmer identically;
    each page still needs its own skeletonRows(cols, n) helper because the column
    count differs and there is no shared JS bundle. */
+/* Brand-purple badge. Bootstrap's .bg-secondary is barely visible against a
+ * card (see cc1/UI_BLUEPRINT.md "Don't use grey as a label colour"), so a mode
+ * or status chip uses this instead. */
+.badge-purple {
+    background-color: #5e4a90;
+    color: #fff;
+}
+
 /* ------------------------------------------------------------------ *
  * Indeterminate progress bar — for a phase that is ONE opaque call, so
  * there is no honest percentage. A segment slides across the track:
