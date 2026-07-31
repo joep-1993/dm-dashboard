@@ -99,15 +99,15 @@
         .pagination-controls .page-info { color: #636e72; }
         .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
         .neg { color: #d63031; }
-        #startDate, #endDate, #refDate {
+        #startDate, #endDate, #refDate, #catDate, #dashDate {
             border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
             box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
             transition: border-color .15s ease, box-shadow .15s ease;
         }
-        #startDate:hover, #endDate:hover, #refDate:hover { border-color: #b9b0d8; }
-        #startDate:focus, #endDate:focus, #refDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
-        #startDate::-webkit-calendar-picker-indicator, #endDate::-webkit-calendar-picker-indicator, #refDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
-        #startDate:hover::-webkit-calendar-picker-indicator, #endDate:hover::-webkit-calendar-picker-indicator, #refDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
+        #startDate:hover, #endDate:hover, #refDate:hover, #catDate:hover, #dashDate:hover { border-color: #b9b0d8; }
+        #startDate:focus, #endDate:focus, #refDate:focus, #catDate:focus, #dashDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
+        #startDate::-webkit-calendar-picker-indicator, #endDate::-webkit-calendar-picker-indicator, #refDate::-webkit-calendar-picker-indicator, #catDate::-webkit-calendar-picker-indicator, #dashDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
+        #startDate:hover::-webkit-calendar-picker-indicator, #endDate:hover::-webkit-calendar-picker-indicator, #refDate:hover::-webkit-calendar-picker-indicator, #catDate:hover::-webkit-calendar-picker-indicator, #dashDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
         .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
         .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
         .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
@@ -239,6 +239,16 @@
            ABOVE the line and all five tiles share one geometry. Scoped to #dashTiles:
            .stat-card is also used by the summary row and the standup tiles, which have
            no sparkline and must keep their current centring. */
+        /* Summary tiles double as the chart's metric toggles, so they carry the same
+           on/off vocabulary as the .metric-toggle pills: brand border + tint when the
+           series is plotted, muted when it is not. The SPARKLINE area is deliberately
+           NOT clickable — it is the biggest part of the tile and you hover it to read a
+           day, so a click there would flip the series off by accident. */
+        #statsRow .stat-card.metric-tile { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+        #statsRow .stat-card.metric-tile:hover { border-color: #b9b0d8; }
+        #statsRow .stat-card.metric-on { border-color: #5e4a90; box-shadow: 0 0 0 2px rgba(94,74,144,0.10) inset; }
+        #statsRow .stat-card.metric-off h3, #statsRow .stat-card.metric-off .label { opacity: 0.45; }
+        #statsRow .stat-card .tile-spark { cursor: default; }
         #dashTiles .stat-card, #statsRow .stat-card { display: flex; flex-direction: column; }
         #dashTiles .stat-card .tile-spark, #statsRow .stat-card .tile-spark { margin-top: auto; }
         .dash-sub { font-size: 0.78rem; text-transform: uppercase; letter-spacing: .04em;
@@ -324,7 +334,7 @@
         <!-- Chart -->
         <div class="card mb-4">
             <div class="card-header d-flex align-items-center gap-2" style="background:#5e4a90; color:#fff;">
-                <h5 class="mb-0">Visits & revenue per day</h5>
+                <h5 class="mb-0">Performance per day</h5>
                 <svg id="revInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
                     <title>Revenue = Beslist's own revenue (onze omzet, incl. affiliate) attributed by conversion date, matching the Qlik "Beslist omzet en clicks" report. The most recent 1–2 days undercount because conversions keep settling for up to ~180 days. Visits remain visit-based (real visits only).</title>
                     <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
@@ -379,15 +389,16 @@
                         <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
                     </svg>
                 </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <label for="dashDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Dag:</label>
+                    <input type="date" class="form-control form-control-sm" id="dashDate" style="width:150px;" onchange="loadDashboard(false)">
+                </div>
             </div>
             <div class="card-body">
-                <!-- Day picker + Refresh live in the BODY, not the purple header: the
-                     blueprint's Refresh is `btn btn-outline-purple` with a ↻ glyph, and
-                     purple-on-purple is unreadable. Same arrangement as the chart card
-                     above (controls left, actions pushed right with ms-auto). -->
+                <!-- Refresh stays in the BODY while the day picker sits on the title row:
+                     the blueprint's Refresh is `btn btn-outline-purple`, and purple on the
+                     purple header is unreadable. A native date input is fine up there. -->
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-                    <label for="dashDate" class="form-label small mb-0">Dag</label>
-                    <input type="date" class="form-control form-control-sm" id="dashDate" style="width:150px;" onchange="loadDashboard(false)">
                     <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadDashboard(true)"
                             title="Bypass cache and re-query Redshift">↻ Refresh</button>
                 </div>
@@ -432,6 +443,13 @@
                         <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
                         <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
                     </svg>
+                </div>
+                <!-- Own comparison day, independent of Performance standup's. Both hit
+                     /deltas but with their own ref_date, so one section can be moved
+                     without dragging the other along. -->
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <label for="catDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Compare day:</label>
+                    <input type="date" class="form-control form-control-sm" id="catDate" style="width:150px;" onchange="loadCatDeltas(false)">
                 </div>
             </div>
             <!-- The toggle is a full-width banner-button UNDER the header rather than
@@ -570,7 +588,7 @@
                 <h5 class="mb-0">Performance standup</h5>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <label for="refDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Compare day:</label>
-                    <input type="date" class="form-control form-control-sm" id="refDate" style="width:150px;" onchange="loadDeltas(false)">
+                    <input type="date" class="form-control form-control-sm" id="refDate" style="width:150px;" onchange="loadStandupDeltas(false)">
                     <svg id="deltaInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
                         <title id="deltaInfoTitle">Comparison windows</title>
                         <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
@@ -730,7 +748,8 @@
         let selected = new Set(['seo_visits', 'dma_visits', 'gsaas_visits']);
         let lastData = null;
         let chart = null;
-        let lastDeltas = null;
+        let lastDeltas = null;      // Performance standup — driven by #refDate
+        let lastCatDeltas = null;   // Top categories   — driven by #catDate
         let catMetric = 'visits';
         // Top-categories tables: independent sort state, default by Δ desc.
         const CAT_TABLES = {
@@ -744,7 +763,7 @@
         let perfSortCol = 'date';
         let perfSortDir = 'asc';
         let perfPage = 1;
-        let fpStart = null, fpEnd = null, fpRef = null, fpDash = null;
+        let fpStart = null, fpEnd = null, fpRef = null, fpDash = null, fpCat = null;
         let notesMap = {};   // date -> { note, color }
         // 6 preset pastel note colors (yellow, green, blue, pink, purple, orange).
         const PRESET_COLORS = ['#fff3b0', '#c7f0d2', '#cfe3fc', '#fdd2d2', '#e3d4f7', '#ffe0c2'];
@@ -852,14 +871,24 @@
             if (!lastData) return;
             const labels = lastData.daily.map(r => r.date);
             const usedAxes = new Set();
-            const datasets = CHART_ORDER.filter(k => selected.has(k)).map(key => {
+            // Area fill + thin line, matching the tile sparklines (renderSpark).
+            //
+            // The fill alpha steps down as series are added: at the default three
+            // series it is '22', byte-identical to the tiles, but ten translucent
+            // washes stacked on one plot turn it to mud, so deeper selections get a
+            // fainter fill. The LINE colour never changes — identity stays put; only
+            // the wash under it gets quieter.
+            const shown = CHART_ORDER.filter(k => selected.has(k));
+            const fillAlpha = shown.length <= 2 ? '2b' : shown.length <= 4 ? '22' : '14';
+            const datasets = shown.map(key => {
                 const m = METRICS[key];
                 usedAxes.add(m.axis);
                 return {
                     label: m.label,
                     data: lastData.daily.map(r => r[key]),
                     borderColor: m.color,
-                    backgroundColor: m.color + '22',
+                    backgroundColor: m.color + fillAlpha,
+                    fill: true,
                     yAxisID: m.axis,
                     tension: 0.35,
                     // Points only on hover: with up to 10 series and 90 days, a
@@ -872,7 +901,9 @@
                     pointBackgroundColor: m.color,
                     pointHoverBorderColor: '#fff',
                     pointHoverBorderWidth: 2,
-                    borderWidth: 2,
+                    // 1.75 not 2, same as the tile sparklines — a thinner stroke over a
+                    // filled area reads lighter, which is the point of the match.
+                    borderWidth: 1.75,
                     borderCapStyle: 'round',
                     borderJoinStyle: 'round',
                 };
@@ -1000,7 +1031,11 @@
             row.innerHTML = '';
             ORDER.forEach(key => {
                 const card = document.createElement('div');
-                card.className = 'stat-card';
+                const on = selected.has(key);
+                card.className = 'stat-card metric-tile ' + (on ? 'metric-on' : 'metric-off');
+                card.title = on ? `Click to hide ${METRICS[key].label} in the chart`
+                                : `Click to show ${METRICS[key].label} in the chart`;
+                card.onclick = () => toggleMetricFromTile(key);
                 let html = `<h3>${fmt(key, t[key])}</h3><div class="label">${METRICS[key].label}</div>`;
                 if (tileDeltas) {
                     html += `<div class="stat-delta">${pctBadge(tileDeltas[key])}<span class="stat-delta-cap">vs prev ${tileDeltaDays}d</span></div>`;
@@ -1016,7 +1051,20 @@
             ORDER.forEach(key => {
                 renderSpark(`stat_${key}`, dates, lastData.daily.map(r => r[key]),
                             METRICS[key].color, v => fmt(key, v));
+                // Hovering the graph to read a day must not toggle the series.
+                const spark = document.getElementById(`stat_${key}`);
+                if (spark) spark.parentElement.addEventListener('click', e => e.stopPropagation());
             });
+        }
+
+        // A summary tile is the same control as its .metric-toggle pill — one `selected`
+        // set behind both, so whichever you click, the pill row, the chart and the tile
+        // states all move together.
+        function toggleMetricFromTile(key) {
+            if (selected.has(key)) selected.delete(key); else selected.add(key);
+            buildToggles();
+            renderChart();
+            renderStats();
         }
 
         // Inclusive day count of an ISO date range.
@@ -1479,7 +1527,7 @@
         // client-side ascending sort can surface negative deltas too. Maincats have
         // no worst_* list but already carry the full set, so this is a no-op there.
         function catSourceRows(which) {
-            const src = lastDeltas[CAT_TABLES[which].src] || {};
+            const src = lastCatDeltas[CAT_TABLES[which].src] || {};
             const pos = catMetric === 'visits' ? 'by_visits' : 'by_revenue';
             const neg = catMetric === 'visits' ? 'worst_by_visits' : 'worst_by_revenue';
             const seen = new Set();
@@ -1494,11 +1542,11 @@
         }
 
         function renderCats() {
-            if (!lastDeltas) return;
+            if (!lastCatDeltas) return;
             renderCatTable('main', catSourceRows('main'));
             renderCatTable('sub', catSourceRows('sub'));
             // Info tooltip: the two days being compared for the selected metric.
-            const c = lastDeltas.comparison;
+            const c = lastCatDeltas.comparison;
             const p1 = catMetric === 'visits' ? c.visits_p1 : c.revenue_p1;
             const p2 = catMetric === 'visits' ? c.visits_p2 : c.revenue_p2;
             const ci = document.getElementById('catInfoTitle');
@@ -1603,14 +1651,39 @@
             renderStandup();
         }
 
+        // /deltas is fetched TWICE, once per section, because Top categories and
+        // Performance standup now have their own comparison day. The server caches per
+        // ref_date for 5 minutes, so when both dates are equal (the default) the second
+        // call is a cache hit and costs nothing.
         async function loadDeltas(force) {
-            // Both cards this fetch fills get skeletons: the standup card's own
-            // tiles + lists, and the Top-categories tables (a separate card).
-            standupSkeleton();
+            await Promise.all([loadCatDeltas(force), loadStandupDeltas(force)]);
+        }
+
+        async function loadCatDeltas(force) {
             document.getElementById('mainCatBody').innerHTML =
                 skeletonRows(catColumns(false).length);
             document.getElementById('subCatBody').innerHTML =
                 skeletonRows(catColumns(true).length);
+            try {
+                const params = new URLSearchParams();
+                const ref = document.getElementById('catDate').value;
+                if (ref) params.set('ref_date', ref);
+                if (force) params.set('force', 'true');
+                const res = await fetch(`${API}/deltas?${params}`);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                lastCatDeltas = await res.json();
+                renderCats();
+            } catch (e) {
+                // Must replace every skeleton, or a failed load shimmers forever.
+                ['mainCatBody', 'subCatBody'].forEach(id => {
+                    document.getElementById(id).innerHTML =
+                        `<tr><td class="text-center text-danger py-3">Failed to load: ${escapeHtml(e.message)}</td></tr>`;
+                });
+            }
+        }
+
+        async function loadStandupDeltas(force) {
+            standupSkeleton();
             try {
                 const params = new URLSearchParams();
                 const ref = document.getElementById('refDate').value;
@@ -1619,16 +1692,10 @@
                 const res = await fetch(`${API}/deltas?${params}`);
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 lastDeltas = await res.json();
-                renderCats();
                 renderStandup();
             } catch (e) {
                 document.getElementById('standupTiles').innerHTML =
-                    `<span class="text-danger">Failed to load deltas: ${e.message}</span>`;
-                // Must replace every skeleton, or a failed load shimmers forever.
-                ['mainCatBody', 'subCatBody'].forEach(id => {
-                    document.getElementById(id).innerHTML =
-                        '<tr><td class="text-center text-danger py-3">Failed to load.</td></tr>';
-                });
+                    `<span class="text-danger">Failed to load deltas: ${escapeHtml(e.message)}</span>`;
                 ['standupVisitsList', 'standupRevenueList'].forEach(id => {
                     document.getElementById(id).innerHTML =
                         '<div class="text-danger px-2 py-2">Failed to load.</div>';
@@ -1768,7 +1835,7 @@
             dayRows.push(totalRow);
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dayRows), 'Per-day');
 
-            if (lastDeltas) {
+            if (lastCatDeltas) {
                 const catSheet = (rows, withSub) => rows.map(r => {
                     const o = { Maincat: r.maincat };
                     if (withSub) o['Deepest cat'] = r.subcat;
@@ -1855,16 +1922,6 @@
             const t = document.getElementById('sparkTip');
             if (t) t.style.opacity = 0;   // never leave a tooltip floating over a redraw
         }
-        // percentage-POINT badge, for rates. Same colours as pctBadge but a "pp"
-        // suffix, because a percentage change of a percentage reads as if the rate
-        // itself moved by that much.
-        function ppBadge(pp, digits = 1) {
-            if (pp === null || pp === undefined) return '<span class="delta-badge flat">n/a</span>';
-            const cls = pp > 0 ? 'up' : (pp < 0 ? 'down' : 'flat');
-            const sign = pp > 0 ? '+' : '';
-            return `<span class="delta-badge ${cls}">${sign}${pp.toLocaleString('nl-NL', { maximumFractionDigits: digits })}pp</span>`;
-        }
-
         // One shared tooltip node for every sparkline: five canvases do not need five
         // elements, and a single node cannot leave a stale copy behind on redraw.
         function sparkTip() {
@@ -2037,8 +2094,8 @@
                 document.getElementById('dashTiles').innerHTML =
                     dashTile('SEO-bezoeken', fmtInt(d.visits), d.visits_wow, 'sparkVisits') +
                     dashTile('SEO-omzet', fmtEuro(d.revenue), d.revenue_wow, 'sparkRevenue') +
-                    dashTile('CTR', pct(d.ctr), null, 'sparkCtr', ppBadge(d.ctr_wow_pp)) +
-                    dashTile('Bounce', pct(d.bounce), null, 'sparkBounce', ppBadge(d.bounce_wow_pp)) +
+                    dashTile('CTR', pct(d.ctr), d.ctr_wow, 'sparkCtr') +
+                    dashTile('Bounce', pct(d.bounce), d.bounce_wow, 'sparkBounce') +
                     dashTile('OPB', opb, d.opb_wow, 'sparkOpb');
                 const s = d.series || {};
                 const eur2 = v => '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2094,9 +2151,11 @@
                 fpEnd = flatpickr('#endDate', fpOpts);
                 fpRef = flatpickr('#refDate', { ...fpOpts, defaultDate: yesterday });
                 fpDash = flatpickr('#dashDate', { ...fpOpts, defaultDate: yesterday });
+                fpCat = flatpickr('#catDate', { ...fpOpts, defaultDate: yesterday });
             } else {
                 document.getElementById('refDate').value = ymd(yesterday);
                 document.getElementById('dashDate').value = ymd(yesterday);
+                document.getElementById('catDate').value = ymd(yesterday);
             }
             // Default range: last 7 days (ending yesterday); also enables the tile WoW deltas.
             setPreset(7);

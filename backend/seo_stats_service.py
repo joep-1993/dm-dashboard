@@ -759,11 +759,12 @@ def get_dashboard(target_date: Optional[str] = None, force: bool = False) -> Dic
         "opb": round(omzet / visits, 3) if visits else None,
         "visits_wow": _pct_delta(int(pre.get("seo_visits") or 0), visits),
         "revenue_wow": _pct_delta(float(pre.get("seo_omzet") or 0.0), omzet),
-        # CTR and Bounce are RATES, so their week-over-week move is in percentage
-        # POINTS, not a percentage of a percentage ("+2,1pp", not "+3,1%"). That is
-        # also why the per-day table excludes percent metrics from its WoW % columns
-        # (hasWow()) — a %-of-% reads as if the rate itself changed by that much.
-        # OPB is euro-per-visit, so a percentage change is the natural comparison.
+        # CTR and Bounce report a PERCENTAGE CHANGE, like the other tiles (Joep's
+        # preference, 2026-07-31). Note this is a percentage of a percentage: "-1,7%"
+        # means the CTR value fell 1,7% relative, not 1,7 points. The percentage-POINT
+        # variant is still computed below for anyone who wants the absolute move.
+        "ctr_wow": _pct_delta(_ratio(pre, "seo_clicks"), _ratio(cur, "seo_clicks")),
+        "bounce_wow": _pct_delta(_ratio(pre, "seo_noprod"), _ratio(cur, "seo_noprod")),
         "ctr_wow_pp": _pp_delta(_ratio(pre, "seo_clicks"), _ratio(cur, "seo_clicks")),
         "bounce_wow_pp": _pp_delta(_ratio(pre, "seo_noprod"), _ratio(cur, "seo_noprod")),
         "opb_wow": _pct_delta(_opb(pre), _opb(cur)),
