@@ -747,7 +747,7 @@
             const combos = selectedCombos();
             const n = combos.length;
             const what = n ? `${n} selected blueprint(s)` : `ALL built blueprints`;
-            if (!confirm(`Push ${what} to PRODUCTION /page-titles (live)?\n\nThis also pushes the per-URL AI unique titles.`)) return;
+            if (!confirm(`Push ${what} to PRODUCTION /page-titles (live)?\n\nBlueprints only — unique titles are published from the Unique Titles tool.`)) return;
             const btn = document.getElementById('btnPublish');
             btn.disabled = true; btn.textContent = 'Publishing…';
             hideDoneBanner('publishDone');
@@ -770,6 +770,8 @@
                 const bits = [`<strong>Done — pushed ${num(d.pushed)} blueprint(s) to production.</strong>`];
                 if (failed) bits.push(`<strong>${num(failed)}</strong> failed`);
                 if (skipped) bits.push(`<strong>${num(skipped)}</strong> skipped (over the length cap)`);
+                // Only mentioned when a caller explicitly asked for it; the default
+                // publish no longer touches unique titles.
                 if (ut) bits.push(`AI unique titles: ${utFailed ? 'failed' : 'pushed'}`);
                 if (d.message) bits.push(esc(d.message));
                 // Raw response stays available, but folded away — the summary is the point.

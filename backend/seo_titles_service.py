@@ -14,8 +14,11 @@ Flow (see /home/joepvanschagen/.claude/plans/proud-singing-lecun.md):
      export) or pa.seo_titles_blueprints (what this tool already built/pushed).
   5. For each NEW combo: build a deterministic placeholder blueprint AND (best
      effort) an AI unique title for the source URL (reused ai_titles_service).
-  6. Publish: POST blueprints -> /page-titles; push per-URL AI titles via the
-     existing unique_titles importer.
+  6. Publish: POST blueprints -> /page-titles. Blueprints ONLY — unique titles are
+     published from the Unique Titles tool. (Until 2026-07-31 this also called
+     upload_titles_to_api(), which re-uploads a CSV of ALL ~1,02M unique titles —
+     the same thing Unique Titles' own Publish All does — adding ~20 minutes to a
+     10-minute blueprint push. `push_unique_titles=True` still opts in.)
 
 Blueprint templates are ported verbatim from
 scripts/pagetitles_blueprint_from_urls.py so generated keys stay byte-identical
@@ -725,7 +728,7 @@ def remove_blueprints(combos):
         return_db_connection(conn)
 
 
-def publish_built(env="production", push_unique_titles=True, combos=None):
+def publish_built(env="production", push_unique_titles=False, combos=None):
     """Push status='built' blueprints to /page-titles (batched upsert), flip
     successful ones to 'pushed', then push the per-URL AI titles. When `combos`
     is given, only those (cat_id, key) built rows are pushed; otherwise all."""
@@ -845,9 +848,13 @@ def publish_built(env="production", push_unique_titles=True, combos=None):
             for r in too_long
         ]
 
-    # Push per-URL AI titles via the existing importer (full CSV upsert). This is
-    # one opaque call, so the bar sits at 100% on a separate phase label rather
-    # than pretending to advance.
+    # OFF BY DEFAULT since 2026-07-31. This is not "the AI titles for the blueprints
+    # just pushed" — upload_titles_to_api() regenerates a CSV of ALL ~1,02M unique
+    # titles and re-uploads the whole file, which is byte-for-byte the same operation
+    # as Publish All in the Unique Titles tool. It added ~20 minutes to a 10-minute
+    # blueprint push and made Publish look hung. Unique titles have their own tool;
+    # publishing them is that tool's job. The flag stays for a caller that explicitly
+    # wants both in one go.
     if push_unique_titles and pushed:
         _pub_set(phase="unique_titles")
         try:

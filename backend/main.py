@@ -3447,11 +3447,14 @@ async def seo_titles_preview_endpoint(limit: int = 100, status: str = "built"):
 
 @app.post("/api/seo-titles/publish")
 async def seo_titles_publish_endpoint(request: dict = None):
-    """Push built blueprints to /page-titles (default production) and the per-URL
-    AI titles via the unique-titles importer."""
+    """Push built blueprints to /page-titles (default production).
+
+    push_unique_titles defaults to FALSE: it triggers a full ~1,02M-row re-upload of
+    every unique title (the same thing Unique Titles' own Publish All does), which is
+    not what someone publishing page-title blueprints is asking for."""
     request = request or {}
     env = request.get("env", "production")
-    push_unique = request.get("push_unique_titles", True)
+    push_unique = request.get("push_unique_titles", False)
     combos = request.get("combos")  # optional [{cat_id, key}]; None = all built
     try:
         loop = asyncio.get_event_loop()
