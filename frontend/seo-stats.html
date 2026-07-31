@@ -117,9 +117,29 @@
         .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
         .flatpickr-day.today { border-color: #5e4a90; }
         .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
-        .btn-preset { border: 1px solid #5e4a90; color: #5e4a90; background: #fff; }
-        .btn-preset:hover, .btn-preset:focus { background: #5e4a90; color: #fff; }
-        .btn-group .btn-preset:not(:first-child) { border-left: 1px solid #5e4a90; }
+        /* NO .card-header .btn-outline-purple override here, on purpose (Joep,
+           2026-07-31: "the Refresh button should be transparent, is now white").
+           The `style="background:#5e4a90"` on the card headers below is DEAD CSS —
+           style.css sets `.card-header { background-color: var(--color-section)
+           !important; color:#333 !important }`, and a stylesheet !important beats an
+           inline declaration, so every header on this page renders in the standard
+           light grey. The canonical transparent btn-outline-purple is therefore
+           correct as-is; the white base this block used to carry was compensating for
+           a purple header that never actually paints. */
+        /* Preset group (7d/14d/30d/90d) shaped like the date inputs next to it: same
+           border colour, same 10px radius on the outer corners, same soft shadow. The
+           purple text stays, so it still reads as an action rather than a field. */
+        .btn-preset { border: 1px solid #d9d4e8; color: #5e4a90; background: #fff;
+                      padding: 0.35rem 0.7rem; }
+        .btn-preset:hover, .btn-preset:focus { background: #5e4a90; color: #fff; border-color: #5e4a90; }
+        .btn-group .btn-preset:not(:first-child) { border-left: 1px solid #d9d4e8; }
+        .btn-group:has(.btn-preset) {
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(45,42,58,0.06);
+            overflow: hidden;
+        }
+        .btn-group .btn-preset:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
+        .btn-group .btn-preset:last-child { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
         .chart-wrap { position: relative; height: 420px; }
         /* Dark hover card (#242628, Joep's pick). Everything inside had to be
            re-toned for a dark ground, not just the background swapped:
@@ -177,16 +197,6 @@
         .seg-toggle .btn { border: 1px solid #5e4a90; color: #5e4a90; background: transparent; }
         .seg-toggle .btn:hover { background: #5e4a90; color: #fff; }
         .seg-toggle .btn-check:checked + .btn { background: #5e4a90; color: #fff; border-color: #5e4a90; }
-        /* "Update Excel" module (the Performance Standup tool, moved in here).
-           ps- prefixed so nothing collides with this page's own .stat-card. */
-        .ps-result-card { border-left: 4px solid #27ae60; }
-        .ps-result-card.error { border-left-color: #e74c3c; }
-        .ps-result-card.warning { border-left-color: #f39c12; }
-        .ps-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
-        .ps-stat { background: #f7f5fb; padding: 0.6rem 0.8rem; border-radius: 8px; }
-        .ps-stat .label { font-size: 0.75rem; color: #636e72; text-transform: uppercase; letter-spacing: 0.05em; }
-        .ps-stat .value { font-size: 1.2rem; font-weight: 600; color: #3a3a3a; }
-        ul.ps-warn-list { font-size: 0.85rem; max-height: 200px; overflow-y: auto; }
         /* ---- Dagoverzicht (single-day tiles + device split) ----
            Part-to-whole is a 100% STACKED BAR, not a donut: the dataviz skill's
            form table sends part-to-whole to a stacked bar, and its anti-pattern
@@ -241,16 +251,18 @@
            no sparkline and must keep their current centring. */
         /* Summary tiles double as the chart's metric toggles, so they carry the same
            on/off vocabulary as the .metric-toggle pills: brand border + tint when the
-           series is plotted, muted when it is not. The SPARKLINE area is deliberately
+           series is plotted. The value and label are NOT dimmed when it is off — the
+           number is the tile's whole point and stays readable either way; only the
+           border says whether it is plotted. The SPARKLINE area is deliberately
            NOT clickable — it is the biggest part of the tile and you hover it to read a
            day, so a click there would flip the series off by accident. */
         #statsRow .stat-card.metric-tile { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
         #statsRow .stat-card.metric-tile:hover { border-color: #b9b0d8; }
         #statsRow .stat-card.metric-on { border-color: #5e4a90; box-shadow: 0 0 0 2px rgba(94,74,144,0.10) inset; }
-        #statsRow .stat-card.metric-off h3, #statsRow .stat-card.metric-off .label { opacity: 0.45; }
         #statsRow .stat-card .tile-spark { cursor: default; }
-        #dashTiles .stat-card, #statsRow .stat-card { display: flex; flex-direction: column; }
-        #dashTiles .stat-card .tile-spark, #statsRow .stat-card .tile-spark { margin-top: auto; }
+        #dashTiles .stat-card, #statsRow .stat-card, #standupTiles .stat-card { display: flex; flex-direction: column; }
+        #dashTiles .stat-card .tile-spark, #statsRow .stat-card .tile-spark,
+        #standupTiles .stat-card .tile-spark { margin-top: auto; }
         .dash-sub { font-size: 0.78rem; text-transform: uppercase; letter-spacing: .04em;
                     color: #8a8a8a; margin-bottom: 6px; }
         /* Top-categories toggle: a wide banner-button under the header, not a small
@@ -341,29 +353,29 @@
                     <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
                     <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
                 </svg>
+                <!-- Canonical blueprint Refresh, zero overrides: btn-outline-purple +
+                     ↻ glyph, transparent background, purple outline and label, fills
+                     purple on hover. The header's inline purple never paints (style.css
+                     forces .card-header grey with !important), so nothing needs
+                     re-toning — see the note in the style block. -->
+                <button class="btn btn-sm btn-outline-purple ms-auto" onclick="load(true)"
+                        title="Bypass cache and re-query Redshift">↻ Refresh</button>
             </div>
             <div class="card-body">
                 <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
                     <div>
                         <label for="startDate" class="form-label small mb-1">Start date</label>
-                        <input type="date" class="form-control form-control-sm" id="startDate" style="width: 160px;">
+                        <input type="date" class="form-control form-control-sm" id="startDate" style="width: 160px;" onchange="autoLoad()">
                     </div>
                     <div>
                         <label for="endDate" class="form-label small mb-1">End date</label>
-                        <input type="date" class="form-control form-control-sm" id="endDate" style="width: 160px;">
+                        <input type="date" class="form-control form-control-sm" id="endDate" style="width: 160px;" onchange="autoLoad()">
                     </div>
                     <div class="btn-group btn-group-sm" role="group" aria-label="presets">
                         <button class="btn btn-preset" onclick="setPreset(7)">7d</button>
                         <button class="btn btn-preset" onclick="setPreset(14)">14d</button>
                         <button class="btn btn-preset" onclick="setPreset(30)">30d</button>
                         <button class="btn btn-preset" onclick="setPreset(90)">90d</button>
-                    </div>
-                    <div class="ms-auto">
-                        <!-- min-width stays inline: it is geometry, not colour —
-                             it keeps the button from resizing when the label
-                             swaps to "Loading…" mid-fetch. -->
-                        <button class="btn btn-sm btn-run" style="min-width:90px;" onclick="load(false)" id="loadBtn">Load</button>
-                        <button class="btn btn-sm btn-outline-purple" onclick="load(true)" title="Bypass cache and re-query Redshift">↻ Refresh</button>
                     </div>
                 </div>
                 <div id="infoNote" class="info-note mb-3" style="display:none;"></div>
@@ -374,60 +386,41 @@
             </div>
         </div>
 
-        <!-- Dagoverzicht — single-day tiles + device split (suggestions_new item 4).
-             Own date picker, defaulting to yesterday, independent of the chart
-             range above: this section answers "how was yesterday", not "how was
-             the period". -->
+        <!-- Per-day table -->
         <div class="card mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
-                <div class="d-flex align-items-center gap-2">
-                    <h5 class="mb-0">Dagoverzicht</h5>
-                    <svg id="dashInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
-                        <title>SEO-kanaal, één dag. CTR = (bvb + outclicks) / bezoeken en kan boven 100% uitkomen — zelfde definitie als de grafiek. Bounce = aandeel bezoeken zonder productklik. OPB = omzet per bezoek. Δ% vergelijkt met dezelfde weekdag 7 dagen eerder. Apparaat komt uit de user agent, op dezelfde manier voor bezoeken én omzet.</title>
-                        <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
-                        <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
-                        <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
-                    </svg>
-                </div>
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <label for="dashDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Dag:</label>
-                    <input type="date" class="form-control form-control-sm" id="dashDate" style="width:150px;" onchange="loadDashboard(false)">
+            <div class="card-header d-flex justify-content-between align-items-center" style="background:#5e4a90; color:#fff;">
+                <h5 class="mb-0">Per-day overview</h5>
+                <div class="d-flex align-items-center gap-3">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showExtraRev" onchange="toggleExtraRev()">
+                        <label class="form-check-label" for="showExtraRev" style="font-size:0.85rem; cursor:pointer;">Show DMA &amp; GSAAS revenue</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showDeltas" onchange="toggleDeltas()">
+                        <label class="form-check-label" for="showDeltas" style="font-size:0.85rem; cursor:pointer;">Show deltas</label>
+                    </div>
+                    <button class="btn btn-sm btn-outline-purple" onclick="exportXlsx()" id="exportBtn" disabled>Export</button>
                 </div>
             </div>
-            <div class="card-body">
-                <!-- Refresh stays in the BODY while the day picker sits on the title row:
-                     the blueprint's Refresh is `btn btn-outline-purple`, and purple on the
-                     purple header is unreadable. A native date input is fine up there. -->
-                <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-                    <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadDashboard(true)"
-                            title="Bypass cache and re-query Redshift">↻ Refresh</button>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover perf-table perf-fixed mb-0">
+                        <thead><tr id="tableHead"></tr></thead>
+                        <tbody id="tableBody"></tbody>
+                        <tfoot><tr id="tableFoot"></tr></tfoot>
+                    </table>
                 </div>
-                <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="dashTiles"></div>
-                <div class="row g-4">
-                    <div class="col-lg-4">
-                        <div class="dash-sub">Apparaten - Visits</div>
-                        <div class="donut-wrap">
-                            <canvas id="dashDonutVisits"></canvas>
-                            <div class="donut-center" id="dashCenterVisits"></div>
-                        </div>
-                    </div>
-                    <div class="col-lg-4">
-                        <div class="dash-sub">Apparaten - Omzet</div>
-                        <div class="donut-wrap">
-                            <canvas id="dashDonutRevenue"></canvas>
-                            <div class="donut-center" id="dashCenterRevenue"></div>
-                        </div>
-                    </div>
-                    <!-- Visits only: the revenue table carries no beslist landing URL
-                         (vis_url is the OUTBOUND shop url), so a url-type revenue
-                         donut cannot be built on the same revenue definition. -->
-                    <div class="col-lg-4">
-                        <div class="dash-sub">Type urls - Visits</div>
-                        <div class="donut-wrap">
-                            <canvas id="dashDonutUrlType"></canvas>
-                            <div class="donut-center" id="dashCenterUrlType"></div>
-                        </div>
-                    </div>
+                <div class="pagination-controls" id="paginationControls">
+                    <span>Per page:</span>
+                    <select class="form-select form-select-sm" id="perPage" onchange="perfPage=1; renderPage();">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="all">Show all</option>
+                    </select>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+                    <span class="page-info" id="pageInfo">-</span>
+                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
                 </div>
             </div>
         </div>
@@ -501,84 +494,61 @@
             </div>
         </div>
 
-        <!-- Per-day table -->
+        <!-- Dagoverzicht — single-day tiles + device split (suggestions_new item 4).
+             Own date picker, defaulting to yesterday, independent of the chart
+             range above: this section answers "how was yesterday", not "how was
+             the period". -->
         <div class="card mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center" style="background:#5e4a90; color:#fff;">
-                <h5 class="mb-0">Per-day overview</h5>
-                <div class="d-flex align-items-center gap-3">
-                    <div class="form-check form-switch mb-0">
-                        <input class="form-check-input" type="checkbox" id="showExtraRev" onchange="toggleExtraRev()">
-                        <label class="form-check-label" for="showExtraRev" style="font-size:0.85rem; cursor:pointer;">Show DMA &amp; GSAAS revenue</label>
-                    </div>
-                    <div class="form-check form-switch mb-0">
-                        <input class="form-check-input" type="checkbox" id="showDeltas" onchange="toggleDeltas()">
-                        <label class="form-check-label" for="showDeltas" style="font-size:0.85rem; cursor:pointer;">Show deltas</label>
-                    </div>
-                    <button class="btn btn-sm btn-outline-purple" onclick="exportXlsx()" id="exportBtn" disabled>Export</button>
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
+                <div class="d-flex align-items-center gap-2">
+                    <h5 class="mb-0">Dagoverzicht</h5>
+                    <svg id="dashInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
+                        <title>SEO-kanaal, één dag. CTR = (bvb + outclicks) / bezoeken en kan boven 100% uitkomen — zelfde definitie als de grafiek. Bounce = aandeel bezoeken zonder productklik. OPB = omzet per bezoek. Δ% vergelijkt met dezelfde weekdag 7 dagen eerder. Apparaat komt uit de user agent, op dezelfde manier voor bezoeken én omzet.</title>
+                        <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
+                        <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
+                        <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
+                    </svg>
                 </div>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover perf-table perf-fixed mb-0">
-                        <thead><tr id="tableHead"></tr></thead>
-                        <tbody id="tableBody"></tbody>
-                        <tfoot><tr id="tableFoot"></tr></tfoot>
-                    </table>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <label for="dashDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Dag:</label>
+                    <input type="date" class="form-control form-control-sm" id="dashDate" style="width:150px;" onchange="loadDashboard(false)">
                 </div>
-                <div class="pagination-controls" id="paginationControls">
-                    <span>Per page:</span>
-                    <select class="form-select form-select-sm" id="perPage" onchange="perfPage=1; renderPage();">
-                        <option value="25">25</option>
-                        <option value="50" selected>50</option>
-                        <option value="100">100</option>
-                        <option value="all">Show all</option>
-                    </select>
-                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(-1)" id="prevBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
-                    <span class="page-info" id="pageInfo">-</span>
-                    <button class="btn btn-outline-secondary btn-page" onclick="changePage(1)" id="nextBtn"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Update Excel — the Performance Standup tool, moved in here from its
-             own page (suggestions.txt item 6). Every id is ps-prefixed because
-             this page already owns #startDate / #endDate for the chart range. -->
-        <div class="card mb-4">
-            <div class="card-header d-flex align-items-center gap-2">
-                <h5 class="mb-0">Update Excel</h5>
-                <!-- The concrete comparison dates used to sit in a paragraph under
-                     the date pickers (#psDatePreview); they live in this hover now. -->
-                <svg id="psInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
-                    <title id="psInfoTitle">Comparison windows</title>
-                    <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>
-                    <circle cx="8" cy="4.2" r="1.1" fill="#fff"/>
-                    <rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/>
-                </svg>
             </div>
             <div class="card-body">
-                <p class="text-muted small mb-3">
-                    The daterange controls which dates get filled on the per-day tabs ("SEO only" cols D-M and "GSaaS" col C).
-                    The comparison sheets always compare the latest date in range against that day a week earlier
-                    (visits: end vs end-7d; omzet: end-1 vs end-8d).
-                </p>
-                <div class="d-flex flex-wrap gap-3 align-items-end">
-                    <div>
-                        <label for="psStartDate" class="form-label small mb-1">Start date</label>
-                        <input type="date" class="form-control form-control-sm" id="psStartDate" style="width: 160px;">
+                <!-- Refresh stays in the BODY while the day picker sits on the title row:
+                     the blueprint's Refresh is `btn btn-outline-purple`, and purple on the
+                     purple header is unreadable. A native date input is fine up there. -->
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                    <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadDashboard(true)"
+                            title="Bypass cache and re-query Redshift">↻ Refresh</button>
+                </div>
+                <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="dashTiles"></div>
+                <div class="row g-4">
+                    <div class="col-lg-4">
+                        <div class="dash-sub">Apparaten - Visits</div>
+                        <div class="donut-wrap">
+                            <canvas id="dashDonutVisits"></canvas>
+                            <div class="donut-center" id="dashCenterVisits"></div>
+                        </div>
                     </div>
-                    <div>
-                        <label for="psEndDate" class="form-label small mb-1">End date</label>
-                        <input type="date" class="form-control form-control-sm" id="psEndDate" style="width: 160px;">
+                    <div class="col-lg-4">
+                        <div class="dash-sub">Apparaten - Omzet</div>
+                        <div class="donut-wrap">
+                            <canvas id="dashDonutRevenue"></canvas>
+                            <div class="donut-center" id="dashCenterRevenue"></div>
+                        </div>
                     </div>
-                    <div class="ms-auto">
-                        <button id="psRunBtn" class="btn btn-run">Run</button>
+                    <!-- Visits only: the revenue table carries no beslist landing URL
+                         (vis_url is the OUTBOUND shop url), so a url-type revenue
+                         donut cannot be built on the same revenue definition. -->
+                    <div class="col-lg-4">
+                        <div class="dash-sub">Type urls - Visits</div>
+                        <div class="donut-wrap">
+                            <canvas id="dashDonutUrlType"></canvas>
+                            <div class="donut-center" id="dashCenterUrlType"></div>
+                        </div>
                     </div>
                 </div>
-                <div id="psLoadingArea" style="display:none;" class="text-center py-4">
-                    <div class="spinner-border" style="color:#CC5500;" role="status"></div>
-                    <div class="mt-2 text-muted">Querying Redshift and writing Excel…</div>
-                </div>
-                <div id="psResultArea" style="display:none;" class="mt-3"></div>
             </div>
         </div>
 
@@ -808,6 +778,16 @@
             if (fpEnd) fpEnd.setDate(end, false); else document.getElementById('endDate').value = ymd(end);
         }
 
+        // Changing a date loads immediately — there is no Load button any more. Debounced
+        // because picking a new start AND end fires twice within a second, and the second
+        // range is the one that matters. setDates() passes `false` to flatpickr so the
+        // presets set both fields WITHOUT triggering this, then call load() once themselves.
+        let autoLoadTimer = null;
+        function autoLoad() {
+            clearTimeout(autoLoadTimer);
+            autoLoadTimer = setTimeout(() => load(false), 400);
+        }
+
         function setPreset(days) {
             const end = new Date();
             end.setDate(end.getDate() - 1);   // yesterday is the latest complete day
@@ -817,10 +797,14 @@
             load(false);
         }
 
+        // Only the two aggregates get a pill: every other metric is toggled from its
+        // summary tile, and having both controls for the same eight metrics was just
+        // two rows saying the same thing. Total visits / Total revenue have no tile
+        // (they are sums, deliberately not in ORDER), so they keep one.
         function buildToggles() {
             const wrap = document.getElementById('metricToggles');
             wrap.innerHTML = '';
-            CHART_ORDER.forEach(key => {
+            TOTAL_KEYS.forEach(key => {
                 const m = METRICS[key];
                 const on = selected.has(key);
                 const lab = document.createElement('label');
@@ -1591,12 +1575,32 @@
             const chans = lastDeltas.channels;
             const byKey = k => chans.find(c => c.channel === k) || {};
 
-            // Tiles: visit delta % per channel.
+            // Tiles: visit delta % per channel, now with the same trailing sparkline as
+            // the summary row. The Δ% stays the headline — that is what this section is
+            // about; the line is context underneath it. Data comes free from
+            // lastData.daily (already loaded for the chart), so no extra request.
+            // CAVEAT: the line therefore follows the CHART's date range, not this card's
+            // compare day — it is context, not the comparison itself.
+            // Per-channel override for THIS card's sparklines only, so the chart and the
+            // summary row keep their canonical METRICS colours. DMA Organic visits Δ is
+            // #d63384 by request (Joep, 2026-07-31) rather than METRICS.dma_visits violet.
+            const STANDUP_SPARK_COLORS = { dma: '#d63384' };
+            destroySparks('stand_');
             document.getElementById('standupTiles').innerHTML = ['seo', 'dma', 'gsaas'].map(k => {
                 const ch = byKey(k);
                 return `<div class="stat-card"><h3>${pctText(ch.visits_pct)}</h3>` +
-                       `<div class="label">${ch.label || k} visits Δ</div></div>`;
+                       `<div class="label">${ch.label || k} visits Δ</div>` +
+                       `<div class="tile-spark"><canvas id="stand_${k}"></canvas></div></div>`;
             }).join('');
+            if (lastData && lastData.daily) {
+                const dates = lastData.daily.map(r => r.date);
+                ['seo', 'dma', 'gsaas'].forEach(k => {
+                    const key = `${k}_visits`;
+                    renderSpark(`stand_${k}`, dates, lastData.daily.map(r => r[key]),
+                                STANDUP_SPARK_COLORS[k] || METRICS[key].color,
+                                v => fmt(key, v));
+                });
+            }
 
             // Skip "-" / maincat-level visits and the "Beslist.nl" catch-all.
             const realCat = r => r.subcat && r.subcat !== '-'
@@ -1635,6 +1639,7 @@
             </table>`;
         }
         function standupSkeleton() {
+            destroySparks('stand_');
             document.getElementById('standupTiles').innerHTML = STANDUP_CHANNELS.map(label =>
                 `<div class="stat-card"><h3><span class="skel-bar" style="width:60%; margin:0 auto;"></span></h3>` +
                 `<div class="label">${label} visits Δ</div></div>`).join('');
@@ -1722,8 +1727,10 @@
         async function load(force) {
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
+            // The Load button was removed (dates load on change); keep the guard so
+            // any remaining caller cannot trip over a missing element.
             const btn = document.getElementById('loadBtn');
-            btn.disabled = true; btn.textContent = 'Loading…';
+            if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
             // Per-day head is drawn by initTable() after the fetch; on a first
             // load there is no header yet, so fall back to the current column set.
             const perDayCols = document.getElementById('tableHead').querySelectorAll('th').length
@@ -1761,7 +1768,7 @@
                 document.getElementById('tableBody').innerHTML =
                     `<tr><td colspan="${perDayCols}" class="text-center text-danger py-3">Failed to load.</td></tr>`;
             } finally {
-                btn.disabled = false; btn.textContent = 'Load';
+                if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
             }
             loadDeltas(force);
         }
@@ -2147,8 +2154,8 @@
             const yesterday = new Date();
             yesterday.setDate(yesterday.getDate() - 1);
             if (window.flatpickr) {
-                fpStart = flatpickr('#startDate', fpOpts);
-                fpEnd = flatpickr('#endDate', fpOpts);
+                fpStart = flatpickr('#startDate', { ...fpOpts, onChange: autoLoad });
+                fpEnd = flatpickr('#endDate', { ...fpOpts, onChange: autoLoad });
                 fpRef = flatpickr('#refDate', { ...fpOpts, defaultDate: yesterday });
                 fpDash = flatpickr('#dashDate', { ...fpOpts, defaultDate: yesterday });
                 fpCat = flatpickr('#catDate', { ...fpOpts, defaultDate: yesterday });
@@ -2163,140 +2170,6 @@
             // single-day Redshift query never delays the chart above it.
             loadDashboard(false);
         })();
-    </script>
-
-    <!-- "Update Excel" module — the Performance Standup tool, moved in from
-         performance-standup.html (suggestions.txt item 6). Kept in its own IIFE,
-         exactly as it was on that page, so it shares no state with the stats
-         page above it; only the element ids gained a ps- prefix. -->
-    <script>
-    (function() {
-        const startEl = document.getElementById('psStartDate');
-        const endEl = document.getElementById('psEndDate');
-        const runBtn = document.getElementById('psRunBtn');
-        const preview = document.getElementById('psInfoTitle');
-        const loading = document.getElementById('psLoadingArea');
-        const result = document.getElementById('psResultArea');
-
-        // Default: end = yesterday, start = 7 days ago
-        const today = new Date();
-        const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-        const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7);
-        endEl.value = yesterday.toISOString().slice(0, 10);
-        startEl.value = weekAgo.toISOString().slice(0, 10);
-
-        // flatpickr, same purple theme as the chart range above (the CSS is
-        // already on this page). Runs after the defaults are set, because it
-        // adopts the input's current value and swaps the field to type=text.
-        if (window.flatpickr) {
-            const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
-                             disableMobile: true, locale: { firstDayOfWeek: 1 } };
-            flatpickr(startEl, fpOpts);
-            flatpickr(endEl, fpOpts);
-        }
-
-        function addDays(iso, d) {
-            const dt = new Date(iso);
-            dt.setDate(dt.getDate() + d);
-            return dt.toISOString().slice(0, 10);
-        }
-
-        // Feeds the header "i" hover. An SVG <title> is plain text, so no markup
-        // here, and one line per comparison reads better than a run-on sentence.
-        function updatePreview() {
-            const e = endEl.value;
-            if (!e) { preview.textContent = 'Pick an end date to see the comparison windows.'; return; }
-            preview.textContent =
-                `Comparison sheets will compare:\n` +
-                `visits: ${addDays(e, -7)} vs ${e}\n` +
-                `omzet: ${addDays(e, -8)} vs ${addDays(e, -1)}`;
-        }
-        startEl.addEventListener('change', updatePreview);
-        endEl.addEventListener('change', updatePreview);
-        updatePreview();
-
-        runBtn.addEventListener('click', async () => {
-            if (!startEl.value || !endEl.value) {
-                alert('Please pick both dates.');
-                return;
-            }
-            if (startEl.value > endEl.value) {
-                alert('Start date must be on or before end date.');
-                return;
-            }
-            runBtn.disabled = true;
-            loading.style.display = '';
-            result.style.display = 'none';
-            try {
-                const r = await fetch('/api/performance-standup/run', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({start_date: startEl.value, end_date: endEl.value}),
-                });
-                const data = await r.json();
-                if (!r.ok) {
-                    renderError(data.detail || 'Unknown error');
-                } else {
-                    renderSuccess(data);
-                }
-            } catch (e) {
-                renderError(e.message);
-            } finally {
-                loading.style.display = 'none';
-                runBtn.disabled = false;
-            }
-        });
-
-        function renderError(msg) {
-            result.innerHTML =
-                `<div class="card ps-result-card error mb-0">
-                    <div class="card-body">
-                        <h6 class="mb-2">Failed</h6>
-                        <pre class="mb-0" style="white-space:pre-wrap;">${escapeHtml(msg)}</pre>
-                    </div>
-                </div>`;
-            result.style.display = '';
-        }
-
-        function renderSuccess(d) {
-            const w = d.warnings || [];
-            const cls = w.length ? 'warning' : '';
-            const rw = d.rows_written;
-            const cmp = d.comparison;
-            const warnHtml = w.length
-                ? `<h6 class="mt-3 mb-2 text-warning">Warnings</h6>
-                   <ul class="ps-warn-list">${w.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`
-                : '';
-            result.innerHTML =
-                `<div class="card ps-result-card ${cls} mb-0">
-                    <div class="card-body">
-                        <h6 class="mb-3">Done</h6>
-                        <p class="small text-muted mb-3">
-                            Range ${escapeHtml(d.date_range.start)} → ${escapeHtml(d.date_range.end)}.
-                            Comparison visits: ${escapeHtml(cmp.visits_p1)} vs ${escapeHtml(cmp.visits_p2)}.
-                            Comparison omzet: ${escapeHtml(cmp.omzet_p1)} vs ${escapeHtml(cmp.omzet_p2)}.
-                        </p>
-                        <div class="ps-stat-grid">
-                            <div class="ps-stat"><div class="label">Days in range</div><div class="value">${rw.seo_dates_in_range}</div></div>
-                            <div class="ps-stat"><div class="label">SEO days found</div><div class="value">${rw.seo_dates_found_in_data}</div></div>
-                            <div class="ps-stat"><div class="label">DMA organic days</div><div class="value">${rw.dma_dates_found_in_data}</div></div>
-                            <div class="ps-stat"><div class="label">GSAAS days</div><div class="value">${rw.gsaas_dates_found_in_data}</div></div>
-                            <div class="ps-stat"><div class="label">Bidcat visit rows</div><div class="value">${rw.bidcat_visits}</div></div>
-                            <div class="ps-stat"><div class="label">Bidcat omzet rows</div><div class="value">${rw.bidcat_omzet}</div></div>
-                            <div class="ps-stat"><div class="label">Maincat visit rows</div><div class="value">${rw.maincat_visits}</div></div>
-                        </div>
-                        ${warnHtml}
-                    </div>
-                </div>`;
-            result.style.display = '';
-        }
-
-        function escapeHtml(s) {
-            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
-                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-            }[c]));
-        }
-    })();
     </script>
 
     <footer class="text-center py-4">

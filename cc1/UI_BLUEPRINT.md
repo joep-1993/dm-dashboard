@@ -178,9 +178,33 @@ inline the hexes.
 | Run / execute (primary CTA) | `btn btn-run` | **full orange**, hover coral | **far right** of the section (`d-flex justify-content-end`) |
 | Orange non-run action (e.g. Export) | `btn btn-outline-orange` | orange outline, fills on hover | — |
 | Any other action | `btn btn-outline-purple` | purple outline, fills on hover | — |
-| Refresh | `btn btn-outline-purple` + `↻` glyph | purple outline **with arrow icon** | usually right (`ms-auto`) |
+| Refresh | `btn btn-outline-purple` + `↻` glyph | purple outline **with arrow icon**, fills purple with white text on hover | usually right (`ms-auto`) |
 | Destructive (Stop / Remove / Cancel) | `btn btn-outline-danger` | **red outline**, fills red on hover — *only while available* | — |
 | Not clickable / unavailable | add `disabled` | **grey outline** (`#6c757d`) — always, even for red buttons | — |
+
+**Refresh in a card header needs NO override — an inline `background:#5e4a90` on a
+`.card-header` is dead CSS (2026-07-31).** `style.css` has
+
+```css
+.card-header { background-color: var(--color-section) !important; color: #333 !important; }
+```
+
+and a stylesheet `!important` **beats an inline declaration**. So every `card-header`
+renders in the standard light grey no matter what `style="background:#5e4a90; color:#fff"`
+says next to it — including SEO stats', which looked purple in the markup for weeks and
+grey on screen the whole time. Consequences:
+
+* Leave the Refresh button exactly canonical: `btn btn-sm btn-outline-purple` + `↻`,
+  transparent background, purple outline and label, fills purple on hover. Any white base
+  or white outline "so it shows on the purple header" is compensating for a colour that
+  never paints, and reads as a different button from every other Refresh (Joep, 2026-07-31:
+  *"the Refresh button in Performance per day should be transparent (is now white)"*).
+* Before styling anything **against** a header colour, check the rendered colour in the
+  browser (or a headless screenshot), not the inline style in the HTML.
+* Corollary for any override you do add: `.card-header .btn-outline-purple` (two classes)
+  has the **same specificity** as `.btn-outline-purple:hover`, and a page's `<style>` block
+  loads after `style.css`, so a bare background override silently wins on hover too and
+  can leave white text on a white fill. Re-assert the hover in the same breath.
 
 **Unavailable always wins over colour.** A `disabled` button must render **grey
 outline** (`#6c757d`) regardless of its available-state colour — this includes
