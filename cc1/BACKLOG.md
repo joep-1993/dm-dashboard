@@ -8,6 +8,36 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### BLOCKER — the OpenAI key has no credits (found 2026-07-31)
+- [ ] **Top up / repoint the OpenAI key: every AI-titles call returns
+  `429 insufficient_quota / credit_balance_exhausted`.** v3 falls back to its
+  deterministic composed H1, so output is still correct but **unpolished** — no adjective
+  inflection ("Hardhout Potdekselplanken" where polish writes "Hardhouten"). This silently
+  degrades every unique-titles generation, not just the 5 t_tuinhout URLs regenerated that
+  day; those 5 are worth re-running once credits are back (see TASKS "t_tuinhout flipped
+  to a type facet"). Nothing in the UI signals the fallback — worth a status line if it
+  cannot be fixed quickly.
+
+### GSD — 2.954 canonical campaigns carry no GSD_SCRIPT label (found 2026-07-31)
+- [ ] **Decide on a label backfill.** 416 shops, 2.456 of them ENABLED, plus 8.565
+  legacy-named unlabelled ones. Unlabelled = invisible in Campaigns created, **not
+  pausable by the tool**, no creation date logged (Elektroshop.nl went `uit` on 2026-07-31
+  and kept running). Cause: the label is applied in a separate best-effort call after the
+  create, and failures were swallowed — now returns a bool and logs `UNMANAGED CAMPAIGN`,
+  so the set should stop growing. Attaching GSD_SCRIPT to the 2.954 canonical ones makes
+  them manageable in one go, which is a deliberate decision, not a bugfix. The legacy-named
+  8.565 are a separate call. Scan pattern: `scratchpad/gsd_unlabeled_split.py`
+  (re-create under `scripts/analysis/` when approved). See LEARNINGS.
+
+### GSD — the SA360 bid-strategy pairing queue (logged 2026-07-31)
+- [ ] **Surface the "awaiting bid strategy" list as a worklist, not just a preview count.**
+  105 GSD campaigns sit PAUSED on MANUAL_CPC waiting for the manual target-ROAS pairing in
+  SA360 (70 of them created 2026-07-31). The run refuses to enable them (correct — see
+  LEARNINGS) and the preview shows the count, but the people doing the pairing have no
+  list. A small read-only endpoint/table (shop, country, label, campaign id, created date)
+  would make the handover explicit; `Downloads/claude/gsd_would_activate_20260731.csv` is
+  the shape.
+
 ### Is the post-cliff /c/ rate drift a second decline? (logged 2026-07-30)
 - [ ] **Separate the post-10-March drift from seasonal category mix.** After the
   bol.com cliff, /c/ outclicks-per-visit recovered to ~0,85 (April) and then drifted
