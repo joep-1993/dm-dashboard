@@ -1,6 +1,26 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## SEO titles' Publish deed een volledige 1,02M-rij unique-titles-upload mee (2026-07-31)
+
+Joep: "'AI unique titles: pushed' — worden die meegepusht? Dat is niet nodig, daar is een
+eigen tool voor." Klopt, en het was zwaarder dan "meegepusht":
+
+- `publish_built(push_unique_titles=True)` (de oude default) riep
+  `upload_titles_to_api()` → `generate_csv_for_upload()` → **`get_all_titles()`**. Dus
+  niet de titels van de net gepushte blueprints, maar een CSV van **álle ~1.022.000**
+  unique titles, als bestand geüpload. Byte-voor-byte hetzelfde als "Publish All" in de
+  Unique Titles-tool (`main.py:3203` roept dezelfde functie).
+- Dat is de verklaring van de "vastgelopen" statusbar: de blueprint-push van 33.749
+  rijen was in ~10 min klaar, daarna liep de fase 'unique_titles' nog 20+ minuten.
+- Default nu **False** op zowel `publish_built()` als de route (`main.py`), zodat een
+  oude frontend het ook niet per omissie aanzet. Vlag blijft bestaan voor wie beide
+  expliciet in één keer wil.
+- Confirm-tekst en done-banner beloofden het ook; die zijn bijgewerkt.
+- **Les:** als een actie een fase heeft die veel langer duurt dan de actie zelf, kijk of
+  die fase eigenlijk bij een ándere tool hoort. Hier deed één klik in tool A het
+  volledige werk van tool B, elke keer.
+
 ## Twee valkuilen in `cpa_outclicks_transactional`: ~2 rijen per outclick, en shop_name-renames (2026-07-31)
 
 Onderzoek naar "is de CTR-daling sinds 10 maart puur bol Plaza?". Ik ging er twéé keer
