@@ -152,6 +152,15 @@ access errors. **Check `GSD_SERVICE_ACCOUNT_FILE` in prod's .env on win-htz-006*
 runbook for the agent on that machine: `docs/PROD_FIX_MC_SERVICE_ACCOUNT.md` (check →
 verify read-only → fix → confirm, plus the NSSM `AppEnvironmentExtra` trap and the
 "wait for run/progress to be false before restarting" warning).
+- **`backend/service_accounts/` is gitignored** (`.gitignore:63`), so the four key files
+  live on each machine by hand and **a `git pull` never delivers them**. The runbook
+  therefore opens with step 0: check the key is present on that box before pointing the env
+  var at it, and if it is missing copy it directly (private key — not via the repo, a
+  branch or a ticket). Verify the right file by its identity, not by opening the key:
+  `client_email beslist-index-checker@acoustic-racer-258913.iam.gserviceaccount.com`,
+  `project acoustic-racer-258913`, `private_key_id e55feb91bacc…` (matches the filename).
+  Laptop copy: `backend/service_accounts/acoustic-racer-258913-e55feb91bacc.json`,
+  referenced by `.env` line 57.
 
 ### OPEN — 2.954 canonical GSD campaigns have no GSD_SCRIPT label (found 2026-07-31)
 

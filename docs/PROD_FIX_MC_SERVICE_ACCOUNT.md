@@ -36,6 +36,30 @@ that directory. Before today it took `os.listdir()[0]` — **arbitrary** order, 
 alphabetical — so it could silently pick a key with no Merchant Center access. (The
 fallback is sorted and logged now, but an explicit env var is still the correct fix.)
 
+## 0. Is the key even on this machine? (read-only)
+
+`backend/service_accounts/` is **gitignored** (`.gitignore:63`), so the key files are NOT in
+the repo and a `git pull` will never deliver them. Check first:
+
+```powershell
+Get-ChildItem backend\service_accounts\*.json | Select-Object Name, Length
+```
+
+* `acoustic-racer-258913-e55feb91bacc.json` present → continue to step 1.
+* absent → copy it across from the laptop
+  (`\\wsl.localhost\Ubuntu\home\joepvanschagen\projects\dm-dashboard\backend\service_accounts\`).
+  It is a **private key**: copy it directly to `backend\service_accounts\` on this machine,
+  never through the repo, a branch, a paste bin or a ticket.
+
+To confirm you have the right file without opening the key material:
+
+```powershell
+.\venv\Scripts\python.exe -c "import json;d=json.load(open(r'backend\service_accounts\acoustic-racer-258913-e55feb91bacc.json'));print(d['client_email'],d['project_id'],d['private_key_id'][:12])"
+```
+
+Expect `beslist-index-checker@acoustic-racer-258913.iam.gserviceaccount.com`,
+`acoustic-racer-258913`, `e55feb91bacc`.
+
 ## 1. Check (read-only)
 
 Run these from the prod checkout (adjust the path if it differs; the dashboard serves
