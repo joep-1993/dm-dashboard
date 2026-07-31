@@ -34,8 +34,17 @@ _Active tasks for immediate work_
   circular, keep them in sync). New result action **`activated`**, filed with `created`
   so undo/reset can pause it back; new preview action `activate` + `to_activate` count,
   new tiles/pill colours (`#00838f`) in both panels.
-  **Today's preview: 70 existing campaigns would be activated, 5 created** — that is
-  live spend, so look at the dry run before the next prod run.
+- **CORRECTED the same day, and this one is critical.** The first version would have
+  enabled the run's OWN fresh creations. Going live requires a manual SA360 step (a
+  colleague pairs the target-ROAS bid strategy) and only then may a campaign be enabled —
+  so the run now refuses to enable anything whose `bidding_strategy_type` is still
+  `MANUAL_CPC`/unset (`BID_STRATEGY_PENDING`, `_bid_strategy_ready()`), reported as
+  `awaiting_bid_strategy`. Measured signature: **ENABLED TARGET_ROAS 2.354 · PAUSED
+  TARGET_ROAS 354 · PAUSED MANUAL_CPC 105**. Do NOT test `campaign.bidding_strategy`
+  (the portfolio field) — it is empty on every GSD campaign because SA360 attaches a
+  STANDARD strategy, so that test would reject everything.
+  Today's preview after the fix: **to_activate 0, awaiting_bid_strategy 70**, 5 to create.
+  Positive path verified too: Aktiewonen.nl's PAUSED+TARGET_ROAS campaigns would enable.
 
 ### Done 2026-07-31 — GSD side-logs reconcile themselves ("just run it again")
 

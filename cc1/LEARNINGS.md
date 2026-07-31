@@ -70,6 +70,30 @@ houdt zijn bare-name campagnes ENABLED, want de pause-query ziet ze niet.
   dat label; de legacy Toolstation-campagnes dragen `Floodlight test jan 2026` of
   helemaal geen label. Daarom plakt de adoptie GSD_SCRIPT erop.
 
+## "Bestaande campagne = veilig aanzetten" gold NIET voor de campagnes van de run zelf (2026-07-31)
+
+Joep vroeg: zet bestaande campagnes aan als ze al bestaan. Geïmplementeerd, en toen kwam
+het domeinfeit dat de regel omdraait: **na het aanmaken (PAUSED) doet een collega
+handwerk in SA360 — de target-ROAS-biedstrategie koppelen — en pas daarna gaat de
+campagne aan.** Mijn versie zou dus bij een tweede run van dezelfde dag zijn eigen
+verse creaties live zetten zonder biedstrategie. Joep zag dat zelf aankomen, ik niet.
+
+- **Het signaal is `bidding_strategy_type`.** Gemeten over alle GSD_SCRIPT-campagnes:
+  ENABLED TARGET_ROAS 2.354 · PAUSED TARGET_ROAS 354 · PAUSED MANUAL_CPC 105. Een verse
+  campagne is MANUAL_CPC; na de SA360-koppeling is hij TARGET_ROAS. Dus:
+  `_bid_strategy_ready()` = type niet in `BID_STRATEGY_PENDING`.
+- **Test NIET `campaign.bidding_strategy`** (het portfolio-veld): dat is leeg op álle GSD
+  campagnes, ook de live ENABLED TARGET_ROAS-set, want SA360 hangt er een STANDARD
+  strategie aan. Wie op dat veld filtert, keurt alles af. (Verwar het niet met de
+  ROAS_CPR_*-portfolio's uit het SHOP-campagneverhaal.)
+- Resultaat: vandaag `to_activate 0, awaiting_bid_strategy 70` — de 70 blijven staan tot
+  de collega ze koppelt. Positieve pad wél getest: Aktiewonen.nl's PAUSED+TARGET_ROAS
+  campagnes zouden aangaan. De preview laat de wachtrij zien, want dat is precies de stap
+  die live gaan blokkeert.
+- Les: bij een "zet X aan"-verzoek eerst uitvragen wélke toestand X moet hebben. Ik had
+  drie guards bedacht (repair-fout, LL-label, al ENABLED) en de enige die er in dit
+  proces echt toe doet gemist, omdat die niet in de code stond maar in het werkproces.
+
 ## Alle drie de GSD-nevenlogs staan ná de create-loop, dus een afgebroken run logt niets (2026-07-31)
 
 `run_gsd_script` maakt eerst alle campagnes en schrijft daarna pas

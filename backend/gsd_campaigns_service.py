@@ -55,6 +55,23 @@ LL_PAUSED_LABEL = "GSD_LL_PAUSED"
 # without re-reading a month of history on every run.
 RECONCILE_WINDOW_DAYS = 7
 
+# A freshly created GSD campaign is MANUAL_CPC. Going live requires a manual step in
+# SA360 (a colleague pairs the target-ROAS bid strategy), and only after that is the
+# campaign enabled. Measured 2026-07-31 across all GSD_SCRIPT campaigns:
+#   ENABLED  TARGET_ROAS 2.354 · PAUSED TARGET_ROAS 354 · PAUSED MANUAL_CPC 105
+# so bidding_strategy_type IS the "has the SA360 pairing happened" flag. (Note: the
+# portfolio field campaign.bidding_strategy is empty on all of them — SA360 sets a
+# STANDARD target-ROAS strategy, so testing that field would reject everything.)
+# The run must never enable a campaign still in a pending state: that would put a
+# campaign live without its bid strategy — exactly what a second run of the day would
+# have done to its own creations.
+BID_STRATEGY_PENDING = {"MANUAL_CPC", "UNSPECIFIED", "UNKNOWN"}
+
+
+def _bid_strategy_ready(strategy_type: Optional[str]) -> bool:
+    """True when a campaign's bid strategy has been paired in SA360."""
+    return bool(strategy_type) and strategy_type.upper() not in BID_STRATEGY_PENDING
+
 # Persistent per-(shop, country) creation dates (n8n-vector-db PostgreSQL). The
 # Google Ads API exposes no campaign creation-date field (campaign.start_date was
 # removed in v24) and change_event only retains ~30 days, so we log each shop's
@@ -822,7 +839,7 @@ def _fetch_shop_campaign_candidates(
     pattern = _name_contains_regexp(f"[shop_id:{shop_id_int}]")
     query = f"""
         SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name,
-               campaign.labels
+               campaign.labels, campaign.bidding_strategy_type
         FROM campaign
         WHERE campaign.name REGEXP_MATCH '{pattern}'
           AND campaign.status != 'REMOVED'
@@ -837,6 +854,7 @@ def _fetch_shop_campaign_candidates(
                 "status": row.campaign.status.name,
                 "resource_name": row.campaign.resource_name,
                 "labels": list(row.campaign.labels),
+                "bidding_strategy_type": row.campaign.bidding_strategy_type.name,
             })
     except GoogleAdsException as ex:
         logger.error("Campaign candidate lookup failed (%s, shop_id=%s): %s",
@@ -2566,22 +2584,37 @@ def _create_campaigns_for_shop(
             res = _repair_campaign(
                 client, customer_id, existing, existing_name, campaign_type, label, shop_name=shop_name)
             # A shop Redshift just switched ON whose campaigns already exist gets them
-            # ENABLED (Joep, 2026-07-31). Brand-new campaigns still go live PAUSED — the
-            # difference is that an existing campaign has already been vetted once.
-            # Three conditions, all of them load-bearing:
+            # ENABLED (Joep, 2026-07-31). Brand-new campaigns still go live PAUSED.
+            # Four conditions, all of them load-bearing:
             #   * the repair must not have errored — enabling a campaign with no ad group
             #     or listing tree would serve nothing and hide the breakage;
-            #   * the campaign must not carry GSD_LL_PAUSED — the low-linkage flow paused
-            #     it deliberately and re-enables it itself once linkage recovers;
-            #   * it must actually be PAUSED, so a no-op mutate is never sent.
+            #   * it must actually be PAUSED, so a no-op mutate is never sent;
+            #   * the BID STRATEGY must already be paired (see BID_STRATEGY_PENDING). A
+            #     campaign this script created is MANUAL_CPC until a colleague pairs the
+            #     target-ROAS strategy in SA360, and only then may it go live. Without
+            #     this check a second run of the same day would enable its OWN fresh
+            #     creations without a bid strategy (Joep, 2026-07-31);
+            #   * it must not carry GSD_LL_PAUSED — the low-linkage flow paused it
+            #     deliberately and re-enables it itself once linkage recovers.
             if res.get("action") != "error" and match["status"] == "PAUSED":
                 ll_rn = _lookup_label_resource(client, customer_id, LL_PAUSED_LABEL)
-                if ll_rn and ll_rn in (match.get("labels") or []):
+                if not _bid_strategy_ready(match.get("bidding_strategy_type")):
+                    logger.info(
+                        "Not enabling '%s': bid strategy is %s, so the SA360 pairing has "
+                        "not happened yet", existing_name,
+                        match.get("bidding_strategy_type") or "unset",
+                    )
+                    res["enable_skipped"] = "awaiting_bid_strategy"
+                    if res.get("action") == "skipped":
+                        res["reason"] = "awaiting_bid_strategy"
+                elif ll_rn and ll_rn in (match.get("labels") or []):
                     logger.info(
                         "Not enabling '%s': it carries %s, so low-linkage owns its status",
                         existing_name, LL_PAUSED_LABEL,
                     )
-                    res["reason"] = "ll_paused_left_alone"
+                    res["enable_skipped"] = "ll_paused"
+                    if res.get("action") == "skipped":
+                        res["reason"] = "ll_paused_left_alone"
                 elif _set_campaign_status_by_resource(client, customer_id, existing, "ENABLED"):
                     logger.info("Enabled existing campaign '%s' for shop '%s'", existing_name, shop_name)
                     # 'activated' rather than 'created': the run turned something ON, which
@@ -2793,8 +2826,10 @@ def preview_gsd_script(
         "to_create": 0,
         "already_exists": 0,
         # Subset of already_exists: matches this run would switch ON (existing campaign,
-        # currently PAUSED, not held by the low-linkage flow).
+        # currently PAUSED, bid strategy paired, not held by the low-linkage flow).
         "to_activate": 0,
+        # Matches left PAUSED because the SA360 bid-strategy pairing has not happened yet.
+        "awaiting_bid_strategy": 0,
         "to_pause": 0,
         "shops_aan": 0,
         "shops_uit": 0,
@@ -2847,6 +2882,7 @@ def preview_gsd_script(
             "to_create": 0,
             "already_exists": 0,
             "to_activate": 0,
+            "awaiting_bid_strategy": 0,
             "to_pause": 0,
         }
         if actie == "aan":
@@ -2893,14 +2929,17 @@ def preview_gsd_script(
                         shop_row["already_exists"] += 1
                     else:
                         shop_row["to_create"] += 1
-                    # Same three conditions the run applies before enabling a match, so
-                    # the preview says "activate" exactly when the run would.
-                    will_activate = bool(
-                        match and match["status"] == "PAUSED"
-                        and not (ll_rn and ll_rn in (match.get("labels") or []))
-                    )
+                    # Same conditions the run applies before enabling a match, so the
+                    # preview says "activate" exactly when the run would.
+                    ready = bool(match) and _bid_strategy_ready(match.get("bidding_strategy_type"))
+                    held = bool(match) and bool(ll_rn and ll_rn in (match.get("labels") or []))
+                    will_activate = bool(match) and match["status"] == "PAUSED" and ready and not held
                     if will_activate:
                         shop_row["to_activate"] = shop_row.get("to_activate", 0) + 1
+                    elif match and match["status"] == "PAUSED" and not ready:
+                        # Waiting on the manual SA360 bid-strategy pairing — worth showing,
+                        # it is the queue that gates going live.
+                        shop_row["awaiting_bid_strategy"] = shop_row.get("awaiting_bid_strategy", 0) + 1
                     summary["campaigns"].append({
                         "campaign_name": match["campaign_name"] if match else campaign_name,
                         "action": "activate" if will_activate else ("skip" if match else "create"),
@@ -2934,16 +2973,17 @@ def preview_gsd_script(
         summary["to_create"] += shop_row["to_create"]
         summary["already_exists"] += shop_row["already_exists"]
         summary["to_activate"] += shop_row.get("to_activate", 0)
+        summary["awaiting_bid_strategy"] += shop_row.get("awaiting_bid_strategy", 0)
         summary["to_pause"] += shop_row["to_pause"]
         summary["by_shop"].append(shop_row)
         _preview_progress["current"] += 1
 
     _preview_progress["running"] = False
     logger.info(
-        "GSD preview: %d to create, %d to activate, %d to pause, %d already exist "
-        "across %d shops",
-        summary["to_create"], summary["to_activate"], summary["to_pause"],
-        summary["already_exists"], len(changes),
+        "GSD preview: %d to create, %d to activate, %d awaiting bid strategy, "
+        "%d to pause, %d already exist across %d shops",
+        summary["to_create"], summary["to_activate"], summary["awaiting_bid_strategy"],
+        summary["to_pause"], summary["already_exists"], len(changes),
     )
     return summary
 

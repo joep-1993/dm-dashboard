@@ -1955,7 +1955,7 @@
                 <div class="mb-2" style="font-size:0.82rem;">
                     <span onclick="selectPreviewTile('shops')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted; color:${previewActiveTile === 'shops' ? '#5e4a90' : '#636e72'}; font-weight:${previewActiveTile === 'shops' ? '600' : '400'};" title="Click to see which shops">
                         ${m.shops_aan} shop(s) to activate, ${m.shops_uit} to pause
-                    </span>${m.errCount ? ` &middot; <span class="text-danger">${m.errCount} error(s)</span>` : ''}
+                    </span>${m.awaiting_bid_strategy ? ` &middot; <span title="These exist and are paused, but their target-ROAS bid strategy has not been paired in SA360 yet, so the run leaves them paused." style="color:#e65100;">${m.awaiting_bid_strategy} awaiting bid strategy (SA360)</span>` : ''}${m.errCount ? ` &middot; <span class="text-danger">${m.errCount} error(s)</span>` : ''}
                 </div>
                 <div id="gsdPreviewDetail"></div>`;
         }
