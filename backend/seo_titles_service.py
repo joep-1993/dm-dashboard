@@ -67,6 +67,39 @@ SUBCATEGORY_PH = '!!sub_category!!'
 # writes a rule, so this default IS the behaviour for them until someone does.
 UNKNOWN_ORDER = 1750
 IGNORE_FACETS = {'pricemin', 'pricemax'}
+
+# ---- Position pins (pa.facet_position_rules.position) ---------------------
+#
+# The SAME column the unique-titles generator honours in
+# ai_titles_service._build_v3_h1 — until 2026-07-31 the blueprint builder read only
+# order_index and silently ignored it, so a facet pinned "after the noun" for the AI
+# H1 could still render in front of the noun in its blueprint. Now both paths obey it.
+#
+# A pin beats order_index for POSITION only; order_index still breaks ties inside a
+# pinned group, so two 'end' facets keep their relative order (thema_speelgoed 1929
+# before mobiel_k 2066).
+#
+#   'pre_noun'        immediately BEFORE the noun — whatever the noun is that combo
+#                     (the !!sub_category!! placeholder, or the type-facet that
+#                     replaced it). This is the one thing order_index cannot express:
+#                     the noun's position is not fixed.
+#   'end'             after every other placeholder in the phrase.
+#   'end_before_size' degraded to 'end' here. The AI path can separate sizes because
+#                     it sees the VALUE (is_spec_value("Maat 42")); a blueprint holds
+#                     only !!placeholders!!, so "before the sizes" is not decidable at
+#                     build time. Direction (post-noun, near the end) is still right.
+#
+# Ignored on a type facet: that facet IS the noun, so "before/after the noun" is
+# meaningless for it (is_type_facet wins, and the pin is skipped).
+POS_PRE_NOUN = 'pre_noun'
+POS_END = 'end'
+POS_END_BEFORE_SIZE = 'end_before_size'
+# Sorts after any real order_index (the table's max is 2400) without being infinite,
+# so pinned facets stay comparable among themselves.
+END_PIN_ORDER = 9000
+# Pinned facets keep their relative order via order_index/PIN_TIE_SCALE, which must be
+# large enough that the fraction can never cross into the next integer slot.
+PIN_TIE_SCALE = 1e6
 COUNTRY_CODE = 'NL'
 TAIL_TITLE = 'kopen? ✔️ Tot !!DISCOUNT!! korting! | beslist.nl'
 # /page-titles rejects a title over this many characters (400 "too long").
@@ -199,46 +232,87 @@ def impossible_reason(types, deps):
 
 
 def load_rules():
-    """facet_slug -> (order_index, is_type_facet) from pa.facet_position_rules."""
+    """facet_slug -> (order_index, is_type_facet, position) from pa.facet_position_rules.
+
+    Only the unscoped (scope_category IS NULL) row per slug is loaded, matching
+    ai_titles_service._load_facet_position_rules — scoped rules are a future feature and
+    a scoped row must not silently override the global one here.
+    """
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT facet_slug, order_index, is_type_facet FROM pa.facet_position_rules")
+        cur.execute("""SELECT facet_slug, order_index, is_type_facet, position
+                       FROM pa.facet_position_rules WHERE scope_category IS NULL""")
         rules = {}
         for row in cur.fetchall():
             slug = row['facet_slug']
             order = row['order_index']
-            rules[slug] = (order if order is not None else UNKNOWN_ORDER, bool(row['is_type_facet']))
+            pos = (row['position'] or '').strip().lower() or None
+            rules[slug] = (order if order is not None else UNKNOWN_ORDER,
+                           bool(row['is_type_facet']), pos)
         return rules
     finally:
         cur.close()
         return_db_connection(conn)
 
 
+def _rule(rules, slug):
+    """(order, is_type, position) for a slug, tolerant of the pre-2026-07-31 2-tuple.
+
+    Callers hand `rules` in from load_rules(), but scripts and long-lived processes can
+    still be holding a dict built before `position` existed; unpacking blind would raise
+    there instead of just losing the pin.
+    """
+    r = rules.get(slug)
+    if r is None:
+        return UNKNOWN_ORDER, False, None
+    if len(r) == 2:
+        return r[0], r[1], None
+    return r[0], r[1], r[2]
+
+
 def facet_phrase(types, rules):
     """Ordered placeholder phrase for a set of facet types. Inserts
     !!sub_category!! at SUBCATEGORY_ORDER when the set has no type-facet.
 
-    geschikte_leeftijd is always rendered AFTER the category/type-facet noun
-    (never before it), regardless of its configured order_index."""
+    Placement is order_index against SUBCATEGORY_ORDER, with two overrides:
+      * a `position` pin from pa.facet_position_rules (see POS_* above) — the only way
+        to say "directly in front of / after THE NOUN" when the noun's own position
+        moves with the type-facet;
+      * geschikte_leeftijd is always rendered AFTER the noun regardless of its
+        order_index. An explicit pin on it wins over this hardcoded rule.
+    """
     items = []  # (order, slug, placeholder)
     has_type = False
     type_orders = []
+    pins = {}   # slug -> position, non-type facets only
     for t in types:
-        order, is_type = rules.get(t, (UNKNOWN_ORDER, False))
+        order, is_type, pos = _rule(rules, t)
         if is_type:
             has_type = True
             type_orders.append(order)
+        elif pos:
+            pins[t] = pos
         items.append((order, t, f'!!{t}!!'))
     if not has_type:
         items.append((SUBCATEGORY_ORDER, '', SUBCATEGORY_PH))
-    # Pin geschikte_leeftijd right after the noun (the last type-facet, or the
-    # sub_category placeholder when there is none) so it never precedes it.
+    # The noun is the last type-facet, or the sub_category placeholder when there is
+    # none. Everything pinned relative to "the noun" hangs off this number.
     noun_order = max(type_orders) if type_orders else SUBCATEGORY_ORDER
-    items = [(noun_order + 0.5, slug, ph) if slug == 'geschikte_leeftijd' else (order, slug, ph)
-             for (order, slug, ph) in items]
-    items.sort(key=lambda x: (x[0], x[1]))
-    return ' '.join(ph for _, _, ph in items)
+    placed = []
+    for order, slug, ph in items:
+        pos = pins.get(slug)
+        if pos == POS_PRE_NOUN:
+            # Just under the noun; the fraction keeps two pre_noun facets in
+            # order_index order and can never reach the noun itself.
+            order = noun_order - 1 + order / PIN_TIE_SCALE
+        elif pos in (POS_END, POS_END_BEFORE_SIZE):
+            order = END_PIN_ORDER + order / PIN_TIE_SCALE
+        elif slug == 'geschikte_leeftijd':
+            order = noun_order + 0.5
+        placed.append((order, slug, ph))
+    placed.sort(key=lambda x: (x[0], x[1]))
+    return ' '.join(ph for _, _, ph in placed)
 
 
 def _compose_title(phrase):

@@ -27,13 +27,16 @@ import argparse
 import csv
 import os
 import sys
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from backend.database import get_db_connection, return_db_connection  # noqa: E402
 from backend.seo_titles_service import build_blueprint, load_rules, publish_built  # noqa: E402
 
+# One file PER RUN. A fixed filename made the second run of the day silently destroy
+# the first run's pre-image, which is the one thing a backup may never do.
 BACKUP = ("/mnt/c/Users/JoepvanSchagen/Downloads/claude/"
-          "seo_titles_repush_backup.csv")
+          "seo_titles_repush_backup_%s.csv" % datetime.now().strftime("%Y%m%d_%H%M%S"))
 
 
 def stale_pushed():
@@ -58,11 +61,72 @@ def stale_pushed():
     return out
 
 
+def stale_built():
+    """Rows still queued as 'built' whose stored phrase is stale under the current rules.
+
+    These are NOT live, so they need no re-push — but publishing them later would put
+    the pre-edit phrase on the site, and a build run only refreshes a combo it happens
+    to re-derive from traffic. Rewriting them in place keeps the queue honest.
+    """
+    rules = load_rules()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""SELECT cat_id, cat_name, key, status, title, h1_title, description
+                       FROM pa.seo_titles_blueprints WHERE status = 'built'""")
+        rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+    out = []
+    for r in rows:
+        types = [t for t in (r["key"] or "").split("~") if t]
+        if not types:
+            continue
+        bp = build_blueprint(r["cat_id"], r["cat_name"] or "", types, rules)
+        if bp["h1_title"] != r["h1_title"] or bp["title"] != r["title"]:
+            out.append((r, bp))
+    return out
+
+
+def refresh_built(rows, apply_changes):
+    """Rewrite title/h1/description of stale 'built' rows. No publish: they are queued."""
+    print(f"stale built (queued, not live) rows: {len(rows):,}")
+    for r, bp in rows[:8]:
+        print(f"  {(r['cat_name'] or '?')[:24]:24} {r['key'][:46]}")
+        print(f"     old h1: {r['h1_title']}")
+        print(f"     new h1: {bp['h1_title']}")
+    if not rows or not apply_changes:
+        return
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        n = 0
+        for r, bp in rows:
+            cur.execute("""UPDATE pa.seo_titles_blueprints
+                           SET title=%s, h1_title=%s, description=%s
+                           WHERE cat_id=%s AND key=%s AND status='built'""",
+                        (bp["title"], bp["h1_title"], bp["description"],
+                         r["cat_id"], r["key"]))
+            n += cur.rowcount
+        conn.commit()
+        print(f"rewritten in place (still 'built'): {n:,}")
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--env", default="production", choices=["production", "staging", "dev"])
+    ap.add_argument("--refresh-built", action="store_true",
+                    help="also rewrite queued 'built' rows whose phrase is stale (no push)")
     args = ap.parse_args()
+
+    if args.refresh_built:
+        refresh_built(stale_built(), args.apply)
+        print()
 
     stale = stale_pushed()
     print(f"stale pushed rows: {len(stale):,}")

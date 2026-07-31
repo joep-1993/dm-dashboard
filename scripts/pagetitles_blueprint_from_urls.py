@@ -123,7 +123,15 @@ def load_tblpagetitles_combos():
 def facet_phrase(types, rules, unknown_counter):
     """Ordered placeholder phrase for a set of facet types.
     Returns the phrase string. Inserts !!sub_category!! at SUBCATEGORY_ORDER when
-    the set has no type-facet."""
+    the set has no type-facet.
+
+    HISTORICAL COPY — do not treat as canonical. This is the one-off generator behind
+    the 2026-06-08 xlsx deliverable; `backend/seo_titles_service.facet_phrase()` is the
+    live implementation and has since gained (a) the geschikte_leeftijd post-noun pin,
+    (b) `position` pins from pa.facet_position_rules (pre_noun / end), and (c) a
+    parse_url guard that requires a facet VALUE, not just a name. Phrases from this
+    script will differ from the tool's. Port the logic or import it before reusing.
+    """
     items = []   # (order, slug, placeholder)
     has_type = False
     for t in types:
