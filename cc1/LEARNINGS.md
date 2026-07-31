@@ -1,6 +1,51 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Klikbaar én hoverbaar op dezelfde plek vecht met zichzelf (2026-07-31)
+
+Joep vroeg de samenvattingstegels in SEO Stats klikbaar te maken als metric-toggle, en
+vroeg zelf: "sloopt dat het hover-effect niet?" Goede vraag — en het antwoord is nee,
+maar niet zonder één ingreep.
+
+- Hover en klik bijten elkaar technisch niet: de sparkline-tooltip hangt aan `mousemove`
+  op de canvas, de toggle aan `click` op de kaart, en Chart.js slikt geen van beide.
+  `destroySparks()` zet de tooltip al op `opacity:0`, dus een re-render laat er geen
+  hangen.
+- **Wél een UX-conflict:** de sparkline is het grootste deel van de tegel, dus een
+  misklik tijdens het lezen van een dag zette de serie uit. Oplossing: de *getal- en
+  labelzone* toggelt, de grafiekzone is hover-only (`stopPropagation` op de
+  spark-container + `cursor:default`). Beide gedragingen, geen ruzie.
+- Eén `selected`-set achter tegels én pillen, zodat tegelstaat, pillenrij en chart
+  altijd samen bewegen. Tegels dragen dezelfde on/off-taal als de pillen (merk-rand +
+  tint aan, gedimd uit).
+
+## Een progress bar mag alleen als de teller echt bestaat — bij FAQ Publish 2.0 bestond hij (2026-07-31)
+
+"Publish 2.0 running… all" was een banner met een spinner, terwijl de backend
+`total_urls` / `urls_done` / `records_pushed` / `failed` al bijhield. Dus was een échte
+bar hier geen leugen maar een verbetering: pct = urls_done/total_urls.
+
+- Fase `counting` heeft nog géén totaal → bar draait dan **indeterminate** en het
+  percentage blijft leeg; zodra `total_urls` binnen is wordt hij determinate. Dat is de
+  regel uit UI_BLUEPRINT "status-bar lifecycle" in de praktijk.
+- Schaal maakt het de moeite waard: een volle push is **265.632 URL's / 1.593.741
+  records** (gemeten; 265.581 URL's hebben exact 6 vragen) en `BATCH_SIZE=2000`, dus
+  ~800 batches. Een spinner zegt daar niets over. Let op: de confirm-dialog schat
+  `urls × 6` (~1,6M) — dat is bewust een schatting.
+- **Correctie op mijzelf:** ik noemde het eerder "~1,7M records". Gemeten is het 1,59M.
+  Joep vroeg er terecht naar; afrondingen naar boven in een getal dat je zó kunt
+  natellen zijn gewoon fout.
+- Testen kón niet via de UI (dat zou 1,59M records naar productie pushen): markup
+  gerenderd in een tijdelijke harnas-pagina in `frontend/`, screenshot, bestand weg.
+
+## Bootstrap's `bg-secondary` badge is op een gekleurde banner vrijwel onzichtbaar (2026-07-31)
+
+De mode-chip ("all") in de FAQ-banners was `badge bg-secondary` = lichtgrijs op geel:
+naast elkaar gezet in een testpagina verdwijnt de grijze en leest de paarse direct.
+Nieuwe shared klasse `.badge-purple` (#5e4a90) in `style.css`, gebruikt in zowel de
+running- als de done-banner. Sluit aan op de bestaande regel "gebruik geen grijs als
+labelkleur" — dit is de tweede keer dat die opduikt, dus nu als klasse en niet inline.
+
 ## SEO titles' Publish deed een volledige 1,02M-rij unique-titles-upload mee (2026-07-31)
 
 Joep: "'AI unique titles: pushed' — worden die meegepusht? Dat is niet nodig, daar is een

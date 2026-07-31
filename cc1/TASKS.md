@@ -4,6 +4,31 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-07-31 (later) — SEO Stats interaction pass + FAQ publish bar
+
+- **"Visits & revenue per day" → "Performance per day".**
+- **Chart matches the tile sparklines**: area fill + 1,75px stroke. Fill alpha steps down
+  with the series count (`<=2 -> 2b`, `<=4 -> 22` = identical to the tiles, `else 14`) so
+  ten translucent washes cannot turn the plot to mud. NOTE the fill makes the shared-axis
+  problem more visible: SEO visits (~69k) buries DMA/GSAAS (~2k) under a wash. Inherent
+  to one count axis (no dual axis allowed), not caused by the fill — open if it annoys.
+- **Summary tiles are now the chart's metric toggles**: same `selected` set as the pills,
+  same on/off vocabulary. The number/label toggles; the sparkline area stays hover-only.
+- **Top categories has its OWN "Compare day"**, independent of Performance standup.
+  `loadDeltas()` is split into `loadCatDeltas()` + `loadStandupDeltas()`, each with its own
+  ref_date and skeleton; the server caches /deltas per ref_date so equal dates cost one
+  query. `lastDeltas` (standup) and `lastCatDeltas` (categories) are separate state.
+- **Dagoverzicht's day picker moved to the title row**; Refresh stays in the body because
+  `btn-outline-purple` on the purple header is unreadable.
+- **CTR/Bounce WoW badges are percentages** (`-1%`, `+0,5%`) instead of percentage points,
+  per Joep. Both are in the payload (`ctr_wow` + `ctr_wow_pp`); `ppBadge` was deleted
+  rather than left dead. Reminder: a % of a % means "the rate moved 1% relative".
+- **FAQ Publish 2.0 gets a real progress bar** (backend already had the counters),
+  indeterminate during `phase='counting'`, plus `.badge-purple` replacing the invisible
+  grey mode chip.
+- **Measured, for the record:** a full FAQ v2 push is **265.632 URLs / 1.593.741 records**
+  (avg exactly 6,00 per URL) — not the ~1,7M I had been saying.
+
 ### Open — bol/CTR follow-ups (2026-07-31)
 - **Re-check the "dying tail" by `shop_id`.** fonQ, Beckhuis, Naduvi, Aliexpress NL CSS,
   PetsHome, Hema.be all read as going to ~0 across 10 March, but that was measured on
