@@ -19,6 +19,8 @@ from typing import Dict, List, Optional
 from dataclasses import asdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from backend import openai_guard
+
 from openai import OpenAI
 
 from backend.faq_service import (
@@ -396,6 +398,15 @@ def _run_faq_batch(num_faqs: int = 6):
         total_processed = 0
 
         for chunk_idx, chunk in enumerate(chunks):
+            # Between chunks, not mid-chunk: an exhausted key would otherwise fail every
+            # remaining chunk one by one and leave the state saying "processing".
+            if openai_guard.is_blocked():
+                st = openai_guard.status()
+                _update_state(batch_type, phase="error", active=False,
+                              error=f"OpenAI key has no credits (since {st.get('since')}) — "
+                                    f"stopped before chunk {chunk_idx + 1}/{len(chunks)}")
+                print(f"[BATCH] stopped: no OpenAI credits (chunk {chunk_idx + 1})")
+                return
             _update_state(batch_type, phase=f"uploading chunk {chunk_idx + 1}/{len(chunks)}")
             print(f"[BATCH-FAQ] Uploading chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} requests)")
 
@@ -692,6 +703,15 @@ def _run_kopteksten_batch():
         total_processed = 0
 
         for chunk_idx, chunk in enumerate(chunks):
+            # Between chunks, not mid-chunk: an exhausted key would otherwise fail every
+            # remaining chunk one by one and leave the state saying "processing".
+            if openai_guard.is_blocked():
+                st = openai_guard.status()
+                _update_state(batch_type, phase="error", active=False,
+                              error=f"OpenAI key has no credits (since {st.get('since')}) — "
+                                    f"stopped before chunk {chunk_idx + 1}/{len(chunks)}")
+                print(f"[BATCH] stopped: no OpenAI credits (chunk {chunk_idx + 1})")
+                return
             _update_state(batch_type, phase=f"uploading chunk {chunk_idx + 1}/{len(chunks)}")
             print(f"[BATCH-KOPT] Uploading chunk {chunk_idx + 1}/{len(chunks)} ({len(chunk)} requests)")
 

@@ -20,6 +20,7 @@ from urllib3.util.retry import Retry
 from openai import OpenAI
 
 from backend.database import get_db_connection, return_db_connection
+from backend import openai_guard
 from backend.faq_service import fetch_products_api, parse_beslist_url
 
 # Configuration
@@ -2892,6 +2893,19 @@ def _run_processing(max_urls: int = 100, num_workers: int = 20, use_api: bool = 
                     if _processing_state["should_stop"]:
                         print("[AI_TITLES] Processing stopped by user")
                         break
+
+                # Out of OpenAI credits? Stop between chunks instead of grinding through
+                # the queue. v3 falls back to its deterministic H1 when the polish call
+                # fails, so without this check a dead key produces a full batch of
+                # unpolished titles that all report "success" (2026-07-31).
+                if openai_guard.is_blocked():
+                    st = openai_guard.status()
+                    msg = f"stopped: OpenAI key has no credits (since {st.get('since')})"
+                    print(f"[AI_TITLES] {msg}")
+                    with _state_lock:
+                        _processing_state["last_error"] = msg
+                        _processing_state["should_stop"] = True
+                    break
 
                 # Submit a chunk of URLs
                 chunk_end = min(url_index + chunk_size, total)

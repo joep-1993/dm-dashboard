@@ -226,6 +226,13 @@ async def get_runtime_config():
 @app.on_event("startup")
 async def startup_event():
     """Run startup tasks for all services."""
+    # Wrap the OpenAI SDK before anything can call it: one hook covers all ~14 call sites,
+    # flips a shared flag when the key runs out of credits, and clears it on the first
+    # success. Without it a dead key is invisible — v3 falls back to its deterministic H1
+    # and batches keep reporting success (2026-07-31).
+    from backend import openai_guard
+    openai_guard.install()
+
     await cleanup_thema_ads_jobs()
     # Start the daily Excel-based low-linkage scheduler (9:50 CET)
     from backend.gsd_ll_service import start_excel_scheduler
@@ -590,6 +597,40 @@ def process_single_url(url: str, conservative_mode: bool = False):
             cur.close()
             return_db_connection(conn)  # Return connection to pool instead of closing
 
+# ============================================================================
+# OpenAI credit guard — see backend/openai_guard.py
+# ============================================================================
+
+@app.get("/api/system/openai-status")
+def openai_status_endpoint():
+    """Is the OpenAI key usable? Polled by the shared UI banner (js/openai-banner.js).
+
+    Always 200 with {blocked, since, message} — a banner must never break a page.
+    """
+    from backend import openai_guard
+    return openai_guard.status()
+
+
+@app.post("/api/system/openai-status/clear")
+def openai_status_clear_endpoint():
+    """Credits topped up: clear the flag. The next successful call clears it anyway."""
+    from backend import openai_guard
+    return openai_guard.clear()
+
+
+def _block_if_no_openai_credits(what: str) -> None:
+    """409 instead of letting a batch chew through URLs it cannot generate.
+
+    409 (not 503) because the request is fine and the state is fixable by the caller;
+    the frontend shows the message verbatim.
+    """
+    from backend import openai_guard
+    try:
+        openai_guard.raise_if_blocked(what)
+    except openai_guard.OpenAIQuotaExhausted as ex:
+        raise HTTPException(status_code=409, detail=str(ex))
+
+
 @app.post("/api/process-urls")
 def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mode: bool = False):
     """
@@ -603,6 +644,7 @@ def process_urls(batch_size: int = 2, parallel_workers: int = 1, conservative_mo
         conservative_mode: If True, use conservative scraping rate (max 2 URLs/sec) with 1 worker. Default: False
     """
     print(f"[ENDPOINT] process_urls called - batch_size={batch_size}, workers={parallel_workers}, conservative={conservative_mode}")
+    _block_if_no_openai_credits("Kopteksten generation")
 
     try:
         # Validate parameters
@@ -1893,6 +1935,7 @@ def get_faq_status():
 @app.post("/api/faq/batch-start")
 def start_faq_batch_endpoint(num_faqs: int = 6):
     """Start FAQ batch processing via OpenAI Batch API."""
+    _block_if_no_openai_credits("The FAQ batch")
     return start_faq_batch(num_faqs)
 
 @app.get("/api/faq/batch-status")
@@ -1903,6 +1946,7 @@ def get_faq_batch_status():
 @app.post("/api/batch-start")
 def start_kopteksten_batch_endpoint():
     """Start kopteksten batch processing via OpenAI Batch API."""
+    _block_if_no_openai_credits("The kopteksten batch")
     return start_kopteksten_batch()
 
 @app.get("/api/batch-status")
@@ -1921,6 +1965,7 @@ def process_faq_urls(batch_size: int = 10, parallel_workers: int = 1, num_faqs: 
         num_faqs: Number of FAQ items to generate per page (default 5)
     """
     print(f"[FAQ] process_faq_urls called - batch_size={batch_size}, workers={parallel_workers}, num_faqs={num_faqs}")
+    _block_if_no_openai_credits("FAQ generation")
 
     try:
         # Validate parameters
@@ -3324,6 +3369,7 @@ async def get_ai_titles_status():
 @app.post("/api/ai-titles/batch-start")
 def start_ai_titles_batch_endpoint():
     """Start AI titles batch processing via concurrent workers."""
+    _block_if_no_openai_credits("The AI-titles batch")
     return start_titles_batch()
 
 @app.get("/api/ai-titles/batch-status")
@@ -3340,6 +3386,7 @@ async def start_ai_titles_processing(batch_size: int = 100, num_workers: int = 2
         num_workers: Number of parallel workers.
         use_api: If True, use productsearch API for faceted URLs. If False, use scraping.
     """
+    _block_if_no_openai_credits("AI-titles processing")
     try:
         result = start_processing(batch_size, num_workers, use_api)
         return result

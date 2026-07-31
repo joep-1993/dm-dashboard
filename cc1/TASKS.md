@@ -4,6 +4,35 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-07-31 (late) — OpenAI credit guard: signalled in the UI, generation stopped
+
+The key ran out of credits and **nothing said so**: v3 catches a failing polish call and
+falls back to its deterministic H1, so batches kept reporting success while producing
+unpolished titles. Now:
+
+- **`backend/openai_guard.py`** — one hook, installed at startup, wrapping
+  `chat.completions.create` **and** `batches.create` at the CLASS level, so all ~14 call
+  sites in 8 modules are covered (and future ones automatically). A quota error sets a
+  flag in `pa.system_flags` (Postgres → shared across uvicorn, workers and the UI, and it
+  survives a restart); the first successful call clears it.
+- Detection matches the error CODE (`insufficient_quota` / `credit_balance_exhausted`),
+  **not** the prose, and deliberately does NOT trip on a plain 429 rate limit.
+- **Refused with 409** (message shown verbatim in the UI): `/api/process-urls`,
+  `/api/faq/process-urls`, `/api/ai-titles/start`, `/api/batch-start`,
+  `/api/faq/batch-start`, `/api/ai-titles/batch-start`. Single-URL calls stay open on
+  purpose — that is the natural "try one to see if credits are back" path, and a success
+  clears the flag.
+- **Running work stops between units**: `_run_processing` checks between chunks (leaves
+  the rest pending, not failed), `batch_api_service` checks between chunks and sets a
+  clear error state.
+- **UI**: `frontend/js/openai-banner.js` (sticky red bar + "Ik heb bijgevuld" button that
+  clears the flag) on unique-titles.html, index.html and faq.html. Status endpoints:
+  `GET /api/system/openai-status`, `POST /api/system/openai-status/clear`.
+- **Tested end to end** with the live dead key: a real 429 sets the flag, the endpoint
+  reports it cross-process, all six start endpoints answer 409, the banner renders
+  (screenshot), clear works, and a fresh failure re-blocks. The flag is left SET, because
+  the key really is empty — see BACKLOG for the top-up.
+
 ### Done 2026-07-31 (late) — position pins live in blueprints + GSD `|NL` dedup
 
 - **`pa.facet_position_rules.position` is now honoured by the blueprint builder**

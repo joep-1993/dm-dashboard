@@ -1,6 +1,32 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een stille fallback is erger dan een crash — OpenAI zonder credits (2026-07-31)
+
+De key was leeg en de dashboards deden alsof er niets aan de hand was: v3 vangt een
+mislukte polish-call en gaat door met de deterministisch samengestelde H1. Batches
+rapporteerden dus **success** terwijl ze ongepolijste titels wegschreven ("Hardhout
+Potdekselplanken" i.p.v. "Hardhouten"). Alleen een logregel verraadde het.
+
+- **Eén hook slaat 14 call sites.** `openai_guard.install()` wrapt
+  `Completions.create` én `Batches.create` op KLASSE-niveau, niet per module — er zijn ~14
+  aanroepen in 8 modules en de volgende nieuwe zou weer onbeschermd zijn. De Batch-API
+  raakt `chat.completions` nooit, dus die had een eigen wrapper nodig; dat was bijna een
+  gat.
+- **Vlag in Postgres (`pa.system_flags`), niet in het proces**: uvicorn, de worker-threads
+  en de UI moeten hetzelfde zien, en het moet een restart overleven. In-process cache van
+  5s zodat een worker-loop hem per URL mag checken.
+- **Match op de error CODE, niet op de tekst.** OpenAI heeft deze melding al eens
+  geherformuleerd; `insufficient_quota` / `credit_balance_exhausted` zijn stabiel. Een
+  gewone 429 rate limit mag NIET blokkeren — die los je op met retryen, en het hele
+  dashboard platleggen om een burst is erger dan de bug.
+- **Stoppen tussen eenheden, niet midden in één**: resterende jobs blijven `pending` i.p.v.
+  als `failed` verbrand te worden. En single-URL-endpoints blijven open: dat is precies
+  het "probeer er één" pad, en een succes wist de vlag automatisch.
+- Getest met de échte lege key: 429 → vlag, endpoint ziet het cross-process, zes
+  start-endpoints geven 409, banner in beeld (screenshot), clear werkt, volgende fout
+  blokkeert opnieuw.
+
 ## De `position`-pin bestond al — alleen de blueprint-builder las hem niet (2026-07-31)
 
 Op 2026-07-30 schreef ik hier dat een before/after-vlag naast `order_index` géén
