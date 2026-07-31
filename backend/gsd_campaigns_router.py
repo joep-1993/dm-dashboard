@@ -17,6 +17,7 @@ from backend.gsd_campaigns_service import (
     undo_run,
     reconstruct_run,
     backfill_campaign_created_dates,
+    reconcile_run_logs,
 )
 from backend.gsd_ll_service import (
     start_ll_run,
@@ -94,6 +95,21 @@ async def get_campaigns(
         return {"campaigns": campaigns, "total": len(campaigns)}
     except Exception as e:
         logger.error(f"Error fetching GSD campaigns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reconcile-logs")
+async def reconcile_logs_endpoint(
+    days: int = Query(7, description="Look back this many days for unlogged creations (max 29)"),
+    dry_run: bool = Query(False, description="If true, report what is missing without writing"),
+):
+    """Fill in the side-logs (creation dates, MC ids, run sheet) for recently created
+    campaigns that an unfinished run never logged. Idempotent — safe to re-run."""
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(executor, reconcile_run_logs, days, dry_run)
+    except Exception as e:
+        logger.error(f"Error reconciling GSD run logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

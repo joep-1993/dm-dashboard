@@ -1,6 +1,128 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De `position`-pin bestond al — alleen de blueprint-builder las hem niet (2026-07-31)
+
+Op 2026-07-30 schreef ik hier dat een before/after-vlag naast `order_index` géén
+verbetering is (zie die entry — dat argument gaat over een **nieuwe** kolom en klopt
+nog). Wat ik toen niet zag: `pa.facet_position_rules` **heeft** al een before/after-as,
+de kolom `position`, en `ai_titles_service._build_v3_h1` honoreert die al maanden.
+Alleen `seo_titles_service.facet_phrase()` las hem niet. Gevolg: een facet die voor de
+unique title expliciet ná de noun is gepind, stond in zijn eigen blueprint nog vóór de
+noun. Twee paden, één config, tegengesteld resultaat.
+
+- **Wat de as toevoegt boven `order_index`:** "direct vóór de noun" is met een getal
+  niet uit te drukken, want de noun heeft geen vaste plek — een type-facet neemt die
+  plek over (zie de entry van 30 juli). `pre_noun` pint op `noun_order - 1 + order/1e6`,
+  dus ook vóór een type-facet-noun: `!!kleur!! !!dier_dierenbenodigdheden!!
+  !!t_zandspeelg!!`. `end` pint op 9000 + order/1e6 (tabel-max is 2400), dus twee
+  end-pins houden hun onderlinge orde: thema_speelgoed 1929 vóór mobiel_k 2066.
+- **`end_before_size` degradeert naar `end`.** Het AI-pad kan sizes afsplitsen omdat het
+  de WAARDE ziet (`is_spec_value("Maat 42")`); een blueprint heeft alleen
+  `!!placeholders!!`, dus "vóór de maten" is bij build-time niet beslisbaar. Richting
+  (post-noun, achteraan) blijft goed. Geen enkele rij gebruikt het vandaag.
+- **Impact gemeten, niet geraden:** 4 facetten hebben een pin (2 `end`, 2 `pre_noun`),
+  maar die zitten in **1.187 gepushte + 49 gequeuede blueprints**. Alle 1.187 herpusht
+  (200 OK), de 49 in-place herschreven; daarna 0 stale. Het bewijs dat de pins goed
+  staan komt uit de live unique titles, die ze al volgen: "Rehall Regular fit Heren
+  **Snowboard** Jassen" (type_sportkleding = pre_noun), "Wooff **Honden** Dierenmanden"
+  (dier_dierenbenodigdheden = pre_noun).
+- `_rule()` unpackt tolerant (2- of 3-tuple), zodat een script of een langlevend proces
+  met een oude rules-dict de pin verliest in plaats van te crashen. En
+  `scripts/pagetitles_blueprint_from_urls.py` heeft een **eigen, verouderde** copy van
+  `facet_phrase` (geen pins, geen geschikte_leeftijd-pin, geen value-guard) — daar staat
+  nu een waarschuwing boven; de backend is canoniek.
+
+## GSD: één `|NL` in de shopnaam maakt een tweede campagneset (2026-07-31)
+
+Redshift levert shopnamen als `Hbm-machines.com|NL` (locale-disambiguatie). Elke lookup
+in `gsd_campaigns_service` matcht het `[shop:NAAM]`-token **exact**, dus zodra die
+toevoeging ná het aanmaken verschijnt, leest de bare-name campagne als afwezig en maakt
+de run een tweede, bijna identieke set. Andersom net zo stil: een shop die uit gaat
+houdt zijn bare-name campagnes ENABLED, want de pause-query ziet ze niet.
+
+- Fix: `_shop_name_variants()` (naam + naam zonder `|…`) op **drie** plekken —
+  create/repair, pause en preview — zodat run en preview hetzelfde zien. Bewezen live
+  (read-only) met `(Hbm-machines.com|NL, tag_toppers)`: variant 1 mist, variant 2 hit.
+  De `[shop_id:N]` in de naam voorkomt kruisbesmetting tussen locales:
+  `Woodselections.com|DE` is 666761 en `|NL` is 666762, dus de bare-name variant kan
+  nooit de andere locale raken.
+- **Niet alles is de `|`.** De campagnes die Joep bij Toolstation.nl zag zijn een oudere
+  naamgeneratie: `[label_test] [shop:Toolstation.nl] … [branche:H&L] [label:a]` (+
+  `[macro]`, `[macro+micro]`, en REMOVED `[limit]`/`[OUD]`/`#4`). Exact matchen kan die
+  per definitie niet vinden, dus maakte de run de canonieke set ernaast. Hetzelfde bij
+  Hbm: er is **nooit** een canonieke bare-name set geweest, alleen `[label_test]`- en
+  `[limit]`-varianten plus `[label:tag_toppers]`.
+- **Joep koos daarna voor die bredere match** (2026-07-31): identiteit = shopnaam
+  (elke variant) + shop_id + `[label:{cl}]`, alle andere tokens negeren, macro/micro
+  uitsluiten. Nu `_fetch_shop_campaign_candidates` (één query per shop op
+  `[shop_id:N]`, SHOPPING-only — dezelfde sleutel die `gsd_ll_service` al vertrouwt) +
+  `_match_existing_campaign`. Twee eigen guards: `[OUD]` wordt overgeslagen (bewust
+  gearchiveerd) en een `[domein:CC]`-mismatch wordt geweigerd (NL_CPR en NL_CPC delen
+  één customer id). Bij meerdere kandidaten: canonieke naam eerst, dan ENABLED, dan
+  hoogste id — anders adopteert een run een 2024-shell terwijl de echte ernaast staat.
+- **Geverifieerd door de ochtend te replayen** (read-only, campagnes van vandaag
+  weggefilterd): dan matcht `[label_test] [shop:Toolstation.nl] … [branche:H&L]
+  [label:b]` (19884113478) — dus die was geadopteerd i.p.v. opnieuw gemaakt. De
+  `[macro]`/`[macro+micro]`-varianten worden correct genegeerd.
+- **Adopteren zonder GSD_SCRIPT zou de shop uit de tool laten vallen**, want
+  `get_gsd_campaigns`, `_pause_campaigns_for_shop` én de creation-date-log filteren op
+  dat label; de legacy Toolstation-campagnes dragen `Floodlight test jan 2026` of
+  helemaal geen label. Daarom plakt de adoptie GSD_SCRIPT erop.
+
+## Alle drie de GSD-nevenlogs staan ná de create-loop, dus een afgebroken run logt niets (2026-07-31)
+
+`run_gsd_script` maakt eerst alle campagnes en schrijft daarna pas
+`pa.jvs_gsd_campaign_created`, `pa.mc_ids_efficy` én het `campaigns_created`-sheet. Drie
+onafgemaakte runs vandaag leverden dus echte campagnes met **nul** logregels.
+
+- Fix is niet een reparatiescript maar `reconcile_run_logs(days, dry_run)`: vergelijk
+  `change_event` (grondwaarheid, ~30 dagen retentie) met alle drie de logs en schrijf
+  alleen wat ontbreekt. Hangt aan het einde van elke run (`RECONCILE_WINDOW_DAYS = 7`,
+  best-effort) én als endpoint `POST /api/gsd-campaigns/reconcile-logs`. Idempotent
+  getest: tweede pass 0/0/0. Vandaag rechtgezet: 13 MC-id-rijen + 14 sheetregels.
+- **`SHEET_DATE_TOLERANCE_DAYS = 2` is essentieel.** De sheet-datum is de RUN-datum, maar
+  `change_event` geeft het creatiemoment van de campagne in de accounttijdzone. Hoopo.eu,
+  Zurbrueggen, Scentulp en Geurfris BE staan op 14-07 terwijl hun campagnes 15-07 zijn;
+  exact matchen dupliceerde in de eerste dry run alle vier. Match op shop+land binnen
+  twee dagen.
+- **Bewuste afwijking bij MC-id's:** een run logt alleen accounts die hij zélf aanmaakte,
+  maar de Content API geeft geen creatiedatum van een account. De reconcile logt daarom
+  elke `(shop_id, country, merchant_id)` die nog niet in de tabel staat — Toolstation NL
+  werd zo correct overgeslagen (mc 687755389 stond er al sinds 20251120).
+- Sheet-type komt uit het labeltoken (`,` → CPC, anders CPR), `op brand?` uit het
+  BRANDED_0/1-label van de campagne. De shop die vandaag `uit` ging is NIET gelogd: zijn
+  campagnes zijn nooit gepauzeerd (geen GSD_SCRIPT-label), dus een `uit`-regel zou een
+  actie claimen die niet gebeurde.
+- Let op bij testen: `ensure_campaign_label_exists()` **maakt** een ontbrekend label aan,
+  dus in een dry-run-pad hoort `_lookup_label_resource()` (read-only). Die fout zat er
+  eerst in.
+
+## 2.954 canonieke GSD-campagnes missen hun GSD_SCRIPT-label (2026-07-31)
+
+Gevonden terwijl ik de preview-pauzetelling gelijktrok met de echte pauzeer-code: de
+preview zei 5 voor Elektroshop.nl (vandaag `uit`), de run zou er **0** pauzeren. Geen
+preview-bug — die campagnes dragen **geen enkel label**.
+
+- Gemeten over alle accounts (naam bevat `[channel:directshopping]`, non-REMOVED,
+  SHOPPING, canonieke labelwaarde, macro/micro/OUD eruit):
+  **canoniek + gelabeld 2.631 · canoniek + ONGELABELD 2.954 (416 shops, 2.456 ENABLED)
+  · legacy-naamgeving ongelabeld 8.565**. De dashboardtabel toont ~2.793 — precies de
+  gelabelde set, dus die 2.954 zijn onzichtbaar én onpauzeerbaar.
+- Mechanisme: `add_standard_shopping_campaign` maakt de campagne en zet het label in een
+  **aparte, best-effort call** (`_apply_label_to_campaign` slikte elke fout met een
+  warning). Mislukt die, dan bestaat er een volstrekt normaal uitziende campagne die
+  deze tool nooit meer kan uitzetten. Nu geeft de helper `True/False` terug (duplicate =
+  succes) en logt de create-tak een `UNMANAGED CAMPAIGN`-error.
+- **Niet zelf rechtgezet:** een label-backfill raakt 2.954 live campagnes en maakt ze in
+  één klap pauzeerbaar. Dat is Joeps beslissing, geen bugfix. Concreet gevolg zolang het
+  blijft: een shop die op `uit` gaat en in die groep zit, blijft draaien —
+  Elektroshop.nl vandaag is precies dat geval.
+- Bijvangst: Toolstation's canonieke set is vandaag in **drie** id-batches ontstaan
+  (24084/24089/24094) — `_create_campaigns_for_shop` breekt zijn label-loop af op
+  cancel, dus elke run vulde een stukje aan. Geen dubbele campagnes, wel het bewijs dat
+  runs vandaag herhaald zijn afgebroken.
+
 ## De paarse card-headers in SEO Stats zijn NOOIT paars geweest (2026-07-31)
 
 Joep: *"de Refresh button in Performance per day moet transparant zijn (is nu wit)."*

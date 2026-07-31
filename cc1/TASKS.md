@@ -4,6 +4,115 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-07-31 (late) — position pins live in blueprints + GSD `|NL` dedup
+
+- **`pa.facet_position_rules.position` is now honoured by the blueprint builder**
+  (`seo_titles_service.facet_phrase`), the same column `ai_titles_service` has honoured
+  for months: `pre_noun` → directly in front of the noun (also a type-facet noun),
+  `end` → after everything, `end_before_size` → degraded to `end` (a blueprint holds
+  placeholders, so "before the sizes" is not decidable at build time). `load_rules()`
+  now returns a 3-tuple and filters `scope_category IS NULL`; `_rule()` stays tolerant
+  of the old 2-tuple. **1.187 pushed blueprints re-pushed + 49 queued rewritten**,
+  0 stale after. Backups are now per-run files
+  (`seo_titles_repush_backup_<stamp>.csv`) — a fixed name had already eaten one.
+- **GSD create/pause/preview look under every shop-name variant** — `Hbm-machines.com|NL`
+  also matches `Hbm-machines.com` (`_shop_name_variants`). Fixes duplicate sets on the
+  way in and campaigns left ENABLED on the way out. Preview output verified byte-identical
+  on today's 16 changes; the positive path proven read-only against the live API.
+- **Then widened, per Joep:** campaign identity is now shop name (any variant) +
+  shop_id + `[label:{cl}]`, ignoring `[label_test]` / `[branche:H&L]` / `[STANDARD]` /
+  `[AFFILIATE]` decorations and excluding macro/micro (and `[OUD]`, my call).
+  `_fetch_shop_campaign_candidates` + `_match_existing_campaign`, used by BOTH the run
+  and the preview. A match is **adopted**: GSD_SCRIPT is attached if missing, else the
+  shop would vanish from the tool. Replay of this morning's state confirms
+  `[label_test] … [label:b]` (19884113478) would have been adopted, not re-created.
+- **Adoption now ENABLES** (Joep, 2026-07-31): a shop Redshift switches ON whose
+  campaigns already exist gets them set to ENABLED; brand-new campaigns still start
+  PAUSED. Three guards: the repair must not have errored, the campaign must be PAUSED,
+  and it must NOT carry `GSD_LL_PAUSED` (low-linkage owns that status and re-enables it
+  itself — `LL_PAUSED_LABEL` mirrors `gsd_ll_service.LL_LABEL`; importing would be
+  circular, keep them in sync). New result action **`activated`**, filed with `created`
+  so undo/reset can pause it back; new preview action `activate` + `to_activate` count,
+  new tiles/pill colours (`#00838f`) in both panels.
+  **Today's preview: 70 existing campaigns would be activated, 5 created** — that is
+  live spend, so look at the dry run before the next prod run.
+
+### Done 2026-07-31 — GSD side-logs reconcile themselves ("just run it again")
+
+Three unfinished runs today created campaigns but wrote **none** of the three side-logs
+(all three steps sit after the create loop): `pa.jvs_gsd_campaign_created`,
+`pa.mc_ids_efficy` and the `campaigns_created` sheet.
+
+- **Backfilled today**: 13 MC-id rows to Redshift (Toolstation NL skipped — already
+  logged with the same mc id 687755389) and **14 sheet rows** from row 1248. Creation
+  dates were already complete (backfilled earlier today).
+- **`reconcile_run_logs(days, dry_run)`** compares change_event (ground truth, ~30-day
+  retention) against all three logs and writes only what is missing. Runs at the end of
+  every `run_gsd_script` (`RECONCILE_WINDOW_DAYS = 7`, best-effort) and is exposed as
+  `POST /api/gsd-campaigns/reconcile-logs?days=7&dry_run=true`. Verified idempotent: a
+  second pass reports 0/0/0.
+- **`SHEET_DATE_TOLERANCE_DAYS = 2`** is load-bearing: the sheet's datum is the RUN date
+  while change_event reports the campaign's own creation time in the account timezone.
+  Hoopo.eu/Zurbrueggen/Scentulp/Geurfris BE are logged 14-07 with campaigns dated 15-07 —
+  exact date matching duplicated all four in the first dry run.
+- MC-id rule (documented divergence): a run logs only MC accounts it CREATED, but the
+  Content API exposes no account creation date, so the reconcile logs any
+  `(shop_id, country, merchant_id)` triple missing from the table.
+- Sheet type is derived from the label token (`,` → CPC, else CPR) and `op brand?` from
+  the campaign's BRANDED_0/1 label. The shop that went `uit` today (Elektroshop.nl) is
+  deliberately NOT logged — its campaigns were never paused (no GSD_SCRIPT label).
+
+### Done 2026-07-31 — the DE `account_access_denied` error is a Merchant Center key, not Google Ads
+
+`auth/account_access_denied: The caller does not have access to the accounts:
+[5342886105]` — 5342886105 is the **DE Merchant Center** advanced account ("beslist BV",
+`ACCOUNTS["DE_CPR"]["mc_id"]`), and the caller is the Content API service account, so no
+Google Ads change would have helped. Measured all four keys in
+`backend/service_accounts/` against all three MC parents (read-only):
+**only `acoustic-racer-258913-e55feb91bacc.json`
+(`beslist-index-checker@acoustic-racer-258913.iam.gserviceaccount.com`) has access** —
+NL/BE/DE all OK; the other three return 401 on every parent (`authinfo` empty).
+`_get_mc_service()` fell back to `os.listdir()[0]` — arbitrary order — when
+`GSD_SERVICE_ACCOUNT_FILE` was unset, so a machine could silently pick a dead key. Now
+sorted + a warning naming the file, and `_mc_err` appends `[caller: <sa email>]` to
+access errors. **Check `GSD_SERVICE_ACCOUNT_FILE` in prod's .env on win-htz-006** —
+runbook for the agent on that machine: `docs/PROD_FIX_MC_SERVICE_ACCOUNT.md` (check →
+verify read-only → fix → confirm, plus the NSSM `AppEnvironmentExtra` trap and the
+"wait for run/progress to be false before restarting" warning).
+
+### OPEN — 2.954 canonical GSD campaigns have no GSD_SCRIPT label (found 2026-07-31)
+
+416 shops, 2.456 of them ENABLED (plus 8.565 legacy-named unlabelled ones). They are
+invisible in Campaigns created and **cannot be paused by the tool** — `Elektroshop.nl`
+went `uit` today and will keep running. Cause: the label is applied in a separate
+best-effort call after the create, and failures were swallowed (now returns a bool +
+logs `UNMANAGED CAMPAIGN`). **Decision needed:** run a label backfill (attach GSD_SCRIPT
+to canonical unlabelled campaigns → instantly manageable/pausable), and separately
+decide about the legacy-named estate. Scan script:
+`scratchpad/gsd_unlabeled_split.py` pattern — re-create under `scripts/analysis/` when
+the backfill is approved.
+
+### Done 2026-07-31 (late) — t_tuinhout flipped to a type facet
+
+- `pa.facet_position_rules`: `t_tuinhout` → `is_type_facet=true`, `order_index=1700`
+  (was 1544/non-type). Its values ARE the noun (Schuttingplanken, Vlonderplanken,
+  Tuinpalen), so the "Tuinhout" category no longer stacks behind them.
+- 9 blueprints in cat 9004934 rebuilt: **7 pushed rows re-pushed to production**
+  (`seo_titles_repush_stale.py --apply`), **2 queued 'built' rows rewritten in place**
+  via the new `--refresh-built` flag (queued rows are invisible to the re-push path but
+  would otherwise be published with the pre-flip phrase). Global check after: 0 stale.
+- 5 of 62 unique titles still ended in "… Tuinhout" (the per-category classifier had
+  the other 57 right already); regenerated, 0 left. Backup:
+  `Downloads/claude/unique_titles_tuinhout_backup_20260731.csv`.
+- **BLOCKER surfaced: the OpenAI key has no credits** (`429 insufficient_quota /
+  credit_balance_exhausted`). v3 fell back to the deterministic composed h1, so the
+  output is correct but unpolished — "Hardhout Potdekselplanken" where polish would
+  write "Hardhouten". Re-run those 5 once credits are topped up.
+- **8 legacy `pa.page_titles_existing` rows for the same category are NOT managed
+  here** and 5 of them still render `!!sub_category_lower!! !!t_tuinhout!!`. They come
+  from the tblPageTitles export and are excluded by dedup; overwriting them via
+  /page-titles is a separate decision.
+
 ### Done 2026-07-31 (evening) — suggestions_new round 3 (SEO Stats layout + GSD dates)
 
 New bullets in `suggestions_new.txt` (5 SEO Stats / 2 GSD Campaigns), all shipped:
