@@ -121,6 +121,36 @@ houdt zijn bare-name campagnes ENABLED, want de pause-query ziet ze niet.
   dat label; de legacy Toolstation-campagnes dragen `Floodlight test jan 2026` of
   helemaal geen label. Daarom plakt de adoptie GSD_SCRIPT erop.
 
+## Wat de audit leerde: de gevaarlijke bugs zaten in de RAPPORTAGE, niet in de logica (2026-08-01)
+
+Zes review-agents over 12.597 regels (GSD Campaigns + SEO Stats), elke HIGH daarna zelf
+nagelopen. Volledig rapport: `cc1/AUDIT_GSD_SEOSTATS_20260801.md`. Wat eruit te leren valt:
+
+- **Verifieer agent-bevindingen; 2 van de gerapporteerde HIGHs sneuvelden.** De claim
+  "visits-joins missen `deleted_ind = 0`, dus alle bezoekcijfers zijn opgeblazen" was met
+  één query weerlegd: 219 rijen, allemaal `deleted_ind=0`, nul dubbele
+  `(aff_id, channel_id)`. En "CTR/Bounce hoort een pp-badge" is Joeps eigen beslissing van
+  31 juli. Een agent die de code goed leest maar de *context* mist, produceert
+  overtuigende niet-bugs.
+- **Een asymmetrische guard is een tijdbom.** `_pct_delta` bewaakte alleen de noemer
+  (`if not p1`), terwijl `_ratio()` bij een dag zonder bezoeken `None` als *p2* teruggeeft
+  → `TypeError` → **500 op `/dashboard`**. Live bewezen: gisteren 500, eergisteren 200. Dus
+  elke ochtend stuk tot de ETL binnen is, op de standaarddatum van de pagina. Guards horen
+  beide kanten te dekken.
+- **De ergste bugs waren rapportagebugs, niet rekenbugs.** Een gepauzeerde shop die uit de
+  run-output verdwijnt; een `activated`-campagne die uit de undo-payload valt; een preview
+  die minder pauzeert dan de run; een reconcile die een dode database niet kan
+  onderscheiden van "niets te doen"; een tegel die altijd 0 toont. De berekening klopte
+  overal — het verslag erover niet. Bij een tool die geld uitgeeft is dat de gevaarlijkste
+  soort.
+- **Twee handmatig bijgehouden kopieën van dezelfde regel divergeren gegarandeerd.**
+  Preview en run implementeren allebei de identiteitstest en de pauze-selectie; ze zijn
+  vandaag nog samen gebracht en stonden bij de audit alweer uit elkaar. Eén helper die
+  beide aanroepen is de enige echte fix.
+- **Vier van de zeven HIGHs schreef ik diezelfde dag.** Nieuwe code is precies waar een
+  audit moet kijken, en "ik heb het net getest" dekt alleen het pad dat je testte — de
+  undo-payload, de preview-tegel en de label-adoptie zaten allemaal één laag naast dat pad.
+
 ## "Bestaande campagne = veilig aanzetten" gold NIET voor de campagnes van de run zelf (2026-07-31)
 
 Joep vroeg: zet bestaande campagnes aan als ze al bestaan. Geïmplementeerd, en toen kwam

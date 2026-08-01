@@ -4,6 +4,54 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### OPEN — audit of GSD Campaigns + SEO Stats (2026-08-01) — full report in `cc1/AUDIT_GSD_SEOSTATS_20260801.md`
+
+Six-slice review of 12 597 lines; every HIGH re-verified by hand. **Two reported HIGHs did
+NOT survive verification** — the `deleted_ind` "inflated visits" claim (measured: 219 rows,
+all `deleted_ind=0`, zero duplicate pairs) and "CTR/Bounce should use a pp badge" (that is
+Joep's 2026-07-31 decision). Do not "fix" either.
+
+**Phase 0 — behaviour-preserving, ~40 lines, no gate needed:**
+- [ ] `seo_stats_service.py:94` — `_pct_delta` guards only the baseline, so a day with no
+      SEO visits 500s `/api/seo-stats/dashboard`. **Live now**: `?date=2026-07-31` → 500,
+      `2026-07-30` → 200, and Dagoverzicht defaults to yesterday — broken every morning
+      until the ETL lands. Fix: `if p1 is None or p2 is None or not p1: return None`.
+- [ ] `gsd_campaigns_service.py:2497` — add `"campaign_resource": campaign_resource` to
+      `_repair_campaign`'s already-exists return; without it every `activated` campaign is
+      missing from the undo payload and Reset silently leaves it live.
+- [ ] `frontend/gsd-campaigns.html:1852` — `previewMeta` never copies `to_activate` /
+      `awaiting_bid_strategy`, so the teal tile always reads 0 and the SA360 note never
+      appears (the backend does return both).
+- [ ] `gsd_campaigns_service.py:3849,3868` — reconcile reads only `["inserted"]` from two
+      of its three sinks; a dead DB looks like "nothing to do".
+- [ ] `gsd_campaigns_service.py:2465,3060` — `ORDER BY ad_group.id` so verify and repair
+      cannot inspect different ad groups of the same campaign.
+
+**Phase 1 — behaviour-changing, needs a regression gate:**
+- [ ] **H1, needs Joep's decision first:** "Exclude these shops" runs on exactly those
+      shops (`:1449` always appends `shop_name IN (…)`; `included` only toggles the `actie`
+      filter). UI wording and `gsd_ll_service.py:2047` say the opposite. Decide whether the
+      wording or the behaviour is the truth.
+- [ ] `:2566-2579` — dedent the GSD_SCRIPT attach out of the name-mismatch branch, or the
+      2 954 canonically-named unlabelled campaigns are never adopted.
+- [ ] `:2626` — a failed ENABLE stays `action="skipped"`; bucket it as an error.
+- [ ] `:3389` / `:3309` / `:3793` — don't stamp creation dates for activations, count
+      activations in the sheet's `campagnes aangemaakt?`, and exclude `uit` rows from the
+      sheet dedupe key.
+- [ ] **Structural:** `run_gsd_script` has no per-shop exception boundary — one failure
+      aborts the run and skips all four side-logs *including the reconcile that exists to
+      heal exactly that*, leaving `_run_progress["running"]` True forever.
+      Gate: `POST /preview` identical before/after except where intended; for H1, Exclude
+      must return the complement of Include over the same shop list.
+
+**Phase 2 — converge preview and run:** preview under-reports pauses (`:2996` vs `:2766`).
+Extract the two-source pause lookup and `_is_ours` into helpers both call.
+
+**Phase 3 — cleanup:** ~10 dead functions in the GSD frontend, `_campaign_name_variants`,
+`loadStats()` (permanent no-op called from 10 places), the dead `sub` cat level (two wasted
+Redshift aggregations per SEO-Stats page load), label negative-caching, request sequencing
+in seo-stats, bulk-selection state, sort ranks for the new actions.
+
 ### Done 2026-07-31 (late) — legacy pin rows adopted + GSD pause matched by identity
 
 **1.846 legacy blueprints regenerated and pushed** (`scripts/analysis/seo_titles_adopt_pin_rows.py`).
