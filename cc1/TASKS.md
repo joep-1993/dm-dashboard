@@ -30,9 +30,24 @@ _Active tasks for immediate work_
 - [ ] **Measure Grasmaaiers.** SEO visits / coverage for 9003581 over the coming weeks. August
       is *past* its seasonal peak (season_index 1.42), so compare against a control category
       rather than against last month, or the seasonal decline reads as a regression.
-- [ ] **Roll out further only to leaf categories.** Of the 10 test cats, Stoelen and Shirts are
-      NOT leaves (19 and 8 children) — keep them out until the partition question is settled.
-      Traffic-safe leaves remaining: Voer, Dekbedovertrekken, Douchewanden, Mobiele telefoons.
+- [ ] **NEXT UP — bring a LARGE test set live.** Joep, 2026-08-03: "almost ready". The
+      machinery is done (`backend/healthscore_keywords.py`); what a bigger rollout needs first:
+      1. **Leaf-only selection.** Pick candidates by `GET /api/Categories/{id}` →
+         `subCategories == []`, NOT by name. Stoelen (19 children) and Shirts (8) must stay out
+         until the parent/child partition question is answered, or push parent+children together.
+      2. **`preserve_cross_category=True` for a partial rollout** — mandatory, or URLs HS2.0
+         still wants get deleted because their own category wasn't in the batch (measured: 2,935
+         urls / 35,866 visits on the 10-cat set). It does push those cats over their cap.
+      3. **`snapshot_live()` every category before its push** — the only rollback that exists.
+         Keep the snapshots; a batch of 100 categories is 100 restore files.
+      4. **Pre-flight the drop list per category**: how many URLs it removes and how many of
+         those had SEO visits in the 90d window. Grasmaaiers went out at 0 traffic dropped;
+         hold that bar, or accept the loss knowingly.
+      5. **Hold back a control group** of comparable untouched categories, chosen before the
+         push, so seasonality can be separated from the HS2.0 effect.
+      6. Still-open decisions that get bigger with scale: **PLP** (27% of the selection, channel
+         carries none), the **new-URL bucket** (unpushable: no category, ~59% phantom), and the
+         **near-non-binding caps** (window mismatch, 206 of 3,539 cats trimmed).
 - [ ] **PLP decision.** 6,106 of 22,287 selected test-cat records (27%) are `/p/` product pages
       and the channel carries none. Drop them, or decide product pages belong in HTML sitemaps.
 - [ ] **New-URL bucket.** 287,262 rows → ~120k real pages after the phantom-facet filter, and
