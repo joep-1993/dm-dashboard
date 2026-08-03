@@ -31,6 +31,35 @@ tegen de API gemeten worden, niet tegen new_hs_data.
   `pa.hs2_sitemap.npath` strípt alle slashes, dus hercanonicaliseren vóór verzending.
   [[feedback_url_canonicalization]]
 
+## EERSTE LIVE HS2.0-CATEGORIE: Grasmaaiers 9003581 (2026-08-03)
+
+Uitgevoerd in twee stappen op Joep's keuze: eerst een **no-op self-replace** (de 409 live
+records ongewijzigd terugposten), daarna de echte payload.
+
+- **No-op**: `{"success":true,"before":409,"after":409}` en de content daarna bit-identiek
+  vergeleken. Dat bewijst in één call dat (a) POST werkt, (b) `before`/`after` setgroottes zijn
+  en het dus écht een replace-per-categorie is, (c) de payloadvorm klopt — zonder dat een
+  bezoeker iets anders ziet. Dit is het goedkoopste contract-experiment dat er is; standaard
+  doen bij een onbekende write-API.
+- **Echte push**: `before=409 after=752`, live content == payload (752 records / 752 unieke
+  urls, +586 nieuwe urls, 166 behouden, 80 verdwenen — allemaal met 0 SEO-visits in het
+  90d-venster, vooraf gecheckt).
+- **POST vereist GEEN auth.** HTTP 200 zonder key of token vanaf het interne netwerk; geen
+  security scheme in de Swagger, niets dat de write tegenhoudt. De `confirm_token` in
+  `push()` is dus het enige dat tussen een typefout en een live categorie staat — niet
+  ceremonie.
+- **Rollback ligt klaar**: `Downloads/claude/hs2_payloads_preserved/live_snapshot_9003581_nl.json`
+  (409 records). Terugzetten = die opnieuw pushen. `order` gaat wel verloren in de round-trip
+  (GET geeft het niet terug), urls + anchors niet.
+- **De live set bevatte 4 exacte dubbele (url, keywords)-rijen** van de 409 — de huidige
+  pipeline dedupliceert dus niet. Mijn validator blokkeerde daardoor de eigen restore;
+  opgelost met `allow_duplicate_pairs` (aan voor een snapshot-restore, uit voor een gebouwde
+  payload, want daar is één rij per url de regel).
+- **Nog te meten**: effect op SEO-visits/coverage voor 9003581 over de komende weken. Let op
+  dat augustus voor Grasmaaiers ná de piek ligt (season_index 1,42, cap 1.769) — de seizoens-
+  daling loopt door de meting heen, dus vergelijk tegen een controlecategorie, niet tegen
+  vorige maand.
+
 ## `page_heading` is de anchor-bron die we zochten — 100% dekking (2026-08-03)
 
 Joep's query op `dim_visit.page_heading` (SEO-visits, per url) lost het enige echte

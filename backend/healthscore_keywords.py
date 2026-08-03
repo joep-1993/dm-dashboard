@@ -32,7 +32,13 @@ SIX CONTRACT FACTS THAT SHAPE THIS MODULE
    response are set sizes, and there is NO DELETE endpoint. So the first push
    for a category discards whatever it holds now, and the only repair is another
    push. Hence `push()` is gated behind an explicit confirmation token and every
-   other function here is read-only.
+   other function here is read-only. Verified live on Grasmaaiers 9003581
+   (2026-08-03): posting its 409 records back unchanged returned
+   {"success":true,"before":409,"after":409} and the content compared identical,
+   then the HS2.0 payload returned before=409 after=752. **POST needs no auth**
+   — no security scheme in the Swagger and no challenge on the write, so the
+   confirmation token is the only thing standing between a typo and a live
+   category.
 5. The channel carries **no `/p/` product pages** (0 of 3,000 sampled in each of
    Sneakers / Stoelen / Voer), while ~27% of the HS2.0 selection is PLP. Those
    rows are excluded by default; `include_plp=True` exists only so the decision
@@ -281,9 +287,16 @@ def snapshot_live(cat: int, country: str = "nl", out_dir: str = None) -> dict:
     return out
 
 
-def validate_payload(payload: dict) -> list:
+def validate_payload(payload: dict, allow_duplicate_pairs: bool = False) -> list:
     """Contract checks against the Swagger schema + the facts above. Returns a
-    list of problems; empty means the body is shaped correctly."""
+    list of problems; empty means the body is shaped correctly.
+
+    allow_duplicate_pairs — the LIVE data genuinely contains repeated
+    (url, keywords) rows (4 of Grasmaaiers' 409, e.g. the same URL twice under
+    'Husqvarna Grasmaaiers'), so a faithful restore from snapshot_live() has to
+    be allowed to reproduce them. For a freshly BUILT payload a duplicate pair is
+    a bug — we emit one row per URL — so it stays an error by default.
+    """
     problems = []
     if not isinstance(payload.get("deepestCategoryId"), int):
         problems.append("deepestCategoryId must be an int")
@@ -310,7 +323,7 @@ def validate_payload(payload: dict) -> list:
             problems.append(f"[{i}] order must be an int, got {order!r}")
         if url and "/p/" in url:
             problems.append(f"[{i}] {url} is a product page; this channel carries none")
-        if (url, kw) in seen:
+        if (url, kw) in seen and not allow_duplicate_pairs:
             problems.append(f"[{i}] duplicate (url, keywords) pair: {url} / {kw!r}")
         seen.add((url, kw))
         if set(k) - {"url", "keywords", "order"}:
@@ -369,7 +382,7 @@ def diff_against_live(payload: dict, country: str = "nl") -> dict:
     }
 
 
-def push(payload: dict, confirm_token: str = "") -> dict:
+def push(payload: dict, confirm_token: str = "", allow_duplicate_pairs: bool = False) -> dict:
     """POST the payload. REFUSES unless `confirm_token` is exactly
     "REPLACE <deepestCategoryId>".
 
@@ -377,7 +390,7 @@ def push(payload: dict, confirm_token: str = "") -> dict:
     DELETE, so a mistaken call is only repairable by another push, and the
     category's live links are gone in between.
     """
-    problems = validate_payload(payload)
+    problems = validate_payload(payload, allow_duplicate_pairs=allow_duplicate_pairs)
     if problems:
         raise ValueError(f"payload invalid, refusing to push: {problems[:5]}")
     expected = f"REPLACE {payload['deepestCategoryId']}"

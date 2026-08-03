@@ -18,12 +18,21 @@ _Active tasks for immediate work_
       `confirm_token == "REPLACE <catId>"`; `snapshot_live()` is the only undo (no DELETE on the
       API). **Nothing has been posted.** See LEARNINGS (4 entries). #priority:high
 
-**Open — decisions needed before any live push:**
-- [ ] **Go/no-go on a single live category.** Best candidate **Douchewanden 9002072**: leaf (0
-      children), smallest live set (88 records / 68 urls), and all 43 urls it would drop have
-      **0** SEO visits in the 90d window. Snapshot first, then `push(confirm_token=...)`.
-      Also still unverified: **whether POST needs auth at all** (no security scheme in the
-      Swagger, GET is open, OPTIONS/HEAD → 405 with no challenge).
+- [x] **FIRST LIVE HS2.0 CATEGORY — Grasmaaiers 9003581** (2026-08-03, on Joep's go). No-op
+      self-replace first (`before=409 after=409`, content verified identical), then the real
+      payload (`before=409 after=752`, live content == payload, 752 urls: +586 new, 166 kept,
+      80 dropped and all 80 had 0 SEO visits in the 90d window). **POST needs no auth** — 200
+      with no key from the internal network, so `confirm_token` is the only guard. Rollback
+      snapshot: `Downloads/claude/hs2_payloads_preserved/live_snapshot_9003581_nl.json`
+      (re-push it to restore). #priority:high
+
+**Open — next steps:**
+- [ ] **Measure Grasmaaiers.** SEO visits / coverage for 9003581 over the coming weeks. August
+      is *past* its seasonal peak (season_index 1.42), so compare against a control category
+      rather than against last month, or the seasonal decline reads as a regression.
+- [ ] **Roll out further only to leaf categories.** Of the 10 test cats, Stoelen and Shirts are
+      NOT leaves (19 and 8 children) — keep them out until the partition question is settled.
+      Traffic-safe leaves remaining: Voer, Dekbedovertrekken, Douchewanden, Mobiele telefoons.
 - [ ] **PLP decision.** 6,106 of 22,287 selected test-cat records (27%) are `/p/` product pages
       and the channel carries none. Drop them, or decide product pages belong in HTML sitemaps.
 - [ ] **New-URL bucket.** 287,262 rows → ~120k real pages after the phantom-facet filter, and
