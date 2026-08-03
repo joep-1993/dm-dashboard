@@ -1,6 +1,37 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een Cancel op een push naar productie moet de halfvolle batch wéggooien, niet nog even versturen (2026-08-03)
+
+Publish 2.0 had geen stop: een volle push is ~800 POSTs van 2.000 records over vele
+minuten, en de enige uitweg was uvicorn herstarten — wat óók de in-memory task weggooit,
+dus de UI geeft daarna 404 en je weet niet hoe ver hij was.
+
+- **Coöperatieve vlag, geen thread kill.** `_is_cancelled(task_id)` wordt één keer per URL
+  gelezen, dus de run stopt *tussen* batches en een POST-in-flight wordt nooit halverwege
+  afgebroken. Dat kan alleen omdat push-state per geslaagde batch wordt gestempeld — dat
+  ontwerp (zie de md5-entry hieronder) maakt afbreken hier gratis veilig.
+- **De halfvolle batch gaat weg, niet de deur uit.** Eerst had ik na de `break` gewoon
+  `flush()` laten staan: "geen werk weggooien". Fout uitgangspunt — Cancel betekent *stop
+  met schrijven naar de live API*, niet "nog één keer 2.000 records". Die URL's blijven
+  ongestempeld en gaan mee met de volgende `new`-run; door de `(url, question)`-upsert kost
+  dat niets en publiceert het niets dubbel.
+- **`urls_done` moet terug.** Anders rapporteert de banner URL's die zijn gelézen maar nooit
+  verstuurd (in de test: 5 in plaats van 4). Een teller die "gedaan" zegt over iets wat niet
+  bij de API is aangekomen, is een leugen in precies het moment waarop je hem gelooft.
+- **Status `cancelled`, niet `completed` + vlag.** UI_BLUEPRINT waarschuwt daar expliciet
+  voor (`seo_titles_service.py` `should_stop`) en dit is waarom: `success = failed == 0`, dus
+  een afgebroken run zonder mislukte batch zou als "Done" renderen. Banner is `alert-info`
+  "Stopped — partial run".
+- **De poller wist de bevestiging.** De statusregel wordt elke 2s overschreven, dus
+  "Cancelling…" verdween twee tellen na de klik en de knop leek stuk. Nu een
+  `faqV2CancelRequested`-vlag die de regel **prefixt** — tellers blijven lopen (dat is echt
+  zo, de laatste batch landt nog) met "Cancelling — " ervoor.
+- **Getest zonder DB en zonder /faq**: stubs voor connectie, `_iter_url_groups` en
+  `_post_batch`, `BATCH_SIZE=4`. Cancel na 5 van 10 URL's → precies 2 POSTs, gestempeld
+  0-3, `urls_processed=4`, `status='cancelled'`. Zo'n harnas is hier de enige manier: via de
+  UI testen betekent 1,59M records naar productie duwen.
+
 ## 59,7% van de legacy-blueprints wijkt af, maar de pin-wijziging verklaart er 2% van (2026-07-31)
 
 Joep vroeg na de before/after-wijziging: moeten alle titels opnieuw? De eigen corpus van de

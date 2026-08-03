@@ -4,6 +4,23 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### Done 2026-08-03 — FAQ Publish 2.0 can be cancelled mid-push
+
+- [x] **Cancel button for Publish 2.0** (commit `9dac89a`, on main, pushed).
+      `POST /api/faq/publish-v2/cancel/{task_id}` zet een coöperatieve vlag die de
+      push-loop **één keer per URL** leest → stoppen gebeurt tussen batches, nooit
+      halverwege een POST. De halfvolle batch wordt **weggegooid** (Cancel = stop met
+      schrijven naar de live API) en `urls_done` rolt terug naar wat écht gepubliceerd is;
+      die URL's blijven ongestempeld in `pa.faq_v2_push_state` en gaan mee met de volgende
+      `mode="new"`-run. Task landt als `status="cancelled"`, niet `completed`+vlag, zodat de
+      banner niet als "Done" kan renderen — frontend: rood-omlijnde Cancel onder de bar,
+      `Cancelling — ` als prefix op de live tellers, en een `alert-info` "Stopped — partial
+      run". Getest met stubs (geen DB, geen live `/faq`): cancel na 5 van 10 URL's → 2 POSTs,
+      gestempeld 0-3, `urls_processed=4`, `status='cancelled'`. #claude-session:2026-08-03 #priority:medium
+- **Deploy-noot**: live :8003 draait **zonder `--reload`** (uvicorn PID 185082, up sinds
+  1 aug), dus de Cancel-knop geeft 404 tot een kill+relaunch. Nog niet gedaan — een
+  herstart sloopt lopende Tier-A rurl-runs, dus met Joep afstemmen.
+
 ### OPEN — audit of GSD Campaigns + SEO Stats (2026-08-01) — full report in `cc1/AUDIT_GSD_SEOSTATS_20260801.md`
 
 Six-slice review of 12 597 lines; every HIGH re-verified by hand. **Two reported HIGHs did

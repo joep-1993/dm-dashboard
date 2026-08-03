@@ -416,7 +416,11 @@ gotchas are in `backend/faq_v2_publisher.py`'s docstring.
 - `GET  /api/faq/publish-v2/stats` - urls_total / urls_pending / urls_pushed / last_pushed_at + record estimates
 - `POST /api/faq/publish-v2` - body `{environment, mode, limit, replace}`; starts a background task.
   `mode` = **`new`** (default: no state row, or md5(faq_json) changed — see `pa.faq_v2_push_state`) or `all` (~280,636 URLs / ~1.7M records)
-- `GET  /api/faq/publish-v2/status/{task_id}` - poll (queued/running/completed/failed) + per-batch progress
+- `GET  /api/faq/publish-v2/status/{task_id}` - poll (queued/running/**cancelled**/completed/failed) + per-batch progress
+- `POST /api/faq/publish-v2/cancel/{task_id}` - stop a running push (400 if unknown/already finished).
+  Cooperative: the flag is read once per URL, so it stops **between** batches; the part-filled batch is
+  dropped rather than POSTed, those URLs stay unstamped in `pa.faq_v2_push_state` and go out with the
+  next `new` run. Result carries `cancelled: true` and the task lands as `status="cancelled"`
 
 ### DM Review (slide 2 refresh)
 - `GET /api/dm-review/health` - Health check
