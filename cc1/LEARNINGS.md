@@ -1,6 +1,115 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De HTML-sitemap wordt geleverd door de Keywords API, niet door `bt.new_hs_data` (2026-08-03)
+
+HS2.0 uit de ijskast gehaald. De hele shadow-vergelijking (+13,7pp) is gemeten tegen
+`bt.new_hs_data`, maar de site leest **`http://keywords.api.beslist.nl`** (Swagger op `/`,
+`env=production`). Dat is een ánder oppervlak: Sneakers heeft daar 2.572 urls, in
+new_hs_data ~5.932. Voordat de winst ergens geciteerd wordt moet de HS1.0-baseline dus
+tegen de API gemeten worden, niet tegen new_hs_data.
+
+- **We hebben GEEN schrijfrechten op Redshift `bt.*`** (`j_vanschagen`: select ja, insert/
+  update nee, `CREATE` in schema bt nee). De plan-doc-architectuur ("schrijf je eigen
+  `bt.hs2_data` naast new_hs_data") kán dus niet met dit account — vandaar dat alles in
+  Postgres `pa.*` staat. De Keywords API is daarmee niet alleen het echte oppervlak, het is
+  ook het enige waar we zelf bij kunnen.
+- **Contract** (live geverifieerd): `GET /sitemap/{cc}/{catId}/{limit}/{offset}` (limit mag
+  == totalCount, 7.348 in één call); `POST /sitemap` body `{deepestCategoryId,
+  countryCodes[], keywords:[{url, keywords, order}]}` → `{success, before, after}`.
+  **POST = replace per (categorie, land) en er is GEEN DELETE** — de enige weg terug is
+  opnieuw pushen wat er stond, dus snapshot vóóraf (`snapshot_live()`).
+- **De id is de 9xxxxxx taxonomie-id** (9000066 → 854 records). De Swagger-voorbeelden
+  gebruiken 32000/32001 → 0 records; negeer ze. `bt.new_hs_data.deepest_category_id` mengt
+  béide id-ruimtes, dus dat is geen veilige sleutel om een payload op te bouwen.
+- **Grain is (url, keyword), niet url.** Airco: 1.308 records over 603 unieke urls. `keywords`
+  is de **anchor-tekst** op de sitemap-pagina.
+- **Geen enkele `/p/` productpagina in het kanaal** (0 van 3.000 in Sneakers/Stoelen, 0 van
+  1.379 in Voer) terwijl 27% van de HS2.0-selectie PLP is. Die kunnen hier dus niet heen.
+- **Trailing slash volgt de huisregel** (14.785 live records geteld): mét `/c/` → géén slash
+  (14.673/14.673), al het andere (kale categorie, alleen `/r/`) → mét slash (112/112).
+  `pa.hs2_sitemap.npath` strípt alle slashes, dus hercanonicaliseren vóór verzending.
+  [[feedback_url_canonicalization]]
+
+## `page_heading` is de anchor-bron die we zochten — 100% dekking (2026-08-03)
+
+Joep's query op `dim_visit.page_heading` (SEO-visits, per url) lost het enige echte
+blokkade-punt op: `pa.hs2_sitemap`/`hs2_features` hebben **geen** keyword-kolom.
+
+- **16.181 van 16.181 pushbare urls** (10 testcats) hebben een heading. Dat is structureel,
+  niet geluk: de selectie komt uit `fct_visits`, en headings komen uit dezelfde facttabel
+  over een breder venster. Wat ik uit de live API zelf kon schrapen was maar 31,9%.
+- **Tie-break = meeste visits** (Joep): 26,3% van de urls heeft >1 concurrerende heading, tot
+  6 op één url. De varianten zijn casing/woordkeus-ruis en de drukste is wat zoekers zien:
+  `Mobiele airco` 3.499 vs `Mobiele Airconditioner` 44.
+- **Voor urls die blijven verandert er bijna niets**: van de 5.156 overlappende urls houdt
+  91,4% exact dezelfde anchor. De live set mengt namelijk twee bronnen — echte paginatitels
+  én ruwe lowercase GSC-queries (15,3% van de records, in Airco zelfs 47%). Eén bron
+  (page_heading) haalt die scheefheid eruit; de GSC-queries verdwijnen automatisch omdat POST
+  per categorie replacet.
+- Kosten van de keuze: één anchor per url betekent ~25% minder records (21.707 → 16.181) voor
+  deze categorieën, want de meervoudige (url, keyword)-rijen klappen samen.
+
+## De new-URL bucket is voor 59% spookpaginas, en Search API + Taxonomy API zijn het daar 100% over eens (2026-08-03)
+
+De 287.262 rijen uit `bt.facet_facetvalues` (20d-venster) hebben geen traffic, dus geen
+page_heading — die moeten gegenereerd worden zoals Unique Titles dat doet. Bij het testen
+bleek de bucket vooral vuilnis:
+
+- `generate_title_v3(url, polish=False)` is de **deterministische** composer (geen OpenAI-call)
+  en werkt prima op urls zonder traffic. **Fidelity: 13/15 exact** tegen de echte page_heading,
+  2× dezelfde woorden in andere volgorde, 0 fout.
+- Maar op de new-bucket **faalt 57%** met `facet_not_available`: de facetwaarde bestaat niet /
+  heeft geen producten. **En dezelfde 47/47 urls die de Search API weigert, missen óók volledig
+  in de Taxonomy API** (`merk~24222045`, `merk~24104622`, …). Er is dus geen "rest" die de
+  Taxonomy API zou kunnen dekken — de generator is tegelijk een validiteitsfilter, en 287k
+  wordt daarmee ~120k. Dat bevestigt het vermoeden van 15 juli dat de bucket opgeblazen was.
+- **Unique Titles gebruikt niet de Taxonomy API voor labels maar de Product Search API**
+  (`faq_service.fetch_products_api` → `selected_facets[].detail_value`), plus `cat_urls.csv`
+  voor het categoriewoord en `pa.facet_position_rules` voor de woordvolgorde. Precies daarom
+  faalt 57%: de Search API labelt alleen waarden die nú producten hebben.
+- **Taxonomy API is wél de betere bulk-labelbron**: `GET /api/Facets/values` geeft in één call
+  537.576 waarden (142 MB, 48s) en het label is **identiek** aan de Search API (83/83, altijd
+  via `nameOnDetail`). Search API is per-url en op 20 QPS gethrottled (~120k urls = 100+ min).
+  Dus: taxonomy als cache voor labels + junkfilter, Search API als fallback voor de ~3% ids
+  die in taxonomy missen maar door search wél geaccepteerd worden.
+- **Locale-val: het is `nl-NL`, niet `nl-nl`.** Met de verkeerde sleutel kreeg ik lege labels
+  en concludeerde ik eerst een 50% mismatch die er niet is. `nameInColumn` = basisvorm (`Wit`,
+  `Rood`), `nameOnDetail` = verbogen vorm (`Witte`, `Rode`) — en de Search API geeft de
+  verbogen vorm, dus match op `nameOnDetail`. 504.581 van de 537.576 waarden hebben alleen een
+  `global`-label (merken); 32.995 hebben nl-NL/nl-BE/en-US/de-DE.
+
+## Keywords-API-categorieën zijn NIET de `deepest_subcat_id`-partitie — een 10-cat pilot strandt 2.935 urls (2026-08-03)
+
+Bij het diffen van de payloads viel op dat Stoelen en Shirts >100% van "hun" visits zouden
+laten vallen. Dat kan niet, en de oorzaak is een echte: **2 van de 10 testcats zijn geen
+deepest category.** Stoelen (9000047) heeft **19 kinderen** — inclusief Eetkamerstoelen
+(9000066), dat óók in de testset zit — en Shirts (9000668) heeft er 8 (T-shirts, Poloshirts, …).
+
+- De API bewaart onder de bucket van een niet-leaf categorie dus urls die Redshift aan de
+  kinderen toeschrijft. HS2.0 scoort per `deepest_subcat_id` en bouwt daarmee een **andere
+  partitie** dan de API gebruikt.
+- Gevolg gemeten over de 10 cats: van de 11.115 urls die een push zou verwijderen is
+  **2.935 (35.866 90d-visits, 87% van alle weggevallen traffic) wél door HS2.0 geselecteerd —
+  maar onder een categorie buiten de 10**. 420 komen terug via een andere test-cat, 2.027 zijn
+  de bedoelde churn (952 visits) en 5.733 zitten alleen in de new-bucket (4 visits).
+- Zonder maatregel leest dat straks als "SEO gedaald na de HS2.0-test" en krijgt het model de
+  schuld van een scoping-artefact. Daarom `preserve_cross_category=True` in
+  `build_payload()`: live urls die HS2.0 elders nog selecteert worden achter de scored rijen
+  aangehangen, mét hun **live anchor onveranderd** (we piloteren die categorieën niet, dus niet
+  her-ankeren). Effect: gestrande urls 11.350 → 7.994, en de payload gaat over de cap heen
+  (Stoelen 2.455 → 4.870, Shirts 1.017 → 1.924).
+- Les voor volgende rollouts: kies pilot-categorieën op **leaf-zijn**, niet op naam. Check
+  `GET /api/Categories/{id}` → `subCategories` vóórdat je een testset vaststelt.
+
+## Een RealDictCursor tuple-unpacken geeft je stilzwijgend de kolomNAMEN (2026-08-03)
+
+`for npath, heading, visits in cur:` op een cursor uit `backend/database.py` (beide pools zijn
+`cursor_factory=RealDictCursor`) itereert over de **keys** van de dict-rij. Resultaat: één
+"heading" met npath=`'npath'`, en de payload-generator meldde vrolijk 64.732 → 1 heading en
+"0 records, 16.181 skipped". Geen exception, geen waarschuwing. Indexeer op naam
+(`row["npath"]`) of forceer een tuple-cursor; en wees alert als een teller precies 1 is.
+
 ## Een Cancel op een push naar productie moet de halfvolle batch wéggooien, niet nog even versturen (2026-08-03)
 
 Publish 2.0 had geen stop: een volle push is ~800 POSTs van 2.000 records over vele

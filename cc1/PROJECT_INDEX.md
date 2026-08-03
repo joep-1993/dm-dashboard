@@ -17,6 +17,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── faq_service.py        # FAQ generation service
 │   ├── content_publisher.py  # Publishes content_top + FAQ blobs to website-configuration /automated-content
 │   ├── faq_v2_publisher.py   # "Publish 2.0": FAQ Q&A pairs -> website-configuration /faq (one record per QUESTION, incremental via pa.faq_v2_push_state)
+│   ├── healthscore_keywords.py # HS2.0 -> Keywords API (keywords.api.beslist.nl POST /sitemap): payload build/validate/diff, dry-run; push() gated behind confirm_token, snapshot_live() is the only undo
 │   ├── ai_titles_service.py  # AI-powered title generation
 │   ├── canonical_service.py  # Canonical URL transformation
 │   ├── redirect_301_service.py # 301 redirect management

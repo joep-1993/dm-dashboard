@@ -4,6 +4,40 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-03 — HS2.0 out of the fridge: first seasonal-cap build + Keywords API payload generator
+
+- [x] **Rebuilt features + sitemap as_of 2026-08-03** — `pa.hs2_features` 1,081,728 urls;
+      `pa.hs2_sitemap` 1,313,740 rows (1,026,478 scored + 287,262 new) over 3,539 cats. This is
+      the **first sitemap ever built with the seasonal caps** — the stored 30-jun set was flat
+      N=1000, so the 21-jul cap model had never actually produced a selection. Joep's answer on
+      the open cap question: **keep the all-channel knee**. #priority:high
+- [x] **Payload generator `backend/healthscore_keywords.py`** — builds/validates/diffs
+      `POST /sitemap` bodies from `pa.hs2_sitemap` + `page_heading`, dry-run only. All 10 test
+      cats validate clean: 16,181 records (19,537 with `preserve_cross_category=True`), 2.5 MB,
+      payloads dumped to `Downloads/claude/hs2_payloads{,_preserved}/`. `push()` refuses unless
+      `confirm_token == "REPLACE <catId>"`; `snapshot_live()` is the only undo (no DELETE on the
+      API). **Nothing has been posted.** See LEARNINGS (4 entries). #priority:high
+
+**Open — decisions needed before any live push:**
+- [ ] **Go/no-go on a single live category.** Best candidate **Douchewanden 9002072**: leaf (0
+      children), smallest live set (88 records / 68 urls), and all 43 urls it would drop have
+      **0** SEO visits in the 90d window. Snapshot first, then `push(confirm_token=...)`.
+      Also still unverified: **whether POST needs auth at all** (no security scheme in the
+      Swagger, GET is open, OPTIONS/HEAD → 405 with no challenge).
+- [ ] **PLP decision.** 6,106 of 22,287 selected test-cat records (27%) are `/p/` product pages
+      and the channel carries none. Drop them, or decide product pages belong in HTML sitemaps.
+- [ ] **New-URL bucket.** 287,262 rows → ~120k real pages after the phantom-facet filter, and
+      they need generated anchors (`generate_title_v3(url, polish=False)` + taxonomy label
+      cache). They also carry `deepest_category_id = NULL`, so they are unpushable until
+      attributed to a category. Surviving examples are thin brand pages
+      (`'YCOVSFP Tuinhuisonderdelen'`) — needs a junk guardrail like the R-urls got.
+- [ ] **The caps barely bind.** August caps sum to 2.65M against a 1.06M candidate pool; the cap
+      trims only ~206 of 3,539 cats, the other 3,327 take their whole supply. Root cause is a
+      window mismatch — base cap = knee over **12 months all-channel**, candidates = **90 days**
+      of activity. Fix the windows, not the seasonality shape.
+- [ ] **Re-measure the HS1.0 baseline against the Keywords API**, not `bt.new_hs_data` — the
+      +13.7pp headline was measured on the wrong surface (see LEARNINGS).
+
 ### Done 2026-08-03 — FAQ Publish 2.0 can be cancelled mid-push
 
 - [x] **Cancel button for Publish 2.0** (commit `9dac89a`, on main, pushed).
