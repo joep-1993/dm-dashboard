@@ -94,17 +94,32 @@ CREATE TABLE IF NOT EXISTS pa.faq_v2_push_state (
 );
 """
 
-# In-place migration of the pre-env table. Idempotent, so it can stay in the
-# startup path: the ADD COLUMN default backfills existing rows as 'production',
-# which is right — every push before this change went to production.
+# In-place migration of the pre-env table.  The ALTER TABLE takes an
+# AccessExclusiveLock even when ADD COLUMN IF NOT EXISTS is a no-op, which
+# deadlocks against concurrent publish runs holding RowExclusiveLock.  So we
+# first check with a cheap catalogue query whether the migration is needed at
+# all — once the env column and composite PK exist, this is a pure read.
 STATE_MIGRATE = """
-ALTER TABLE pa.faq_v2_push_state ADD COLUMN IF NOT EXISTS env TEXT NOT NULL DEFAULT 'production';
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_constraint
-                WHERE conrelid = 'pa.faq_v2_push_state'::regclass
-                  AND conname  = 'faq_v2_push_state_pkey'
-                  AND pg_get_constraintdef(oid) = 'PRIMARY KEY (url_id)') THEN
+    -- Only touch the table if the env column is missing.
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'pa'
+           AND table_name   = 'faq_v2_push_state'
+           AND column_name  = 'env'
+    ) THEN
+        ALTER TABLE pa.faq_v2_push_state
+            ADD COLUMN env TEXT NOT NULL DEFAULT 'production';
+    END IF;
+
+    -- Only rebuild the PK if it is still the old single-column form.
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'pa.faq_v2_push_state'::regclass
+           AND conname  = 'faq_v2_push_state_pkey'
+           AND pg_get_constraintdef(oid) = 'PRIMARY KEY (url_id)'
+    ) THEN
         ALTER TABLE pa.faq_v2_push_state DROP CONSTRAINT faq_v2_push_state_pkey;
         ALTER TABLE pa.faq_v2_push_state ADD PRIMARY KEY (url_id, env);
     END IF;
