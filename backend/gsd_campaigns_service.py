@@ -101,7 +101,7 @@ LOG_WORKSHEET = os.environ.get("GSD_LOG_WORKSHEET", "campaigns_created")
 # the MC service-account auto-detect (_get_content_service).
 SHEETS_SA_FILE = os.environ.get(
     "GSD_SHEETS_SERVICE_ACCOUNT_FILE",
-    "/mnt/c/Users/JoepvanSchagen/Downloads/Python/gsd-campaign-creation.json",
+    r"C:\Users\l.davidowski\Downloads\dm_dashboard\gsd-campaign-creation.json",
 )
 SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
