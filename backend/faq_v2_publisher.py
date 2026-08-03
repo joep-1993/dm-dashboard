@@ -155,6 +155,23 @@ def _set_progress(task_id, **kw):
             t.setdefault("progress", {}).update(kw)
 
 
+def _is_cancelled(task_id):
+    """Non-raising cancel check, polled once per URL by the push loop.
+
+    A full run is ~850 POSTs of 2000 records over many minutes, so it needs a
+    stop that isn't "restart uvicorn" — and a restart mid-run also loses the
+    in-memory task, so the UI would just 404. Cooperative flag rather than
+    killing the thread: state is stamped per successful batch, so stopping
+    between URLs leaves the published set consistent and the unpushed URLs are
+    simply picked up by the next mode="new" run.
+    """
+    if not task_id:
+        return False
+    with _task_lock:
+        t = _tasks.get(task_id)
+        return bool(t and t.get("cancel"))
+
+
 def _iter_url_groups(cur, limit=None, mode="new", env="production"):
     """Yield (url_id, url, md5, [records]) — one group per URL, streaming.
 
@@ -304,7 +321,13 @@ def publish_faq_v2(env="production", limit=None, replace=False, mode="new", task
             _set_progress(task_id, records_pushed=pushed, failed=failed,
                           batches=len(batch_results), urls_done=urls_done)
 
+        cancelled = False
         for url_id, url, md5, recs, skip_reason in _iter_url_groups(cur, limit, mode, env):
+            # Checked per URL, i.e. between batches at worst: a POST in flight is
+            # never abandoned half-written, so the API never sees a torn batch.
+            if _is_cancelled(task_id):
+                cancelled = True
+                break
             if skip_reason:
                 if len(skipped) < 50:
                     skipped.append({"url": url, "reason": skip_reason})
@@ -321,7 +344,16 @@ def publish_faq_v2(env="production", limit=None, replace=False, mode="new", task
             batch.extend(recs)
             batch_state.append((url_id, md5, len(recs)))
             urls_done += 1
-        flush()
+        if cancelled:
+            # Drop the part-filled batch instead of firing one last POST: Cancel
+            # means stop writing to the live API now. Those URLs stay unstamped,
+            # so the next "new" run pushes them — hence urls_done is rolled back
+            # to what was actually published, not what was read.
+            urls_done -= len(batch_state)
+            batch, batch_state = [], []
+            _set_progress(task_id, phase="cancelled", urls_done=urls_done)
+        else:
+            flush()
         cur.close()
     finally:
         return_db_connection(conn)
@@ -338,6 +370,7 @@ def publish_faq_v2(env="production", limit=None, replace=False, mode="new", task
         "records_failed": failed,
         "batches": len(batch_results),
         "replace": replace,
+        "cancelled": cancelled,
         "duration_sec": round(time.time() - started, 1),
     }
     if skipped:
@@ -360,8 +393,11 @@ def _run(task_id, env, limit, replace, mode):
         res = publish_faq_v2(env=env, limit=limit, replace=replace, mode=mode,
                              task_id=task_id)
         with _task_lock:
-            _tasks[task_id].update(status="completed", result=res,
-                                   completed_at=time.time())
+            # A stopped run gets its own terminal status rather than
+            # completed+flag — UI_BLUEPRINT: a cancelled run must not be able to
+            # render as "Done" just because nothing failed.
+            _tasks[task_id].update(status="cancelled" if res.get("cancelled") else "completed",
+                                   result=res, completed_at=time.time())
     except Exception as e:
         with _task_lock:
             _tasks[task_id].update(status="failed", error=str(e),
@@ -381,6 +417,19 @@ def get_faq_v2_status(task_id):
     with _task_lock:
         t = _tasks.get(task_id)
         return dict(t) if t else {"error": "Task not found"}
+
+
+def cancel_faq_v2_task(task_id):
+    """Request a stop. Returns False for an unknown or already-finished task, so
+    the endpoint can 404/400 instead of silently accepting a no-op."""
+    with _task_lock:
+        t = _tasks.get(task_id)
+        if t is None:
+            return False
+        if t.get("status") not in ("queued", "running"):
+            return False
+        t["cancel"] = True
+        return True
 
 
 def get_faq_v2_stats(env="production"):

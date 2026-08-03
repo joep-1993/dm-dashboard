@@ -1112,6 +1112,10 @@ function escapeHtml(text) {
 // The confirm dialog must say two things out loud: the real volume, and that the
 // endpoint is ADDITIVE, so questions we no longer generate stay live.
 // ---------------------------------------------------------------------------
+// Set by cancelFaqV2, cleared at the start of every run, read by the poller so
+// the status line keeps saying "Cancelling" until the worker actually stops.
+let faqV2CancelRequested = false;
+
 async function publishFaqV2(full = false) {
     const btn = document.getElementById('publishV2Btn');
     const fullBtn = document.getElementById('publishV2FullBtn');
@@ -1171,6 +1175,7 @@ async function publishFaqV2(full = false) {
 
     btn.disabled = true;
     if (fullBtn) fullBtn.disabled = true;
+    faqV2CancelRequested = false;
     resultDiv.innerHTML = `<div class="alert alert-warning">Starting Publish 2.0 (${escapeHtml(mode)}) to ${escapeHtml(environment)}…</div>`;
 
     try {
@@ -1201,12 +1206,42 @@ async function publishFaqV2(full = false) {
                          style="background-color:#00b894;" role="progressbar"
                          aria-valuemin="0" aria-valuemax="100"></div>
                 </div>
+                <div class="mt-2">
+                    <button id="publishV2CancelBtn" class="btn btn-sm" style="border: 1px solid #d63031; color: #d63031;"
+                            onmouseover="this.style.background='#d63031';this.style.color='white'"
+                            onmouseout="this.style.background='transparent';this.style.color='#d63031'"
+                            onclick="cancelFaqV2('${escapeHtml(data.task_id)}')">Cancel</button>
+                </div>
             </div>`;
         pollFaqV2(data.task_id, btn, resultDiv);
     } catch (e) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Failed to start: ${escapeHtml(e.message)}</div>`;
         btn.disabled = false;
         if (fullBtn) fullBtn.disabled = false;
+    }
+}
+
+// The push is a long chain of live POSTs, so Cancel is a *request*: the worker
+// notices between batches. Disable the button and say so, rather than letting a
+// second click read as "it didn't work".
+async function cancelFaqV2(taskId) {
+    const cancelBtn = document.getElementById('publishV2CancelBtn');
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.textContent = 'Cancelling…';
+    }
+    faqV2CancelRequested = true;
+    try {
+        const r = await fetch(`${API_BASE}/api/faq/publish-v2/cancel/${taskId}`, { method: 'POST' });
+        if (!r.ok) {
+            // Already finished, or an unknown task — let the poller's own
+            // terminal branch tell the real story instead of guessing here.
+            faqV2CancelRequested = false;
+            if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.textContent = 'Cancel'; }
+        }
+    } catch (e) {
+        faqV2CancelRequested = false;
+        if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.textContent = 'Cancel'; }
     }
 }
 
@@ -1224,10 +1259,15 @@ function pollFaqV2(taskId, btn, resultDiv) {
         const p = data.progress || {};
         const txt = document.getElementById('publishV2StatusText');
         if (txt) {
-            txt.textContent = p.phase === 'counting'
-                ? 'Counting…'
-                : `${nf(p.urls_done)}/${nf(p.total_urls)} URLs · ${nf(p.records_pushed)} records pushed`
-                  + (p.failed ? ` · ${nf(p.failed)} failed` : '');
+            // Keep the counts live while cancelling — the flag is only read
+            // between batches, so the last batch still lands and its numbers
+            // still move. Prefix rather than replace, or the poll would wipe
+            // the "Cancelling…" acknowledgement two seconds after the click.
+            txt.textContent = (faqV2CancelRequested ? 'Cancelling — ' : '')
+                + (p.phase === 'counting'
+                    ? 'Counting…'
+                    : `${nf(p.urls_done)}/${nf(p.total_urls)} URLs · ${nf(p.records_pushed)} records pushed`
+                      + (p.failed ? ` · ${nf(p.failed)} failed` : ''));
         }
         // Determinate as soon as a total exists; indeterminate before that.
         const track = document.getElementById('publishV2Track');
@@ -1247,12 +1287,24 @@ function pollFaqV2(taskId, btn, resultDiv) {
                 if (pctEl) pctEl.textContent = '';
             }
         }
-        if (data.status === 'completed' || data.status === 'failed') {
+        if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
             clearInterval(timer);
             btn.disabled = false;
             if (fullBtn) fullBtn.disabled = false;
             const r = data.result || {};
-            if (data.status === 'failed' || r.success === false) {
+            if (data.status === 'cancelled' || r.cancelled) {
+                // "Stopped", never "Done" (UI_BLUEPRINT status-bar lifecycle):
+                // the records already pushed stay live, the rest were never sent.
+                resultDiv.innerHTML = `
+                    <div class="alert alert-info">
+                        <strong>Stopped — partial run</strong> <span class="badge badge-purple">${escapeHtml(r.mode || '')}</span><br>
+                        Pushed <strong>${nf(r.records_pushed)}</strong> records across
+                        <strong>${nf(r.urls_processed)}</strong> of ${nf(r.total_urls)} URLs
+                        in ${r.batches} batches (${r.duration_sec}s) before you cancelled.<br>
+                        <span class="text-muted">Those URLs are marked as pushed; the remainder are
+                        untouched and go out with the next <code>new</code> run.</span>
+                    </div>`;
+            } else if (data.status === 'failed' || r.success === false) {
                 resultDiv.innerHTML = `
                     <div class="alert alert-danger">
                         <strong>Publish 2.0 finished with errors</strong><br>

@@ -2954,6 +2954,17 @@ async def faq_publish_v2_status(task_id: str):
     return status
 
 
+@app.post("/api/faq/publish-v2/cancel/{task_id}")
+async def faq_publish_v2_cancel(task_id: str):
+    """Stop a running Publish 2.0 push. Cooperative: the worker checks the flag
+    once per URL, so it stops between batches — already-pushed URLs keep their
+    push state and the rest come back in the next mode="new" run."""
+    from backend.faq_v2_publisher import cancel_faq_v2_task
+    if not cancel_faq_v2_task(task_id):
+        raise HTTPException(status_code=400, detail="Task not found or already finished")
+    return {"status": "cancelling", "task_id": task_id}
+
+
 @app.get("/api/faq/publish-v2/stats")
 async def faq_publish_v2_stats(environment: str = "production"):
     """URL/record counts so the button can state the size before running.
