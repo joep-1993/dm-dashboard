@@ -3166,8 +3166,8 @@ def run_gsd_script(
     }
     sheet_rows: List[List[Any]] = []                        # one row per processed shop, for the log sheet
     mc_created_rows: List[tuple] = []                        # (shop_name, shop_id, mc_created, country, date) for pa.mc_ids_efficy
-    run_date = datetime.now().strftime("%d-%m-%Y")          # dd-mm-yyyy, matching the original sheet format
-    date_ymd = datetime.now().strftime("%Y%m%d")            # YYYYMMDD, matching the original Redshift push
+    run_date = datetime.strptime(overall_results["date"], "%Y-%m-%d").strftime("%d-%m-%Y")  # dd-mm-yyyy from the change date, not "now"
+    date_ymd = overall_results["date"].replace("-", "")     # YYYYMMDD from the change date, not "now"
     _run_cancel["cancel"] = False  # fresh run
     _run_progress.update({"current": 0, "total": 0, "running": True})
 
@@ -3386,7 +3386,7 @@ def run_gsd_script(
     # Persist creation dates of the campaigns created this run (best-effort;
     # never fails the run) so the Campaigns-created Date column stays populated
     # going forward, independent of change_event's ~30-day retention.
-    overall_results["created_dates_logged"] = record_created_campaigns(overall_results["created"])
+    overall_results["created_dates_logged"] = record_created_campaigns(overall_results["created"], created_date=overall_results["date"])
 
     # Heal the side-logs of EARLIER runs that never got this far. All three logging steps
     # above sit AFTER the whole create loop, so a cancelled run, a crash or a uvicorn
