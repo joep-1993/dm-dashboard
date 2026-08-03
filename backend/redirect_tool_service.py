@@ -156,26 +156,46 @@ def normalize_path(path: str) -> str:
 
 
 def equiv_key(path: str) -> str:
-    """Canonical comparison key — treats space/underscore/%20 as identical."""
-    return normalize_path(path).replace("_", " ")
+    """Canonical comparison key — treats space/underscore/%20/+ as identical."""
+    return normalize_path(path).replace("_", " ").replace("+", " ")
 
 
 def url_variants(path: str) -> list[str]:
-    """Generate matching variants (space-form, underscore-form, %20-form)."""
+    """Generate matching variants (space-form, underscore-form, +-form, %20-form)."""
     p = normalize_path(path)
     if not p:
         return []
-    space = p.replace("_", " ")
-    underscore = p.replace(" ", "_")
-    percent = p.replace(" ", "%20")
+    # Normalize to space-base first so all separator types generate all forms.
+    base = p.replace("_", " ").replace("+", " ")
+    space = base
+    underscore = base.replace(" ", "_")
+    plus = base.replace(" ", "+")
+    percent = base.replace(" ", "%20")
     # Order matters: prefer the original-decoded form first so resolver hits the
     # exact stored value when possible.
     seen, out = set(), []
-    for v in (p, space, underscore, percent):
+    for v in (p, space, underscore, plus, percent):
         if v and v not in seen:
             seen.add(v)
             out.append(v)
     return out
+
+
+def _submit_variants(primary: str) -> list[str]:
+    """Return the space / underscore / + forms of a path, excluding the primary.
+
+    Called after a successful POST so the redirect API also contains the
+    other separator forms.  Only produces variants that actually differ
+    from *primary*.
+    """
+    base = normalize_path(primary).replace("_", " ").replace("+", " ")
+    if " " not in base:
+        return []
+    variants = []
+    for v in (base, base.replace(" ", "_"), base.replace(" ", "+")):
+        if v != primary and v not in variants:
+            variants.append(v)
+    return variants
 
 
 def normalize_country(raw: str) -> str:
@@ -1181,6 +1201,26 @@ def submit_rows(processed: list[dict], task: dict | None = None,
                         else:
                             success += 1
                             out_row["status"] = "ok"
+                        # Post space/underscore/+ variants so all URL
+                        # forms redirect (beslist resolves them literally).
+                        variant_results = []
+                        for vfrom in _submit_variants(item["input_old"]):
+                            try:
+                                vc, vb = post_redirect(
+                                    vfrom, item["final_new"],
+                                    item["country"], item["statusCode"],
+                                )
+                                variant_results.append({
+                                    "fromUrl": vfrom,
+                                    "status": vc,
+                                })
+                            except Exception as exc:
+                                variant_results.append({
+                                    "fromUrl": vfrom,
+                                    "error": str(exc),
+                                })
+                        if variant_results:
+                            out_row["variants"] = variant_results
                         per_row.append(out_row)
                     else:
                         failed += 1
