@@ -3763,11 +3763,9 @@ def _existing_mc_id_keys(shop_ids: List[int]) -> set:
 
 
 # A creation is considered already logged when a sheet row for the same shop+country sits
-# within this many days of it. Not zero: the sheet's datum is the RUN date while
-# change_event reports the campaign's own creation timestamp in the account's timezone, and
-# the two drift — Hoopo.eu/Zurbrueggen/Scentulp/Geurfris BE are logged 14-07-2026 while
-# their campaigns date to 15-07. Exact matching would have duplicated all four.
-SHEET_DATE_TOLERANCE_DAYS = 2
+# within this many days of it. Matches RECONCILE_WINDOW_DAYS so a re-run that logs today's
+# date won't cause reconciliation to add a second row with the original creation date.
+SHEET_DATE_TOLERANCE_DAYS = RECONCILE_WINDOW_DAYS
 
 
 def _existing_sheet_keys() -> Dict[tuple, List[str]]:
