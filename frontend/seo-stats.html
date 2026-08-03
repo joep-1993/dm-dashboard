@@ -215,7 +215,23 @@
            lifts the arc (hoverOffset) and shows a dark tooltip. */
         .donut-wrap { position: relative; height: 200px; margin-bottom: 10px; }
         .donut-center { position: absolute; inset: 0; display: flex; flex-direction: column;
-                        align-items: center; justify-content: center; pointer-events: none; }
+                        align-items: center; justify-content: center; pointer-events: none;
+                        z-index: 1; }
+        /* Chart.js paints its tooltip INSIDE the canvas, and .donut-center is an
+           absolutely-positioned div stacked on top of that canvas — so the centre
+           total always bled through the hover block. The tooltip is therefore an
+           external DOM node in .donut-wrap, where a z-index above .donut-center
+           actually wins. Colours mirror the old Chart.js tooltip options. */
+        .donut-tip { position: absolute; z-index: 3; pointer-events: none;
+                     opacity: 0; transition: opacity .12s ease;
+                     display: flex; align-items: center; gap: 6px; white-space: nowrap;
+                     background: #242628; color: #b9b9c4; font-size: 0.75rem;
+                     padding: 8px 10px; border-radius: 10px;
+                     box-shadow: 0 4px 14px rgba(0,0,0,.25);
+                     transform: translateX(-50%); }
+        .donut-tip.is-on { opacity: 1; }
+        .donut-tip .dt-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+        .donut-tip .dt-label { color: #f0f0f3; font-weight: 600; }
         .donut-center .dc-total { font-size: 1.35rem; font-weight: 700; color: #2d2a3a; line-height: 1.1; }
         .donut-center .dc-cap { font-size: 0.68rem; text-transform: uppercase;
                                 letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
@@ -2011,9 +2027,50 @@
             return (v === null || v === undefined) ? '–' : String(v).replace('.', ',') + '%';
         }
 
+        // External tooltip for the donuts, so the hover block sits IN FRONT of the
+        // centre total instead of behind it (see .donut-tip). Text still comes from
+        // the chart's own `callbacks.label`, so there is one source for the wording.
+        function donutTooltip({ chart, tooltip }) {
+            const wrap = chart.canvas.parentNode;
+            let tip = wrap.querySelector('.donut-tip');
+            if (!tip) {
+                tip = document.createElement('div');
+                tip.className = 'donut-tip';
+                wrap.appendChild(tip);
+            }
+            if (!tooltip.opacity || !tooltip.dataPoints || !tooltip.dataPoints.length) {
+                tip.classList.remove('is-on');
+                return;
+            }
+            const colour = (tooltip.labelColors && tooltip.labelColors[0]
+                            && tooltip.labelColors[0].backgroundColor) || '#9a9aa6';
+            const title = (tooltip.title || []).join(' ');
+            const body = (tooltip.body || []).map(b => b.lines.join(' ')).join(' ');
+            tip.innerHTML = `<span class="dt-dot" style="background:${colour};"></span>`
+                          + `<span class="dt-label">${escapeHtml(title)}</span>`
+                          + `<span>${escapeHtml(body)}</span>`;
+            tip.classList.add('is-on');
+            // caretX/Y are canvas-relative; the canvas fills .donut-wrap, but offset
+            // in anyway so this survives future padding on the wrapper.
+            const x = chart.canvas.offsetLeft + tooltip.caretX;
+            const y = chart.canvas.offsetTop + tooltip.caretY;
+            tip.style.left = x + 'px';
+            // Prefer above the caret; flip below when that would clip out of the card.
+            const above = y - tip.offsetHeight - 10;
+            tip.style.top = (above < 0 ? y + 14 : above) + 'px';
+        }
+
+        function hideDonutTips() {
+            document.querySelectorAll('.donut-tip.is-on')
+                    .forEach(t => t.classList.remove('is-on'));
+        }
+
         function renderDeviceDonut(which, canvasId, centerId, dist, fmtValue, caption,
                                    styleMap = DEVICE_STYLE) {
             const center = document.getElementById(centerId);
+            // A tip left visible from the previous render would hang over the new
+            // chart with stale numbers — destroy() does not touch our DOM node.
+            hideDonutTips();
             if (donuts[which]) { donuts[which].destroy(); donuts[which] = null; }
             if (!dist || !dist.length) {
                 center.innerHTML = '<div class="dc-cap">Geen data</div>';
@@ -2044,14 +2101,10 @@
                     plugins: {
                         legend: { display: false },
                         tooltip: {
-                            backgroundColor: '#242628',
-                            titleColor: '#f0f0f3',
-                            bodyColor: '#b9b9c4',
-                            borderWidth: 0,
-                            padding: 10,
-                            cornerRadius: 10,
-                            displayColors: true,
-                            usePointStyle: true,
+                            // Canvas tooltip off; the styling now lives in .donut-tip
+                            // so the hover block can stack above .donut-center.
+                            enabled: false,
+                            external: donutTooltip,
                             callbacks: {
                                 label(ctx) {
                                     const share = dist[ctx.dataIndex]?.share;
@@ -2074,6 +2127,7 @@
                      + `<div class="label">${l}</div></div>`).join('');
             // Donuts: drop any live chart (or it keeps painting under the
             // skeleton) and shimmer the ring's footprint + the legend.
+            hideDonutTips();
             ['visits', 'revenue', 'urltype'].forEach(k => {
                 if (donuts[k]) { donuts[k].destroy(); donuts[k] = null; }
             });
