@@ -37,7 +37,31 @@ ACCOUNTS = {
     "BE_CPR": {"customer_id": "2454295509", "mc_id": "5588879919", "country": "BE", "type": "CPR"},
     "DE_CPR": {"customer_id": "4192567576", "mc_id": "5342886105", "country": "DE", "type": "CPR"},
     "NL_CPC": {"customer_id": "7938980174", "mc_id": "5592708765", "country": "NL", "type": "CPC"},
-    "BE_CPC": {"customer_id": "7565255758", "mc_id": "5588879919", "country": "BE", "type": "CPC"},
+    # Every country now has ONE account serving both models (Joep, 2026-08-04), so the
+    # derived model can no longer send a lookup to the wrong account. That mattered
+    # because a shop's model flips on the very day it goes off — is_wecantrack_shop /
+    # is_pixel_shop drop in the same feed update as the GSD flag, so an 'uit' row for a
+    # CPR shop reads as CPC (see get_redshift_shop_changes). Previously:
+    #   * BE_CPC pointed at its own account 7565255758 → the pause searched an account
+    #     holding 4 long-paused MANUAL_CPC campaigns, found nothing, and reported
+    #     "no_live_campaigns_to_pause" while Emob.be kept 7 ENABLED campaigns in BE_CPR.
+    #   * DE_CPC did not exist at all → "no_account_config", and Emob-moebel.de kept 7.
+    # 7565255758 is no longer queried by any flow; its 4 campaigns are PAUSED with zero
+    # spend and both shops (599127, 27143) are already managed in 2454295509.
+    "BE_CPC": {"customer_id": "2454295509", "mc_id": "5588879919", "country": "BE", "type": "CPC"},
+    "DE_CPC": {"customer_id": "4192567576", "mc_id": "5342886105", "country": "DE", "type": "CPC"},
+}
+
+# Accounts no longer used for creating, but still swept by the PAUSE path (Joep,
+# 2026-08-04: "there are only paused campaigns in that account so it wouldn't hurt
+# checking it"). 7565255758 was BE_CPC until BE was consolidated into 2454295509; it
+# still holds GSD_SCRIPT campaigns, so a shop going off for BE should go dark there too
+# rather than leaving them behind where no flow can ever reach them again.
+# Cost of sweeping is one read per shop, and pausing skips anything not ENABLED — so an
+# account that only holds paused campaigns produces zero mutations. Pause-only by design:
+# these never receive creations, and _find_account_info() does not consult this map.
+PAUSE_EXTRA_CUSTOMER_IDS: Dict[str, List[str]] = {
+    "BE": ["7565255758"],
 }
 
 MCC_CUSTOMER_ID = "3011145605"
@@ -81,6 +105,23 @@ CAMPAIGN_CREATED_TABLE = "pa.jvs_gsd_campaign_created"
 
 LABELS_CPR = ["a", "b", "c", "no_data", "no_ean"]
 LABELS_CPC = ["a,b", "c,no_data,no_ean"]
+
+# Campaigns a switched-off shop must ALSO lose, though the create path never makes them.
+# promo and tag_toppers campaigns are GSD campaigns by identity ([shop:N] [shop_id:N]
+# [channel:directshopping]) but are built by other flows, so they carry neither a create
+# label token nor GSD_SCRIPT — both pause tests rejected them and they kept spending after
+# the shop left GSD (Joep, 2026-08-04). Note the tag_toppers flow omits [domein:XX] even
+# on DE/BE campaigns, so the account — never the name — is what scopes a pause to a country.
+PAUSE_EXTRA_LABELS = ["promo", "tag_toppers"]
+
+# The pause path matches BOTH model vocabularies plus the extras, never just the labels
+# belonging to this run's derived model. A shop's model can flip on the very day it goes
+# off (is_wecantrack_shop / is_pixel_shop drop together with the GSD flag), and going dark
+# must not depend on having derived the model right: Emob.nl kept five ENABLED
+# [label:a…no_ean] campaigns because the run derived CPC and therefore looked only for
+# [label:a,b] and [label:c,no_data,no_ean]. Over-matching here is safe — identity is
+# already pinned by account + [shop_id:N] + shop-name variant + SHOPPING channel.
+PAUSE_LABELS = LABELS_CPR + LABELS_CPC + PAUSE_EXTRA_LABELS
 
 # A Redshift shop-change row is per-country: `kolom` is the GSD flag that flipped,
 # so it names the ONE country to act on. A shop flagged for NL only must not
@@ -2304,6 +2345,17 @@ def _find_account_info(country: str, campaign_type: str) -> Optional[Dict[str, s
     return ACCOUNTS.get(key)
 
 
+def _pause_customer_ids(country: str, primary_customer_id: str) -> List[str]:
+    """Every account a pause must sweep for this country: the live account first, then
+    any legacy account from PAUSE_EXTRA_CUSTOMER_IDS. De-duplicated, order preserved, so
+    the live account is always the one reported when a campaign exists in both."""
+    ids = [primary_customer_id]
+    for cid in PAUSE_EXTRA_CUSTOMER_IDS.get((country or "").upper(), []):
+        if cid not in ids:
+            ids.append(cid)
+    return ids
+
+
 def _is_transient_mc_error(ex: Exception) -> bool:
     """Return True if the Merchant Center API error is transient (worth retrying):
     read timeouts and HTTP 500/503. Permanent errors (403 quota, 404, etc.) are not."""
@@ -2744,10 +2796,13 @@ def _pause_campaigns_for_shop(
         a switched-off shop spending.
     A campaign matched only by identity gets GSD_SCRIPT attached, so the estate converges
     instead of drifting further.
+
+    The identity test uses PAUSE_LABELS — both model vocabularies plus promo/tag_toppers —
+    so `campaign_type` deliberately does NOT narrow it: a shop off for a country goes fully
+    dark there even when its derived model flipped on the way out.
     """
     results = []
-    label_tokens = {f"[label:{l}]".lower()
-                    for l in (LABELS_CPR if campaign_type == "CPR" else LABELS_CPC)}
+    label_tokens = {f"[label:{l}]".lower() for l in PAUSE_LABELS}
     name_tokens = [f"[shop:{v}]".lower() for v in _shop_name_variants(shop_name)]
 
     def _is_ours(name: str) -> bool:
@@ -2990,30 +3045,54 @@ def preview_gsd_script(
                 # shop_id + one of this run's label tokens, macro/micro/OUD excluded).
                 # Label looked up read-only — ensure_campaign_label_exists() would create it,
                 # and a preview must mutate nothing.
-                gsd_label_rn = _lookup_label_resource(client, customer_id, SCRIPT_LABEL)
                 name_tokens = [f"[shop:{v}]".lower() for v in _shop_name_variants(shop_name)]
-                label_tokens = {f"[label:{l}]".lower() for l in labels}
-                for c in candidates:
-                    if c["status"] != "ENABLED":
-                        continue
-                    name = c["campaign_name"] or ""
-                    low = name.lower()
-                    if not any(tok in low for tok in name_tokens):
-                        continue
-                    labelled = bool(gsd_label_rn and gsd_label_rn in (c["labels"] or []))
-                    ours = (any(tok in low for tok in label_tokens)
-                            and not (_MACRO_MICRO_RE.search(name) or _RETIRED_RE.search(name)))
-                    if not (labelled or ours):
-                        continue
-                    shop_row["to_pause"] += 1
-                    summary["campaigns"].append({
-                        "campaign_name": name,
-                        "action": "pause",
-                        "shop_name": shop_name,
-                        "country": country,
-                        "type": campaign_type,
-                        "detail": "" if labelled else "matched by name (no GSD_SCRIPT label)",
-                    })
+                # PAUSE_LABELS, not this run's `labels` — the run pauses on the same wider
+                # vocabulary (both models + promo/tag_toppers), so preview and run agree.
+                label_tokens = {f"[label:{l}]".lower() for l in PAUSE_LABELS}
+                # Same accounts the run sweeps: the live one (candidates already fetched
+                # above) plus any legacy account, or the preview would under-report.
+                swept: List[tuple] = [(customer_id, candidates)]
+                for extra_cid in _pause_customer_ids(country, customer_id)[1:]:
+                    try:
+                        swept.append(
+                            (extra_cid, _fetch_shop_campaign_candidates(client, extra_cid, shop_id))
+                        )
+                    except GoogleAdsException as ex:
+                        logger.error("Preview: legacy-account lookup failed for '%s' in %s: %s",
+                                     shop_name, extra_cid, ex)
+                        summary["errors"].append({
+                            "shop_name": shop_name,
+                            "country": country,
+                            "customer_id": extra_cid,
+                            "error": str(ex),
+                        })
+                for sweep_cid, sweep_candidates in swept:
+                    # Per account — a label resource name is account-scoped. Looked up
+                    # read-only: ensure_campaign_label_exists() would create it, and a
+                    # preview must mutate nothing.
+                    gsd_label_rn = _lookup_label_resource(client, sweep_cid, SCRIPT_LABEL)
+                    for c in sweep_candidates:
+                        if c["status"] != "ENABLED":
+                            continue
+                        name = c["campaign_name"] or ""
+                        low = name.lower()
+                        if not any(tok in low for tok in name_tokens):
+                            continue
+                        labelled = bool(gsd_label_rn and gsd_label_rn in (c["labels"] or []))
+                        ours = (any(tok in low for tok in label_tokens)
+                                and not (_MACRO_MICRO_RE.search(name) or _RETIRED_RE.search(name)))
+                        if not (labelled or ours):
+                            continue
+                        shop_row["to_pause"] += 1
+                        summary["campaigns"].append({
+                            "campaign_name": name,
+                            "action": "pause",
+                            "shop_name": shop_name,
+                            "country": country,
+                            "type": campaign_type,
+                            "customer_id": sweep_cid,
+                            "detail": "" if labelled else "matched by name (no GSD_SCRIPT label)",
+                        })
 
         summary["to_create"] += shop_row["to_create"]
         summary["already_exists"] += shop_row["already_exists"]
@@ -3316,23 +3395,38 @@ def run_gsd_script(
                 ])
 
             elif actie == "uit":
-                # Pause campaigns
-                pause_results = _pause_campaigns_for_shop(
-                    client=client,
-                    customer_id=customer_id,
-                    shop_name=shop_name,
-                    shop_id=shop_id,
-                    country=country,
-                    campaign_type=campaign_type,
-                    label_resource_name=ensure_campaign_label_exists(
-                        client, customer_id, SCRIPT_LABEL),
-                )
+                # Pause campaigns in every account that can still hold this shop's
+                # campaigns for the country — the live one plus any legacy account.
+                pause_results: List[Dict[str, Any]] = []
+                nothing_found: List[Dict[str, Any]] = []
+                for pause_cid in _pause_customer_ids(country, customer_id):
+                    rows = _pause_campaigns_for_shop(
+                        client=client,
+                        customer_id=pause_cid,
+                        shop_name=shop_name,
+                        shop_id=shop_id,
+                        country=country,
+                        campaign_type=campaign_type,
+                        label_resource_name=ensure_campaign_label_exists(
+                            client, pause_cid, SCRIPT_LABEL),
+                    )
+                    for r in rows:
+                        r["customer_id"] = pause_cid
+                        if r.get("reason") == "no_live_campaigns_to_pause":
+                            nothing_found.append(r)
+                        else:
+                            pause_results.append(r)
+                # The sentinel exists so a shop can never vanish from the output — but it
+                # is per shop, not per swept account. An empty legacy account must not add
+                # a "nothing to pause" line next to campaigns the live account did pause.
+                if not pause_results:
+                    pause_results = nothing_found[:1]
 
                 for pr in pause_results:
                     pr["shop_name"] = shop_name
                     pr["country"] = country
                     pr["type"] = campaign_type
-                    pr["customer_id"] = customer_id
+                    pr.setdefault("customer_id", customer_id)
                     if pr["action"] == "paused":
                         overall_results["paused"].append(pr)
                     elif pr["action"] == "skipped":

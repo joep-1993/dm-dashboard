@@ -1,6 +1,59 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Eén oorzaak, drie manieren waarop een uitgezette shop níet gepauzeerd wordt (2026-08-04)
+
+Emob.nl, Emob.be en Emob-moebel.de gingen op 4 aug alle drie uit. Geen enkele werd
+gepauzeerd — met drie verschillende symptomen, uit **één** oorzaak.
+
+- **De oorzaak: `model` wordt afgeleid uit de rij van VANDAAG.** `get_redshift_shop_changes`
+  rekent `CPR` als `is_wecantrack_shop=1 OR is_pixel_shop=1`, anders `CPC`. Die tracking-vlag
+  valt weg in dezelfde feed-update als de GSD-vlag, dus een `uit`-rij van een CPR-shop leest
+  als **CPC**. Alle drie: `is_pixel_shop` 1 → 0 op precies de dag dat `is_gsd_*_shop` 1 → 0 ging.
+- **DE → `no_account_config`.** `_find_account_info("DE","CPC")` zoekt de key `DE_CPC`, die niet
+  in `ACCOUNTS` bestond. De `for country`-loop deed `continue`; 7 campagnes bleven ENABLED.
+- **BE → stil "no_live_campaigns_to_pause".** `BE_CPC` wees naar eigen account 7565255758,
+  de campagnes staan in `BE_CPR` 2454295509. De pause zocht in het lege account en meldde
+  succes met 0 gepauzeerd. Gemeten: `_fetch_shop_campaign_candidates(…, 642814)` geeft 0 in
+  7565255758 en 7 in 2454295509. **Dit is de gevaarlijkste variant — geen error, geen spoor.**
+- **NL → juist account, verkeerde vocabulaire.** `NL_CPR`/`NL_CPC` delen customer 7938980174,
+  dus de kandidaten wérden gevonden, maar de identity-test bouwde zijn label-tokens uit
+  `LABELS_CPC` = `[label:a,b]` / `[label:c,no_data,no_ean]` terwijl de campagnes `[label:a]`,
+  `[label:b]`, … heten → `_is_ours()` false op alle 7. Het label-pad (a) had ze ook niet: geen
+  van deze campagnes draagt `GSD_SCRIPT` (alleen `TAGTOPPERS_SCRIPT` / `tag_toppers_bid_strat`).
+  Zie ook [[2.954 canonieke GSD-campagnes missen hun GSD_SCRIPT-label]] — dat label is nooit
+  een betrouwbare eerste filter.
+- **De hunch "andere shop_id" was fout.** Redshift gaf 642810 (Emob.nl) en 642814 (Emob.be) —
+  exact de ids in de campagnenamen. Het verschil zat in account + label-vocabulaire, niet in de
+  id. Loont om eerst de gemelde id naast de naam te leggen voordat je in de matcher duikt.
+
+**Wat er nu staat** (Joep's keuzes): elk land één account voor beide modellen
+(`BE_CPC` → 2454295509, `DE_CPC` → 4192567576), `PAUSE_LABELS` = beide vocabulaires +
+`promo` + `tag_toppers`, en `PAUSE_EXTRA_CUSTOMER_IDS = {"BE": ["7565255758"]}` zodat het oude
+BE-account bij een pauze meegesweept wordt. Preview 4 aug: 0 → **21 to pause, 0 errors**.
+
+Vier dingen die daarbij bleken te kloppen of juist niet:
+
+- **Bij pauzeren is het ACCOUNT de landgrens, nooit de naam.** De tag_toppers-flow zet géén
+  `[domein:XX]`: alle 23 domein-loze SHOPPING-campagnes in het DE-account zijn tag_toppers.
+  Een `[domein:]`-guard in het pause-pad (zoals `_match_existing_campaign` die wél heeft) zou
+  precies de campagnes uitsluiten die je wilt pauzeren.
+- **Over-matchen op labels is hier veilig.** Identiteit hangt al aan account + `[shop_id:N]` +
+  shopnaam-variant + `SHOPPING` + niet macro/micro/OUD. De label-token is de zwakste guard, dus
+  die mag de bredere zijn — en móet dat, anders pauzeert een run promo/tag_toppers wél en
+  `[label:a…no_ean]` niet: een halve blackout is erger dan geen.
+- **De "nothing to pause"-sentinel is per shop, niet per account.** Anders zet een leeg legacy-
+  account een "no_live_campaigns_to_pause"-regel náást de 7 die het live account wél pauzeerde.
+- **`gsd_label_rn` is account-scoped** — in de preview moest de lookup ín de sweep-loop, anders
+  toets je BE_CPR's resource name tegen campagnes in 7565255758 en leest `labelled` fout.
+
+**Rest-risico, niet gefixt:** de model-afleiding zelf. Voor pauzeren is die nu onschadelijk
+(elk land één account, brede vocabulaire), maar het `aan`-pad kiest er nog steeds zijn
+create-vocabulaire mee — en nu `DE_CPC` bestaat, mákt een DE-shop die als CPC leest 2
+CPC-campagnes aan waar hij eerst luidruchtig faalde. Een luide fout is ingeruild voor een
+stille. Bij `aan` staat de tracking-vlag normaal mee aan, dus smal risico; de echte fix is
+`model` bij `actie='uit'` uit de rij van GISTEREN lezen.
+
 ## De HTML-sitemap wordt geleverd door de Keywords API, niet door `bt.new_hs_data` (2026-08-03)
 
 HS2.0 uit de ijskast gehaald. De hele shadow-vergelijking (+13,7pp) is gemeten tegen

@@ -4,6 +4,44 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-04 — GSD pause: drie shops gingen uit en geen enkele werd gepauzeerd
+
+Gemeld door Joep: "Emob-moebel.de to pause, maar error `no_account_config`". Bleek één oorzaak
+met drie symptomen over NL/BE/DE — zie LEARNINGS (1 entry). 21 ENABLED campagnes bleven staan.
+
+- [x] **`ACCOUNTS`: elk land één account voor beide modellen.** `DE_CPC` toegevoegd (bestond
+      niet → `no_account_config`) en `BE_CPC` omgezet van 7565255758 naar 2454295509 op Joep's
+      aanwijzing ("everything is in 2454295509"). Distinct customer_ids 4 → 3; LL-map wordt
+      `NL:[7938980174] BE:[2454295509] DE:[4192567576]`; stats-view labelt elk account nog
+      `*_CPR` (insertion order). #priority:high
+- [x] **`PAUSE_LABELS`** — pause matcht beide model-vocabulaires + `promo` + `tag_toppers`, dus
+      een uitgezette shop gaat volledig donker en het pauzeren hangt niet meer aan een juist
+      afgeleid model. Zowel in `_pause_campaigns_for_shop` als in het `uit`-pad van de preview,
+      zodat die twee niet uit elkaar lopen. #priority:high
+- [x] **`PAUSE_EXTRA_CUSTOMER_IDS = {"BE": ["7565255758"]}`** + `_pause_customer_ids()` — het
+      oude BE_CPC-account wordt bij pauzeren meegesweept (Joep: "there are only paused campaigns
+      in that account so it wouldn't hurt checking it"). Pause-only: `_find_account_info()` kijkt
+      hier niet naar, dus er wordt nooit meer in gecreëerd. Kosten = 1 read per shop, en niet-
+      ENABLED wordt overgeslagen → 0 mutaties. Geverifieerd op de twee shops die daar wél iets
+      hebben (Beddenbriljant.nl 599127, Duifhuizen.nl 27143): 2 kandidaten, 2 identity-match,
+      0 ENABLED. #priority:medium
+- [x] **Backend herstart** (geen `--reload`, PID 16040 → 35982) en over HTTP geverifieerd:
+      `POST /api/gsd-campaigns/preview` geeft 21 to pause / 0 errors, 7 per land.
+
+**Open:**
+- [ ] **De 21 campagnes zijn nog ENABLED — de echte pause is NIET gedraaid.** Preview zegt
+      7× NL (7938980174), 7× BE (2454295509), 7× DE (4192567576) voor Emob.nl / Emob.be /
+      Emob-moebel.de op 2026-08-04. Wacht op Joep's go.
+- [ ] **Model-afleiding bij de bron fixen** (`get_redshift_shop_changes`, `_LEG`): lees `model`
+      bij `actie='uit'` uit de rij van GISTEREN. Nu `DE_CPC` bestaat is de luide `no_account_config`
+      ingeruild voor een stille mis-create: een DE-shop die als CPC leest maakt 2 CPC-campagnes
+      aan i.p.v. 5 CPR. Smal risico (bij `aan` staat de tracking-vlag normaal mee aan) maar het is
+      de enige plek waar dit écht opgelost wordt.
+- [ ] **Vraag open:** de 4 campagnes in 7565255758 dragen `GSD_SCRIPT` maar het account staat niet
+      in `ACCOUNTS`, dus ze blijven onzichtbaar in de Campaigns-lijst van het dashboard (die over
+      distinct `ACCOUNTS`-customer_ids loopt). Pause bereikt ze, de stats-view niet. Wel of niet
+      ook laten meelezen?
+
 ### 2026-08-03 — HS2.0 out of the fridge: first seasonal-cap build + Keywords API payload generator
 
 - [x] **Rebuilt features + sitemap as_of 2026-08-03** — `pa.hs2_features` 1,081,728 urls;
