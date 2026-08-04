@@ -15,10 +15,20 @@ verified live against production 2026-08-03:
 
 SIX CONTRACT FACTS THAT SHAPE THIS MODULE
 
-1. `categoryId` is the **9xxxxxx taxonomy id** (9000066 -> 854 records). The
-   Swagger examples use a 32000-style id, which returns an empty set — ignore
-   them. Note `bt.new_hs_data.deepest_category_id` mixes both id spaces, so it
-   is NOT a safe key to build a payload from.
+1. `categoryId` accepts ids from **both taxonomy id spaces**, because the
+   taxonomy genuinely uses both: the 32 top-level categories have SMALL ids
+   (`parentId IS NULL` — 6 /computers/, 137 /mode/, 165 /huis_tuin/, 32000
+   /schoenen/) and everything below them is 9xxxxxx (9000066 -> 854 records).
+   **Corrected 2026-08-04**: this note previously said a "32000-style id returns
+   an empty set — ignore them". It does not. 32000 is Schoenen and returns
+   27,883 records; 137 returns 53,411 and 165 returns 68,209. Reading those
+   maincat buckets as invalid is precisely what would block a maincat push.
+   `bt.new_hs_data.deepest_category_id` mixing the two spaces is therefore the
+   taxonomy being itself, not corruption — but it is still not a safe payload key,
+   because it does not tell you WHICH level a row belongs to.
+   Top-level buckets also already contain URLs from deeper categories (bucket 6's
+   first record is /products/computers/computers_19664320/c/merk~24100313), so a
+   maincat rollup matches what the channel already renders.
 2. The grain is **(url, keyword)**, not url: one URL may carry several rows with
    different anchor text (Airco: 1,308 records over 603 distinct URLs). We emit
    exactly one row per URL, so a push shrinks record counts even where it grows
@@ -69,6 +79,11 @@ from backend.database import (get_db_connection, get_redshift_connection,
 KEYWORDS_API = os.getenv("KEYWORDS_API_URL", "http://keywords.api.beslist.nl")
 SITEMAP_TABLE = "pa.hs2_sitemap"
 
+# Maincat rollup (top-level sitemaps only) — see healthscore_service's MAINCAT
+# section. Correction to contract fact 1 below: the small-id space is NOT invalid.
+MAINCAT_SITEMAP_TABLE = "pa.hs2_sitemap_maincat"
+MAINCAT_MAP_TABLE = "pa.hs2_cat_maincat"
+
 # The 10 validation categories HS2.0 is being rolled out to first.
 TEST_CATEGORIES = {
     9000047: "Stoelen",
@@ -100,6 +115,22 @@ _session = requests.Session()
 # --------------------------------------------------------------------------- #
 # URL canonicalisation
 # --------------------------------------------------------------------------- #
+def is_product_path(npath: str) -> bool:
+    """True for product pages, which this channel carries none of (fact 5).
+
+    Matching the PATH, not `type_url`: filtering on type_url == 'PLP' alone is not
+    enough, because /p/ URLs also arrive typed as R-url or with no type at all.
+    That hole let 14 product pages into the maincat payloads on 2026-08-04
+    (Napapijri jackets under /mode/, EAN-style /p/ pages under /huis_tuin/); they
+    were caught only by validate_payload, i.e. after the build. The deepest-category
+    builder has the same hole — it just has not been hit yet, because those pages
+    have to reach a category's top-N first, and a maincat pool is far wider.
+
+    '/products/' is not a false positive: the substring is exactly slash-p-slash.
+    """
+    return "/p/" in (npath or "")
+
+
 def canonical_url(npath: str) -> str:
     """Re-apply the trailing-slash rule npath strips (contract fact 6)."""
     p = (npath or "").strip()
@@ -224,11 +255,15 @@ def build_payload(cat: int, as_of: date, headings: dict, country: str = "nl",
     finally:
         return_db_connection(conn)
 
-    keywords, skipped = [], {"plp": 0, "no_heading": 0, "no_rank": 0}
+    keywords, skipped = [], {"plp": 0, "product": 0, "no_heading": 0, "no_rank": 0}
     for r in rows:
         npath, type_url, rank, source = r["npath"], r["type_url"], r["rank_in_cat"], r["source"]
         if type_url == "PLP" and not include_plp:
             skipped["plp"] += 1
+            continue
+        # See is_product_path: type_url == 'PLP' does not catch every /p/ page.
+        if is_product_path(npath):
+            skipped["product"] += 1
             continue
         hit = headings.get(npath)
         if not hit:
@@ -261,6 +296,136 @@ def build_payload(cat: int, as_of: date, headings: dict, country: str = "nl",
 
     payload = {"deepestCategoryId": int(cat), "countryCodes": [country], "keywords": keywords}
     return {"payload": payload, "skipped": skipped, "preserved": preserved,
+            "rows_considered": len(rows)}
+
+
+def fetch_maincat_headings(maincats, as_of: date,
+                           window_days: int = HEADING_WINDOW_DAYS) -> dict:
+    """{npath: (heading, visits)} for whole maincat subtrees.
+
+    Filters on dim_category.main_category_id rather than an IN-list of the ~3,500
+    descendant deepest categories, which is both faster and immune to the list
+    going stale.
+    """
+    lo = int((as_of - timedelta(days=window_days)).strftime("%Y%m%d"))
+    hi = int(as_of.strftime("%Y%m%d"))
+    sql = f"""
+        SELECT {_NORM_RS} AS npath, dv.page_heading AS heading, count(*) AS visits
+          FROM datamart.fct_visits fcv
+          JOIN datamart.dim_visit dv ON fcv.dim_visit_key = dv.dim_visit_key
+          JOIN chan_deriv.ref_channel_derivation_stats chan
+            ON dv.aff_id = chan.aff_id AND dv.channel_id = chan.channel_id
+          JOIN datamart.dim_category dc
+            ON dc.deepest_category_id = dv.deepest_subcat_id AND dc.deleted_ind = 0
+         WHERE dv.is_real_visit = 1
+           AND chan.marketing_channel = 'SEO'
+           AND fcv.dim_date_key BETWEEN %(lo)s AND %(hi)s
+           AND dv.url ~ '^https?://www\\.beslist\\.nl/'
+           AND dv.page_heading IS NOT NULL AND dv.page_heading <> ''
+           AND dc.main_category_id IN %(maincats)s
+         GROUP BY 1, 2
+    """
+    conn = get_redshift_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, {"lo": lo, "hi": hi, "maincats": tuple(maincats)})
+            best: dict = {}
+            for row in cur:
+                npath, h, visits = row["npath"], (row["heading"] or "").strip(), row["visits"]
+                if not h:
+                    continue
+                cur_best = best.get(npath)
+                if cur_best is None or visits > cur_best[1]:
+                    best[npath] = (h, visits)
+            return best
+    finally:
+        return_redshift_connection(conn)
+
+
+def seo_visits_in_maincats(maincats, as_of: date, days: int = 90) -> dict:
+    """{npath: seo_visits} over the trailing `days` for these maincats' subtrees.
+
+    Feeds the pre-flight bar the rollout is held to: Grasmaaiers went live with 0
+    SEO visits dropped, and a maincat push can only be judged the same way if the
+    drop list is priced. Fetched per maincat set rather than per URL so a 50k drop
+    list costs one query, not 50k parameters.
+    """
+    lo = int((as_of - timedelta(days=days)).strftime("%Y%m%d"))
+    hi = int(as_of.strftime("%Y%m%d"))
+    sql = f"""
+        SELECT {_NORM_RS} AS npath, count(*) AS visits
+          FROM datamart.fct_visits fcv
+          JOIN datamart.dim_visit dv ON fcv.dim_visit_key = dv.dim_visit_key
+          JOIN chan_deriv.ref_channel_derivation_stats chan
+            ON dv.aff_id = chan.aff_id AND dv.channel_id = chan.channel_id
+          JOIN datamart.dim_category dc
+            ON dc.deepest_category_id = dv.deepest_subcat_id AND dc.deleted_ind = 0
+         WHERE dv.is_real_visit = 1
+           AND chan.marketing_channel = 'SEO'
+           AND fcv.dim_date_key BETWEEN %(lo)s AND %(hi)s
+           AND dv.url ~ '^https?://www\\.beslist\\.nl/'
+           AND dc.main_category_id IN %(maincats)s
+         GROUP BY 1
+    """
+    conn = get_redshift_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, {"lo": lo, "hi": hi, "maincats": tuple(maincats)})
+            return {r["npath"]: int(r["visits"] or 0) for r in cur}
+    finally:
+        return_redshift_connection(conn)
+
+
+def build_maincat_payload(maincat: int, as_of: date, headings: dict,
+                          country: str = "nl", include_plp: bool = False) -> dict:
+    """One `POST /sitemap` body for a top-level category, from the rollup table.
+
+    Same rules as build_payload — PLP excluded by default, a URL needs a heading
+    to get an anchor, order follows our rank — but the pool is the whole subtree
+    and the rank is rank_in_maincat.
+
+    No preserve_cross_category here, and none needed: the bucket already spans the
+    entire subtree, so a maincat push cannot strand a URL whose own category was
+    left out of the batch. The one residual risk is a deepest category missing
+    from dim_category, which `unmapped_live` reports rather than hides.
+    """
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"""
+            SELECT npath, type_url, rank_in_maincat AS rank_in_cat, source
+              FROM {MAINCAT_SITEMAP_TABLE}
+             WHERE as_of_date = %s AND maincat = %s
+             ORDER BY rank_in_maincat NULLS LAST, npath
+        """, (as_of, maincat))
+        rows = cur.fetchall()
+        cur.close()
+    finally:
+        return_db_connection(conn)
+
+    keywords, skipped = [], {"plp": 0, "product": 0, "no_heading": 0, "no_rank": 0}
+    for r in rows:
+        npath, type_url, rank = r["npath"], r["type_url"], r["rank_in_cat"]
+        if type_url == "PLP" and not include_plp:
+            skipped["plp"] += 1
+            continue
+        # Unconditional, unlike PLP: include_plp is a deliberate choice about
+        # listing pages, never a licence to publish product pages.
+        if is_product_path(npath):
+            skipped["product"] += 1
+            continue
+        hit = headings.get(npath)
+        if not hit:
+            skipped["no_heading"] += 1
+            continue
+        if rank is None:
+            skipped["no_rank"] += 1
+            continue
+        keywords.append({"url": canonical_url(npath), "keywords": hit[0], "order": int(rank)})
+
+    payload = {"deepestCategoryId": int(maincat), "countryCodes": [country],
+               "keywords": keywords}
+    return {"payload": payload, "skipped": skipped, "preserved": 0,
             "rows_considered": len(rows)}
 
 
@@ -355,12 +520,17 @@ def get_live(cat: int, country: str = "nl", limit: int = None) -> list:
     return r.json().get("keywords") or []
 
 
-def diff_against_live(payload: dict, country: str = "nl") -> dict:
+def diff_against_live(payload: dict, country: str = "nl", live: list = None) -> dict:
     """What a push would actually change. Because POST replaces the category,
     every live URL absent from the payload disappears — so `dropped` is a real
-    consequence, not a rounding error."""
+    consequence, not a rounding error.
+
+    `live` lets a caller that already holds the set pass it in. That matters at
+    maincat scale: /huis_tuin/ is 68,209 records, so re-fetching it per report
+    would move ~2M records over the wire for one dry run.
+    """
     cat = payload["deepestCategoryId"]
-    live = get_live(cat, country)
+    live = get_live(cat, country) if live is None else live
     live_anchors: dict = {}
     for k in live:
         live_anchors.setdefault(k["url"], set()).add(k["keywords"])
@@ -456,3 +626,71 @@ def dry_run(as_of: date, cats: dict = None, country: str = "nl",
         results.append(res)
     return {"as_of": str(as_of), "country": country, "headings_available": len(headings),
             "categories": results}
+
+
+# --------------------------------------------------------------------------- #
+# Dry run over the MAINCATS (top-level sitemaps)
+# --------------------------------------------------------------------------- #
+def maincat_dry_run(as_of: date, maincats: dict = None, country: str = "nl",
+                    include_plp: bool = False, out_dir: str = None,
+                    visits_days: int = 90) -> dict:
+    """Build + validate + diff every maincat, price the drop list, send NOTHING.
+
+    Two numbers decide whether the cap clamp is right, and both are printed per
+    maincat: `proposed_records` against `live_records`, and what the drop would
+    cost in SEO visits. With MAINCAT_CAP_MAX at its default the cap should not be
+    what binds — if proposed collapses far below live, the clamp is the cause and
+    wants raising before any push.
+
+    Coverage is reported on DISTINCT URLs (per Joep, 2026-08-04): a URL sitting in
+    both its own deepest-category bucket and its maincat bucket is one URL.
+    """
+    from backend.healthscore_service import get_maincats
+
+    maincats = maincats or get_maincats()
+    ids = list(maincats)
+    headings = fetch_maincat_headings(ids, as_of)
+    visits = seo_visits_in_maincats(ids, as_of, visits_days)
+
+    results, all_urls = [], set()
+    for mc in ids:
+        name = maincats[mc]
+        built = build_maincat_payload(mc, as_of, headings, country, include_plp)
+        payload = built["payload"]
+        ours = {k["url"] for k in payload["keywords"]}
+        all_urls |= ours
+
+        res = {
+            "maincat": mc, "name": name,
+            "proposed_records": len(payload["keywords"]),
+            "skipped": built["skipped"],
+            "problems": validate_payload(payload),
+        }
+        if payload["keywords"]:
+            # One fetch, reused for both the diff and the drop pricing.
+            live_records = get_live(mc, country)
+            res["diff"] = diff_against_live(payload, country, live=live_records)
+            dropped = {k["url"] for k in live_records} - ours
+            # Price the drop list. npath has no trailing slash; visits keys are
+            # normalised the same way, so compare on the stripped form.
+            dropped_v = {u: visits.get(u.rstrip("/"), 0) for u in dropped}
+            with_traffic = {u: v for u, v in dropped_v.items() if v > 0}
+            res["drop_cost"] = {
+                "dropped_urls": len(dropped),
+                "dropped_urls_with_seo_visits": len(with_traffic),
+                f"dropped_seo_visits_{visits_days}d": sum(with_traffic.values()),
+                "worst": sorted(with_traffic.items(), key=lambda kv: -kv[1])[:10],
+            }
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+            safe = str(name).replace(" ", "_").replace("/", "_").replace("&", "en")
+            path = os.path.join(out_dir, f"hs2_maincat_payload_{mc}_{safe}.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+            res["file"] = path
+        results.append(res)
+
+    return {"as_of": str(as_of), "country": country,
+            "headings_available": len(headings),
+            "distinct_urls_across_maincats": len(all_urls),
+            "maincats": results}

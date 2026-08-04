@@ -595,34 +595,15 @@ def _refresh_cat_knee(as_of: date, months: int = 12) -> int:
     return len(data)
 
 
-def build_category_caps(as_of: date, knee_p: int = KNEE_P_DEFAULT,
-                        cap_min: int = CAP_MIN_DEFAULT, cap_max: int = CAP_MAX_DEFAULT,
-                        alpha: float = SEASON_ALPHA_DEFAULT,
-                        mult_min: float = SEASON_MULT_MIN_DEFAULT,
-                        mult_max: float = SEASON_MULT_MAX_DEFAULT,
-                        refresh_source: bool = True) -> dict:
-    """Build per-category, per-calendar-month caps into pa.hs2_cat_cap.
+def _combine_caps(knee: dict, cm: dict, knee_p: int, cap_min: int, cap_max: int,
+                  alpha: float, mult_min: float, mult_max: float) -> list:
+    """(knee rows, monthly climatology) -> per-(key, calendar_month) cap rows.
 
-    refresh_source rebuilds pa.hs2_cat_month (24m climatology) + pa.hs2_cat_knee
-    (12m coverage-knee) from Redshift first (heavy); pass False to only recombine
-    the persisted tables (fast, for clamp/alpha tuning). Returns a summary."""
+    Shared by the deepest-category caps and the maincat caps so the seasonal
+    maths exists once. The only thing the two callers differ on is the clamp
+    range: a maincat bucket is an order of magnitude bigger than a category's.
+    """
     from collections import defaultdict
-
-    if refresh_source:
-        _refresh_cat_month(as_of)
-        _refresh_cat_knee(as_of)
-
-    pg = _postgres()
-    try:
-        with pg.cursor(cursor_factory=RealDictCursor) as c:
-            c.execute(f"SELECT cat, yearly, knee80, knee90, knee95 FROM {KNEE_TABLE}")
-            knee = {r["cat"]: r for r in c.fetchall()}
-            c.execute(f"SELECT cat, yyyymm, visits FROM {CAT_MONTH_TABLE}")
-            cm: dict = defaultdict(dict)
-            for r in c.fetchall():
-                cm[r["cat"]][r["yyyymm"]] = int(r["visits"] or 0)
-    finally:
-        pg.close()
 
     knee_col = {80: "knee80", 90: "knee90", 95: "knee95"}[knee_p]
 
@@ -654,6 +635,39 @@ def build_category_caps(as_of: date, knee_p: int = KNEE_P_DEFAULT,
             mult = clamp(raw ** alpha, mult_min, mult_max)
             cap = int(clamp(round(base * mult), cap_min, cap_max))
             rows.append((cat, m, base, round(raw, 3), cap, int(k["yearly"] or 0)))
+    return rows
+
+
+def build_category_caps(as_of: date, knee_p: int = KNEE_P_DEFAULT,
+                        cap_min: int = CAP_MIN_DEFAULT, cap_max: int = CAP_MAX_DEFAULT,
+                        alpha: float = SEASON_ALPHA_DEFAULT,
+                        mult_min: float = SEASON_MULT_MIN_DEFAULT,
+                        mult_max: float = SEASON_MULT_MAX_DEFAULT,
+                        refresh_source: bool = True) -> dict:
+    """Build per-category, per-calendar-month caps into pa.hs2_cat_cap.
+
+    refresh_source rebuilds pa.hs2_cat_month (24m climatology) + pa.hs2_cat_knee
+    (12m coverage-knee) from Redshift first (heavy); pass False to only recombine
+    the persisted tables (fast, for clamp/alpha tuning). Returns a summary."""
+    from collections import defaultdict
+
+    if refresh_source:
+        _refresh_cat_month(as_of)
+        _refresh_cat_knee(as_of)
+
+    pg = _postgres()
+    try:
+        with pg.cursor(cursor_factory=RealDictCursor) as c:
+            c.execute(f"SELECT cat, yearly, knee80, knee90, knee95 FROM {KNEE_TABLE}")
+            knee = {r["cat"]: r for r in c.fetchall()}
+            c.execute(f"SELECT cat, yyyymm, visits FROM {CAT_MONTH_TABLE}")
+            cm: dict = defaultdict(dict)
+            for r in c.fetchall():
+                cm[r["cat"]][r["yyyymm"]] = int(r["visits"] or 0)
+    finally:
+        pg.close()
+
+    rows = _combine_caps(knee, cm, knee_p, cap_min, cap_max, alpha, mult_min, mult_max)
 
     pg = _postgres()
     try:
@@ -797,6 +811,421 @@ def build_sitemaps(as_of: date, cap_n: int = CAP_N_DEFAULT,
                 "new_query_rows": len(new_rows), "by_source": by_source}
     finally:
         pg.close()
+
+
+# --------------------------------------------------------------------------- #
+# MAINCAT ROLLUP — top-level sitemaps only
+# --------------------------------------------------------------------------- #
+# The 32 top-level categories have their own sitemap buckets in the Keywords API,
+# keyed on the SMALL taxonomy id space (parentId IS NULL): 137 /mode/, 6
+# /computers/, 165 /huis_tuin/, 32000 /schoenen/. Verified live 2026-08-04, and
+# they ALREADY hold URLs from deeper categories — bucket 6's first record is
+# /products/computers/computers_19664320/c/merk~24100313. So a rollup is what the
+# channel already models at this level; we are only choosing the contents.
+#
+# Scope is deliberately top-level ONLY. Every category below a maincat keeps the
+# existing rule: its sitemap contains only URLs whose own deepest category it is.
+# Nothing in the deepest-category pipeline above changes.
+#
+# WHY A SEPARATE SCORE PASS RATHER THAN REUSING pa.hs2_sitemap.score
+# The score is a percent_rank WITHIN deepest_category_id, so it is relative to a
+# URL's own category and cannot be pooled: the 2nd-best URL in a 20-URL child
+# scores ~0.95 while a far stronger URL in a 5,000-URL category sits at 0.80.
+# Pooling the raw scores would systematically promote thin categories. So the
+# percentile is recomputed over the maincat's own pool — same functional form,
+# different partition. NOTE: the 0.889/0.111 weights were backtested on
+# within-deepest-cat percentiles; they are reused here unchanged and still need
+# re-validating at maincat granularity (32 backtests) before a real push.
+MAINCAT_MAP_TABLE = "pa.hs2_cat_maincat"
+MAINCAT_MONTH_TABLE = "pa.hs2_maincat_month"
+MAINCAT_KNEE_TABLE = "pa.hs2_maincat_knee"
+MAINCAT_CAP_TABLE = "pa.hs2_maincat_cap"
+MAINCAT_SITEMAP_TABLE = "pa.hs2_sitemap_maincat"
+
+# A maincat bucket is an order of magnitude larger than a category's, so the
+# deepest-cat clamps would be catastrophic here: /huis_tuin/ holds 68,209 live
+# records and /mode/ 53,411, and CAP_MAX_DEFAULT=12000 would cut them ~80% on
+# the first push — irreversibly, since POST is replace-per-category with no
+# DELETE. These defaults are set NOT to bind by accident; maincat_dry_run()
+# prints proposed-vs-live per maincat so the real ceiling is chosen from numbers.
+MAINCAT_CAP_MIN_DEFAULT = 1000
+MAINCAT_CAP_MAX_DEFAULT = 120000
+
+# main_category_id -1 "Niet bekend" and 0 "Beslist.nl" are sentinels in
+# dim_category, not categories. They must never become a push target.
+MAINCAT_SENTINELS = (-1, 0)
+
+
+def refresh_maincat_map() -> dict:
+    """Sync deepest-category -> maincat from datamart.dim_category into Postgres.
+
+    This is the closure, and it is already maintained for us: dim_category is
+    1:1 on deepest_category_id (3,571 rows, no duplicates at deleted_ind = 0),
+    and its main_category_id is the SAME id space the Keywords API buckets use.
+    So no recursive walk of the Taxonomy API is needed — which also removes the
+    staleness trap, since a restructure lands here rather than in a cache of ours.
+
+    is_lowest_category comes along because it answers the leaf question the
+    rollout pre-flight asks (Stoelen and Shirts are both level 2, lowest = 0)
+    without 3,500 taxonomy calls.
+    """
+    sql = """
+        SELECT deepest_category_id AS cat, deepest_category_name AS cat_name,
+               main_category_id AS maincat, main_category_name AS maincat_name,
+               urlslug, deepest_cat_level AS cat_level,
+               is_lowest_category AS is_lowest
+        FROM datamart.dim_category
+        WHERE deleted_ind = 0
+          AND deepest_category_id IS NOT NULL
+          AND main_category_id IS NOT NULL
+          AND main_category_id NOT IN %(sentinels)s
+    """
+    with _redshift() as rs, rs.cursor() as c:
+        c.execute(sql, {"sentinels": MAINCAT_SENTINELS})
+        data = c.fetchall()
+
+    # _redshift() hands out a PLAIN cursor in this module (backend.database's pool
+    # is the RealDict one) — index positionally, as the sibling refreshers do.
+    rows = [(r[0], r[1], r[2], r[3], r[4], r[5], int(r[6] or 0)) for r in data]
+    pg = _postgres()
+    try:
+        with pg.cursor() as c:
+            c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_MAP_TABLE} (
+                cat BIGINT PRIMARY KEY, cat_name TEXT, maincat BIGINT, maincat_name TEXT,
+                urlslug TEXT, cat_level SMALLINT, is_lowest SMALLINT)""")
+            c.execute(f"TRUNCATE {MAINCAT_MAP_TABLE}")
+            execute_values(c, f"INSERT INTO {MAINCAT_MAP_TABLE} "
+                              f"(cat,cat_name,maincat,maincat_name,urlslug,cat_level,is_lowest) VALUES %s",
+                           rows, page_size=10000)
+            c.execute(f"CREATE INDEX IF NOT EXISTS hs2_cat_maincat_maincat_idx "
+                      f"ON {MAINCAT_MAP_TABLE} (maincat)")
+        pg.commit()
+    finally:
+        pg.close()
+    return {"cats": len(rows), "maincats": len({r[2] for r in rows})}
+
+
+def get_maincats() -> dict:
+    """{maincat_id: name} from the synced map — the push targets."""
+    pg = _postgres()
+    try:
+        with pg.cursor(cursor_factory=RealDictCursor) as c:
+            c.execute(f"SELECT DISTINCT maincat, maincat_name FROM {MAINCAT_MAP_TABLE} "
+                      f"ORDER BY maincat")
+            return {r["maincat"]: r["maincat_name"] for r in c.fetchall()}
+    finally:
+        pg.close()
+
+
+def _refresh_maincat_month(as_of: date, months: int = 24) -> int:
+    """ALL-channel visits per (maincat, yyyymm) — the maincat climatology.
+
+    dim_category is 1:1 on deepest_category_id, so this join cannot fan out the
+    visit counts.
+    """
+    from datetime import timedelta
+    lo, hi = _dkey(as_of - timedelta(days=int(months * 30.5))), _dkey(as_of)
+    sql = f"""
+        SELECT dc.main_category_id AS cat, fv.dim_date_key / 100 AS yyyymm,
+               COUNT(*) AS visits, SUM({_REV}) AS revenue
+        FROM datamart.fct_visits fv {_ALL_JOIN}
+        JOIN datamart.dim_category dc
+          ON dc.deepest_category_id = dv.deepest_subcat_id AND dc.deleted_ind = 0
+        WHERE fv.dim_date_key BETWEEN %(lo)s AND %(hi)s AND {_ALL_WHERE}
+          AND dv.deepest_subcat_id IS NOT NULL
+          AND dc.main_category_id NOT IN %(sentinels)s
+        GROUP BY 1, 2
+    """
+    with _redshift() as rs, rs.cursor() as c:
+        c.execute(sql, {"lo": lo, "hi": hi, "sentinels": MAINCAT_SENTINELS})
+        data = c.fetchall()
+    pg = _postgres()
+    try:
+        with pg.cursor() as c:
+            c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_MONTH_TABLE} (
+                cat BIGINT, yyyymm INT, visits BIGINT, revenue DOUBLE PRECISION,
+                PRIMARY KEY (cat, yyyymm))""")
+            c.execute(f"TRUNCATE {MAINCAT_MONTH_TABLE}")
+            execute_values(c, f"INSERT INTO {MAINCAT_MONTH_TABLE} (cat,yyyymm,visits,revenue) VALUES %s",
+                           [(r[0], r[1], int(r[2] or 0), float(r[3] or 0))
+                            for r in data], page_size=10000)
+        pg.commit()
+    finally:
+        pg.close()
+    return len(data)
+
+
+def _refresh_maincat_knee(as_of: date, months: int = 12) -> int:
+    """Coverage-knee per MAINCAT: URLs needed to reach 80/90/95% of the whole
+    subtree's all-channel visits. Same shape as _refresh_cat_knee, but the
+    cumulative share is taken over the pooled subtree — which is the point: a
+    parent's own knee would be sized for its own facet URLs only.
+    """
+    from datetime import timedelta
+    lo, hi = _dkey(as_of - timedelta(days=int(months * 30.5))), _dkey(as_of)
+    nv = _norm("dv.url")
+    sql = f"""
+        WITH u AS (
+            SELECT dc.main_category_id AS cat, {nv} AS npath, COUNT(*) AS v
+            FROM datamart.fct_visits fv {_ALL_JOIN}
+            JOIN datamart.dim_category dc
+              ON dc.deepest_category_id = dv.deepest_subcat_id AND dc.deleted_ind = 0
+            WHERE fv.dim_date_key BETWEEN %(lo)s AND %(hi)s AND {_ALL_WHERE}
+              AND dv.deepest_subcat_id IS NOT NULL
+              AND dc.main_category_id NOT IN %(sentinels)s
+            GROUP BY 1, 2
+        ),
+        r AS (
+            SELECT cat,
+                   SUM(v) OVER (PARTITION BY cat ORDER BY v DESC ROWS UNBOUNDED PRECEDING) AS cum,
+                   SUM(v) OVER (PARTITION BY cat) AS tot,
+                   ROW_NUMBER() OVER (PARTITION BY cat ORDER BY v DESC) AS rn
+            FROM u
+        )
+        SELECT cat, MAX(tot) AS yearly,
+               MIN(CASE WHEN cum >= 0.80*tot THEN rn END) AS knee80,
+               MIN(CASE WHEN cum >= 0.90*tot THEN rn END) AS knee90,
+               MIN(CASE WHEN cum >= 0.95*tot THEN rn END) AS knee95,
+               COUNT(*) AS n_urls
+        FROM r GROUP BY cat
+    """
+    with _redshift() as rs, rs.cursor() as c:
+        c.execute(sql, {"lo": lo, "hi": hi, "sentinels": MAINCAT_SENTINELS})
+        data = c.fetchall()
+    pg = _postgres()
+    try:
+        with pg.cursor() as c:
+            c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_KNEE_TABLE} (
+                cat BIGINT PRIMARY KEY, yearly BIGINT, knee80 INT, knee90 INT,
+                knee95 INT, n_urls INT)""")
+            c.execute(f"TRUNCATE {MAINCAT_KNEE_TABLE}")
+            execute_values(c, f"INSERT INTO {MAINCAT_KNEE_TABLE} "
+                              f"(cat,yearly,knee80,knee90,knee95,n_urls) VALUES %s",
+                           [(r[0], int(r[1] or 0), r[2], r[3], r[4], r[5])
+                            for r in data], page_size=10000)
+        pg.commit()
+    finally:
+        pg.close()
+    return len(data)
+
+
+def build_maincat_caps(as_of: date, knee_p: int = KNEE_P_DEFAULT,
+                       cap_min: int = MAINCAT_CAP_MIN_DEFAULT,
+                       cap_max: int = MAINCAT_CAP_MAX_DEFAULT,
+                       alpha: float = SEASON_ALPHA_DEFAULT,
+                       mult_min: float = SEASON_MULT_MIN_DEFAULT,
+                       mult_max: float = SEASON_MULT_MAX_DEFAULT,
+                       refresh_source: bool = True) -> dict:
+    """Per-maincat, per-calendar-month caps into pa.hs2_maincat_cap.
+
+    Same seasonal maths as build_category_caps (shared _combine_caps), only the
+    clamp range differs. refresh_source=False recombines the persisted knee +
+    climatology, which is the fast path for tuning the clamp.
+    """
+    from collections import defaultdict
+
+    if refresh_source:
+        _refresh_maincat_month(as_of)
+        _refresh_maincat_knee(as_of)
+
+    pg = _postgres()
+    try:
+        with pg.cursor(cursor_factory=RealDictCursor) as c:
+            c.execute(f"SELECT cat, yearly, knee80, knee90, knee95 FROM {MAINCAT_KNEE_TABLE}")
+            knee = {r["cat"]: r for r in c.fetchall()}
+            c.execute(f"SELECT cat, yyyymm, visits FROM {MAINCAT_MONTH_TABLE}")
+            cm: dict = defaultdict(dict)
+            for r in c.fetchall():
+                cm[r["cat"]][r["yyyymm"]] = int(r["visits"] or 0)
+    finally:
+        pg.close()
+
+    rows = _combine_caps(knee, cm, knee_p, cap_min, cap_max, alpha, mult_min, mult_max)
+
+    pg = _postgres()
+    try:
+        with pg.cursor() as c:
+            c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_CAP_TABLE} (
+                cat BIGINT, calendar_month INT, base_cap INT, season_index DOUBLE PRECISION,
+                cap INT, yearly BIGINT, PRIMARY KEY (cat, calendar_month))""")
+            c.execute(f"TRUNCATE {MAINCAT_CAP_TABLE}")
+            execute_values(c, f"INSERT INTO {MAINCAT_CAP_TABLE} "
+                              f"(cat,calendar_month,base_cap,season_index,cap,yearly) VALUES %s",
+                           rows, page_size=10000)
+        pg.commit()
+    finally:
+        pg.close()
+    return {"as_of": str(as_of), "maincats": len(knee), "cap_rows": len(rows),
+            "knee_p": knee_p, "cap_min": cap_min, "cap_max": cap_max, "alpha": alpha}
+
+
+MAINCAT_LIVE_MULTIPLE_DEFAULT = 1.5
+
+
+def build_maincat_caps_from_live(multiple: float = MAINCAT_LIVE_MULTIPLE_DEFAULT,
+                                 cap_min: int = MAINCAT_CAP_MIN_DEFAULT,
+                                 cap_max: int = MAINCAT_CAP_MAX_DEFAULT,
+                                 country: str = "nl") -> dict:
+    """Size maincat caps as a MULTIPLE OF TODAY'S LIVE SET (per Joep, 2026-08-04).
+
+    Replaces the knee for maincats, because the knee does not transfer to this
+    granularity. knee90 asks how many URLs reach 90% of a bucket's all-channel
+    visits; a category's traffic concentrates, a maincat's does not, so it wanted
+    226,013 URLs for Woonaccessoires (of 675,252) and 293,879 for Kleding against
+    live sets of 68,209 and 53,411. Anchoring to what is live instead is empirical
+    and bounded, and keeps each maincat recognisable.
+
+    The seasonal multiplier is deliberately NOT applied here. It is calibrated on
+    the same per-category climatology the knee came from, and layering it on a live
+    anchor would re-introduce exactly the unvalidated extrapolation this avoids —
+    at mult_max it would reach 3.75x live. Deepest-category caps keep it.
+
+    Live size is counted in DISTINCT URLs, not records: the API's grain is
+    (url, keyword) so a record count over-states the set we would replace, and a
+    cap must not be quietly generous. Writes every calendar_month with the same
+    value so the table shape stays compatible with build_maincat_sitemaps' join.
+    """
+    from backend.healthscore_keywords import get_live
+
+    maincats = get_maincats()
+    rows, detail = [], []
+    for mc, name in maincats.items():
+        live = get_live(mc, country)
+        live_urls = len({k["url"] for k in live})
+        base = max(cap_min, min(cap_max, int(round(live_urls * multiple))))
+        detail.append({"maincat": mc, "name": name, "live_records": len(live),
+                       "live_urls": live_urls, "cap": base})
+        for m in range(1, 13):
+            rows.append((mc, m, base, 1.0, base, 0))
+
+    pg = _postgres()
+    try:
+        with pg.cursor() as c:
+            c.execute(f"""CREATE TABLE IF NOT EXISTS {MAINCAT_CAP_TABLE} (
+                cat BIGINT, calendar_month INT, base_cap INT, season_index DOUBLE PRECISION,
+                cap INT, yearly BIGINT, PRIMARY KEY (cat, calendar_month))""")
+            c.execute(f"TRUNCATE {MAINCAT_CAP_TABLE}")
+            execute_values(c, f"INSERT INTO {MAINCAT_CAP_TABLE} "
+                              f"(cat,calendar_month,base_cap,season_index,cap,yearly) VALUES %s",
+                           rows, page_size=10000)
+        pg.commit()
+    finally:
+        pg.close()
+    return {"multiple": multiple, "maincats": len(maincats), "cap_rows": len(rows),
+            "cap_min": cap_min, "cap_max": cap_max,
+            "total_cap": sum(d["cap"] for d in detail), "detail": detail}
+
+
+def combined_sitemap_urls(as_of: date) -> dict:
+    """DISTINCT-URL accounting across both levels (per Joep, 2026-08-04).
+
+    With the rollup live, a URL can sit in its own deepest-category bucket AND in
+    its maincat bucket. Summing bucket rows would therefore overstate the footprint
+    and any "% of SEO visits covered" built on it, so the reportable number is the
+    distinct union. `in_both` is the overlap that a row-count would double-count.
+    """
+    pg = _postgres()
+    try:
+        with pg.cursor(cursor_factory=RealDictCursor) as c:
+            c.execute(f"""
+                WITH d AS (SELECT DISTINCT npath FROM {SITEMAP_TABLE}         WHERE as_of_date = %(a)s),
+                     m AS (SELECT DISTINCT npath FROM {MAINCAT_SITEMAP_TABLE} WHERE as_of_date = %(a)s)
+                SELECT (SELECT count(*) FROM d)                                   AS deepest_urls,
+                       (SELECT count(*) FROM m)                                   AS maincat_urls,
+                       (SELECT count(*) FROM d JOIN m USING (npath))               AS in_both,
+                       (SELECT count(*) FROM (SELECT npath FROM d
+                                              UNION SELECT npath FROM m) u)        AS distinct_union
+            """, {"a": as_of})
+            row = dict(c.fetchone())
+    finally:
+        pg.close()
+    row["rows_would_double_count"] = row["in_both"]
+    row["as_of"] = str(as_of)
+    return row
+
+
+def build_maincat_sitemaps(as_of: date, cap_n: int = MAINCAT_CAP_MAX_DEFAULT,
+                           w_visits: float = W_VISITS_DEFAULT,
+                           w_rev: float = W_REV_DEFAULT,
+                           seasonal_caps: bool = True) -> dict:
+    """Select the maincat-rollup set for `as_of` into pa.hs2_sitemap_maincat.
+
+    Additive: pa.hs2_sitemap is not touched, so every deepest-category sitemap
+    keeps its current contents and rule. A URL therefore appears in at most two
+    buckets — its own deepest category, and its maincat.
+
+    The new-URL bucket is absent by construction: those rows carry
+    deepest_category_id = NULL, so they cannot be mapped to a maincat. They are
+    reported as unmapped rather than silently dropped.
+    """
+    cap_join = (f"LEFT JOIN {MAINCAT_CAP_TABLE} cp "
+                f"ON cp.cat = r.maincat AND cp.calendar_month = %(month)s"
+                if seasonal_caps else "")
+    cap_pred = "COALESCE(cp.cap, %(cap)s)" if seasonal_caps else "%(cap)s"
+    pg = _postgres()
+    try:
+        with pg.cursor() as c:
+            c.execute(f"""
+                CREATE TABLE IF NOT EXISTS {MAINCAT_SITEMAP_TABLE} (
+                    as_of_date          DATE NOT NULL,
+                    maincat             BIGINT NOT NULL,
+                    npath               TEXT NOT NULL,
+                    sample_url          TEXT,
+                    deepest_category_id BIGINT,
+                    type_url            TEXT,
+                    score               DOUBLE PRECISION,
+                    rank_in_maincat     INT,
+                    source              TEXT,
+                    PRIMARY KEY (as_of_date, maincat, npath)
+                )
+            """)
+            c.execute(f"DELETE FROM {MAINCAT_SITEMAP_TABLE} WHERE as_of_date = %s", (as_of,))
+            c.execute(f"""
+                INSERT INTO {MAINCAT_SITEMAP_TABLE}
+                    (as_of_date, maincat, npath, sample_url, deepest_category_id,
+                     type_url, score, rank_in_maincat, source)
+                SELECT %(as_of)s, r.maincat, r.npath, r.sample_url, r.deepest_category_id,
+                       r.type_url, r.score, r.rnk, 'scored'
+                FROM (
+                    SELECT *, row_number() OVER (
+                        PARTITION BY maincat ORDER BY score DESC, visits DESC) AS rnk
+                    FROM (
+                        SELECT f.npath, f.sample_url, f.type_url, f.deepest_category_id,
+                               m.maincat, f.visits, f.revenue,
+                               -- Percentile over the MAINCAT pool, not the category's:
+                               -- see the section header for why raw scores can't be pooled.
+                               %(wv)s * percent_rank() OVER (
+                                   PARTITION BY m.maincat ORDER BY ln(1 + f.visits))
+                             + %(wr)s * percent_rank() OVER (
+                                   PARTITION BY m.maincat ORDER BY ln(1 + GREATEST(f.revenue, 0))) AS score
+                        FROM {FEATURE_TABLE} f
+                        JOIN {MAINCAT_MAP_TABLE} m ON m.cat = f.deepest_category_id
+                        WHERE f.as_of_date = %(as_of)s AND f.deepest_category_id IS NOT NULL
+                    ) s
+                ) r
+                {cap_join}
+                WHERE r.rnk <= {cap_pred}
+            """, {"as_of": as_of, "wv": w_visits, "wr": w_rev, "cap": cap_n,
+                  "month": as_of.month})
+            scored_n = c.rowcount
+
+            # Reporting: distinct URLs (per Joep, 2026-08-04) — a URL living in
+            # both its leaf bucket and its maincat bucket must count once.
+            c.execute(f"""SELECT COUNT(DISTINCT npath) AS urls, COUNT(DISTINCT maincat) AS maincats
+                          FROM {MAINCAT_SITEMAP_TABLE} WHERE as_of_date = %s""", (as_of,))
+            got = c.fetchone()
+            c.execute(f"""SELECT COUNT(*) AS n FROM {FEATURE_TABLE} f
+                          LEFT JOIN {MAINCAT_MAP_TABLE} m ON m.cat = f.deepest_category_id
+                          WHERE f.as_of_date = %s AND m.cat IS NULL""", (as_of,))
+            unmapped = c.fetchone()
+        pg.commit()
+    finally:
+        pg.close()
+    return {"as_of": str(as_of), "rows": scored_n,
+            "distinct_urls": (got["urls"] if isinstance(got, dict) else got[0]),
+            "maincats": (got["maincats"] if isinstance(got, dict) else got[1]),
+            "features_unmapped_to_maincat": (unmapped["n"] if isinstance(unmapped, dict) else unmapped[0]),
+            "seasonal_caps": seasonal_caps}
 
 
 # --------------------------------------------------------------------------- #
