@@ -171,26 +171,35 @@
                                 </span>
                             </div>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-outline-purple" onclick="fetchLastPushTimestamp()">↻ Refresh</button>
-                                <!-- Publish → the /faq section, one record per question. This is
+                                <!-- No Refresh button: the timestamp is fetched on page load and
+                                     again after every publish, so the only thing it added was a
+                                     way to re-fetch a value nothing else changes (Joep, 2026-08-04).
+                                     fetchLastPushTimestamp() itself stays — faq.js still calls it
+                                     in both those places.
+                                     Publish → the /faq section, one record per question. This is
                                      the former "Publish 2.0" and is now the only publish here:
                                      the old grey Publish posted an /automated-content blob, which
                                      no longer carries FAQ at all, so it would have been a button
                                      that published nothing of this page's. Kopteksten has its own
                                      Publish on the Kopteksten tool.
                                      Default is incremental (new/changed only). "Publish All"
-                                     is the full ~1.7M-record re-push. It carries no btn-sm: the
+                                     is the full ~1.7M-record re-push. Neither carries btn-sm: the
                                      whole row is default-size, so shrinking one button made its
                                      label read smaller than its neighbours. What guards the full
                                      push is its confirm dialog, which states the real volume for
                                      the selected environment before anything is sent.
+                                     Order and colour per UI_BLUEPRINT: the incremental Publish is
+                                     the primary CTA, so it wears full-orange btn-run and sits far
+                                     right, while Publish All keeps the orange outline of a non-run
+                                     action and leads. btn-run brings its own :disabled grey, so the
+                                     existing disable logic needs no change.
                                      The ids keep their V2 names — renaming them would touch the
                                      poller, the cancel path and the disable/enable logic for a
                                      label change. -->
-                                <button class="btn btn-outline-orange" onclick="publishFaqV2()" id="publishV2Btn"
-                                        title="Push new &amp; changed FAQ Q&amp;A pairs to the website-configuration /faq section">Publish</button>
                                 <button class="btn btn-outline-orange" onclick="publishFaqV2(true)" id="publishV2FullBtn"
                                         title="Re-push EVERY FAQ Q&amp;A pair (~1.7M records), not just new/changed ones">Publish All</button>
+                                <button class="btn btn-run" onclick="publishFaqV2()" id="publishV2Btn"
+                                        title="Push new &amp; changed FAQ Q&amp;A pairs to the website-configuration /faq section">Publish</button>
                             </div>
                         </div>
 

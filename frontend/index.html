@@ -195,7 +195,11 @@
                                 </span>
                             </div>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-outline-purple" onclick="fetchLastPushTimestamp()">↻ Refresh</button>
+                                <!-- No Refresh button: the timestamp is fetched on page load and
+                                     again after every publish, so the only thing it added was a
+                                     way to re-fetch a value nothing else changes (Joep, 2026-08-04).
+                                     fetchLastPushTimestamp() itself stays — app.js still calls it
+                                     in both those places. -->
                                 <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">Publish</button>
                             </div>
                         </div>

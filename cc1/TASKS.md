@@ -4,6 +4,20 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-04 — Content Publishing: Refresh eruit, FAQ-publishknoppen omgedraaid
+
+- [x] **Refresh-knop weg uit Content Publishing** op FAQs (`frontend/faq.html`) én Kopteksten
+      (`frontend/index.html`). `fetchLastPushTimestamp()` blijft bestaan: faq.js/app.js roepen hem
+      al aan bij page load én na elke publish, dus de knop haalde alleen een waarde opnieuw op die
+      niets anders verandert. Geen dode code. De `↻ Refresh Status`-knop in de **Processing
+      Status**-card is een andere knop en staat er nog.
+- [x] **FAQ: Publish en Publish All omgewisseld, Publish vol-oranje.** Nieuwe volgorde `Publish All`
+      (`btn-outline-orange`) → `Publish` (`btn btn-run`) uiterst rechts. Volgt UI_BLUEPRINT:
+      vol-oranje `btn-run` = primaire CTA uiterst rechts, `btn-outline-orange` = oranje non-run
+      actie. `.btn-run` heeft zijn eigen `:disabled`-grijs, dus de bestaande disable-logica in
+      `publishFaqV2`/`pollFaqV2` (alleen het `disabled`-attribuut, geen class-writes) kon blijven.
+      Ids houden hun V2-namen. [[feedback_ui_blueprint]]
+
 ### 2026-08-04 — GSD pause: drie shops gingen uit en geen enkele werd gepauzeerd
 
 Gemeld door Joep: "Emob-moebel.de to pause, maar error `no_account_config`". Bleek één oorzaak
