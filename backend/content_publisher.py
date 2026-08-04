@@ -1,8 +1,38 @@
 """
 Content Publisher Service
 
-Publishes generated content (content_top) and FAQ content to the website-configuration API.
-Supports batched publishing to handle large datasets.
+Publishes kopteksten (content_top) to the website-configuration `/automated-content`
+endpoint. FAQ content does NOT travel this path — see "SCOPE" below.
+
+TWO PROPERTIES OF /automated-content THAT SHAPE THIS MODULE (verified against
+staging 2026-08-04, by seeding one URL and posting a payload containing only a
+different one):
+
+1. It is a full-set REPLACE, not an upsert. Any URL absent from the payload is
+   DELETED from the store. So every publish must carry the complete set we want
+   live, and a partial payload is a deletion.
+2. It requires url + content_top + content_bottom + country_language on every
+   row; a missing field 400s the whole request ("Row N: Missing field(s): ...").
+
+SCOPE — content_top only (changed 2026-08-04)
+This used to also ship content_bottom (FAQ Q&A rendered to HTML) and content_faq
+(the schema.org JSON-LD). Both are gone:
+
+  * content_faq was never stored. The endpoint accepts the field and silently
+    discards it — a record posted with content_faq comes back without it, and the
+    newer /automated-content/records endpoint rejects it outright with
+    "content_faq: This field was not expected." It was 792 MB of every upload
+    that landed nowhere.
+  * content_bottom is now owned by FAQ "Publish 2.0" (backend/faq_v2_publisher.py),
+    which posts one record per QUESTION to /faq instead of one HTML blob per URL.
+
+Because property 2 makes content_bottom mandatory, it is sent as "" rather than
+omitted — which is also what retires the values already stored: the first publish
+after this change clears content_bottom for every URL it carries.
+
+Only URLs that actually have a content_top are sent. Combined with property 1,
+that means FAQ-only URLs are dropped from this store — correct, since with
+content_bottom gone they would be rows with no content at all.
 """
 import os
 import json
@@ -110,176 +140,30 @@ def get_api_config(environment: str = None) -> tuple:
     return CONTENT_API_URLS[env], CONTENT_API_KEYS[env]
 
 
-def faq_json_to_html(faq_json_str: str) -> str:
-    """
-    Convert FAQ JSON array to HTML format.
-
-    Input format: [{"question": "...", "answer": "..."}, ...]
-    Output format: <div class="faq-item"><h3>Question</h3><p>Answer</p></div>...
-    """
-    if not faq_json_str:
-        return ""
-
-    try:
-        faq_list = json.loads(faq_json_str)
-        if not isinstance(faq_list, list):
-            return ""
-
-        html_parts = []
-        for item in faq_list:
-            question = item.get("question", "")
-            answer = item.get("answer", "")
-            if question and answer:
-                html_parts.append(
-                    f'<div class="faq-item">'
-                    f'<h3>{question}</h3>'
-                    f'<p>{answer}</p>'
-                    f'</div>'
-                )
-
-        return "".join(html_parts)
-    except (json.JSONDecodeError, TypeError):
-        return ""
-
-
-def schema_org_to_script_tag(schema_org_str: str) -> str:
-    """
-    Return schema.org JSON-LD for content_faq (raw JSON, no script tags).
-
-    Input: JSON-LD string (FAQPage schema)
-    Output: JSON-LD string as-is
-    """
-    if not schema_org_str:
-        return ""
-
-    return schema_org_str
-
-
-def faq_json_to_content_bottom(faq_json_str: str) -> str:
-    """
-    Convert FAQ JSON array to content_bottom format.
-    Only includes Q&As that have internal links (beslist.nl).
-
-    Input format: [{"question": "...", "answer": "..."}, ...]
-    Output format: <br /><strong>Question</strong><br>Answer<br>...
-    """
-    import re
-
-    if not faq_json_str:
-        return ""
-
-    try:
-        faq_list = json.loads(faq_json_str)
-        if not isinstance(faq_list, list):
-            return ""
-
-        # Simple pattern to detect internal links (beslist.nl in href)
-        internal_link_pattern = re.compile(r'href="[^"]*beslist\.nl', re.IGNORECASE)
-
-        html_parts = []
-        for item in faq_list:
-            question = item.get("question", "")
-            answer = item.get("answer", "")
-
-            # Only include if question or answer has internal links
-            has_internal_link = (
-                internal_link_pattern.search(question) or
-                internal_link_pattern.search(answer)
-            )
-
-            if question and answer and has_internal_link:
-                html_parts.append(
-                    f'<strong>{question}</strong><br>{answer}<br>'
-                )
-
-        if not html_parts:
-            return ""
-
-        # Start with <br /> and join all parts with <br /> for blank lines between questions
-        return "<br />" + "<br />".join(html_parts)
-    except (json.JSONDecodeError, TypeError):
-        return ""
-
-
-def get_all_content_for_publishing() -> List[Dict]:
-    """
-    Fetch all content (content_top and FAQ) from database, merged by URL.
-    Returns a list of dicts with url, content_top, content_bottom, content_faq.
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    try:
-        # Pull content_top (kopteksten) + faq_json from the new schema, joined
-        # through the URL catalog. LEFT JOINs from pa.urls so a row appears as
-        # long as either content table has data.
-        cur.execute("""
-            SELECT
-                u.url AS url,
-                k.content AS content_top,
-                f.faq_json AS faq_json
-            FROM pa.urls u
-            LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
-            LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
-            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
-            WHERE (k.content IS NOT NULL OR f.faq_json IS NOT NULL)
-              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
-        """)
-
-        rows = cur.fetchall()
-
-        # Build result list with unique URLs
-        url_data = {}
-        for row in rows:
-            url = row['url']
-            if url not in url_data:
-                url_data[url] = {
-                    "url": url,
-                    "content_top": "",
-                    "content_bottom": "",
-                    "content_faq": "",
-                    "country_language": "nl-nl"
-                }
-
-            # Update content_top if available
-            if row['content_top']:
-                url_data[url]["content_top"] = row['content_top']
-
-            # Convert FAQ JSON to HTML if available
-            if row['faq_json']:
-                url_data[url]["content_faq"] = faq_json_to_html(row['faq_json'])
-                url_data[url]["content_bottom"] = faq_json_to_content_bottom(row['faq_json'])
-
-        return list(url_data.values())
-
-    finally:
-        cur.close()
-        return_db_connection(conn)
+# The publishable set: every URL with a non-empty content_top that has not failed
+# validation. Kept in one place because the count endpoint, the preview and the
+# real publish must agree — on a replace-all endpoint a count that disagrees with
+# the payload is a count that under-reports deletions.
+_PUBLISHABLE_WHERE = """
+    FROM pa.urls u
+    JOIN pa.kopteksten_content k ON k.url_id = u.url_id
+    LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
+    WHERE k.content IS NOT NULL AND k.content <> ''
+      AND (v.is_valid IS NULL OR v.is_valid = TRUE)
+"""
 
 
 def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
     """
-    Fetch a batch of content for publishing.
+    Fetch a batch of content for publishing (preview / curl helpers).
     """
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
-        cur.execute("""
-            SELECT
-                u.url AS url,
-                k.content AS content_top,
-                f.faq_json AS faq_json,
-                f.schema_org AS schema_org
-            FROM pa.urls u
-            LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
-            LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
-            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
-            WHERE (k.content IS NOT NULL OR f.faq_json IS NOT NULL)
-              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
-            ORDER BY u.url
-            LIMIT %s OFFSET %s
-        """, (limit, offset))
+        cur.execute("SELECT u.url AS url, k.content AS content_top"
+                    + _PUBLISHABLE_WHERE
+                    + " ORDER BY u.url LIMIT %s OFFSET %s", (limit, offset))
 
         rows = cur.fetchall()
 
@@ -295,16 +179,12 @@ def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
                 continue
             seen_urls_lower.add(url_lower)
 
-            content_top = sanitize_for_api(row['content_top'] or "")
-            # Use schema_org wrapped in script tag for content_faq
-            content_faq = sanitize_for_api(schema_org_to_script_tag(row['schema_org'])) if row['schema_org'] else ""
-            content_bottom = sanitize_for_api(faq_json_to_content_bottom(row['faq_json'])) if row['faq_json'] else ""
-
             item = {
                 "url": url,
-                "content_top": content_top,
-                "content_bottom": content_bottom,
-                "content_faq": content_faq,
+                "content_top": sanitize_for_api(row['content_top'] or ""),
+                # Mandatory field, deliberately blank — see SCOPE in the module
+                # docstring. Sending "" is what clears the retired FAQ blobs.
+                "content_bottom": "",
                 "country_language": "nl-nl"
             }
             result.append(item)
@@ -317,20 +197,12 @@ def get_content_batch(offset: int = 0, limit: int = 100) -> List[Dict]:
 
 
 def get_total_content_count() -> int:
-    """Get total count of unique URLs with content."""
+    """Count of URLs that a publish would send (and therefore keep live)."""
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
-        cur.execute("""
-            SELECT COUNT(*) AS count
-            FROM pa.urls u
-            LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
-            LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
-            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
-            WHERE (k.content IS NOT NULL OR f.faq_json IS NOT NULL)
-              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
-        """)
+        cur.execute("SELECT COUNT(*) AS count" + _PUBLISHABLE_WHERE)
         return cur.fetchone()['count']
     finally:
         cur.close()
@@ -374,28 +246,20 @@ def _normalize_url(url: str) -> str:
 
 def get_all_content_items() -> List[Dict]:
     """
-    Fetch ALL content items from database for publishing.
-    Returns a list of dicts with url, content_top, content_bottom, content_faq.
+    Fetch ALL publishable items from the database.
+    Returns a list of dicts with url, content_top, content_bottom, country_language.
+
+    This is the complete set that will be live after the publish — anything not in
+    it gets deleted, because /automated-content is a replace-all.
     """
     conn = get_db_connection()
     cur = conn.cursor()
 
     try:
         # Get all unique URLs with their content in a single query
-        cur.execute("""
-            SELECT
-                u.url AS url,
-                k.content AS content_top,
-                f.faq_json AS faq_json,
-                f.schema_org AS schema_org
-            FROM pa.urls u
-            LEFT JOIN pa.kopteksten_content k ON k.url_id = u.url_id
-            LEFT JOIN pa.faq_content_v2  f ON f.url_id = u.url_id
-            LEFT JOIN pa.url_validation v ON v.url_id = u.url_id
-            WHERE (k.content IS NOT NULL OR f.faq_json IS NOT NULL)
-              AND (v.is_valid IS NULL OR v.is_valid = TRUE)
-            ORDER BY u.url
-        """)
+        cur.execute("SELECT u.url AS url, k.content AS content_top"
+                    + _PUBLISHABLE_WHERE
+                    + " ORDER BY u.url")
 
         rows = cur.fetchall()
 
@@ -417,16 +281,12 @@ def get_all_content_items() -> List[Dict]:
                 continue
             seen_canon_lower.add(canon_key)
 
-            content_top = sanitize_for_api(row['content_top'] or "")
-            # Use schema_org wrapped in script tag for content_faq
-            content_faq = sanitize_for_api(schema_org_to_script_tag(row['schema_org'])) if row['schema_org'] else ""
-            content_bottom = sanitize_for_api(faq_json_to_content_bottom(row['faq_json'])) if row['faq_json'] else ""
-
             item = {
                 "url": url_norm,
-                "content_top": content_top,
-                "content_bottom": content_bottom,
-                "content_faq": content_faq,
+                "content_top": sanitize_for_api(row['content_top'] or ""),
+                # Mandatory field, deliberately blank — see SCOPE in the module
+                # docstring. Sending "" is what clears the retired FAQ blobs.
+                "content_bottom": "",
                 "country_language": "nl-nl"
             }
             result.append(item)
@@ -445,13 +305,19 @@ def get_all_content_items() -> List[Dict]:
         return_db_connection(conn)
 
 
-def publish_all_content(environment: str = None, content_type: str = "all", task_id: str = None) -> Dict:
+def publish_all_content(environment: str = None, task_id: str = None) -> Dict:
     """
-    Publish content in a single API call.
+    Publish all kopteksten in a single API call.
+
+    There is no content-type selector any more. It used to offer seo_only /
+    faq_only, and both were unsafe against a replace-all endpoint: seo_only
+    dropped every FAQ-only URL and blanked content_bottom on the rest, while
+    faq_only blanked content_top for the entire corpus. With FAQ moved to
+    Publish 2.0 there is exactly one thing this endpoint publishes — content_top
+    — so the only correct payload is the whole publishable set.
 
     Args:
         environment: Target environment (dev, staging, production)
-        content_type: What to publish - "all", "seo_only", or "faq_only"
         task_id: Optional task ID for progress tracking
 
     Returns:
@@ -472,24 +338,6 @@ def publish_all_content(environment: str = None, content_type: str = "all", task
     content_items = get_all_content_items()
     t1 = time.time()
     print(f"[Publisher] Fetched {len(content_items)} items in {t1-t0:.1f}s")
-
-    # Filter based on content_type
-    if content_type == "seo_only":
-        content_items = [
-            {**item, "content_faq": "", "content_bottom": ""}
-            for item in content_items
-            if item.get("content_top")
-        ]
-        print(f"[Publisher] Publishing SEO content only")
-    elif content_type == "faq_only":
-        content_items = [
-            {**item, "content_top": ""}
-            for item in content_items
-            if item.get("content_faq")
-        ]
-        print(f"[Publisher] Publishing FAQ content only")
-    else:
-        print(f"[Publisher] Publishing all content")
 
     total_count = len(content_items)
     print(f"[Publisher] Total URLs to publish: {total_count}")
@@ -568,143 +416,8 @@ def publish_all_content(environment: str = None, content_type: str = "all", task
         }
 
 
-def publish_content_batched(batch_size: int = 5000, limit: int = None, dry_run: bool = False, environment: str = None) -> Dict:
-    """
-    Publish content in batches to avoid overwhelming the API.
-
-    Args:
-        batch_size: Number of items per API request (default: 5000)
-        limit: Maximum total items to publish (None = all)
-        dry_run: If True, just return stats without making API calls
-        environment: Target environment (dev, staging, production)
-
-    Returns:
-        Dict with results including per-batch status
-    """
-    env = environment or DEFAULT_ENV
-    api_url, api_key = get_api_config(env)
-
-    print(f"[Publisher] Fetching content from database...")
-    all_items = get_all_content_items()
-
-    # Apply limit if specified
-    if limit is not None:
-        all_items = all_items[:limit]
-
-    total_count = len(all_items)
-    print(f"[Publisher] Total URLs to publish: {total_count}")
-    print(f"[Publisher] Batch size: {batch_size}")
-    print(f"[Publisher] Target environment: {env} ({api_url})")
-
-    if dry_run:
-        num_batches = (total_count + batch_size - 1) // batch_size if total_count > 0 else 0
-        return {
-            "success": True,
-            "dry_run": True,
-            "environment": env,
-            "api_url": api_url,
-            "total_urls": total_count,
-            "batch_size": batch_size,
-            "num_batches": num_batches,
-            "payload_size_mb": round(len(json.dumps({"data": all_items})) / 1024 / 1024, 2)
-        }
-
-    if not all_items:
-        return {
-            "success": True,
-            "message": "No items to publish",
-            "environment": env,
-            "total_urls": 0
-        }
-
-    headers = {
-        "X-Api-Key": api_key,
-        "Content-Type": "application/json"
-    }
-
-    # Process in batches
-    total_published = 0
-    batch_results = []
-
-    for i in range(0, total_count, batch_size):
-        batch_num = (i // batch_size) + 1
-        batch_items = all_items[i:i + batch_size]
-
-        payload = {"data": batch_items}
-        payload_size = len(json.dumps(payload))
-
-        print(f"[Publisher] Batch {batch_num}: Sending {len(batch_items)} items ({payload_size / 1024 / 1024:.2f} MB)...")
-
-        try:
-            response = _post_with_retry(
-                api_url,
-                headers=headers,
-                json=payload,
-                timeout=300,  # 5 minute timeout per batch
-            )
-
-            batch_success = response.status_code in (200, 201)
-            batch_result = {
-                "batch": batch_num,
-                "items": len(batch_items),
-                "success": batch_success,
-                "status_code": response.status_code,
-                "response": response.text if response.text else None
-            }
-
-            if batch_success:
-                total_published += len(batch_items)
-                print(f"[Publisher] Batch {batch_num}: SUCCESS ({len(batch_items)} items)")
-            else:
-                print(f"[Publisher] Batch {batch_num}: FAILED (status {response.status_code})")
-                batch_results.append(batch_result)
-                # Stop on first failure
-                return {
-                    "success": False,
-                    "environment": env,
-                    "api_url": api_url,
-                    "total_urls": total_count,
-                    "items_published": total_published,
-                    "failed_at_batch": batch_num,
-                    "batch_results": batch_results,
-                    "error": f"Batch {batch_num} failed with status {response.status_code}"
-                }
-
-            batch_results.append(batch_result)
-
-        except requests.RequestException as e:
-            print(f"[Publisher] Batch {batch_num}: ERROR - {str(e)}")
-            batch_results.append({
-                "batch": batch_num,
-                "items": len(batch_items),
-                "success": False,
-                "error": str(e)
-            })
-            return {
-                "success": False,
-                "environment": env,
-                "api_url": api_url,
-                "total_urls": total_count,
-                "items_published": total_published,
-                "failed_at_batch": batch_num,
-                "batch_results": batch_results,
-                "error": str(e)
-            }
-
-    return {
-        "success": True,
-        "environment": env,
-        "api_url": api_url,
-        "total_urls": total_count,
-        "items_published": total_published,
-        "batch_size": batch_size,
-        "num_batches": len(batch_results),
-        "batch_results": batch_results
-    }
-
-
 # Background task functions
-def _run_publish_task(task_id: str, environment: str, content_type: str = "all"):
+def _run_publish_task(task_id: str, environment: str):
     """Background worker to run the publish task."""
     with _task_lock:
         _publish_tasks[task_id]["status"] = "running"
@@ -712,7 +425,7 @@ def _run_publish_task(task_id: str, environment: str, content_type: str = "all")
         _publish_tasks[task_id]["progress"] = {"phase": "fetching", "total_items": 0}
 
     try:
-        result = publish_all_content(environment=environment, content_type=content_type, task_id=task_id)
+        result = publish_all_content(environment=environment, task_id=task_id)
         with _task_lock:
             _publish_tasks[task_id]["status"] = "completed"
             _publish_tasks[task_id]["result"] = result
@@ -729,7 +442,10 @@ def _run_publish_task(task_id: str, environment: str, content_type: str = "all")
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (
                     environment,
-                    content_type,
+                    # The column predates the selector; there is only one kind of
+                    # publish now, and naming the field it carries is more use to
+                    # the history table than a constant "all".
+                    "content_top",
                     result.get("total_urls", 0),
                     "success",
                     result.get("payload_size_mb"),
@@ -748,14 +464,13 @@ def _run_publish_task(task_id: str, environment: str, content_type: str = "all")
             _publish_tasks[task_id]["completed_at"] = time.time()
 
 
-def start_publish_task(environment: str, content_type: str = "all") -> str:
+def start_publish_task(environment: str) -> str:
     """
     Start a background publish task.
     Returns task_id that can be used to check status.
 
     Args:
         environment: Target environment (dev, staging, production)
-        content_type: What to publish - "all", "seo_only", or "faq_only"
     """
     import uuid
     task_id = str(uuid.uuid4())[:8]
@@ -764,7 +479,7 @@ def start_publish_task(environment: str, content_type: str = "all") -> str:
         _publish_tasks[task_id] = {
             "status": "pending",
             "environment": environment,
-            "content_type": content_type,
+            "content_type": "content_top",
             "created_at": time.time(),
             "started_at": None,
             "completed_at": None,
@@ -773,7 +488,7 @@ def start_publish_task(environment: str, content_type: str = "all") -> str:
         }
 
     # Start background thread
-    thread = threading.Thread(target=_run_publish_task, args=(task_id, environment, content_type))
+    thread = threading.Thread(target=_run_publish_task, args=(task_id, environment))
     thread.daemon = True
     thread.start()
 
@@ -842,15 +557,17 @@ if __name__ == "__main__":
             print(generate_curl_command(limit=limit))
 
         elif cmd == "publish":
-            dry_run = "--dry-run" in sys.argv
-            result = publish_all_content(dry_run=dry_run)
+            # No dry-run: this used to pass dry_run=, which publish_all_content has
+            # never accepted (TypeError). Use `count`/`sample` to inspect first —
+            # and note that a publish REPLACES the live set.
+            result = publish_all_content()
             print(json.dumps(result, indent=2))
 
         else:
             print("Usage: python content_publisher.py [count|sample|curl|publish]")
-            print("  count           - Show total URLs with content")
+            print("  count           - Show total URLs that would be published")
             print("  sample [n]      - Show sample of n content items (default: 5)")
             print("  curl [n]        - Generate curl command with n items (default: 10)")
-            print("  publish [--dry-run] - Publish all content (use --dry-run to test)")
+            print("  publish         - Publish all content (REPLACES the live set)")
     else:
         print("Usage: python content_publisher.py [count|sample|curl|publish]")

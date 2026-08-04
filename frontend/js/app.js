@@ -1191,9 +1191,9 @@ async function recheckSkippedUrls() {
 
 // Refresh publish stats on page load
 window.addEventListener('DOMContentLoaded', () => {
-    // Only run if on a page with publishing elements
-    if (document.getElementById('publishStats')) {
-        refreshPublishStats();
+    // Gated on the env selector, not the old #publishStats tile row — those tiles
+    // are gone and this card's only live datum is now the last-push timestamp.
+    if (document.getElementById('publishEnvironment')) {
         fetchLastPushTimestamp();
     }
 });
@@ -1218,32 +1218,28 @@ async function fetchLastPushTimestamp() {
     }
 }
 
-async function refreshPublishStats() {
-    try {
-        const response = await fetch(`${API_BASE}/api/content-publish/stats`);
-        const data = await response.json();
-
-        document.getElementById('publishContentCount').textContent = data.content_top_count?.toLocaleString() || '-';
-        document.getElementById('publishFaqCount').textContent = data.faq_count?.toLocaleString() || '-';
-        document.getElementById('publishTotalCount').textContent = data.total_unique_urls?.toLocaleString() || '-';
-
-    } catch (error) {
-        console.error('Failed to refresh publish stats:', error);
-    }
-}
 
 async function publishContent() {
     const publishBtn = document.getElementById('publishBtn');
     const resultDiv = document.getElementById('publishResult');
     const environmentSelect = document.getElementById('publishEnvironment');
-    const contentTypeSelect = document.getElementById('publishContentType');
 
     const environment = environmentSelect.value;
-    const contentType = contentTypeSelect.value;
 
-    // Confirm for production
+    // Confirm for production. /automated-content is a full-set REPLACE, so the
+    // warning has to say that this deletes as well as writes — the old generic
+    // "are you sure" did not. The count is fetched rather than read off the card:
+    // the stat tiles are gone, and publishable_count is the payload size anyway.
     if (environment === 'production') {
-        if (!confirm('⚠️ WARNING: You are about to publish to PRODUCTION!\n\nAre you sure you want to continue?')) {
+        let live = '?';
+        try {
+            const r = await fetch(`${API_BASE}/api/content-publish/stats`);
+            if (r.ok) live = ((await r.json()).publishable_count ?? '?').toLocaleString();
+        } catch (e) { /* fall through to '?' rather than block the publish */ }
+        if (!confirm('⚠️ WARNING: You are about to publish to PRODUCTION!\n\n'
+                   + `Publishes content_top for ${live} URLs. This REPLACES the live set: `
+                   + 'any URL not in this payload is deleted from the store.\n\n'
+                   + 'Are you sure you want to continue?')) {
             return;
         }
     }
@@ -1251,12 +1247,11 @@ async function publishContent() {
     // Disable button
     publishBtn.disabled = true;
 
-    const contentTypeLabel = contentType === 'all' ? 'All Content' : (contentType === 'seo_only' ? 'SEO Only' : 'FAQ Only');
-    resultDiv.innerHTML = `<div class="alert alert-warning">Publishing ${contentTypeLabel} to ${environment}...</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Publishing kopteksten to ${environment}...</div>`;
 
     try {
         const response = await fetch(
-            `${API_BASE}/api/content-publish?environment=${environment}&content_type=${contentType}`,
+            `${API_BASE}/api/content-publish?environment=${environment}`,
             { method: 'POST' }
         );
 
@@ -1270,7 +1265,7 @@ async function publishContent() {
                     <strong>Publishing started...</strong><br>
                     Task ID: <code>${taskId}</code><br>
                     Environment: <code>${data.environment}</code><br>
-                    Content Type: <code>${data.content_type}</code><br>
+                    Publishing: <code>${data.content_type}</code><br>
                     <div class="mt-2">
                         <div class="spinner-border spinner-border-sm" role="status"></div>
                         <span id="publishStatusText">Preparing content...</span>

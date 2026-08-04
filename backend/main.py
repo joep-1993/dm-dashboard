@@ -2815,7 +2815,13 @@ async def get_content_publish_stats():
         return {
             "content_top_count": row['content_top_count'],
             "faq_count": row['faq_count'],
-            "total_unique_urls": row['total_unique_urls']
+            "total_unique_urls": row['total_unique_urls'],
+            # What a publish would actually send, and therefore keep live. The
+            # three counts above are corpus stats: they span both content tables
+            # and ignore url_validation, so none of them is the publish size.
+            # Quoting one of those in the confirm dialog would understate the
+            # deletions a replace-all publish performs.
+            "publishable_count": get_total_content_count(),
         }
 
     except Exception as e:
@@ -2863,28 +2869,29 @@ async def get_content_publish_curl(limit: int = 10, environment: str = "dev"):
 
 
 @app.post("/api/content-publish")
-async def publish_content(environment: str = "dev", content_type: str = "all"):
+async def publish_content(environment: str = "dev"):
     """
-    Publish content to the website-configuration API in a single call.
+    Publish kopteksten (content_top) to the website-configuration API in one call.
+
+    The content_type selector is gone. It offered all / seo_only / faq_only, and
+    against a replace-all endpoint the last two were destructive — faq_only blanked
+    content_top corpus-wide. FAQ content now goes out via FAQ Publish 2.0 (/faq),
+    so this endpoint publishes exactly one thing and takes no selector.
 
     Args:
         environment: Target environment (dev, staging, production)
-        content_type: What to publish - "all", "seo_only", or "faq_only"
     """
     try:
         if environment not in ("dev", "staging", "production"):
             raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
 
-        if content_type not in ("all", "seo_only", "faq_only"):
-            raise HTTPException(status_code=400, detail="Invalid content_type. Use: all, seo_only, faq_only")
-
         # Start background task for publishing
-        task_id = start_publish_task(environment=environment, content_type=content_type)
+        task_id = start_publish_task(environment=environment)
         return {
             "status": "started",
             "task_id": task_id,
             "environment": environment,
-            "content_type": content_type,
+            "content_type": "content_top",
             "message": "Publishing started in background. Use /api/content-publish/status/{task_id} to check progress."
         }
 
@@ -2941,6 +2948,38 @@ async def faq_publish_v2(request: dict = None):
         task_id = start_faq_v2_task(env=env, limit=limit, replace=replace, mode=mode)
         return {"status": "started", "task_id": task_id, "environment": env,
                 "mode": mode, "limit": limit, "replace": replace}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/faq/publish-v2/url")
+async def faq_publish_v2_url(request: dict = None):
+    """Publish ONE url's FAQ to /faq — backs the Publish button on URL Lookup.
+
+    Synchronous, not a background task: one URL is a single POST of ~6 records.
+
+    Body: {url, environment, replace}. `replace` defaults to TRUE here, the
+    opposite of the bulk run: /faq is additive, so a targeted re-push has to
+    DELETE first for the live questions to match the ones on screen.
+    """
+    request = request or {}
+    url = (request.get("url") or "").strip()
+    env = request.get("environment", "production")
+    replace = bool(request.get("replace", True))
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    if env not in ("dev", "staging", "production"):
+        raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+    try:
+        from backend.faq_v2_publisher import publish_faq_v2_url
+        result = publish_faq_v2_url(url, env=env, replace=replace)
+        # A URL with no stored FAQ is a client mistake, not a server fault, and the
+        # button should be able to say so without reading it as a crash.
+        if not result.get("success") and result.get("message") and "status_code" not in result:
+            raise HTTPException(status_code=400, detail=result["message"])
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

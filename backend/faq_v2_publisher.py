@@ -172,16 +172,48 @@ def _is_cancelled(task_id):
         return bool(t and t.get("cancel"))
 
 
+def _build_records(url, raw):
+    """Turn one stored faq_json blob into /faq records.
+
+    Returns (records, skip_reason) — exactly one of the two is None. Shared by the
+    bulk run and the single-URL publish so the two can never disagree about what a
+    valid record is.
+
+    faq_json is TEXT holding a JSON array of {question, answer} (verified: the only
+    key shape present). sort_order is the array index, so published order matches
+    generated order.
+    """
+    try:
+        items = json.loads(raw)
+    except Exception:
+        return None, "unparseable faq_json"
+    if not isinstance(items, list):
+        return None, f"faq_json is {type(items).__name__}, not a list"
+    recs = []
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            continue
+        q = (it.get("question") or "").strip()
+        a = (it.get("answer") or "").strip()
+        if not q or not a:
+            # url+question+answer are all required; an incomplete pair would
+            # 400 the entire batch.
+            continue
+        recs.append({"url": url, "question": q, "answer": a,
+                     "country_code": "NL", "sort_order": i})
+    if not recs:
+        return None, "no complete question/answer pairs"
+    return recs, None
+
+
 def _iter_url_groups(cur, limit=None, mode="new", env="production"):
     """Yield (url_id, url, md5, [records]) — one group per URL, streaming.
 
     Whole URLs, never partial: the caller stamps push state per batch, which is
     only correct if a URL's records all land in the same batch.
 
-    faq_json is TEXT holding a JSON array of {question, answer} (verified: the
-    only key shape present). sort_order is the array index, so published order
-    matches generated order. Unparseable / non-list JSON is reported as a skip
-    rather than aborting the run.
+    Record building is delegated to _build_records; unparseable / non-list JSON is
+    reported as a skip rather than aborting the run.
     """
     sql = ("SELECT f.url_id, u.url, f.faq_json, md5(f.faq_json) AS md5"
            + _BASE_FROM + (_NEW_ONLY if mode == "new" else "")
@@ -194,30 +226,8 @@ def _iter_url_groups(cur, limit=None, mode="new", env="production"):
 
     for row in cur:
         url_id, url, raw, md5 = row["url_id"], row["url"], row["faq_json"], row["md5"]
-        try:
-            items = json.loads(raw)
-        except Exception:
-            yield (url_id, url, md5, None, "unparseable faq_json")
-            continue
-        if not isinstance(items, list):
-            yield (url_id, url, md5, None, f"faq_json is {type(items).__name__}, not a list")
-            continue
-        recs = []
-        for i, it in enumerate(items):
-            if not isinstance(it, dict):
-                continue
-            q = (it.get("question") or "").strip()
-            a = (it.get("answer") or "").strip()
-            if not q or not a:
-                # url+question+answer are all required; an incomplete pair would
-                # 400 the entire batch.
-                continue
-            recs.append({"url": url, "question": q, "answer": a,
-                         "country_code": "NL", "sort_order": i})
-        if not recs:
-            yield (url_id, url, md5, None, "no complete question/answer pairs")
-            continue
-        yield (url_id, url, md5, recs, None)
+        recs, skip_reason = _build_records(url, raw)
+        yield (url_id, url, md5, recs, skip_reason)
 
 
 def _post_batch(records, env):
@@ -379,6 +389,90 @@ def publish_faq_v2(env="production", limit=None, replace=False, mode="new", task
     bad = [b for b in batch_results if not b["ok"]]
     if bad:
         result["failed_batches"] = bad[:10]
+    return result
+
+
+def publish_faq_v2_url(url, env="production", replace=True):
+    """Push ONE url's FAQ to /faq, synchronously.
+
+    Backs the Publish button on the URL Lookup card, so it runs inline rather than
+    as a background task: one URL is ~6 records and a single POST, and the caller
+    is looking at the answer.
+
+    replace=True by default, unlike the bulk run. /faq is additive, so without a
+    DELETE first, questions that were regenerated under different wording stay
+    live alongside the new ones — and the whole point of publishing from the lookup
+    card is to make the live set match the FAQ shown on screen. It is one extra
+    request for one URL, which is exactly the "narrow re-push" the module docstring
+    reserves replace for.
+
+    Push state is stamped on success, so a later mode="new" bulk run skips this URL
+    instead of re-sending it.
+    """
+    if env not in FAQ_API_URLS:
+        return {"success": False, "message": f"unknown env {env!r}"}
+    if not FAQ_API_KEYS[env]():
+        return {"success": False, "message": f"no API key configured for env {env!r}"}
+
+    started = time.time()
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        _ensure_state_table(cur)
+        conn.commit()
+        # Match on the stored url. The lookup card hands back pa.urls.url verbatim,
+        # so this is an exact hit; canonicalizing again would only risk drifting
+        # away from the row the user is looking at.
+        cur.execute("""
+            SELECT f.url_id, u.url, f.faq_json, md5(f.faq_json) AS md5
+            FROM pa.faq_content_v2 f
+            JOIN pa.urls u ON u.url_id = f.url_id
+            WHERE u.url = %s
+              AND f.faq_json IS NOT NULL AND f.faq_json <> ''
+            LIMIT 1
+        """, (url,))
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        return_db_connection(conn)
+
+    if not row:
+        return {"success": False, "url": url, "env": env,
+                "message": "no FAQ content stored for this URL"}
+
+    records, skip_reason = _build_records(row["url"], row["faq_json"])
+    if skip_reason:
+        return {"success": False, "url": row["url"], "env": env, "message": skip_reason}
+
+    # A failed DELETE is reported, not fatal: the POST still upserts the current
+    # questions, it just cannot guarantee that superseded ones are gone.
+    deleted = None
+    if replace:
+        try:
+            ok_del, code_del = _delete_url(row["url"], env)
+            deleted = {"ok": ok_del, "status_code": code_del}
+        except Exception as e:
+            deleted = {"ok": False, "error": str(e)}
+
+    ok, code, text = _post_batch(records, env)
+    if ok:
+        _stamp_state([(row["url_id"], row["md5"], len(records))], env)
+
+    result = {
+        "success": ok,
+        "url": row["url"],
+        "env": env,
+        "api_url": FAQ_API_URLS[env],
+        "records_pushed": len(records) if ok else 0,
+        "records": len(records),
+        "replace": replace,
+        "status_code": code,
+        "duration_sec": round(time.time() - started, 1),
+    }
+    if deleted is not None:
+        result["deleted_first"] = deleted
+    if not ok:
+        result["response"] = text
     return result
 
 

@@ -148,9 +148,9 @@ function resetBatchUI() {
 // Initialize on page load
 window.addEventListener('DOMContentLoaded', () => {
     refreshFaqStatus();
-    // Refresh publish stats if on a page with publishing elements
-    if (document.getElementById('publishStats')) {
-        refreshPublishStats();
+    // Gated on the env selector, not the old #publishStats tile row — those tiles
+    // are gone and this card's only live datum is now the last-push timestamp.
+    if (document.getElementById('publishEnvironment')) {
         fetchLastPushTimestamp();
     }
 
@@ -878,139 +878,6 @@ async function fetchLastPushTimestamp() {
     }
 }
 
-async function refreshPublishStats() {
-    try {
-        const response = await fetch(`${API_BASE}/api/content-publish/stats`);
-        const data = await response.json();
-
-        document.getElementById('publishContentCount').textContent = data.content_top_count?.toLocaleString() || '-';
-        document.getElementById('publishFaqCount').textContent = data.faq_count?.toLocaleString() || '-';
-        document.getElementById('publishTotalCount').textContent = data.total_unique_urls?.toLocaleString() || '-';
-
-    } catch (error) {
-        console.error('Failed to refresh publish stats:', error);
-    }
-}
-
-async function publishContent() {
-    const publishBtn = document.getElementById('publishBtn');
-    const resultDiv = document.getElementById('publishResult');
-    const environmentSelect = document.getElementById('publishEnvironment');
-    const contentTypeSelect = document.getElementById('publishContentType');
-
-    const environment = environmentSelect.value;
-    const contentType = contentTypeSelect.value;
-
-    // Confirm for production
-    if (environment === 'production') {
-        if (!confirm('⚠️ WARNING: You are about to publish to PRODUCTION!\n\nAre you sure you want to continue?')) {
-            return;
-        }
-    }
-
-    // Disable button
-    publishBtn.disabled = true;
-
-    const contentTypeLabel = contentType === 'all' ? 'All Content' : (contentType === 'seo_only' ? 'SEO Only' : 'FAQ Only');
-    resultDiv.innerHTML = `<div class="alert alert-warning">Publishing ${contentTypeLabel} to ${environment}...</div>`;
-
-    try {
-        const response = await fetch(
-            `${API_BASE}/api/content-publish?environment=${environment}&content_type=${contentType}`,
-            { method: 'POST' }
-        );
-
-        const data = await response.json();
-
-        if (response.ok) {
-            // Background task started - poll for status
-            const taskId = data.task_id;
-            resultDiv.innerHTML = `
-                <div class="alert alert-warning">
-                    <strong>Publishing started...</strong><br>
-                    Task ID: <code>${taskId}</code><br>
-                    Environment: <code>${data.environment}</code><br>
-                    Content Type: <code>${data.content_type}</code><br>
-                    <div class="mt-2">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                        <span id="publishStatusText">Preparing content...</span>
-                    </div>
-                </div>
-            `;
-
-            // Poll for status
-            pollPublishStatus(taskId, resultDiv, publishBtn);
-        } else {
-            resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(data.detail || 'Unknown error')}</div>`;
-            publishBtn.disabled = false;
-        }
-
-    } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
-        publishBtn.disabled = false;
-    }
-}
-
-async function pollPublishStatus(taskId, resultDiv, publishBtn) {
-    try {
-        const response = await fetch(`${API_BASE}/api/content-publish/status/${taskId}`);
-        const data = await response.json();
-
-        if (data.status === 'running' || data.status === 'pending') {
-            // Still running - update status text and poll again
-            const statusText = document.getElementById('publishStatusText');
-            if (statusText) {
-                statusText.textContent = data.status === 'running' ? 'Sending content to API...' : 'Starting...';
-            }
-            setTimeout(() => pollPublishStatus(taskId, resultDiv, publishBtn), 2000);
-        } else if (data.status === 'completed') {
-            // Done - show results
-            const result = data.result || {};
-            const alertClass = result.success ? 'success' : 'warning';
-
-            let html = `
-                <div class="alert alert-${alertClass}">
-                    <strong>Publishing Complete!</strong><br>
-                    Environment: <code>${result.environment}</code><br>
-                    API URL: <code>${result.api_url}</code><br>
-                    Total URLs: ${result.total_urls?.toLocaleString() || 0}<br>
-                    Items published: ${result.items_published?.toLocaleString() || 0}<br>
-                    Payload size: ${result.payload_size_mb || 0} MB<br>
-                    Status code: ${result.status_code || 'N/A'}
-                </div>
-            `;
-
-            if (result.response) {
-                html += `
-                    <div class="alert alert-secondary mt-2">
-                        <strong>API Response:</strong><br>
-                        <small><code>${result.response}</code></small>
-                    </div>
-                `;
-            }
-
-            if (result.error) {
-                html += `<div class="alert alert-danger mt-2"><strong>Error:</strong> ${result.error}</div>`;
-            }
-
-            resultDiv.innerHTML = html;
-            publishBtn.disabled = false;
-            fetchLastPushTimestamp();
-        } else if (data.status === 'failed') {
-            // Failed
-            resultDiv.innerHTML = `
-                <div class="alert alert-danger">
-                    <strong>Publishing Failed</strong><br>
-                    Error: ${data.error || 'Unknown error'}
-                </div>
-            `;
-            publishBtn.disabled = false;
-        }
-    } catch (error) {
-        resultDiv.innerHTML = `<div class="alert alert-danger">Error checking status: ${escapeHtml(error.message)}</div>`;
-        publishBtn.disabled = false;
-    }
-}
 
 // ============================================================================
 // FAQ URL Lookup
@@ -1059,21 +926,78 @@ async function lookupFaqContent() {
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <code style="word-break: break-all;">${data.url}</code>
-                    <div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-outline-orange btn-sm" id="publishOneBtn"
+                                onclick="publishFaqOne('${encodeURIComponent(data.url)}')"
+                                title="Push just this URL's Q&amp;A pairs to the /faq section (deletes its live questions first, so they match what is shown here)">
+                            Publish
+                        </button>
                         <button class="btn btn-outline-danger btn-sm" onclick="deleteFaqAndReset('${encodeURIComponent(data.url)}')">
-                            Delete & Reset to Pending
+                            Delete
                         </button>
                     </div>
                 </div>
                 <div class="card-body">
                     <p class="text-muted small mb-2">Title: <strong>${escapeHtml(data.page_title || 'N/A')}</strong> | Created: ${createdAt}</p>
                     <div style="max-height: 400px; overflow-y: auto;">${faqHtml}</div>
+                    <!-- Publish writes here rather than into #faqLookupResult, which
+                         holds this whole card — reusing it would delete the card. -->
+                    <div id="publishOneResult" class="mt-2"></div>
                 </div>
             </div>
         `;
 
     } catch (error) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// Publish just this URL to /faq. Synchronous — one URL is a single POST of ~6
+// records, so there is no task to poll. Environment comes from the Content
+// Publishing card's selector, so both publishes on this page target the same env.
+async function publishFaqOne(encodedUrl) {
+    const url = decodeURIComponent(encodedUrl);
+    const btn = document.getElementById('publishOneBtn');
+    const out = document.getElementById('publishOneResult');
+    const envSelect = document.getElementById('publishEnvironment');
+    const environment = envSelect ? envSelect.value : 'production';
+
+    if (!confirm(`Publish this URL's FAQ → ${environment}?\n\n${url}\n\n`
+               + `Its live questions are deleted first, so what ends up published `
+               + `matches the Q&A shown here.`)) return;
+
+    if (btn) btn.disabled = true;
+    out.innerHTML = `<div class="alert alert-warning py-2 mb-0">`
+        + `<span class="spinner-border spinner-border-sm"></span> Publishing to ${escapeHtml(environment)}…</div>`;
+
+    try {
+        const res = await fetch(`${API_BASE}/api/faq/publish-v2/url`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, environment })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            out.innerHTML = `<div class="alert alert-danger py-2 mb-0">${escapeHtml(data.detail || 'Publish failed')}</div>`;
+        } else if (data.success) {
+            // A failed pre-delete still leaves a successful push, but the live set
+            // may carry superseded questions — say so rather than a bare "done".
+            const warn = (data.deleted_first && data.deleted_first.ok === false)
+                ? ` <strong class="text-danger">Could not delete the old questions first — superseded ones may still be live.</strong>`
+                : '';
+            out.innerHTML = `<div class="alert alert-success py-2 mb-0">`
+                + `Published <strong>${data.records_pushed}</strong> Q&amp;A record(s) to `
+                + `<code>${escapeHtml(data.env)}</code> in ${data.duration_sec}s.${warn}</div>`;
+        } else {
+            out.innerHTML = `<div class="alert alert-danger py-2 mb-0">`
+                + `Publish failed (HTTP ${escapeHtml(String(data.status_code))}): `
+                + `${escapeHtml(data.response || data.message || '')}</div>`;
+        }
+    } catch (e) {
+        out.innerHTML = `<div class="alert alert-danger py-2 mb-0">Error: ${escapeHtml(e.message)}</div>`;
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -1099,11 +1023,17 @@ function escapeHtml(text) {
 }
 
 // ---------------------------------------------------------------------------
-// Publish 2.0 — FAQ Q&A pairs -> website-configuration /faq
+// Publish — FAQ Q&A pairs -> website-configuration /faq
 //
-// A DIFFERENT store from the plain Publish button, which posts one blob per URL
-// to /automated-content. /faq takes one record per QUESTION (url/question/answer
-// + optional country_code/sort_order) and upserts on (url, question).
+// Called "Publish 2.0" until 2026-08-04, when it became this page's only publish.
+// The button next to it posted one blob per URL to /automated-content; that store
+// no longer carries FAQ at all (content_bottom retired, content_faq was always
+// silently discarded), so it was publishing nothing of this page's and is gone.
+// /faq takes one record per QUESTION (url/question/answer + optional
+// country_code/sort_order) and upserts on (url, question).
+//
+// The function and its element ids keep their V2 names — renaming them would
+// touch the poller, the cancel path and the disable/enable logic for a relabel.
 //
 // Defaults to mode="new": only URLs never pushed or whose faq_json changed, via
 // pa.faq_v2_push_state. `full=true` re-pushes everything (~1.7M records) and is
@@ -1161,7 +1091,7 @@ async function publishFaqV2(full = false) {
                 ? `ALL ${nf(stats.urls_total)} URLs (~${nf(stats.est_records_total)} records)`
                 : `${nf(stats.urls_pending)} new/changed URLs (~${nf(stats.est_records_pending)} records)`;
             if (!confirm(
-                `Publish 2.0 → ${environment}\n\n` +
+                `Publish → ${environment}\n\n` +
                 `Pushes ${what} to the /faq section, one record per question.\n` +
                 `${nf(stats.urls_pushed)} of ${nf(stats.urls_total)} URLs already pushed.\n\n` +
                 `This endpoint is ADDITIVE: it upserts on (url, question), so questions ` +
@@ -1169,14 +1099,14 @@ async function publishFaqV2(full = false) {
                 return;
             }
         }
-    } else if (!confirm(`Publish 2.0 → ${environment}\n\nCould not read the counts. Continue anyway?`)) {
+    } else if (!confirm(`Publish → ${environment}\n\nCould not read the counts. Continue anyway?`)) {
         return;
     }
 
     btn.disabled = true;
     if (fullBtn) fullBtn.disabled = true;
     faqV2CancelRequested = false;
-    resultDiv.innerHTML = `<div class="alert alert-warning">Starting Publish 2.0 (${escapeHtml(mode)}) to ${escapeHtml(environment)}…</div>`;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Starting Publish (${escapeHtml(mode)}) to ${escapeHtml(environment)}…</div>`;
 
     try {
         const res = await fetch(`${API_BASE}/api/faq/publish-v2`, {
@@ -1194,7 +1124,7 @@ async function publishFaqV2(full = false) {
         // unknown).
         resultDiv.innerHTML = `
             <div class="alert alert-warning">
-                <strong>Publish 2.0 running…</strong> <span class="badge badge-purple">${escapeHtml(mode)}</span><br>
+                <strong>Publish running…</strong> <span class="badge badge-purple">${escapeHtml(mode)}</span><br>
                 Task ID: <code>${escapeHtml(data.task_id)}</code><br>
                 Target: <code>${escapeHtml(environment)}</code> /faq
                 <div class="d-flex justify-content-between align-items-center small text-muted mt-2 mb-1">
@@ -1307,7 +1237,7 @@ function pollFaqV2(taskId, btn, resultDiv) {
             } else if (data.status === 'failed' || r.success === false) {
                 resultDiv.innerHTML = `
                     <div class="alert alert-danger">
-                        <strong>Publish 2.0 finished with errors</strong><br>
+                        <strong>Publish finished with errors</strong><br>
                         ${escapeHtml(data.error || r.message || '')}
                         ${r.records_pushed !== undefined
                             ? `Pushed ${nf(r.records_pushed)}, failed ${nf(r.records_failed)} `
@@ -1319,13 +1249,13 @@ function pollFaqV2(taskId, btn, resultDiv) {
             } else {
                 resultDiv.innerHTML = `
                     <div class="alert alert-done-yellow">
-                        <strong>Publish 2.0 done</strong> <span class="badge badge-purple">${escapeHtml(r.mode || '')}</span><br>
+                        <strong>Publish done</strong> <span class="badge badge-purple">${escapeHtml(r.mode || '')}</span><br>
                         ${nf(r.records_pushed)} records across ${nf(r.urls_processed)} URLs
                         in ${r.batches} batches (${r.duration_sec}s) → <code>${escapeHtml(r.api_url || '')}</code>
                         ${r.skipped_count ? `<br><span class="text-muted">${r.skipped_count} URL(s) skipped (unusable faq_json)</span>` : ''}
                     </div>`;
             }
-            if (typeof refreshPublishStats === 'function') refreshPublishStats();
+            fetchLastPushTimestamp();
         }
     }, 2000);
 }
