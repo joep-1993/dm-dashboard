@@ -23,8 +23,6 @@
         .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .tool-table th.sortable.sort-asc::after { content: '▲'; opacity: 0.9; }
         .tool-table th.sortable.sort-desc::after { content: '▼'; opacity: 0.9; }
-        .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
-        .filter-row select, .filter-row input { font-size: 0.9rem; }
         .flag-yes { color: #00b894; font-weight: 600; }
         .flag-no  { color: #b2bec3; }
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
@@ -129,17 +127,18 @@
         <!-- Results Section -->
         <div id="resultsSection" style="display: none;">
             <div class="card mb-4">
-                <div class="card-header">
+                <!-- Copy / Export sit in the card header, far right, next to the
+                     "Results" title (Joep, 2026-08-04) — not in a .filter-row. There is
+                     no filter on this table, so a filter-row would have been a bar
+                     holding nothing but two right-aligned buttons. -->
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">Results</h5>
-                </div>
-                <div class="card-body">
-                    <!-- Action buttons live in a .filter-row above the table, not in the
-                         card header (cc1/UI_BLUEPRINT.md "Tables"), so they share one
-                         baseline with any filter added later. -->
-                    <div class="filter-row d-flex gap-2 align-items-center mb-3">
-                        <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.backgroundColor='#5e4a90';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#5e4a90'" onclick="copyAllToClipboard()">Copy</button>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.backgroundColor='#5e4a90';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#5e4a90'" onclick="copyAllToClipboard()">Copy</button>
                         <button class="btn btn-sm" style="border: 1px solid #CC5500; color: #CC5500; background: transparent;" onmouseover="this.style.backgroundColor='#CC5500';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#CC5500'" onclick="exportExcel()">Export</button>
                     </div>
+                </div>
+                <div class="card-body">
                     <div class="table-responsive tool-table-wrap">
                         <table class="table table-sm table-hover tool-table mb-0">
                             <thead class="table-light" id="resultsHead"></thead>

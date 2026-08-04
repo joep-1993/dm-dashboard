@@ -92,6 +92,13 @@ other tool uses the grey default. New tools follow the grey default.
   on the left and the action buttons pushed right (`ms-auto` on the first right item),
   so filter and buttons share a single baseline height. Sort arrows use the
   `th.sortable::after` `⇅`/`▲`/`▼` glyph pattern (see "Campaigns created" in GSD Campaigns).
+  - **Exception — a table with NO filter puts its export actions in the card header,**
+    far right, next to the title (`card-header d-flex justify-content-between
+    align-items-center`). Joep, 2026-08-04, on GSD Check and MC ID Finder: a
+    `.filter-row` holding nothing but two right-aligned buttons is a bar that exists
+    for no reason, and the card title row is already the right home for
+    Copy/Export. The `.filter-row` rule stands wherever there IS a filter to pair
+    the buttons with — that is what the shared baseline is for.
 - **Sortable headers**: add `class="sortable" data-sort="<key>" onclick="sortBy('<key>')"`.
   The `.sortable` CSS shows a `⇅` idle glyph and `▲`/`▼` for the active sort
   direction (toggled by adding `sort-asc` / `sort-desc` to the active `<th>`).
