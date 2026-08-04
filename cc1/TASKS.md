@@ -4,6 +4,34 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-04 — GSD Check: is_pixel_shop erbij, en de laatste twee tabellen naar de blueprint
+
+- [x] **`is_pixel_shop` in GSD Check** (`1ae749e`), uit **dezelfde** as-of-gisteren snapshot als de
+      GSD-vlaggen (`bt.shop_main_attributes_by_day`, niet `shop_list`). Dat is het hele punt: GSD
+      Campaigns leidt `model` af als CPR bij `is_wecantrack_shop OR is_pixel_shop`, anders CPC — en de
+      tracking-vlag valt weg in dezelfde feed-update als de GSD-vlag. Uit twee verschillende as-of
+      datums lezen zou precies de casus verbergen waarvoor je de tool opent. Direct zichtbaar:
+      gisteren staan alle drie Emob-shops op `pixel=1` mét GSD-vlag 1; vandaag vielen beide weg.
+- [x] **GSD Check + MC ID Finder result-tables volgen nu UI_BLUEPRINT § Tables.** Dit waren de laatste
+      twee met de oude paarse uppercase header op een plain `.table`. Nu grijs `#f8f9fa`, sticky,
+      1rem headers op `table table-sm table-hover tool-table` + `thead.table-light`, body 0.9rem, in
+      een omrande `.tool-table-wrap`. Kolomstrategie = **content widths + horizontale scroll**
+      (`width:max-content; min-width:100%` + nowrap): GSD Check heeft nu tien kolommen en MC ID Finder
+      bouwt zijn landkolommen at runtime, dus elke waarde moet volledig leesbaar blijven. Copy/Export
+      uit de card-header naar een `.filter-row` bóven de tabel, en herbenoemd naar **"Copy" / "Export"**
+      (zoals de Campaigns-created toolbar). Sorteerglyphs ↑/↓ → ▲/▼. [[feedback_ui_blueprint]]
+      **Valkuil bij zo'n class-rename:** `sortBy()` doet
+      `querySelectorAll('.result-table th.sortable')` — vergeet je die, dan verdwijnt de actieve
+      sorteerpijl geruisloos terwijl het sorteren zelf blijft werken.
+- [x] **Emob.be `no_live_campaigns_to_pause` was géén nieuwe bug** — de fix (`802cc7f`, 14:26) zat op
+      disk en in GitHub, maar de draaiende uvicorn was om 14:21 gestart (4,5 min ervóór) en heeft geen
+      `--reload`. De runs van 14:54/14:56 liepen dus nog op oude code. Herstart om 15:41 loste het op.
+      **Les: bij "de fix werkt niet" eerst `ps -o lstart` van de uvicorn tegen de commit-tijd zetten
+      voordat je de code gaat debuggen.** [[dm_tools_backend_no_reload]]
+- [ ] **Emob.nl en Emob-moebel.de nog controleren** — die stonden in dezelfde stale runs, dus hun
+      campagnes zijn vermoedelijk ook nog niet gepauzeerd. Na een nieuwe run verifiëren in de
+      accounts zelf, niet op de run-samenvatting.
+
 ### 2026-08-04 — Kopteksten-publish is content_top-only, FAQ splitst af
 
 - [x] **`content_faq` en `content_bottom` uit de kopteksten-publish** (`152661d`). Zie LEARNINGS: de

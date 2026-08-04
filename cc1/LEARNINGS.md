@@ -1,6 +1,37 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## "De fix werkt niet" — kijk eerst naar de starttijd van de uvicorn (2026-08-04)
+
+Emob.be werd na de GSD-fix nog steeds geskipt met `no_live_campaigns_to_pause`. Er was niets mis
+met de fix:
+
+    fix 802cc7f gecommit    14:26:12
+    uvicorn pid 35982 op    14:21:42   <- 4,5 min ervóór, en géén --reload
+    runs (activity log)     14:54, 14:56
+
+De runs liepen dus op code van vóór de fix, terwijl `git log` en GitHub allebei zeiden dat het
+opgelost was. Herstart om 15:41 → probleem weg.
+
+- **Diagnostisch recept:** `ps -o pid,lstart -p <pid>` (of `ss -ltnp | grep 8003` voor de pid) tegen
+  `git log -1 --format=%ad <fix-commit>`. Start de proces vóór de commit? Dan debug je code die niet
+  draait. De rigoureuze vorm is `stat -c %y <bestand>` vs de starttijd van het proces.
+- **Let op de tijdzone bij de activity log:** die timestamps staan in UTC, de klok van de machine in
+  CEST. 12:56 UTC = 14:56 lokaal; zonder die correctie lijkt een run vóór de fix te vallen terwijl
+  hij erna kwam. [[postgres_utc_timestamps_display]]
+- Blijft gelden: het lokale :8003 draait zónder `--reload`, dus **backend**-wijzigingen zijn pas live
+  na kill+relaunch; frontend-bestanden worden per request van disk gelezen en zijn direct live. Dat
+  asymmetrische gedrag is precies waarom dit zo lang onopgemerkt bleef. [[dm_tools_backend_no_reload]]
+
+## Een class-rename in een tabel kan de sorteerpijl geruisloos slopen (2026-08-04)
+
+Bij het omzetten van GSD Check en MC ID Finder naar de blueprint-tabel werd `.result-table`
+`.tool-table`. Het sorteren zelf bleef werken (dat is JS op de dataset), maar
+`sortBy()` zet de `sort-asc`/`sort-desc`-class via
+`document.querySelectorAll('.result-table th.sortable')` — met de oude selector matcht dat niets
+meer, dus de **actieve pijl verdwijnt zonder enige fout**. Bij een tabel-class-rename dus altijd
+grep'en op de oude classnaam in het JS, niet alleen in de markup en CSS.
+
 ## `/automated-content` is een REPLACE, geen upsert — en `content_faq` werd nooit opgeslagen (2026-08-04)
 
 Bewezen op staging: één url geseed via het nieuwe `/automated-content/records`, daarna een
