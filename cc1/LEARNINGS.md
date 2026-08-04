@@ -1,6 +1,115 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `/automated-content` is een REPLACE, geen upsert — en `content_faq` werd nooit opgeslagen (2026-08-04)
+
+Bewezen op staging: één url geseed via het nieuwe `/automated-content/records`, daarna een
+batch-payload gepost die alléén een ándere url bevatte → de eerste was weg. De docstring noemde
+het een "full-set upsert" en het woord *full-set* deed al het werk: **elke url die niet in de
+payload zit, wordt verwijderd.** Dat is de reden dat één koptekst wijzigen ~1,5 GB en 14–21
+minuten kostte (`pa.publish_log`: 250k–274k urls, 1.555–1.830 MB, 863–1.275 s per run).
+
+- **`content_faq` bestond niet.** De batch-endpoint accepteert het veld en gooit het stil weg (gepost
+  op staging, record kwam terug zónder), en `/automated-content/records` weigert het hard met
+  `content_faq: This field was not expected`. Het was **792 MB `schema_org` over 255.761 rijen** in
+  élke upload die nergens landde. FAQ-schema gaat via `/faq` (Publish 2.0).
+- **`content_bottom` is verplicht** (`Row N: Missing field(s): content_bottom`), dus je kunt het niet
+  weglaten — `""` sturen is zowel de enige geldige vorm als precies wat de oude waarden opruimt.
+- **Nieuw: `POST /automated-content/records`** = échte per-record upsert op `(url, country_language)`.
+  Semantiek geverifieerd: veld weggelaten → blijft staan, expliciet `null` → blijft staan, `""` →
+  wist, `country_language` default `nl-nl`, onbekend veld → 400. Plus `GET ...?url=` met `*`/`%`
+  wildcard (limit default 100, max 1000) en `DELETE ...?url=`. Record: `id, country_language, url,
+  content_top, content_bottom, created_at` — géén `content_faq`.
+- **`content_type` seo_only/faq_only waren dodelijk** tegen een replace-endpoint: `seo_only` liet elke
+  FAQ-only url vallen en blankte `content_bottom`, `faq_only` blankte `content_top` corpusbreed.
+  Beide weg; er valt nu maar één ding te publiceren.
+- `publish_content_batched` was onbereikbaar én fataal: elke batch had de vorige gewist, dus
+  productie hield alleen de láátste batch over. Verwijderd. [[redirect_api_behavior]]
+
+## De Keywords API accepteert BEIDE id-ruimtes — maincat-sitemaps bestonden al (2026-08-04)
+
+De contract-notitie in `healthscore_keywords.py` zei dat een "32000-style id een lege set
+teruggeeft — negeer ze". **Onjuist**, en precies de aanname die een maincat-push zou blokkeren.
+
+- De 32 top-level categorieën hebben **kleine ids** (`parentId IS NULL`): 137 `/mode/` 53.411
+  records, 165 `/huis_tuin/` 68.209, 32000 `/schoenen/` 27.883, 6 `/computers/` 7.531. Alles
+  daaronder is 9xxxxxx. `deepest_category_id` "mengt" die ruimtes dus niet uit corruptie — de
+  taxonomie ís zo.
+- **Die maincat-buckets bevatten al urls uit diepere categorieën**: het eerste record van bucket 6 is
+  `/products/computers/computers_19664320/c/merk~24100313`. Een rollup op maincat-niveau kiest dus
+  alleen de inhoud van iets dat het kanaal al rendert.
+- `GET /api/Categories/{id}` geeft maar **één** niveau `subCategories` (vanaf Computers lijkt 9005167
+  bladeren te hebben = 0, maar direct opgevraagd heeft het 10 kinderen). De lijst-endpoint geeft er
+  géén. Een volledige boom vergt dus een recursieve walk — die we niet nodig bleken te hebben.
+
+## `datamart.dim_category` is de gratis closure, en `is_lowest_category` de goedkope blad-test (2026-08-04)
+
+Voor de maincat-rollup was een parent→child closure nodig. Die bestaat al en wordt voor ons
+onderhouden: `dim_category` is **1:1 op `deepest_category_id`** (3.571 rijen, nul duplicaten bij
+`deleted_ind = 0`), en `main_category_id` staat in **dezelfde id-ruimte als de Keywords-API buckets**.
+
+- Dus: geen recursieve Taxonomy-API-walk over ~3.500 categorieën, en geen eigen cache die
+  verschraalt wanneer een restructure parent→children herverdeelt. Een join kan niet fan-outen.
+- **`is_lowest_category` vervangt de pre-flight blad-check**: Stoelen (9000047) en Shirts (9000668)
+  zijn beide `deepest_cat_level = 2, is_lowest_category = 0`. Dat is één query in plaats van ~3.500
+  taxonomie-calls om te bepalen of een pilotcategorie een blad is. `main_category_id` −1 "Niet
+  bekend" en 0 "Beslist.nl" zijn sentinels en mogen nooit een push-target worden.
+
+## De coverage-knie werkt NIET op maincat-niveau (2026-08-04)
+
+`knee90` vraagt hoeveel urls 90% van de all-channel visits van een bucket dekken. Bij een categorie
+concentreert traffic; bij een maincat niet — dus de knie wilde **226.013 urls voor Woonaccessoires**
+(van 675.252) en **293.879 voor Kleding**, tegen live sets van 55.266 en 47.455. Totaal 1.460.080
+aan headroom over 32 maincats.
+
+- Vervangen door **1,5 × de live set** (`build_maincat_caps_from_live`): totaal 676.564, selectie
+  653.785. Live geteld in **distinct urls**, niet records — de API-grain is `(url, keyword)`, dus een
+  recordcount blaast elke cap 10–20% op.
+- De seizoensmultiplier is er bewust **niet** op gelegd: bij `mult_max` wordt dat 3,75 × live, wat
+  precies de ongevalideerde extrapolatie terugbrengt die we vermijden. Deepest-cat caps houden hun
+  seizoen.
+
+## Een within-category percentile kun je niet poolen (2026-08-04)
+
+`score = 0.889 * percent_rank() OVER (PARTITION BY deepest_category_id ...) + 0.111 * ...` is
+dimensieloos en **relatief aan de eigen categorie**. De 2e-beste url in een categorie met 20 urls
+haalt ~0,95; een veel sterkere url in een categorie met 5.000 urls zit op 0,80. Ruwe scores poolen
+promoveert dus systematisch dunne categorieën. Voor de maincat-pass wordt de percentile
+**hergepartitioneerd op maincat** — zelfde functievorm, andere pool. **Let op:** de gewichten
+0.889/0.111 zijn gefit op within-deepest-cat percentiles en zijn op maincat-niveau nog
+ongevalideerd (32 backtests open).
+
+## `/p/` productpagina's ontglippen aan de `type_url == 'PLP'`-filter (2026-08-04)
+
+Het kanaal draagt geen productpagina's, maar de payload-builders filterden op `type_url == 'PLP'` —
+en `/p/`-urls komen óók binnen als `R-url` of ongetypeerd. 14 stuks kwamen in de maincat-payloads
+(Napapijri-jassen onder `/mode/`, EAN-achtige pagina's onder `/huis_tuin/`) en werden alleen door
+`validate_payload` tegengehouden, dus ná de build.
+
+- `is_product_path()` matcht nu het **pad** in plaats van het label, in **beide** builders en
+  onvoorwaardelijk: `include_plp` is een keuze over listing-pagina's, nooit een licentie om
+  productpagina's te publiceren. `/products/` is geen false positive (de substring is exact
+  slash-p-slash).
+- De deepest-cat builder had hetzelfde gat maar was er nog niet tegenaan gelopen: een productpagina
+  moet eerst de top-N van één categorie halen, en een maincat-pool is veel breder. Bewijs: `product:
+  0` bij alle 10 testcategorieën, `product: 4` bij Kantoor — een categorie die de fix nooit had gezien.
+
+## Rapporteer de rollup in distinct urls, niet in rijen (2026-08-04)
+
+Met de rollup live kan één url in zijn eigen deepest-cat bucket **én** in zijn maincat bucket zitten.
+Van de 653.785 geselecteerde maincat-urls zijn er **647.643 al live onder hun eigen categorie**: een
+rijtelling zou ~2M claimen waar de echte union **1.319.882** is — 6.142 meer dan de deepest-cat set
+alleen. `combined_sitemap_urls()` zet die overlap expliciet in de output. Consequentie voor de
+verwachtingen: de maincat-rollup is vooral een **browse-surface**, geen coverage-uitbreiding.
+
+## In `healthscore_service` geeft `_redshift()` gewone tuples (2026-08-04)
+
+De spiegel van de eerdere RealDictCursor-les. `backend.database`'s pools geven mappings, maar
+`healthscore_service._redshift()` levert een **plain cursor** — de zustermethodes
+(`_refresh_cat_knee`, `_refresh_cat_month`) indexeren dan ook positioneel. Nieuwe functies die op
+naam indexeren geven `TypeError: tuple indices must be integers`. Ook: dit module leest env-vars
+direct via `os.environ["REDSHIFT_HOST"]`, dus standalone draaien vraagt eerst `load_dotenv()`.
+
 ## Eén oorzaak, drie manieren waarop een uitgezette shop níet gepauzeerd wordt (2026-08-04)
 
 Emob.nl, Emob.be en Emob-moebel.de gingen op 4 aug alle drie uit. Geen enkele werd

@@ -4,6 +4,81 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-04 — Kopteksten-publish is content_top-only, FAQ splitst af
+
+- [x] **`content_faq` en `content_bottom` uit de kopteksten-publish** (`152661d`). Zie LEARNINGS: de
+      batch-endpoint is een REPLACE, `content_faq` werd altijd stil weggegooid (792 MB per upload) en
+      `content_bottom` is nu van Publish 2.0. Payload valt van ~1,5 GB naar ~280 MB en van 265.151 naar
+      251.248 urls; de 13.902 FAQ-only urls verdwijnen daarmee uit die store (correct — zonder
+      `content_bottom` zouden dat lege rijen zijn). `content_bottom` gaat als `""` mee omdat het veld
+      verplicht is, en dát ruimt de oude waarden op.
+- [x] **`content_type`-selector weg** uit de API en beide frontends (seo_only/faq_only waren
+      destructief tegen een replace-endpoint). `publish_log.content_type` logt nu `content_top`.
+- [x] **FAQ URL Lookup: Publish-knop toegevoegd** naast Delete, via nieuwe `POST
+      /api/faq/publish-v2/url` + `publish_faq_v2_url()`. Synchroon (één url ≈ 6 records, één POST) en
+      `replace=True` als default — omgekeerd aan de bulkrun, want `/faq` is additief en een gerichte
+      re-push moet eerst DELETE'en om te matchen met wat op het scherm staat. Record-bouw naar
+      `_build_records()` zodat bulk en single niet kunnen divergeren. "Delete & Reset to Pending" →
+      "Delete" (de confirm zegt nog steeds dat hij op pending zet, want dat doet hij).
+- [x] **Performance Standup terug als losse tool onder SEO tools** (`cdf1e1e`) — nav-entry op 32
+      pagina's + dashboard-tile terug; de tool zelf was nooit stuk, alleen onbereikbaar.
+- [ ] **Excel-exports emitten nog `content_faq`/`content_bottom`-kolommen** (`main.py:2174`, `2738`).
+      Ongewijzigd gelaten (niet gevraagd), maar als iets daarvan terugvoert naar deze API is de
+      `content_faq`-kolom daar even inert als hier.
+- [ ] **Overweeg de bulk-publish naar `/automated-content/records` te verhuizen.** Die endpoint is een
+      echte upsert, dus dan verdwijnt de "elke ontbrekende url wordt verwijderd"-eigenschap — en
+      daarmee de noodzaak om 251k rijen te sturen om er één te wijzigen.
+
+### 2026-08-04 — HS2.0 LIVE op 10 testcategorieën + 2 pilot-maincats
+
+- [x] **Alle 10 testcategorieën live gezet** (op Joep's go). Onafhankelijk teruggelezen uit de API:
+      12/12 buckets matchen de gepushte payload exact. Elke categorie eerst `snapshot_live()` →
+      `validate_payload` (0 problemen overal) → drop-list geprijsd → push met `confirm_token`.
+
+      | cat | naam | before | after |
+      |---|---|---|---|
+      | 9000047 | Stoelen | 7.348 | 4.870 |
+      | 9000066 | Eetkamerstoelen | 854 | 1.272 |
+      | 9000608 | Sneakers | 3.019 | 4.125 |
+      | 9000953 | Voer | 1.379 | 1.880 |
+      | 9002072 | Douchewanden | 88 | 241 |
+      | 9005282 | Mobiele telefoons | 1.160 | 1.452 |
+      | 9005317 | Airconditionings | 1.308 | 448 |
+      | 9001646 | Dekbedovertrekken | 1.604 | 2.573 |
+      | 9003581 | Grasmaaiers | 752 | 752 |
+      | 9000668 | Shirts | 4.538 | 1.924 |
+
+      **Totale prijs van alle drops: 1.441 SEO-visits over 90 dagen**, waarvan 968 Airconditionings.
+      Grasmaaiers kwam identiek terug (752 → 752, 0 added, 0 dropped) — de schoonste bevestiging dat
+      de pipeline deterministisch is. `preserve_cross_category=True` deed exact wat de meting
+      voorspelde: Stoelen preserveerde 2.415 → 4.870 records, Shirts 907 → 1.924, en hun drop-kosten
+      klapten in naar 8 en 2 visits (was 35.866 zonder de mitigatie). **De twee non-leaf
+      categorieën waren daarmee veilig te pushen.** #priority:high
+
+- [x] **Pilot-maincats live: Kantoor (361) en Fietsen (38000)** — om te bewijzen dat de
+      maincat-procedure werkt. Kantoor 16.625 → 16.954, Fietsen 12.190 → 13.326, 0 validatieproblemen,
+      drop-kosten 100 resp. 349 visits (90d). Bewust gekozen: **geen van beide bevat een testcategorie**
+      (die zitten onder 10, 137, 165, 655, 12000, 27000, 32000, 34000, 36000), dus de twee pilots zijn
+      niet verstrengeld. Seizoensneutraal in augustus (0,99 en 1,09), anders dan Grasmaaiers (1,42, ná
+      de piek). Contrast in breedte: Kantoor trekt uit 220 subtree-categorieën, Fietsen uit 73.
+      **Let op de churn**: Kantoor houdt maar 2.216 van 15.478 live urls (14%), Fietsen 2.848 van
+      10.091 (28%) — bijna volledige vervanging van welke urls gelinkt worden. #priority:high
+
+**Open — vervolg:**
+- [ ] **32-maincat backtest van de gewichten.** 0.889/0.111 zijn gefit op within-deepest-cat
+      percentiles; de maincat-pass hergebruikt ze ongewijzigd. De pilot valideert de *mechaniek*, niet
+      de *selectiekwaliteit* — lees traffic-beweging op Kantoor/Fietsen dus als voorlopig, en doe deze
+      backtest vóór uitbreiding naar meer maincats. #priority:high
+- [ ] **Meet Airconditionings (9005317) eerst.** De enige categorie die kromp (603 → 448 urls) en 67%
+      van alle weggevallen traffic. Seizoenscap werkt zoals bedoeld (augustus is ná de piek), maar dit
+      is de enige plek waar dit rollout-moment een echt verlies kan laten zien.
+- [ ] **Controls vastgelegd vóór de push, niet aanraken**: 40000 Multimedia-accessoires als control
+      voor Kantoor, 37000 Auto's voor Fietsen (zelfde voertuigen-domein, vergelijkbare seizoenspatroon).
+      Let bij de baseline op dat Grasmaaiers al sinds 3 aug live staat en de andere elf sinds 4 aug.
+- [ ] **Rollback = `Downloads/claude/hs2_payloads_preserved/`** — 12 snapshotbestanden, opnieuw posten
+      herstelt. Niet perfect lossless: de GET geeft `order` niet terug, dus een restore hernummert de
+      rijen; urls en anchor-tekst komen exact terug.
+
 ### 2026-08-04 — Content Publishing: Refresh eruit, FAQ-publishknoppen omgedraaid
 
 - [x] **Refresh-knop weg uit Content Publishing** op FAQs (`frontend/faq.html`) én Kopteksten
@@ -1105,7 +1180,9 @@ separate gap in the site's title builder that this tool does not control).
 
 - [x] **Healthscore 2.0 — all-channel seasonal caps + 1-month look-ahead + COMMIT (Phases 1–6 + 3.5)** (2026-07-21, commit `e423557` on main, pushed to dm-dashboard; live :8003 already served the code). Two cap-model changes: (1) seasonal caps sized on **all-channel** visits (was SEO-only) via `_ALL_JOIN`/`_ALL_WHERE` in `_refresh_cat_month` + `_refresh_cat_knee` — coverage KPI + URL score stay SEO-only; universe grew 3,574→3,608 cats. (2) **forward-max one-month look-ahead** `mult(m)=max(idx[m],idx[m+1])` (Dec→Jan wrap) so caps ramp before a peak without dropping during it. Rebuilt `pa.hs2_cat_{month,knee,cap}` (43,296 rows). Built the **HS1.0-vs-HS2.0 comparison Excel** (`Downloads/claude/HS2.0_vs_HS1.0_vergelijking.xlsx`, 5 sheets; builder `scripts/analysis/healthscore_catdiff_excel.py`) + per-category URL-type breakdown (R-url 2.6%→22.6%, PLP 53.9%→28.9%). **June holdout can't exercise the look-ahead** (cats already at/past peak → +0.0; measure on a run-up month like May). See LEARNINGS "Healthscore 2.0 — seasonal caps go all-channel …". #claude-session:2026-07-21 #priority:high
 
-- [ ] **Healthscore 2.0 — implement for the 10 test categories** (next, 2026-07-21). Roll HS2.0 selection live for the validation set: cats 9000047 Stoelen, 9000066 Eetkamerstoelen, 9000608 Sneakers, 9000953 Voer, 9002072 Douchewanden, 9005282 Mobiele telefoons, 9005317 Airconditionings, 9001646 Dekbedovertrekken, 9003581 Grasmaaiers, 9000668 Shirts. Decide the cutover mechanism (write HS2.0 selection into the live HTML-sitemap path for just these cats), then measure. Open Q from this session: whether to keep all-channel knee (+13% footprint) or switch base-cap to SEO-only + all-channel only for the *seasonality* signal; validate the look-ahead on a run-up month first. #priority:high
+- [x] **Healthscore 2.0 — implement for the 10 test categories** (DONE 2026-08-04 — all 10 live, see the
+      Current Sprint entry for the before/after table and drop costs; the leaf question for Stoelen and
+      Shirts was answered with `preserve_cross_category=True` rather than by excluding them). Roll HS2.0 selection live for the validation set: cats 9000047 Stoelen, 9000066 Eetkamerstoelen, 9000608 Sneakers, 9000953 Voer, 9002072 Douchewanden, 9005282 Mobiele telefoons, 9005317 Airconditionings, 9001646 Dekbedovertrekken, 9003581 Grasmaaiers, 9000668 Shirts. Decide the cutover mechanism (write HS2.0 selection into the live HTML-sitemap path for just these cats), then measure. Open Q from this session: whether to keep all-channel knee (+13% footprint) or switch base-cap to SEO-only + all-channel only for the *seasonality* signal; validate the look-ahead on a run-up month first. #priority:high
 
 - [x] **Unique-title mojibake — fix + root-cause + deploy** (2026-07-21, commit `bc68056` on main, deployed). User saw garbled H1s in `pa.unique_titles_content` (`ImprimÃ©tops`, `plissã©gordijnen`). (a) **DB repaired**: 1,100 mojibake rows (`Ã©`/`ã©` map, both cases) + 5,312 doubled-word rows; backups `pa.unique_titles_content_bak_mojibake_20260721` / `_bak_dupword_20260721`. Dedup used a **brand+numeric exclusion list** (Joseph Joseph, Miu Miu, Samsøe Samsøe, `Watch 5 5 ATM`… must NOT collapse). (b) **Root cause**: `backend/data/cat_urls.csv` **content itself was mojibaked** (27/3558 rows: `PlissÃ©gordijnen`, `FÃ¶hns`…); the read path (`utf-8-sig`) was correct so it faithfully propagated into every generated title via `fetch_products_api`. Bug class = `requests` ISO-8859-1 fallback on `text/html` with no `charset` header (Beslist omits it for our scraper UA). (c) **Fixes**: new `backend/text_encoding.py::fix_mojibake` (no-op on clean text) wired into `category_lookup._load` + `fetch_products_api`; repaired the 27 CSV rows (backup `cat_urls.csv.bak_mojibake_20260721`); `response.encoding="utf-8"` added to `scraper_service.py` (live kopteksten path) + dead `scrape_page_h1`. (d) **Deployed**: bare uvicorn kill+relaunch (pid 57818), `/api/version` = `bc68056`. `scrape_page_h1` is DEAD (0 callers). No DB regen needed (batch worker skips non-empty). See LEARNINGS "Unique-title mojibake …". #claude-session:2026-07-21 #priority:high
 
