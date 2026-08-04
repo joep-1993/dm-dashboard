@@ -45,7 +45,14 @@ def search_gsd(
                            shop_name,
                            is_gsd_nl_shop,
                            is_gsd_be_shop,
-                           is_gsd_de_shop
+                           is_gsd_de_shop,
+                           -- Same snapshot as the GSD flags on purpose. is_pixel_shop
+                           -- is what decides a shop's derived model in GSD Campaigns
+                           -- (CPR when is_wecantrack_shop OR is_pixel_shop, else CPC),
+                           -- and it drops in the SAME feed update as the GSD flag — so
+                           -- reading it from a different as-of date would hide exactly
+                           -- the case you look this up for.
+                           is_pixel_shop
                     FROM beslistbi.bt.shop_main_attributes_by_day
                     WHERE date = CURRENT_DATE - 1
                       AND deleted_ind = 0
@@ -69,6 +76,7 @@ def search_gsd(
                        a.is_gsd_nl_shop,
                        a.is_gsd_be_shop,
                        a.is_gsd_de_shop,
+                       a.is_pixel_shop,
                        l.shop_phase,
                        l.hide_online,
                        l.is_disabled,
@@ -91,6 +99,7 @@ def search_gsd(
                     "is_gsd_nl_shop": row["is_gsd_nl_shop"],
                     "is_gsd_be_shop": row["is_gsd_be_shop"],
                     "is_gsd_de_shop": row["is_gsd_de_shop"],
+                    "is_pixel_shop": row["is_pixel_shop"],
                     "shop_phase": row["shop_phase"],
                     "hide_online": row["hide_online"],
                     "is_disabled": row["is_disabled"],

@@ -19,14 +19,24 @@
         .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; }
         .stat-card .label { font-size: 0.85rem; color: #636e72; }
 
-        .result-table { font-size: 0.9rem; }
-        .result-table th { background: #5e4a90; color: white; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
-        .result-table td { vertical-align: middle; }
-        .result-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
-        .result-table th.sortable:hover { opacity: 0.85; }
-        .result-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
-        .result-table th.sortable.sort-asc::after { content: '↑'; opacity: 0.9; }
-        .result-table th.sortable.sort-desc::after { content: '↓'; opacity: 0.9; }
+        /* Table follows cc1/UI_BLUEPRINT.md "Tables" — the same shell as
+           "Campaigns created" in GSD Campaigns. Was a purple uppercase header on a
+           plain .table; now grey #f8f9fa sticky headers on table-sm, inside a
+           bordered rounded wrapper. Column strategy = content widths + horizontal
+           scroll, because the country columns are added at runtime and MC IDs must
+           never be truncated. */
+        .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
+        .tool-table { font-size: 0.9rem; width: max-content; min-width: 100%; }
+        .tool-table th, .tool-table td { white-space: nowrap; }
+        .tool-table th { background: #f8f9fa; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
+        .tool-table td { vertical-align: middle; }
+        .tool-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+        .tool-table th.sortable:hover { background: #e9ecef; }
+        .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .tool-table th.sortable.sort-asc::after { content: '▲'; opacity: 0.9; }
+        .tool-table th.sortable.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
+        .filter-row select, .filter-row input { font-size: 0.9rem; }
         .mc-id-cell { font-family: monospace; font-size: 0.95rem; }
         .mc-id-empty { color: #b2bec3; }
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-top: 0.5rem; border-top: 1px solid #eee; font-size: 0.85rem; }
@@ -146,17 +156,20 @@
         <!-- Results Section -->
         <div id="resultsSection" style="display: none;">
             <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="card-header">
                     <h5 class="mb-0">Results</h5>
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-sm" style="border: 1px solid #8b7bb5; color: #8b7bb5; background: transparent;" onmouseover="this.style.backgroundColor='#8b7bb5';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#8b7bb5'" onclick="copyAllToClipboard()">Copy for Excel</button>
-                        <button class="btn btn-sm" style="border: 1px solid #CC5500; color: #CC5500; background: transparent;" onmouseover="this.style.backgroundColor='#CC5500';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#CC5500'" onclick="exportExcel()">Export Excel</button>
-                    </div>
                 </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-hover result-table mb-0">
-                            <thead id="resultsHead">
+                <div class="card-body">
+                    <!-- Action buttons live in a .filter-row above the table, not in the
+                         card header (cc1/UI_BLUEPRINT.md "Tables"), so they share one
+                         baseline with any filter added later. -->
+                    <div class="filter-row d-flex gap-2 align-items-center mb-3">
+                        <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.backgroundColor='#5e4a90';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#5e4a90'" onclick="copyAllToClipboard()">Copy</button>
+                        <button class="btn btn-sm" style="border: 1px solid #CC5500; color: #CC5500; background: transparent;" onmouseover="this.style.backgroundColor='#CC5500';this.style.color='white'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#CC5500'" onclick="exportExcel()">Export</button>
+                    </div>
+                    <div class="table-responsive tool-table-wrap">
+                        <table class="table table-sm table-hover tool-table mb-0">
+                            <thead class="table-light" id="resultsHead">
                             </thead>
                             <tbody id="resultsBody">
                             </tbody>
@@ -340,7 +353,7 @@
                 sortDirection = 'asc';
             }
 
-            document.querySelectorAll('.result-table th.sortable').forEach(th => {
+            document.querySelectorAll('.tool-table th.sortable').forEach(th => {
                 th.classList.remove('sort-asc', 'sort-desc');
                 if (th.dataset.sort === column) {
                     th.classList.add(sortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
