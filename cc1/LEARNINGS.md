@@ -1,6 +1,47 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## IEMAND ANDERS PUBLICEERT OOK NAAR DE KEYWORDS API — onze HS2.0-push was binnen een dag weg (2026-08-05)
+
+Alle 12 categorieën die we op 4 aug live zetten stonden op 5 aug rond 13:20 **terug op
+hun oude inhoud**. Niet gedeeltelijk: alle twaalf.
+
+- De live-aantallen landden vrijwel exact op de **pre-push**-waarden: Douchewanden precies
+  88 (was 88, wij 241), Dekbedovertrekken precies 1.604 (wij 2.573), Stoelen 7.344 (was
+  7.348, wij 4.870), Shirts 4.499 (was 4.538, wij 1.924).
+- De eerste 3 records in de Kantoor-bucket zaten **niet in onze payload** en hadden
+  auto-gegenereerde anchors (`Everlast kantoorartikelen`) in plaats van onze page
+  headings (`Verhuisdozen`, `Stellingkasten`).
+- **Grasmaaiers is de smoking gun: 407.** Pre-push was 752 én onze payload was 752. Er is
+  dus iets dat een *eigen, nieuwe* selectie schrijft — geen rollback van ons.
+
+**Wat het NIET is:** het enige in deze repo dat naar `keywords.api.beslist.nl` post is
+`backend/healthscore_keywords.py`, dus de overschrijver zit buiten dit project. n8n's
+`workflow_entity` bestaat níet in de gedeelde Postgres, dus n8n-workflowdefinities staan
+elders dan aangenomen — die zoekactie is nog open.
+
+**Consequenties, en dit is de belangrijke les:**
+- **Elke HS2.0-meting is onbetrouwbaar tot dit gevonden is.** Je kunt een trafficverandering
+  niet toeschrijven aan een selectie die stil terugdraait.
+- Een push overleeft dus < 1 dag. Bij een re-push: tijdstip noteren en later opnieuw
+  lezen — het interval tussen overschrijvingen identificeert doorgaans de job.
+- Snapshots van de teruggedraaide staat staan in
+  `Downloads/claude/hs2_payloads_reverted_20260805/` (apart van de 4-aug pre-push
+  snapshots, want ze zijn níet identiek).
+- Op 5 aug ~13:30 opnieuw gepusht vanuit de **bewaarde payload-bytes** (niet opnieuw
+  gebouwd), zodat live exact de set is die gevalideerd en gediff'd was. 12/12 teruggelezen
+  en kloppend. [[keywords_api_sitemap]]
+
+## Grijs is geen "klaar" — `.alert-success` wordt bewust plat getrokken (2026-08-05)
+
+Een success-banner aan het eind van een run kwam lichtgrijs binnen. Niet omdat iemand grijs
+zette, maar omdat `css/style.css` `.alert-success` doelbewust naar thema-grijs plat trekt.
+Het gevolg is dat een geslaagde run eruitziet als "er is niets gebeurd". De canonieke
+eindstaat is **`.alert-done-yellow`** (#fff8e1) — UI_BLUEPRINT § "Done banner". Gebruik die
+klasse expliciet voor elke eind-van-run-banner; `alert-success` alleen is per definitie
+grijs. Zelfde reden waarom Bootstrap's `alert-secondary` niet bruikbaar is voor een
+info-blok op een card: vrijwel onzichtbaar. [[feedback_avoid_grey_labels]]
+
 ## "De fix werkt niet" — kijk eerst naar de starttijd van de uvicorn (2026-08-04)
 
 Emob.be werd na de GSD-fix nog steeds geskipt met `no_live_campaigns_to_pause`. Er was niets mis

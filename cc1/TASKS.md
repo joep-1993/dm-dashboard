@@ -4,6 +4,48 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-05 — Kopteksten incrementeel publiceren, en de HS2.0-push werd overschreven
+
+- [ ] **BLOKKER: zoek uit wie nog naar de Keywords API publiceert.** Alle 12 HS2.0-categorieën
+      stonden binnen een dag terug op hun oude inhoud (zie LEARNINGS voor het bewijs, incl.
+      Grasmaaiers op 407 waar zowel pre-push als onze payload 752 was). Niets in deze repo doet
+      dat behalve `healthscore_keywords.py`, en `workflow_entity` bestaat niet in de gedeelde
+      Postgres — dus n8n-definities staan elders. **Tot dit gevonden is, is elke HS2.0-meting
+      onbetrouwbaar.** Kandidaten: een n8n-workflow op een andere host/DB, een scheduled script
+      op de Windows-server, of de HS1.0-pipeline die dit project moet vervangen.
+      #priority:high
+- [x] **12 categorieën opnieuw gepusht** (5 aug ~13:30) vanuit de bewaarde payload-bytes, niet
+      opnieuw gebouwd — live is dus exact de gevalideerde set. 12/12 teruggelezen en kloppend.
+      Snapshots van de teruggedraaide staat: `Downloads/claude/hs2_payloads_reverted_20260805/`.
+- [x] **Kopteksten publiceert nu incrementeel** (`70a163f`, `e05acf1`). `Publish` = upsert over
+      `/automated-content/records`, alleen nieuw/gewijzigd, bijgehouden via md5 in
+      `pa.kopteksten_push_state`. `Publish All` = de oude full-set batch, en nog steeds het enige
+      dat écht prunet. Retireren gebeurt als **push van `content_top = ""`** in dezelfde chunks
+      (Joeps idee) i.p.v. één DELETE per url — ~11 extra chunks tegen ~21.810 requests. Veilig
+      want geen nieuwe staat: 7,2% van de live records had al een leeg content_top.
+- [x] **Publish All uitgevoerd + push state geseed** (5 aug, door Joep resp. hier). De batch liep
+      op de nieuwe code: `content_type` gelogd als `content_top`, payload 323 MB i.p.v. 1.730 MB
+      (−81%, dat is de `content_faq`-verwijdering), 232s i.p.v. 978s. Productie-steekproef daarna:
+      `content_bottom` populated **0/1000** (was 917) en leeg `content_top` **0/1000** (was 72) —
+      de 13.902 FAQ-only urls zijn dus gepruned. Seeden was hard verantwoord: **0** kopteksten
+      gewijzigd sinds de publish-start, dus de publishable set was exact wat live stond. 249.809
+      rijen geseed, `pending 0 / stale 0`.
+- [x] **Per-url Push + Delete & Push op URL Lookup** (`e357d8c`, `a6165e9`, `4e59fc3`). Push = één
+      record van ~1 KB. Delete & Push haalt hem ook direct uit de live store; sinds content_bottom
+      dood is, is dat een gewone record-DELETE.
+- [x] **`Delete` reset de job nu écht op pending** (`a38fc92`) — deed dat niet, zie LEARNINGS.
+      Zelfde fix in de FAQ-delete.
+- [x] **UI uit suggestions_new.txt** (`73a84f4`): done-banners in `alert-done-yellow` i.p.v. het
+      platgetrokken grijze `alert-success`; het ruwe API-response-blok alleen nog bij een mislukte
+      run en niet meer in `alert-secondary`; Shop-campaigns' 7d/14d/30d/90d-groep gelijk aan
+      SEO Stats (6 regels verbatim overgezet, rulesets nu identiek).
+- [ ] **`#processResult` heeft hetzelfde grijze-success-probleem** ("Bulk API complete!") op zowel
+      Kopteksten als FAQ's. Buiten de scope van het verzoek gelaten (dat ging over
+      `#publishResult`); zelfde fix als het opgepakt wordt.
+- [ ] **FAQ's `/faq` staat op 94,4%** — 240.958 van 255.274 urls, laatste push 3 aug 16:14. De
+      resterende ~14.316 moeten gepusht zijn **vóór** een volgende Publish All, want die wist
+      `content_bottom` overal en dan hebben die pagina's op geen van beide plekken FAQ-content.
+
 ### 2026-08-04 — GSD Check: is_pixel_shop erbij, en de laatste twee tabellen naar de blueprint
 
 - [x] **`is_pixel_shop` in GSD Check** (`1ae749e`), uit **dezelfde** as-of-gisteren snapshot als de
