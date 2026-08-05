@@ -7,7 +7,12 @@ Flow:
   3. Validate FAQ + Kopteksten links (parallel)
   4. Recheck skipped URLs (makes URLs with new products eligible again)
   5. Regenerate FAQ + Kopteksten content (parallel)
-  6. Publish all content to production
+  6. Publish kopteksten + FAQs to production (parallel, incremental upsert)
+
+Kopteksten are published via /api/content-publish/records (incremental upsert
+to /automated-content/records). FAQs are published via /api/faq/publish-v2
+(one record per question to /faq). Both track push state and only send
+new/changed content (mode="new").
 
 Can be triggered manually, via cron (Linux), or Windows Task Scheduler.
 
@@ -233,9 +238,15 @@ def poll_task(status_url, timeout, restart_fn=None):
         if status in ("error", "failed"):
             raise RuntimeError(f"Task failed: {data}")
 
-        # Log progress — support both validation response shapes
+        # Log progress — support validation, recheck, and publisher response shapes
         validated = data.get("validated", data.get("rechecked", ""))
         total = data.get("total_to_validate", data.get("total_to_recheck", data.get("total", "")))
+        # Incremental publishers nest progress under a "progress" key
+        progress = data.get("progress", {})
+        if not validated and progress:
+            validated = progress.get("urls_done", progress.get("urls_processed", ""))
+        if not total and progress:
+            total = progress.get("total_urls", "")
         log.info(f"  Polling… status={status}  progress={validated}/{total}")
         time.sleep(POLL_INTERVAL)
 
@@ -465,24 +476,77 @@ def step_process_parallel():
     return results
 
 
-def step_publish_production():
+def step_publish_kopteksten_records():
+    """Incremental kopteksten publish via /automated-content/records (upsert)."""
     log = logging.getLogger("automation")
     resp = SESSION.post(
-        f"{BASE_URL}/api/content-publish",
-        params={"environment": "production", "content_type": "all"},
+        f"{BASE_URL}/api/content-publish/records",
+        json={"environment": "production", "mode": "new", "prune": True},
         timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
     )
+    if resp.status_code == 401 and _reauth_on_401(resp):
+        resp = SESSION.post(
+            f"{BASE_URL}/api/content-publish/records",
+            json={"environment": "production", "mode": "new", "prune": True},
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        )
     resp.raise_for_status()
     task_id = resp.json().get("task_id")
-    log.info(f"  Publish started, task_id={task_id}")
-    result = poll_task(f"{BASE_URL}/api/content-publish/status/{task_id}", PUBLISH_TIMEOUT)
+    log.info(f"  Kopteksten records publish started, task_id={task_id}")
+    result = poll_task(f"{BASE_URL}/api/content-publish/records/status/{task_id}", PUBLISH_TIMEOUT)
 
     pub_result = result.get("result", {})
     if pub_result.get("success"):
-        log.info(f"  Published {pub_result.get('total_urls', 0)} URLs to production")
+        log.info(f"  Kopteksten: pushed {pub_result.get('urls_pushed', 0)} URLs"
+                 f" (pruned {pub_result.get('urls_retired', 0)})")
         return pub_result
     else:
-        raise RuntimeError(f"Publish did not succeed: {pub_result}")
+        raise RuntimeError(f"Kopteksten publish did not succeed: {pub_result}")
+
+
+def step_publish_faq_v2():
+    """Incremental FAQ publish via /faq (one record per question)."""
+    log = logging.getLogger("automation")
+    resp = SESSION.post(
+        f"{BASE_URL}/api/faq/publish-v2",
+        json={"environment": "production", "mode": "new"},
+        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+    )
+    if resp.status_code == 401 and _reauth_on_401(resp):
+        resp = SESSION.post(
+            f"{BASE_URL}/api/faq/publish-v2",
+            json={"environment": "production", "mode": "new"},
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        )
+    resp.raise_for_status()
+    task_id = resp.json().get("task_id")
+    log.info(f"  FAQ v2 publish started, task_id={task_id}")
+    result = poll_task(f"{BASE_URL}/api/faq/publish-v2/status/{task_id}", PUBLISH_TIMEOUT)
+
+    pub_result = result.get("result", {})
+    if pub_result.get("success"):
+        log.info(f"  FAQ: pushed {pub_result.get('records_pushed', 0)} records"
+                 f" across {pub_result.get('urls_processed', 0)} URLs")
+        return pub_result
+    else:
+        raise RuntimeError(f"FAQ publish did not succeed: {pub_result}")
+
+
+def step_publish_parallel():
+    """Publish kopteksten + FAQs to production in parallel."""
+    log = logging.getLogger("automation")
+    log.info("  Starting Kopteksten + FAQ publish in parallel")
+    results = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {
+            executor.submit(step_publish_kopteksten_records): "Kopteksten",
+            executor.submit(step_publish_faq_v2): "FAQ",
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            results[name] = future.result()  # raises if failed
+            log.info(f"  {name} publish completed")
+    return results
 
 # ---------------------------------------------------------------------------
 # Slack notification
@@ -539,7 +603,7 @@ def main():
 
     completed_steps = []
     process_results = None
-    publish_result = None
+    publish_results = None
 
     # --- Preparation steps (critical) ---
     for step_name, step_func in prep_steps:
@@ -577,9 +641,10 @@ def main():
         log.info("Continuing to publish — already-generated content is still in the DB")
 
     # --- Publish (always runs) ---
-    log.info("--- Starting: Publish to Production ---")
+    log.info("--- Starting: Publish to Production (Kopteksten + FAQ) ---")
+    publish_results = None
     try:
-        publish_result = step_publish_production()
+        publish_results = step_publish_parallel()
         completed_steps.append("Publish to Production")
         log.info("--- Completed: Publish to Production ---")
     except Exception as e:
@@ -596,8 +661,6 @@ def main():
 
     # --- Final Slack notification ---
     duration = datetime.now() - start_time
-    total_urls = publish_result.get("total_urls", 0) if publish_result else "?"
-    payload_mb = publish_result.get("payload_size_mb", "?") if publish_result else "?"
 
     # Build process summary
     process_summary = ""
@@ -608,14 +671,26 @@ def main():
             parts.append(f"{name}: {r['total_processed']} URLs ({status})")
         process_summary = f"\nGeneration: {', '.join(parts)}"
 
+    # Build publish summary
+    publish_summary = ""
+    if publish_results:
+        kopt = publish_results.get("Kopteksten", {})
+        faq = publish_results.get("FAQ", {})
+        publish_summary = (
+            f"\nPublish: Kopteksten {kopt.get('urls_pushed', '?')} URLs"
+            f" (pruned {kopt.get('urls_retired', 0)})"
+            f", FAQ {faq.get('records_pushed', '?')} records"
+            f" ({faq.get('urls_processed', '?')} URLs)"
+        )
+
     any_timed_out = process_results and any(r["timed_out"] for r in process_results.values())
     icon = ":warning:" if any_timed_out else ":white_check_mark:"
     label = "Partial" if any_timed_out else "Complete"
 
     send_slack_message(
-        f"{icon} *DM Tools - Daily Automation {label}*\n"
-        f"Published *{total_urls}* URLs to production ({payload_mb} MB)"
-        f"{process_summary}\n"
+        f"{icon} *DM Tools - Daily Automation {label}*"
+        f"{process_summary}"
+        f"{publish_summary}\n"
         f"Duration: {str(duration).split('.')[0]}"
     )
 
