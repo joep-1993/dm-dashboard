@@ -33,7 +33,7 @@ def health_check():
 @router.get("/stats")
 async def stats(country: str = Query("NL", description="Country code: NL or BE")):
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(executor, lambda: get_stats(country=country))
     except Exception as e:
         logger.error(f"Error fetching GSD Budgets stats: {e}")
@@ -52,7 +52,7 @@ async def run(
     skip_missed_upload: bool = Query(False, description="If true, skip upload to pa.jvs_gsd_missed_shops (always skipped in dry-run)"),
 ):
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         shop_list = (
             [s.strip() for s in shop_names.split(",") if s.strip()]
             if shop_names

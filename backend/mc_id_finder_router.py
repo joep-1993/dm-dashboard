@@ -34,7 +34,7 @@ async def search(
         if country_list:
             country_list = [c for c in country_list if c in ("nl", "be", "de")]
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             executor, search_mc_ids, name_list, country_list, id_list
         )

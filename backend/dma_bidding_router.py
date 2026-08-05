@@ -29,7 +29,7 @@ async def get_stats(
 ):
     """Get campaign counts per DMA bid strategy level."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, lambda: get_level_stats(country=country))
         return result
     except Exception as e:
@@ -48,7 +48,7 @@ async def run_dma_bidding_endpoint(
 ):
     """Run the DMA bidding analysis and (optionally) apply bid strategy changes."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         exclude_list = (
             [s.strip() for s in exclude_campaigns.split(",") if s.strip()]
             if exclude_campaigns
@@ -92,7 +92,7 @@ async def revert_campaigns(
     Expects a JSON list of: [{"campaign_name": "...", "target_level": 1}, ...]
     """
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def do_revert():
             level_to_strategy, _ = get_bid_strategies(country=country)

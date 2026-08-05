@@ -33,7 +33,7 @@ async def upload_xlsx(
     try:
         contents = await file.read()
         df = parse_xlsx(contents)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             executor, upload_to_redshift, df, table_name, chunk_size
         )
@@ -64,7 +64,7 @@ async def upload_paste(
         if not header_list or not row_list:
             raise HTTPException(status_code=400, detail="Headers and rows are required.")
         df = parse_pasted_data(header_list, row_list)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             executor, upload_to_redshift, df, table_name, chunk_size
         )

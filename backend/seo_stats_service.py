@@ -64,6 +64,11 @@ REV_TABLE_FILTERS = (
 # ---------------------------------------------------------------------------
 _CACHE: Dict[str, Tuple[float, dict]] = {}
 _CACHE_TTL = 300  # seconds
+# AUDIT LOW — the cache never evicted. Keys embed the requested dates, so every distinct
+# range a user picks left a payload behind for the process lifetime, and a /daily payload
+# is a month of rows plus sparklines. Nothing here is huge; it just never stopped growing,
+# and this backend runs for weeks between restarts.
+_CACHE_MAX = 200
 
 
 def _cache_get(key: str):
@@ -74,7 +79,18 @@ def _cache_get(key: str):
 
 
 def _cache_set(key: str, value: dict):
-    _CACHE[key] = (time.time(), value)
+    # Drop what has already expired before adding. Cheap: this runs once per Redshift
+    # round trip, not per read, and the dict is small by construction.
+    now = time.time()
+    for k in [k for k, (ts, _) in _CACHE.items() if (now - ts) >= _CACHE_TTL]:
+        _CACHE.pop(k, None)
+    # Backstop for the pathological case where entries are added faster than the TTL
+    # retires them: evict oldest-first. Never evict the key we are about to write.
+    if len(_CACHE) >= _CACHE_MAX:
+        for k in sorted(_CACHE, key=lambda k: _CACHE[k][0])[: len(_CACHE) - _CACHE_MAX + 1]:
+            if k != key:
+                _CACHE.pop(k, None)
+    _CACHE[key] = (now, value)
 
 
 # ---------------------------------------------------------------------------
@@ -660,9 +676,23 @@ def _as_distribution(raw: Dict[str, float], order: Optional[List[str]] = None) -
             continue
         out.append({"device": dev, "value": round(v, 2),
                     "share": round(100.0 * v / total, 1) if total else None})
-    # any bucket the order list does not mention still has to be counted somewhere
+    # AUDIT LOW flagged this loop as dead code, and on today's inputs it IS unreachable:
+    # both callers pass the order list that matches their SQL CASE exactly (device ->
+    # tablet/mobile/unknown/desktop, urltype -> R-url/C-url/PLP/Browse/Overig).
+    #
+    # Deleting it would be the wrong fix. `total` sums ALL of raw, so a bucket that is
+    # missing from the order list would still be in the denominator — drop the loop and the
+    # slices silently stop summing to 100%. Keeping it costs one no-op pass and makes that
+    # impossible. What it should NOT do is stay silent: appending an unknown bucket at the
+    # end shifts the colours, which is the exact thing the order list exists to prevent.
+    # So it survives as a tripwire that says so.
     for dev, v in raw.items():
         if v and dev not in (order or _DEVICE_ORDER):
+            logger.warning(
+                "_as_distribution: bucket %r is not in the order list %r — appended at the "
+                "end, so its slice colour will shift. Add it to the order constant.",
+                dev, order or _DEVICE_ORDER,
+            )
             out.append({"device": dev, "value": round(v, 2),
                         "share": round(100.0 * v / total, 1) if total else None})
     return out

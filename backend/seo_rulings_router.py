@@ -27,7 +27,7 @@ def health():
 
 @router.post("/run")
 async def run():
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(_executor, run_all_checks)
     return result
 

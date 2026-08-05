@@ -98,7 +98,10 @@
         .pagination-controls select { font-size: 0.85rem; width: auto; }
         .pagination-controls .page-info { color: #636e72; }
         .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
-        .neg { color: #d63031; }
+        /* AUDIT LOW — .neg removed. No .pos ever existed, and nothing emitted "neg" as a
+           class: the only `neg` on the page is a JS variable holding a worst_by_* key.
+           Negative values are coloured by .delta-badge.down and by inline styles in the
+           table cells, not by this rule. */
         #startDate, #endDate, #refDate, #catDate, #dashDate {
             border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
             box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
@@ -176,19 +179,10 @@
         .chart-tooltip .ct-wow { margin-left: 10px; font-weight: 700; font-size: 11px; padding: 1px 7px; border-radius: 20px; color: #2d2a3a; min-width: 52px; text-align: center; white-space: nowrap; }
         .chart-tooltip .ct-wow.flat { background: rgba(255,255,255,0.14); color: #c2c2cc; }
         /* .info-note now lives in css/style.css (shared) — see UI_BLUEPRINT "Info banners". */
-        /* Channel delta cards */
-        .delta-card {
-            background: #fff; border: 1px solid #e6e3ef; border-radius: 12px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05); flex: 1 1 220px; min-width: 220px;
-            overflow: hidden;
-        }
-        .delta-card .dc-head { background: #5e4a90; color: #fff; font-weight: 700; padding: 0.5rem 0.9rem; font-size: 0.95rem; }
-        .delta-card .dc-body { display: flex; }
-        .delta-card .dc-metric { flex: 1 1 0; padding: 0.7rem 0.9rem; }
-        .delta-card .dc-metric + .dc-metric { border-left: 1px solid #eee; }
-        .delta-card .dc-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: .04em; color: #8a8a8a; }
-        .delta-card .dc-value { font-size: 1.25rem; font-weight: 700; color: #2d2a3a; line-height: 1.2; margin: 2px 0; }
-        .delta-card .dc-sub { font-size: 0.72rem; color: #9a96a8; }
+        /* AUDIT LOW — the .delta-card block (8 rules: .dc-head/-body/-metric/-label/
+           -value/-sub) is gone. It was a superseded design for the channel deltas, which
+           now render as .stat-card tiles; nothing emitted any of those names. .delta-badge
+           below is a different thing and IS live. */
         .delta-badge { display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 1px 8px; border-radius: 20px; }
         .delta-badge.up { background: #e3f9f0; color: #00854c; }
         .delta-badge.down { background: #fdecec; color: #c0392b; }
@@ -1780,10 +1774,13 @@
             const myToken = ++loadToken;
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
-            // The Load button was removed (dates load on change); keep the guard so
-            // any remaining caller cannot trip over a missing element.
-            const btn = document.getElementById('loadBtn');
-            if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+            // AUDIT LOW — the #loadBtn disable/re-enable dance is gone. The button was
+            // removed when dates started loading on change, and `if (btn)` guarded against
+            // a missing ELEMENT, which is the one thing that was certain: nothing creates
+            // #loadBtn, so all three lines plus the finally that reset them were permanent
+            // no-ops. Same shape as loadStats — code that reads as if it manages a loading
+            // state while doing nothing. The real loading indicator is the skeleton rows
+            // below. Refresh (line ~381) calls load(true) and needs no disabling.
             // Per-day head is drawn by initTable() after the fetch; on a first
             // load there is no header yet, so fall back to the current column set.
             const perDayCols = document.getElementById('tableHead').querySelectorAll('th').length
@@ -1834,8 +1831,6 @@
                 if (chart) { chart.destroy(); chart = null; }
                 document.getElementById('exportBtn').disabled = true;
                 lastData = null;
-            } finally {
-                if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
             }
             loadDeltas(force);
         }

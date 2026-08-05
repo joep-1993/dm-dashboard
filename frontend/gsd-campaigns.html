@@ -9,18 +9,10 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <style>
-        .stat-card {
-            border-radius: 12px;
-            background: white;
-            color: #2d3436;
-            padding: 1.25rem;
-            text-align: center;
-            min-width: 140px;
-            box-shadow: 0 4px 16px rgba(94, 74, 144, 0.14);
-        }
-        .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; }
-        .stat-card .label { font-size: 0.85rem; color: #636e72; }
-        .stat-card .detail { font-size: 0.75rem; color: #999; margin-top: 0.25rem; }
+        /* AUDIT LOW — the .stat-card block that stood here is gone: it styled the tiles
+           loadStats() filled, and loadStats was removed in 751399a as a permanent no-op.
+           Nothing on this page carries the class any more. Removing it is safe twice over,
+           because style.css also defines .stat-card. */
 
         .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
         .filter-row select, .filter-row input { font-size: 0.9rem; }
@@ -49,11 +41,10 @@
         .campaign-table .col-country { text-align: center; }
         .campaign-table .col-status { text-align: center; }
 
-        .btn-action { font-size: 0.8rem; padding: 0.25rem 0; border-radius: 4px; width: 70px; text-align: center; display: inline-block; }
-        .btn-pause { border: 1px solid #e0a800; color: #e0a800; background: transparent; }
-        .btn-pause:hover { background: #e0a800; color: white; }
-        .btn-activate { border: 1px solid #00b894; color: #00b894; background: transparent; }
-        .btn-activate:hover { background: #00b894; color: white; }
+        /* AUDIT LOW — .btn-action / .btn-pause / .btn-activate removed (and .btn-remove
+           further down). They styled the per-row Pause/Activate/Remove buttons whose
+           handlers went in 751399a; the surviving bulk buttons use the separate
+           .btn-bulk-pause / -activate / -remove above. Nothing carried these names. */
 
         .badge-active { background: transparent !important; border: 1px solid #00b894; color: #00b894 !important; font-weight: 600; }
 
@@ -97,8 +88,6 @@
         .ll-history-table th:nth-child(3), .ll-history-table td:nth-child(3) { width: 120px; }  /* Country */
         .ll-history-table th:nth-child(4), .ll-history-table td:nth-child(4) { width: 110px; }  /* Action */
         /* Campaign (5th column) takes the remaining width. */
-        .btn-remove { border: 1px solid #d63031; color: #d63031; background: transparent; }
-        .btn-remove:hover { background: #d63031; color: white; }
 
         /* No leftover gap under the date input when there's no message to show. */
         #llDateHint:empty { display: none; }
@@ -121,9 +110,11 @@
         .flatpickr-day.today { border-color: #5e4a90; }
         .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
         .activity-log { font-size: 0.82rem; }
-        .activity-log .log-entry { padding: 0.4rem 0; border-bottom: 1px solid #f1f2f6; }
-        .activity-log .log-time { color: #636e72; min-width: 140px; display: inline-block; }
-        .activity-log .log-action { font-weight: 600; }
+        /* AUDIT LOW — .log-entry / .log-time / .log-action removed: they styled a div-based
+           log that is now a <table>, so nothing emits those names. .log-success and
+           .log-error below STAY — they are applied from a template literal
+           (`const cls = entry.success ? 'log-success' : 'log-error'`), which is exactly the
+           kind of use a grep for class=" misses. */
         .activity-log .log-success { color: #00b894; }
         .activity-log .log-error { color: #d63031; }
 

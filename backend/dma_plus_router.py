@@ -120,7 +120,7 @@ async def warm_cat_cache():
     if svc._cat_ids_cache and (_time.time() - svc._cat_ids_cache_time) < _CAT_IDS_TTL:
         return {"status": "already_cached", "rows": len(svc._cat_ids_cache)}
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _warm():
         svc._ensure_maincat_mapping()

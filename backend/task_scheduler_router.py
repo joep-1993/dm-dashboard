@@ -56,7 +56,7 @@ def health_check():
 async def get_tasks():
     """List all scheduled tasks with live Windows status."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         tasks = await loop.run_in_executor(executor, list_tasks)
         return {"tasks": tasks}
     except Exception as e:
@@ -68,7 +68,7 @@ async def get_tasks():
 async def get_task_detail(task_id: int):
     """Get a single task by ID."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         task = await loop.run_in_executor(executor, get_task, task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -84,7 +84,7 @@ async def get_task_detail(task_id: int):
 async def create_task_endpoint(body: TaskCreate):
     """Create a new scheduled task (DB + Windows Task Scheduler)."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         task = await loop.run_in_executor(executor, create_task, body.dict())
         return task
     except RuntimeError as e:
@@ -99,7 +99,7 @@ async def update_task_endpoint(task_id: int, body: TaskUpdate):
     """Update an existing scheduled task."""
     try:
         data = {k: v for k, v in body.dict().items() if v is not None}
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         task = await loop.run_in_executor(executor, update_task, task_id, data)
         return task
     except ValueError as e:
@@ -115,7 +115,7 @@ async def update_task_endpoint(task_id: int, body: TaskUpdate):
 async def delete_task_endpoint(task_id: int):
     """Delete a scheduled task (DB + Windows)."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(executor, delete_task, task_id)
         return {"status": "deleted", "task_id": task_id}
     except ValueError as e:
@@ -129,7 +129,7 @@ async def delete_task_endpoint(task_id: int):
 async def toggle_task_endpoint(task_id: int):
     """Enable or disable a scheduled task."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         task = await loop.run_in_executor(executor, toggle_task, task_id)
         return task
     except ValueError as e:
@@ -143,7 +143,7 @@ async def toggle_task_endpoint(task_id: int):
 async def run_task_endpoint(task_id: int):
     """Trigger a manual run of a scheduled task."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         run_id = await loop.run_in_executor(executor, run_task_manually, task_id)
         return {"status": "started", "run_id": run_id, "task_id": task_id}
     except ValueError as e:
@@ -157,7 +157,7 @@ async def run_task_endpoint(task_id: int):
 async def get_task_runs_endpoint(task_id: int):
     """Get execution history for a task."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         runs = await loop.run_in_executor(executor, get_task_runs, task_id)
         return {"runs": runs}
     except Exception as e:
@@ -169,7 +169,7 @@ async def get_task_runs_endpoint(task_id: int):
 async def get_run_log_endpoint(run_id: int):
     """Get output log for a specific run."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         run = await loop.run_in_executor(executor, get_run_log, run_id)
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
@@ -185,7 +185,7 @@ async def get_run_log_endpoint(run_id: int):
 async def import_existing_endpoint():
     """Import existing DM-Dashboard-* tasks from Windows Task Scheduler."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         imported = await loop.run_in_executor(executor, import_existing_tasks)
         return {"imported": len(imported), "tasks": imported}
     except Exception as e:

@@ -28,7 +28,7 @@ def health():
 async def run(req: RunRequest):
     if req.start_date > req.end_date:
         raise HTTPException(status_code=400, detail="start_date must be <= end_date")
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(executor, run_standup, req.start_date, req.end_date)
     except Exception as e:

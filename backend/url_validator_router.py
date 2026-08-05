@@ -43,7 +43,7 @@ async def validate(req: ValidateRequest):
     if len(req.urls) > 50000:
         raise HTTPException(400, "Maximum 50,000 URLs per request")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(executor, validate_urls, req.urls)
     return result
 

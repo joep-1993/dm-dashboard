@@ -42,7 +42,7 @@ def health():
 @router.post("/run")
 async def run(req: Optional[RunRequest] = None):
     target_yyyymm = _parse_target_yyyymm(req.target_month if req else None)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(executor, run_dm_review, target_yyyymm)
     except Exception as e:

@@ -38,7 +38,7 @@ async def search(
             if not id_list:
                 id_list = None
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, search_gsd, name_list, id_list)
         if result["status"] == "error":
             raise HTTPException(status_code=500, detail=result["error"])

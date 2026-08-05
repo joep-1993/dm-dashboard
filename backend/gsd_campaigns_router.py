@@ -3,6 +3,7 @@ from typing import Optional, List
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from backend.gsd_campaigns_service import (
     get_all_gsd_stats,
     pause_campaign,
@@ -49,6 +50,25 @@ router = APIRouter(prefix="/api/gsd-campaigns", tags=["gsd-campaigns"])
 executor = ThreadPoolExecutor(max_workers=6)
 
 
+# AUDIT LOW — same client-error-as-500 as seo-stats, but it lands harder here: `date` is
+# interpolated into the shop_list query and reaches preview/run, so a typo used to spend a
+# Redshift round trip (or, on the run path, start a real run) before failing. Reject it at
+# the door.
+#
+# CALL THIS BEFORE THE `try`. HTTPException is an Exception, so the handlers'
+# `except Exception` would turn a 400 raised inside the block back into a 500.
+def _check_date(value: Optional[str], field: str = "date") -> None:
+    if value is None or value == "":
+        return
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must be YYYY-MM-DD, got {value!r}",
+        )
+
+
 @router.get("/health")
 def health_check():
     return {"status": "healthy", "service": "gsd_campaigns"}
@@ -58,7 +78,7 @@ def health_check():
 async def get_stats():
     """Get campaign counts per account and full campaign list."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, get_all_gsd_stats)
         return result
     except Exception as e:
@@ -74,7 +94,7 @@ async def get_campaigns(
 ):
     """Get all campaigns with optional filters."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, get_all_gsd_stats)
         campaigns = result.get("campaigns", [])
 
@@ -106,7 +126,7 @@ async def reconcile_logs_endpoint(
     """Fill in the side-logs (creation dates, MC ids, run sheet) for recently created
     campaigns that an unfinished run never logged. Idempotent — safe to re-run."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(executor, reconcile_run_logs, days, dry_run)
     except Exception as e:
         logger.error(f"Error reconciling GSD run logs: {e}")
@@ -120,7 +140,7 @@ async def backfill_created_dates_endpoint(
 ):
     """Seed per-campaign creation dates from the Google Ads change_event log."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, backfill_campaign_created_dates, days, dry_run)
         return result
     except Exception as e:
@@ -132,7 +152,7 @@ async def backfill_created_dates_endpoint(
 async def pause_campaign_endpoint(customer_id: str, campaign_id: str):
     """Pause a specific campaign."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, pause_campaign, customer_id, campaign_id)
         return result
     except Exception as e:
@@ -144,7 +164,7 @@ async def pause_campaign_endpoint(customer_id: str, campaign_id: str):
 async def enable_campaign_endpoint(customer_id: str, campaign_id: str):
     """Enable a specific campaign."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, enable_campaign, customer_id, campaign_id)
         return result
     except Exception as e:
@@ -156,7 +176,7 @@ async def enable_campaign_endpoint(customer_id: str, campaign_id: str):
 async def remove_campaign_endpoint(customer_id: str, campaign_id: str):
     """Remove a specific campaign."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, remove_campaign, customer_id, campaign_id)
         return result
     except Exception as e:
@@ -171,8 +191,9 @@ async def get_shop_changes(
     included: bool = Query(False, description="If true, only include listed shops; if false, exclude them"),
 ):
     """Get shop changes from Redshift."""
+    _check_date(date)
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
         result = await loop.run_in_executor(
             executor, get_redshift_shop_changes, date, shop_list, included
@@ -204,6 +225,9 @@ async def run_low_linkage_endpoint(
         port, client_ip, dry_run, source, date, shop_names, included,
         user_agent, caller_stack,
     )
+    # After the call log on purpose — the log is the tripwire for "who started this run",
+    # and a rejected call is still a call worth seeing.
+    _check_date(date)
     try:
         shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
         return start_ll_run(dry_run, date, shop_list, included, source)
@@ -248,7 +272,7 @@ async def ll_history_endpoint(
 ):
     """Return the pause/enable audit trail from pa.jvs_gsd_ll_campaigns."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         rows = await loop.run_in_executor(executor, get_ll_history, limit)
         return {"rows": rows, "total": len(rows)}
     except Exception as e:
@@ -262,7 +286,7 @@ async def ll_shop_cycles_endpoint(
 ):
     """Per-(shop, country) pause/enable cycle counts from pa.jvs_gsd_ll_shop_cycles."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         rows = await loop.run_in_executor(executor, get_ll_shop_cycles, limit)
         return {"rows": rows, "total": len(rows)}
     except Exception as e:
@@ -276,7 +300,7 @@ async def activity_log_get(
 ):
     """Return the server-side activity log."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         rows = await loop.run_in_executor(executor, get_activity_log, limit)
         return {"entries": rows}
     except Exception as e:
@@ -288,7 +312,7 @@ async def activity_log_get(
 async def activity_log_post(entry: dict = Body(...)):
     """Save or update an activity log entry from the frontend."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(executor, save_activity, entry)
         return {"ok": True}
     except Exception as e:
@@ -306,7 +330,7 @@ async def ll_undo_backfill_endpoint(
     entry's own details text, so a mismatch is reported rather than guessed at.
     """
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(executor, backfill_ll_undo, dry_run)
     except Exception as e:
         logger.error(f"Error backfilling LL undo payloads: {e}")
@@ -317,7 +341,7 @@ async def ll_undo_backfill_endpoint(
 async def activity_log_mark_reset(entry_id: str):
     """Mark an activity log entry as reset."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         found = await loop.run_in_executor(executor, mark_activity_reset, entry_id)
         return {"ok": True, "found": found}
     except Exception as e:
@@ -329,7 +353,7 @@ async def activity_log_mark_reset(entry_id: str):
 async def activity_log_backfill():
     """Reconstruct Activity Log entries from both LL audit table and Google Ads change history."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         ll_result = await loop.run_in_executor(executor, backfill_activity_from_ll)
         gsd_result = await loop.run_in_executor(executor, backfill_activity_from_gsd)
         return {"ll": ll_result, "gsd": gsd_result}
@@ -345,8 +369,9 @@ async def preview_gsd_script_endpoint(
     included: bool = Query(False, description="If true, only include listed shops; if false, exclude them"),
 ):
     """Dry-run the GSD script: report how many campaigns would be created/paused. Read-only."""
+    _check_date(date)
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
         result = await loop.run_in_executor(
             executor, preview_gsd_script, date, shop_list, included
@@ -376,7 +401,7 @@ async def reconstruct_run_endpoint(payload: dict):
             raise HTTPException(status_code=400, detail="Missing 'at' timestamp")
         before = int(payload.get("before_minutes", 60))
         after = int(payload.get("after_minutes", 10))
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, reconstruct_run, at, before, after)
         return result
     except HTTPException:
@@ -400,7 +425,7 @@ async def undo_run_endpoint(payload: dict):
     browser keeps one code path in the UI and covers an older deployed frontend.
     """
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         if payload.get("ll"):
             return await loop.run_in_executor(executor, undo_ll_run, payload)
         created = payload.get("created") or []
@@ -432,8 +457,11 @@ async def run_gsd_script_endpoint(
     included: bool = Query(False, description="If true, only include listed shops; if false, exclude them"),
 ):
     """Run the GSD script. This is a long-running operation."""
+    # The one that matters most: this creates and pauses real campaigns, and the date
+    # decides WHICH shop changes it acts on.
+    _check_date(date)
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         shop_list = [s.strip() for s in shop_names.split(",") if s.strip()] if shop_names else None
         result = await loop.run_in_executor(
             executor, run_gsd_script, date, shop_list, included
@@ -481,7 +509,7 @@ async def excel_load_endpoint():
     Does NOT pause/enable any campaigns.
     """
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, load_excel_data)
         return result
     except Exception as e:
@@ -516,7 +544,7 @@ async def excel_dates_backfill_endpoint():
     waiting for a restart. Skips dates already stored, so it is safe to repeat.
     """
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(executor, backfill_excel_snapshots)
     except Exception as e:
         logger.error(f"Error backfilling Excel snapshots: {e}")

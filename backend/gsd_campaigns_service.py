@@ -853,7 +853,14 @@ def _shop_name_variants(shop_name: Optional[str]) -> List[str]:
 #     would make the run rebuild something a human archived on purpose.
 #   * a `[domein:CC]` mismatch is rejected, so an NL run can never adopt a BE campaign
 #     that happens to sit in the same customer id (NL_CPR and NL_CPC share 7938980174).
-_MACRO_MICRO_RE = re.compile(r"\[[^\]]*\b(?:macro|micro)\b[^\]]*\]", re.I)
+# AUDIT LOW — `[^\]:]` not `[^\]]`: the marker is only ever a BARE tag, so a KEYED tag
+# can no longer trip it. The old pattern scanned tag CONTENTS, so a shop literally named
+# "Macro.nl" would arrive as `[shop:Macro.nl]`, read as a macro variant, and be
+# permanently unadoptable — the run would create a second campaign beside it every day.
+# Verified against all 2.856 live campaigns (2026-08-05): 120 carry a macro/micro tag and
+# every one of them is bare — `[macro]` (60) or `[macro+micro]` (60). Zero keyed forms, so
+# narrowing to bare tags loses no true positive; both patterns flag the same 120 names.
+_MACRO_MICRO_RE = re.compile(r"\[[^\]:]*\b(?:macro|micro)\b[^\]:]*\]", re.I)
 _RETIRED_RE = re.compile(r"\[\s*oud\s*\]", re.I)
 _DOMEIN_RE = re.compile(r"\[domein:([^\]]+)\]", re.I)
 

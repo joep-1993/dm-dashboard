@@ -25,7 +25,7 @@ async def performance(
 ):
     """Per-day aggregated performance of all SHOP/ campaigns from SA360."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, get_performance, start_date, end_date, force)
         return result
     except Exception as e:
@@ -42,7 +42,7 @@ async def top_performers(
 ):
     """Top campaigns and ad groups (by revenue) over a date range from SA360."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, get_top_performers, start_date, end_date, limit, force)
         return result
     except Exception as e:
@@ -56,7 +56,7 @@ async def inventory(
 ):
     """All SHOP/ campaigns with status counts (which campaigns are being tracked)."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(executor, get_inventory, force)
         return result
     except Exception as e:

@@ -3643,7 +3643,7 @@ async def ai_titles_flag_predicted_failures(request: dict):
     min_failures = request.get("min_failures", 5)
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, analyze_and_flag_failures, dry_run, min_fail_rate, min_failures
         )
@@ -3725,7 +3725,7 @@ async def seo_titles_publish_endpoint(request: dict = None):
     push_unique = request.get("push_unique_titles", False)
     combos = request.get("combos")  # optional [{cat_id, key}]; None = all built
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: seo_titles_publish(env, push_unique, combos))
     except Exception as e:
         seo_titles_mark_publish_error(e)  # else the frontend's progress bar spins forever
@@ -4706,7 +4706,7 @@ async def keyword_planner_search_volumes(request: dict):
         raise HTTPException(status_code=400, detail="Maximum 50,000 keywords per request")
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, get_search_volumes, keywords)
         return result
     except Exception as e:
@@ -4739,7 +4739,7 @@ async def keyword_planner_upload_excel(file: UploadFile = File(...)):
         if len(keywords) > 50000:
             raise HTTPException(status_code=400, detail="Maximum 50,000 keywords per file")
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, get_search_volumes, keywords)
         return result
     except HTTPException:
@@ -4752,7 +4752,7 @@ async def keyword_planner_upload_excel(file: UploadFile = File(...)):
 async def keyword_planner_test():
     """Test the Google Ads Keyword Planner API connection."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, test_keyword_planner_connection)
         return result
     except Exception as e:
@@ -4804,7 +4804,7 @@ async def keyword_planner_category_volumes(request: dict):
         raise HTTPException(status_code=400, detail="No keyword provided")
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, process_category_keywords, keyword, PRELOADED_CATEGORIES)
         return result
     except Exception as e:
@@ -4884,7 +4884,7 @@ async def keyword_planner_keyword_redirects(request: dict):
         raise HTTPException(status_code=400, detail="No shop provided")
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         shop_info = await loop.run_in_executor(None, resolve_shop, shop)
         if not shop_info.get("shop_id"):
             raise HTTPException(status_code=404, detail=shop_info.get("error") or f"No shop found matching '{shop}'")
@@ -4965,7 +4965,7 @@ async def indexnow_submit(request: dict):
         raise HTTPException(status_code=400, detail="No valid URLs provided")
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, submit_urls, urls)
         return result
     except Exception as e:
@@ -5006,7 +5006,7 @@ async def indexnow_upload_excel(file: UploadFile = File(...)):
         if not urls:
             raise HTTPException(status_code=400, detail="No valid URLs found in the file")
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, submit_urls, urls)
         return result
     except HTTPException:
@@ -5021,7 +5021,7 @@ async def indexnow_history(limit: int = 100):
     from backend.indexnow_service import get_submission_history
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         history = await loop.run_in_executor(None, get_submission_history, limit)
         return {"status": "success", "history": history}
     except Exception as e:
@@ -5079,7 +5079,7 @@ async def indexnow_today_count():
     from backend.indexnow_service import get_today_count, DAILY_LIMIT
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         count = await loop.run_in_executor(None, get_today_count)
         return {"status": "success", "today_count": count, "daily_limit": DAILY_LIMIT}
     except Exception as e:
@@ -5109,7 +5109,7 @@ async def index_checker_check(request: dict):
         raise HTTPException(status_code=400, detail="Maximum 8,000 URLs per request (daily quota limit)")
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, check_urls, urls)
         return result
     except Exception as e:
@@ -5150,7 +5150,7 @@ async def index_checker_upload_excel(file: UploadFile = File(...)):
         if len(urls) > 8000:
             raise HTTPException(status_code=400, detail="Maximum 8,000 URLs per request (daily quota limit)")
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, check_urls, urls)
         return result
     except HTTPException:
@@ -5165,7 +5165,7 @@ async def index_checker_quota():
     from backend.index_checker_service import get_quota_info
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(None, get_quota_info)
         return info
     except Exception as e:
