@@ -290,12 +290,16 @@
                         <option value="PAUSED">Paused</option>
                     </select>
                     <input type="text" class="form-control form-control-sm" id="filterCampaignName" placeholder="Search campaign name..." oninput="applyFilters()" style="max-width: 250px;">
-                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="newCampaignIds.clear(); loadCampaigns(); loadStats();">↻ Refresh</button>
+                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="newCampaignIds.clear(); loadCampaigns();">↻ Refresh</button>
                     <button class="btn btn-sm" id="copyForExcelBtn" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyForExcel()">Copy</button>
                     <button class="btn btn-sm btn-bulk-pause" id="bulkPauseBtn" onclick="bulkAction('pause')" disabled>Pause</button>
                     <button class="btn btn-sm btn-bulk-activate" id="bulkActivateBtn" onclick="bulkAction('enable')" disabled>Activate</button>
                     <button class="btn btn-sm btn-bulk-remove" id="bulkRemoveBtn" onclick="bulkAction('remove')" disabled>Remove</button>
                 </div>
+                <!-- Filled by loadCampaigns() when the API reports per-account failures:
+                     those rows are simply absent from data.campaigns, so without this an
+                     incomplete table looks like a complete one (AUDIT MED). -->
+                <div id="campaignLoadWarning"></div>
                 <div class="table-responsive gsd-table-wrap">
                     <table class="table table-sm table-hover campaign-table mb-0">
                         <thead class="table-light">
@@ -520,7 +524,6 @@
             }
             toggleShopMode();
             toggleLLShopMode();
-            loadStats();
             loadCampaigns();
             loadLLHistory();
             loadExcelSchedule();
@@ -635,39 +638,6 @@
             }
         }
 
-        // --- Stats ---
-        async function loadStats() {
-            // Counter tiles were removed; nothing to update.
-            if (!document.getElementById('statTotal')) return;
-            try {
-                const res = await fetch(`${API_BASE}/api/gsd-campaigns/stats`);
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-
-                const accounts = data.accounts || {};
-                const campaigns = data.campaigns || [];
-
-                // Per-country stats
-                ['NL', 'BE', 'DE'].forEach(c => {
-                    const acc = accounts[c] || {};
-                    const total = acc.total || 0;
-                    const active = acc.active || 0;
-                    const paused = acc.paused || 0;
-                    document.getElementById(`stat${c}`).textContent = total;
-                    document.getElementById(`stat${c}Detail`).textContent = `${active} active / ${paused} paused`;
-                });
-
-                // Total
-                const totalAll = campaigns.length;
-                const totalActive = campaigns.filter(c => c.status === 'ENABLED').length;
-                const totalPaused = campaigns.filter(c => c.status === 'PAUSED').length;
-                document.getElementById('statTotal').textContent = totalAll;
-                document.getElementById('statTotalDetail').textContent = `${totalActive} active / ${totalPaused} paused`;
-            } catch (err) {
-                console.error('Failed to load stats:', err);
-            }
-        }
-
         // --- Campaigns ---
         async function loadCampaigns() {
             // Hold the current table height with skeleton rows while reloading so
@@ -681,6 +651,19 @@
                 const data = await res.json();
                 allCampaigns = data.campaigns || [];
                 applyFilters();
+                // AUDIT MED — a per-account failure arrives in data.errors and its rows are
+                // simply absent, so a broken DE query looked exactly like "DE has no
+                // campaigns". Say so instead of showing a confidently short table.
+                const accErrs = data.errors || [];
+                const warnEl = document.getElementById('campaignLoadWarning');
+                if (warnEl) {
+                    warnEl.innerHTML = accErrs.length
+                        ? `<div class="alert alert-warning py-2 mb-2 mt-2">`
+                          + `<strong>${accErrs.length} account(s) failed to load</strong> — the table below is `
+                          + `incomplete. ${escapeHtml(accErrs.map(e => e.customer_id || e.country || e.step || '?').join(', '))}`
+                          + `</div>`
+                        : '';
+                }
             } catch (err) {
                 console.error('Failed to load campaigns:', err);
                 document.getElementById('campaignTableBody').innerHTML =
@@ -810,33 +793,8 @@
             updateBulkButtons();
         }
 
-        function formatCost(cost) {
-            if (cost == null) return '-';
-            return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(cost);
-        }
-
         function escapeHtml(str) {
             return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-        }
-
-        // --- Export / Copy ---
-        function getCampaignRows() {
-            return filteredCampaigns.map(c => ({
-                Date: c.created_date || '',
-                Shop: c.shop_name || '',
-                Country: c.country || '',
-                Status: c.status || '',
-                Campaign: c.campaign_name || '',
-            }));
-        }
-
-        function exportXlsx() {
-            const rows = getCampaignRows();
-            if (!rows.length) return alert('No campaigns to export.');
-            const ws = XLSX.utils.json_to_sheet(rows);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'GSD Campaigns');
-            XLSX.writeFile(wb, `gsd_campaigns_${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
         // Copy only the checked rows (falls back to a hint if nothing is selected).
@@ -868,45 +826,6 @@
                 btn.textContent = 'Copied!';
                 setTimeout(() => btn.textContent = orig, 1500);
             });
-        }
-
-        // --- Actions ---
-        async function pauseCampaign(customerId, campaignId, name) {
-            if (!confirm(`Pause campaign "${name}"?`)) return;
-            try {
-                const res = await fetch(`${API_BASE}/api/gsd-campaigns/campaigns/${customerId}/${campaignId}/pause`, { method: 'POST' });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                // Individual campaign actions are intentionally not logged in the Activity Log.
-                loadCampaigns();
-                loadStats();
-            } catch (err) {
-                alert(`Failed to pause "${name}": ${err.message}`);
-            }
-        }
-
-        async function enableCampaign(customerId, campaignId, name) {
-            try {
-                const res = await fetch(`${API_BASE}/api/gsd-campaigns/campaigns/${customerId}/${campaignId}/enable`, { method: 'POST' });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                // Individual campaign actions are intentionally not logged in the Activity Log.
-                loadCampaigns();
-                loadStats();
-            } catch (err) {
-                alert(`Failed to enable "${name}": ${err.message}`);
-            }
-        }
-
-        async function removeCampaign(customerId, campaignId, name) {
-            if (!confirm(`Are you sure you want to REMOVE campaign "${name}"? This cannot be undone.`)) return;
-            try {
-                const res = await fetch(`${API_BASE}/api/gsd-campaigns/campaigns/${customerId}/${campaignId}`, { method: 'DELETE' });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                // Individual campaign actions are intentionally not logged in the Activity Log.
-                loadCampaigns();
-                loadStats();
-            } catch (err) {
-                alert(`Failed to remove "${name}": ${err.message}`);
-            }
         }
 
         // --- Bulk actions via row checkboxes ---
@@ -964,7 +883,6 @@
             // Bulk campaign actions are intentionally not logged in the Activity Log.
             if (fail) alert(`${verb}: ${ok} succeeded, ${fail} failed.`);
             loadCampaigns();
-            loadStats();
         }
 
         // --- Pause/Enable low linkage shops ---
@@ -1081,7 +999,6 @@
                     loadActivityLog();
                     loadLLHistory();
                     loadCampaigns();
-                    loadStats();
                     loadExcelSchedule();
                 }
             } catch (err) {
@@ -1168,7 +1085,6 @@
                 loadActivityLog();
                 loadLLHistory();
                 loadCampaigns();
-                loadStats();
             } catch (err) {
                 barWrap.classList.add('d-none');
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
@@ -1554,13 +1470,6 @@
             updatePreviewSelectionUI();
         }
 
-        // --- Preview row selection ---
-        function togglePreviewRow(key, checked) {
-            if (checked) llPreviewSelected.add(key);
-            else llPreviewSelected.delete(key);
-            updatePreviewSelectionUI();
-        }
-
         // Select-all toggles the currently-filtered rows (selection persists
         // across filtering for the rows not shown).
         function togglePreviewSelectAll(checked) {
@@ -1593,21 +1502,6 @@
                 btn.style.cursor = n === 0 ? 'not-allowed' : 'pointer';
                 btn.textContent = `Run selected${n ? ` (${n})` : ''}`;
             }
-        }
-
-        function exportPreviewXlsx() {
-            const rows = llPreviewFiltered.map(r => ({
-                Shop: r.shop_name || '',
-                'Shop ID': r.shop_id || '',
-                Country: r.country || '',
-                Action: r.action || '',
-                Campaign: r.campaign_name || '',
-            }));
-            if (!rows.length) return alert('No preview rows to export.');
-            const ws = XLSX.utils.json_to_sheet(rows);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'GSD LL preview');
-            XLSX.writeFile(wb, `gsd_ll_preview_${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
         async function loadLLHistory() {
@@ -2004,7 +1898,9 @@
                 (c.shop_name || '').toLowerCase().includes(q) ||
                 (c.country || '').toLowerCase().includes(q) ||
                 (c.action || '').toLowerCase().includes(q));
-            const rank = { pause: 0, create: 1, skip: 2 };
+            // AUDIT MED — 'activate' included, or today's new rows sort below 'skip'
+            // in the default view.
+            const rank = { pause: 0, create: 1, activate: 2, skip: 3 };
             const { col, dir } = previewSort;
             const mul = dir === 'asc' ? 1 : -1;
             return rows.slice().sort((a, b) => {
@@ -2143,7 +2039,6 @@
                 renderRunResultPanel(data);
                 logActivity('Run Script', `${nC} created / ${nP} paused${data.cancelled ? ' (cancelled)' : ''}${date ? ' for ' + date : ''}`, true, { undo });
                 loadCampaigns();
-                loadStats();
             } catch (err) {
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
                 logActivity('Run Script', `Error: ${err.message}`, false);
@@ -2265,7 +2160,8 @@
                 (r.country || '').toLowerCase().includes(q) ||
                 (r.action || '').toLowerCase().includes(q) ||
                 (r.detail || '').toLowerCase().includes(q));
-            const rank = { error: 0, created: 1, repaired: 2, paused: 3, skipped: 4 };
+            // AUDIT MED — 'activated' included for the same reason as the preview map.
+            const rank = { error: 0, created: 1, activated: 2, repaired: 3, paused: 4, skipped: 5 };
             const { col, dir } = runResultSort;
             const mul = dir === 'asc' ? 1 : -1;
             return rows.slice().sort((a, b) => {
@@ -2486,7 +2382,6 @@
 
                 logActivity('Reset', `Paused ${data.paused_created ?? 0} created / re-enabled ${data.enabled_paused ?? 0} paused${errN ? ` · ${errN} error(s)` : ''}`, errN === 0);
                 loadCampaigns();
-                loadStats();
             } catch (err) {
                 logActivity('Reset', `Error: ${err.message}`, false);
             }
@@ -2576,7 +2471,6 @@
                 content.innerHTML = `<div class="text-success fw-bold">Undo applied — paused ${data.paused_created ?? 0} created, re-enabled ${data.enabled_paused ?? 0} paused${errN ? ` · ${errN} error(s)` : ''}.</div>`;
                 logActivity('Reset', `Paused ${data.paused_created ?? 0} created / re-enabled ${data.enabled_paused ?? 0} paused (reconstructed)${errN ? ` · ${errN} error(s)` : ''}`, errN === 0);
                 loadCampaigns();
-                loadStats();
             } catch (err) {
                 content.innerHTML = `<div class="text-danger fw-bold">Error: ${escapeHtml(err.message)}</div>`;
                 logActivity('Reset', `Error: ${err.message}`, false);

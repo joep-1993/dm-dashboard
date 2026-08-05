@@ -509,7 +509,11 @@ def get_deltas(ref_date: Optional[str] = None, force: bool = False) -> Dict:
     try:
         channels = _fetch_channel_deltas(conn, vis_p1, vis_p2, rev_p1, rev_p2)
         maincats = _fetch_cat_deltas(conn, "main", vis_p1, vis_p2, rev_p1, rev_p2)
-        subcats = _fetch_cat_deltas(conn, "sub", vis_p1, vis_p2, rev_p1, rev_p2)
+        # AUDIT MED — the "sub" level is gone. Nothing read it: the frontend's sub table
+        # maps to `deepestcats` (CAT_TABLES.sub.src), so this was a full Redshift
+        # aggregation computed and discarded on every call — twice per page load, since
+        # loadCatDeltas and loadStandupDeltas each fetch /deltas with different anchors and
+        # therefore miss each other's cache.
         deepestcats = _fetch_cat_deltas(conn, "deepest", vis_p1, vis_p2, rev_p1, rev_p2)
     finally:
         return_redshift_connection(conn)
@@ -521,7 +525,6 @@ def get_deltas(ref_date: Optional[str] = None, force: bool = False) -> Dict:
         },
         "channels": channels,
         "maincats": maincats,
-        "subcats": subcats,
         "deepestcats": deepestcats,
         "generated_at": datetime.now().isoformat(),
     }

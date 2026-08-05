@@ -734,6 +734,12 @@
         }
         let selected = new Set(['seo_visits', 'dma_visits', 'gsaas_visits']);
         let lastData = null;
+        // AUDIT MED — request sequencing. Without a generation token a SLOW older
+        // /daily can resolve after a newer one and overwrite it, and loadTileDeltas()
+        // re-reads lastData AFTER its own await — so run A's baseline could be divided
+        // into run B's totals across all eight tiles. Every async step that writes
+        // shared state checks the token it started with and bails if it moved on.
+        let loadToken = 0;
         let chart = null;
         let lastDeltas = null;      // Performance standup — driven by #refDate
         let lastCatDeltas = null;   // Top categories   — driven by #catDate
@@ -1091,6 +1097,7 @@
 
         // Tile deltas: current-period totals vs the equal-length window right before it.
         async function loadTileDeltas() {
+            const myToken = loadToken;   // the load this delta belongs to
             tileDeltas = null;
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
@@ -1106,6 +1113,9 @@
                 prevTot = await fetchTotals(prevStart, prevEnd);
             }
             if (!prevTot) { renderStats(); return; }
+            // The await above may have outlived its load: computeTotals() reads lastData,
+            // so continuing here is exactly how run A's baseline met run B's totals.
+            if (myToken !== loadToken) return;
             const curTot = computeTotals();
             const d = {};
             ORDER.forEach(k => {
@@ -1762,15 +1772,9 @@
             const cell = '<td><span class="skel-bar"></span></td>';
             return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
         }
-        function skeletonInto(bodyId, headId, n = 10) {
-            const body = document.getElementById(bodyId);
-            const head = document.getElementById(headId);
-            if (!body) return;
-            const cols = head ? head.querySelectorAll('th').length : 0;
-            body.innerHTML = skeletonRows(cols, n);
-        }
 
         async function load(force) {
+            const myToken = ++loadToken;
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
             // The Load button was removed (dates load on change); keep the guard so
@@ -1796,7 +1800,9 @@
                 if (force) params.set('force', 'true');
                 const res = await fetch(`${API}/daily?${params}`);
                 if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + (await res.text()));
-                lastData = await res.json();
+                const payload = await res.json();
+                if (myToken !== loadToken) return;   // a newer load started; drop this one
+                lastData = payload;
                 deriveRatios(lastData.daily);
                 deriveTotals(lastData.daily);
                 await loadNotes(lastData.start_date, lastData.end_date);
@@ -1809,6 +1815,7 @@
                 document.getElementById('exportBtn').disabled = false;
                 loadTileDeltas();      // tile deltas vs the equal-length prior period
             } catch (e) {
+                if (myToken !== loadToken) return;   // a newer load owns the screen now
                 document.getElementById('metaLine').innerHTML = `<span class="text-danger">Failed to load: ${e.message}</span>`;
                 // Must replace the skeleton, or a failed load shimmers forever.
                 document.getElementById('tableBody').innerHTML =

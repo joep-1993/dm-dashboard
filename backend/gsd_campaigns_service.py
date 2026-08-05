@@ -834,10 +834,6 @@ def _shop_name_variants(shop_name: Optional[str]) -> List[str]:
     return variants
 
 
-def _campaign_name_variants(country: str, shop_name: str, shop_id: Any, label: str) -> List[str]:
-    """Every campaign name this (shop, label) could legitimately already live under."""
-    return [_build_campaign_name(country, v, shop_id, label)
-            for v in _shop_name_variants(shop_name)]
 
 
 # --- Identity of a GSD campaign, independent of naming generation ----------
@@ -1562,6 +1558,11 @@ def _lookup_label_resource(
         for row in ga_service.search(customer_id=customer_id, query=query):
             _label_resource_cache[cache_key] = row.label.resource_name
             return row.label.resource_name
+        # AUDIT MED — cache the MISS too. This is called inside the per-label loop, so an
+        # account that simply has no GSD_LL_PAUSED label paid one pointless round trip per
+        # label per shop; only hits were remembered. A genuine error is deliberately NOT
+        # cached below, so a transient failure does not stick for the process lifetime.
+        _label_resource_cache[cache_key] = None
     except GoogleAdsException as ex:
         logger.warning("Label lookup failed (%s, %s): %s", customer_id, label_name, ex)
     return None
