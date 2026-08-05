@@ -7,11 +7,11 @@ publishable URLs (~280 MB, 14-21 min) because anything absent is deleted. Editin
 koptekst therefore costs a corpus upload. `/automated-content/records` upserts on
 (url, country_language), so only what actually changed needs to go over the wire.
 
-THE ONE THING THE RECORDS ENDPOINT CANNOT DO IS PRUNE
+THE RECORDS ENDPOINT CANNOT BE ENUMERATED
 Verified 2026-08-05: `GET /automated-content/records?url=*` is hard-capped at 1,000
-rows and takes no offset/page parameter, so the live set cannot be enumerated through
-it. An upsert-only publish would therefore let retired URLs live forever with no way
-to discover them — a regression against the batch, which prunes as a side effect of
+rows and takes no offset/page parameter, so the live set cannot be read back. An
+upsert-only publish would therefore let retired URLs live forever with no way to even
+discover them — a regression against the batch, which prunes as a side effect of
 replacing.
 
 So this module tracks its own state instead of asking the API:
@@ -19,9 +19,24 @@ So this module tracks its own state instead of asking the API:
     pa.kopteksten_push_state (url_id, env, content_md5, pushed_at)
 
 A URL needs pushing when it has no state row for this env, or its content md5 differs
-from the one last pushed. A URL needs DELETING when it HAS a state row but is no
-longer publishable (content emptied, validation failed, URL deactivated). Both sets
-are derivable locally, which is what makes pruning possible without enumeration.
+from the one last pushed. A URL needs RETIRING when it HAS a state row but is no longer
+publishable (content deleted or emptied, validation marked it invalid). Both sets are
+derivable locally, which is what makes removal possible without enumeration.
+
+RETIRING IS A PUSH OF content_top = "", NOT A DELETE
+Because "" clears a field on this endpoint, a retired URL rides along in the ordinary
+chunked upsert instead of costing its own HTTP DELETE — the difference between ~11
+extra chunks and ~21,810 round trips on the current backlog. It leaves an empty record
+rather than no record, which is litter rather than breakage, and is not a new state
+anyway: 7.2% of live production records already carry an empty content_top (72 of a
+1,000-record sample), which is how the old "all" batch published the 13,902 FAQ-only
+URLs. A Publish All clears the empty rows, since replace-all drops anything absent.
+
+WHAT THIS STILL CANNOT REACH
+Only URLs with a state row can be retired. Records the old batch left behind were never
+tracked here, so the ~21,810 currently live-but-unqualified are invisible to this module
+and need one Publish All. Seeding does not help with that either — it stamps the
+PUBLISHABLE set, and those URLs are by definition not in it.
 
 SEEDING IS SOUND, AND ONLY BECAUSE THE BATCH IS REPLACE-ALL
 On first use the state table is empty, so `mode="new"` would push everything. That is
@@ -258,19 +273,31 @@ def _unstamp(url_ids, env):
 
 
 def publish_records(env: str = "production", mode: str = "new", limit: int = None,
-                    chunk_size: int = CHUNK_SIZE, prune: bool = False,
+                    chunk_size: int = CHUNK_SIZE, prune: bool = True,
                     task_id: str = None) -> dict:
-    """Upsert content_top for new/changed URLs; optionally delete retired ones.
+    """Upsert content_top for new/changed URLs, and retire the ones whose content is gone.
 
     mode  — "new" (default): only URLs never pushed to this env or whose content
             changed since. "all": every publishable URL.
-    prune — also DELETE URLs that have a state row but are no longer publishable.
-            One request per URL (the endpoint has no bulk delete), so this is the slow
-            half; off by default.
+    prune — also retire URLs that have a state row but are no longer publishable.
+            ON by default: a publish that adds content but never removes it does not
+            actually make the store match our intent, which is what the button claims.
+
+    RETIRING IS A PUSH OF content_top = "", NOT A DELETE (Joep's idea, 2026-08-05)
+    An earlier version issued one HTTP DELETE per retired URL, which for the current
+    backlog would have been ~21,810 requests. Since "" clears a field on this endpoint,
+    a retired URL can instead ride along in the ordinary chunked upsert — ~11 extra
+    chunks instead of 21,810 round trips, and one code path instead of two.
+    Safe because it is not a new state: 7.2% of live production records already carry an
+    empty content_top (72 of a 1,000-record sample), which is how the old "all" batch
+    published the 13,902 FAQ-only URLs.
+    The trade is that the row survives as an empty record rather than disappearing. That
+    is litter, not breakage, and a Publish All clears it since replace-all drops
+    anything absent.
 
     content_bottom is deliberately NOT sent. On this endpoint an omitted field keeps
-    its stored value and "" clears it — and content_bottom belongs to FAQ Publish 2.0
-    now. Sending it either way would fight that publisher.
+    its stored value and "" clears it — and content_bottom is retired, owned by the
+    /faq store. Sending it either way would fight that publisher.
     """
     if env not in RECORDS_API_URLS:
         return {"success": False, "message": f"unknown env {env!r}"}
@@ -331,33 +358,38 @@ def publish_records(env: str = "production", mode: str = "new", limit: int = Non
         result["failed_chunks"] = bad[:10]
 
     if prune and not cancelled:
-        _set_progress(task_id, phase="pruning")
+        _set_progress(task_id, phase="retiring")
         stale = _fetch_stale(env)
-        deleted, del_failed, gone = 0, 0, []
-        for r in stale:
+        retired = retire_failed = 0
+        for start in range(0, len(stale), chunk_size):
             if _is_cancelled(task_id):
                 result["cancelled"] = True
                 break
+            chunk = stale[start:start + chunk_size]
+            payload = [{"url": _normalize_url(r["url"]), "content_top": "",
+                        "country_language": "nl-nl"} for r in chunk]
             try:
-                d = requests.delete(api_url, headers={"X-Api-Key": CONTENT_API_KEYS[env]},
-                                    params={"url": _normalize_url(r["url"])}, timeout=60)
-                # 404 = already absent, which is the desired end state, so it counts
-                # as done rather than as an error.
-                if 200 <= d.status_code < 300 or d.status_code == 404:
-                    deleted += 1
-                    gone.append(r["url_id"])
-                else:
-                    del_failed += 1
+                resp = _post_with_retry(
+                    api_url, headers=_headers(env),
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    timeout=600,
+                )
+                ok = 200 <= resp.status_code < 300
             except requests.RequestException:
-                del_failed += 1
-            if len(gone) >= 500:
-                _unstamp(gone, env); gone = []
-            _set_progress(task_id, phase="pruning", deleted=deleted, delete_failed=del_failed)
-        _unstamp(gone, env)
+                ok = False
+            if ok:
+                retired += len(chunk)
+                # Drop the state row: the url is neither publishable nor live-with-content
+                # any more, so it must stop being reported as stale on every future run.
+                _unstamp([r["url_id"] for r in chunk], env)
+            else:
+                retire_failed += len(chunk)
+            _set_progress(task_id, phase="retiring", retired=retired,
+                          retire_failed=retire_failed)
         result["stale_found"] = len(stale)
-        result["deleted"] = deleted
-        result["delete_failed"] = del_failed
-        if del_failed:
+        result["urls_retired"] = retired
+        result["retire_failed"] = retire_failed
+        if retire_failed:
             result["success"] = False
 
     _set_progress(task_id, phase="cancelled" if result["cancelled"] else "done")
@@ -384,7 +416,7 @@ def _run(task_id, env, mode, limit, prune):
                                    completed_at=time.time())
 
 
-def start_task(env="production", mode="new", limit=None, prune=False) -> str:
+def start_task(env="production", mode="new", limit=None, prune=True) -> str:
     task_id = str(uuid.uuid4())
     with _task_lock:
         _tasks[task_id] = {"status": "queued", "env": env, "mode": mode,

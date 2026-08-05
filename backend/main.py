@@ -2942,8 +2942,9 @@ async def content_records_publish(request: dict = None):
 
     Body: {environment, mode, limit, prune}. mode defaults to "new" — only URLs never
     pushed to this env or whose content changed, tracked in pa.kopteksten_push_state.
-    prune additionally DELETEs URLs that were pushed once but are no longer publishable;
-    that is one request per URL, so it is off by default.
+    prune (ON by default) also retires URLs that were pushed once but are no longer
+    publishable, by pushing content_top = "" in the same chunked upsert — so removal
+    costs a few extra chunks rather than one DELETE per URL.
 
     This does NOT replace the store, unlike POST /api/content-publish. It also cannot
     discover records it never pushed — the records GET is capped at 1,000 rows with no
@@ -2953,7 +2954,7 @@ async def content_records_publish(request: dict = None):
     env = request.get("environment", "production")
     mode = request.get("mode", "new")
     limit = request.get("limit")
-    prune = bool(request.get("prune", False))
+    prune = bool(request.get("prune", True))
     if env not in ("dev", "staging", "production"):
         raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
     if mode not in ("new", "all"):

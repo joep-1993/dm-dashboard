@@ -1357,10 +1357,10 @@ async function publishContentRecords() {
                 + `.</div>`;
             return;
         }
-        // The stale count is information, not an action: this button does not prune.
+        // Both directions are stated, because this publish now removes as well as adds.
         const staleNote = stats.urls_stale
-            ? `\n\n${nf(stats.urls_stale)} url(s) were pushed before but are no longer `
-              + `publishable. This publish does NOT remove them — run Publish All for that.`
+            ? `\n\nAlso retires ${nf(stats.urls_stale)} url(s) whose content was removed, `
+              + `by pushing an empty koptekst for them.`
             : '';
         if (!confirm(`Publish → ${environment}\n\n`
                    + `Pushes ${nf(stats.urls_pending)} new/changed koptekst(en) of `
@@ -1423,11 +1423,15 @@ function pollRecordsStatus(taskId, resultDiv, btn, batchBtn) {
         if (data.status === 'queued' || data.status === 'running') {
             const p = data.progress || {};
             const phase = recordsCancelRequested ? 'Cancelling…' : (p.phase || 'working');
+            const retiring = p.phase === 'retiring'
+                ? `<br>retiring removed content: ${nf(p.retired)}`
+                : '';
             resultDiv.innerHTML = `
                 <div class="alert alert-warning">
                     <strong>Publishing…</strong> <span class="badge bg-secondary">${escapeHtml(phase)}</span><br>
                     ${nf(p.urls_done)} / ${nf(p.total_urls)} urls in ${nf(p.chunks)} chunk(s)
                     ${p.failed ? `<span class="text-danger"> — ${nf(p.failed)} failed</span>` : ''}
+                    ${retiring}
                     <div class="mt-2">
                         <div class="spinner-border spinner-border-sm" role="status"></div>
                         <button class="btn btn-sm btn-outline-danger ms-2"
@@ -1447,12 +1451,17 @@ function pollRecordsStatus(taskId, resultDiv, btn, batchBtn) {
         } else if (data.status === 'cancelled') {
             resultDiv.innerHTML = `<div class="alert alert-warning"><strong>Publish cancelled</strong><br>`
                 + `${nf(r.urls_pushed)} url(s) were already pushed and stay pushed; the rest come along next run.</div>`;
-        } else if (r.urls_failed) {
+        } else if (r.urls_failed || r.retire_failed) {
             resultDiv.innerHTML = `<div class="alert alert-danger"><strong>Publish finished with errors</strong><br>`
-                + `${nf(r.urls_pushed)} pushed, ${nf(r.urls_failed)} failed across ${nf(r.chunks)} chunk(s) (${r.duration_sec}s)</div>`;
+                + `${nf(r.urls_pushed)} pushed, ${nf(r.urls_failed)} failed across ${nf(r.chunks)} chunk(s)`
+                + (r.retire_failed ? `; ${nf(r.retire_failed)} retire(s) failed` : '')
+                + ` (${r.duration_sec}s)</div>`;
         } else {
+            const retired = r.urls_retired
+                ? `, and ${nf(r.urls_retired)} retired (emptied because their content was removed)`
+                : '';
             resultDiv.innerHTML = `<div class="alert alert-success"><strong>Publish done</strong><br>`
-                + `${nf(r.urls_pushed)} koptekst(en) upserted in ${nf(r.chunks)} chunk(s) `
+                + `${nf(r.urls_pushed)} koptekst(en) upserted in ${nf(r.chunks)} chunk(s)${retired} `
                 + `(${r.duration_sec}s) → <code>${escapeHtml(r.api_url || '')}</code></div>`;
         }
         fetchLastPushTimestamp();
