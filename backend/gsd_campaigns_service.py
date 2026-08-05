@@ -2653,14 +2653,22 @@ def _create_campaigns_for_shop(
                     "instead of creating '%s'",
                     shop_name, existing_name, match["campaign_id"], match["status"], campaign_name,
                 )
-                # Adopt it into the GSD-managed set. Without GSD_SCRIPT the campaign is
-                # invisible to get_gsd_campaigns (the Campaigns-created table), to
-                # _pause_campaigns_for_shop (which filters on that label) and to the
-                # creation-date log — i.e. skipping the create would drop the shop out
-                # of the tool entirely. Every legacy Toolstation campaign carries
-                # 'Floodlight test jan 2026' or no label at all, never GSD_SCRIPT.
-                if label_resource_name and label_resource_name not in (match.get("labels") or []):
-                    _apply_label_to_campaign(client, customer_id, existing, label_resource_name)
+            # Adopt it into the GSD-managed set. Without GSD_SCRIPT the campaign is
+            # invisible to get_gsd_campaigns (the Campaigns-created table), to
+            # _pause_campaigns_for_shop (which filters on that label) and to the
+            # creation-date log — i.e. skipping the create would drop the shop out
+            # of the tool entirely. Every legacy Toolstation campaign carries
+            # 'Floodlight test jan 2026' or no label at all, never GSD_SCRIPT.
+            #
+            # AUDIT H4 — this used to sit inside the name-mismatch branch above, which
+            # excluded exactly the cohort that needs it: the ~2,954 unlabelled campaigns
+            # have a CORRECT name (their label application failed after create), so
+            # existing_name == campaign_name and adoption never fired. Labelling is keyed
+            # on the label being absent, not on the name differing — the same test
+            # _pause_campaigns_for_shop already uses (`not info["labelled"]`). Only the
+            # logger.info above stays inside the mismatch branch, where it is accurate.
+            if label_resource_name and label_resource_name not in (match.get("labels") or []):
+                _apply_label_to_campaign(client, customer_id, existing, label_resource_name)
             _apply_branded_label(client, customer_id, existing, branded)
             # Report the name that actually EXISTS, not the one we would have built:
             # _repair_campaign parses the label out of it and the run result feeds the
@@ -2710,6 +2718,15 @@ def _create_campaigns_for_shop(
                     res["enable_error"] = _last_gads_error["msg"] or "enable failed"
                     logger.error("Failed to enable existing campaign '%s': %s",
                                  existing_name, res["enable_error"])
+                    # AUDIT H7 — re-bucket, or the run reports a failure as "skipped",
+                    # which reads as "nothing needed doing" when in fact it tried and
+                    # failed and the campaign is still PAUSED. Only the skipped case is
+                    # touched: if the campaign was actually repaired, action is "created"
+                    # and that stays true — enable_error already carries the rest.
+                    if res.get("action") == "skipped":
+                        res["action"] = "error"
+                        res["reason"] = "enable_failed"
+                        res["error"] = res["enable_error"]
             results.append(res)
             continue
 
@@ -3301,181 +3318,213 @@ def run_gsd_script(
     logger.info("Processing %d shop changes", len(changes))
     _run_progress["total"] = len(changes)
 
-    for idx, change in enumerate(changes):
-        _run_progress["current"] = idx
-        if _run_cancel["cancel"]:
-            overall_results["cancelled"] = True
-            logger.info("GSD run cancelled after %d/%d shop changes", idx, len(changes))
-            break
-        shop_id = change.get("shop_id")
-        shop_name = change.get("shop_name", "")
-        actie = change.get("actie", "")
-        model = change.get("model", "CPR")
-        branded_yes = str(change.get("branded", "")).strip().lower() in ("1", "true", "t", "ja", "yes")
-
-        # Determine campaign type
-        campaign_type = model.upper() if model else "CPR"
-        if campaign_type not in ("CPR", "CPC"):
-            campaign_type = "CPR"
-
-        # Act only on the country whose GSD flag flipped (the feed's `kolom`),
-        # NOT every model country — a shop flagged for one country must not
-        # create/pause campaigns in the others.
-        country = KOLOM_COUNTRY.get(change.get("kolom"))
-        countries = [country] if country else []
-
-        for country in countries:
+    # AUDIT structural risk, outer half. The per-shop boundary inside the country loop
+    # covers the work itself; this covers anything that escapes it — the per-change
+    # preamble, or a bug in the boundary. Falling through instead of propagating is the
+    # point: the four side-logs and the progress reset below MUST run, because the last
+    # of them (reconcile_run_logs) is what repairs a half-finished run.
+    try:
+        for idx, change in enumerate(changes):
+            _run_progress["current"] = idx
             if _run_cancel["cancel"]:
                 overall_results["cancelled"] = True
+                logger.info("GSD run cancelled after %d/%d shop changes", idx, len(changes))
                 break
-            account_info = _find_account_info(country, campaign_type)
-            if account_info is None:
-                overall_results["errors"].append({
-                    "shop_name": shop_name,
-                    "country": country,
-                    "type": campaign_type,
-                    "error": "no_account_config",
-                })
-                continue
+            shop_id = change.get("shop_id")
+            shop_name = change.get("shop_name", "")
+            actie = change.get("actie", "")
+            model = change.get("model", "CPR")
+            branded_yes = str(change.get("branded", "")).strip().lower() in ("1", "true", "t", "ja", "yes")
 
-            customer_id = account_info["customer_id"]
-            mc_parent_id = account_info["mc_id"]
+            # Determine campaign type
+            campaign_type = model.upper() if model else "CPR"
+            if campaign_type not in ("CPR", "CPC"):
+                campaign_type = "CPR"
 
-            if actie == "aan":
-                # Ensure label exists (cached per account)
+            # Act only on the country whose GSD flag flipped (the feed's `kolom`),
+            # NOT every model country — a shop flagged for one country must not
+            # create/pause campaigns in the others.
+            country = KOLOM_COUNTRY.get(change.get("kolom"))
+            countries = [country] if country else []
+
+            for country in countries:
+                # AUDIT structural risk — a per-shop/country exception boundary. Without
+                # it one shop's lookup failure aborted the WHOLE run, which skipped
+                # _log_run_to_sheet, push_mc_ids_to_redshift, record_created_campaigns and
+                # reconcile_run_logs — i.e. the recovery mechanism was skipped by the exact
+                # failure it exists to repair — and left _run_progress['running'] True
+                # forever. Now the run carries on with the next shop and the failure is
+                # reported in overall_results['errors'] like any other.
                 try:
-                    if customer_id not in label_cache:
-                        label_cache[customer_id] = ensure_campaign_label_exists(client, customer_id)
-                    label_resource = label_cache[customer_id]
-                except Exception as ex:
-                    overall_results["errors"].append({
-                        "shop_name": shop_name,
-                        "step": "ensure_label",
-                        "error": str(ex),
-                    })
-                    continue
+                    if _run_cancel["cancel"]:
+                        overall_results["cancelled"] = True
+                        break
+                    account_info = _find_account_info(country, campaign_type)
+                    if account_info is None:
+                        overall_results["errors"].append({
+                            "shop_name": shop_name,
+                            "country": country,
+                            "type": campaign_type,
+                            "error": "no_account_config",
+                        })
+                        continue
 
-                # Get or create MC sub-account and link
-                mc_id, mc_was_created = _get_or_create_mc_account(mc_parent_id, shop_name, customer_id, country)
-                if mc_id is None:
+                    customer_id = account_info["customer_id"]
+                    mc_parent_id = account_info["mc_id"]
+
+                    if actie == "aan":
+                        # Ensure label exists (cached per account)
+                        try:
+                            if customer_id not in label_cache:
+                                label_cache[customer_id] = ensure_campaign_label_exists(client, customer_id)
+                            label_resource = label_cache[customer_id]
+                        except Exception as ex:
+                            overall_results["errors"].append({
+                                "shop_name": shop_name,
+                                "step": "ensure_label",
+                                "error": str(ex),
+                            })
+                            continue
+
+                        # Get or create MC sub-account and link
+                        mc_id, mc_was_created = _get_or_create_mc_account(mc_parent_id, shop_name, customer_id, country)
+                        if mc_id is None:
+                            overall_results["errors"].append({
+                                "shop_name": shop_name,
+                                "country": country,
+                                "step": "mc_account",
+                                "error": _last_mc_error["msg"] or "failed_to_get_or_create_mc_account",
+                            })
+                            continue
+
+                        # Log ONLY newly created MC sub-accounts to pa.mc_ids_efficy at the
+                        # end of the run, mirroring the original create GSD-campaigns.py
+                        # (which pushed its `mc_created` list; existing accounts are skipped).
+                        if mc_was_created:
+                            try:
+                                _mc_id_int = int(mc_id)
+                            except (TypeError, ValueError):
+                                _mc_id_int = None
+                            mc_created_rows.append(
+                                (shop_name, shop_id, _mc_id_int, country, date_ymd)
+                            )
+
+                        # Create campaigns
+                        campaign_results = _create_campaigns_for_shop(
+                            client=client,
+                            customer_id=customer_id,
+                            mc_id=mc_id,
+                            shop_name=shop_name,
+                            shop_id=shop_id,
+                            country=country,
+                            campaign_type=campaign_type,
+                            label_resource_name=label_resource,
+                            branded=change.get("branded"),
+                        )
+
+                        for cr in campaign_results:
+                            cr["shop_name"] = shop_name
+                            # shop_id is NOT decoration: record_created_campaigns() keys the
+                            # creation-date table on (shop_id, country) and skips any entry
+                            # without it. Omitting it here made every post-run date log a
+                            # silent no-op, which is why the Campaigns-created Date column
+                            # went blank for everything created after the 2026-07-16 seed.
+                            cr["shop_id"] = shop_id
+                            cr["country"] = country
+                            cr["type"] = campaign_type
+                            cr["customer_id"] = customer_id
+                            # Expose the numeric id (parsed from the resource name) so a
+                            # later "undo" can pause exactly what was created.
+                            res = cr.get("campaign_resource") or ""
+                            if res:
+                                cr["campaign_id"] = res.rstrip("/").split("/")[-1]
+                            # 'activated' (an existing campaign this run switched ON) files with
+                            # the created ones: the undo/reset payload is built from this list and
+                            # pausing it again is the correct inverse. The action string survives,
+                            # so the UI can still show it as its own thing.
+                            if cr["action"] in ("created", "activated"):
+                                overall_results["created"].append(cr)
+                            elif cr["action"] == "skipped":
+                                overall_results["skipped"].append(cr)
+                            else:
+                                overall_results["errors"].append(cr)
+
+                        # Log one row for this shop (mirrors the original sheet).
+                        # AUDIT MED — 'activated' counts as well. It only counted "created", so a
+                        # run that turned five existing campaigns ON logged
+                        # `campagnes aangemaakt? nee` in the sheet. run_gsd_script deliberately
+                        # files activated alongside created for exactly this reason.
+                        created_count = sum(1 for cr in campaign_results
+                                            if cr.get("action") in ("created", "activated"))
+                        sheet_rows.append([
+                            run_date, str(shop_id or ""), shop_name or "", campaign_type,
+                            str(mc_id or ""), country or "",
+                            ("ja" if branded_yes else "nee"),
+                            ("ja" if created_count > 0 else "nee"),
+                            "aan",
+                        ])
+
+                    elif actie == "uit":
+                        # Pause campaigns in every account that can still hold this shop's
+                        # campaigns for the country — the live one plus any legacy account.
+                        pause_results: List[Dict[str, Any]] = []
+                        nothing_found: List[Dict[str, Any]] = []
+                        for pause_cid in _pause_customer_ids(country, customer_id):
+                            rows = _pause_campaigns_for_shop(
+                                client=client,
+                                customer_id=pause_cid,
+                                shop_name=shop_name,
+                                shop_id=shop_id,
+                                country=country,
+                                campaign_type=campaign_type,
+                                label_resource_name=ensure_campaign_label_exists(
+                                    client, pause_cid, SCRIPT_LABEL),
+                            )
+                            for r in rows:
+                                r["customer_id"] = pause_cid
+                                if r.get("reason") == "no_live_campaigns_to_pause":
+                                    nothing_found.append(r)
+                                else:
+                                    pause_results.append(r)
+                        # The sentinel exists so a shop can never vanish from the output — but it
+                        # is per shop, not per swept account. An empty legacy account must not add
+                        # a "nothing to pause" line next to campaigns the live account did pause.
+                        if not pause_results:
+                            pause_results = nothing_found[:1]
+
+                        for pr in pause_results:
+                            pr["shop_name"] = shop_name
+                            pr["country"] = country
+                            pr["type"] = campaign_type
+                            pr.setdefault("customer_id", customer_id)
+                            if pr["action"] == "paused":
+                                overall_results["paused"].append(pr)
+                            elif pr["action"] == "skipped":
+                                # "nothing to pause" is information, not an error — but it MUST be
+                                # in the output, or the shop silently disappears from the run.
+                                overall_results["skipped"].append(pr)
+                            else:
+                                overall_results["errors"].append(pr)
+
+                        # Log one row for this shop (MC ID not looked up on pause; matches
+                        # the original: op brand? = n.v.t., campagnes aangemaakt? = nee).
+                        sheet_rows.append([
+                            run_date, str(shop_id or ""), shop_name or "", campaign_type,
+                            "", country or "", "n.v.t.", "nee", "uit",
+                        ])
+                except Exception as ex:
+                    logger.exception("Unhandled error for shop '%s' (%s) — continuing",
+                                     shop_name, country)
                     overall_results["errors"].append({
                         "shop_name": shop_name,
                         "country": country,
-                        "step": "mc_account",
-                        "error": _last_mc_error["msg"] or "failed_to_get_or_create_mc_account",
+                        "step": "shop_country_unhandled",
+                        "error": str(ex)[:300],
                     })
                     continue
-
-                # Log ONLY newly created MC sub-accounts to pa.mc_ids_efficy at the
-                # end of the run, mirroring the original create GSD-campaigns.py
-                # (which pushed its `mc_created` list; existing accounts are skipped).
-                if mc_was_created:
-                    try:
-                        _mc_id_int = int(mc_id)
-                    except (TypeError, ValueError):
-                        _mc_id_int = None
-                    mc_created_rows.append(
-                        (shop_name, shop_id, _mc_id_int, country, date_ymd)
-                    )
-
-                # Create campaigns
-                campaign_results = _create_campaigns_for_shop(
-                    client=client,
-                    customer_id=customer_id,
-                    mc_id=mc_id,
-                    shop_name=shop_name,
-                    shop_id=shop_id,
-                    country=country,
-                    campaign_type=campaign_type,
-                    label_resource_name=label_resource,
-                    branded=change.get("branded"),
-                )
-
-                for cr in campaign_results:
-                    cr["shop_name"] = shop_name
-                    # shop_id is NOT decoration: record_created_campaigns() keys the
-                    # creation-date table on (shop_id, country) and skips any entry
-                    # without it. Omitting it here made every post-run date log a
-                    # silent no-op, which is why the Campaigns-created Date column
-                    # went blank for everything created after the 2026-07-16 seed.
-                    cr["shop_id"] = shop_id
-                    cr["country"] = country
-                    cr["type"] = campaign_type
-                    cr["customer_id"] = customer_id
-                    # Expose the numeric id (parsed from the resource name) so a
-                    # later "undo" can pause exactly what was created.
-                    res = cr.get("campaign_resource") or ""
-                    if res:
-                        cr["campaign_id"] = res.rstrip("/").split("/")[-1]
-                    # 'activated' (an existing campaign this run switched ON) files with
-                    # the created ones: the undo/reset payload is built from this list and
-                    # pausing it again is the correct inverse. The action string survives,
-                    # so the UI can still show it as its own thing.
-                    if cr["action"] in ("created", "activated"):
-                        overall_results["created"].append(cr)
-                    elif cr["action"] == "skipped":
-                        overall_results["skipped"].append(cr)
-                    else:
-                        overall_results["errors"].append(cr)
-
-                # Log one row for this shop (mirrors the original sheet).
-                created_count = sum(1 for cr in campaign_results if cr.get("action") == "created")
-                sheet_rows.append([
-                    run_date, str(shop_id or ""), shop_name or "", campaign_type,
-                    str(mc_id or ""), country or "",
-                    ("ja" if branded_yes else "nee"),
-                    ("ja" if created_count > 0 else "nee"),
-                    "aan",
-                ])
-
-            elif actie == "uit":
-                # Pause campaigns in every account that can still hold this shop's
-                # campaigns for the country — the live one plus any legacy account.
-                pause_results: List[Dict[str, Any]] = []
-                nothing_found: List[Dict[str, Any]] = []
-                for pause_cid in _pause_customer_ids(country, customer_id):
-                    rows = _pause_campaigns_for_shop(
-                        client=client,
-                        customer_id=pause_cid,
-                        shop_name=shop_name,
-                        shop_id=shop_id,
-                        country=country,
-                        campaign_type=campaign_type,
-                        label_resource_name=ensure_campaign_label_exists(
-                            client, pause_cid, SCRIPT_LABEL),
-                    )
-                    for r in rows:
-                        r["customer_id"] = pause_cid
-                        if r.get("reason") == "no_live_campaigns_to_pause":
-                            nothing_found.append(r)
-                        else:
-                            pause_results.append(r)
-                # The sentinel exists so a shop can never vanish from the output — but it
-                # is per shop, not per swept account. An empty legacy account must not add
-                # a "nothing to pause" line next to campaigns the live account did pause.
-                if not pause_results:
-                    pause_results = nothing_found[:1]
-
-                for pr in pause_results:
-                    pr["shop_name"] = shop_name
-                    pr["country"] = country
-                    pr["type"] = campaign_type
-                    pr.setdefault("customer_id", customer_id)
-                    if pr["action"] == "paused":
-                        overall_results["paused"].append(pr)
-                    elif pr["action"] == "skipped":
-                        # "nothing to pause" is information, not an error — but it MUST be
-                        # in the output, or the shop silently disappears from the run.
-                        overall_results["skipped"].append(pr)
-                    else:
-                        overall_results["errors"].append(pr)
-
-                # Log one row for this shop (MC ID not looked up on pause; matches
-                # the original: op brand? = n.v.t., campagnes aangemaakt? = nee).
-                sheet_rows.append([
-                    run_date, str(shop_id or ""), shop_name or "", campaign_type,
-                    "", country or "", "n.v.t.", "nee", "uit",
-                ])
+    except Exception as ex:
+        logger.exception("GSD run loop aborted — falling through to the side-logs")
+        overall_results["errors"].append({"step": "run_loop", "error": str(ex)[:300]})
 
     # Safety net: cancel may fire on the last shop/label, so the loops above
     # end naturally without hitting a cancel check — flag it here regardless.
@@ -3514,7 +3563,13 @@ def run_gsd_script(
     # Persist creation dates of the campaigns created this run (best-effort;
     # never fails the run) so the Campaigns-created Date column stays populated
     # going forward, independent of change_event's ~30-day retention.
-    overall_results["created_dates_logged"] = record_created_campaigns(overall_results["created"], created_date=overall_results["date"])
+    # AUDIT MED — only genuinely CREATED campaigns get a creation date. overall_results
+    # ["created"] deliberately also holds 'activated' entries (so undo can pause them),
+    # but an activated campaign already existed: stamping the run's date as its creation
+    # date is simply wrong, and ON CONFLICT DO NOTHING makes that wrong date permanent.
+    _really_created = [c for c in overall_results["created"] if c.get("action") == "created"]
+    overall_results["created_dates_logged"] = record_created_campaigns(
+        _really_created, created_date=overall_results["date"])
 
     # Heal the side-logs of EARLIER runs that never got this far. All three logging steps
     # above sit AFTER the whole create loop, so a cancelled run, a crash or a uvicorn
@@ -3896,8 +3951,15 @@ def _existing_mc_id_keys(shop_ids: List[int]) -> set:
 SHEET_DATE_TOLERANCE_DAYS = RECONCILE_WINDOW_DAYS
 
 
-def _existing_sheet_keys() -> Dict[tuple, List[str]]:
-    """{(shop_id, country): [YYYY-MM-DD, ...]} already logged in the campaigns_created sheet."""
+def _existing_sheet_keys() -> Dict[tuple, List[tuple]]:
+    """{(shop_id, country): [(YYYY-MM-DD, actie), ...]} already logged in the sheet.
+
+    AUDIT MED — the actie (column I, 'aan'/'uit') is part of the value now. It was read
+    into the range but thrown away, so an 'uit' row inside SHEET_DATE_TOLERANCE_DAYS
+    suppressed a later 'aan' row for the same shop+country: a shop switched off and back
+    on within two days lost its 'aan' log line. The ±2-day tolerance itself is correct and
+    deliberate — it is the key that was too coarse.
+    """
     creds = service_account.Credentials.from_service_account_file(
         SHEETS_SA_FILE, scopes=SHEETS_SCOPES
     )
@@ -3905,7 +3967,7 @@ def _existing_sheet_keys() -> Dict[tuple, List[str]]:
     rows = svc.spreadsheets().values().get(
         spreadsheetId=LOG_SPREADSHEET_ID, range=f"{LOG_WORKSHEET}!A:I"
     ).execute().get("values", [])
-    keys: Dict[tuple, List[str]] = {}
+    keys: Dict[tuple, List[tuple]] = {}
     for r in rows[1:]:
         if len(r) < 6:
             continue
@@ -3916,17 +3978,30 @@ def _existing_sheet_keys() -> Dict[tuple, List[str]]:
             shop_id = int(str(r[1]).strip())
         except (TypeError, ValueError):
             continue
-        keys.setdefault((shop_id, (r[5] or "").strip().upper()), []).append(d)
+        # Column I is absent on older rows; "" means "unknown", which _sheet_has_row
+        # treats as matching any actie so those rows keep suppressing duplicates exactly
+        # as they did before.
+        actie = (r[8] or "").strip().lower() if len(r) > 8 else ""
+        keys.setdefault((shop_id, (r[5] or "").strip().upper()), []).append((d, actie))
     return keys
 
 
-def _sheet_has_row(have: Dict[tuple, List[str]], shop_id: int, country: str, date: str) -> bool:
-    """True when the sheet already logs this shop+country near this date."""
-    dates = have.get((shop_id, country)) or []
-    if not dates:
+def _sheet_has_row(have: Dict[tuple, List[tuple]], shop_id: int, country: str, date: str,
+                   actie: str = "aan") -> bool:
+    """True when the sheet already logs this shop+country+actie near this date.
+
+    A row whose actie is unknown (legacy row without column I) matches any actie, so this
+    stays backwards compatible: it can only ever suppress more than the old key did for
+    rows that predate the column, never fewer.
+    """
+    entries = have.get((shop_id, country)) or []
+    if not entries:
         return False
     target = datetime.strptime(date, "%Y-%m-%d")
-    for d in dates:
+    want = (actie or "").strip().lower()
+    for d, row_actie in entries:
+        if row_actie and want and row_actie != want:
+            continue
         try:
             if abs((datetime.strptime(d, "%Y-%m-%d") - target).days) <= SHEET_DATE_TOLERANCE_DAYS:
                 return True
@@ -4009,7 +4084,9 @@ def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
         have_sheet = _existing_sheet_keys()
         sheet_rows = []
         for r in sorted(inv.values(), key=lambda x: (x["date"], x["shop_id"], x["country"])):
-            if _sheet_has_row(have_sheet, r["shop_id"], r["country"], r["date"]):
+            # Reconcile only ever writes 'aan' rows (hardcoded below), so that is what it
+            # must look for — an existing 'uit' row is not evidence this one was logged.
+            if _sheet_has_row(have_sheet, r["shop_id"], r["country"], r["date"], "aan"):
                 continue
             sheet_rows.append([
                 datetime.strptime(r["date"], "%Y-%m-%d").strftime("%d-%m-%Y"),
