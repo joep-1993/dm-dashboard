@@ -349,9 +349,6 @@ async function deleteAndResetUrl(url) {
                      + `It will go on the next Publish All.</span>`;
             } else if (d2.action === 'nothing_live') {
                 live = `<br><span class="text-muted">Nothing was live on ${escapeHtml(environment)}.</span>`;
-            } else if (d2.action === 'cleared_content_top') {
-                live = `<br>Removed from <code>${escapeHtml(environment)}</code> `
-                     + `<span class="text-muted">(content_top cleared; the FAQ content_bottom on that record was left alone)</span>.`;
             } else {
                 live = `<br>Removed from <code>${escapeHtml(environment)}</code> <span class="text-muted">(record deleted)</span>.`;
             }

@@ -400,17 +400,15 @@ def unpublish_content_url(url: str, environment: str = None) -> Dict:
     publish, because the batch prunes only as a side effect of replacing. This makes
     the removal immediate.
 
-    WHY THIS IS NOT ALWAYS A RECORD DELETE
-    `content_bottom` sits in the SAME record and belongs to FAQ Publish 2.0, so
-    `DELETE ?url=` would take the FAQ content with it. So:
-      * content_bottom still populated -> push content_top = "" (on this endpoint ""
-        clears a field), which removes the koptekst and leaves the FAQ blob alone;
-      * content_bottom empty/absent    -> DELETE the whole record, so an all-empty row
-        is not left behind as litter.
-    One GET decides which, and it is cheap (single url, no wildcard).
+    Straight record DELETE. This briefly had a branch that first GET the record and,
+    when content_bottom was populated, pushed content_top = "" instead so as not to
+    take the FAQ blob with it — content_bottom is dead as of 2026-08-05 (FAQ content
+    lives in the /faq store, written by faq_v2_publisher), so there is nothing left on
+    the record worth preserving and the GET plus the conditional went with it.
 
-    The push-state row is dropped either way, so the incremental publisher stops
-    believing this url is live with content.
+    A 404 means it was already gone, which is the desired end state, so it counts as
+    success rather than an error. The push-state row is dropped either way, so the
+    incremental publisher stops believing this url is live with content.
     """
     env = environment or DEFAULT_ENV
     if env not in CONTENT_RECORDS_API_URLS:
@@ -428,42 +426,17 @@ def unpublish_content_url(url: str, environment: str = None) -> Dict:
 
     started = time.time()
     try:
-        g = requests.get(api_url, headers={"X-Api-Key": api_key},
-                         params={"url": wire}, timeout=60)
-        live = g.json() if (g.text or "").startswith("[") else []
-    except (requests.RequestException, ValueError) as e:
-        return {"success": False, "url": wire, "env": env, "error": str(e)}
-
-    if not live:
-        _drop_push_state(canon, env)
-        return {"success": True, "url": wire, "env": env, "action": "nothing_live",
-                "message": "no live record for this URL"}
-
-    has_bottom = any((r.get("content_bottom") or "").strip() for r in live)
-    try:
-        if has_bottom:
-            # Clear only our field; the FAQ blob stays.
-            resp = _post_with_retry(
-                api_url,
-                headers={"X-Api-Key": api_key, "Content-Type": "application/json"},
-                data=json.dumps([{"url": wire, "content_top": "",
-                                  "country_language": "nl-nl"}], ensure_ascii=False).encode("utf-8"),
-                timeout=120,
-            )
-            action = "cleared_content_top"
-        else:
-            resp = requests.delete(api_url, headers={"X-Api-Key": api_key},
-                                   params={"url": wire}, timeout=60)
-            action = "deleted_record"
+        resp = requests.delete(api_url, headers={"X-Api-Key": api_key},
+                               params={"url": wire}, timeout=60)
     except requests.RequestException as e:
         return {"success": False, "url": wire, "env": env, "error": str(e)}
 
-    # 404 on the delete means it is already gone, which is the desired end state.
     ok = 200 <= resp.status_code < 300 or resp.status_code == 404
     if ok:
         _drop_push_state(canon, env)
-    out = {"success": ok, "url": wire, "env": env, "action": action,
-           "status_code": resp.status_code, "kept_content_bottom": has_bottom,
+    out = {"success": ok, "url": wire, "env": env,
+           "action": "nothing_live" if resp.status_code == 404 else "deleted_record",
+           "status_code": resp.status_code,
            "duration_sec": round(time.time() - started, 1)}
     if not ok:
         out["response"] = (resp.text or "")[:500]

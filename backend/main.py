@@ -2992,9 +2992,8 @@ async def content_records_seed(request: dict = None):
 async def unpublish_content_single_url(request: dict = None):
     """Remove one url's koptekst from the live store — paired with a local delete.
 
-    Clears content_top rather than deleting the record when content_bottom is still
-    populated, because that field belongs to FAQ Publish 2.0 and a record delete would
-    take it along. See unpublish_content_url().
+    A record DELETE. content_bottom is dead (FAQ content lives in the /faq store), so
+    there is nothing on the record to preserve. See unpublish_content_url().
     """
     request = request or {}
     url = (request.get("url") or "").strip()
