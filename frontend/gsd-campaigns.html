@@ -483,6 +483,18 @@
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
     <script>
         const API_BASE = window.location.origin;
+        // AUDIT MED — bulk selection lives HERE, not in the DOM. It used to be read from
+        // `.camp-check:checked`, so any keystroke, sort or page change rebuilt tbody and
+        // silently dropped it. Keyed customer_id|campaign_id, which is what the bulk
+        // endpoints take.
+        //
+        // These keys drive Pause/Activate/Remove on live campaigns, so two rules:
+        //   * a row is only ever selected by an explicit click (nothing auto-selects);
+        //   * bulkAction resolves keys against allCampaigns and tells you when part of the
+        //     selection is outside the current filter, rather than acting on rows you
+        //     cannot see without saying so.
+        const selectedCampaigns = new Set();
+        const campKey = c => `${c.customer_id}|${c.campaign_id}`;
         let allCampaigns = [];
         let filteredCampaigns = [];
         let currentPage = 1;
@@ -650,6 +662,15 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 allCampaigns = data.campaigns || [];
+                // Drop selection keys that no longer exist upstream — a campaign removed
+                // here or by someone else would otherwise sit in the Set forever, keeping
+                // the bulk buttons enabled and the "Copy (n)" count above what a bulk
+                // action would actually touch. Only on a successful load: a failed fetch
+                // must not silently discard a selection.
+                if (selectedCampaigns.size) {
+                    const live = new Set(allCampaigns.map(campKey));
+                    selectedCampaigns.forEach(k => { if (!live.has(k)) selectedCampaigns.delete(k); });
+                }
                 applyFilters();
                 // AUDIT MED — a per-account failure arrives in data.errors and its rows are
                 // simply absent, so a broken DE query looked exactly like "DE has no
@@ -782,7 +803,7 @@
                         ? '<span class="badge bg-transparent fw-bold" style="border:1px solid #CC5500; color:#CC5500;">Paused</span>'
                         : `<span class="badge bg-transparent fw-bold" style="border:1px solid #6c757d; color:#6c757d;">${c.status || 'Unknown'}</span>`;
                 return `<tr class="${isNew ? 'row-new' : ''}">
-                    <td><input type="checkbox" class="camp-check" data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" data-status="${(c.status || '').toUpperCase()}" onclick="updateBulkButtons()"></td>
+                    <td><input type="checkbox" class="camp-check"${selectedCampaigns.has(campKey(c)) ? ' checked' : ''} data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" data-status="${(c.status || '').toUpperCase()}" onclick="toggleCampaignSelection(this)"></td>
                     <td>${c.created_date || '-'}</td>
                     <td title="${escapeHtml(c.shop_name || '')}">${escapeHtml(c.shop_name || '-')}</td>
                     <td class="col-country">${c.country || '-'}</td>
@@ -799,13 +820,11 @@
 
         // Copy only the checked rows (falls back to a hint if nothing is selected).
         function getSelectedCampaignRows() {
-            const selected = new Set();
-            document.querySelectorAll('.camp-check:checked').forEach(x => {
-                selected.add(`${x.dataset.cid}|${x.dataset.campid}`);
-            });
-            if (!selected.size) return [];
-            return filteredCampaigns
-                .filter(c => selected.has(`${c.customer_id}|${c.campaign_id}`))
+            // Same source of truth as bulkAction: the state Set over allCampaigns, so a
+            // Copy after a sort or page change no longer silently returns nothing.
+            if (!selectedCampaigns.size) return [];
+            return allCampaigns
+                .filter(c => selectedCampaigns.has(campKey(c)))
                 .map(c => ({
                     Date: c.created_date || '',
                     Shop: c.shop_name || '',
@@ -829,32 +848,54 @@
         }
 
         // --- Bulk actions via row checkboxes ---
+        function toggleCampaignSelection(cb) {
+            const key = `${cb.dataset.cid}|${cb.dataset.campid}`;
+            if (cb.checked) selectedCampaigns.add(key); else selectedCampaigns.delete(key);
+            updateBulkButtons();
+        }
+
+        // "Select all on this page" — the visible rows only, as the title says.
         function toggleSelectAllCampaigns(cb) {
-            document.querySelectorAll('.camp-check').forEach(x => { x.checked = cb.checked; });
+            document.querySelectorAll('.camp-check').forEach(x => {
+                x.checked = cb.checked;
+                const key = `${x.dataset.cid}|${x.dataset.campid}`;
+                if (cb.checked) selectedCampaigns.add(key); else selectedCampaigns.delete(key);
+            });
             updateBulkButtons();
         }
 
         function updateBulkButtons() {
             const all = document.querySelectorAll('.camp-check');
-            const n = document.querySelectorAll('.camp-check:checked').length;
+            const onPage = Array.from(all).filter(x => x.checked).length;
+            // The buttons and the Copy label report the WHOLE selection, not just this
+            // page's share of it — that is the number the confirm dialog will quote.
+            const n = selectedCampaigns.size;
             ['bulkPauseBtn', 'bulkActivateBtn', 'bulkRemoveBtn'].forEach(id => {
                 const b = document.getElementById(id);
                 if (b) b.disabled = n === 0;
             });
             const sa = document.getElementById('selectAllCampaigns');
-            if (sa) { sa.checked = all.length > 0 && n === all.length; sa.indeterminate = n > 0 && n < all.length; }
+            if (sa) { sa.checked = all.length > 0 && onPage === all.length; sa.indeterminate = onPage > 0 && onPage < all.length; }
             const cb = document.getElementById('copyForExcelBtn');
             if (cb) cb.textContent = n > 0 ? `Copy (${n})` : 'Copy';
         }
 
         async function bulkAction(type) {
-            const checks = Array.from(document.querySelectorAll('.camp-check:checked'));
-            if (!checks.length) return;
-            const selected = checks.length;
-            let items = checks.map(cb => ({
-                cid: cb.dataset.cid, campid: cb.dataset.campid, name: cb.dataset.name,
-                status: (cb.dataset.status || '').toUpperCase(),
+            // Resolve the selection from allCampaigns, NOT from the checkboxes on screen:
+            // the whole point of holding it in state is that it survives a re-render, so
+            // the DOM is no longer the source of truth.
+            const chosen = allCampaigns.filter(c => selectedCampaigns.has(campKey(c)));
+            if (!chosen.length) return;
+            const selected = chosen.length;
+            let items = chosen.map(c => ({
+                cid: String(c.customer_id), campid: String(c.campaign_id),
+                name: c.campaign_name || '',
+                status: (c.status || '').toUpperCase(),
             }));
+            // Selection now outlives filter changes, so part of it can be off-screen. Say
+            // so before acting rather than after — these calls mutate live campaigns.
+            const visible = new Set(filteredCampaigns.map(campKey));
+            const offscreen = chosen.filter(c => !visible.has(campKey(c))).length;
             // Skip no-ops: Activate only non-active, Pause only non-paused (Remove: all).
             let skipped = 0;
             if (type === 'enable') { const n = items.length; items = items.filter(i => i.status !== 'ENABLED'); skipped = n - items.length; }
@@ -866,9 +907,12 @@
             }
             const verb = type === 'pause' ? 'Pause' : type === 'enable' ? 'Activate' : 'Remove';
             const skipNote = skipped ? ` (${skipped} already ${stateWord}, skipped)` : '';
+            const offNote = offscreen
+                ? `\n\nNOTE: ${offscreen} of them are not visible under the current filter.`
+                : '';
             const msg = type === 'remove'
-                ? `Are you sure you want to REMOVE ${items.length} selected campaign(s)? This cannot be undone.`
-                : `${verb} ${items.length} selected campaign(s)?${skipNote}`;
+                ? `Are you sure you want to REMOVE ${items.length} selected campaign(s)? This cannot be undone.${offNote}`
+                : `${verb} ${items.length} selected campaign(s)?${skipNote}${offNote}`;
             if (!confirm(msg)) return;
             let ok = 0, fail = 0;
             for (const it of items) {
@@ -880,6 +924,11 @@
                     ok++;
                 } catch (e) { fail++; }
             }
+            // The action consumed the selection: clear every key that was submitted,
+            // including the no-ops we filtered out. Leaving them checked would invite a
+            // second live mutation on a set whose statuses have just changed underneath.
+            chosen.forEach(c => selectedCampaigns.delete(campKey(c)));
+            updateBulkButtons();
             // Bulk campaign actions are intentionally not logged in the Activity Log.
             if (fail) alert(`${verb}: ${ok} succeeded, ${fail} failed.`);
             loadCampaigns();
