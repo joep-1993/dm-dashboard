@@ -3348,18 +3348,21 @@ def run_gsd_script(
     _run_progress.update({"current": 0, "total": 0, "running": True})
 
     # Get shop changes from Redshift
+    # AUDIT MED — neither of these two exits may return early any more. reconcile_run_logs
+    # is what heals a half-finished EARLIER run, and it lives at the end of this function:
+    # bailing out here meant "just run it again" healed nothing on a day with no shop
+    # changes, or when the Redshift query itself failed — i.e. exactly the quiet day you
+    # would use to catch up. Both now fall through to the side-logs with an empty change
+    # list, which is a no-op for the three write steps and a real run for reconcile.
+    changes: List[Dict[str, Any]] = []
     try:
         changes = get_redshift_shop_changes(date_str, shop_names, included)
     except Exception as ex:
         logger.error("Failed to get shop changes from Redshift: %s", ex)
         overall_results["errors"].append({"step": "redshift_query", "error": str(ex)})
-        _run_progress["running"] = False
-        return overall_results
 
     if not changes:
-        logger.info("No shop changes found for %s", overall_results["date"])
-        _run_progress["running"] = False
-        return overall_results
+        logger.info("No shop changes for %s — falling through to reconcile", overall_results["date"])
 
     logger.info("Processing %d shop changes", len(changes))
     _run_progress["total"] = len(changes)

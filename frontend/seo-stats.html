@@ -995,7 +995,10 @@
         }
 
         function computeTotals() {
-            return aggregate(lastData.daily);
+            // Null-safe: loadTileDeltas() already calls renderStats() when lastData is
+            // falsy (`if (!lastData || !start || !end)`), and the failed-load path now
+            // clears lastData deliberately — both would throw on lastData.daily here.
+            return aggregate((lastData && lastData.daily) || []);
         }
 
         // Period-vs-prior-period % per metric for the top tiles: the selected range vs
@@ -1361,11 +1364,16 @@
             return heatColor(0.5 + m / 2);
         }
 
+        // AUDIT MED — scaled over visibleRows(), not perfRows. The Total row and the body
+        // both follow the weekday filter, so a scale built over ALL rows made every cell
+        // uniformly red once you filtered to a single weekday: the filtered set's own
+        // spread was being coloured against the full month's min/max.
         function visitColScales() {
             const sc = {};
+            const rows = visibleRows();
             HEAT_KEYS.forEach(k => {
                 let mn = Infinity, mx = -Infinity;
-                perfRows.forEach(r => {
+                rows.forEach(r => {
                     const v = Number(r[k]) || 0;
                     if (v < mn) mn = v;
                     if (v > mx) mx = v;
@@ -1448,6 +1456,23 @@
             return v === 'all' ? Infinity : parseInt(v);
         }
 
+        // AUDIT MED — Top-categories column labels come from the backend's OWN comparison
+        // dates. They were hardcoded "Yesterday"/"Week before", which is only right for the
+        // default #catDate: the windows move with that picker AND differ by metric (visits
+        // compare ref vs ref-7, revenue ref-1 vs ref-8 because revenue settles late). Read
+        // from `comparison` rather than recomputing the windows here — one definition of the
+        // rule, not two (the same mistake as AUDIT H6).
+        function catColLabel(which) {
+            const c = (lastCatDeltas && lastCatDeltas.comparison) || null;
+            if (!c) return which === 'p2' ? 'Day' : 'Compare';
+            const iso = catMetric === 'visits'
+                ? (which === 'p2' ? c.visits_p2 : c.visits_p1)
+                : (which === 'p2' ? c.revenue_p2 : c.revenue_p1);
+            if (!iso) return which === 'p2' ? 'Day' : 'Compare';
+            const [y, m, d] = iso.split('-');
+            return `${d}-${m}`;
+        }
+
         // Normalise a backend cat row to the currently-selected metric.
         function buildCatRows(src, withSub) {
             const isVis = catMetric === 'visits';
@@ -1465,8 +1490,11 @@
             const cols = [{ key: 'maincat', label: 'Maincat', text: true }];
             if (withSub) cols.push({ key: 'subcat', label: 'Deepest cat', text: true });
             // Most-recent day first, then the week-before baseline it is compared to.
-            cols.push({ key: 'p2', label: 'Yesterday' });
-            cols.push({ key: 'p1', label: 'Week before' });
+            // AUDIT MED — the backend compares ref-1 vs ref-8 for revenue and any #catDate
+            // for the day, so "Yesterday"/"Week before" was only ever right for the default
+            // date. Label from the actual dates instead.
+            cols.push({ key: 'p2', label: catColLabel('p2') });
+            cols.push({ key: 'p1', label: catColLabel('p1') });
             cols.push({ key: 'delta', label: 'Δ' });
             cols.push({ key: 'pct', label: 'Δ%' });
             return cols;
@@ -1546,12 +1574,13 @@
             if (!lastCatDeltas) return;
             renderCatTable('main', catSourceRows('main'));
             renderCatTable('sub', catSourceRows('sub'));
-            // Info tooltip: the two days being compared for the selected metric.
+            // Info tooltip: the two days being compared for the selected metric. Same
+            // source as the column labels, so header and tooltip cannot disagree.
             const c = lastCatDeltas.comparison;
             const p1 = catMetric === 'visits' ? c.visits_p1 : c.revenue_p1;
             const p2 = catMetric === 'visits' ? c.visits_p2 : c.revenue_p2;
             const ci = document.getElementById('catInfoTitle');
-            if (ci) ci.textContent = `Yesterday: ${p2}\nWeek before: ${p1}`;
+            if (ci) ci.textContent = `Day: ${p2}\nCompare: ${p1}`;
         }
 
         // ---- Performance standup section ----
@@ -1784,6 +1813,17 @@
                 // Must replace the skeleton, or a failed load shimmers forever.
                 document.getElementById('tableBody').innerHTML =
                     `<tr><td colspan="${perDayCols}" class="text-center text-danger py-3">Failed to load.</td></tr>`;
+                // AUDIT MED — and everything else that describes the range has to go with
+                // it. lastData is only reassigned on success, so the tiles, the chart and
+                // the Total row otherwise keep showing the PREVIOUS range under a "Failed
+                // to load" line: numbers that look current and are not.
+                destroySparks('stat_');
+                document.getElementById('statsRow').innerHTML =
+                    '<div class="text-muted small py-2">No data for this range.</div>';
+                document.getElementById('tableFoot').innerHTML = '';
+                if (chart) { chart.destroy(); chart = null; }
+                document.getElementById('exportBtn').disabled = true;
+                lastData = null;
             } finally {
                 if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
             }
@@ -1922,7 +1962,9 @@
         // "a single current value plus a trend"). The canvas id lets the chart be
         // attached after the innerHTML write and destroyed on the next load.
         function dashTile(label, value, delta, sparkId, badgeHtml) {
-            // `badgeHtml` wins when given: rates pass a pp badge, everything else a
+            // `badgeHtml` wins when given. NB rates pass a RELATIVE % badge, not a
+            // percentage-point one (Joep, 2026-07-31) — this comment used to claim pp,
+            // which sent one audit reader hunting a defect that does not exist.
             // numeric % delta. Either way the "vs. 7d" caption is identical.
             const inner = badgeHtml || ((delta === null || delta === undefined) ? '' : pctBadge(delta));
             const d = inner
