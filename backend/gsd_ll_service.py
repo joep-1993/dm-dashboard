@@ -147,6 +147,12 @@ _EXCEL_DATA: Dict[str, Any] = {
     "enable_count": 0,
 }
 
+# Dedup guard: skip the Slack notification when the same file was already
+# notified within SLACK_COOLDOWN_SECONDS (prevents double messages when the
+# scheduler fires twice, e.g. after a near-schedule-time server restart).
+SLACK_COOLDOWN_SECONDS = 600  # 10 minutes
+_LAST_SLACK_NOTIFY: Dict[str, Any] = {"file": None, "at": None}
+
 # ---------------------------------------------------------------------------
 # Kill switch — safety net while we trace the mysterious daily 09:50 run.
 # When active, run_low_linkage / apply_selected refuse to mutate campaigns
@@ -455,12 +461,23 @@ def load_excel_data(filepath: Optional[str] = None, *, notify: bool = True, max_
         status["shop_count"], pause_n, enable_n, fname,
     )
     if notify and _get_server_port() == "3003":
-        _send_slack(
-            f":white_check_mark: *GSD Low Linkage — Excel data loaded*\n"
-            f"File: {fname}\n"
-            f"Shops: {len(feed)} ({pause_n} to pause, {enable_n} to enable)\n"
-            f"Ready for Preview / Run in the dashboard."
+        now = datetime.now(AMSTERDAM_TZ)
+        dup = (
+            _LAST_SLACK_NOTIFY["file"] == fname
+            and _LAST_SLACK_NOTIFY["at"] is not None
+            and (now - _LAST_SLACK_NOTIFY["at"]).total_seconds() < SLACK_COOLDOWN_SECONDS
         )
+        if dup:
+            logger.info("GSD LL Excel: skipping duplicate Slack notification for %s", fname)
+        else:
+            _send_slack(
+                f":white_check_mark: *GSD Low Linkage — Excel data loaded*\n"
+                f"File: {fname}\n"
+                f"Shops: {len(feed)} ({pause_n} to pause, {enable_n} to enable)\n"
+                f"Ready for Preview / Run in the dashboard."
+            )
+            _LAST_SLACK_NOTIFY["file"] = fname
+            _LAST_SLACK_NOTIFY["at"] = now
     return get_excel_data_status()
 
 
