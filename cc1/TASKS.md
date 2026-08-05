@@ -4,6 +4,47 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-05 — GSD/SEO-Stats audit uit de koelkast: Phase 0 + 1 live
+
+- [x] **Phase 0** (`9b04eaa`) — H2, H3, H5, reconcile-sinkfouten zichtbaar, `ORDER BY
+      ad_group.id` op beide ad-group-queries. Allemaal gedragsbehoudend. H2 was een **dagelijkse
+      500**: `_pct_delta` bewaakte alleen de baseline terwijl `_ratio()`/`_opb()` None teruggeven
+      voor een dag zonder visits en als p2 doorgegeven worden; Dagoverzicht staat default op
+      gisteren. Gate uit de audit gehaald: `?date=2026-07-31` was een bevestigde 500 op 1 aug en
+      geeft nu 200.
+- [x] **Phase 1** (`3ff1455` = H1, `8d0a1b7` = de rest).
+      **H1-beslissing van Joep: de UI is het juiste gedrag** — Include = allow-list,
+      Exclude = deny-list. `included` deed twee dingen tegelijk: het bepaalde of het
+      `actie IN ('aan','uit')`-predicaat werd toegepast, en `shop_names` werd *altijd*
+      `shop_name IN (…)`. Dus "Exclude these shops" liep op precies díe shops. Nu gescheiden;
+      de oude bijwerking "`included=True` geeft ook shops zonder wijziging vandaag" is bewust
+      wég (hoort achter een eigen parameter als je hem terug wil).
+      Gate gehaald tegen 2026-08-04: Include is exact de gekozen set, Exclude bevat er geen
+      één van, samen zijn ze het complement van de dag, en de rijaantallen tellen op.
+      Verder: H4 (adoptie miste juist zijn eigen cohort van ~2.954 naamgelijke campagnes —
+      dedent), H7 (mislukte ENABLE stond als `skipped`), creatiedatum alleen nog voor écht
+      *created* campagnes, sheet-vlag `aangemaakt?` telt `activated` mee, en de
+      sheet-dedupekey kent nu de actie (een `uit`-rij binnen ±2 dagen onderdrukte een latere
+      `aan`-rij).
+      **Plus het structurele risico, beide helften:** `run_gsd_script` had géén
+      exception-grens. Eén shop die faalde brak de hele run af en sloeg `_log_run_to_sheet`,
+      `push_mc_ids_to_redshift`, `record_created_campaigns` én `reconcile_run_logs` over — het
+      herstelmechanisme werd overgeslagen door precies de fout waarvoor het bestaat — terwijl
+      `_run_progress["running"]` voor altijd True bleef.
+      **Let op bij reviewen:** die diff is ~443 regels maar bijna volledig herindentatie van de
+      twee try-wraps. `git diff -w` geeft 49 toegevoegde en 12 verwijderde coderegels; lees hem zo.
+- [ ] **Phase 2 — preview en run convergeren (H6).** Bezig. De run pauzeert via twee bronnen (een
+      `campaign_label`-query op `[shop:variant]` zónder shop_id/kanaalfilter, óf identiteit over de
+      kandidatenlijst); preview loopt alleen de kandidatenlijst af en eist `[shop_id:N]` +
+      `SHOPPING`. Een shop met NULL shop_id previewt dus als "0 te pauzeren" terwijl de run alles
+      pauzeert wat hij vindt — **divergentie in de gevaarlijke richting**. De regels staan nu op
+      twee plekken met de hand bij, en dát is hoe H6 ontstond. #priority:high
+- [ ] **Phase 3 — opruimen.** Dode code, het dode `sub`-catniveau (twee verspilde
+      Redshift-aggregaties per page load), label negative-caching, bulk-selectiestate, sorteerrangen,
+      request-sequencing in seo-stats (kan baseline van run A door totalen van run B delen over alle
+      acht tiles). Plus uit de MED-lijst: `loadCampaigns()` leest alleen `data.campaigns`, dus een
+      kapotte DE-query ziet eruit als "DE heeft geen campagnes".
+
 ### 2026-08-05 — Kopteksten incrementeel publiceren, en de HS2.0-push werd overschreven
 
 - [ ] **BLOKKER: zoek uit wie nog naar de Keywords API publiceert.** Alle 12 HS2.0-categorieën

@@ -145,20 +145,27 @@ scans the `[shop:…]` tag so a shop literally named "Macro.nl" would be unadopt
 
 ## Phased plan
 
-**Phase 0 — ship now, no gate** (behaviour-preserving, ~40 lines)
+**Phase 0 — ✅ SHIPPED 2026-08-05 (`9b04eaa`)** (behaviour-preserving, ~40 lines)
 H2, H3, H5, surface the reconcile's sink errors, `ORDER BY ad_group.id` on both queries.
 Smoke test: `/api/seo-stats/dashboard` returns 200 for today *and* yesterday; the preview's
 activate tile shows a non-zero count on a day with matches.
+*Gate met:* `?date=2026-07-31` was a confirmed 500 on 2026-08-01 and returns 200.
 
-**Phase 1 — behaviour-changing, gated**
-H1 (after Joep decides UI-wording vs backend-behaviour), H4, H7, the created-date filter,
-the sheet `aangemaakt?` flag, the sheet dedupe `uit` filter, **and a per-shop
-`try/except` + `finally` in `run_gsd_script`** (see structural risk).
-Gate: `POST /api/gsd-campaigns/preview` before and after must be identical except where
-intended; for H1, a preview with shop names + Exclude must return the complement of the
-same list with Include.
+**Phase 1 — ✅ SHIPPED 2026-08-05 (`3ff1455` = H1, `8d0a1b7` = the rest)**
+H1, H4, H7, the created-date filter, the sheet `aangemaakt?` flag, the sheet dedupe `uit`
+filter, **and the per-shop boundary in `run_gsd_script`** (see structural risk).
 
-**Phase 2 — converge preview and run** (H6)
+* **H1 decided: the UI is the truth** (Joep, 2026-08-05). Include = allow-list,
+  Exclude = deny-list. `included` no longer doubles as the `actie` filter, so the old
+  side effect "`included=True` also returns shops with no change today" is gone —
+  removed deliberately, and if wanted it belongs behind its own named parameter.
+* *Gate met:* against 2026-08-04 (6 change rows / 5 shops, 2 picked) Include returns
+  exactly the picked set, Exclude contains none of them, the two are complements over the
+  day, and their row counts add up to the unfiltered run.
+* The Phase 1 diff is ~443 lines but almost all re-indentation from the two exception
+  wraps; `git diff -w` showed 49 code lines added / 12 removed. Review it that way.
+
+**Phase 2 — converge preview and run** (H6) — ⏳ IN PROGRESS 2026-08-05
 Extract the two-source pause lookup and the `_is_ours` identity test into helpers that both
 `preview_gsd_script` and `_pause_campaigns_for_shop` call. This is the structural fix: the
 rules are currently hand-maintained in two places, which is how H6 happened.
