@@ -50,6 +50,20 @@ CONTENT_API_URLS = {
     "production": "https://website-configuration.api.beslist.nl/automated-content"
 }
 
+# The per-record sibling of the endpoint above, and a genuinely different animal: it
+# upserts on (url, country_language) instead of replacing the whole store. So one URL
+# can be pushed on its own — ~1 KB instead of the ~280 MB the batch moves.
+# Semantics verified on staging 2026-08-04:
+#   * a field OMITTED or explicitly null KEEPS its stored value
+#   * "" CLEARS it
+#   * country_language defaults to nl-nl
+#   * an unexpected field is a hard 400 ("<field>: This field was not expected")
+CONTENT_RECORDS_API_URLS = {
+    "dev": "http://dev.website-configuration.api.beslist.nl:5900/automated-content/records",
+    "staging": "https://website-configuration-staging.api.beslist.nl/automated-content/records",
+    "production": "https://website-configuration.api.beslist.nl/automated-content/records",
+}
+
 CONTENT_API_KEYS = {
     "dev": os.getenv("CONTENT_API_KEY_DEV", ""),
     "staging": os.getenv("CONTENT_API_KEY_STAGING", ""),
@@ -303,6 +317,80 @@ def get_all_content_items() -> List[Dict]:
     finally:
         cur.close()
         return_db_connection(conn)
+
+
+def publish_content_url(url: str, environment: str = None) -> Dict:
+    """Push ONE url's content_top, synchronously, via /automated-content/records.
+
+    Backs the Push button on the Kopteksten URL Lookup card. The batch endpoint
+    cannot do this: it is a full-set replace, so posting one URL would delete every
+    other one. This endpoint upserts on (url, country_language) and leaves the rest
+    of the store alone.
+
+    content_bottom is OMITTED here, not sent as "". On this endpoint an omitted field
+    keeps its stored value while "" clears it — and the batch deliberately sends ""
+    to retire the old FAQ blobs. A single-URL push has no business re-clearing
+    anything, and omitting it also means this cannot fight FAQ Publish 2.0 over a
+    field that store now owns.
+    """
+    env = environment or DEFAULT_ENV
+    if env not in CONTENT_RECORDS_API_URLS:
+        return {"success": False, "message": f"unknown environment {env!r}"}
+    api_url = CONTENT_RECORDS_API_URLS[env]
+    api_key = CONTENT_API_KEYS.get(env, "")
+    if not api_key:
+        return {"success": False, "message": f"no API key configured for {env!r}"}
+
+    from backend.url_catalog import canonicalize_url
+    canon = canonicalize_url(url)
+    if not canon:
+        return {"success": False, "message": f"could not canonicalize URL: {url!r}"}
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT k.content
+              FROM pa.urls u
+              JOIN pa.kopteksten_content k ON k.url_id = u.url_id
+             WHERE u.url = %s
+        """, (canon,))
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        return_db_connection(conn)
+
+    if not row or not (row["content"] or "").strip():
+        return {"success": False, "url": canon, "env": env,
+                "message": "no koptekst stored for this URL"}
+
+    started = time.time()
+    # Same shape as the batch's rows minus content_bottom; any extra key would 400.
+    record = {"url": _normalize_url(canon),
+              "content_top": sanitize_for_api(row["content"]),
+              "country_language": "nl-nl"}
+    try:
+        resp = _post_with_retry(
+            api_url,
+            headers={"X-Api-Key": api_key, "Content-Type": "application/json"},
+            data=json.dumps([record], ensure_ascii=False).encode("utf-8"),
+            timeout=120,
+        )
+    except requests.RequestException as e:
+        return {"success": False, "url": canon, "env": env, "error": str(e)}
+
+    ok = 200 <= resp.status_code < 300
+    out = {"success": ok, "url": record["url"], "env": env, "api_url": api_url,
+           "status_code": resp.status_code, "chars": len(record["content_top"]),
+           "duration_sec": round(time.time() - started, 1)}
+    if not ok:
+        out["response"] = (resp.text or "")[:500]
+    else:
+        try:
+            out["records"] = (resp.json() or {}).get("records")
+        except Exception:
+            pass
+    return out
 
 
 def publish_all_content(environment: str = None, task_id: str = None) -> Dict:

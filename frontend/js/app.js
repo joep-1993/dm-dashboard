@@ -224,21 +224,74 @@ async function lookupContent() {
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <code style="word-break: break-all;">${data.url}</code>
-                    <div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-outline-orange btn-sm" id="pushOneBtn"
+                                onclick="pushContentOne('${encodeURIComponent(data.url)}')"
+                                title="Push just this URL's koptekst via /automated-content/records (an upsert — the rest of the store is untouched)">
+                            Push
+                        </button>
                         <button class="btn btn-outline-danger btn-sm" onclick="deleteAndResetUrl('${data.url}')">
-                            Delete & Reset to Pending
+                            Delete
                         </button>
                     </div>
                 </div>
                 <div class="card-body">
                     <p class="text-muted small mb-2">Created: ${createdAt}</p>
                     <div class="border rounded p-2 bg-light" style="max-height: 300px; overflow-y: auto; white-space: pre-wrap; font-size: 0.85rem;">${escapeHtml(data.content || 'No content')}</div>
+                    <!-- Push writes here rather than into #lookupResult, which holds this
+                         whole card — reusing it would delete the card. -->
+                    <div id="pushOneResult" class="mt-2"></div>
                 </div>
             </div>
         `;
 
     } catch (error) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// Push just this URL's koptekst. Uses /automated-content/records (an upsert), so
+// unlike the Publish button on the Content Publishing card this does NOT replace the
+// whole store — nothing outside this URL is touched. Synchronous: one ~1 KB POST.
+// Environment comes from the Content Publishing card's selector so both publishes on
+// this page target the same env.
+async function pushContentOne(encodedUrl) {
+    const url = decodeURIComponent(encodedUrl);
+    const btn = document.getElementById('pushOneBtn');
+    const out = document.getElementById('pushOneResult');
+    const envSelect = document.getElementById('publishEnvironment');
+    const environment = envSelect ? envSelect.value : 'production';
+
+    if (!confirm(`Push this URL's koptekst → ${environment}?\n\n${url}\n\n`
+               + `Upserts just this record. The rest of the store is left alone.`)) return;
+
+    if (btn) btn.disabled = true;
+    out.innerHTML = `<div class="alert alert-warning py-2 mb-0">`
+        + `<span class="spinner-border spinner-border-sm"></span> Pushing to ${escapeHtml(environment)}…</div>`;
+
+    try {
+        const res = await fetch(`${API_BASE}/api/content-publish/url`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, environment })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            out.innerHTML = `<div class="alert alert-danger py-2 mb-0">${escapeHtml(data.detail || 'Push failed')}</div>`;
+        } else if (data.success) {
+            out.innerHTML = `<div class="alert alert-success py-2 mb-0">`
+                + `Pushed <strong>${data.chars.toLocaleString()}</strong> chars of content_top to `
+                + `<code>${escapeHtml(data.env)}</code> in ${data.duration_sec}s.</div>`;
+        } else {
+            out.innerHTML = `<div class="alert alert-danger py-2 mb-0">`
+                + `Push failed (HTTP ${escapeHtml(String(data.status_code ?? '-'))}): `
+                + `${escapeHtml(data.response || data.error || data.message || '')}</div>`;
+        }
+    } catch (e) {
+        out.innerHTML = `<div class="alert alert-danger py-2 mb-0">Error: ${escapeHtml(e.message)}</div>`;
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 

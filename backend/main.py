@@ -2899,6 +2899,37 @@ async def publish_content(environment: str = "dev"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/content-publish/url")
+async def publish_content_single_url(request: dict = None):
+    """Push ONE url's koptekst — backs the Push button on Kopteksten URL Lookup.
+
+    Uses /automated-content/records (a real upsert), NOT the batch endpoint, which is
+    a full-set replace and would delete every URL absent from the payload. Synchronous:
+    one record is a single ~1 KB POST, against ~280 MB for the batch.
+
+    Body: {url, environment}.
+    """
+    request = request or {}
+    url = (request.get("url") or "").strip()
+    env = request.get("environment", "production")
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    if env not in ("dev", "staging", "production"):
+        raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+    try:
+        from backend.content_publisher import publish_content_url
+        result = publish_content_url(url, environment=env)
+        # No stored koptekst / unusable URL is a client mistake, not a server fault:
+        # 400 so the button can say so without reading as a crash.
+        if not result.get("success") and "status_code" not in result and "error" not in result:
+            raise HTTPException(status_code=400, detail=result.get("message", "publish failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/content-publish/status/{task_id}")
 async def get_publish_status(task_id: str):
     """
