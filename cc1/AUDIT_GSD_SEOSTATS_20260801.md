@@ -165,14 +165,46 @@ filter, **and the per-shop boundary in `run_gsd_script`** (see structural risk).
 * The Phase 1 diff is ~443 lines but almost all re-indentation from the two exception
   wraps; `git diff -w` showed 49 code lines added / 12 removed. Review it that way.
 
-**Phase 2 — converge preview and run** (H6) — ⏳ IN PROGRESS 2026-08-05
-Extract the two-source pause lookup and the `_is_ours` identity test into helpers that both
-`preview_gsd_script` and `_pause_campaigns_for_shop` call. This is the structural fix: the
-rules are currently hand-maintained in two places, which is how H6 happened.
+**Phase 2 — ✅ SHIPPED 2026-08-05 (`939cf4d`)** converge preview and run (H6)
+Extracted into `_pause_identity_matcher()` + `find_pausable_campaigns()`, which both
+`preview_gsd_script` and `_pause_campaigns_for_shop` now call.
+*Measured against NL_CPR:* Voordeelvanger.nl and Bosmenshop.nl each return 6 pausable
+campaigns, identical to the old identity-only path while `shop_id` is present (no
+regression). Force `shop_id` to NULL and the shared lookup still finds 6 and 5 where the
+old preview reported **0**. Bosmenshop's 6-vs-5 is the useful bit: one campaign is found
+ONLY by identity because it carries no GSD_SCRIPT label, so neither source can be dropped.
 
-**Phase 3 — cleanup**
-Dead code above, the dead `sub` cat level, label negative-caching, debounced filtering,
-bulk-selection state, sort ranks, request sequencing in seo-stats.
+**The five MEDs that were in no phase — ✅ SHIPPED 2026-08-05 (`28318db`)**
+Reconcile reachability (`if not changes: return` sat before it), the heatmap scale vs the
+weekday filter, Top-categories column labels, the failed-reload stale render, and the
+stale pp-badge comment. The reload fix needed `computeTotals()` to become null-safe, which
+also closed a pre-existing latent throw.
+
+**Phase 3 — ✅ SHIPPED 2026-08-05 (`751399a`)** cleanup, net −95 lines
+Dead code, the dead `sub` cat level, label negative-caching, sort ranks, request sequencing
+in seo-stats, and `loadCampaigns` surfacing per-account failures.
+
+* **The dead-code list in this doc was WRONG about one entry.** `exportXlsx` exists in both
+  pages and the **seo-stats one is live** (wired to the Export button) — it was listed here
+  among the "eight GSD-frontend functions". Deleting both would have removed the SEO Stats
+  export. Check each name per file before trusting a list like this again.
+* `loadStats` was as described: a permanent no-op (#statTotal exists nowhere but inside it)
+  called from 11 places, three of them inside functions that were themselves dead.
+* **NOT done, deliberately: bulk-selection state.** It lives in the DOM, so a keystroke,
+  sort or page change discards it — but it feeds bulk Pause/Enable/Remove, which mutate live
+  campaigns, and losing a selection currently fails SAFE (empty). Making it stateful risks
+  the opposite (acting on a stale set), so it wants its own change and its own review.
+* Watch out when verifying a `/deltas` change: the response is cached AND the local :8003
+  has no `--reload`, so a removed field can look unfixed twice over. Restart, then
+  `?force=true`.
+
+**Still open — decisions, not code**
+* The two "Decisions, not defects" items above (Efficy MC-id row for a pre-existing
+  sub-account; pay 3 extra GAQL reads for `repaired` in preview, or rename it
+  `skip_or_repair`).
+* `seo_stats_service.py:~726` Dagoverzicht compares `d` vs `d-7` while `get_deltas` uses
+  `d-1` vs `d-8`. Held back on purpose: aligning it changes WHICH DAY's revenue the card
+  shows, not just its comparison, so it is Joep's call.
 
 ## Biggest structural risk
 

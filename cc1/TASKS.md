@@ -33,17 +33,36 @@ _Active tasks for immediate work_
       `_run_progress["running"]` voor altijd True bleef.
       **Let op bij reviewen:** die diff is ~443 regels maar bijna volledig herindentatie van de
       twee try-wraps. `git diff -w` geeft 49 toegevoegde en 12 verwijderde coderegels; lees hem zo.
-- [ ] **Phase 2 — preview en run convergeren (H6).** Bezig. De run pauzeert via twee bronnen (een
+- [x] **Phase 2 — preview en run convergeren (H6)** (`939cf4d`). Uitgetrokken naar
+      `_pause_identity_matcher()` + `find_pausable_campaigns()`, die preview én run nu beide
+      aanroepen. Gemeten tegen NL_CPR: met shop_id aanwezig identiek aan de oude weg (geen
+      regressie), met shop_id op NULL vindt de gedeelde lookup 6 resp. 5 campagnes waar de
+      oude preview **0** rapporteerde. Bosmenshop 6-vs-5 laat zien dat beide bronnen nodig
+      blijven: één campagne wordt alléén op identiteit gevonden omdat het GSD_SCRIPT-label
+      ontbreekt. De run pauzeert via twee bronnen (een
       `campaign_label`-query op `[shop:variant]` zónder shop_id/kanaalfilter, óf identiteit over de
       kandidatenlijst); preview loopt alleen de kandidatenlijst af en eist `[shop_id:N]` +
       `SHOPPING`. Een shop met NULL shop_id previewt dus als "0 te pauzeren" terwijl de run alles
       pauzeert wat hij vindt — **divergentie in de gevaarlijke richting**. De regels staan nu op
       twee plekken met de hand bij, en dát is hoe H6 ontstond. #priority:high
-- [ ] **Phase 3 — opruimen.** Dode code, het dode `sub`-catniveau (twee verspilde
-      Redshift-aggregaties per page load), label negative-caching, bulk-selectiestate, sorteerrangen,
-      request-sequencing in seo-stats (kan baseline van run A door totalen van run B delen over alle
-      acht tiles). Plus uit de MED-lijst: `loadCampaigns()` leest alleen `data.campaigns`, dus een
-      kapotte DE-query ziet eruit als "DE heeft geen campagnes".
+- [x] **De vijf MEDs die in géén fase zaten** (`28318db`): reconcile weer bereikbaar
+      (`if not changes: return` stond ervóor, dus "run hem nog eens" repareerde niets op precies
+      de rustige dag waarop je dat doet), heatmap-schaal volgt nu het weekdagfilter, Top-categorieën
+      koplabels komen uit de `comparison`-datums van de backend i.p.v. hardcoded "Yesterday", een
+      mislukte reload laat niet langer de vórige periode staan, en het stale pp-badge-commentaar.
+- [x] **Phase 3 — opruimen** (`751399a`, netto −95 regels). Dode code, het dode `sub`-catniveau,
+      label negative-caching, sorteerrangen, request-sequencing in seo-stats, en `loadCampaigns()`
+      die per-account-fouten nu wél toont.
+      **Let op — de dode-codelijst in de audit had het bij één naam MIS:** `exportXlsx` bestaat in
+      béide pagina's en die in seo-stats is **live** (Export-knop). Alleen de gsd-campaigns-variant
+      is weg. Check bij zo'n lijst elke naam per bestand.
+      **Bewust NIET gedaan: bulk-selectiestate.** Die leeft in de DOM en gaat verloren bij een
+      toetsaanslag/sortering — maar hij voedt bulk Pause/Enable/Remove op échte campagnes, en
+      verliezen faalt nu *veilig* (leeg). Stateful maken introduceert het omgekeerde risico
+      (handelen op een verouderde set), dus dat verdient een eigen wijziging en review.
+- [ ] **Open beslissingen (geen code):** de twee "Decisions, not defects" uit de audit, plus
+      Dagoverzicht `d` vs `d-7` (zie hieronder) — die laatste verandert wélke dag de kaart toont,
+      niet alleen de vergelijking.
 
 ### 2026-08-05 — Kopteksten incrementeel publiceren, en de HS2.0-push werd overschreven
 
