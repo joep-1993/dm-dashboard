@@ -277,6 +277,9 @@
         #statsRow .stat-card.metric-on { border-color: #5e4a90; box-shadow: 0 0 0 2px rgba(94,74,144,0.10) inset; }
         #statsRow .stat-card .tile-spark { cursor: default; }
         #dashTiles .stat-card, #statsRow .stat-card, #standupTiles .stat-card { display: flex; flex-direction: column; }
+        /* Marker on a still-maturing figure (see revenue_settling). Amber, not red:
+           the number is not wrong, only incomplete. */
+        .tile-note { color: #b58100; font-weight: 700; cursor: help; }
         #dashTiles .stat-card .tile-spark, #statsRow .stat-card .tile-spark,
         #standupTiles .stat-card .tile-spark { margin-top: auto; }
         .dash-sub { font-size: 0.78rem; text-transform: uppercase; letter-spacing: .04em;
@@ -1968,7 +1971,7 @@
         // Each tile is value + WoW delta + a 14-day sparkline (the dataviz form for
         // "a single current value plus a trend"). The canvas id lets the chart be
         // attached after the innerHTML write and destroyed on the next load.
-        function dashTile(label, value, delta, sparkId, badgeHtml) {
+        function dashTile(label, value, delta, sparkId, badgeHtml, note) {
             // `badgeHtml` wins when given. NB rates pass a RELATIVE % badge, not a
             // percentage-point one (Joep, 2026-07-31) — this comment used to claim pp,
             // which sent one audit reader hunting a defect that does not exist.
@@ -1978,8 +1981,13 @@
                 ? `<div class="stat-delta">${inner}<span class="stat-delta-cap">vs. 7d</span></div>`
                 : '';
             const spark = sparkId ? `<div class="tile-spark"><canvas id="${sparkId}"></canvas></div>` : '';
-            return `<div class="stat-card"><h3>${value}</h3>` +
-                   `<div class="label">${label}</div>${d}${spark}</div>`;
+            // `note` marks a figure that is still maturing. Deliberately a visible marker
+            // plus a tooltip, not a silent correction: the number is real, it is only less
+            // complete than the day it is compared against (see revenue_settling).
+            const hint = note ? ` <span class="tile-note" title="${escapeHtml(note)}">*</span>` : '';
+            const tip = note ? ` title="${escapeHtml(note)}"` : '';
+            return `<div class="stat-card"${tip}><h3>${value}</h3>` +
+                   `<div class="label">${label}${hint}</div>${d}${spark}</div>`;
         }
 
         // Sparklines live in their own registry so a reload cannot leak Chart.js
@@ -2201,13 +2209,21 @@
                     ? '–' : Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
                 const opb = (d.opb === null || d.opb === undefined)
                     ? '–' : '€' + Number(d.opb).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                // Revenue settles late, so on the freshest day it is measured against a day
+                // that finished settling a week ago and the delta reads low until this one
+                // matures. Visits/CTR/Bounce do not settle late and carry no note.
+                const settlingNote = d.revenue_settling
+                    ? 'Omzet van deze dag is nog niet volledig verwerkt — de vergelijking met '
+                      + '7 dagen eerder valt daardoor te laag uit.'
+                    : null;
                 destroySparks('spark');
                 document.getElementById('dashTiles').innerHTML =
                     dashTile('SEO-bezoeken', fmtInt(d.visits), d.visits_wow, 'sparkVisits') +
-                    dashTile('SEO-omzet', fmtEuro(d.revenue), d.revenue_wow, 'sparkRevenue') +
+                    dashTile('SEO-omzet', fmtEuro(d.revenue), d.revenue_wow, 'sparkRevenue',
+                             null, settlingNote) +
                     dashTile('CTR', pct(d.ctr), d.ctr_wow, 'sparkCtr') +
                     dashTile('Bounce', pct(d.bounce), d.bounce_wow, 'sparkBounce') +
-                    dashTile('OPB', opb, d.opb_wow, 'sparkOpb');
+                    dashTile('OPB', opb, d.opb_wow, 'sparkOpb', null, settlingNote);
                 const s = d.series || {};
                 const eur2 = v => '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 // Each sparkline wears its tile's own metric colour from METRICS, so a

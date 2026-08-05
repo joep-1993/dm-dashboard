@@ -756,9 +756,20 @@ def get_dashboard(target_date: Optional[str] = None, force: bool = False) -> Dic
     noprod = int(cur.get("seo_noprod") or 0)
     omzet = float(cur.get("seo_omzet") or 0.0)
 
+    # AUDIT — Dagoverzicht keeps its d vs d-7 window, deliberately (Joep, 2026-08-05).
+    # get_deltas shifts revenue to d-1 vs d-8 because revenue settles late; matching that
+    # here would mean the card headed "5 August" showed 4 August's revenue next to
+    # 5 August's visits — one date in the header, two in the numbers. So the window stays
+    # and the known bias is surfaced instead: on the freshest day, revenue (and therefore
+    # OPB) is still filling in while d-7 settled a week ago, which makes revenue_wow and
+    # opb_wow read low. The correct-but-unbuildable fix would compare d-7 AT THE SAME
+    # MATURITY, which needs historical maturity snapshots we do not keep.
+    revenue_settling = (today - d).days <= 1
+
     result = {
         "date": d.isoformat(),
         "compare_date": prev.isoformat(),
+        "revenue_settling": revenue_settling,
         "visits": visits,
         "revenue": round(omzet, 2),
         # CTR is clicks-per-visit (bvb + outclicks) and CAN exceed 100% — same
