@@ -1112,7 +1112,20 @@ async def delete_result(url: str):
                 WHERE c.url_id = %s
             """, (uid,))
             cur.execute("DELETE FROM pa.kopteksten_content WHERE url_id = %s", (uid,))
-            cur.execute("DELETE FROM pa.kopteksten_jobs WHERE url_id = %s", (uid,))
+            # Reset the job to pending, do NOT delete it. Both work-pickers require a
+            # row that EXISTS with status='pending' (main.py's batch endpoint and
+            # batch_api_service._fetch_pending_kopteksten_urls), and nothing re-queues
+            # afterwards — daily_automation.py never touches kopteksten_jobs. Deleting
+            # the row therefore dropped the URL out of the werkvoorraad for good, while
+            # this endpoint's own docstring promised "reset back to pending".
+            # attempts/last_error are cleared too, so a URL that previously failed gets
+            # a clean run rather than inheriting its old failure state.
+            cur.execute("""
+                INSERT INTO pa.kopteksten_jobs (url_id, status, attempts, last_error, created_at, updated_at)
+                VALUES (%s, 'pending', 0, NULL, now(), now())
+                ON CONFLICT (url_id) DO UPDATE
+                   SET status = 'pending', attempts = 0, last_error = NULL, updated_at = now()
+            """, (uid,))
             cur.execute("DELETE FROM pa.url_validation WHERE url_id = %s", (uid,))
         conn.commit()
         cur.close()
@@ -2635,7 +2648,18 @@ async def delete_faq_result(url: str):
             found = True
             uid = row['url_id']
             cur.execute("DELETE FROM pa.faq_content_v2 WHERE url_id = %s", (uid,))
-            cur.execute("DELETE FROM pa.faq_jobs WHERE url_id = %s", (uid,))
+            # Same fix as the kopteksten delete above: reset to pending rather than
+            # deleting the row, because the FAQ work-picker also requires an existing
+            # row with status='pending' and nothing re-queues afterwards. skip_reason is
+            # cleared as well — a URL previously skipped should be reconsidered, not
+            # inherit the old skip.
+            cur.execute("""
+                INSERT INTO pa.faq_jobs (url_id, status, skip_reason, attempts, last_error, created_at, updated_at)
+                VALUES (%s, 'pending', NULL, 0, NULL, now(), now())
+                ON CONFLICT (url_id) DO UPDATE
+                   SET status = 'pending', skip_reason = NULL, attempts = 0,
+                       last_error = NULL, updated_at = now()
+            """, (uid,))
             cur.execute("DELETE FROM pa.faq_link_validation WHERE url_id = %s", (uid,))
             # Also clear the shared skip table so a skipped→deleted URL
             # returns to FAQ pending (process-urls filters out is_valid=FALSE).
