@@ -132,6 +132,47 @@ never evicts, a malformed `?date=` returns 500 instead of 400, and `_MACRO_MICRO
 scans the `[shop:…]` tag so a shop literally named "Macro.nl" would be unadoptable
 (latent — no such shop verified).
 
+**✅ SHIPPED 2026-08-05 (`d682c39`)** — the dead functions went in Phase 3 (`751399a`); this
+commit closes the rest. Every item was re-checked against the code first, and the list was
+wrong or incomplete on three of them:
+
+* **`_MACRO_MICRO_RE`** — fixed by narrowing the tag body to `[^\]:]`, so only a BARE tag can
+  mark a variant. Grounded before changing it: of 2.856 live campaigns, 120 carry a
+  macro/micro tag and **all 120 are bare** (`[macro]` 60, `[macro+micro]` 60). Zero keyed
+  forms, both patterns flag the same 120 names, and `[shop:Macro.nl]` now passes. Not as
+  latent as the audit implied: the run would have created a duplicate campaign beside such a
+  shop **every day**.
+* **Malformed `?date=`** — a `_check_date` helper in both routers. **Call it before the
+  `try`:** HTTPException is an Exception, so validating inside the block lets the handler's
+  `except Exception` relabel the 400 as a 500 — the same bug one indent deeper. Both helpers
+  carry that warning. GSD's `/preview`, `/run` and `/ll/run` now reject a typo before
+  spending a Redshift round trip or starting a real run; verified `running=false` afterwards.
+* **`_CACHE`** — sweeps expired entries on write plus an oldest-first cap of 200 that never
+  evicts the key being written. 1.000 distinct keys → 200 entries.
+* **`_as_distribution`'s fallback loop — the list was WRONG to call this deletable.** It is
+  unreachable today, but `total` sums all of `raw`, so a bucket missing from the order list
+  stays in the denominator: delete the loop and the slices silently stop summing to 100%. It
+  now `logger.warning`s when it fires, which also catches the subtler harm — an unmentioned
+  bucket is appended at the end and shifts every slice colour, exactly what the order list
+  exists to prevent.
+* **Two items no longer existed**: no unreachable statement follows any `return` in
+  `gsd_campaigns_service` (AST-checked, zero hits — the H4 dedent took it), and
+  `.dev-legend` was already gone.
+* **Dead ids/CSS, measured not assumed.** Removed: seo-stats' `#loadBtn` disable/re-enable
+  dance (button gone, `if (btn)` guarded the one certainty, so three lines + the `finally`
+  were no-ops — `loadStats`' shape again); `.stat-card`, `.btn-action`, `.btn-pause`,
+  `.btn-activate`, `.btn-remove` in gsd-campaigns (orphaned by `751399a`);
+  `.activity-log .log-entry/.log-time/.log-action` (the log is a table now);
+  `.delta-card` + its six `.dc-*` descendants; `.neg`.
+  **KEPT, because a class grep is not proof of death** — and all four look dead to a naive
+  scan: `.log-success`/`.log-error` come from a template literal
+  (`entry.success ? 'log-success' : 'log-error'`), `.metric-tile` is assigned via
+  `card.className`, `#sparkTip` is created at runtime by `sparkTip()` so its absence from the
+  HTML is correct, and every `.flatpickr-*` rule is a theme override the library applies.
+* **`get_event_loop()` → `get_running_loop()`**, all 67 sites in 15 files (the audit said 20;
+  it was 67). AST-verified that every one sits inside an `async def`, where the two are
+  equivalent — mechanical, not behavioural.
+
 ## Decisions, not defects
 
 * Reconcile logs an MC id whenever the `(shop_id, country, merchant_id)` triple is absent,
@@ -215,7 +256,12 @@ in seo-stats, and `loadCampaigns` surfacing per-account failures.
   has no `--reload`, so a removed field can look unfixed twice over. Restart, then
   `?force=true`.
 
-**Still open — decisions, not code**
+**LOW cluster — ✅ SHIPPED 2026-08-05 (`d682c39`)**, details under `## LOW` above. Three of
+the seven items did not match the list: two no longer existed, and `_as_distribution`'s
+"dead" loop needed keeping (plus a tripwire) rather than deleting. Second time this doc's own
+inventory has been wrong — re-check before acting on it.
+
+**Still open — decisions, not code. No code items remain.**
 * The two "Decisions, not defects" items above (Efficy MC-id row for a pre-existing
   sub-account; pay 3 extra GAQL reads for `repaired` in preview, or rename it
   `skip_or_repair`).

@@ -89,10 +89,48 @@ _Active tasks for immediate work_
       cijfer *incompleet* is, niet fout. Visits/CTR/bounce rijpen niet na en krijgen geen noot.
       De statistisch juiste fix (d-7 op dezelfde rijpheid vergelijken) vraagt maturity-snapshots
       die we niet bewaren.
+- [x] **De LOW-cluster** (`d682c39`) — de zeven items die in géén fase zaten. Elk item eerst
+      tegen de code gecheckt, en de lijst had het bij **drie** mis:
+      * `_MACRO_MICRO_RE` scande de tag-inhoud, dus een shop die écht "Macro.nl" heet komt binnen
+        als `[shop:Macro.nl]`, wordt als macro-variant gelezen en is daarmee permanent
+        niet-adopteerbaar — de run zou er **elke dag** een tweede campagne naast zetten. Niet zo
+        latent als de audit suggereerde. Fix: `[^\]:]`, dus alleen een *bare* tag markeert nog.
+        Eerst gemeten: van 2.856 live campagnes hebben 120 een macro/micro-tag en **alle 120 zijn
+        bare** (`[macro]` 60, `[macro+micro]` 60). Nul keyed vormen, beide patronen vlaggen
+        dezelfde 120 namen.
+      * Foute `?date=` gaf 500 i.p.v. 400. `_check_date` in beide routers. **Roep hem vóór de
+        `try` aan:** HTTPException *is* een Exception, dus binnen het blok valideren laat de
+        handler's `except Exception` de 400 weer als 500 teruggeven — precies dezelfde bug, één
+        indent dieper. GSD's `/preview`, `/run` en `/ll/run` weigeren een typo nu aan de deur in
+        plaats van na een Redshift-round-trip of een gestarte run (`running=false` nagemeten).
+      * `_CACHE` groeide oneindig (keys bevatten de datums). Nu: verlopen entries worden bij een
+        write geveegd + oudste-eerst cap op 200 die nooit de net geschreven key wegvaagt.
+        1.000 losse keys → 200 entries.
+      * **`_as_distribution`'s fallback-loop mocht juist NIET weg** — hij is vandaag onbereikbaar,
+        maar `total` telt héél `raw`, dus een bucket die niet in de order-lijst staat blijft in de
+        noemer: loop weg = slices tellen stil niet meer op tot 100%. Hij logt nu een warning als
+        hij vuurt, wat ook de subtielere schade pakt (een onbekende bucket wordt achteraan
+        geplakt en verschuift alle slice-kleuren — precies wat de order-lijst moet voorkomen).
+      * Twee items bestónden niet meer: géén onbereikbare statement na een `return` in
+        `gsd_campaigns_service` (AST-check, nul hits — de H4-dedent nam hem mee) en `.dev-legend`
+        was al verwijderd.
+      * Dode ids/CSS **gemeten, niet aangenomen.** Weg: seo-stats' `#loadBtn` disable/enable-dans
+        (knop bestaat niet, `if (btn)` dekte juist het enige zekere, dus 3 regels + de `finally`
+        waren no-ops — de vorm van `loadStats`), `.stat-card`/`.btn-action`/`.btn-pause`/
+        `.btn-activate`/`.btn-remove` (verweesd door `751399a`), `.activity-log
+        .log-entry/-time/-action` (log is nu een `<table>`), `.delta-card` + zes `.dc-*`, `.neg`.
+        **Bewust GEHOUDEN, want een class-grep is geen doodsbewijs** — en alle vier lijken dood
+        voor een naïeve scan: `.log-success`/`.log-error` komen uit een template literal,
+        `.metric-tile` via `card.className`, `#sparkTip` wordt at-runtime aangemaakt (afwezig in
+        de HTML is dus correct) en elke `.flatpickr-*` regel is een theme-override die de library
+        zelf toepast.
+      * `get_event_loop()` → `get_running_loop()`, alle **67** plekken in 15 bestanden (de audit
+        zei 20). Per AST geverifieerd dat elke call in een `async def` staat, waar de twee
+        equivalent zijn — mechanisch, niet gedragsveranderend.
 - [ ] **Open beslissingen (geen code):** de twee "Decisions, not defects" uit de audit — de
       Efficy MC-id-rij voor een al bestaand subaccount, en of we 3 extra GAQL-reads betalen voor
-      `repaired` in de preview of hem `skip_or_repair` noemen. **Hiermee is de audit verder
-      volledig afgerond: geen code-items open.**
+      `repaired` in de preview of hem `skip_or_repair` noemen. **Hiermee is de audit volledig
+      afgerond: geen code-items meer open.**
 
 ### 2026-08-05 — Kopteksten incrementeel publiceren, en de HS2.0-push werd overschreven
 

@@ -1,6 +1,56 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een 400 die je binnen de `try` gooit, wordt een 500 (2026-08-05)
+
+Het patroon staat in élke router hier:
+
+```python
+try:
+    ...
+except Exception as e:
+    raise HTTPException(status_code=500, detail=str(e))
+```
+
+`HTTPException` **is** een `Exception`. Gooi je dus binnen dat blok een nette 400, dan vangt de
+handler hem en geeft alsnog 500 terug. De validatie moet **vóór** de `try` staan. Beide
+`_check_date`-helpers (seo-stats + gsd) hebben die waarschuwing er expliciet boven staan, want
+het is precies het soort fout dat je "opgelost" aflevert.
+
+Dit was ook de oorzaak van het oorspronkelijke defect: `?date=abc` liet `strptime` klappen diep
+in `run_in_executor`, en `except Exception` labelde een clienttypo als serverfout. Op de
+GSD-kant erger dan cosmetisch — `date` bepaalt op welke shop-changes een run acteert, dus een
+typo kostte een Redshift-round-trip of startte een échte run vóórdat hij faalde.
+
+**Generieker:** `except Exception` rond een hele handler maakt elk onderscheid tussen
+client- en serverfout onmogelijk. Wil je een specifieke status, valideer buiten het blok of vang
+`HTTPException` apart en re-raise.
+
+## "Dode code" is een hypothese, geen bevinding — en soms moet hij juist blijven (2026-08-05)
+
+Tweede keer dat de inventarislijst in `AUDIT_GSD_SEOSTATS_20260801.md` ernaast zat (de eerste
+was `exportXlsx`, dat in seo-stats **live** is). Bij het afwerken van de LOW-cluster bleken van
+de zeven items drie niet te kloppen: twee bestonden niet meer, en één moest juist blijven.
+
+**`_as_distribution`'s fallback-loop stond als "dode code" op de lijst en is onbereikbaar —
+maar weghalen maakt een toekomstige fout stiller.** `total` telt héél `raw`; een bucket die niet
+in de order-lijst staat blijft dus in de noemer. Loop weg → de slices tellen stil niet meer op
+tot 100%. Hij logt nu een warning als hij vuurt. Dat pakt ook de subtielere schade: een
+onbekende bucket wordt achteraan geplakt en verschuift alle slice-kleuren, precies wat de
+order-lijst moet voorkomen. **Onbereikbare defensieve code kan je beter luid maken dan
+verwijderen.**
+
+**En een class-grep is geen doodsbewijs.** Vier kandidaten leken dood en waren het niet:
+- `.log-success`/`.log-error` → uit een template literal (`entry.success ? '…' : '…'`)
+- `.metric-tile` → via `card.className = '…'`
+- `#sparkTip` → wordt at-runtime aangemaakt, dus afwezig in de HTML is *correct*
+- `.flatpickr-*` → theme-overrides die de library zelf toepast
+
+Werkwijze die wél werkt: zoek naar de naam in het **hele** bestand (niet alleen `class="`),
+kijk of hij at-runtime gezet wordt, en check of een externe library hem toepast. Wat écht dood
+was, was dood om een traceerbare reden — de per-rij actieknoppen en `loadStats` waren in
+`751399a` verwijderd en hun CSS bleef achter.
+
 ## "Faalt veilig" is geen reden om een bug te laten staan — maar wél om hem apart te fixen (2026-08-05)
 
 De bulk-selectie in GSD Campaigns leefde in de DOM (`.camp-check:checked`). Elke re-render
