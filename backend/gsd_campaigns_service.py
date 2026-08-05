@@ -1437,10 +1437,15 @@ def get_redshift_shop_changes(
     Parameters
     ----------
     date_str : optional date string (YYYY-MM-DD), defaults to today.
-    shop_names : optional list of shop names to filter on.
-    included : if True, also include shops that are already included.
+    shop_names : optional list of shop names to filter on. Ignored when empty.
+    included : how shop_names is applied — True = allow-list (only these shops),
+        False = deny-list (everything except these). Matches the UI's
+        "Include these shops" / "Exclude these shops" radios and the router's
+        documented contract. It used to mean something else entirely; see AUDIT H1
+        at the filter below.
 
     Returns list of dicts with: shop_id, shop_name, kolom, actie, branded, model.
+    Only shops whose GSD flag actually changed on `date_str` are returned.
     """
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
@@ -1484,12 +1489,29 @@ def get_redshift_shop_changes(
     params: list = [date_str] * len(flags)
 
     conditions: list = []
-    if not included:
-        conditions.append("actie IN ('aan', 'uit')")
+
+    # AUDIT H1 — `included` is the allow/deny switch for shop_names, and nothing else.
+    # It used to mean two unrelated things at once: it decided whether the actie filter
+    # was applied, while shop_names was ALWAYS turned into `shop_name IN (…)`. So the UI's
+    # default "Exclude these shops" ran on exactly those shops — the opposite of what it
+    # says, and the opposite of what the router documents. Joep, 2026-08-05: the UI is the
+    # truth, so Include = allow-list, Exclude = deny-list.
+    #
+    # actie is NULL when a flag did not change (the CASE has no ELSE), so this predicate
+    # is what makes this a CHANGES query. It now always applies. That removes the old side
+    # effect of `included=True` — "also return shops with no flag change today", per the
+    # original docstring — deliberately rather than silently: it was never what the UI or
+    # the router offered, and it is not reachable from the UI, whose radios only enable
+    # once the textarea has content. If that capability is still wanted it belongs behind
+    # its own explicitly-named parameter, not as a side effect of the shop-list mode.
+    conditions.append("actie IN ('aan', 'uit')")
 
     if shop_names:
         placeholders = ",".join(["%s"] * len(shop_names))
-        conditions.append(f"shop_name IN ({placeholders})")
+        conditions.append(
+            f"shop_name IN ({placeholders})" if included
+            else f"shop_name NOT IN ({placeholders})"
+        )
         params.extend(shop_names)
 
     if conditions:
