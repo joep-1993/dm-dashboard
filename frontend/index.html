@@ -200,7 +200,21 @@
                                      way to re-fetch a value nothing else changes (Joep, 2026-08-04).
                                      fetchLastPushTimestamp() itself stays — app.js still calls it
                                      in both those places. -->
-                                <button class="btn btn-secondary" onclick="publishContent()" id="publishBtn">Publish</button>
+                                <!-- Two publishes, and the difference matters:
+                                     "Publish" = incremental UPSERT over
+                                     /automated-content/records — only new/changed
+                                     kopteksten, tracked in pa.kopteksten_push_state.
+                                     Fast, and it never deletes anything.
+                                     "Publish All" = the original full-set batch over
+                                     /automated-content, which REPLACES the store. It is
+                                     the only thing that prunes retired URLs, so it stays
+                                     as the periodic hammer. Layout follows the FAQ card:
+                                     full-orange btn-run as the primary CTA on the right,
+                                     btn-outline-orange for the heavier one. -->
+                                <button class="btn btn-outline-orange" onclick="publishContent()" id="publishBtn"
+                                        title="Full-set batch over /automated-content: replaces the whole store (~243k urls) and is the only publish that removes retired ones">Publish All</button>
+                                <button class="btn btn-run" onclick="publishContentRecords()" id="publishRecordsBtn"
+                                        title="Push only new &amp; changed kopteksten via /automated-content/records (an upsert — nothing else is touched)">Publish</button>
                             </div>
                         </div>
 

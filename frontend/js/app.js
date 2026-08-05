@@ -1272,6 +1272,151 @@ async function fetchLastPushTimestamp() {
 }
 
 
+// ---------------------------------------------------------------------------
+// Incremental publish — /automated-content/records (UPSERT), only new/changed.
+//
+// Distinct from publishContent() below, which posts the full-set batch and REPLACES
+// the store. This one cannot delete anything, so retired URLs are reported in the
+// confirm rather than silently left behind: the records GET is capped at 1,000 rows
+// with no offset, so pruning has to be driven from pa.kopteksten_push_state, and the
+// batch remains the thing that actually removes them.
+// ---------------------------------------------------------------------------
+let recordsCancelRequested = false;
+
+async function publishContentRecords() {
+    const btn = document.getElementById('publishRecordsBtn');
+    const batchBtn = document.getElementById('publishBtn');
+    const resultDiv = document.getElementById('publishResult');
+    const envSelect = document.getElementById('publishEnvironment');
+    const environment = envSelect ? envSelect.value : 'production';
+
+    let stats = null;
+    try {
+        const r = await fetch(`${API_BASE}/api/content-publish/records/stats?environment=${encodeURIComponent(environment)}`);
+        if (r.ok) stats = await r.json();
+    } catch (e) { /* fall through to a generic confirm */ }
+
+    const nf = n => (n || 0).toLocaleString('nl-NL');
+    if (stats && stats.has_api_key === false) {
+        const keyVar = { dev: 'DEV', staging: 'STAGING', production: 'PROD' }[environment] || '?';
+        resultDiv.innerHTML = `<div class="alert alert-danger">No API key configured for `
+            + `<code>${escapeHtml(environment)}</code> — set <code>CONTENT_API_KEY_${keyVar}</code>`
+            + ` in the backend .env.</div>`;
+        return;
+    }
+
+    if (stats) {
+        if (stats.urls_pending === 0) {
+            resultDiv.innerHTML = `<div class="alert alert-info">Nothing to publish — all `
+                + `${nf(stats.urls_total)} kopteksten are already up to date on `
+                + `<code>${escapeHtml(environment)}</code>`
+                + (stats.last_pushed_at ? ` (last push ${escapeHtml(stats.last_pushed_at.slice(0,16).replace('T',' '))})` : '')
+                + `.</div>`;
+            return;
+        }
+        // The stale count is information, not an action: this button does not prune.
+        const staleNote = stats.urls_stale
+            ? `\n\n${nf(stats.urls_stale)} url(s) were pushed before but are no longer `
+              + `publishable. This publish does NOT remove them — run Publish All for that.`
+            : '';
+        if (!confirm(`Publish → ${environment}\n\n`
+                   + `Pushes ${nf(stats.urls_pending)} new/changed koptekst(en) of `
+                   + `${nf(stats.urls_total)} total, as an upsert — nothing else in the `
+                   + `store is touched.${staleNote}\n\nContinue?`)) return;
+    } else if (!confirm(`Publish → ${environment}\n\nCould not read the counts. Continue anyway?`)) {
+        return;
+    }
+
+    btn.disabled = true;
+    if (batchBtn) batchBtn.disabled = true;
+    recordsCancelRequested = false;
+    resultDiv.innerHTML = `<div class="alert alert-warning">Starting incremental publish to ${escapeHtml(environment)}…</div>`;
+
+    try {
+        const res = await fetch(`${API_BASE}/api/content-publish/records`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ environment, mode: 'new' })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            resultDiv.innerHTML = `<div class="alert alert-danger">${escapeHtml(data.detail || 'Publish failed')}</div>`;
+            btn.disabled = false;
+            if (batchBtn) batchBtn.disabled = false;
+            return;
+        }
+        pollRecordsStatus(data.task_id, resultDiv, btn, batchBtn);
+    } catch (e) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(e.message)}</div>`;
+        btn.disabled = false;
+        if (batchBtn) batchBtn.disabled = false;
+    }
+}
+
+async function cancelContentRecords(taskId) {
+    recordsCancelRequested = true;
+    try {
+        await fetch(`${API_BASE}/api/content-publish/records/cancel/${encodeURIComponent(taskId)}`,
+                    { method: 'POST' });
+    } catch (e) { /* the poller reports the terminal state either way */ }
+}
+
+function pollRecordsStatus(taskId, resultDiv, btn, batchBtn) {
+    const nf = n => (n || 0).toLocaleString('nl-NL');
+    setTimeout(async () => {
+        let data;
+        try {
+            const r = await fetch(`${API_BASE}/api/content-publish/records/status/${encodeURIComponent(taskId)}`);
+            data = await r.json();
+        } catch (e) {
+            // Every failure path must clear the running state, or the card claims
+            // "publishing" for a request that already died.
+            resultDiv.innerHTML = `<div class="alert alert-danger">Lost contact with the task: ${escapeHtml(e.message)}</div>`;
+            btn.disabled = false;
+            if (batchBtn) batchBtn.disabled = false;
+            return;
+        }
+
+        if (data.status === 'queued' || data.status === 'running') {
+            const p = data.progress || {};
+            const phase = recordsCancelRequested ? 'Cancelling…' : (p.phase || 'working');
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <strong>Publishing…</strong> <span class="badge bg-secondary">${escapeHtml(phase)}</span><br>
+                    ${nf(p.urls_done)} / ${nf(p.total_urls)} urls in ${nf(p.chunks)} chunk(s)
+                    ${p.failed ? `<span class="text-danger"> — ${nf(p.failed)} failed</span>` : ''}
+                    <div class="mt-2">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <button class="btn btn-sm btn-outline-danger ms-2"
+                                onclick="cancelContentRecords('${taskId}')"
+                                ${recordsCancelRequested ? 'disabled' : ''}>Cancel</button>
+                    </div>
+                </div>`;
+            pollRecordsStatus(taskId, resultDiv, btn, batchBtn);
+            return;
+        }
+
+        btn.disabled = false;
+        if (batchBtn) batchBtn.disabled = false;
+        const r = data.result || {};
+        if (data.status === 'failed') {
+            resultDiv.innerHTML = `<div class="alert alert-danger"><strong>Publish failed</strong><br>${escapeHtml(data.error || '')}</div>`;
+        } else if (data.status === 'cancelled') {
+            resultDiv.innerHTML = `<div class="alert alert-warning"><strong>Publish cancelled</strong><br>`
+                + `${nf(r.urls_pushed)} url(s) were already pushed and stay pushed; the rest come along next run.</div>`;
+        } else if (r.urls_failed) {
+            resultDiv.innerHTML = `<div class="alert alert-danger"><strong>Publish finished with errors</strong><br>`
+                + `${nf(r.urls_pushed)} pushed, ${nf(r.urls_failed)} failed across ${nf(r.chunks)} chunk(s) (${r.duration_sec}s)</div>`;
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-success"><strong>Publish done</strong><br>`
+                + `${nf(r.urls_pushed)} koptekst(en) upserted in ${nf(r.chunks)} chunk(s) `
+                + `(${r.duration_sec}s) → <code>${escapeHtml(r.api_url || '')}</code></div>`;
+        }
+        fetchLastPushTimestamp();
+    }, 2000);
+}
+
+
 async function publishContent() {
     const publishBtn = document.getElementById('publishBtn');
     const resultDiv = document.getElementById('publishResult');

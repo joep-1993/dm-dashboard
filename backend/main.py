@@ -2899,6 +2899,95 @@ async def publish_content(environment: str = "dev"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/content-publish/records/stats")
+async def content_records_stats(environment: str = "production"):
+    """Counts behind the incremental Publish button: pending (new/changed), stale
+    (pushed once, no longer publishable), and when anything last went out."""
+    if environment not in ("dev", "staging", "production"):
+        raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+    try:
+        from backend.content_records_publisher import get_stats
+        return get_stats(environment)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/content-publish/records")
+async def content_records_publish(request: dict = None):
+    """Incremental kopteksten publish over /automated-content/records (an UPSERT).
+
+    Body: {environment, mode, limit, prune}. mode defaults to "new" — only URLs never
+    pushed to this env or whose content changed, tracked in pa.kopteksten_push_state.
+    prune additionally DELETEs URLs that were pushed once but are no longer publishable;
+    that is one request per URL, so it is off by default.
+
+    This does NOT replace the store, unlike POST /api/content-publish. It also cannot
+    discover records it never pushed — the records GET is capped at 1,000 rows with no
+    offset — which is why pruning is driven by our own push state.
+    """
+    request = request or {}
+    env = request.get("environment", "production")
+    mode = request.get("mode", "new")
+    limit = request.get("limit")
+    prune = bool(request.get("prune", False))
+    if env not in ("dev", "staging", "production"):
+        raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+    if mode not in ("new", "all"):
+        raise HTTPException(status_code=400, detail="Invalid mode. Use: new, all")
+    if limit is not None:
+        try:
+            limit = int(limit)
+            if limit < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="limit must be a positive integer")
+    try:
+        from backend.content_records_publisher import start_task
+        task_id = start_task(env=env, mode=mode, limit=limit, prune=prune)
+        return {"status": "started", "task_id": task_id, "environment": env,
+                "mode": mode, "limit": limit, "prune": prune}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/content-publish/records/status/{task_id}")
+async def content_records_status(task_id: str):
+    from backend.content_records_publisher import get_status
+    st = get_status(task_id)
+    if st.get("error") == "Task not found":
+        raise HTTPException(status_code=404, detail="Task not found")
+    return st
+
+
+@app.post("/api/content-publish/records/cancel/{task_id}")
+async def content_records_cancel(task_id: str):
+    """Stop a running incremental publish. Cooperative: the worker checks between
+    chunks, so already-pushed URLs keep their state and the rest are picked up by the
+    next "new" run."""
+    from backend.content_records_publisher import cancel_task
+    if not cancel_task(task_id):
+        raise HTTPException(status_code=400, detail="No running task with that id")
+    return {"status": "cancelling", "task_id": task_id}
+
+
+@app.post("/api/content-publish/records/seed")
+async def content_records_seed(request: dict = None):
+    """Stamp the current publishable set as already-pushed.
+
+    Run this immediately after a full batch publish and at no other time: the claim it
+    records is only true because the batch replaced the store with exactly this set.
+    """
+    request = request or {}
+    env = request.get("environment", "production")
+    if env not in ("dev", "staging", "production"):
+        raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+    try:
+        from backend.content_records_publisher import seed_push_state
+        return seed_push_state(env)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/content-publish/url")
 async def publish_content_single_url(request: dict = None):
     """Push ONE url's koptekst — backs the Push button on Kopteksten URL Lookup.
