@@ -99,7 +99,7 @@ pause" while the run pauses everything it finds. Divergence is in the dangerous 
   failed account is reported in `data.errors` and its rows are simply absent, so a broken
   DE query looks like "DE has no campaigns".
 * `…:843` — bulk selection lives only in the DOM; any keystroke, sort or page change
-  rebuilds `tbody` and silently discards it.
+  rebuilds `tbody` and silently discards it. **FIXED 92d96e8** (see below).
 * `…:1999`, `…:2260` — neither sort-rank map knows `activate` / `activated`, so today's
   new rows sort below `skipped` in the default view.
 * `frontend/seo-stats.html:1727-1774` — no request sequencing: a slow older `/daily` can
@@ -190,10 +190,27 @@ in seo-stats, and `loadCampaigns` surfacing per-account failures.
   export. Check each name per file before trusting a list like this again.
 * `loadStats` was as described: a permanent no-op (#statTotal exists nowhere but inside it)
   called from 11 places, three of them inside functions that were themselves dead.
-* **NOT done, deliberately: bulk-selection state.** It lives in the DOM, so a keystroke,
-  sort or page change discards it — but it feeds bulk Pause/Enable/Remove, which mutate live
-  campaigns, and losing a selection currently fails SAFE (empty). Making it stateful risks
-  the opposite (acting on a stale set), so it wants its own change and its own review.
+* **Bulk-selection state — DONE in its own commit, `92d96e8`.** Held back from Phase 3 on
+  purpose (it mutates live campaigns), then shipped separately. Now a `selectedCampaigns`
+  Set keyed `customer_id|campaign_id`; the checkbox renders from it and writes back to it,
+  and `renderCampaigns()` re-runs `updateBulkButtons()` so the header checkbox follows the
+  newly drawn page.
+  The old behaviour failed SAFE (empty), the new one could fail the other way — acting on a
+  set you can no longer see — so it ships with three guards, which are the actual content of
+  the change:
+  1. `bulkAction` resolves keys against `allCampaigns` and counts how many fall outside
+     `filteredCampaigns`, then names that count in the confirm ("NOTE: n of them are not
+     visible under the current filter") **before** acting.
+  2. `loadCampaigns` prunes keys that no longer exist upstream — **on success only**, inside
+     the `try` after the assignment, so a failed fetch cannot silently discard a selection.
+     Without this, a campaign removed here or elsewhere keeps the bulk buttons enabled and
+     `Copy (n)` above what an action would touch.
+  3. A completed bulk action clears every key it submitted, no-ops included — their statuses
+     just changed underneath, so leaving them checked invites a second live mutation on
+     stale state.
+  Header checkbox stays page-scoped ("select all on this page"); buttons and the Copy label
+  report the whole selection, because that is the number the confirm quotes.
+  `getSelectedCampaignRows` reads the same Set, so Copy and Pause can no longer disagree.
 * Watch out when verifying a `/deltas` change: the response is cached AND the local :8003
   has no `--reload`, so a removed field can look unfixed twice over. Restart, then
   `?force=true`.
@@ -202,9 +219,15 @@ in seo-stats, and `loadCampaigns` surfacing per-account failures.
 * The two "Decisions, not defects" items above (Efficy MC-id row for a pre-existing
   sub-account; pay 3 extra GAQL reads for `repaired` in preview, or rename it
   `skip_or_repair`).
-* `seo_stats_service.py:~726` Dagoverzicht compares `d` vs `d-7` while `get_deltas` uses
-  `d-1` vs `d-8`. Held back on purpose: aligning it changes WHICH DAY's revenue the card
-  shows, not just its comparison, so it is Joep's call.
+* ~~`seo_stats_service.py:~726` Dagoverzicht `d` vs `d-7`.~~ **RESOLVED 2d86d6b** — Joep's
+  call was to keep the window and surface the bias. Both dates are real days, so the
+  arithmetic was never wrong; what differs is MATURITY (d is still filling in, d-7 settled a
+  week ago), which makes `revenue_wow`/`opb_wow` read low every morning. Aligning to
+  `get_deltas` would have shown 4 August's revenue beside 5 August's visits under a
+  "5 August" heading. New `revenue_settling` (day is today or yesterday) drives an amber
+  marker + tooltip on SEO-omzet and OPB only — visits/CTR/bounce do not settle late.
+  The statistically correct fix (compare d-7 at the same maturity) needs maturity snapshots
+  we do not keep.
 
 ## Biggest structural risk
 

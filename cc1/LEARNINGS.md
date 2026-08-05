@@ -1,6 +1,33 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## "Faalt veilig" is geen reden om een bug te laten staan — maar wél om hem apart te fixen (2026-08-05)
+
+De bulk-selectie in GSD Campaigns leefde in de DOM (`.camp-check:checked`). Elke re-render
+bouwt `tbody` opnieuw op, dus typen/sorteren/pagineren wiste de selectie — en dat zijn precies
+de drie handelingen die `renderCampaigns()` aanroepen. Symptoom: 40 vinkjes, pagina 2, Pause →
+er gebeurt niets.
+
+Waarom dat maanden overleefde: het faalde de *veilige* kant op. Een lege selectie doet niks aan
+échte campagnes. Daarom bleef het buiten de grote Phase 3-batch (`751399a`) en kreeg het een
+eigen commit (`92d96e8`) — de fix draait de faalrichting namelijk om.
+
+**De les is het patroon, niet de bug.** Als je state van "vluchtig en veilig" naar "persistent"
+tilt, verplaats je het risico naar *handelen op iets wat je niet meer ziet*. Wat zo'n fix dan
+nodig heeft:
+- **Vertel het vóóraf, niet erna.** De confirm noemt hoeveel van de selectie buiten het huidige
+  filter valt. Anders is de enige feedback dat er meer campagnes muteerden dan je verwachtte.
+- **Schoon stale keys op bij succes, nooit bij falen.** De prune staat binnen de `try` ná de
+  assignment. Buiten de `try` wist een netwerkblip stil je selectie; zónder prune houdt een
+  elders verwijderde campagne de knoppen enabled en `Copy (n)` hoger dan wat een actie raakt.
+- **Consumeer de selectie na de actie**, inclusief de overgeslagen no-ops: hun status is net
+  veranderd, dus aangevinkt laten staan nodigt uit tot een tweede mutatie op stale state.
+- **Eén bron van waarheid.** `getSelectedCampaignRows` (Copy) leest dezelfde Set als
+  `bulkAction`. Zolang de een de DOM leest en de ander state, kunnen ze van mening verschillen
+  over wat er geselecteerd is — dezelfde klasse fout als H6 (preview vs run).
+- Scope-verschil expliciet houden: de kopcheckbox is pagina-scoped ("alles op deze pagina"), de
+  knoppen melden de héle selectie. Eén getal voor beide zou één van de twee liegen.
+
 ## IEMAND ANDERS PUBLICEERT OOK NAAR DE KEYWORDS API — onze HS2.0-push was binnen een dag weg (2026-08-05)
 
 Alle 12 categorieën die we op 4 aug live zetten stonden op 5 aug rond 13:20 **terug op

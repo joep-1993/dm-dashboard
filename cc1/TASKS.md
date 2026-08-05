@@ -56,13 +56,43 @@ _Active tasks for immediate work_
       **Let op — de dode-codelijst in de audit had het bij één naam MIS:** `exportXlsx` bestaat in
       béide pagina's en die in seo-stats is **live** (Export-knop). Alleen de gsd-campaigns-variant
       is weg. Check bij zo'n lijst elke naam per bestand.
-      **Bewust NIET gedaan: bulk-selectiestate.** Die leeft in de DOM en gaat verloren bij een
-      toetsaanslag/sortering — maar hij voedt bulk Pause/Enable/Remove op échte campagnes, en
-      verliezen faalt nu *veilig* (leeg). Stateful maken introduceert het omgekeerde risico
-      (handelen op een verouderde set), dus dat verdient een eigen wijziging en review.
-- [ ] **Open beslissingen (geen code):** de twee "Decisions, not defects" uit de audit, plus
-      Dagoverzicht `d` vs `d-7` (zie hieronder) — die laatste verandert wélke dag de kaart toont,
-      niet alleen de vergelijking.
+      Bulk-selectiestate zat bewust **niet** in deze batch (mutaties op échte campagnes) en is
+      apart geland — zie hieronder.
+- [x] **Bulk-selectiestate in GSD Campaigns** (`92d96e8`, eigen commit na Phase 3). Selectie
+      leefde in de DOM (`.camp-check:checked`), en elke re-render bouwt `tbody` opnieuw op — dus
+      typen in het zoekveld, sorteren of pagineren gooide hem weg, en dat zijn precies de drie
+      dingen die `renderCampaigns()` aanroepen. 40 vinkjes op pagina 1, door naar pagina 2, Pause:
+      er gebeurde niets. Nu een `selectedCampaigns`-Set op `customer_id|campaign_id` (precies wat
+      de bulk-endpoints aannemen); de checkbox rendert eruit én schrijft erin.
+      Oud gedrag faalde *veilig* (leeg), nieuw gedrag kan de ándere kant op falen — handelen op een
+      set die je niet meer ziet — dus drie waarborgen, en dát is de eigenlijke inhoud:
+      1. `bulkAction` lost keys op tegen `allCampaigns` en telt hoeveel er buiten
+         `filteredCampaigns` vallen; die telling staat in de confirm ("NOTE: n of them are not
+         visible under the current filter") **vóór** het handelen, niet erna.
+      2. `loadCampaigns` schoont keys op die upstream niet meer bestaan — **alleen bij succes**,
+         binnen de `try` ná de assignment, zodat een mislukte fetch nooit stil een selectie wist.
+         Zonder dit houdt een elders verwijderde campagne de bulkknoppen enabled en `Copy (n)`
+         hoger dan wat een actie raakt.
+      3. Na een bulkactie worden álle ingezonden keys gewist, óók de no-ops: hun status is net
+         veranderd, dus aangevinkt laten staan nodigt uit tot een tweede live mutatie op stale
+         state.
+      Kopcheckbox blijft pagina-scoped ("alles op deze pagina"); knoppen en het Copy-label melden
+      de héle selectie, want dat is het getal dat de confirm citeert. `getSelectedCampaignRows`
+      leest dezelfde Set, dus Copy en Pause kunnen niet meer van mening verschillen.
+- [x] **Dagoverzicht `d` vs `d-7`** (`2d86d6b`). Joeps keuze: venster houden, de vertekening
+      tónen. Beide datums zijn echte dagen, dus de rekensom was nooit fout — wat verschilt is
+      **rijpheid**: `d` vult nog aan, `d-7` is een week geleden uitgekristalliseerd, dus
+      `revenue_wow`/`opb_wow` lezen elke ochtend laag en lopen dicht als de dag rijpt. Uitlijnen op
+      `get_deltas` was de verleidelijke fix en is hier slechter: dan staat de omzet van 4 augustus
+      naast de visits van 5 augustus onder een kop "5 augustus". Nieuwe `revenue_settling` (dag is
+      vandaag of gisteren) zet een amberen marker + tooltip op SEO-omzet en OPB — amber omdat het
+      cijfer *incompleet* is, niet fout. Visits/CTR/bounce rijpen niet na en krijgen geen noot.
+      De statistisch juiste fix (d-7 op dezelfde rijpheid vergelijken) vraagt maturity-snapshots
+      die we niet bewaren.
+- [ ] **Open beslissingen (geen code):** de twee "Decisions, not defects" uit de audit — de
+      Efficy MC-id-rij voor een al bestaand subaccount, en of we 3 extra GAQL-reads betalen voor
+      `repaired` in de preview of hem `skip_or_repair` noemen. **Hiermee is de audit verder
+      volledig afgerond: geen code-items open.**
 
 ### 2026-08-05 — Kopteksten incrementeel publiceren, en de HS2.0-push werd overschreven
 
@@ -383,6 +413,12 @@ Extract the two-source pause lookup and `_is_ours` into helpers both call.
 `loadStats()` (permanent no-op called from 10 places), the dead `sub` cat level (two wasted
 Redshift aggregations per SEO-Stats page load), label negative-caching, request sequencing
 in seo-stats, bulk-selection state, sort ranks for the new actions.
+
+> **Status 2026-08-05: alle drie fases geland** — `9b04eaa` (fase 0), `3ff1455` + `8d0a1b7`
+> (fase 1, H1 apart), `939cf4d` (fase 2 / H6), `28318db` (de vijf losse MEDs), `751399a`
+> (fase 3), `92d96e8` (bulk-selectiestate, apart), `2d86d6b` (Dagoverzicht).
+> Alleen de twee "Decisions, not defects" staan nog open, en dat zijn keuzes, geen defecten.
+> Zie de bovenste sectie van dit bestand voor de details per fase.
 
 ### Done 2026-07-31 (late) — legacy pin rows adopted + GSD pause matched by identity
 
