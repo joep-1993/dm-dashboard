@@ -1,6 +1,52 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Redshift: een write terugleggen over dezelfde connectie leest de oude snapshot (2026-08-05)
+
+Kostte een false failure tijdens het testen van de `pa.mc_ids_efficy`-upsert. Testharnas hield
+één connectie open (psycopg2 `autocommit=False`, dus een transactie start bij het eerste SELECT).
+`push_mc_ids_to_redshift` opent zijn **eigen** connectie en commit. Gevolg:
+
+1. De update was echt gecommit, maar mijn verificatie-SELECT las nog de snapshot van vóór de
+   write → "mc id updated: FAIL" terwijl de code correct was.
+2. De volgende write in die verschaalde transactie stierf met
+   `Serializable isolation violation on table … transactions forming the cycle are: …`.
+
+Redshift is serializable: een langlopende transactie zit vást aan de snapshot van zijn eerste
+statement. **Lees na een write van elders altijd op een verse connectie** (of zet
+`autocommit = True` op de leesconnectie).
+
+Erger dan de false failure: punt 2 liet mijn *restore*-stap afbreken, dus de testrij bleef
+gemuteerd achter in een tabel die een ander team leest. Bij het testen tegen productiedata moet
+de opruiming óók tegen dit soort aborts kunnen — check achteraf expliciet de werkelijke staat in
+plaats van aan te nemen dat de restore liep.
+
+## Kale INSERT als "log" bouwt stil dubbele events op — en de audit keek de verkeerde kant op (2026-08-05)
+
+`pa.mc_ids_efficy` (Redshift, gelezen door Efficy) had **63 surplusrijen op 520 keys (10,8%)**.
+Cameranu.nl NL stond er **7×** in, 4× op dezelfde dag. Oorzaak: het schrijfpad was
+`INSERT … VALUES %s` zonder enige dedupe, dus elke run waarin get-or-create "created" zei plakte
+er een rij bij.
+
+**De audit had hier een ándere, kleinere vraag over gesteld** (kan reconcile een rij loggen voor
+een al bestaand subaccount?) en de duplicaten volledig gemist. De vraag was pas te beantwoorden
+toen ik de tabel echt *opvroeg* in plaats van de code te lezen — 583 rijen, 520 keys, en dat
+verschil was het echte verhaal. **Bij twijfel over "wat staat er nu eigenlijk in": meten.**
+
+Twee dingen die de fix bruikbaar maakten:
+- **Welke rij de waarheid is, is te meten.** Tegen de autoritatieve bron
+  (`pa.jvs_gsd_campaign_created`) matchte de **vroegste** gelogde datum in 39 van 49 groepen en
+  de laatste in **nul**. Zonder die check had "laatste wint" heel redelijk geklonken en was het
+  fout geweest. Latere rijen bleken re-logs én backfill-artefacten: de MC-backfill dateert uit
+  `change_event` (~30 dagen retentie), dus die stempelt een *recente* datum op een oud account.
+- **Bepaal eerst of de tabel STATE of EVENTS is.** Dat ene antwoord ("state, één rij per
+  shop+country") loste zowel de auditvraag als de duplicaten op: bij state doet herkomst niet
+  meer mee, want de rij is afwezig / anders / identiek. Bij events was de fix het omgekeerde
+  geweest.
+
+Volgorde die telde: **eerst het schrijfpad fixen + backend herstarten, dán opruimen.** Andersom
+had een geplande run de tabel meteen weer vervuild.
+
 ## Een 400 die je binnen de `try` gooit, wordt een 500 (2026-08-05)
 
 Het patroon staat in élke router hier:

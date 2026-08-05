@@ -175,12 +175,35 @@ wrong or incomplete on three of them:
 
 ## Decisions, not defects
 
-* Reconcile logs an MC id whenever the `(shop_id, country, merchant_id)` triple is absent,
-  while a run logs only accounts it **created**. The Content API exposes no account
-  creation date, so the substitution is deliberate and documented — but it does mean Efficy
-  can receive a row for a pre-existing sub-account. Joep's call which semantic is wanted.
-* Preview cannot predict `repaired` without three extra GAQL reads per match. Either pay
-  them or rename the preview action to `skip_or_repair`.
+* ~~Reconcile logs an MC id whenever the `(shop_id, country, merchant_id)` triple is
+  absent, while a run logs only accounts it **created**.~~ **RESOLVED 2026-08-05
+  (`eb17d60` code, `ccf22da` cleanup).** Joep: `pa.mc_ids_efficy` is a **STATE** table —
+  one row per (shop_id, domain) holding that shop's current MC id. A new MC id for an
+  existing key updates the row **and the date**; the same MC id is neither added nor
+  updated. Under that reading provenance stops mattering, which is what dissolves the
+  question: absent → insert, different → update, identical → nothing.
+  **The bigger defect was on the other side and the audit missed it.** The write path was a
+  bare `INSERT` with no dedupe, so every run where get-or-create said "created" appended a
+  row: **63 surplus rows over 520 keys (10.8%)**, Cameranu.nl NL logged **7 times, 4 of them
+  on one day**. If Efficy reads rows as events it had been receiving duplicate "new account"
+  signals for months.
+  Which row is the truth was measured: against `pa.jvs_gsd_campaign_created` the EARLIEST
+  logged date matches in **39 of 49** duplicated groups and the latest in **zero** — exactly
+  what "insert once, then leave alone" produces. Later rows are re-logs and MC-id backfill
+  artifacts (the backfill dates from `change_event`, ~30-day retention, so it stamps a recent
+  date on an old account).
+  Reconcile now delegates to the same `mc_upsert_plan` the writer uses (H6's lesson again),
+  which also fixed a blind spot: the old triple pre-filter skipped exact matches but thereby
+  hid the UPDATE case, so a shop whose MC id had CHANGED read as "nothing to do".
+  Still open as **data**, not code: Kamera-express.nl (182, NL) had two distinct MC ids on
+  the same date and live campaigns use `670182955`, which is **neither** — both stored values
+  are stale.
+* ~~Preview cannot predict `repaired` without three extra GAQL reads per match.~~
+  **RESOLVED 2026-08-05 (`4b025ae`)** — Joep chose the rename. `skip` → `skip_or_repair`,
+  because a match means the campaign will not be CREATED but the run still calls
+  `_repair_campaign` on it and can report `created`/`repaired`. Predicting it would cost
+  three extra GAQL reads per match on every previewed campaign. Tile key stays `'skip'`
+  (it counts `already_exists`); renders as "skip / repair" with the reason in a tooltip.
 
 ---
 
@@ -261,10 +284,15 @@ the seven items did not match the list: two no longer existed, and `_as_distribu
 "dead" loop needed keeping (plus a tripwire) rather than deleting. Second time this doc's own
 inventory has been wrong — re-check before acting on it.
 
-**Still open — decisions, not code. No code items remain.**
-* The two "Decisions, not defects" items above (Efficy MC-id row for a pre-existing
-  sub-account; pay 3 extra GAQL reads for `repaired` in preview, or rename it
-  `skip_or_repair`).
+**THE AUDIT IS CLOSED (2026-08-05).** Both "Decisions, not defects" items are decided and
+shipped — see that section above for the reasoning and commits. Nothing code-level remains.
+
+Two data follow-ups it surfaced, neither a code defect:
+* Kamera-express.nl (182, NL): stored MC id is stale either way — live campaigns use
+  `670182955`, the table held `5619578895`/`5619583143`. Needs a human to say which is right.
+* Reconcile would insert 2 legitimately-missing state rows for Superfoodsonline.nl (BE + NL,
+  MC ids `5822964513` / `5294760190`, campaigns created 2026-07-10). Left unrun: it writes to
+  a table another team consumes.
 * ~~`seo_stats_service.py:~726` Dagoverzicht `d` vs `d-7`.~~ **RESOLVED 2d86d6b** — Joep's
   call was to keep the window and surface the bias. Both dates are real days, so the
   arithmetic was never wrong; what differs is MATURITY (d is still filling in, d-7 settled a

@@ -127,10 +127,45 @@ _Active tasks for immediate work_
       * `get_event_loop()` → `get_running_loop()`, alle **67** plekken in 15 bestanden (de audit
         zei 20). Per AST geverifieerd dat elke call in een `async def` staat, waar de twee
         equivalent zijn — mechanisch, niet gedragsveranderend.
-- [ ] **Open beslissingen (geen code):** de twee "Decisions, not defects" uit de audit — de
-      Efficy MC-id-rij voor een al bestaand subaccount, en of we 3 extra GAQL-reads betalen voor
-      `repaired` in de preview of hem `skip_or_repair` noemen. **Hiermee is de audit volledig
-      afgerond: geen code-items meer open.**
+- [x] **Beslissing 1: `pa.mc_ids_efficy` is een STATE-tabel** (`eb17d60` code, `ccf22da` opruiming).
+      Joeps regel: één rij per (shop_id, domain) met de *huidige* MC-id. Nieuwe MC-id voor een
+      bestaande key → rij **én datum** updaten; zelfde MC-id → niet toevoegen, niet updaten.
+      Daarmee is de auditvraag zélf weg: herkomst ("hebben wíj dit account aangemaakt?") doet niet
+      meer mee, want de rij is óf afwezig (insert), óf anders (update), óf identiek (niets).
+      **Het grotere defect zat aan de andere kant en dat had de audit gemist:** het schrijfpad was
+      een kale `INSERT` zonder dedupe, dus élke run waarin get-or-create "created" zei plakte een
+      rij erbij — **63 surplusrijen op 520 keys (10,8%)**, Cameranu.nl NL **7×** gelogd, 4× op
+      dezelfde dag. Leest Efficy rijen als events, dan kregen ze maanden dubbele
+      "nieuw account"-signalen.
+      Wélke rij de waarheid is, is **gemeten**: tegen `pa.jvs_gsd_campaign_created` matcht de
+      **vroegste** datum in **39 van 49** groepen en de laatste in **nul** — precies wat "één keer
+      inserten, daarna afblijven" oplevert. Latere rijen zijn re-logs en backfill-artefacten (de
+      MC-backfill dateert uit `change_event`, ~30 dagen retentie, dus een recente datum op een oud
+      account).
+      Reconcile beslist niet meer zelf wat "missing" is maar geeft alles aan dezelfde
+      `mc_upsert_plan` als de writer (weer de H6-les), en dát repareerde een blinde vlek: de oude
+      triple-prefilter sloeg exacte matches over (de no-op) maar verborg daarmee de UPDATE-case —
+      een shop wiens MC-id was **veranderd** las als "niets te doen".
+      Opruiming: 583 → 520 rijen, 0 keys verloren, 0 rijen verzonnen. Backup in
+      `pa.mc_ids_efficy_bak_20260805` + CSV's in `Downloads\claude`. Script:
+      `scripts/dedup_mc_ids_efficy.py`.
+      **Redshift-valkuil (kostte een verwarrende false failure):** een write terugleggen over
+      dezelfde langlopende connectie leest de snapshot van vóór de write (serializable), en de
+      volgende write in die verschaalde transactie sterft met "Serializable isolation violation".
+      Lees op een verse connectie.
+- [x] **Beslissing 2: preview-actie `skip` → `skip_or_repair`** (`4b025ae`). Een match betekent
+      dat de campagne níet wordt aangemaakt, maar de run doet er wél `_repair_campaign` op en kan
+      dan `created`/`repaired` melden — "skip" beloofde dus read-only en hield dat niet. Vóórspellen
+      kost 3 extra GAQL-reads per match op élke previewde campagne; hernoemen kost niets. Tile-key
+      blijft `'skip'` (die telt `already_exists`); rendert als "skip / repair" met de reden in een
+      tooltip.
+- [ ] **Data-nazorg uit de audit (geen code):**
+      * Kamera-express.nl (182, NL) — de opgeslagen MC-id is hoe dan ook stale: live campagnes
+        gebruiken `670182955`, de tabel had `5619578895`/`5619583143`. Iemand moet zeggen wat klopt.
+      * Reconcile zou 2 échte ontbrekende state-rijen inserten voor Superfoodsonline.nl (BE + NL,
+        campagnes van 2026-07-10). **Niet uitgevoerd** — het schrijft naar een tabel die een ander
+        team leest.
+      **De audit zelf is hiermee volledig gesloten: geen code-items meer open.**
 
 ### 2026-08-05 — Kopteksten incrementeel publiceren, en de HS2.0-push werd overschreven
 
