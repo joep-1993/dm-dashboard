@@ -288,11 +288,37 @@ inventory has been wrong — re-check before acting on it.
 shipped — see that section above for the reasoning and commits. Nothing code-level remains.
 
 Two data follow-ups it surfaced, neither a code defect:
-* Kamera-express.nl (182, NL): stored MC id is stale either way — live campaigns use
-  `670182955`, the table held `5619578895`/`5619583143`. Needs a human to say which is right.
-* Reconcile would insert 2 legitimately-missing state rows for Superfoodsonline.nl (BE + NL,
-  MC ids `5822964513` / `5294760190`, campaigns created 2026-07-10). Left unrun: it writes to
-  a table another team consumes.
+
+* **Superfoodsonline.nl — DONE 2026-08-05.** Reconcile run for real (`days=29`, not dry) after
+  confirming a fresh dry run listed only shop 649612: `mc_ids missing 2 | inserted 2 |
+  updated 0 | unchanged 27`, `sheet missing 1 | logged 1` (row 1274), no errors. Table
+  520 → **522 rows, 522 keys, 0 surplus**. Reconcile has no shop filter, so this was only safe
+  because all three pending writes happened to belong to that one shop — check that first.
+
+* **Kamera-express.nl (182, NL) — the stored MC id points at an account that DOES NOT EXIST.**
+  Scanned all 2.668 sub-accounts across the three GSD parents, then `get()` on each id:
+
+  | where | MC id | name | website | Ads link |
+  |---|---|---|---|---|
+  | NL `5592708765` | **670182955** | Kamera-Express.nl | kamera-express.nl | 7938980174 |
+  | BE `5588879919` | **702356923** | Kamera-express.be | kamera-express.be | 2454295509 |
+  | BE `5588879919` | **5609659447** | Kamera-express.be | kamera-express.be | 2454295509 |
+  | DE | — | none | | |
+
+  `670182955` is the only Kamera account under the NL parent and what all 14 live GSD
+  campaigns use (7 NL_CPC + 7 NL_CPR, all ENABLED). The table's `5619578895` (and the
+  pre-dedup `5619583143`) are absent from every parent and return **401** on `get()` — not
+  our sub-account — versus the **400** a wrong-parent guess gives. The `5619…` prefix matches
+  other GSD-created sub-accounts, so the likely story is: a run on 2025-07-10 created two NL
+  sub-accounts, someone later consolidated onto the pre-existing `670182955` and deleted the
+  GSD-made ones. The audit's "pre-existing sub-account" worry, with the real harm being a
+  **dead id** rather than a spurious row.
+  Open: set the NL row to `670182955` — the date is the undecidable part (`20250710`, when GSD
+  first touched it, vs `20250613`, the shop's GSD created-date from
+  `pa.jvs_gsd_campaign_created`). One-row update through the new upsert path once Joep picks.
+  Also noted: **two BE MC accounts for one shop and website**, both linked to the same Ads
+  account. Not a table problem (`shop_list` has 182 as `listed_on_nl=1, listed_on_be=0`, so no
+  BE row exists), but duplicate sub-accounts split feed data.
 * ~~`seo_stats_service.py:~726` Dagoverzicht `d` vs `d-7`.~~ **RESOLVED 2d86d6b** — Joep's
   call was to keep the window and surface the bias. Both dates are real days, so the
   arithmetic was never wrong; what differs is MATURITY (d is still filling in, d-7 settled a

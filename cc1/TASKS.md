@@ -159,13 +159,34 @@ _Active tasks for immediate work_
       kost 3 extra GAQL-reads per match op élke previewde campagne; hernoemen kost niets. Tile-key
       blijft `'skip'` (die telt `already_exists`); rendert als "skip / repair" met de reden in een
       tooltip.
-- [ ] **Data-nazorg uit de audit (geen code):**
-      * Kamera-express.nl (182, NL) — de opgeslagen MC-id is hoe dan ook stale: live campagnes
-        gebruiken `670182955`, de tabel had `5619578895`/`5619583143`. Iemand moet zeggen wat klopt.
-      * Reconcile zou 2 échte ontbrekende state-rijen inserten voor Superfoodsonline.nl (BE + NL,
-        campagnes van 2026-07-10). **Niet uitgevoerd** — het schrijft naar een tabel die een ander
-        team leest.
-      **De audit zelf is hiermee volledig gesloten: geen code-items meer open.**
+- [x] **Superfoodsonline.nl state-rijen bijgeschreven** (2026-08-05). Reconcile écht gedraaid
+      (`days=29`, `dry_run=false`) ná een verse dry run die bevestigde dat álle openstaande writes
+      bij shop 649612 hoorden: `mc_ids missing 2 | inserted 2 | updated 0 | unchanged 27`,
+      `sheet missing 1 | logged 1` (rij 1274), geen errors. Tabel 520 → **522 rijen, 522 keys,
+      0 surplus**. **Let op: reconcile heeft géén shop-filter** — dit was alleen veilig omdat alle
+      drie de writes bij die ene shop hoorden. Altijd eerst dry-run + controleren wie er in zit.
+- [ ] **Kamera-express.nl (182, NL): de opgeslagen MC-id bestaat NIET (meer).** Alle 2.668
+      subaccounts onder de drie GSD-parents gescand + `get()` per id:
+      * NL parent `5592708765` → **670182955** "Kamera-Express.nl" (kamera-express.nl, Ads
+        7938980174). Enige Kamera-account onder de NL-parent, en wat alle 14 live GSD-campagnes
+        gebruiken (7 NL_CPC + 7 NL_CPR, allemaal ENABLED).
+      * BE parent `5588879919` → **702356923** én **5609659447**, béide "Kamera-express.be", zelfde
+        website, zelfde Ads-account 2454295509. **Twee subaccounts voor één shop.**
+      * DE parent → niets.
+      * `5619578895` (in de tabel) en `5619583143` (pre-dedup) staan onder **géén enkele** parent en
+        geven **401** op `get()` (= niet ons subaccount), tegenover de **400** die een
+        verkeerde-parent-gok oplevert. Het `5619…`-prefix matcht andere GSD-gemaakte subaccounts,
+        dus waarschijnlijk: run van 2025-07-10 maakte twee NL-subaccounts aan, later is
+        geconsolideerd op het al bestaande `670182955` en zijn de GSD-accounts verwijderd. Precies
+        de "pre-existing sub-account"-zorg uit de audit — maar de échte schade is een **dode id**,
+        niet een spookrij.
+      **Openstaand:** NL-rij op `670182955` zetten. De **datum** is het onbeslisbare deel:
+      `20250710` (wanneer GSD hem voor het eerst aanraakte, staat er nu) vs `20250613` (de
+      GSD-created-date van de shop uit `pa.jvs_gsd_campaign_created`). Eén-rij-update via het
+      nieuwe upsert-pad zodra Joep kiest. De dubbele BE-accounts zijn geen tabelprobleem
+      (`shop_list`: 182 is `listed_on_nl=1, listed_on_be=0`, dus geen BE-rij), maar dubbele
+      subaccounts splitsen feeddata — iemand mag daar in Merchant Center naar kijken.
+      **De audit zelf is volledig gesloten: geen code-items meer open.**
 
 ### 2026-08-05 — Kopteksten incrementeel publiceren, en de HS2.0-push werd overschreven
 

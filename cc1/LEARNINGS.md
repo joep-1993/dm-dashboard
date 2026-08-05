@@ -1,6 +1,39 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Bestaat een MC-subaccount echt? 401 vs 400 op accounts().get() (2026-08-05)
+
+Om te controleren of een Merchant Center-id nog leeft, is `accounts().get(merchantId=parent,
+accountId=id)` genoeg — maar de foutcode moet je goed lezen:
+
+* **401** = het is géén subaccount van die parent (we hebben er geen toegang toe). Dus: bestaat
+  niet meer, of hangt elders.
+* **400** = het id bestaat wél, maar je vraagt het aan de verkeerde parent.
+* **200** = bestaat onder die parent; `adsLinks` laat zien aan welk Ads-account het hangt.
+
+Doe het naast een volledige `accounts().list()`-scan per parent (paginate op `nextPageToken`);
+één van beide alleen is te zwak bewijs. Zo vastgesteld dat Kamera-express' opgeslagen MC-id
+`5619578895` onder géén van de drie GSD-parents staat (2.668 subaccounts gescand), terwijl het
+live account `670182955` is — wat álle 14 live GSD-campagnes van die shop ook gebruiken.
+
+**Waarom dit een patroon is, niet één shop:** een `5619…`/`567x…`-prefix hoort bij
+GSD-gemaakte subaccounts, een 9-cijferig `670…`/`687…`-id bij oudere, al bestaande accounts. Zie
+je in `pa.mc_ids_efficy` een GSD-prefix terwijl de live campagnes een 9-cijferig id gebruiken,
+dan is er geconsolideerd op het pre-existing account en is de GSD-versie verwijderd — de
+opgeslagen id is dan **dood**, niet alleen verouderd. Ook gezien: **twee** BE-subaccounts voor
+één shop+website, beide aan hetzelfde Ads-account gelinkt (splitst feeddata).
+
+## reconcile_run_logs heeft géén shop-filter — dry-run eerst en kijk wie erin zit (2026-08-05)
+
+`reconcile_run_logs(days, dry_run)` werkt over **alles** wat het in `change_event` vindt, niet
+over een shop. "Draai reconcile even voor shop X" bestaat dus niet.
+
+Werkwijze die wel klopt: verse `dry_run=true`, dan controleren dat elke geplande write bij de
+bedoelde shop hoort (`to_insert` + `to_update` + `sheet.rows`), en pas dan `dry_run=false`.
+Bij Superfoodsonline waren dat toevallig alle drie de writes (2 MC-rijen + 1 sheetrij), dus was
+het veilig — dat is geen garantie, dat is iets om te *checken*. Draai het niet op oude
+dry-run-output: de inventaris is een live Google Ads-query.
+
 ## Redshift: een write terugleggen over dezelfde connectie leest de oude snapshot (2026-08-05)
 
 Kostte een false failure tijdens het testen van de `pa.mc_ids_efficy`-upsert. Testharnas hield
