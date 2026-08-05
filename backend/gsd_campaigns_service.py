@@ -462,20 +462,109 @@ def _get_redshift_connection():
     )
 
 
+def mc_upsert_plan(rows: List[tuple], state: Optional[Dict[tuple, tuple]] = None) -> Dict[str, list]:
+    """Split incoming rows into {insert, update, unchanged} against the table's state.
+
+    ``pa.mc_ids_efficy`` is a STATE table (Joep, 2026-08-05): one row per
+    (shop_id, domain) holding that shop's current Merchant Center id.
+      * key absent            -> INSERT
+      * key present, new mc   -> UPDATE the mc id AND the date
+      * key present, same mc  -> NOTHING. Not re-inserted, and the date is left alone,
+                                 so the stored date stays the original creation date.
+
+    That last rule is why the table had 63 surplus rows: the old code was a bare INSERT,
+    so every run where get-or-create reported "created" appended another row —
+    Cameranu.nl was logged 7 times, 4 of them on one day. Measured against the
+    authoritative creation-date log (pa.jvs_gsd_campaign_created), the EARLIEST logged
+    date matched in 39 of 49 duplicated groups and the latest in **zero**, which is
+    exactly what "insert once, never touch again" produces.
+
+    Pass ``state`` to plan without touching Redshift (used by the reconcile dry run).
+    """
+    plan: Dict[str, list] = {"insert": [], "update": [], "unchanged": []}
+    if not rows:
+        return plan
+    if state is None:
+        state = current_mc_state([r[1] for r in rows])
+    # Later rows for the same key win, so one call cannot both insert and update a key.
+    staged: Dict[tuple, tuple] = {}
+    for r in rows:
+        shop_name, shop_id, mc, domain, date = r
+        if shop_id is None or mc is None or not domain:
+            continue
+        staged[(int(shop_id), str(domain).upper())] = (shop_name, int(shop_id), int(mc),
+                                                       str(domain).upper(), date)
+    for key, row in staged.items():
+        cur_mc = state.get(key, (None,))[0]
+        if cur_mc is None:
+            plan["insert"].append(row)
+        elif int(cur_mc) == row[2]:
+            plan["unchanged"].append(row)
+        else:
+            plan["update"].append(row)
+    return plan
+
+
+def current_mc_state(shop_ids: List[int]) -> Dict[tuple, tuple]:
+    """{(shop_id, domain): (mc_created, date, shop_name, n_rows)} for these shops.
+
+    ``n_rows`` is how many rows that key currently has — >1 means legacy duplicates the
+    upsert will collapse the next time it writes that key.
+    """
+    out: Dict[tuple, tuple] = {}
+    ids = sorted({int(s) for s in shop_ids if s is not None})
+    if not ids:
+        return out
+    conn = _get_redshift_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT shop_id, UPPER(domain), MIN(date), COUNT(*)
+                FROM pa.mc_ids_efficy
+                WHERE shop_id IN (%s)
+                GROUP BY shop_id, UPPER(domain)
+                """ % ",".join(str(i) for i in ids)
+            )
+            groups = cur.fetchall()
+            for shop_id, domain, _dmin, n in groups:
+                out[(int(shop_id), domain)] = (None, None, None, int(n))
+            # The mc id of the earliest row is the state, matching the dedup rule.
+            cur.execute(
+                """
+                SELECT shop_id, UPPER(domain), mc_created, date, shop_name
+                FROM pa.mc_ids_efficy
+                WHERE shop_id IN (%s)
+                ORDER BY shop_id, UPPER(domain), date ASC, mc_created ASC
+                """ % ",".join(str(i) for i in ids)
+            )
+            seen = set()
+            for shop_id, domain, mc, date, shop_name in cur.fetchall():
+                key = (int(shop_id), domain)
+                if key in seen:
+                    continue
+                seen.add(key)
+                n = out.get(key, (None, None, None, 1))[3]
+                out[key] = (int(mc) if mc is not None else None, date, shop_name, n)
+    finally:
+        conn.close()
+    return out
+
+
 def push_mc_ids_to_redshift(rows: List[tuple]) -> Dict[str, Any]:
     """
-    Persist newly created Merchant Center sub-accounts to pa.mc_ids_efficy,
-    mirroring push_to_redshift() in the original create GSD-campaigns.py.
+    Keep pa.mc_ids_efficy in step with the Merchant Center ids GSD created.
 
-    ``rows`` is a list of (shop_name, shop_id, mc_created, domain, date) tuples,
-    where ``domain`` holds the country (NL/BE/DE) and ``date`` is YYYYMMDD.
-    Only rows for MC accounts that were actually created should be passed —
-    existing/reused accounts are not logged (same as the original).
+    ``rows`` is a list of (shop_name, shop_id, mc_created, domain, date) tuples, where
+    ``domain`` holds the country (NL/BE/DE) and ``date`` is YYYYMMDD.
 
-    Best-effort: exceptions are caught and returned in the result dict so a
-    Redshift hiccup never fails the GSD run.
+    Upsert on (shop_id, domain) — see mc_upsert_plan for the rule and why. A same-mc-id
+    push is a no-op, so re-running a day cannot grow the table any more.
+
+    Best-effort: exceptions are caught and returned in the result dict so a Redshift
+    hiccup never fails the GSD run.
     """
-    result: Dict[str, Any] = {"inserted": 0, "error": None}
+    result: Dict[str, Any] = {"inserted": 0, "updated": 0, "unchanged": 0, "error": None}
     if not rows:
         return result
     try:
@@ -494,18 +583,40 @@ def push_mc_ids_to_redshift(rows: List[tuple]) -> Dict[str, Any]:
                     """
                 )
                 conn.commit()
-                execute_values(
-                    cur,
-                    """
-                    INSERT INTO pa.mc_ids_efficy
-                        (shop_name, shop_id, mc_created, domain, date)
-                    VALUES %s
-                    """,
-                    rows,
-                )
+            plan = mc_upsert_plan(rows)
+            result["unchanged"] = len(plan["unchanged"])
+            with conn.cursor() as cur:
+                # An UPDATE is a delete-then-insert of that key, so a key that still
+                # carries legacy duplicates collapses to one row instead of leaving
+                # stale siblings behind next to the new value.
+                for shop_name, shop_id, mc, domain, date in plan["update"]:
+                    cur.execute(
+                        "DELETE FROM pa.mc_ids_efficy WHERE shop_id = %s AND UPPER(domain) = %s",
+                        (shop_id, domain),
+                    )
+                    cur.execute(
+                        """INSERT INTO pa.mc_ids_efficy
+                               (shop_name, shop_id, mc_created, domain, date)
+                           VALUES (%s, %s, %s, %s, %s)""",
+                        (shop_name, shop_id, mc, domain, date),
+                    )
+                    result["updated"] += 1
+                if plan["insert"]:
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO pa.mc_ids_efficy
+                            (shop_name, shop_id, mc_created, domain, date)
+                        VALUES %s
+                        """,
+                        plan["insert"],
+                    )
+                    result["inserted"] = len(plan["insert"])
                 conn.commit()
-            result["inserted"] = len(rows)
-            logger.info("Pushed %d new MC id(s) to pa.mc_ids_efficy", len(rows))
+            logger.info(
+                "pa.mc_ids_efficy: %d inserted, %d updated, %d unchanged (of %d pushed)",
+                result["inserted"], result["updated"], result["unchanged"], len(rows),
+            )
         finally:
             conn.close()
     except Exception as ex:
@@ -3990,25 +4101,11 @@ def _inventory_recent_creations(client: GoogleAdsClient, days: int) -> Dict[tupl
     return out
 
 
-def _existing_mc_id_keys(shop_ids: List[int]) -> set:
-    """{(shop_id, country, merchant_id)} already in pa.mc_ids_efficy for these shops."""
-    if not shop_ids:
-        return set()
-    keys = set()
-    conn = _get_redshift_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT shop_id, domain, mc_created FROM pa.mc_ids_efficy WHERE shop_id IN (%s)"
-                % ",".join(str(int(s)) for s in shop_ids)
-            )
-            for shop_id, domain, mc in cur.fetchall():
-                keys.add((int(shop_id) if shop_id is not None else None,
-                          (domain or "").upper(),
-                          int(mc) if mc is not None else None))
-    finally:
-        conn.close()
-    return keys
+# _existing_mc_id_keys lived here. It returned the (shop_id, country, merchant_id) triples
+# already logged, and reconcile used it to skip "already known" MC ids. Replaced by
+# current_mc_state + mc_upsert_plan: the triple test could only answer "have I seen this
+# exact combination", which silently hid the case the state rule cares about — a shop whose
+# MC id CHANGED. Its only caller is gone.
 
 
 # A creation is considered already logged when a sheet row for the same shop+country sits
@@ -4083,15 +4180,21 @@ def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
     only what is absent, so running it twice changes nothing the second time. Returns a
     per-sink summary; never raises — a reconcile failure must not fail a run.
 
-    NOTE on pa.mc_ids_efficy: a run logs a Merchant Center id only when it CREATED that
-    sub-account. The Content API exposes no account creation date, so here the rule is
-    "the (shop_id, country, merchant_id) triple is not in the table yet" — for a shop
-    whose MC account already existed and was already logged, nothing is added.
+    NOTE on pa.mc_ids_efficy: the "did WE create this account" question is now moot, and
+    that resolves an ambiguity this docstring used to carry. A run gates on its own
+    mc_was_created boolean; reconcile cannot, because the Content API exposes no account
+    creation date, and it only ever sees which MC account a campaign POINTS AT — never who
+    created it. So reconcile used to risk logging a pre-existing sub-account as new.
+
+    Joep's call (2026-08-05): the table is STATE, one row per (shop_id, domain) holding that
+    shop's current MC id. Under that reading provenance stops mattering — the row is either
+    absent (insert), different (update the mc id and the date) or identical (do nothing). See
+    mc_upsert_plan; reconcile delegates the decision to it rather than re-implementing it.
     """
     summary: Dict[str, Any] = {
         "days": days, "dry_run": dry_run, "shops_seen": 0,
         "created_dates": {"missing": 0, "inserted": 0},
-        "mc_ids": {"missing": 0, "inserted": 0},
+        "mc_ids": {"missing": 0, "inserted": 0, "updated": 0, "unchanged": 0},
         "sheet": {"missing": 0, "logged": 0},
         "errors": [],
     }
@@ -4125,19 +4228,29 @@ def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
 
     # --- 2. Merchant Center ids (Redshift)
     try:
-        have_mc = _existing_mc_id_keys([k[0] for k in inv])
-        rows = []
-        for r in inv.values():
-            if not r["merchant_id"]:
-                continue
-            if (r["shop_id"], r["country"], r["merchant_id"]) in have_mc:
-                continue
-            rows.append((r["shop_name"], r["shop_id"], r["merchant_id"], r["country"],
-                         r["date"].replace("-", "")))
-        summary["mc_ids"]["missing"] = len(rows)
-        summary["mc_ids"]["rows"] = rows
-        if rows and not dry_run:
+        # Reconcile no longer decides for itself what is "missing". It hands everything it
+        # found to mc_upsert_plan, the same function push_mc_ids_to_redshift uses, so the
+        # two cannot drift apart on the rule — H6's lesson. The old triple pre-filter
+        # skipped exact matches, which happens to be the no-op case, but it also hid the
+        # UPDATE case: a shop whose MC id CHANGED looked like "nothing to do" here.
+        rows = [(r["shop_name"], r["shop_id"], r["merchant_id"], r["country"],
+                 r["date"].replace("-", ""))
+                for r in inv.values() if r["merchant_id"]]
+        state = current_mc_state([r[1] for r in rows])
+        plan = mc_upsert_plan(rows, state)
+        summary["mc_ids"]["missing"] = len(plan["insert"]) + len(plan["update"])
+        summary["mc_ids"]["to_insert"] = plan["insert"]
+        summary["mc_ids"]["to_update"] = [
+            # what it would change FROM, so a dry run is reviewable rather than trusted
+            {"shop_name": n, "shop_id": s, "country": d, "new_mc": mc, "new_date": dt,
+             "old_mc": state.get((s, d), (None,))[0], "old_date": state.get((s, d), (None, None))[1]}
+            for (n, s, mc, d, dt) in plan["update"]
+        ]
+        summary["mc_ids"]["unchanged"] = len(plan["unchanged"])
+        summary["mc_ids"]["rows"] = plan["insert"] + plan["update"]
+        if summary["mc_ids"]["missing"] and not dry_run:
             res = push_mc_ids_to_redshift(rows)
+            summary["mc_ids"]["updated"] = res.get("updated", 0)
             summary["mc_ids"]["inserted"] = res.get("inserted", 0)
             if res.get("error"):
                 summary["errors"].append({"step": "mc_ids", "error": str(res["error"])[:300]})
