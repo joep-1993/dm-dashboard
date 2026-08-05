@@ -225,13 +225,15 @@ async function lookupContent() {
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <code style="word-break: break-all;">${data.url}</code>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-outline-orange btn-sm" id="pushOneBtn"
+                        <button class="btn btn-outline-purple btn-sm" id="deletePushBtn"
+                                onclick="deleteAndResetUrl('${data.url}')"
+                                title="Delete the koptekst here, reset the URL to pending, and remove it from the live store in the same go">
+                            Delete &amp; Push
+                        </button>
+                        <button class="btn btn-run btn-sm" id="pushOneBtn"
                                 onclick="pushContentOne('${encodeURIComponent(data.url)}')"
                                 title="Push just this URL's koptekst via /automated-content/records (an upsert — the rest of the store is untouched)">
                             Push
-                        </button>
-                        <button class="btn btn-outline-danger btn-sm" onclick="deleteAndResetUrl('${data.url}')">
-                            Delete
                         </button>
                     </div>
                 </div>
@@ -295,12 +297,27 @@ async function pushContentOne(encodedUrl) {
     }
 }
 
+// "Delete & Push": two steps, in this order and reported separately.
+//   1. delete the koptekst here and reset the URL to pending (as before)
+//   2. remove it from the LIVE store straight away
+// Step 2 exists because the batch prunes only as a side effect of replacing the whole
+// store — so before this, a deleted koptekst stayed live until the next full publish.
+// The local delete comes first deliberately: if the remote step fails, the URL is still
+// correctly pending here and the next full publish will drop it, whereas the reverse
+// order could unpublish content that then survives locally.
 async function deleteAndResetUrl(url) {
-    if (!confirm(`Delete content and reset URL to pending?\n\n${url}`)) {
+    const envSelect = document.getElementById('publishEnvironment');
+    const environment = envSelect ? envSelect.value : 'production';
+
+    if (!confirm(`Delete this koptekst and push the removal?\n\n${url}\n\n`
+               + `1. deletes the content here and resets the URL to pending\n`
+               + `2. removes it from the live store on ${environment}`)) {
         return;
     }
 
     const resultDiv = document.getElementById('lookupResult');
+    const btn = document.getElementById('deletePushBtn');
+    if (btn) btn.disabled = true;
 
     try {
         const response = await fetch(`${API_BASE}/api/result/${encodeURIComponent(url)}`, {
@@ -309,21 +326,50 @@ async function deleteAndResetUrl(url) {
 
         const data = await response.json();
 
-        if (data.status === 'success') {
-            resultDiv.innerHTML = `
-                <div class="alert alert-success">
-                    <strong>Success:</strong> Content deleted and URL reset to pending.<br>
-                    <code>${url}</code>
-                </div>
-            `;
-            // Refresh stats
-            refreshStatus();
-        } else {
+        if (data.status !== 'success') {
             resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(data.message || 'Unknown error')}</div>`;
+            if (btn) btn.disabled = false;
+            return;
         }
+
+        // Step 2. A failure here is reported as a partial success, not swallowed —
+        // the local delete already happened and the user needs to know the live
+        // store still has it.
+        let live = '';
+        try {
+            const r2 = await fetch(`${API_BASE}/api/content-publish/url/unpublish`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, environment })
+            });
+            const d2 = await r2.json();
+            if (!r2.ok || !d2.success) {
+                live = `<br><span class="text-danger">Still live on ${escapeHtml(environment)} — `
+                     + `${escapeHtml(d2.detail || d2.response || d2.error || d2.message || 'unpublish failed')}. `
+                     + `It will go on the next Publish All.</span>`;
+            } else if (d2.action === 'nothing_live') {
+                live = `<br><span class="text-muted">Nothing was live on ${escapeHtml(environment)}.</span>`;
+            } else if (d2.action === 'cleared_content_top') {
+                live = `<br>Removed from <code>${escapeHtml(environment)}</code> `
+                     + `<span class="text-muted">(content_top cleared; the FAQ content_bottom on that record was left alone)</span>.`;
+            } else {
+                live = `<br>Removed from <code>${escapeHtml(environment)}</code> <span class="text-muted">(record deleted)</span>.`;
+            }
+        } catch (e) {
+            live = `<br><span class="text-danger">Still live on ${escapeHtml(environment)} — ${escapeHtml(e.message)}.</span>`;
+        }
+
+        resultDiv.innerHTML = `
+            <div class="alert alert-success">
+                <strong>Deleted:</strong> content removed here and URL reset to pending.<br>
+                <code>${escapeHtml(url)}</code>${live}
+            </div>
+        `;
+        refreshStatus();
 
     } catch (error) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;
+        if (btn) btn.disabled = false;
     }
 }
 

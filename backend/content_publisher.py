@@ -393,6 +393,103 @@ def publish_content_url(url: str, environment: str = None) -> Dict:
     return out
 
 
+def unpublish_content_url(url: str, environment: str = None) -> Dict:
+    """Remove ONE url's koptekst from the live store — the production half of a delete.
+
+    Deleting a koptekst in the tool used to leave it live until the next full batch
+    publish, because the batch prunes only as a side effect of replacing. This makes
+    the removal immediate.
+
+    WHY THIS IS NOT ALWAYS A RECORD DELETE
+    `content_bottom` sits in the SAME record and belongs to FAQ Publish 2.0, so
+    `DELETE ?url=` would take the FAQ content with it. So:
+      * content_bottom still populated -> push content_top = "" (on this endpoint ""
+        clears a field), which removes the koptekst and leaves the FAQ blob alone;
+      * content_bottom empty/absent    -> DELETE the whole record, so an all-empty row
+        is not left behind as litter.
+    One GET decides which, and it is cheap (single url, no wildcard).
+
+    The push-state row is dropped either way, so the incremental publisher stops
+    believing this url is live with content.
+    """
+    env = environment or DEFAULT_ENV
+    if env not in CONTENT_RECORDS_API_URLS:
+        return {"success": False, "message": f"unknown environment {env!r}"}
+    api_url = CONTENT_RECORDS_API_URLS[env]
+    api_key = CONTENT_API_KEYS.get(env, "")
+    if not api_key:
+        return {"success": False, "message": f"no API key configured for {env!r}"}
+
+    from backend.url_catalog import canonicalize_url
+    canon = canonicalize_url(url)
+    if not canon:
+        return {"success": False, "message": f"could not canonicalize URL: {url!r}"}
+    wire = _normalize_url(canon)
+
+    started = time.time()
+    try:
+        g = requests.get(api_url, headers={"X-Api-Key": api_key},
+                         params={"url": wire}, timeout=60)
+        live = g.json() if (g.text or "").startswith("[") else []
+    except (requests.RequestException, ValueError) as e:
+        return {"success": False, "url": wire, "env": env, "error": str(e)}
+
+    if not live:
+        _drop_push_state(canon, env)
+        return {"success": True, "url": wire, "env": env, "action": "nothing_live",
+                "message": "no live record for this URL"}
+
+    has_bottom = any((r.get("content_bottom") or "").strip() for r in live)
+    try:
+        if has_bottom:
+            # Clear only our field; the FAQ blob stays.
+            resp = _post_with_retry(
+                api_url,
+                headers={"X-Api-Key": api_key, "Content-Type": "application/json"},
+                data=json.dumps([{"url": wire, "content_top": "",
+                                  "country_language": "nl-nl"}], ensure_ascii=False).encode("utf-8"),
+                timeout=120,
+            )
+            action = "cleared_content_top"
+        else:
+            resp = requests.delete(api_url, headers={"X-Api-Key": api_key},
+                                   params={"url": wire}, timeout=60)
+            action = "deleted_record"
+    except requests.RequestException as e:
+        return {"success": False, "url": wire, "env": env, "error": str(e)}
+
+    # 404 on the delete means it is already gone, which is the desired end state.
+    ok = 200 <= resp.status_code < 300 or resp.status_code == 404
+    if ok:
+        _drop_push_state(canon, env)
+    out = {"success": ok, "url": wire, "env": env, "action": action,
+           "status_code": resp.status_code, "kept_content_bottom": has_bottom,
+           "duration_sec": round(time.time() - started, 1)}
+    if not ok:
+        out["response"] = (resp.text or "")[:500]
+    return out
+
+
+def _drop_push_state(canon_url: str, env: str) -> None:
+    """Forget that we pushed this url, so the incremental publisher's state matches
+    reality. Best-effort: the state table may not exist yet on a fresh install."""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM pa.kopteksten_push_state s
+             USING pa.urls u
+             WHERE u.url_id = s.url_id AND s.env = %s AND u.url = %s
+        """, (env, canon_url))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        conn.rollback()
+        print(f"[Publisher] could not drop push state for {canon_url}: {e}")
+    finally:
+        return_db_connection(conn)
+
+
 def publish_all_content(environment: str = None, task_id: str = None) -> Dict:
     """
     Publish all kopteksten in a single API call.

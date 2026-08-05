@@ -2988,6 +2988,33 @@ async def content_records_seed(request: dict = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/content-publish/url/unpublish")
+async def unpublish_content_single_url(request: dict = None):
+    """Remove one url's koptekst from the live store — paired with a local delete.
+
+    Clears content_top rather than deleting the record when content_bottom is still
+    populated, because that field belongs to FAQ Publish 2.0 and a record delete would
+    take it along. See unpublish_content_url().
+    """
+    request = request or {}
+    url = (request.get("url") or "").strip()
+    env = request.get("environment", "production")
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    if env not in ("dev", "staging", "production"):
+        raise HTTPException(status_code=400, detail="Invalid environment. Use: dev, staging, production")
+    try:
+        from backend.content_publisher import unpublish_content_url
+        result = unpublish_content_url(url, environment=env)
+        if not result.get("success") and "status_code" not in result and "error" not in result:
+            raise HTTPException(status_code=400, detail=result.get("message", "unpublish failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/content-publish/url")
 async def publish_content_single_url(request: dict = None):
     """Push ONE url's koptekst — backs the Push button on Kopteksten URL Lookup.
