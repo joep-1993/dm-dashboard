@@ -502,7 +502,8 @@
         let previewMeta = {};
         let previewSort = { col: 'shop_name', dir: 'asc' };
         let previewFilterText = '';
-        let previewActiveTile = null;  // null | 'create' | 'pause' | 'skip' | 'shops'
+        // Tile keys, NOT action values — the 'skip' tile matches action 'skip_or_repair'.
+        let previewActiveTile = null;  // null | 'create' | 'activate' | 'pause' | 'skip' | 'shops'
 
         // GSD run-result panel state (table view of a completed run)
         let runResultData = {};
@@ -1818,7 +1819,17 @@
         function previewActionLabel(a) {
             const c = a === 'create' ? '#00b894' : a === 'activate' ? '#00838f'
                     : a === 'pause' ? '#e65100' : '#5e4a90';
-            return `<span class="badge bg-transparent fw-bold" style="border:1px solid ${c}; color:${c};">${escapeHtml(a || '')}</span>`;
+            // 'skip_or_repair' is the honest action name but too long for a 90px column, so
+            // it shows as "skip / repair" with the reason in the tooltip. The exported and
+            // filtered value stays the raw action.
+            const isSor = a === 'skip_or_repair';
+            const text = isSor ? 'skip / repair' : (a || '');
+            const tip = isSor
+                ? 'The campaign already exists, so it will not be created — but the run still '
+                  + 'checks it and may repair a missing ad group, listing group or budget link.'
+                : '';
+            return `<span class="badge bg-transparent fw-bold"${tip ? ` title="${escapeHtml(tip)}"` : ''} `
+                 + `style="border:1px solid ${c}; color:${c};">${escapeHtml(text)}</span>`;
         }
 
         function renderPreviewPanel() {
@@ -1849,7 +1860,7 @@
             // campaigns (create/skip for 'aan', pause for 'uit') — this reflects
             // exactly what the script will do, not a model-based guess.
             const countriesFor = (s) => {
-                const want = s.actie === 'uit' ? ['pause'] : ['create', 'activate', 'skip'];
+                const want = s.actie === 'uit' ? ['pause'] : ['create', 'activate', 'skip_or_repair'];
                 const set = new Set();
                 previewCampaigns.forEach(c => {
                     if (c.shop_name === s.shop_name && want.includes(c.action) && c.country) set.add(c.country);
@@ -1931,16 +1942,18 @@
             const q = (previewFilterText || '').toLowerCase();
             let rows = previewCampaigns;
             if (['create', 'activate', 'pause'].includes(previewActiveTile)) rows = rows.filter(c => c.action === previewActiveTile);
-            // 'skip' means "already exists", which includes the ones about to be activated.
-            else if (previewActiveTile === 'skip') rows = rows.filter(c => c.action === 'skip' || c.action === 'activate');
+            // The tile key stays 'skip' (it is the tile's own id and counts already_exists);
+            // the ACTION it matches is now 'skip_or_repair'. Activate is included because
+            // "already exists" covers the ones about to be switched on.
+            else if (previewActiveTile === 'skip') rows = rows.filter(c => c.action === 'skip_or_repair' || c.action === 'activate');
             if (q) rows = rows.filter(c =>
                 (c.campaign_name || '').toLowerCase().includes(q) ||
                 (c.shop_name || '').toLowerCase().includes(q) ||
                 (c.country || '').toLowerCase().includes(q) ||
                 (c.action || '').toLowerCase().includes(q));
-            // AUDIT MED — 'activate' included, or today's new rows sort below 'skip'
-            // in the default view.
-            const rank = { pause: 0, create: 1, activate: 2, skip: 3 };
+            // AUDIT MED — 'activate' included, or today's new rows sort below
+            // 'skip_or_repair' in the default view.
+            const rank = { pause: 0, create: 1, activate: 2, skip_or_repair: 3 };
             const { col, dir } = previewSort;
             const mul = dir === 'asc' ? 1 : -1;
             return rows.slice().sort((a, b) => {

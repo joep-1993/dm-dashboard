@@ -3146,7 +3146,16 @@ def preview_gsd_script(
                         shop_row["awaiting_bid_strategy"] = shop_row.get("awaiting_bid_strategy", 0) + 1
                     summary["campaigns"].append({
                         "campaign_name": match["campaign_name"] if match else campaign_name,
-                        "action": "activate" if will_activate else ("skip" if match else "create"),
+                        # AUDIT decision (Joep, 2026-08-05): "skip" -> "skip_or_repair".
+                        # A match means the run will not CREATE the campaign, but it still
+                        # calls _repair_campaign on it, which can add a missing ad group,
+                        # listing group or budget link and then reports action "created"
+                        # with reason "repaired". So "skip" promised read-only and could not
+                        # keep it. Naming it honestly costs nothing; actually PREDICTING it
+                        # would cost three extra GAQL reads per match (ad group, listing
+                        # group, budget) on every previewed campaign, and the preview
+                        # already runs one query per (shop, account).
+                        "action": "activate" if will_activate else ("skip_or_repair" if match else "create"),
                         "shop_name": shop_name,
                         "country": country,
                         "type": campaign_type,
