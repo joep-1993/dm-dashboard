@@ -986,7 +986,7 @@ async function publishFaqOne(encodedUrl) {
             const warn = (data.deleted_first && data.deleted_first.ok === false)
                 ? ` <strong class="text-danger">Could not delete the old questions first — superseded ones may still be live.</strong>`
                 : '';
-            out.innerHTML = `<div class="alert alert-success py-2 mb-0">`
+            out.innerHTML = `<div class="alert alert-done-yellow py-2 mb-0">`
                 + `Published <strong>${data.records_pushed}</strong> Q&amp;A record(s) to `
                 + `<code>${escapeHtml(data.env)}</code> in ${data.duration_sec}s.${warn}</div>`;
         } else {
@@ -1009,7 +1009,7 @@ async function deleteFaqAndReset(encodedUrl) {
     try {
         const response = await fetch(`${API_BASE}/api/faq/result/${encodeURIComponent(url)}`, { method: 'DELETE' });
         const data = await response.json();
-        resultDiv.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+        resultDiv.innerHTML = `<div class="alert alert-done-yellow">${data.message}</div>`;
         refreshFaqStatus();
     } catch (error) {
         resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(error.message)}</div>`;

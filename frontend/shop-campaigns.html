@@ -90,9 +90,23 @@
         .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
         .flatpickr-day.today { border-color: #5e4a90; }
         .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
-        .btn-preset { border: 1px solid #5e4a90; color: #5e4a90; background: #fff; }
-        .btn-preset:hover, .btn-preset:focus { background: #5e4a90; color: #fff; }
-        .btn-group .btn-preset:not(:first-child) { border-left: 1px solid #5e4a90; }
+        /* Preset group (7d/14d/30d/90d) shaped like the date inputs next to it: same
+           border colour, same 10px radius on the outer corners, same soft shadow. The
+           purple text stays, so it still reads as an action rather than a field.
+           Ported verbatim from seo-stats.html so the two pages match (Joep,
+           suggestions_new.txt) — this page still had the older hard-purple border with
+           square corners and no shadow. */
+        .btn-preset { border: 1px solid #d9d4e8; color: #5e4a90; background: #fff;
+                      padding: 0.35rem 0.7rem; }
+        .btn-preset:hover, .btn-preset:focus { background: #5e4a90; color: #fff; border-color: #5e4a90; }
+        .btn-group .btn-preset:not(:first-child) { border-left: 1px solid #d9d4e8; }
+        .btn-group:has(.btn-preset) {
+            border-radius: 10px;
+            box-shadow: 0 1px 3px rgba(45,42,58,0.06);
+            overflow: hidden;
+        }
+        .btn-group .btn-preset:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
+        .btn-group .btn-preset:last-child { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
         .chart-wrap { position: relative; height: 420px; }
         .chart-tooltip {
             position: absolute; pointer-events: none; z-index: 10;

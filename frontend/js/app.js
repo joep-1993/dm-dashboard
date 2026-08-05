@@ -282,7 +282,7 @@ async function pushContentOne(encodedUrl) {
         if (!res.ok) {
             out.innerHTML = `<div class="alert alert-danger py-2 mb-0">${escapeHtml(data.detail || 'Push failed')}</div>`;
         } else if (data.success) {
-            out.innerHTML = `<div class="alert alert-success py-2 mb-0">`
+            out.innerHTML = `<div class="alert alert-done-yellow py-2 mb-0">`
                 + `Pushed <strong>${data.chars.toLocaleString()}</strong> chars of content_top to `
                 + `<code>${escapeHtml(data.env)}</code> in ${data.duration_sec}s.</div>`;
         } else {
@@ -357,7 +357,7 @@ async function deleteAndResetUrl(url) {
         }
 
         resultDiv.innerHTML = `
-            <div class="alert alert-success">
+            <div class="alert alert-done-yellow">
                 <strong>Deleted:</strong> content removed here and URL reset to pending.<br>
                 <code>${escapeHtml(url)}</code>${live}
             </div>
@@ -1460,7 +1460,7 @@ function pollRecordsStatus(taskId, resultDiv, btn, batchBtn) {
             const retired = r.urls_retired
                 ? `, and ${nf(r.urls_retired)} retired (emptied because their content was removed)`
                 : '';
-            resultDiv.innerHTML = `<div class="alert alert-success"><strong>Publish done</strong><br>`
+            resultDiv.innerHTML = `<div class="alert alert-done-yellow"><strong>Publish done</strong><br>`
                 + `${nf(r.urls_pushed)} koptekst(en) upserted in ${nf(r.chunks)} chunk(s)${retired} `
                 + `(${r.duration_sec}s) → <code>${escapeHtml(r.api_url || '')}</code></div>`;
         }
@@ -1565,7 +1565,10 @@ async function pollPublishStatus(taskId, resultDiv, publishBtn) {
         } else if (data.status === 'completed') {
             // Done - show results
             const result = data.result || {};
-            const alertClass = result.success ? 'success' : 'warning';
+            // done-yellow on success: .alert-success is flattened to grey in style.css,
+            // which reads as "nothing happened" at the end of a run
+            // (cc1/UI_BLUEPRINT.md "Done banner").
+            const alertClass = result.success ? 'done-yellow' : 'warning';
 
             let html = `
                 <div class="alert alert-${alertClass}">
@@ -1580,9 +1583,13 @@ async function pollPublishStatus(taskId, resultDiv, publishBtn) {
                 </div>
             `;
 
-            if (result.response) {
+            // The raw API response is only worth showing when something went wrong; on a
+            // clean run it is noise under a banner that already says "Complete". And when
+            // it does appear it wears done-yellow rather than Bootstrap's grey secondary,
+            // which is near-invisible against the card (Joep, suggestions_new.txt).
+            if (result.response && !result.success) {
                 html += `
-                    <div class="alert alert-secondary mt-2">
+                    <div class="alert alert-done-yellow mt-2">
                         <strong>API Response:</strong><br>
                         <small><code>${result.response}</code></small>
                     </div>
