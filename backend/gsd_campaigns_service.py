@@ -2513,7 +2513,10 @@ def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
 
     ags = list(ga.search(customer_id=customer_id, query=(
         f"SELECT ad_group.resource_name FROM ad_group "
-        f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED'")))
+        # ORDER BY so repair and verify always pick the SAME ad group: an unordered
+        # result let the two inspect different siblings and flap (AUDIT MED).
+        f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED' "
+        f"ORDER BY ad_group.id")))
     ad_group_resource = ags[0].ad_group.resource_name if ags else None
     # Scope the product-ad / listing-tree checks to the LIVE ad group, not the
     # campaign: a REMOVED sibling ad group keeps its child ads/criteria at their
@@ -2546,7 +2549,14 @@ def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
         retree = True
 
     if ad_group_resource and has_ad and has_lg:
-        return {"campaign_name": campaign_name, "action": "skipped", "reason": "already_exists"}
+        # campaign_resource is carried even though nothing was repaired: this dict gets
+        # flipped to action="activated" by _create_campaigns_for_shop, and without a
+        # resource run_gsd_script never derives a campaign_id — so the frontend's undo
+        # builder (filter(c => c.customer_id && c.campaign_id)) silently dropped the row
+        # and Reset left activated campaigns live while promising to pause them.
+        # Every other return here already carries it (AUDIT H3).
+        return {"campaign_name": campaign_name, "action": "skipped", "reason": "already_exists",
+                "campaign_resource": campaign_resource}
 
     # Incomplete/mis-targeted — complete the missing pieces (stays PAUSED).
     logger.info("Repairing campaign '%s' (ad_group=%s ad=%s listing=%s retree=%s)",
@@ -3132,7 +3142,9 @@ def _check_campaign_structure(
     # non-REMOVED and would otherwise mask a broken live ad group.
     ags = list(ga.search(customer_id=customer_id, query=(
         f"SELECT ad_group.id FROM ad_group "
-        f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED'")))
+        # Same ORDER BY as _repair_campaign, for the same reason.
+        f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED' "
+        f"ORDER BY ad_group.id")))
     if not ags:
         issues.append("no_ad_group")
         return issues  # nothing else to check without a live ad group
@@ -3938,7 +3950,12 @@ def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
                 for k, r in inv.items() if _created_key(k[0], k[1]) not in have_dates]
         summary["created_dates"]["missing"] = len(rows)
         if rows and not dry_run:
-            summary["created_dates"]["inserted"] = upsert_created_dates(rows)["inserted"]
+            res = upsert_created_dates(rows)
+            summary["created_dates"]["inserted"] = res.get("inserted", 0)
+            # A sink that failed reports inserted=0 WITH an error; without surfacing it a
+            # dead DB looked exactly like "nothing to do" (AUDIT MED).
+            if res.get("error"):
+                summary["errors"].append({"step": "created_dates", "error": str(res["error"])[:300]})
     except Exception as ex:
         logger.error("Reconcile: creation dates failed: %s", ex)
         summary["errors"].append({"step": "created_dates", "error": str(ex)[:300]})
@@ -3957,7 +3974,10 @@ def reconcile_run_logs(days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
         summary["mc_ids"]["missing"] = len(rows)
         summary["mc_ids"]["rows"] = rows
         if rows and not dry_run:
-            summary["mc_ids"]["inserted"] = push_mc_ids_to_redshift(rows)["inserted"]
+            res = push_mc_ids_to_redshift(rows)
+            summary["mc_ids"]["inserted"] = res.get("inserted", 0)
+            if res.get("error"):
+                summary["errors"].append({"step": "mc_ids", "error": str(res["error"])[:300]})
     except Exception as ex:
         logger.error("Reconcile: mc ids failed: %s", ex)
         summary["errors"].append({"step": "mc_ids", "error": str(ex)[:300]})

@@ -1850,10 +1850,17 @@
                     action: c.action, campaign_name: c.campaign_name || '',
                     shop_name: c.shop_name || '', country: c.country || '', type: c.type || ''
                 }));
+                // to_activate / awaiting_bid_strategy were missing here, so the teal
+                // activate tile always read 0 and the SA360 note never showed, even though
+                // the backend returns both and the tile/note read them. Clicking the tile
+                // filtered correctly all along — only the counters were wrong (AUDIT H5).
                 previewMeta = {
                     date: data.date || '', to_create: data.to_create ?? 0, to_pause: data.to_pause ?? 0,
                     already_exists: data.already_exists ?? 0, shops_aan: data.shops_aan ?? 0,
-                    shops_uit: data.shops_uit ?? 0, errCount
+                    shops_uit: data.shops_uit ?? 0,
+                    to_activate: data.to_activate ?? 0,
+                    awaiting_bid_strategy: data.awaiting_bid_strategy ?? 0,
+                    errCount
                 };
                 previewSort = { col: 'shop_name', dir: 'asc' };
                 previewFilterText = '';

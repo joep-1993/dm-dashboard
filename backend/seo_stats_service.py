@@ -92,8 +92,15 @@ def _parse_date(s: Optional[str], default: date) -> date:
 
 
 def _pct_delta(p1: float, p2: float) -> Optional[float]:
-    """Percentage change p1 -> p2. None when the baseline is zero."""
-    if not p1:
+    """Percentage change p1 -> p2. None when either side is missing or the baseline is zero.
+
+    p2 has to be guarded, not just the baseline: _ratio() and _opb() return None for a
+    zero-visit day and are passed straight in here, so `_pct_delta(12.3, None)` raised
+    TypeError and /api/seo-stats/dashboard 500'd for any day the ETL had not landed yet.
+    Dagoverzicht defaults to yesterday, so that was a 500 every morning (AUDIT H2,
+    confirmed live 2026-08-01: ?date=2026-07-31 -> 500, ?date=2026-07-30 -> 200).
+    """
+    if p1 is None or p2 is None or not p1:
         return None
     return (p2 - p1) / p1 * 100.0
 
