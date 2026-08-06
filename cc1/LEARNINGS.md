@@ -1,6 +1,75 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De Search API kent maar drie locales, en DE-slugs moeten percent-DEcoded (2026-08-06)
+
+Bij het porten van `check_and_results` naar de BE/DE-basementflows liepen twee aannames stuk.
+
+**1. De locale heet `be-nl`, niet `nl-be`.** `productsearch-v2` accepteert exact drie waarden
+en zegt dat ook in de foutmelding:
+`{"errors":"… language must be one of the following values: nl-nl, de-de, be-nl."}`.
+BE draait op **dezelfde category-slugs als NL** (`huishoudelijke_apparatuur_19968035_19968042`
+geeft 3.640 bij `be-nl` tegen 4.713 bij `nl-nl`), dus alleen de locale verschilt.
+
+**2. Duitse slugs én facetnamen staan percent-encoded in de URL, en de API weigert die vorm.**
+shopcaddy.de-URLs zien er zo uit: `/products/zubeh%C3%B6r/zubeh%C3%B6r_2596346_2665500/c/
+beliebt_themen_zubeh%C3%B6r~17177117~~marke~4499717`. Direct getest op categorie `schuhe_430890`:
+
+| wat je meestuurt | resultaat |
+|---|---|
+| `filters[gr%C3%B6%C3%9Fe][0]=430795` | `400 {"errorInfo":"The given facet is not valid."}` |
+| `filters[größe][0]=430795` | OK, total=5 |
+| `category=fahrr%C3%A4der` | `400 "Category is a required parameter."` |
+| `category=fahrräder` | OK |
+
+Dus: **decode vóór je de querystring bouwt**; de http-helper encodeert daarna zelf correct.
+Zonder decode stuur je `%25C3%25A4` en krijg je een 400. 13 van 60 DE-sample-URLs bevatten `%`.
+
+Het venijn zit hem erin dat de node **fail-open** is: een API-fout betekent "URL behouden". Een
+ontbrekende decode crasht dus niets — hij verbrandt calls en houdt vervolgens alles, waardoor
+de check er *werkend* uitziet terwijl hij op een groot deel van de DE-catalogus niets doet.
+Opgelost met een `safeDecode()` (try/catch rond `decodeURIComponent`) op de category-slug en de
+facetnamen; facet*waarden* zijn numerieke ids en blijven ongemoeid. Na de fix: 0 HTTP-fouten en
+élke behouden URL had een echte count, bij zowel BE (`be-nl`) als DE (`de-de`).
+
+Bijvangst: maincat-only slugs zonder id-suffix (`mode`, `fahrräder`) werken gewoon.
+
+## Basements results-check: gemeten drop-rate en kosten per flow (2026-08-06)
+
+De `check_and_results`-node uit `basements_homepage_nl` haalt per `/c/`-URL het echte
+AND-productaantal op en dropt lege/dunne pagina's. Vóór we hem breder inzetten, de node 1-op-1
+naar Python geport en op echte URL-samples uit Redshift gedraaid — de cijfers, want ze bepalen
+of inbouwen kan:
+
+| sample | drop-rate | API-calls/URL | wall-clock/URL |
+|---|---|---|---|
+| 250 drukst bezochte `/c/`-URLs (≈ maincat-profiel, 1,32 facetten) | **21,6 %** | 1,26 | 0,31 s |
+| 250 URLs uit rang 20–100 binnen deepest cats (1,90 facetten) | **37,2 %** | 2,02 | 0,55 s |
+
+Gemiddelde Search-API-latency 0,24–0,27 s. De drop-rate schaalt mee met de **facetdiepte**, dus
+interpoleer op het facetgemiddelde van je set — niet op "het is toch dezelfde query".
+
+Volumes (30 dagen, exact de query uit `build_query`):
+- **maincat**: 31 cats met data, **2.894 URLs** in de top-100-set, 1,31 facetten/URL, en
+  **215.797 kandidaten op álle rangen** — dus zat bijvulruimte. → ~3.650 calls, ~15 min.
+- **deepest**: 3.321 cats met data, **110.627 URLs**, 1,66 facetten/URL, gemiddeld maar **33
+  kandidaten per cat**. → ~190.000 calls, ~14 uur. Geen bijvulruimte.
+
+Dat verschil in bijvulruimte is de kern: de check kan alleen krimpen, nooit aanvullen. Bij
+maincat vang je dat op door de cap in `build_query` van 100 naar 150 te zetten; bij deepest
+bestaat die 150 gewoon niet. Zie BACKLOG voor de openstaande keuze daar.
+
+Twee dingen die bij het inbouwen misgingen en die je zelf ook zult tegenkomen:
+- **`order` moet per cat opnieuw genummerd**, anders krijgen `create_post_json` en
+  `pa.jvs_basements_deepest_1` gaten in de reeks.
+- **De TARGET-afkap is geen "drop".** Tel ze apart, anders rapporteert een run waarin de check
+  helemaal niet werkte (fail-open) alsnog vrolijk "50 gedropt" — dat was puur het afkappen op 100.
+
+Redshift-tip die dit onderzoek uren kostte: `CAST(TO_CHAR(dv.intime,'YYYYMMDD') AS INTEGER)
+BETWEEN …` (zoals `build_query` het doet) **blokkeert sortkey-pruning** op `datamart.dim_visit`.
+Een gewone range (`dv.intime >= '2026-08-04' AND dv.intime < '2026-08-06'`) maakte dezelfde
+sample-query van 25+ minuten naar seconden.
+
 ## Een chart-palette toewijzen is een zoekprobleem, geen smaakkwestie (2026-08-06)
 
 Shop-campaigns moest "dezelfde kleuren als SEO stats". De metric-sets verschillen

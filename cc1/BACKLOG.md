@@ -8,6 +8,45 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### Basements deepest-cats: welke vorm krijgt de results-check? (logged 2026-08-06)
+- [ ] **Kies een aanpak voordat we `basements_deepest_cats_{nl,be,de}.json` verbouwen.** De
+  `check_and_results`-node (uit `basements_homepage_nl`, op 2026-08-06 ook in de drie
+  maincat-flows gezet) drukt per `/c/`-URL het echte AND-aantal producten uit de Search API en
+  gooit lege/dunne pagina's uit de basement. Voor de maincats is dat een kwartiertje extra per
+  run; voor de deepest cats **niet**, en de vraag is welke van de vier routes we nemen. Joep
+  wilde de keuze eerst uitgediept hebben — daarom hier geparkeerd, nog geen besluit.
+
+  Waarom het bij deepest anders ligt (gemeten, zie LEARNINGS 2026-08-06):
+  **110.627 URLs** in de top-100-set over 3.321 cats, gemiddeld 1,66 facetten per URL →
+  **~190.000 Search-API-calls** en **~14 uur** sequentieel per run. De flow start om 18:15 en
+  zou tot de volgende ochtend doorlopen, over de volgende run heen, met een n8n-worker bezet.
+  Twee dingen maken dat extra vervelend: er is **geen hervat-mechanisme** (de `chk`-join in
+  `get_cat_ids` staat uitgecommentarieerd, en in de maincat-variant wijzen de drie
+  check-tabellen naar drie verschillende namen), en er is **geen bijvulruimte** — een deepest
+  cat heeft gemiddeld maar 33 kandidaat-URLs in 30 dagen, dus de cap in `build_query` verhogen
+  levert niets op. Bij ~30% drop gaat een basement van gemiddeld 33 naar ~23 links.
+
+  De vier routes zoals ze op tafel lagen:
+  1. **Cache-tabel + JOIN (mijn voorkeur).** Aparte nachtelijke job checkt URLs en schrijft
+     `url -> aantal resultaten` weg met een TTL (7–30 dagen); de basement-flow filtert er met
+     een JOIN op en blijft net zo snel als nu. Eerste vulling ~190k calls, daarna nog maar een
+     paar duizend per dag. Meeste bouwwerk: nieuwe tabel + nieuwe workflow + aanpassing in
+     `build_query`. **Open sub-vraag: waar landt die tabel — Redshift `pa.` of de gedeelde
+     Postgres op 10.1.32.9?** Bewust nog niet ingevuld.
+  2. **Inline met parallelle batches.** Zelfde patch als maincat, maar `Promise.all` in blokken
+     binnen de Code node: ~14 uur → ~1,5 uur. Geen nieuwe infra, maar wél ~190k calls elke dag
+     en 20–40 req/s op productie-ES tijdens de run.
+  3. **Inline sequentieel.** Exact dezelfde patch als de maincat-flows, kleinste diff en
+     makkelijk te reviewen — maar die ~14 uur per run.
+  4. **Alleen de gratis SQL-filters.** Nul API-calls: `winkel~`-URLs eruit (1.694 stuks) en
+     eventueel een limiet op facetdiepte, rechtstreeks in `build_query`. Vangt de echt lege
+     facetcombinaties niet af.
+
+  Let op bij route 1 en 2: de node zoals hij nu in de maincat-flows staat, is geschreven voor
+  het per-cat item `{cat_id, date_to, urls:[…]}` uit `group_by_cat_id`. Een losse cache-job
+  werkt op platte URL-rijen en heeft dus een andere wrapper (de evaluatiekern kan hetzelfde
+  blijven). En de `countryLanguage` + percent-decode-gotchas uit LEARNINGS gelden daar net zo.
+
 ### Shop-campaigns mist de WoW-laag die SEO stats wél heeft (logged 2026-08-06)
 - [ ] **Baseline-fetch toevoegen zodat de tegels en de tooltip een vergelijking kunnen tonen.**
   Shop-campaigns is op 2026-08-06 visueel gelijkgetrokken met SEO stats (layout, chart-chrome,

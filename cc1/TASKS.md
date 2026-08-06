@@ -4,6 +4,40 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-06 — results-check in de drie maincat-basementflows
+
+Bestanden in `Downloads\claude\N8N`, als **nieuwe** `*_with_check.json` naast de originelen
+(die zijn ongemoeid, zodat je kunt vergelijken/terugvallen):
+`basements_maincat_nl_with_check.json` (`nl-nl`), `_be_` (`be-nl`), `_de_` (`de-de`).
+
+- [x] **`check_and_results` ingebouwd** tussen `Loop Over Items` (loop-output) en
+      `create_post_json`; de takken naar `write_check_table` / `write_basement_info` blijven
+      zoals ze waren. Node aangepast op de geneste vorm `{cat_id, date_to, urls:[…]}` uit
+      `group_by_cat_id`, zodat `create_post_json` níet hoefde te veranderen. `order` wordt per
+      cat opnieuw genummerd 1..N. `retryOnFail: false` — de code is al fail-open per URL, een
+      retry zou ~5k calls verdubbelen. Extra outputvelden per cat: `urls_candidates`,
+      `urls_checked`, `urls_dropped` (afkap op TARGET telt niet als drop).
+- [x] **`build_query` cap 100 → 150.** De check kan alleen krimpen; met 150 kandidaten blijft
+      de basement op 100 staan. Kan hier omdat er 215.797 kandidaten op alle rangen zijn.
+- [x] **`safeDecode()` op category-slug en facetnamen** — nodig voor DE, zie LEARNINGS. Zit ook
+      in de NL-versie (onschadelijk, robuuster). **Let op: het NL-bestand is hierna opnieuw
+      gegenereerd; gebruik die versie, niet de eerste.**
+- [x] **Getest tegen de live Search API**, node-body uitgevoerd zoals n8n hem draait
+      (async function body, `$input`/`$helpers` geïnjecteerd): NL 40 URLs → 7 gedropt;
+      BE 30 → 10; DE 30 → 14; overal 0 HTTP-fouten en `order` aaneengesloten. Edge-cases:
+      geen `$helpers` / http gooit altijd → 100 behouden en netjes afgekapt; item zonder
+      `urls`; kapotte `$input` → `[]` i.p.v. crash.
+- [ ] **Nog niet gedaan: importeren + een run bekijken.** Verwachting NL ~15–20 min extra
+      runtime (~3.650–5.000 calls). Volumes voor BE/DE niet gemeten (Redshift was traag), dus
+      die schatting geldt voor NL. DE staat om 18:30, gelijk met NL-maincat.
+- [ ] **Pre-existing bug, bewust niet aangeraakt:** in de maincat-flows schrijft
+      `write_check_table` naar `pa.deepest_cat_ids_check_joep` en insert `create_post_json` in
+      `pa.jvs_basements_deepest_1`, terwijl `create_table`/`empty_basements_table`
+      `pa.main_cat_ids_check_joep` en `pa.basements_main_joep` beheren — en `get_cat_ids` leest
+      wéér een andere naam (`pa.maincat_ids_check_joep`). De 'done'-resume werkt daardoor niet.
+- [ ] **Deepest-cats flows: keuze open**, zie BACKLOG. `basements_maincats.json` valt buiten
+      scope (inactief, 62 nodes, andere opzet — geen `build_query`/`group_by_cat_id`).
+
 ### 2026-08-06 — Shop-campaigns gelijkgetrokken met SEO stats
 
 - [x] **Layout + gedrag** naar het SEO stats-model: tegels eerst en klikbaar (ze zijn nu de
