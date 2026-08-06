@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Hits</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        /* ---- Chart palette -------------------------------------------------
+           Validated categorical set (adjacent-pair CVD ΔE 9.1, normal-vision
+           19.6 on a light surface). Slots are assigned to a FIXED entity map
+           below, never by rank — filtering out a bot must not repaint the
+           ones that remain. Three slots sit under 3:1 contrast, so every
+           chart ships a legend AND the matching table underneath it. */
+        .viz-root {
+            --surface-1: #ffffff;
+            --series-1: #2a78d6;  /* blue    */
+            --series-2: #eb6834;  /* orange  */
+            --series-3: #1baf7a;  /* aqua    */
+            --series-4: #eda100;  /* yellow  */
+            --series-5: #e87ba4;  /* magenta */
+            --series-6: #008300;  /* green   */
+            --series-7: #4a3aa7;  /* violet  */
+            --series-8: #e34948;  /* red     */
+            --series-other: #9aa0a6;
+        }
+        .chart-box { position: relative; height: 340px; }
+        .chart-box-sm { position: relative; height: 260px; }
+
+        /* ---- Stat tiles ---- */
+        .tile-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+        .tile { background: #fff; border: 1px solid #eee; border-radius: 6px; padding: 0.8rem 1rem; }
+        .tile .tile-label { font-size: 0.78rem; color: #636e72; text-transform: uppercase; letter-spacing: 0.03em; }
+        .tile .tile-value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; margin-top: 0.15rem; }
+        .tile .tile-sub { font-size: 0.78rem; color: #636e72; }
+
+        /* ---- Standard table look ---- */
+        .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; max-height: 620px; }
+        .tool-table { font-size: 0.9rem; margin-bottom: 0; }
+        .tool-table th {
+            background: #f8f9fa; white-space: nowrap;
+            position: sticky; top: 0; z-index: 1;
+            padding: 6px 14px; font-size: 1rem;
+        }
+        .tool-table td { vertical-align: middle; }
+        .tool-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+        .tool-table th.sortable:hover { background: #e9ecef; }
+        .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+        .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
+        .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .url-cell { max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
+        .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+        .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
+        .filter-row select, .filter-row input { font-size: 0.9rem; }
+        .chk-list { max-height: 132px; overflow: auto; border: 1px solid #dee2e6; border-radius: 4px; padding: 0.4rem 0.6rem; font-size: 0.85rem; }
+        /* nowrap keeps a long host like d36j60x09x33dn.cloudfront.net on the same
+           line as its checkbox instead of wrapping underneath it. */
+        .chk-list label { display: block; cursor: pointer; white-space: nowrap; }
+        .nav-tabs .nav-link { color: #5e4a90; }
+        .nav-tabs .nav-link.active { color: #212529; font-weight: 600; }
+        .muted-note { font-size: 0.82rem; color: #636e72; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary sticky-top">
+        <div class="container d-flex flex-nowrap align-items-center gap-2">
+            <span class="navbar-brand mb-0 h1" style="white-space: nowrap;">Bot Hits</span>
+            <div class="d-flex flex-nowrap gap-1 ms-auto align-items-center">
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Generators</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/canonical.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 12h10"/><path d="M12 7v10"/></svg> Canonicals</a>
+                        <a href="/static/faq.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg> FAQ's</a>
+                        <a href="/static/index.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg> Kopteksten</a>
+                        <a href="/static/seo-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 6h11"/><path d="M3 12h8"/><path d="M3 18h8"/><circle cx="18" cy="16" r="3"/><path d="m22 20-1.8-1.8"/></svg> SEO titles</a>
+                        <a href="/static/unique-titles.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg> Unique Titles</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Redirects</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/rurl-optimizer.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Auto-Redirects</a>
+                        <a href="/static/rfinder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg> R-Finder</a>
+                        <a href="/static/redirect-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M18 8L22 12L18 16"/><path d="M2 12h20"/><path d="M6 16L2 12L6 8"/></svg> Redirect Checker</a>
+                        <a href="/static/301-generator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Redirect Generator</a>
+                        <a href="/static/redirect-tool.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 17V7a2 2 0 0 1 2-2h9"/><path d="M15 2l4 3-4 3"/><path d="M20 7v10a2 2 0 0 1-2 2H9"/><path d="M9 22l-4-3 4-3"/></svg> Redirect Tool</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle">Google Ads</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/dma-bidding.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> DMA Bidding</a>
+                        <a href="/static/dma-plus.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="10"/></svg> DMA+</a>
+                        <a href="/static/dma-exclusions.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> DMA Exclusions</a>
+                        <a href="/static/gsd-budgets.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C9.5 4 6 7.5 6 12s3.5 8 7.8 8c2 0 3.8-.8 5.2-2"/></svg> GSD Budgets</a>
+                        <a href="/static/gsd-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg> GSD Campaigns</a>
+                        <a href="/static/gsd-check.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> GSD Check</a>
+                        <a href="/static/mc-id-finder.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> MC ID Finder</a>
+                        <a href="/static/shop-campaigns.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 9h18l-1.5 11H4.5z"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/></svg> Shop-campaigns</a>
+                        <a href="/static/thema-ads.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20.6 8.4 12 17l-8.6-8.6A5 5 0 1 1 12 4a5 5 0 1 1 8.6 4.4z"/></svg> Thema Ads</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-toggle nav-dropdown-active">SEO tools</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="/static/bothits.html" class="nav-dropdown-item active"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg> Bot Hits</a>
+                        <a href="/static/dm-review.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3"/><path d="m7 21 5-6 5 6"/><path d="M12 15v6"/></svg> DM Review</a>
+                        <a href="/static/index-checker.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Index Checker</a>
+                        <a href="/static/indexnow.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> IndexNow</a>
+                        <a href="/static/keyword-planner.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/></svg> Keyword Planner</a>
+                        <a href="/static/performance-standup.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> Performance Standup</a>
+                        <a href="/static/redshift-upload.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg> Redshift Upload</a>
+                        <a href="/static/seo-prio.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m12 2 3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg> SEO Priority</a>
+                        <a href="/static/seo-rulings.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg> SEO Rulings</a>
+                        <a href="/static/seo-stats.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> SEO stats</a>
+                        <a href="/static/url-validator.html" class="nav-dropdown-item"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> URL Validator</a>
+                    </div>
+                </div>
+                <a href="/static/dashboard.html" class="btn btn-light nav-dashboard-btn" title="Apps" aria-label="Apps"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg></a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4 pb-5 viz-root" style="max-width: 1500px;">
+
+        <!-- ============================ FILTERS ============================ -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Filters</h5>
+                <span id="coverageNote" class="muted-note"></span>
+            </div>
+            <div class="card-body">
+                <!-- align-items-start, not -end: the checkbox lists are much taller than
+                     the date inputs, so bottom-alignment pushes "Van"/"Tot en met" a full
+                     row below the other filter labels. -->
+                <div class="row g-3 align-items-start">
+                    <div class="col-md-2">
+                        <label class="form-label mb-1">Van</label>
+                        <input type="date" class="form-control form-control-sm" id="startDate">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label mb-1">Tot en met</label>
+                        <input type="date" class="form-control form-control-sm" id="endDate">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label mb-1">Domein</label>
+                        <div class="chk-list" id="hostFilter"><span class="text-muted">laden…</span></div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label mb-1">Bot-soort</label>
+                        <div class="chk-list" id="classFilter"><span class="text-muted">laden…</span></div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label mb-1">URL-type</label>
+                        <div class="chk-list" id="typeFilter"><span class="text-muted">laden…</span></div>
+                    </div>
+                    <div class="col-md-2 d-flex flex-column gap-3">
+                        <div>
+                            <label class="form-label mb-1">In pa.urls</label>
+                            <select class="form-select form-select-sm" id="knownFilter">
+                                <option value="">Alles</option>
+                                <option value="known">Alleen bekende URL's</option>
+                                <option value="unknown">Alleen onbekende URL's</option>
+                            </select>
+                        </div>
+                        <div class="d-flex justify-content-end gap-2">
+                            <button class="btn btn-sm btn-outline-purple" id="resetBtn">Reset</button>
+                            <button class="btn btn-sm btn-run" id="applyBtn">Toepassen</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="partialWarn" class="alert alert-warning py-2 px-3 mt-3 mb-0 d-none" style="font-size:0.85rem;"></div>
+            </div>
+        </div>
+
+        <!-- ============================ TILES ============================ -->
+        <div class="tile-row mb-3" id="tiles"></div>
+
+        <!-- ============================ TABS ============================ -->
+        <ul class="nav nav-tabs mb-3" id="mainTabs" role="tablist">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-overview" type="button">Overzicht</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-urls" type="button">URL's</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-waste" type="button">Crawl-verspilling</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-cats" type="button">Categorieën</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ingest" type="button">Ingest</button></li>
+        </ul>
+
+        <div class="tab-content">
+            <!-- ---------------------- OVERVIEW ---------------------- -->
+            <div class="tab-pane fade show active" id="tab-overview">
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Hits per dag</h5>
+                        <div class="d-flex gap-2 align-items-center">
+                            <label class="muted-note mb-0">Splitsen op</label>
+                            <select class="form-select form-select-sm" id="groupBy" style="width:auto;">
+                                <option value="bot_class">Bot-soort</option>
+                                <option value="bot_family">Bot-familie</option>
+                                <option value="url_type">URL-type</option>
+                                <option value="host">Domein</option>
+                                <option value="status_class">HTTP-status</option>
+                                <option value="is_known_url">Bekend / onbekend</option>
+                                <option value="facet_depth">Facet-diepte</option>
+                                <option value="none">Totaal</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-purple" id="refreshBtn">↻ Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-box"><canvas id="dailyChart"></canvas></div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-header"><h5 class="mb-0">URL-type</h5></div>
+                            <div class="card-body">
+                                <div class="chart-box-sm"><canvas id="typeChart"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-header"><h5 class="mb-0">Facet-diepte — bekend vs onbekend</h5></div>
+                            <div class="card-body">
+                                <div class="chart-box-sm"><canvas id="depthChart"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header"><h5 class="mb-0">Per bot-familie</h5></div>
+                    <div class="card-body">
+                        <div class="tool-table-wrap">
+                            <table class="table table-hover tool-table" id="botTable">
+                                <thead><tr>
+                                    <th class="sortable" data-k="bot_family">Bot-familie</th>
+                                    <th class="sortable" data-k="bot_class">Soort</th>
+                                    <th class="sortable num" data-k="hits">Hits</th>
+                                    <th class="num">Aandeel</th>
+                                    <th class="sortable num" data-k="per_day">Per dag</th>
+                                    <th class="num">In pa.urls</th>
+                                    <th class="sortable num" data-k="hits_2xx">2xx</th>
+                                    <th class="sortable num" data-k="hits_3xx">3xx</th>
+                                    <th class="sortable num" data-k="hits_4xx">4xx</th>
+                                    <th class="sortable num" data-k="hits_5xx">5xx</th>
+                                    <th class="num">Cache-hit</th>
+                                    <th class="sortable num" data-k="bytes">Verkeer</th>
+                                </tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ---------------------- TOP URLS ---------------------- -->
+            <div class="tab-pane fade" id="tab-urls">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Meest gecrawlde URL's <span class="muted-note">(alleen URL's uit pa.urls)</span></h5>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="text" class="form-control form-control-sm" id="urlSearch" placeholder="zoek in URL…" style="width:230px;">
+                            <select class="form-select form-select-sm" id="urlLimit" style="width:auto;">
+                                <option>50</option><option selected>100</option><option>250</option><option>500</option><option>1000</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-orange" id="urlExport">Export CSV</button>
+                            <button class="btn btn-sm btn-run" id="urlLoad">Laden</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="tool-table-wrap">
+                            <table class="table table-hover tool-table" id="urlTable">
+                                <thead><tr>
+                                    <th class="sortable" data-k="url">URL</th>
+                                    <th class="sortable" data-k="main_cat_name">Maincat</th>
+                                    <th class="sortable num" data-k="hits">Hits</th>
+                                    <th class="sortable num" data-k="days">Dagen</th>
+                                    <th class="sortable num" data-k="n_2xx">2xx</th>
+                                    <th class="sortable num" data-k="n_3xx">3xx</th>
+                                    <th class="sortable num" data-k="n_4xx">4xx</th>
+                                    <th class="sortable num" data-k="n_5xx">5xx</th>
+                                    <th class="sortable" data-k="bots">Bots</th>
+                                </tr></thead>
+                                <tbody><tr><td colspan="9" class="text-muted p-3">Klik op Laden.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ---------------------- WASTE ---------------------- -->
+            <div class="tab-pane fade" id="tab-waste">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Crawl-verspilling <span class="muted-note">(URL's die niet in pa.urls staan)</span></h5>
+                        <div class="d-flex gap-2 align-items-center">
+                            <select class="form-select form-select-sm" id="wasteLimit" style="width:auto;">
+                                <option>50</option><option selected>100</option><option>250</option><option>500</option><option>1000</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-orange" id="wasteExport">Export CSV</button>
+                            <button class="btn btn-sm btn-run" id="wasteLoad">Laden</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info py-2 px-3 muted-note">
+                            Dit is een <strong>dagelijkse top-500 per bot-familie</strong>, geen volledige ranglijst van de
+                            hele onbekende staart. Lees het als “de luidste veroorzakers”, niet als een uitputtende telling.
+                            De totalen per dag in het Overzicht kloppen wél volledig.
+                        </div>
+                        <div class="tool-table-wrap">
+                            <table class="table table-hover tool-table" id="wasteTable">
+                                <thead><tr>
+                                    <th class="sortable" data-k="url">URL</th>
+                                    <th class="sortable" data-k="url_type">Type</th>
+                                    <th class="sortable num" data-k="facet_depth">Facets</th>
+                                    <th class="sortable num" data-k="hits">Hits</th>
+                                    <th class="sortable num" data-k="days">Dagen</th>
+                                    <th class="sortable" data-k="bots">Bots</th>
+                                </tr></thead>
+                                <tbody><tr><td colspan="6" class="text-muted p-3">Klik op Laden.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ---------------------- CATEGORIES ---------------------- -->
+            <div class="tab-pane fade" id="tab-cats">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Per hoofdcategorie <span class="muted-note">(alleen URL's uit pa.urls)</span></h5>
+                        <button class="btn btn-sm btn-run" id="catLoad">Laden</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="tool-table-wrap">
+                            <table class="table table-hover tool-table" id="catTable">
+                                <thead><tr>
+                                    <th class="sortable" data-k="main_cat_name">Hoofdcategorie</th>
+                                    <th class="sortable num" data-k="hits">Hits</th>
+                                    <th class="sortable num" data-k="urls_crawled">Unieke URL's</th>
+                                    <th class="sortable num" data-k="per_url">Hits per URL</th>
+                                </tr></thead>
+                                <tbody><tr><td colspan="4" class="text-muted p-3">Klik op Laden.</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ---------------------- INGEST ---------------------- -->
+            <div class="tab-pane fade" id="tab-ingest">
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Nieuwe logs verwerken</h5>
+                        <button class="btn btn-sm btn-run" id="ingestBtn">Verwerk dropfolder</button>
+                    </div>
+                    <div class="card-body">
+                        <p class="muted-note mb-2">
+                            Zet nieuwe CloudFront-mappen in de dropfolder en druk op Verwerk. Een logdatum wordt pas
+                            geladen als alle 24 uur-bestanden aanwezig zijn, zodat een map die nog staat te kopiëren niet
+                            als halve dag binnenkomt. Verwerkte bestanden verhuizen naar <code>_processed/</code>.
+                            Opnieuw verwerken van dezelfde datum is veilig — die wordt overschreven, niet verdubbeld.
+                        </p>
+                        <div id="ingestStatus" class="muted-note"></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h5 class="mb-0">Geladen logdatums</h5></div>
+                    <div class="card-body">
+                        <div class="tool-table-wrap">
+                            <table class="table table-hover tool-table" id="ingestTable">
+                                <thead><tr>
+                                    <th>Datum</th><th class="num">Uren</th><th class="num">Files</th>
+                                    <th class="num">Logregels</th><th class="num">Bot-regels</th>
+                                    <th class="num">URL-rijen</th><th class="num">Duur</th><th>Geladen op</th>
+                                </tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    const API = '/api/bothits';
+
+    // ---- Fixed entity -> palette slot ------------------------------------
+    // Keyed on the entity, never on rank: filtering a bot out must not
+    // recolour the ones that stay. Anything not listed falls to "Other" grey,
+    // which also keeps the chart within the validated 8-hue set.
+    const CSS = getComputedStyle(document.querySelector('.viz-root') || document.body);
+    const SLOT = n => CSS.getPropertyValue('--series-' + n).trim() || '#888';
+    const OTHER = () => CSS.getPropertyValue('--series-other').trim() || '#9aa0a6';
+
+    const COLOR_MAPS = {
+        bot_class: { ai: 1, search: 2, 'seo-tool': 3, social: 4, monitoring: 5, other: 6 },
+        bot_family: { Googlebot: 1, OpenAI: 2, GoogleOther: 3, Apple: 4, 'Meta-AI': 5,
+                      Anthropic: 6, 'Google-AI': 7, Bing: 8 },
+        url_type: { product: 1, category_facet: 2, category: 3, sitemap: 4, home: 5,
+                    product_legacy: 6, robots: 7, other: 8 },
+        host: { 'beslist.nl': 1, 'beslist.be': 2, 'shopcaddy.de': 3, 'shop.beslist.nl': 4,
+                'shop.beslist.be': 5, 'shop.shopcaddy.de': 6 },
+        // Status is a reserved palette, not categorical slots: 2xx good,
+        // 3xx informational, 4xx warning, 5xx critical. Always label-bearing.
+        status_class: { '2xx': 6, '3xx': 1, '4xx': 4, '5xx': 8 },
+        is_known_url: { 'in pa.urls': 1, 'not in pa.urls': 2 },
+    };
+
+    function colorFor(groupBy, key) {
+        const m = COLOR_MAPS[groupBy];
+        if (groupBy === 'facet_depth') {
+            const n = parseInt(key, 10);
+            return isNaN(n) || n > 8 ? OTHER() : SLOT(Math.max(1, n === 0 ? 1 : n));
+        }
+        if (!m) return SLOT(1);
+        return m[key] ? SLOT(m[key]) : OTHER();
+    }
+
+    const fmt = n => (n == null ? '—' : Number(n).toLocaleString('nl-NL'));
+    const pct = (a, b) => (!b ? '—' : (a / b * 100).toFixed(1) + '%');
+    function fmtBytes(b) {
+        if (!b) return '—';
+        const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let i = 0, v = Number(b);
+        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+        return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i];
+    }
+
+    let META = null, CHARTS = {};
+
+    // ---- Filter state ----------------------------------------------------
+    function checked(id) {
+        return [...document.querySelectorAll('#' + id + ' input:checked')].map(e => e.value);
+    }
+    function params(extra = {}) {
+        const p = new URLSearchParams();
+        const s = document.getElementById('startDate').value;
+        const e = document.getElementById('endDate').value;
+        if (s) p.set('start_date', s);
+        if (e) p.set('end_date', e);
+        const h = checked('hostFilter'), c = checked('classFilter'), t = checked('typeFilter');
+        // An all-checked box is the same as no filter — leave it out so the
+        // backend can skip the ANY() and the cache key stays stable.
+        if (h.length && h.length < (META?.hosts?.length || 99)) p.set('host', h.join(','));
+        if (c.length && c.length < Object.keys(classCounts()).length) p.set('bot_class', c.join(','));
+        if (t.length && t.length < (META?.url_types?.length || 99)) p.set('url_type', t.join(','));
+        const k = document.getElementById('knownFilter').value;
+        if (k) p.set('known', k);
+        for (const [key, v] of Object.entries(extra)) if (v !== '' && v != null) p.set(key, v);
+        return p.toString();
+    }
+    function classCounts() {
+        const out = {};
+        (META?.bots || []).forEach(b => { out[b.bot_class] = (out[b.bot_class] || 0) + 1; });
+        return out;
+    }
+
+    function chkbox(container, values, labels) {
+        const el = document.getElementById(container);
+        el.innerHTML = values.map((v, i) =>
+            `<label><input type="checkbox" value="${v}" checked> ${labels ? labels[i] : v}</label>`).join('');
+    }
+
+    // ---- Boot ------------------------------------------------------------
+    async function boot() {
+        META = await (await fetch(API + '/meta')).json();
+        const cov = META.coverage || {};
+        document.getElementById('coverageNote').textContent =
+            cov.days ? `${cov.days} dagen geladen · ${cov.first_day} t/m ${cov.last_day} · ${fmt(cov.bot_lines)} bot-hits` : 'nog geen data geladen';
+        if (cov.last_day) {
+            document.getElementById('endDate').value = cov.last_day;
+            const d = new Date(cov.last_day); d.setDate(d.getDate() - 29);
+            const lo = cov.first_day && d < new Date(cov.first_day) ? cov.first_day : d.toISOString().slice(0, 10);
+            document.getElementById('startDate').value = lo;
+        }
+        chkbox('hostFilter', META.hosts || []);
+        chkbox('classFilter', Object.keys(classCounts()));
+        chkbox('typeFilter', META.url_types || []);
+        if ((META.partial_days || []).length) {
+            const w = document.getElementById('partialWarn');
+            w.classList.remove('d-none');
+            w.innerHTML = '<strong>Let op — onvolledige dagen.</strong> Deze logdatums hebben niet alle 24 uur in het archief, ' +
+                'dus hun totalen liggen kunstmatig laag: ' +
+                META.partial_days.map(p => `${p.log_date} (${p.hours_present}/24u)`).join(', ') + '.';
+        }
+        await refresh();
+    }
+
+    // ---- Overview --------------------------------------------------------
+    async function refresh(force = false) {
+        const gb = document.getElementById('groupBy').value;
+        const f = force ? { force: 'true' } : {};
+        const [daily, summary] = await Promise.all([
+            fetch(API + '/daily?' + params({ group_by: gb, ...f })).then(r => r.json()),
+            fetch(API + '/summary?' + params(f)).then(r => r.json()),
+        ]);
+        drawTiles(summary);
+        drawDaily(daily, gb);
+        drawType(summary);
+        drawDepth(summary);
+        drawBotTable(summary);
+    }
+
+    function drawTiles(s) {
+        const ai = (s.bots || []).filter(b => b.bot_class === 'ai').reduce((a, b) => a + Number(b.hits), 0);
+        // Waste is measured over catalog (/c/) URLs only — pa.urls contains no
+        // product pages, so counting /p/ as "not in pa.urls" would report ~94%
+        // and mean nothing.
+        const tiles = [
+            ['Bot-hits totaal', fmt(s.total_hits), `${s.start_date} t/m ${s.end_date}`],
+            ['AI-crawlers', fmt(ai), pct(ai, s.total_hits) + ' van alle bot-hits'],
+            ['Productpagina\'s', fmt(s.product_hits), pct(s.product_hits, s.total_hits) + ' van alle bot-hits'],
+            ['Categorie-URL\'s', fmt(s.catalog_hits), fmt(s.catalog_known) + ' daarvan in pa.urls'],
+            ['Facet-verspilling', s.waste_pct + '%', 'van categorie-crawls valt buiten pa.urls'],
+            ['Verkeer', fmtBytes((s.bots || []).reduce((a, b) => a + Number(b.bytes || 0), 0)), 'uitgeserveerd aan bots'],
+        ];
+        document.getElementById('tiles').innerHTML = tiles.map(([l, v, sub]) =>
+            `<div class="tile"><div class="tile-label">${l}</div><div class="tile-value">${v}</div><div class="tile-sub">${sub}</div></div>`).join('');
+    }
+
+    function drawDaily(data, gb) {
+        const dates = [...new Set(data.rows.map(r => r.log_date))].sort();
+        const groups = [...new Set(data.rows.map(r => r.grp))];
+        // Keep the chart inside the validated 8-hue set: everything without a
+        // fixed slot collapses into one "Overig" band. The table below carries
+        // the full per-family detail.
+        const named = groups.filter(g => (COLOR_MAPS[gb] || {})[g] || gb === 'facet_depth' || gb === 'none');
+        const rest = groups.filter(g => !named.includes(g));
+        const keys = [...named, ...(rest.length ? ['Overig'] : [])];
+        const idx = {};
+        data.rows.forEach(r => {
+            const k = named.includes(r.grp) ? r.grp : 'Overig';
+            idx[k] = idx[k] || {};
+            idx[k][r.log_date] = (idx[k][r.log_date] || 0) + Number(r.hits);
+        });
+        const ds = keys.map(k => ({
+            label: k,
+            data: dates.map(d => (idx[k] || {})[d] || 0),
+            backgroundColor: k === 'Overig' ? OTHER() : colorFor(gb, k),
+            borderColor: '#ffffff',          // 2px surface gap between bands
+            borderWidth: 2,
+            fill: true, pointRadius: 0, tension: 0,
+        }));
+        CHARTS.daily?.destroy();
+        CHARTS.daily = new Chart(document.getElementById('dailyChart'), {
+            type: 'line',
+            data: { labels: dates, datasets: ds },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 14, color: '#636e72' } },
+                    y: { stacked: true, beginAtZero: true, grid: { color: '#f1f1f1' },
+                         ticks: { color: '#636e72', callback: v => fmt(v) } },
+                },
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded' } },
+                    tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } },
+                },
+            },
+        });
+    }
+
+    function drawType(s) {
+        const rows = (s.by_url_type || []).slice(0, 8);
+        CHARTS.type?.destroy();
+        CHARTS.type = new Chart(document.getElementById('typeChart'), {
+            type: 'doughnut',
+            data: {
+                labels: rows.map(r => r.url_type),
+                datasets: [{
+                    data: rows.map(r => Number(r.hits)),
+                    backgroundColor: rows.map(r => colorFor('url_type', r.url_type)),
+                    borderColor: '#ffffff', borderWidth: 2,
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded' } },
+                    tooltip: { callbacks: { label: c => ` ${c.label}: ${fmt(c.parsed)} (${pct(c.parsed, s.total_hits)})` } },
+                },
+            },
+        });
+    }
+
+    function drawDepth(s) {
+        const rows = s.by_facet_depth || [];
+        const known = rows.map(r => Number(r.hits_known || 0));
+        const unknown = rows.map(r => Number(r.hits) - Number(r.hits_known || 0));
+        CHARTS.depth?.destroy();
+        CHARTS.depth = new Chart(document.getElementById('depthChart'), {
+            type: 'bar',
+            data: {
+                labels: rows.map(r => r.facet_depth === 0 ? 'geen facet' : r.facet_depth + ' facets'),
+                datasets: [
+                    { label: 'in pa.urls', data: known, backgroundColor: SLOT(1), borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
+                    { label: 'niet in pa.urls', data: unknown, backgroundColor: SLOT(2), borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
+                ],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { stacked: true, grid: { display: false }, ticks: { color: '#636e72' } },
+                    y: { stacked: true, beginAtZero: true, grid: { color: '#f1f1f1' }, ticks: { color: '#636e72', callback: v => fmt(v) } },
+                },
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded' } },
+                    tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } },
+                },
+            },
+        });
+    }
+
+    let botRows = [];
+    function drawBotTable(s) {
+        const days = Math.max(1, ...(s.bots || []).map(b => Number(b.days || 1)));
+        botRows = (s.bots || []).map(b => ({ ...b, hits: Number(b.hits), per_day: Math.round(Number(b.hits) / days) }));
+        renderBotTable(s.total_hits);
+    }
+    function renderBotTable(total) {
+        total = total || botRows.reduce((a, b) => a + b.hits, 0);
+        document.querySelector('#botTable tbody').innerHTML = botRows.map(b => `
+            <tr>
+              <td><span class="swatch" style="background:${colorFor('bot_family', b.bot_family)}"></span>${b.bot_family}</td>
+              <td><span class="badge" style="background:${colorFor('bot_class', b.bot_class)}">${b.bot_class}</span></td>
+              <td class="num">${fmt(b.hits)}</td>
+              <td class="num">${pct(b.hits, total)}</td>
+              <td class="num">${fmt(b.per_day)}</td>
+              <td class="num">${pct(b.hits_known, b.hits)}</td>
+              <td class="num">${fmt(b.hits_2xx)}</td>
+              <td class="num">${fmt(b.hits_3xx)}</td>
+              <td class="num">${fmt(b.hits_4xx)}</td>
+              <td class="num">${fmt(b.hits_5xx)}</td>
+              <td class="num">${pct(b.cache_hits, b.hits)}</td>
+              <td class="num">${fmtBytes(b.bytes)}</td>
+            </tr>`).join('');
+    }
+
+    // ---- Generic client-side sorting ------------------------------------
+    function makeSortable(tableId, getRows, render) {
+        document.querySelectorAll('#' + tableId + ' th.sortable').forEach(th => {
+            th.addEventListener('click', () => {
+                const k = th.dataset.k;
+                const desc = !th.classList.contains('sort-desc');
+                document.querySelectorAll('#' + tableId + ' th').forEach(x => x.classList.remove('sort-asc', 'sort-desc'));
+                th.classList.add(desc ? 'sort-desc' : 'sort-asc');
+                getRows().sort((a, b) => {
+                    const x = a[k], y = b[k];
+                    const n = (typeof x === 'number' || !isNaN(parseFloat(x))) && (typeof y === 'number' || !isNaN(parseFloat(y)));
+                    const r = n ? parseFloat(x) - parseFloat(y) : String(x ?? '').localeCompare(String(y ?? ''));
+                    return desc ? -r : r;
+                });
+                render();
+            });
+        });
+    }
+
+    // ---- Top URLs --------------------------------------------------------
+    let urlRows = [];
+    async function loadUrls() {
+        const tb = document.querySelector('#urlTable tbody');
+        tb.innerHTML = '<tr><td colspan="9" class="p-3 text-muted">laden…</td></tr>';
+        urlRows = await (await fetch(API + '/top-urls?' + params({
+            limit: document.getElementById('urlLimit').value,
+            search: document.getElementById('urlSearch').value,
+        }))).json();
+        urlRows.forEach(r => { r.hits = Number(r.hits); r.days = Number(r.days); });
+        renderUrls();
+    }
+    function renderUrls() {
+        const tb = document.querySelector('#urlTable tbody');
+        if (!urlRows.length) { tb.innerHTML = '<tr><td colspan="9" class="p-3 text-muted">Geen resultaten.</td></tr>'; return; }
+        tb.innerHTML = urlRows.map(r => `
+            <tr>
+              <td class="url-cell" title="${r.url}"><a href="https://www.beslist.nl${r.url}" target="_blank" rel="noopener">${r.url}</a></td>
+              <td>${r.main_cat_name || "—"}</td>
+              <td class="num">${fmt(r.hits)}</td>
+              <td class="num">${fmt(r.days)}</td>
+              <td class="num">${fmt(r.n_2xx)}</td>
+              <td class="num">${fmt(r.n_3xx)}</td>
+              <td class="num">${fmt(r.n_4xx)}</td>
+              <td class="num">${fmt(r.n_5xx)}</td>
+              <td class="muted-note">${r.bots || ''}</td>
+            </tr>`).join('');
+    }
+
+    // ---- Waste -----------------------------------------------------------
+    let wasteRows = [];
+    async function loadWaste() {
+        const tb = document.querySelector('#wasteTable tbody');
+        tb.innerHTML = '<tr><td colspan="6" class="p-3 text-muted">laden…</td></tr>';
+        wasteRows = await (await fetch(API + '/top-waste?' + params({
+            limit: document.getElementById('wasteLimit').value,
+        }))).json();
+        wasteRows.forEach(r => { r.hits = Number(r.hits); r.days = Number(r.days); });
+        renderWaste();
+    }
+    function renderWaste() {
+        const tb = document.querySelector('#wasteTable tbody');
+        if (!wasteRows.length) { tb.innerHTML = '<tr><td colspan="6" class="p-3 text-muted">Geen resultaten.</td></tr>'; return; }
+        tb.innerHTML = wasteRows.map(r => `
+            <tr>
+              <td class="url-cell" title="${r.url}">${r.url}</td>
+              <td>${r.url_type}</td>
+              <td class="num">${r.facet_depth}</td>
+              <td class="num">${fmt(r.hits)}</td>
+              <td class="num">${fmt(r.days)}</td>
+              <td class="muted-note">${r.bots || ''}</td>
+            </tr>`).join('');
+    }
+
+    // ---- Categories ------------------------------------------------------
+    let catRows = [];
+    async function loadCats() {
+        const tb = document.querySelector('#catTable tbody');
+        tb.innerHTML = '<tr><td colspan="4" class="p-3 text-muted">laden…</td></tr>';
+        catRows = await (await fetch(API + '/categories?' + params({ limit: 200 }))).json();
+        catRows.forEach(r => {
+            r.hits = Number(r.hits); r.urls_crawled = Number(r.urls_crawled);
+            r.per_url = r.urls_crawled ? +(r.hits / r.urls_crawled).toFixed(1) : 0;
+        });
+        renderCats();
+    }
+    function renderCats() {
+        const tb = document.querySelector('#catTable tbody');
+        if (!catRows.length) { tb.innerHTML = '<tr><td colspan="4" class="p-3 text-muted">Geen resultaten.</td></tr>'; return; }
+        tb.innerHTML = catRows.map(r => `
+            <tr><td>${r.main_cat_name}</td><td class="num">${fmt(r.hits)}</td>
+                <td class="num">${fmt(r.urls_crawled)}</td><td class="num">${r.per_url}</td></tr>`).join('');
+    }
+
+    // ---- Ingest ----------------------------------------------------------
+    async function loadIngest() {
+        const [log, st] = await Promise.all([
+            fetch(API + '/ingest/log?limit=400').then(r => r.json()),
+            fetch(API + '/ingest/status').then(r => r.json()),
+        ]);
+        document.querySelector('#ingestTable tbody').innerHTML = log.map(r => `
+            <tr>
+              <td>${r.log_date}</td>
+              <td class="num">${r.is_complete ? '24' : `<span class="badge bg-warning text-dark">${r.hours_present}/24</span>`}</td>
+              <td class="num">${fmt(r.files)}</td>
+              <td class="num">${fmt(r.raw_lines)}</td>
+              <td class="num">${fmt(r.bot_lines)}</td>
+              <td class="num">${fmt(r.known_rows)}</td>
+              <td class="num">${r.duration_s}s</td>
+              <td class="muted-note">${(r.ingested_at || '').replace('T', ' ').slice(0, 16)}</td>
+            </tr>`).join('') || '<tr><td colspan="8" class="p-3 text-muted">Nog niets geladen.</td></tr>';
+        renderIngestStatus(st);
+        if (st.running) setTimeout(loadIngest, 5000);
+    }
+    function renderIngestStatus(st) {
+        const auto = st.auto_ingest
+            ? `automatisch elke nacht om ${st.auto_ingest_at}`
+            : 'automatische run staat uit (zet <code>BOTHITS_AUTO_INGEST=true</code>)';
+        let s = `Dropfolder: <code>${st.drop_dir}</code> — ${auto}.`;
+        if (st.running) s += ` <span class="badge bg-info">bezig sinds ${st.started_at}</span>`;
+        else if (st.error) s += ` <span class="badge bg-danger">fout: ${st.error}</span>`;
+        else if (st.finished_at) {
+            const p = st.result?.processed || [], k = st.result?.skipped || [];
+            s += ` Laatste run ${st.finished_at}: ${p.length} datum(s) verwerkt`;
+            if (k.length) s += `, ${k.length} overgeslagen (${k.map(x => x.log_date + ': ' + x.reason).join('; ')})`;
+        }
+        document.getElementById('ingestStatus').innerHTML = s;
+        document.getElementById('ingestBtn').disabled = !!st.running;
+    }
+
+    function toCsv(rows, cols) {
+        const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        return [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
+    }
+    function download(name, text) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8;' }));
+        a.download = name; a.click(); URL.revokeObjectURL(a.href);
+    }
+
+    // ---- Wiring ----------------------------------------------------------
+    document.getElementById('applyBtn').onclick = () => refresh();
+    document.getElementById('refreshBtn').onclick = () => refresh(true);
+    document.getElementById('groupBy').onchange = () => refresh();
+    document.getElementById('resetBtn').onclick = () => {
+        document.querySelectorAll('.chk-list input').forEach(i => i.checked = true);
+        document.getElementById('knownFilter').value = '';
+        refresh();
+    };
+    document.getElementById('urlLoad').onclick = loadUrls;
+    document.getElementById('urlSearch').addEventListener('keydown', e => { if (e.key === 'Enter') loadUrls(); });
+    document.getElementById('wasteLoad').onclick = loadWaste;
+    document.getElementById('catLoad').onclick = loadCats;
+    document.getElementById('urlExport').onclick = () => download('bothits-urls.csv',
+        toCsv(urlRows, ['url', 'main_cat_name', 'hits', 'days', 'n_2xx', 'n_3xx', 'n_4xx', 'n_5xx', 'bots']));
+    document.getElementById('wasteExport').onclick = () => download('bothits-waste.csv',
+        toCsv(wasteRows, ['url', 'url_type', 'facet_depth', 'hits', 'days', 'bots']));
+    document.getElementById('ingestBtn').onclick = async () => {
+        document.getElementById('ingestBtn').disabled = true;
+        await fetch(API + '/ingest/run', { method: 'POST' });
+        loadIngest();
+    };
+    document.querySelector('[data-bs-target="#tab-ingest"]').addEventListener('shown.bs.tab', loadIngest);
+
+    makeSortable('botTable', () => botRows, () => renderBotTable());
+    makeSortable('urlTable', () => urlRows, renderUrls);
+    makeSortable('wasteTable', () => wasteRows, renderWaste);
+    makeSortable('catTable', () => catRows, renderCats);
+
+    boot();
+    </script>
+</body>
+</html>

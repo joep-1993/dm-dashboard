@@ -23,6 +23,15 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   │   #   _ALL_JOIN/_ALL_WHERE  = cap-sizing (knik-punt + klimatologie). Alle kanalen.
 │   │   # pa.hs2_cat_month en pa.hs2_cat_knee.yearly zijn ALL-CHANNEL -> nooit als dekkingsnoemer
 │   │   # gebruiken (Grasmaaiers juni-2026: 6.915 all-channel vs 2.081 SEO). Zie LEARNINGS 2026-08-06.
+│   ├── bothits_ingest.py     # Bot Hits: CloudFront .gz -> pa.bothits_* (parser, dedupe, daily Timer-scheduler, CLI)
+│   │   # KORREL IS GEMETEN, NIET GEKOZEN — zie cc1/BOTHITS_PROCESS.md:
+│   │   #   volledige URL-korrel = 154M rijen/116d; week/maand bespaart ~10% (compressie 1,05x)
+│   │   #   omdat bots elke dag ANDERE facet-URLs raken -> de URL-ruimte inperken, niet de datum.
+│   │   #   86% van de rijen staat niet in pa.urls -> URL-detail alleen voor pa.urls-leden (21M).
+│   │   # scan_tree(): mapnaam != logdatum, 1 datum kan over 2 mappen liggen, dedupe op basename,
+│   │   #   alleen .gz (1039 uitgepakte kopieen hebben allemaal een .gz-tweeling).
+│   ├── bothits_service.py    # Bot Hits querylaag (cube + URL-tabellen), 5-min in-process cache
+│   ├── bothits_router.py     # Bot Hits APIRouter (/api/bothits), deelt ingest-lock met de scheduler
 │   ├── ai_titles_service.py  # AI-powered title generation
 │   ├── canonical_service.py  # Canonical URL transformation
 │   ├── redirect_301_service.py # 301 redirect management

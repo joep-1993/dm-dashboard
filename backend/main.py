@@ -69,6 +69,7 @@ from backend.shop_campaigns_router import router as shop_campaigns_router
 from backend.seo_stats_router import router as seo_stats_router
 from backend.dma_exclusions_router import router as dma_exclusions_router
 from backend.healthscore_router import router as healthscore_router
+from backend.bothits_router import router as bothits_router
 from backend.keyword_planner_service import get_search_volumes, test_api_connection as test_keyword_planner_connection
 from backend.category_keyword_service import process_category_keywords, PRELOADED_CATEGORIES
 from backend.keyword_redirect_service import resolve_shop, enrich_redirects
@@ -206,6 +207,9 @@ app.include_router(dma_exclusions_router)
 # Include healthscore router (HS2.0 HTML-sitemap coverage dashboard + selection runs)
 app.include_router(healthscore_router)
 
+# Include bothits router (CloudFront crawler-log analytics: AI bots, Googlebot, ...)
+app.include_router(bothits_router)
+
 # Koptekst-promptversie voor NIEUW gegenereerde content. "v3" = per-maincat
 # informationele koopgids-prompts (gpt_service_v3); "v1" = originele promo-prompt
 # (gpt_service.generate_product_content). Zet KOPTEKST_PROMPT_VERSION=v1 om terug
@@ -238,6 +242,12 @@ async def startup_event():
     from backend.gsd_ll_service import start_excel_scheduler
     start_excel_scheduler()
 
+    # Arm the nightly CloudFront drop-folder ingest (off unless
+    # BOTHITS_AUTO_INGEST=true, so a second uvicorn cannot double-run it).
+    from backend.bothits_ingest import start_scheduler as start_bothits_scheduler
+    from backend.bothits_service import clear_cache as clear_bothits_cache
+    start_bothits_scheduler(on_done=clear_bothits_cache)
+
     # SEO Priority's two category dropdowns are fed by a DISTINCT over
     # datamart.dim_visit that costs 25s+ (and grows with the table). Warm the
     # cache here — reads the on-disk copy, and refreshes on a background thread
@@ -253,6 +263,9 @@ async def shutdown_event():
     """Close long-lived HTTP sessions to prevent CLOSE_WAIT socket buildup."""
     from backend.gsd_ll_service import stop_excel_scheduler
     stop_excel_scheduler()
+
+    from backend.bothits_ingest import stop_scheduler as stop_bothits_scheduler
+    stop_bothits_scheduler()
     from backend import (
         gpt_service, scraper_service, link_validator, faq_service,
         ai_titles_service, url_validator_service,

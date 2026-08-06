@@ -1,6 +1,87 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Crawl-logs: de URL-ruimte is onbegrensd, de datum-korrel niet het probleem (2026-08-06)
+
+Bij het bouwen van **Bot Hits** was de eerste vraag waar 116 dagen CloudFront-logs moeten
+landen. De reflex is "aggregeer naar week of maand". Dat is hier meetbaar fout.
+
+Volledige URL-korrel `(datum, host, bot, url)` over de niet-productpagina's:
+
+| dag | dagrijen | cumulatieve unie |
+|---|---|---|
+| 2026-03-10 | 1.336.466 | 1.336.466 |
+| 2026-03-11 | 1.235.656 | 2.510.477 |
+| 2026-03-12 | 1.096.122 | 3.522.436 |
+| 2026-03-13 | 1.151.848 | 4.571.527 |
+
+Som van de dagen 4.820.092 tegen 4.571.527 uniek: **compressie 1,05x**. Er is nauwelijks
+overlap tussen dagen. Geëxtrapoleerd: dag 140M, week 129M, maand 126M rijen — week- of
+maandbuckets besparen ~10%, niet de orde van grootte die je nodig hebt.
+
+**De reden**: crawlers lopen elke dag een andere doorsnede van de facet-combinatieruimte af.
+Die ruimte is combinatorisch, dus praktisch onbegrensd. Elke dag levert zijn eigen verse
+URL's op, hoe grof je de datum ook maakt.
+
+Wat wél werkt is snijden op de URL-*ruimte*. 86% van de rijen staat niet in `pa.urls`; alleen
+bekende URL's houden brengt 154M → 21,4M. Ter vergelijking, een bot-whitelist — de intuïtieve
+"gooi de ruis eruit"-zet — snijdt **2%** weg, want het volume is Googlebot (36%), OpenAI (31%),
+GoogleOther (11%), Apple (9%) en Meta (8%): precies de bots die je wilt houden. De twee filters
+zijn dus geen alternatieven; de een bepaalt de omvang, de ander de signaalkwaliteit.
+
+Les: bij een long-tail-feitentabel eerst de **cardinaliteitscurve over de tijd** meten
+(marginale nieuwe sleutels per extra dag) vóór je de korrel kiest. Bij compressie ≈ 1 is
+her-bucketen van de datum verspilde moeite en moet de dimensie zelf ingeperkt.
+
+## `pa.urls` bevat geen productpagina's, dus "verspilling" over alles meten liegt (2026-08-06)
+
+De eerste versie van de Bot Hits-tegel rapporteerde **94,4% crawl-verspilling**. Dat cijfer was
+technisch juist en inhoudelijk onzin: `pa.urls` bevat alleen `/c/`-URL's (1.028.016 van 1.031.796),
+dus alle 22,3M hits op `/p/`-productpagina's tellen als "niet in pa.urls" — terwijl dat gewoon
+legitieme pagina's zijn die crawlers hóren op te halen.
+
+Verspilling is alleen betekenisvol binnen de URL-soort die in `pa.urls` thuishoort. De tegel
+rekent nu over `category` + `category_facet` + `category_legacy`, en productpagina's staan als
+eigen tegel ernaast.
+
+Generieke les: een "% buiten de referentieset"-KPI is alleen geldig als de referentieset
+dezelfde scope heeft als de noemer. Controleer bij zo'n ratio altijd eerst wát er per definitie
+buiten de referentieset valt.
+
+## Case-insensitive matchen, case-sensitive opslaan = dubbele dimensierijen (2026-08-06)
+
+De bot-classificatie matcht user-agents met `re.I`, en sloeg vervolgens `m.group(1)` op. `re`
+geeft de tekst terug **zoals hij in de user-agent stond**, dus `DiffBot` en `Diffbot` werden twee
+rijen in `pa.bothits_bot` voor één crawler — en dus twee reeksen in elke grafiek. Zichtbaar
+geworden doordat `/meta` de bot-namen per familie teruggaf: `['DiffBot', 'Diffbot']`.
+
+Fix: `CANON_BY_LOWER = {n.lower(): n for n in CANON_NAMES}` en de match daar doorheen vouwen.
+Patroon om te onthouden: **als je case-insensitive matcht, normaliseer dan expliciet vóór opslag** —
+anders lekt de invoervariatie je dimensietabel in.
+
+## CloudFront-archiefmappen zijn downloaddatums, geen logdatums (2026-08-06)
+
+Vier valkuilen in `Downloads\claude\bothits_new\backup`, alle vier gemeten:
+
+1. **Mapnaam ≠ logdatum.** `1-5-2026` bevat 2026-04-22 t/m 05-01.
+2. **Eén logdatum ligt over twee mappen.** `26-3-2026` loopt terug tot 2026-02-14, dus
+   2026-03-15/16 zitten óók in `16-3-2026`. Een testrun die maar één map scande laadde
+   3.710.645 regels waar het er 6.666.792 moesten zijn — **44% stil gemist**, en niets in de
+   output verried dat.
+3. **Dubbele bestanden** tussen die overlappende mappen: 2.599 `.gz` voor 2026-03-16, waarvan
+   1.629 uniek. Dedupliceren op basename.
+4. **1.039 uitgepakte kopieën** (magic `#Ver`) naast hun `.gz`-tweeling, 2,33 GB los tegen
+   517 MB gecomprimeerd. Alleen `.gz` nemen is veilig — geverifieerd dat 0 platte bestanden
+   zonder tweeling bestaan. Toevallig klopte de eerste regeltelling daardoor exact, want
+   `gzip.open()` op platte tekst gooit `BadGzipFile` en die werd stil weggevangen.
+
+Ook: het archief bevat **6 distributies** en **3 domeinen**; het domein zit in `x-host-header`,
+die de oude CSV-export weggooide. Vijf logdatums zijn onvolledig (afkapdag van een batch) en
+staan nu als `is_complete = false` in de ledger, zodat het dashboard geen nepdip toont.
+
+De generieke les: bij een bestandsarchief nooit vertrouwen op mapstructuur als sleutel, en na
+het inlezen een **onafhankelijke volledigheidscontrole** draaien (hier: uren-dekking per dag).
+
 ## De Search API kent maar drie locales, en DE-slugs moeten percent-DEcoded (2026-08-06)
 
 Bij het porten van `check_and_results` naar de BE/DE-basementflows liepen twee aannames stuk.

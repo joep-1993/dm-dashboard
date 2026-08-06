@@ -4,6 +4,69 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-06 — Bot Hits: crawler-log dashboard (nieuw)
+
+Nieuwe tool onder SEO tools: `/static/bothits.html` + `/api/bothits`. Runbook en de
+gemeten onderbouwing van de korrel staan in **cc1/BOTHITS_PROCESS.md** — lees die eerst
+voordat je de tabellen aanpast.
+
+- [x] **Schema** `scripts/bothits_schema.sql` — `pa.bothits_daily` (cube),
+      `pa.bothits_url_daily` (alleen `pa.urls`), `pa.bothits_unknown_daily` (top-500/dag/familie),
+      `pa.bothits_ingest` (ledger), `pa.bothits_host` / `pa.bothits_bot` (dimensies).
+- [x] **Ingest** `backend/bothits_ingest.py` — 33 bot-families in 6 klassen, idempotent per
+      logdatum (`DELETE WHERE log_date`), ~55 s/dag op 16 cores.
+- [x] **Backfill** 116 dagen (2026-02-14 t/m 2026-06-09) uit het 102 GB-archief.
+- [x] **Dashboard** — tegels, stacked-area per dag (splitsbaar op 8 dimensies), URL-type-donut,
+      facet-diepte bekend/onbekend, tabellen voor bots / top-URL's / crawl-verspilling /
+      hoofdcategorieën, CSV-export, ingest-tab.
+- [x] **Dropfolder + nachtelijke run** — `BOTHITS_DROP_DIR`, `threading.Timer` (géén APScheduler),
+      default **uit** via `BOTHITS_AUTO_INGEST`; knop en timer delen één lock. Een datum wordt pas
+      geladen bij 24/24 uur, verwerkte files gaan naar `_processed/`.
+- [x] **Nav** toegevoegd aan alle 33 toolpagina's + tegel op `dashboard.html`.
+
+#### IN DE KOELKAST — oppakken bij de volgende sessie
+
+**1. De backfill draait nog en moet afgemaakt.** Gestart 2026-08-06 15:36 als losstaand
+`setsid`-proces (`python3 -m backend.bothits_ingest backfill --redo`), log in
+`/tmp/claude-…/scratchpad/backfill2.log`. Ongeveer 100-120 s per dag, 116 dagen ≈ 3 uur.
+Overleeft een uvicorn-restart, **niet** een WSL-herstart.
+
+```bash
+cd ~/projects/dm-dashboard
+python3 -m backend.bothits_ingest status          # hoeveel dagen staan erin
+python3 -m backend.bothits_ingest backfill        # hervat, slaat geladen datums over
+```
+
+Hervatten is veilig en idempotent — hij slaat over wat in `pa.bothits_ingest` staat.
+Verwacht eindresultaat: 116 dagen, ~2.500 cube-rijen/dag, ~150k URL-rijen/dag (≈ 20M totaal).
+
+**2. Dubbele bot-dimensierijen opruimen (ná de backfill).** De eerste run schreef namen met
+de casing uit de user-agent, dus er staan nog rijen als `DiffBot` naast `Diffbot`. Na de
+volledige `--redo` wijzen er geen feiten meer naar; ze zijn wees en vervuilen alleen de
+filterlijst. Opruimen met een **gescopeerde** DELETE (een `TRUNCATE`/`DELETE` zonder `WHERE`
+op deze DB wordt door een hook geblokkeerd, en terecht):
+
+```sql
+DELETE FROM pa.bothits_bot b
+WHERE NOT EXISTS (SELECT 1 FROM pa.bothits_daily d WHERE d.bot_id = b.bot_id);
+```
+
+**3. Zet `BOTHITS_AUTO_INGEST=true` in `.env`** zodra de dropfolder daadwerkelijk gevuld
+wordt. Staat nu bewust uit zodat er niets ongemerkt draait.
+
+**Bewust niet gedaan (geen bug, ontwerpkeuze)**
+- [ ] **Geen IP-verificatie.** Classificatie is puur user-agent; een vervalste Googlebot telt
+      mee. De oude rDNS+range-logica staat nog in `~/bothits_verify.py` als dit gaat knellen.
+- [ ] **Geen URL-detail voor productpagina's.** `/p/` is ~58% van de hits maar bijna volledig
+      uniek per hit; die zitten alleen in de cube. Per-product analyse zou de feitentabel
+      vervijfvoudigen.
+- [ ] **`bothits_unknown_daily` is een dagelijkse top-500 per familie**, geen uitputtende
+      ranglijst van de onbekende staart. Het dashboard zegt dat er expliciet bij.
+- [ ] **Data stopt op 2026-06-09** tot er nieuwe logs in de dropfolder gaan.
+- [ ] **Crawl-verspilling wordt gedomineerd door niet-pagina's** (`/data/graphql` 260k,
+      `/shoppingcart/header` 206k). Die staan als `url_type = other`; overweeg een aparte
+      `api`-klasse als dat de tabel te veel vertroebelt.
+
 ### 2026-08-06 — results-check in de drie maincat-basementflows
 
 Bestanden in `Downloads\claude\N8N`, als **nieuwe** `*_with_check.json` naast de originelen
