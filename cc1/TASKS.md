@@ -22,9 +22,12 @@ _Active tasks for immediate work_
       lijnen, punten alleen bij hover, faint grid, eenheid op het tick-label, korte
       datumlabels, donkere tooltip met weekdag. As-captions alleen als één zijde twee assen
       draagt (deze pagina kan dat, SEO stats niet).
-- [x] **Kleuren** = SEO stats' palet, 9 van de 10. Clicks lichtgroen + Cost lichtblauw op
-      Joeps verzoek; de rest doorgerekend met `validate_palette.js`. Elke check gelijk of beter
-      dan de bron — meetwaarden staan als commentaar boven `METRICS` en in LEARNINGS.
+- [x] **Kleuren** = SEO stats' palet, 9 van de 10. Vier slots op Joeps verzoek — Clicks
+      lichtgroen, Cost lichtblauw, Revenue roze, Impressions bruin — de vijf overige
+      doorgerekend met `validate_palette.js`. Elke check gelijk of beter dan de bron;
+      meetwaarden staan als commentaar boven `METRICS` en in LEARNINGS. Let op: Revenue en Cost
+      staan naast elkaar in `ORDER` en zijn samen het zwakste paar (CVD 7,7, WARN-band), dus de
+      adjacent-score is lager dan wat de zoektocht zonder die pins haalde (21,7).
 - [x] **Kleine dingen**: "Export Excel" → "Export" (en van inline styles naar de canonieke
       `btn-outline-purple`), `.btn-preset` krijgt `min-width: 3rem` zodat de vijf presetcellen
       even breed zijn.

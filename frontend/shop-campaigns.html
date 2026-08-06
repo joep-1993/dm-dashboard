@@ -379,9 +379,19 @@
         // "Kleursysteem" base row with Joep's bordeaux/navy departures. This page
         // needs 9 of its 10, so one is dropped — see below for which, and why.
         //
-        // Clicks = accent-500 (lichtgroen) and Cost = primary-500 (lichtblauw) are
-        // Joep's call (2026-08-06). The other seven were SEARCHED, not eyeballed,
-        // with the `dataviz` skill's validate_palette.js (light, surface #fff).
+        // Four slots are Joep's call (2026-08-06): Clicks = accent-500 (lichtgroen),
+        // Cost = primary-500 (lichtblauw), Revenue = secondary-500 (roze),
+        // Impressions = yellow-800 (bruin). The other five were SEARCHED, not
+        // eyeballed, with the `dataviz` skill's validate_palette.js (light, #fff).
+        //
+        // WHAT THE REVENUE/COST PAIR COSTS. Those two sit next to each other in
+        // ORDER and are both in the default selection, and roze ↔ lichtblauw is this
+        // palette's weakest pair at CVD 7.7 (deutan) — so the adjacent CVD check
+        // drops from 21.7 to 7.7. That is still the 6–8 WARN band, not a FAIL, and
+        // it is legal precisely because the secondary encoding is there: the tiles
+        // and the tooltip both name every series. Swapping Impressions for Revenue
+        // does not help — the binding pair is Revenue ↔ Cost either way. The
+        // all-pairs numbers are untouched, since the SET of nine did not change.
         //
         // WHICH COLOUR IS DROPPED FOLLOWS FROM THAT PIN. accent-500 is one half of
         // both of the source palette's worst pairs — ↔ cta-500 CVD 4.9 and
@@ -391,23 +401,22 @@
         // leaves the accent↔green pair, which the source palette carries anyway.
         //
         //                        SEO stats (10)   here (9)
-        //   adjacent CVD          WARN  6.1       PASS 21.7
-        //   adjacent normal       PASS 16.4       PASS 24.5
+        //   adjacent CVD          WARN  6.1       WARN  7.7  (roze ↔ lichtblauw)
+        //   adjacent normal       PASS 16.4       PASS 24.6
         //   all-pairs CVD         FAIL  4.9       WARN  7.7
         //   all-pairs normal      FAIL 13.4       FAIL 13.4  (accent ↔ green — the
         //                                                     pair the pin implies)
         //
         // Every check is equal to or better than the palette it comes from. The
-        // default three (Clicks/Revenue/Cost) PASS everything on their own. The
         // lightness/chroma FAILs are bordeaux, navy and deep turquoise being dark
         // and low-chroma by choice; inherited, not introduced. Mitigation for what
         // remains is the same as SEO stats': the tiles and the tooltip both name
         // every series, so identity never rests on hue alone.
         // Re-run the validator before changing any of this; do not eyeball ΔE.
         const METRICS = {
-            impressions: { label: 'Impressions', unit: 'count', axis: 'impr',  color: '#be4693' },  // secondary-500
+            impressions: { label: 'Impressions', unit: 'count', axis: 'impr',  color: '#936305' },  // yellow-800 (bruin)
             clicks:      { label: 'Clicks',      unit: 'count', axis: 'count', color: '#91c34e' },  // accent-500 (lichtgroen)
-            revenue:     { label: 'Revenue',     unit: 'euro',  axis: 'euro',  color: '#936305' },  // yellow-800
+            revenue:     { label: 'Revenue',     unit: 'euro',  axis: 'euro',  color: '#be4693' },  // secondary-500 (roze)
             cost:        { label: 'Cost',        unit: 'euro',  axis: 'euro',  color: '#1f99c4' },  // primary-500 (lichtblauw)
             margin:      { label: 'Margin',      unit: 'euro',  axis: 'euro',  color: '#722F37' },  // bordeaux
             conversions: { label: 'Conversions', unit: 'num',   axis: 'count', color: '#8459cf' },  // violet-500

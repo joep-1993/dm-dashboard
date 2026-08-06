@@ -25,12 +25,21 @@ naar 6,1 (WARN). Toen Joep daarna Clicks expliciet lichtgroen wilde, kwam accent
 in — en dán is één van die twee conflicten onvermijdelijk, want je mag er maar één droppen.
 cta-500 (oranje) droppen is de betere helft: CVD 7,7 (WARN) i.p.v. 4,9 (FAIL).
 
+**4. Elke handmatige pin erbij kost een deel van de gezochte winst.** Na lichtgroen/lichtblauw
+kwamen Revenue=roze en Impressions=bruin er ook nog bij. Die twee staan náást elkaar in `ORDER`
+(impressions, clicks, revenue, cost) én roze↔lichtblauw is met CVD 7,7 het zwakste paar van dit
+palet — dus de adjacent-CVD zakte van 21,7 naar 7,7. Nog steeds de 6–8 WARN-band, niet een FAIL,
+en toegestaan juist omdát de secundaire codering er is (tegels + tooltip noemen elke serie). Het
+punt: zodra vier van de negen slots vastliggen, valt er weinig meer te optimaliseren — de
+zoektocht bepaalt dan alleen nog de vijf vrije slots. Impressions en Revenue omdraaien helpt
+niet, het bindende paar is Revenue↔Cost hoe dan ook.
+
 Eindstand vs. de bron, `validate_palette.js --mode light --surface #fff`:
 
 | check | SEO stats (10) | Shop-campaigns (9) |
 |---|---|---|
-| adjacent CVD | WARN 6,1 | PASS 21,7 |
-| adjacent normaal zicht | PASS 16,4 | PASS 24,5 |
+| adjacent CVD | WARN 6,1 | WARN 7,7 |
+| adjacent normaal zicht | PASS 16,4 | PASS 24,6 |
 | all-pairs CVD | FAIL 4,9 | WARN 7,7 |
 | all-pairs normaal zicht | FAIL 13,4 | FAIL 13,4 |
 
