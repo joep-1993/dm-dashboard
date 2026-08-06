@@ -1460,8 +1460,11 @@ function pollRecordsStatus(taskId, resultDiv, btn, batchBtn) {
             const retired = r.urls_retired
                 ? `, and ${nf(r.urls_retired)} retired (emptied because their content was removed)`
                 : '';
+            const tooLong = r.urls_too_long
+                ? `, ${nf(r.urls_too_long)} skipped (URL > 255 chars)`
+                : '';
             resultDiv.innerHTML = `<div class="alert alert-done-yellow"><strong>Publish done</strong><br>`
-                + `${nf(r.urls_pushed)} koptekst(en) upserted in ${nf(r.chunks)} chunk(s)${retired} `
+                + `${nf(r.urls_pushed)} koptekst(en) upserted in ${nf(r.chunks)} chunk(s)${retired}${tooLong} `
                 + `(${r.duration_sec}s) → <code>${escapeHtml(r.api_url || '')}</code></div>`;
         }
         fetchLastPushTimestamp();

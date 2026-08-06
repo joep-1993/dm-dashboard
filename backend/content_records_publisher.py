@@ -51,10 +51,13 @@ production "new" run skip a URL. The FAQ table learned that the hard way — it 
 originally keyed on url_id alone, which silently coupled the environments.
 """
 import json
+import logging
 import os
 import threading
 import time
 import uuid
+
+log = logging.getLogger(__name__)
 
 import requests
 
@@ -311,6 +314,18 @@ def publish_records(env: str = "production", mode: str = "new", limit: int = Non
     _set_progress(task_id, phase="counting", mode=mode)
 
     rows = _fetch_candidates(env, mode, limit)
+
+    # The records API rejects URLs > 255 chars, and one bad URL fails the
+    # entire chunk.  Filter them out before chunking so they can't poison
+    # a batch of 2,000 good records.
+    MAX_URL_LEN = 255
+    too_long = [r for r in rows if len(_normalize_url(r["url"])) > MAX_URL_LEN]
+    if too_long:
+        rows = [r for r in rows if len(_normalize_url(r["url"])) <= MAX_URL_LEN]
+        log.warning("Skipped %d URLs exceeding %d chars: %s",
+                    len(too_long), MAX_URL_LEN,
+                    [r["url"][:120] for r in too_long[:10]])
+
     total = len(rows)
     _set_progress(task_id, phase="pushing", total_urls=total, urls_done=0,
                   chunks=0, failed=0)
@@ -350,6 +365,7 @@ def publish_records(env: str = "production", mode: str = "new", limit: int = Non
         "success": failed == 0,
         "env": env, "mode": mode, "api_url": api_url,
         "candidates": total, "urls_pushed": pushed, "urls_failed": failed,
+        "urls_too_long": len(too_long),
         "chunks": len(chunk_results), "cancelled": cancelled,
         "duration_sec": round(time.time() - started, 1),
     }

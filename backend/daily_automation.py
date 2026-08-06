@@ -497,8 +497,10 @@ def step_publish_kopteksten_records():
 
     pub_result = result.get("result", {})
     if pub_result.get("success"):
+        skipped = pub_result.get("urls_too_long", 0)
+        extra = f", skipped {skipped} too-long URLs" if skipped else ""
         log.info(f"  Kopteksten: pushed {pub_result.get('urls_pushed', 0)} URLs"
-                 f" (pruned {pub_result.get('urls_retired', 0)})")
+                 f" (pruned {pub_result.get('urls_retired', 0)}{extra})")
         return pub_result
     else:
         raise RuntimeError(f"Kopteksten publish did not succeed: {pub_result}")
