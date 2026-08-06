@@ -8,6 +8,21 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### Verwijderde maincat-level URLs kunnen zichzelf terugschrijven (logged 2026-08-06)
+- [ ] **Beslis of de 4.699 opgeschoonde URLs permanent contentloos moeten blijven.** Op
+  2026-08-06 zijn koptekst + FAQ verwijderd voor 4.699 maincat-level `/c/`-URLs (zie TASKS).
+  De job-rijen zijn mee weggegooid, maar `pa.urls` is ongemoeid — dus een backfill die
+  job-rijen aanmaakt voor URLs zónder job pikt deze set weer op en genereert alles opnieuw.
+  Als "weg" ook "weg blijven" betekent, is er een guard nodig: een uitsluiting in de
+  queue-logica, of een `notes`-tag op die URLs waar de queue op filtert. De set is exact
+  reproduceerbaar via `pa.del_targets_maincat_c_20260806`. Doen we niets, dan is dit een
+  eenmalige opschoning die stilletjes terugdraait — en dat merk je pas als de content er weer
+  staat.
+- [ ] **Publish draaien om de live site in lijn te brengen.** Bewust uitgesteld; tot die tijd
+  staan ~4.300 kopteksten en ~4.600 FAQ's nog op beslist.nl. Let op dat de eerstvolgende
+  volledige publish dit hoe dan ook doorvoert (replace-all), ook als iemand anders hem draait
+  voor iets heel anders.
+
 ### SEO titles — converge the legacy tblPageTitles corpus, or accept the split (logged 2026-07-31)
 - [ ] **Decide whether the legacy blueprints should follow the current builder at all.**
   Audited 2026-07-31: of 154.721 legacy NL rows in `pa.page_titles_existing`, **92.329

@@ -18,6 +18,11 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── content_publisher.py  # Publishes content_top + FAQ blobs to website-configuration /automated-content
 │   ├── faq_v2_publisher.py   # "Publish 2.0": FAQ Q&A pairs -> website-configuration /faq (one record per QUESTION, incremental via pa.faq_v2_push_state)
 │   ├── healthscore_keywords.py # HS2.0 -> Keywords API (keywords.api.beslist.nl POST /sitemap): payload build/validate/diff, dry-run; push() gated behind confirm_token, snapshot_live() is the only undo
+│   │   # HS2.0 TWEE BEZOEKDEFINITIES — verwissel ze niet:
+│   │   #   _SEO_JOIN/_SEO_WHERE  = dekkings-KPI + URL-score. SEO-only EN url-regex www.beslist.nl.
+│   │   #   _ALL_JOIN/_ALL_WHERE  = cap-sizing (knik-punt + klimatologie). Alle kanalen.
+│   │   # pa.hs2_cat_month en pa.hs2_cat_knee.yearly zijn ALL-CHANNEL -> nooit als dekkingsnoemer
+│   │   # gebruiken (Grasmaaiers juni-2026: 6.915 all-channel vs 2.081 SEO). Zie LEARNINGS 2026-08-06.
 │   ├── ai_titles_service.py  # AI-powered title generation
 │   ├── canonical_service.py  # Canonical URL transformation
 │   ├── redirect_301_service.py # 301 redirect management
@@ -231,6 +236,24 @@ All data lives in the local PostgreSQL container. See LEARNINGS.md for connectio
 - `pa.content_history` - Content backup before resets
 - `pa.publish_log` - Publish history (environment, content_type, total_urls, timestamps)
 - Thema Ads tables (jobs, job_items, input_data)
+
+> **Let op — de lijst hierboven is deels verouderd.** `pa.jvs_seo_werkvoorraad`,
+> `pa.content_urls_joep`, `pa.faq_content`, `pa.faq_tracking`, `pa.unique_titles`,
+> `pa.link_validation_results` en `pa.url_validation_tracking` heten in de DB inmiddels
+> `…_old_2026_05_07`. De huidige constellatie hangt aan `pa.urls` (url_id, ~1,03M) met per
+> contenttype een `_content` + `_jobs` paar plus satellieten:
+>
+> | | koptekst | FAQ |
+> |---|---|---|
+> | content | `pa.kopteksten_content` (url_id, page_title, content) | `pa.faq_content_v2` (url_id, page_title, faq_json, schema_org) |
+> | queue | `pa.kopteksten_jobs` (status: pending/success/failed) | `pa.faq_jobs` (+ skip_reason) |
+> | push-state | `pa.kopteksten_push_state` (url_id, env, content_md5) | `pa.faq_v2_push_state` (+ records) |
+> | linkcheck | `pa.kopteksten_link_validation` | `pa.faq_link_validation` |
+>
+> Alle acht op `url_id`. `faq_v2_push_state` heeft een rij **per env**, dus daar horen ~2 rijen
+> per URL bij (staging + production) — reken er niet mee als 1:1. Elke URL met content heeft
+> ook een job-rij. Wie hier rijen verwijdert: zie LEARNINGS 2026-08-06 (recept + de
+> replace-all-val bij publishen).
 
 **Pending URL calculation**: `WHERE werkvoorraad.url NOT IN tracking_table` (LEFT JOIN, see LEARNINGS.md "Stuck Pending URLs")
 

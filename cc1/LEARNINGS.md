@@ -1,6 +1,136 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## HS2.0: cap-sizing is all-channel, de dekkings-KPI is SEO-only (2026-08-06)
+
+Twee verschillende bezoekdefinities in hetzelfde systeem. Wie ze verwisselt, rapporteert een
+dekking die een factor 3 te hoog of te laag is. Gemeten voor Grasmaaiers (9003581), juni 2026:
+
+| variant | junibezoeken |
+|---|---:|
+| SEO + `dv.url ~ '^https?://www\.beslist\.nl/'` (`_SEO_WHERE`) | **2.081** |
+| SEO, zonder de url-regex | 3.824 |
+| alle kanalen + url-regex (`_ALL_WHERE`) | **6.915** |
+| alle kanalen, zonder regex | 10.773 |
+
+* **Dekkings-KPI en de URL-score** = de bovenste: SEO-only én de url-regex. Die regex alleen al
+  halveert de teller (3.824 → 2.081) — vergeet hem niet, dan lijkt de dekking te laag.
+* **Cap-sizing** (knik-punt + seizoensklimatologie) = alle kanalen, want daar is de vraag
+  "hoeveel vraag heeft deze categorie", niet "hoeveel SEO-verkeer".
+
+`pa.hs2_cat_month` en `pa.hs2_cat_knee.yearly` zijn dus **all-channel** en mogen nooit als
+dekkingsnoemer gebruikt worden. Over 12 maanden voor Grasmaaiers: SEO 17.992 vs all-channel
+57.370, en de tabel bevat 57.786.
+
+**De drift die hierbij hoorde (gefixt, e-nog-te-committen):** `healthscore_caps.py` en
+`healthscore_cat_seasonality.py` importeerden allebei `_SEO_JOIN`/`_SEO_WHERE`, terwijl de
+weggeschreven tabellen all-channel waren. De code deed dus iets anders dan de data zei, en
+`backend/healthscore_service.py:1249` documenteerde het all-channel-gedrag als de bedoeling.
+Wie `build_knee()` opnieuw had gedraaid, had elke knie met ~3× verkleind, daarmee elke cap en
+elke sitemap — zonder foutmelding, exit 0. Beide scripts staan nu op `_ALL_JOIN`/`_ALL_WHERE`
+plus een `_guard_knee_shrink()` die aborteert als de mediane `knee90` meer dan halveert
+(override met `HS2_ALLOW_KNEE_SHRINK=1`). Getest: gelijke rebuild gaat door, 1/3-rebuild wordt
+geblokkeerd.
+
+**Patroon om te onthouden:** als een tabel via `TRUNCATE` + `INSERT` herbouwd wordt, is een
+stille schaalverandering onzichtbaar. Een goedkope vergelijking oud-vs-nieuw op één
+samenvattende statistiek vóór de TRUNCATE vangt precies dit soort drift.
+
+## Het "knikpunt" is een dekkingsdrempel, geen wiskundige elleboog (2026-08-06)
+
+`pa.hs2_cat_knee.knee90` = het aantal URL's dat nodig is om 90% van het jaarverkeer van de
+categorie te dekken. Letterlijk `MIN(CASE WHEN cum >= 0.90*tot THEN rn END)` over URL's
+gesorteerd op bezoeken aflopend (`healthscore_caps.py:build_knee`). Dus **geen** gedetecteerd
+buigpunt in de curve — P is een gekozen parameter (`--p`, keuze 80/90/95, default 90). Bij een
+vlakke of juist heel steile curve ligt dat punt niet waar de curve visueel knikt.
+
+Waarom het toch werkt, Grasmaaiers (4.048 URL's met verkeer):
+
+| drempel | URL's | % van de poel | winst per extra URL |
+|---|---:|---:|---:|
+| 80% | 674 | 16,7% | 0,119 pp |
+| 90% | 1.248 | 30,8% | 0,017 pp |
+| 95% | 1.928 | 47,6% | 0,007 pp |
+| 100% | 4.048 | 100% | 0,002 pp |
+
+De eerste 674 URL's leveren per stuk ~50× meer dekking dan de laatste 2.120. Daarna is de cap:
+`clamp(knee90, 100, 6000) × clamp(seizoensindex, 0.4, 2.5)`, opnieuw geclamped. Grasmaaiers juni:
+1.248 × 1,463 = 1.825.
+
+## "Maincat-level" bepaal je uit het URL-pad, niet uit pa.urls-kolommen (2026-08-06)
+
+`pa.urls.main_cat_name` en `deepest_subcat_name` zijn onbruikbaar: **968.503 van de 1.031.796
+rijen hebben beide op NULL** (en 2.971 hebben subcat == maincat). Wie hierop filtert krijgt een
+antwoord dat over 6% van de tabel gaat en merkt dat niet.
+
+Leid het af uit het pad. `pa.urls` is /c/-only, dus er zijn precies twee maincat-level vormen:
+
+```sql
+split_part(url,'/',2) = 'products'
+AND split_part(url,'/',4) IN ('', 'c')   -- '' = kale root, 'c' = maincat + facetten
+AND split_part(url,'/',3) <> ''
+AND split_part(url,'/',3) !~ '_[0-9]'    -- zie hieronder
+```
+
+`split_part(url,'/',4)` is het segment ná de maincat: is dat `c` of leeg, dan zit er geen
+subcategorie in het pad. Facetten maken een URL dus **niet** dieper dan maincat-level —
+`/products/tuin_accessoires/c/merk~23581576` is maincat-level, `/products/schoenen/schoenen_430873/c/…`
+niet.
+
+**De `_[0-9]`-guard:** 20 URLs hebben een subcat-slug in het maincat-slot
+(`/products/schoenen_430884/c/…`, `/products/tuin_accessoires_504077_5335059/c/…`). Dat zijn
+kapotte paden — eigenlijk diepere URLs — en zonder guard verschijnen ze als losse "maincats" in
+elke GROUP BY. Ze hadden geen van allen content, dus ze raken alleen de noemer.
+
+Uitkomst van de telling zelf: 79.777 maincat-level URLs over 33 maincats, waarvan 17.235 (21,6%)
+een koptekst en/of FAQ hadden. `schoenen` alleen al is 41.661 daarvan — doelgroep/maat/merk/kleur
+hangen daar blijkbaar niet onder een subcat. Slechts 34 URLs zijn een kale root; het `/c/`-filter
+is daardoor bijna een no-op (79.764 van de 79.798).
+
+**Let op bij het benoemen van maincats:** Horloges en Sieraden zijn niet los te filteren. Er zijn
+drie slugs — `horloge` (eigen maincat) en `sieraden_horloges` (gecombineerd) — dus "sluit Sieraden
+uit" sluit onvermijdelijk ook Horloges uit. Idem `mode` (Kleding) vs `mode_accessoires`, die je
+apart moet benoemen.
+
+## Content uit de DB gooien = stilzwijgend unpublishen bij de volgende publish (2026-08-06)
+
+`backend/content_publisher.py:11-13` zegt het expliciet: `/automated-content/records` is een
+**full-set REPLACE, geen upsert**. Elke URL die niet in de payload zit wordt uit de live store
+verwijderd. Gevolg voor destructief DB-werk: een DELETE op `pa.kopteksten_content` /
+`pa.faq_content_v2` is *niet* alleen een DB-opschoning — het is een uitgestelde live-wijziging die
+afgaat zodra iemand een volledige publish draait, mogelijk dagen later en door iemand anders.
+
+Dus bij zo'n verwijdering hoort altijd de vraag: nu direct unpublishen (per-URL DELETE via
+`content_publisher.py:397`) of laten liggen tot de volgende publish? En als het antwoord "laten
+liggen" is: leg vast dat de live site nog niet in lijn is, want er is verder geen enkel signaal
+dat de DB en de live store uit elkaar lopen.
+
+## Recept: contentrijen verwijderen uit de shared Postgres (2026-08-06)
+
+Gebruikt om 4.699 maincat-level URLs op te schonen; werkt voor elke bulk-delete daar.
+
+1. **Leg de scope vast in een echte tabel**, niet in een WHERE die je later moet reconstrueren:
+   `CREATE TABLE pa.del_targets_<tag> AS SELECT url_id, url FROM …`. Neem `url` mee, anders is de
+   backup over een half jaar niet zelfstandig leesbaar.
+2. **Backup per tabel** volgens de bestaande conventie `pa.<tabel>_bak_<tag>` (de tabel staat vol
+   met `_bak_facetval1_20260612`-achtige voorbeelden). `CREATE TABLE … AS SELECT * … WHERE url_id
+   IN (SELECT url_id FROM pa.del_targets_<tag>)`.
+3. **Alles in één transactie**, met een assert op de verwachte scope-grootte vóór de eerste DELETE
+   en een verificatie ná: backup-count == delete-count == aantal, en resterend == 0. Mismatch →
+   `conn.rollback()`. psycopg2 staat default op `autocommit=False`, dus dit werkt vanzelf.
+4. **Vergeet de satelliettabellen niet.** Aan één content-URL hangen er zes:
+   `kopteksten_push_state`, `faq_v2_push_state`, `kopteksten_link_validation`,
+   `faq_link_validation`, `kopteksten_jobs`, `faq_jobs`. Alleen de content-tabellen legen laat
+   wees-rijen achter die naar niet-bestaande content wijzen.
+
+Twee tellingen die verrasten: `faq_v2_push_state` had **8.792** rijen voor 4.699 URLs (er is een
+rij per env — 4.581 production + 4.211 staging), en `kopteksten_jobs`/`faq_jobs` hadden er precies
+4.699, want élke URL met content heeft ook een job-rij (success + failed + pending samen).
+
+**Wat een delete níet doet:** `pa.urls` blijft ongemoeid. Een volgende backfill die job-rijen
+aanmaakt voor URLs zonder job zet deze set gewoon terug in de wachtrij en regenereert de content.
+Permanent uitsluiten vraagt een guard in de queue-logica of een `notes`-tag op die URLs.
+
 ## Bestaat een MC-subaccount echt? 401 vs 400 op accounts().get() (2026-08-05)
 
 Om te controleren of een Merchant Center-id nog leeft, is `accounts().get(merchantId=parent,

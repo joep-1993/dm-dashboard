@@ -4,6 +4,67 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-06 — HS2.0: Grasmaaiers-deck + all-channel drift in de cap-scripts gefixt
+
+- [x] **Deck `Healthscore_2.0_Grasmaaiers.pptx`** (Downloads\claude, 8 slides) in de stijl van
+      de hoofddeck; generator `scripts/analysis/healthscore_hs2_grasmaaiers_presentation.py`
+      herberekent alles uit `hs2_catdiff_seasonal_v2.csv` bij het bouwen. Grasmaaiers gekozen
+      omdat het de enige testcat is waarvan de selectie écht live staat (push 03-08-2026).
+      Kern: 797 → 1.001 URL's, dekking bezoeken **65,3% → 83,6%** (+18,3pp), omzet 84,0% → 90,0%.
+      Volledig gedragen door R-urls (7,2% → 70,2%, +63pp); PLP zakt 90,9% → 76,4% als bewuste
+      ruil; C-urls (78% van de omzet) blijven op 95,4%. Verlies: 395 URL's / 88 bezoeken / €4,13
+      tegenover 468 bezoeken erbij. PDF-export moet handmatig uit PowerPoint (geen libreoffice
+      in WSL).
+- [x] **All-channel drift gefixt in `healthscore_caps.py` + `healthscore_cat_seasonality.py`.**
+      Beide importeerden `_SEO_JOIN`/`_SEO_WHERE` terwijl `pa.hs2_cat_knee` en
+      `pa.hs2_cat_month` all-channel gevuld waren. Een rebuild had elke knie ~3× verkleind en
+      daarmee elke cap en elke sitemap — stil, exit 0. Nu `_ALL_JOIN`/`_ALL_WHERE` + een
+      `_guard_knee_shrink()` die aborteert als de mediane `knee90` meer dan halveert
+      (`HS2_ALLOW_KNEE_SHRINK=1` om te overrulen). Getest tegen de live tabel: gelijke rebuild
+      1,00× gaat door, 1/3-rebuild wordt geblokkeerd. Zie LEARNINGS voor de meetwaarden.
+- [ ] **Nog niet gecommit** — beide scriptwijzigingen + cc1-updates staan lokaal.
+- [ ] **Openstaand: de 03-08-selectie is nog niet nagemeten.** De echte test is of de
+      gerealiseerde SEO-dekking van Grasmaaiers in aug/sep richting de voorspelde 83,6% beweegt.
+      Nu meten kan niet — augustus is nog niet compleet.
+
+### 2026-08-06 — Kopteksten + FAQ's van 4.699 maincat-level /c/-URLs verwijderd
+
+- [x] **Geteld: 17.235 van de 79.777 maincat-level URLs (21,6%) hadden een koptekst en/of FAQ**,
+      over 33 maincats. Maincat-level = geen subcategorie-segment in het pad; facetten tellen
+      niet mee als diepte. Afgeleid uit het URL-pad omdat `pa.urls.main_cat_name` /
+      `deepest_subcat_name` voor 94% NULL zijn — zie LEARNINGS voor de query en de `_[0-9]`-guard
+      tegen 20 kapotte paden. `schoenen` is in z'n eentje 41.661 van de 79.777 (13,8% dekking),
+      `mode` heeft met 50,9% de hoogste.
+- [x] **Verwijderd, na uitsluiting van 7 maincats** (`meubilair`, `mode`, `fietsen`, `horloge`,
+      `schoenen`, `sieraden_horloges`, `speelgoed_spelletjes`) en filter op `/c/`: 4.699 URLs.
+      Eén transactie, backups vooraf, verificatie vóór commit (backup-count == delete-count,
+      resterend 0 per tabel).
+
+      | tabel | verwijderd |
+      |---|---:|
+      | `pa.kopteksten_content` | 4.306 |
+      | `pa.faq_content_v2` | 4.431 |
+      | `pa.kopteksten_push_state` | 4.343 |
+      | `pa.faq_v2_push_state` | 8.792 (4.581 prod + 4.211 staging) |
+      | `pa.kopteksten_link_validation` | 4.354 |
+      | `pa.faq_link_validation` | 4.577 |
+      | `pa.kopteksten_jobs` | 4.699 |
+      | `pa.faq_jobs` | 4.699 |
+
+      Stand na afloop: `kopteksten_content` 240.517 → 236.211, `faq_content_v2` 250.071 →
+      245.640, maincat-level met content 17.235 → 12.536. Binnen de uitgesloten-set blijven 23
+      over: de kale roots `/products/<maincat>/`, die vielen buiten het `/c/`-filter.
+
+      **Terugdraaien:** `INSERT INTO pa.<tabel> SELECT * FROM pa.<tabel>_bak_maincat_c_20260806`
+      per tabel. De scope staat in `pa.del_targets_maincat_c_20260806` (url_id + url), dus de set
+      is exact reproduceerbaar. Backups nog niet opgeruimd — Joep laat weten wanneer dat mag.
+- [ ] **Openstaand: de live site loopt achter.** Bewuste keuze van Joep — niet direct
+      unpublishen, de eerstvolgende volledige publish ruimt het op (replace-all). Tot dan staan
+      ~4.300 kopteksten en ~4.600 FAQ's nog online op beslist.nl terwijl ze uit de DB weg zijn.
+- [ ] **Openstaand: niets belet regeneratie.** `pa.urls` is ongemoeid gelaten, dus een backfill
+      die job-rijen aanmaakt voor URLs zonder job zet deze 4.699 gewoon terug in de wachtrij.
+      Zie BACKLOG.
+
 ### 2026-08-05 — GSD/SEO-Stats audit uit de koelkast: Phase 0 + 1 live
 
 - [x] **Phase 0** (`9b04eaa`) — H2, H3, H5, reconcile-sinkfouten zichtbaar, `ORDER BY
