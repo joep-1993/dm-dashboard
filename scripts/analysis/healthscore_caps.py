@@ -3,8 +3,8 @@ HS2.0 seasonal per-category cap builder.
 
 Combines two data sources into a per-category, per-calendar-month cap:
 
-  base_cap_c   = coverage-knee: # URLs to cover P% of category c's own SEO visits
-                 over the trailing 12 months (clamped to [MIN, MAX]).
+  base_cap_c   = coverage-knee: # URLs to cover P% of category c's ALL-CHANNEL
+                 visits over the trailing 12 months (clamped to [MIN, MAX]).
   season_mult  = climatology multiplier from pa.hs2_cat_month (24-month calendar
                  average), dampened by `alpha` and clamped to [mmin, mmax].
 
@@ -16,6 +16,19 @@ Writes:
 
 Run once end-to-end; then iterate clamps/alpha fast with --skip-knee (reads the
 persisted knee table, no Redshift round-trip).
+
+ALL-CHANNEL, NOT SEO — do not "simplify" this back to _SEO_*.
+  Cap-sizing asks "how much demand does this category have", so it uses the full
+  demand signal (_ALL_JOIN/_ALL_WHERE), exactly as healthscore_service.py:1249
+  documents. Only the coverage KPI and the URL score are SEO-only.
+
+  This file used to import _SEO_JOIN/_SEO_WHERE while the persisted tables had
+  been built all-channel — a silent drift found on 2026-08-06. Measured for
+  Grasmaaiers (9003581) over 20250701-20260630: SEO-only = 17.992 visits,
+  all-channel = 57.370, and pa.hs2_cat_knee.yearly held 57.786. So re-running
+  build_knee() with the SEO variant would have overwritten every knee with a
+  ~3x smaller number, shrinking every cap and every sitemap in one go, with no
+  warning. The guard in build_knee() now refuses to do that quietly.
 """
 from __future__ import annotations
 import os, sys, argparse
@@ -26,7 +39,7 @@ from psycopg2.extras import RealDictCursor, execute_values
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from backend.healthscore_service import (  # noqa: E402
-    _load_env, _redshift, _postgres, _norm, _SEO_JOIN, _SEO_WHERE,
+    _load_env, _redshift, _postgres, _norm, _ALL_JOIN, _ALL_WHERE,
 )
 
 YEAR_LO, YEAR_HI = 20250701, 20260630        # trailing 12 complete months
@@ -40,13 +53,50 @@ DEMO_NAME_LIKE = ["slee", "vaz", "airco", "sneaker", "winterjas", "zwembad"]
 _NL = {1:"jan",2:"feb",3:"mrt",4:"apr",5:"mei",6:"jun",7:"jul",8:"aug",9:"sep",10:"okt",11:"nov",12:"dec"}
 
 
+SHRINK_FACTOR = 0.5   # a rebuild may not halve the median knee90 without --force
+SHRINK_ENV = "HS2_ALLOW_KNEE_SHRINK"
+
+
+def _guard_knee_shrink(cur, rows):
+    """Refuse a rebuild that collapses the knees, unless explicitly allowed.
+
+    The failure this exists for is not hypothetical: with _SEO_* instead of
+    _ALL_* every knee comes out ~3x smaller, every cap shrinks with it, and
+    nothing about the run looks wrong — it just writes and exits 0. Compare the
+    median knee90 old vs new and stop if it fell off a cliff.
+    """
+    cur.execute(f"SELECT count(*), percentile_cont(0.5) WITHIN GROUP (ORDER BY knee90) "
+                f"FROM {KNEE_TABLE} WHERE knee90 IS NOT NULL")
+    n_old, med_old = cur.fetchone()
+    if not n_old or med_old is None:
+        return                      # first build, nothing to compare against
+    new = sorted(r["knee90"] for r in rows if r["knee90"] is not None)
+    if not new:
+        raise SystemExit("[caps] ABORT: rebuild produced no knee90 values at all.")
+    med_new = new[len(new) // 2]
+    ratio = med_new / float(med_old)
+    print(f"[caps] knee90 median {med_old:,.0f} -> {med_new:,} ({ratio:.2f}x) "
+          f"over {n_old:,} -> {len(new):,} cats", file=sys.stderr)
+    if ratio >= SHRINK_FACTOR or os.getenv(SHRINK_ENV) == "1":
+        return
+    raise SystemExit(
+        f"[caps] ABORT: median knee90 would drop {med_old:,.0f} -> {med_new:,} "
+        f"({ratio:.2f}x, threshold {SHRINK_FACTOR}x). Every cap and every sitemap "
+        f"shrinks with it.\n"
+        f"        Most likely cause: the visit query switched from all-channel "
+        f"(_ALL_JOIN/_ALL_WHERE) to SEO-only (_SEO_*). Cap-sizing wants the full "
+        f"demand signal — see the module docstring.\n"
+        f"        If the shrink is genuinely intended, re-run with "
+        f"{SHRINK_ENV}=1.")
+
+
 def build_knee():
     nv = _norm("dv.url")
     sql = f"""
         WITH u AS (
             SELECT dv.deepest_subcat_id AS cat, {nv} AS npath, COUNT(*) AS v
-            FROM datamart.fct_visits fv {_SEO_JOIN}
-            WHERE fv.dim_date_key BETWEEN {YEAR_LO} AND {YEAR_HI} AND {_SEO_WHERE}
+            FROM datamart.fct_visits fv {_ALL_JOIN}
+            WHERE fv.dim_date_key BETWEEN {YEAR_LO} AND {YEAR_HI} AND {_ALL_WHERE}
               AND dv.deepest_subcat_id IS NOT NULL
             GROUP BY 1, 2
         ),
@@ -76,6 +126,7 @@ def build_knee():
             c.execute(f"""CREATE TABLE IF NOT EXISTS {KNEE_TABLE} (
                 cat BIGINT PRIMARY KEY, yearly BIGINT, knee80 INT, knee90 INT,
                 knee95 INT, n_urls INT)""")
+            _guard_knee_shrink(c, rows)
             c.execute(f"TRUNCATE {KNEE_TABLE}")
             execute_values(c, f"INSERT INTO {KNEE_TABLE} "
                               f"(cat,yearly,knee80,knee90,knee95,n_urls) VALUES %s",

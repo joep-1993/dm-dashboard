@@ -1,14 +1,28 @@
 """
 HS2.0 per-category yearly-volume + seasonality analysis.
 
-Aggregates real SEO visits per deepest_category_id per calendar month over the
-trailing 24 complete months, then derives:
-  - yearly_visits   : trailing-12-month SEO visits per category
+Aggregates real ALL-CHANNEL visits per deepest_category_id per calendar month
+over the trailing 24 complete months, then derives:
+  - yearly_visits   : trailing-12-month visits per category
   - season_index[M] : category's avg visits in calendar month M / its avg month
                       (climatology over up to 2 years -> stable, not noise)
 
 Writes pa.hs2_cat_month (cat, yyyymm, visits, revenue) for reuse and prints a
 demo for a handful of categories (the 10 diff cats + a few seasonal examples).
+
+ALL-CHANNEL, NOT SEO — do not "simplify" this back to _SEO_*.
+  This table feeds cap-sizing (the climatology multiplier in healthscore_caps.py),
+  which wants the full demand signal, per healthscore_service.py:1249. Only the
+  coverage KPI and the URL score are SEO-only.
+
+  Same silent drift as healthscore_caps.py, fixed 2026-08-06: this file imported
+  the SEO variants while the persisted table was all-channel. Measured for
+  Grasmaaiers (9003581), June 2026: SEO+url-filter = 2.081 visits, all-channel =
+  6.915, and pa.hs2_cat_month held 6.915. Re-running with _SEO_* would have
+  rewritten the whole climatology at ~1/3 scale. The season INDEX is a ratio so
+  it partly survives that, but `visits`/`revenue` are read directly elsewhere.
+
+  Do not use this table as a coverage denominator — see LEARNINGS 2026-08-06.
 """
 from __future__ import annotations
 import os, sys
@@ -19,7 +33,7 @@ from psycopg2.extras import RealDictCursor, execute_values
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from backend.healthscore_service import (  # noqa: E402
-    _load_env, _redshift, _postgres, _SEO_JOIN, _SEO_WHERE, _REV,
+    _load_env, _redshift, _postgres, _ALL_JOIN, _ALL_WHERE, _REV,
 )
 
 WIN_LO, WIN_HI = 20240701, 20260630  # 24 complete months
@@ -40,8 +54,8 @@ def main():
                fv.dim_date_key / 100 AS yyyymm,
                COUNT(*)              AS visits,
                SUM({_REV})           AS revenue
-        FROM datamart.fct_visits fv {_SEO_JOIN}
-        WHERE fv.dim_date_key BETWEEN {WIN_LO} AND {WIN_HI} AND {_SEO_WHERE}
+        FROM datamart.fct_visits fv {_ALL_JOIN}
+        WHERE fv.dim_date_key BETWEEN {WIN_LO} AND {WIN_HI} AND {_ALL_WHERE}
           AND dv.deepest_subcat_id IS NOT NULL
         GROUP BY 1, 2
     """
