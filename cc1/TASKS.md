@@ -4,6 +4,35 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-06 — Shop-campaigns gelijkgetrokken met SEO stats
+
+- [x] **Layout + gedrag** naar het SEO stats-model: tegels eerst en klikbaar (ze zijn nu de
+      legenda én de toggles, dus de losse pillenrij + `buildToggles()` zijn weg en Chart.js'
+      eigen legenda staat uit), kaart heet **Performance per day** i.p.v. "Trend", datumkiezer
+      + presets in de body van die kaart, Refresh op de titelregel. **Load-knop weg**: laden
+      gebeurt on change (debounce 400ms, `onChange` óók op de flatpickr-instanties) met een
+      `loadToken`-guard, want er kunnen nu twee loads tegelijk lopen. Een mislukte load wist
+      voortaan ook tegels/grafiek/Total-rij i.p.v. de vorige range te laten staan.
+- [x] **"All"-preset** (24-06-2026 t/m vandaag). Geverifieerd dat 24-06 echt de eerste dag met
+      data is: 44 dagen, allemaal gevuld, en 0 dagen met data tussen 01-05 en 23-06.
+      Bugfix die daarbij hoorde: `ymd()` gebruikte `toISOString()` → dag te vroeg (LEARNINGS).
+- [x] **Loader** voor de grafiek: skeleton in de vorm van een grafiek, opaak over de canvas,
+      plus shimmerende tegelwaardes op dezelfde fetch. Patroon staat in UI_BLUEPRINT § Charts.
+- [x] **Grafiek visueel gelijkgetrokken**: gevulde vlakken met aflopende alpha, dunne ronde
+      lijnen, punten alleen bij hover, faint grid, eenheid op het tick-label, korte
+      datumlabels, donkere tooltip met weekdag. As-captions alleen als één zijde twee assen
+      draagt (deze pagina kan dat, SEO stats niet).
+- [x] **Kleuren** = SEO stats' palet, 9 van de 10. Clicks lichtgroen + Cost lichtblauw op
+      Joeps verzoek; de rest doorgerekend met `validate_palette.js`. Elke check gelijk of beter
+      dan de bron — meetwaarden staan als commentaar boven `METRICS` en in LEARNINGS.
+- [x] **Kleine dingen**: "Export Excel" → "Export" (en van inline styles naar de canonieke
+      `btn-outline-purple`), `.btn-preset` krijgt `min-width: 3rem` zodat de vijf presetcellen
+      even breed zijn.
+- [ ] **Open: WoW-pillen in de tooltip en sparklines + delta-badges in de tegels.** SEO stats
+      heeft die, Shop-campaigns niet — ze hangen aan een extra baseline-fetch (equal-length
+      vorige periode) die deze pagina nog niet doet. Bewust buiten scope gelaten: dat is
+      databasis-werk, geen visuele afstemming.
+
 ### 2026-08-06 — HS2.0: Grasmaaiers-deck + all-channel drift in de cap-scripts gefixt
 
 - [x] **Deck `Healthscore_2.0_Grasmaaiers.pptx`** (Downloads\claude, 8 slides) in de stijl van

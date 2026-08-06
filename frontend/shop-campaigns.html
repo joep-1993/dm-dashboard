@@ -38,15 +38,22 @@
             .stat-card h3 { font-size: 1.25rem; }
             .stat-card .label { font-size: 0.72rem; letter-spacing: .04em; }
         }
-        .metric-toggle {
-            display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-            border: 1px solid #d9d4e8; border-radius: 20px; padding: 4px 12px;
-            font-size: 0.82rem; user-select: none; background: #fff; transition: all .15s ease;
+        /* Same tile vocabulary as SEO Stats: the summary tiles ARE the chart's
+           legend and its metric toggles, so the separate pill row below the chart
+           is gone (it said the same nine things twice) and Chart.js' own legend
+           stays off. A tile carries the series colour as a dot next to its label,
+           and the brand border + inset tint when the series is plotted. The value
+           and label are never dimmed — the number is the tile's whole point and
+           stays readable either way; only the border and the dot say whether it
+           is drawn. # Campaigns is not a series, so it stays a plain tile. */
+        #statsRow .stat-card.metric-tile { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+        #statsRow .stat-card.metric-tile:hover { border-color: #b9b0d8; }
+        #statsRow .stat-card.metric-on { border-color: #5e4a90; box-shadow: 0 0 0 2px rgba(94,74,144,0.10) inset; }
+        .stat-card .label .tile-dot {
+            width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+            margin-right: 4px; vertical-align: 1px; opacity: .3;
         }
-        .metric-toggle input { display: none; }
-        .metric-toggle .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; opacity: .35; }
-        .metric-toggle.on { border-color: #5e4a90; background: #f3f0fa; font-weight: 600; }
-        .metric-toggle.on .dot { opacity: 1; }
+        .stat-card.metric-on .label .tile-dot { opacity: 1; }
         .perf-table { font-size: 0.9rem; }
         /* UI_BLUEPRINT table headers: grey #f8f9fa, sticky, 6px 14px, 1rem
            (a touch larger than the 0.9rem body), bold — not the old purple
@@ -96,8 +103,12 @@
            Ported verbatim from seo-stats.html so the two pages match (Joep,
            suggestions_new.txt) — this page still had the older hard-purple border with
            square corners and no shadow. */
+        /* min-width equalises the five cells. With padding alone the width follows
+           the label, so "7d" (2 chars) and "All" sat in ~39px cells between ~47px
+           ones — each label was dead-centre in its own cell, but the cells were not
+           the same size, which is what reads as "All isn't centred". */
         .btn-preset { border: 1px solid #d9d4e8; color: #5e4a90; background: #fff;
-                      padding: 0.35rem 0.7rem; }
+                      padding: 0.35rem 0.7rem; min-width: 3rem; }
         .btn-preset:hover, .btn-preset:focus { background: #5e4a90; color: #fff; border-color: #5e4a90; }
         .btn-group .btn-preset:not(:first-child) { border-left: 1px solid #d9d4e8; }
         .btn-group:has(.btn-preset) {
@@ -108,19 +119,52 @@
         .btn-group .btn-preset:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
         .btn-group .btn-preset:last-child { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
         .chart-wrap { position: relative; height: 420px; }
+        /* Chart loading state = a skeleton in the SHAPE of a chart, not a spinner
+           (same reasoning as the skeleton table rows, cc1/UI_BLUEPRINT.md
+           "Tables"). It is OPAQUE and covers the canvas on purpose: Chart.js keeps
+           the previous range drawn until new data lands, and a stale chart behind a
+           translucent veil reads as the current one. The left/bottom padding leaves
+           the axis gutters empty, so the skeleton occupies the same footprint the
+           plot will and nothing shifts when the real chart appears. */
+        .chart-skel {
+            position: absolute; inset: 0; z-index: 5; background: #fff;
+            display: flex; align-items: flex-end; gap: 1.6%;
+            padding: 10px 12px 26px 46px;
+        }
+        .chart-skel .sk-col {
+            flex: 1 1 0; border-radius: 4px 4px 0 0;
+            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
+            background-size: 400% 100%;
+            animation: skelShimmer 1.4s ease infinite;
+        }
+        /* Tile values shimmer on the same fetch as the chart: the tiles ARE the
+           range's totals, so leaving the previous range's numbers above a loading
+           chart would show figures that look current. The label and the on/off
+           border stay — both are known before the fetch, and the tile has to remain
+           clickable while it loads. */
+        /* Sized to the h3's own line box (1.02rem × 1.2), so the tile is exactly as
+           tall loading as loaded and the row doesn't jump. */
+        .stat-card h3 .skel-bar { height: 1.02rem; width: 70%; margin: 0.1rem auto; }
+        /* Tooltip ported from seo-stats.html: dark panel, not the light one this page
+           used to have. */
         .chart-tooltip {
             position: absolute; pointer-events: none; z-index: 10;
-            background: #f1f1f4; color: #2d2a3a;
-            border: 1px solid #e3e3ea; border-radius: 12px;
+            background: #242628; color: #f0f0f3;
+            border-radius: 12px;
             padding: 12px 14px; min-width: 160px;
-            box-shadow: 0 6px 20px rgba(45,42,58,0.16);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.45);
             font-size: 12.5px; opacity: 0; transition: opacity .12s ease;
             transform: translate(-50%, calc(-100% - 14px));
         }
         .chart-tooltip .ct-title { font-weight: 700; font-size: 13px; margin-bottom: 9px; }
         .chart-tooltip .ct-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-        .chart-tooltip .ct-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
-        .chart-tooltip .ct-label { flex: 1 1 auto; color: #6a6a78; }
+        /* Hairline ring so a dark series colour stays visible on the dark panel,
+           without altering the colour it is identifying. */
+        .chart-tooltip .ct-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
+                                 box-shadow: 0 0 0 1px rgba(255,255,255,0.45); }
+        /* nowrap: the series name is the only shrinkable item in the row, so without
+           it a wide value wraps the label and the tooltip's height jumps between days. */
+        .chart-tooltip .ct-label { flex: 1 1 auto; color: #b9b9c4; white-space: nowrap; }
         .chart-tooltip .ct-val { font-weight: 600; margin-left: 16px; white-space: nowrap; }
         /* .info-note now lives in css/style.css (shared) — see UI_BLUEPRINT "Info banners". */
     </style>
@@ -189,43 +233,39 @@
         <div class="col-md-10 mx-auto">   <!-- shared page width, see cc1/UI_BLUEPRINT.md -->
         <div id="metaLine" class="text-muted text-end mb-2" style="font-size:0.82rem;"></div>
 
-        <!-- Controls -->
+        <!-- Summary cards. First on the page, ahead of the chart, because they
+             double as its legend — see the #statsRow rules in the style block. -->
+        <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="statsRow"></div>
+
+        <!-- Chart. Layout ported from seo-stats.html: the date range lives inside
+             this card (it scopes the whole page, but this is where you look at it),
+             Refresh sits on the title row, and there is no Load button — changing a
+             date loads on its own. -->
         <div class="card mb-4">
+            <div class="card-header d-flex align-items-center gap-2" style="background:#5e4a90; color:#fff;">
+                <h5 class="mb-0">Performance per day</h5>
+                <button class="btn btn-sm btn-outline-purple ms-auto" onclick="load(true)"
+                        title="Bypass cache and re-query SA360">↻ Refresh</button>
+            </div>
             <div class="card-body">
-                <div class="d-flex flex-wrap gap-3 align-items-end">
+                <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
                     <div>
                         <label for="startDate" class="form-label small mb-1">Start date</label>
-                        <input type="date" class="form-control form-control-sm" id="startDate" style="width: 160px;">
+                        <input type="date" class="form-control form-control-sm" id="startDate" style="width: 160px;" onchange="autoLoad()">
                     </div>
                     <div>
                         <label for="endDate" class="form-label small mb-1">End date</label>
-                        <input type="date" class="form-control form-control-sm" id="endDate" style="width: 160px;">
+                        <input type="date" class="form-control form-control-sm" id="endDate" style="width: 160px;" onchange="autoLoad()">
                     </div>
                     <div class="btn-group btn-group-sm" role="group" aria-label="presets">
                         <button class="btn btn-preset" onclick="setPreset(7)">7d</button>
                         <button class="btn btn-preset" onclick="setPreset(14)">14d</button>
                         <button class="btn btn-preset" onclick="setPreset(30)">30d</button>
                         <button class="btn btn-preset" onclick="setPreset(90)">90d</button>
-                    </div>
-                    <div class="ms-auto">
-                        <button class="btn btn-sm text-white" style="background:#CC5500; border:1px solid #CC5500; min-width:90px; transition: background-color 0.2s ease, border-color 0.2s ease;" onmouseover="this.style.backgroundColor='#E97451';this.style.borderColor='#E97451'" onmouseout="this.style.backgroundColor='#CC5500';this.style.borderColor='#CC5500'" onclick="load(false)" id="loadBtn">Load</button>
-                        <button class="btn btn-sm btn-outline-purple" onclick="load(true)" title="Bypass cache and re-query SA360">↻ Refresh</button>
+                        <button class="btn btn-preset" onclick="setAllPreset()" title="Everything on record: 24-06-2026 through today">All</button>
                     </div>
                 </div>
-                <div id="infoNote" class="info-note mt-4" style="display:none;"></div>
-            </div>
-        </div>
-
-        <!-- Summary cards -->
-        <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center" id="statsRow"></div>
-
-        <!-- Chart -->
-        <div class="card mb-4">
-            <div class="card-header" style="background:#5e4a90; color:#fff;">
-                <h5 class="mb-0">Trend</h5>
-            </div>
-            <div class="card-body">
-                <div class="d-flex flex-wrap gap-2 mb-3" id="metricToggles"></div>
+                <div id="infoNote" class="info-note mb-3" style="display:none;"></div>
                 <div class="chart-wrap"><canvas id="chart"></canvas></div>
             </div>
         </div>
@@ -234,7 +274,11 @@
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center" style="background:#5e4a90; color:#fff;">
                 <h5 class="mb-0">Per-day overview</h5>
-                <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="exportXlsx()" id="exportBtn" disabled>Export Excel</button>
+                <!-- Canonical .btn-outline-purple, same as SEO stats. The inline
+                     styles it replaces were a hand-rolled copy of exactly that class
+                     (purple outline, fills purple on hover) — see
+                     cc1/UI_BLUEPRINT.md "never inline the hexes". -->
+                <button class="btn btn-sm btn-outline-purple" onclick="exportXlsx()" id="exportBtn" disabled>Export</button>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -330,16 +374,46 @@
         const API = window.location.origin + '/api/shop-campaigns';
 
         // metric key -> {label, unit group, color}
+        //
+        // COLOURS: SEO stats' palette (seo-stats.html), which is the Beslist
+        // "Kleursysteem" base row with Joep's bordeaux/navy departures. This page
+        // needs 9 of its 10, so one is dropped — see below for which, and why.
+        //
+        // Clicks = accent-500 (lichtgroen) and Cost = primary-500 (lichtblauw) are
+        // Joep's call (2026-08-06). The other seven were SEARCHED, not eyeballed,
+        // with the `dataviz` skill's validate_palette.js (light, surface #fff).
+        //
+        // WHICH COLOUR IS DROPPED FOLLOWS FROM THAT PIN. accent-500 is one half of
+        // both of the source palette's worst pairs — ↔ cta-500 CVD 4.9 and
+        // ↔ green-500 normal 13.4 — so pinning it in means one of those two
+        // conflicts must survive, because only one colour can be dropped. Dropping
+        // cta-500 (orange) is the better half: it turns a CVD FAIL into a WARN and
+        // leaves the accent↔green pair, which the source palette carries anyway.
+        //
+        //                        SEO stats (10)   here (9)
+        //   adjacent CVD          WARN  6.1       PASS 21.7
+        //   adjacent normal       PASS 16.4       PASS 24.5
+        //   all-pairs CVD         FAIL  4.9       WARN  7.7
+        //   all-pairs normal      FAIL 13.4       FAIL 13.4  (accent ↔ green — the
+        //                                                     pair the pin implies)
+        //
+        // Every check is equal to or better than the palette it comes from. The
+        // default three (Clicks/Revenue/Cost) PASS everything on their own. The
+        // lightness/chroma FAILs are bordeaux, navy and deep turquoise being dark
+        // and low-chroma by choice; inherited, not introduced. Mitigation for what
+        // remains is the same as SEO stats': the tiles and the tooltip both name
+        // every series, so identity never rests on hue alone.
+        // Re-run the validator before changing any of this; do not eyeball ΔE.
         const METRICS = {
-            impressions: { label: 'Impressions', unit: 'count', axis: 'impr',  color: '#00a8b5' },
-            clicks:      { label: 'Clicks',      unit: 'count', axis: 'count', color: '#5e4a90' },
-            revenue:     { label: 'Revenue',     unit: 'euro',  axis: 'euro',  color: '#00b894' },
-            cost:        { label: 'Cost',        unit: 'euro',  axis: 'euro',  color: '#d63031' },
-            margin:      { label: 'Margin',      unit: 'euro',  axis: 'euro',  color: '#0984e3' },
-            conversions: { label: 'Conversions', unit: 'num',   axis: 'count', color: '#e17055' },
-            ctr:         { label: 'CTR',         unit: 'pct',   axis: 'pct',   color: '#6c5ce7' },
-            conv_rate:   { label: 'Conv. rate',  unit: 'pct',   axis: 'pct',   color: '#fdcb6e' },
-            avg_cpc:     { label: 'Avg CPC',     unit: 'cpc',   axis: 'cpc',   color: '#e84393' },
+            impressions: { label: 'Impressions', unit: 'count', axis: 'impr',  color: '#be4693' },  // secondary-500
+            clicks:      { label: 'Clicks',      unit: 'count', axis: 'count', color: '#91c34e' },  // accent-500 (lichtgroen)
+            revenue:     { label: 'Revenue',     unit: 'euro',  axis: 'euro',  color: '#936305' },  // yellow-800
+            cost:        { label: 'Cost',        unit: 'euro',  axis: 'euro',  color: '#1f99c4' },  // primary-500 (lichtblauw)
+            margin:      { label: 'Margin',      unit: 'euro',  axis: 'euro',  color: '#722F37' },  // bordeaux
+            conversions: { label: 'Conversions', unit: 'num',   axis: 'count', color: '#8459cf' },  // violet-500
+            ctr:         { label: 'CTR',         unit: 'pct',   axis: 'pct',   color: '#26a660' },  // green-500
+            conv_rate:   { label: 'Conv. rate',  unit: 'pct',   axis: 'pct',   color: '#001F3F' },  // navy
+            avg_cpc:     { label: 'Avg CPC',     unit: 'cpc',   axis: 'cpc',   color: '#107063' },  // deep turquoise
         };
         const ORDER = ['impressions','clicks','revenue','cost','margin','conversions','ctr','conv_rate','avg_cpc'];
         // Impressions get their OWN axis rather than sharing 'count' with clicks:
@@ -355,6 +429,9 @@
         let selected = new Set(['clicks', 'revenue', 'cost']);
         let lastData = null;
         let chart = null;
+        // Dates load on change now, so two loads can be in flight at once (a slow
+        // SA360 range plus a preset clicked over it). Only the newest one may paint.
+        let loadToken = 0;
 
         // Per-day table sort + pagination state
         let perfRows = [];
@@ -402,11 +479,56 @@
             }
             return fmt(key, v);
         }
-        function ymd(d) { return d.toISOString().slice(0, 10); }
+        // Local calendar date, NOT toISOString(): that converts to UTC first, so in
+        // CEST a date at local midnight (which is what the All preset and any
+        // Date-only value are) comes back as the DAY BEFORE.
+        // Chart chrome, ported from seo-stats.html so the two plots read as one
+        // component: muted ticks, a faint recessive grid, no axis borders or tick
+        // marks, and the unit riding on the tick label instead of an axis caption.
+        const TICK_COLOR = '#9a9aa6';
+        const GRID_COLOR = '#eef0f2';
+        const COMPACT_NL = new Intl.NumberFormat('nl-NL', { notation: 'compact', maximumFractionDigits: 1 });
+        function axisTick(ax, v) {
+            if (ax === 'euro') return '€' + COMPACT_NL.format(v);
+            if (ax === 'pct') return Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+            // CPC runs in cents here (€0,08–0,12), where compact notation would
+            // round every tick to the same "0,1".
+            if (ax === 'cpc') return '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return COMPACT_NL.format(v);
+        }
+        // x-axis tick label: "Jul 29" instead of the raw 2026-07-29. The chart's
+        // LABELS stay ISO on purpose — the external tooltip reads tooltip.title[0]
+        // back as a date, so shortening the labels themselves would break its
+        // "2026-07-29 (woensdag)" heading. Only the tick display is reformatted.
+        function shortDateLabel(iso) {
+            if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+            const [y, m, d] = iso.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+        function weekdayLongOf(iso) {
+            if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+            const [y, m, d] = iso.split('-').map(Number);
+            return new Date(y, m - 1, d).toLocaleDateString('nl-NL', { weekday: 'long' });
+        }
+
+        function ymd(d) {
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
 
         function setDates(start, end) {
             if (fpStart) fpStart.setDate(start, false); else document.getElementById('startDate').value = ymd(start);
             if (fpEnd) fpEnd.setDate(end, false); else document.getElementById('endDate').value = ymd(end);
+        }
+
+        // Changing a date loads immediately — there is no Load button any more.
+        // Debounced because picking a new start AND end fires twice within a second
+        // and only the second range matters. setDates() passes `false` to flatpickr
+        // so the presets set both fields WITHOUT triggering this, then load once
+        // themselves.
+        let autoLoadTimer = null;
+        function autoLoad() {
+            clearTimeout(autoLoadTimer);
+            autoLoadTimer = setTimeout(() => load(false), 400);
         }
 
         function setPreset(days) {
@@ -417,22 +539,14 @@
             load(false);
         }
 
-        function buildToggles() {
-            const wrap = document.getElementById('metricToggles');
-            wrap.innerHTML = '';
-            ORDER.forEach(key => {
-                const m = METRICS[key];
-                const on = selected.has(key);
-                const lab = document.createElement('label');
-                lab.className = 'metric-toggle' + (on ? ' on' : '');
-                lab.innerHTML = `<span class="dot" style="background:${m.color}"></span>${m.label}`;
-                lab.onclick = () => {
-                    if (selected.has(key)) selected.delete(key); else selected.add(key);
-                    buildToggles();
-                    renderChart();
-                };
-                wrap.appendChild(lab);
-            });
+        // "All" = the full history of the SHOP/ campaigns, which starts 2026-06-24.
+        // A fixed start rather than an open-ended one: the API wants both bounds,
+        // and there is nothing before this date to fetch.
+        const ALL_START = [2026, 6, 24];
+        function setAllPreset() {
+            const [y, m, d] = ALL_START;
+            setDates(new Date(y, m - 1, d), new Date());
+            load(false);
         }
 
         function externalTooltip(context) {
@@ -452,7 +566,8 @@
                        `<span class="ct-label">${dp.dataset.label}</span>` +
                        `<span class="ct-val">${fmt(key, dp.parsed.y)}</span></div>`;
             }).join('');
-            el.innerHTML = `<div class="ct-title">${title}</div>${rows}`;
+            const wd = weekdayLongOf(title);
+            el.innerHTML = `<div class="ct-title">${wd ? `${title} (${wd})` : title}</div>${rows}`;
             el.style.opacity = 1;
             el.style.left = chart.canvas.offsetLeft + tooltip.caretX + 'px';
             el.style.top = chart.canvas.offsetTop + tooltip.caretY + 'px';
@@ -462,21 +577,61 @@
             if (!lastData) return;
             const labels = lastData.daily.map(r => r.date);
             const usedAxes = new Set();
-            const datasets = ORDER.filter(k => selected.has(k)).map(key => {
+            const shown = ORDER.filter(k => selected.has(k));
+            // The fill alpha steps down as series are added: at the default three
+            // it is '22', but nine translucent washes on one plot turn to mud, so
+            // deeper selections get a fainter fill. The LINE colour never changes —
+            // identity stays put; only the wash under it gets quieter.
+            const fillAlpha = shown.length <= 2 ? '2b' : shown.length <= 4 ? '22' : '14';
+            const datasets = shown.map(key => {
                 const m = METRICS[key];
                 usedAxes.add(m.axis);
                 return {
                     label: m.label,
                     data: lastData.daily.map(r => r[key]),
                     borderColor: m.color,
-                    backgroundColor: m.color + '22',
+                    backgroundColor: m.color + fillAlpha,
+                    fill: true,
                     yAxisID: m.axis,
-                    tension: 0.25,
-                    pointRadius: 2,
-                    borderWidth: 2,
+                    tension: 0.35,
+                    // Points only on hover: with nine series over 90 days, a
+                    // permanent dot per day is what makes the chart look busy. The
+                    // line stays hoverable because interaction is index-mode, and
+                    // pointHitRadius keeps the grab area generous.
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    pointHitRadius: 12,
+                    pointBackgroundColor: m.color,
+                    pointHoverBorderColor: '#fff',
+                    pointHoverBorderWidth: 2,
+                    // 1.75 not 2: a thinner stroke over a filled area reads lighter,
+                    // which is the point of the match.
+                    borderWidth: 1.75,
+                    borderCapStyle: 'round',
+                    borderJoinStyle: 'round',
                 };
             });
-            const scales = { x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } } };
+            const scales = {
+                x: {
+                    grid: { display: true, color: GRID_COLOR, drawTicks: false },
+                    border: { display: false },
+                    ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16,
+                             color: TICK_COLOR, font: { size: 11 }, padding: 8,
+                             // Not an arrow function: `this` must be the scale so
+                             // getLabelForValue() can turn the tick index back into
+                             // the ISO label before it is shortened.
+                             callback(value) { return shortDateLabel(this.getLabelForValue(value)); } },
+                },
+            };
+            // Axis captions are off while a side carries ONE axis — the unit rides
+            // on the tick label, as in SEO stats. This page can put two axes on the
+            // same side (Count + Impressions left; €, % and € CPC right), and there
+            // the tick alone no longer says which gutter is which, so the caption
+            // comes back for that side only.
+            const axesOnSide = { left: 0, right: 0 };
+            ['count','impr','euro','pct','cpc'].forEach(ax => {
+                if (usedAxes.has(ax)) axesOnSide[AXES[ax].position]++;
+            });
             let rightUsed = 0, leftUsed = 0;
             ['count','impr','euro','pct','cpc'].forEach(ax => {
                 if (!usedAxes.has(ax)) return;
@@ -484,10 +639,15 @@
                 const isRight = cfg.position === 'right';
                 scales[ax] = {
                     position: cfg.position,
-                    title: { display: true, text: cfg.title },
+                    title: { display: axesOnSide[cfg.position] > 1, text: cfg.title,
+                             color: TICK_COLOR, font: { size: 11 } },
                     // Only the first axis on each side draws gridlines, so two
                     // left axes (Count + Impressions) don't overlay two grids.
-                    grid: { drawOnChartArea: isRight ? rightUsed === 0 : leftUsed === 0 },
+                    grid: { drawOnChartArea: isRight ? rightUsed === 0 : leftUsed === 0,
+                            color: GRID_COLOR, drawTicks: false },
+                    border: { display: false },
+                    ticks: { color: TICK_COLOR, font: { size: 11 }, padding: 8,
+                             maxTicksLimit: 6, callback: v => axisTick(ax, v) },
                     beginAtZero: true,
                 };
                 if (isRight) rightUsed++; else leftUsed++;
@@ -498,8 +658,14 @@
                 options: {
                     responsive: true, maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
+                    // Breathing room instead of a frame: the plot has no border
+                    // now, so the padding is what separates it from the card.
+                    layout: { padding: { top: 12, right: 12, bottom: 0, left: 0 } },
                     plugins: {
-                        legend: { position: 'top', labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8, padding: 16 } },
+                        // Chart.js' own legend is OFF: the summary tiles above carry
+                        // the same colour dot and label AND toggle the series, which
+                        // the built-in legend only did for series already drawn.
+                        legend: { display: false },
                         tooltip: { enabled: false, external: externalTooltip },
                     },
                     scales,
@@ -519,15 +685,28 @@
             row.appendChild(campCard);
             ORDER.forEach(key => {
                 const v = t[key];
+                const m = METRICS[key];
+                const on = selected.has(key);
                 const cls = (key === 'margin' && v < 0) ? ' class="neg"' : '';
                 const card = document.createElement('div');
-                card.className = 'stat-card';
-                // title carries the exact value, since fmtTile may abbreviate it
-                // and the narrow tile may ellipsis it.
+                card.className = 'stat-card metric-tile ' + (on ? 'metric-on' : 'metric-off');
+                card.title = on ? `Click to hide ${m.label} in the chart`
+                                : `Click to show ${m.label} in the chart`;
+                card.onclick = () => toggleMetricFromTile(key);
+                // title on the value carries the exact figure, since fmtTile may
+                // abbreviate it and the narrow tile may ellipsis it.
                 card.innerHTML = `<h3${cls} title="${fmt(key, v)}">${fmtTile(key, v)}</h3>`
-                    + `<div class="label" title="${METRICS[key].label}">${METRICS[key].label}</div>`;
+                    + `<div class="label"><span class="tile-dot" style="background:${m.color}"></span>${m.label}</div>`;
                 row.appendChild(card);
             });
+        }
+
+        // A tile is the chart's legend entry and its switch in one: one `selected`
+        // set behind the tiles and the chart, so clicking a tile moves both.
+        function toggleMetricFromTile(key) {
+            if (selected.has(key)) selected.delete(key); else selected.add(key);
+            renderChart();
+            renderStats();
         }
 
         function initTable() {
@@ -656,16 +835,59 @@
             return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
         }
 
+        // Fixed silhouette, not random: a shape that changes on every load reads as
+        // data. Percentages of the plot height, kept in the upper half of the range
+        // so the skeleton fills the same footprint the real chart does — lower
+        // values leave the top of the card empty and the placeholder reads as a
+        // half-drawn chart rather than a loading one.
+        const SKEL_COLS = [62, 79, 53, 90, 68, 58, 85, 74, 56, 94, 66, 81, 59, 87, 71, 64];
+        function showChartSkeleton() {
+            const wrap = document.querySelector('.chart-wrap');
+            if (!wrap || wrap.querySelector('.chart-skel')) return;
+            const el = document.createElement('div');
+            el.className = 'chart-skel';
+            el.innerHTML = SKEL_COLS.map(h => `<div class="sk-col" style="height:${h}%"></div>`).join('');
+            wrap.appendChild(el);
+        }
+        function hideChartSkeleton() {
+            const el = document.querySelector('.chart-wrap .chart-skel');
+            if (el) el.remove();
+        }
+
+        // Tiles during a load: same row, same labels, same on/off state (so the
+        // legend stays usable and nothing shifts) — only the values shimmer.
+        function showStatsSkeleton() {
+            const row = document.getElementById('statsRow');
+            const bar = '<h3><span class="skel-bar"></span></h3>';
+            row.innerHTML = `<div class="stat-card">${bar}<div class="label"># Campaigns</div></div>`;
+            ORDER.forEach(key => {
+                const m = METRICS[key];
+                const on = selected.has(key);
+                const card = document.createElement('div');
+                card.className = 'stat-card metric-tile ' + (on ? 'metric-on' : 'metric-off');
+                card.onclick = () => {
+                    // No lastData to re-render from mid-load, so flip the state and
+                    // repaint the skeleton; the landing load() draws the real chart
+                    // from the same `selected` set.
+                    if (selected.has(key)) selected.delete(key); else selected.add(key);
+                    showStatsSkeleton();
+                };
+                card.innerHTML = bar + `<div class="label"><span class="tile-dot" style="background:${m.color}"></span>${m.label}</div>`;
+                row.appendChild(card);
+            });
+        }
+
         async function load(force) {
+            const myToken = ++loadToken;
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
-            const btn = document.getElementById('loadBtn');
-            btn.disabled = true; btn.textContent = 'Loading…';
             // Per-day head is drawn by initTable() after the fetch, so on a
             // first load count the column set instead of the (absent) <th>.
             const perDayCols = document.getElementById('tableHead').querySelectorAll('th').length
                 || (2 + ORDER.length);
             document.getElementById('tableBody').innerHTML = skeletonRows(perDayCols);
+            showChartSkeleton();
+            showStatsSkeleton();
             Object.values(TOP_TABLES).forEach(t => {
                 document.getElementById(t.bodyId).innerHTML = skeletonRows(t.columns.length);
             });
@@ -679,7 +901,12 @@
                     fetch(`${API}/top-performers?${params}`),
                 ]);
                 if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + (await res.text()));
-                lastData = await res.json();
+                const payload = await res.json();
+                // Return WITHOUT clearing the skeletons: a newer load is still
+                // running and owns them now.
+                if (myToken !== loadToken) return;   // a newer load started; drop this one
+                lastData = payload;
+                hideChartSkeleton();
                 renderStats();
                 renderChart();
                 initTable();
@@ -690,6 +917,8 @@
                     renderTop();
                 }
             } catch (e) {
+                if (myToken !== loadToken) return;   // a newer load owns the screen now
+                hideChartSkeleton();
                 document.getElementById('metaLine').innerHTML = `<span class="text-danger">Failed to load: ${e.message}</span>`;
                 // Must replace the skeletons, or a failed load shimmers forever.
                 const fail = cols => `<tr><td colspan="${cols}" class="text-center text-danger py-3">Failed to load.</td></tr>`;
@@ -697,8 +926,16 @@
                 Object.values(TOP_TABLES).forEach(t => {
                     document.getElementById(t.bodyId).innerHTML = fail(t.columns.length);
                 });
-            } finally {
-                btn.disabled = false; btn.textContent = 'Load';
+                // And everything else that describes the range goes with it: lastData
+                // is only reassigned on success, so the tiles, the chart and the Total
+                // row would otherwise keep showing the PREVIOUS range under a "Failed
+                // to load" line — numbers that look current and are not.
+                document.getElementById('statsRow').innerHTML =
+                    '<div class="text-muted small py-2">No data for this range.</div>';
+                document.getElementById('tableFoot').innerHTML = '';
+                if (chart) { chart.destroy(); chart = null; }
+                document.getElementById('exportBtn').disabled = true;
+                lastData = null;
             }
         }
 
@@ -848,12 +1085,13 @@
 
         // Init: default last 30 days
         (function () {
-            buildToggles();
             const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
                              disableMobile: true, locale: { firstDayOfWeek: 1 } };
             if (window.flatpickr) {
-                fpStart = flatpickr('#startDate', fpOpts);
-                fpEnd = flatpickr('#endDate', fpOpts);
+                // flatpickr replaces the native picker, so its onChange is what
+                // fires — the inputs' own onchange never runs once it is attached.
+                fpStart = flatpickr('#startDate', { ...fpOpts, onChange: autoLoad });
+                fpEnd = flatpickr('#endDate', { ...fpOpts, onChange: autoLoad });
             }
             const end = new Date();
             const start = new Date();

@@ -8,6 +8,20 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### Shop-campaigns mist de WoW-laag die SEO stats wél heeft (logged 2026-08-06)
+- [ ] **Baseline-fetch toevoegen zodat de tegels en de tooltip een vergelijking kunnen tonen.**
+  Shop-campaigns is op 2026-08-06 visueel gelijkgetrokken met SEO stats (layout, chart-chrome,
+  kleuren, loader — zie TASKS), maar twee dingen bleven bewust liggen omdat ze géén
+  opmaakkwestie zijn: de **WoW-pillen in de tooltip** en de **sparklines + delta-badges in de
+  tegels**. Beide hangen aan data die deze pagina niet ophaalt — SEO stats doet daarvoor een
+  extra `/daily`-call over de voorgaande 7 dagen (`loadWowBase()`) plus één over de
+  even lange periode ervóór (`loadTileDeltas()`). Zonder die twee calls is er niets om tegen
+  af te zetten en zou een pil een verzonnen getal tonen.
+  Aandachtspunt bij het bouwen: de tegels zijn hier al de legenda én de toggles, dus een
+  sparkline moet — net als in SEO stats — een niet-klikbaar gebied worden, anders klapt de
+  serie uit zodra je een dag wilt aflezen. En de deltafetch moet dezelfde `loadToken`-guard
+  respecteren als `load()`, anders deelt een oude baseline zich door een nieuwe periode.
+
 ### Verwijderde maincat-level URLs kunnen zichzelf terugschrijven (logged 2026-08-06)
 - [ ] **Beslis of de 4.699 opgeschoonde URLs permanent contentloos moeten blijven.** Op
   2026-08-06 zijn koptekst + FAQ verwijderd voor 4.699 maincat-level `/c/`-URLs (zie TASKS).

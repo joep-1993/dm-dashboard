@@ -1,6 +1,79 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een chart-palette toewijzen is een zoekprobleem, geen smaakkwestie (2026-08-06)
+
+Shop-campaigns moest "dezelfde kleuren als SEO stats". De metric-sets verschillen
+(SEO/DMA/GSAAS visits & omzet daar; impressions/clicks/revenue/cost/… hier), dus kopiëren kon
+niet — er moest **toegewezen** worden. Drie dingen die daarbij tegenvielen:
+
+**1. De volgorde van de toewijzing bepaalt of je zakt.** De validator checkt standaard
+*adjacent* paren, en "adjacent" is de volgorde van je `ORDER`-array. Mijn eerste, semantisch
+logische mapping (impressions=blauw, clicks=violet, revenue=magenta, …) zakte op twee harde
+grenzen tegelijk — violet↔magenta staat op ΔE 14,1 en de vloer is 15 — terwijl exact dezelfde
+kleuren in een andere toewijzing 20,9 haalden. Zelfde palet, zelfde metrics, factor anders.
+
+**2. Voor een lijngrafiek geldt `--pairs all`, niet adjacent.** Alle series staan tegelijk op
+het scherm. Dat is ook hoe het SEO stats-palet ooit is gevalideerd (het commentaar daar noemt
+"10 of 45 pairs" = C(10,2)). Onder `--pairs all` maakt de vólgorde niets meer uit en telt
+alleen nog wélke kleuren in de set zitten.
+
+**3. Minder series nodig = gratis winst, mits je de juiste weglaat.** SEO stats heeft er 10,
+deze pagina 9. `accent-500 #91c34e` is de helft van *beide* slechtste paren van dat palet
+(↔ cta-500 CVD 4,9 en ↔ green-500 normaal 13,4). Weglaten tilde all-pairs CVD van 4,9 (FAIL)
+naar 6,1 (WARN). Toen Joep daarna Clicks expliciet lichtgroen wilde, kwam accent-500 er weer
+in — en dán is één van die twee conflicten onvermijdelijk, want je mag er maar één droppen.
+cta-500 (oranje) droppen is de betere helft: CVD 7,7 (WARN) i.p.v. 4,9 (FAIL).
+
+Eindstand vs. de bron, `validate_palette.js --mode light --surface #fff`:
+
+| check | SEO stats (10) | Shop-campaigns (9) |
+|---|---|---|
+| adjacent CVD | WARN 6,1 | PASS 21,7 |
+| adjacent normaal zicht | PASS 16,4 | PASS 24,5 |
+| all-pairs CVD | FAIL 4,9 | WARN 7,7 |
+| all-pairs normaal zicht | FAIL 13,4 | FAIL 13,4 |
+
+**Werkwijze die werkte:** de validator één keer per paar draaien (45 aanroepen) en die matrix
+daarna in een permutatiezoektocht gebruiken. Per permutatie `validate()` aanroepen is te traag
+— 10P9 = 3,6M arrangementen liep in 2 minuten niet af.
+
+## Een laadtoestand screenshotten in headless Chrome (2026-08-06)
+
+Twee blokkades, allebei omzeilbaar zonder sudo:
+
+* **De WSL-chromium van playwright start niet** — `libnspr4.so` ontbreekt en
+  `playwright install-deps` wil root. **Windows Chrome via `/mnt/c` doet het wél**:
+  `"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu
+  --virtual-time-budget=20000 --screenshot="C:\...\out.png" "http://localhost:8003/…"`.
+  localhost bereikt de WSL-uvicorn gewoon. `--force-device-scale-factor=4` + PIL-crop geeft
+  een meetbare uitsnede (zo is "All staat niet in het midden" nagemeten: het lábel stond
+  goed, de cellen waren ongelijk breed).
+* **Chrome weigert te screenshotten zolang er een request openstaat.** Een trage proxy helpt
+  dus niet — hij wacht gewoon tot de fetch klaar is, en bij 90s stalling loopt hij in een
+  timeout zonder bestand. Wat wél werkt: de fetch met een **timer** vertragen in plaats van
+  met een socket. Een same-origin proxy injecteert
+  `window.fetch = (...a) => new Promise(r => setTimeout(() => r(_f(...a)), 30000))` vóór
+  `</head>`; `--virtual-time-budget=4000` spoelt timers door en schiet op virtuele t=4s, dus
+  vóór de fetch. Zo kwamen de skeleton-grafiek en de shimmerende tegels in beeld.
+  Klikken en hoveren kan via dezelfde injectie (`.click()`, of een synthetische
+  `MouseEvent('mousemove')` op de canvas — Chart.js pikt die op).
+
+## `toISOString().slice(0,10)` is de verkeerde datum in CEST (2026-08-06)
+
+`ymd()` in shop-campaigns.html deed `d.toISOString().slice(0, 10)`. Dat converteert eerst naar
+UTC, dus een Date op lokale middernacht — precies wat een preset-knop doorgeeft
+(`new Date(2026, 5, 24)`) — komt eruit als de **dag ervóór**. Raakte alleen het pad zonder
+flatpickr (de fallback als de CDN onbereikbaar is), maar het is stil fout. Nu op de lokale
+kalendervelden:
+
+```js
+`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+```
+
+Zelfde klasse fout als de UTC-timestamps in de tabellen (zie UI_BLUEPRINT "Timestamp columns"):
+JS praat UTC waar wij een kalenderdag bedoelen.
+
 ## HS2.0: cap-sizing is all-channel, de dekkings-KPI is SEO-only (2026-08-06)
 
 Twee verschillende bezoekdefinities in hetzelfde systeem. Wie ze verwisselt, rapporteert een

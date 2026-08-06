@@ -175,6 +175,65 @@ select (10 / 25 / 50 / 100 / Show all), prev/next chevron buttons, and an
 `--color-button` in style.css, which is why the arrows render **orange**. Use the
 chevron SVGs from the template (not `<` / `>` text).
 
+## Charts — the SEO stats look is the reference
+
+`seo-stats.html` and `shop-campaigns.html` now render the same chart. Copy that
+chrome rather than re-deriving it (Chart.js, `.chart-wrap { position: relative;
+height: 420px }`):
+
+- **Filled areas, thin lines.** `fill: true`, `tension: 0.35`, `borderWidth: 1.75`,
+  round caps/joins. The fill alpha steps DOWN as series are added — `'2b'` at ≤2,
+  `'22'` at ≤4, `'14'` above — because a stack of translucent washes turns to mud.
+  The line colour never changes; only the wash under it gets quieter.
+- **No permanent points.** `pointRadius: 0`, `pointHoverRadius: 4`,
+  `pointHitRadius: 12`, white hover ring. A dot per day over 90 days is what makes
+  a chart look busy; index-mode interaction keeps the line hoverable anyway.
+- **Recessive grid, no furniture.** Grid `#eef0f2` on both axes, `border: display
+  false`, `drawTicks: false`, ticks `#9a9aa6` at 11px with `padding: 8`,
+  `maxTicksLimit: 6` on the value axes. `layout.padding` top/right 12.
+- **The unit rides on the tick, not on an axis caption** — `€1,2 mln`, `6,7%`,
+  `Jul 29`. Turn the axis title off. **Exception**: when one side carries TWO axes
+  (Shop-campaigns can put Count + Impressions left, and €, % and € CPC right) the
+  tick alone no longer says which gutter is which, so the caption comes back for
+  that side only.
+- **Chart.js' own legend is OFF.** The summary tiles are the legend — see below.
+- **Tooltip is ours, dark**: `#242628` panel, `.ct-dot` with a
+  `0 0 0 1px rgba(255,255,255,0.45)` ring so a dark series colour stays visible,
+  `.ct-label` nowrap, date heading with the weekday — `2026-07-24 (vrijdag)`.
+
+**Summary tiles double as the legend and the toggles.** One `selected` Set behind
+the tiles and the chart. A tile carries the series colour (a sparkline in SEO
+stats; a 7px `.tile-dot` next to the label where tiles are too narrow for one),
+gets `.metric-tile` + `.metric-on`/`.metric-off`, and its border and dot say
+whether the series is drawn — the value and label are NEVER dimmed, the number is
+the tile's whole point. Do not also ship a row of `.metric-toggle` pills for the
+same metrics; keep pills only for series that have no tile (SEO stats' two
+aggregates). In SEO stats the sparkline area is deliberately not clickable.
+
+**Loading state = a skeleton in the shape of a chart, not a spinner** — same
+reasoning as the skeleton table rows. Absolutely positioned inside `.chart-wrap`,
+**opaque** (`background: #fff`), a row of bottom-aligned shimmer columns using the
+shared `skelShimmer` gradient, with the left/bottom padding left empty where the
+axis gutters will be. Opaque matters: Chart.js keeps the PREVIOUS range drawn
+until new data lands, and a stale chart behind a translucent veil reads as the
+current one. Heights are a FIXED silhouette in the upper half of the range — a
+shape that changes per load reads as data, and low values leave the top of the
+card empty. Remove it on success AND on error, but **not** when a stale-load guard
+bails out: a newer load owns it then. The tiles shimmer on the same fetch (label
+and on/off border stay, only the value goes to a `.skel-bar`), because the tiles
+are the range's totals and stale numbers above a loading chart look current.
+
+**Colours: run the validator, never eyeball ΔE.** The palette is SEO stats'
+(`seo-stats.html` — the Kleursysteem base row with the bordeaux/navy departures).
+A page that needs fewer than ten series picks a SUBSET, and *which* one it drops is
+a real decision: dropping accent-500 removes both of that palette's worst pairs.
+Which colour lands on which metric is a search, not a preference — the assignment
+determines which pairs end up adjacent, and a "logical" mapping can fail a floor
+that a computed one clears by 10 ΔE. Use the `dataviz` skill's
+`scripts/validate_palette.js`, light mode, surface `#fff`, and check **both**
+`--pairs all` (every line is on screen at once) and the default adjacent run.
+Record the measured numbers next to `METRICS` so the next change has a baseline.
+
 ## Buttons
 
 Canonical classes are defined in `style.css` (additive/opt-in). Use them; never
@@ -350,6 +409,27 @@ carries through automatically:
   assigning a `YYYY-MM-DD` string afterwards is not equivalent.
   Still-native (no flatpickr): DMA Bidding, SEO Priority, Performance Standup,
   R-Finder.
+- **A date range loads on change — there is no Load button.** SEO stats and
+  Shop-campaigns both put the range INSIDE the chart card (it scopes the page, but
+  that is where you look at it) with Refresh on the card's title row, and load on
+  change. Four things go with that:
+  1. `onchange="autoLoad()"` on the inputs **and** `onChange: autoLoad` on the
+     flatpickr instances — flatpickr replaces the native picker, so the input's own
+     `onchange` never fires once it is attached. Wiring only one of the two is a
+     picker that silently does nothing.
+  2. Debounce ~400ms: picking a new start AND end fires twice within a second and
+     only the second range matters.
+  3. `setDates()` passes `false` to flatpickr so the presets set both fields
+     WITHOUT triggering the debounce, then call `load()` once themselves.
+  4. A **generation token** (`loadToken`) — two loads can now be in flight at once,
+     so every async step that writes shared state checks the token it started with
+     and bails. Without it a slow older range paints over a newer one.
+- **Preset group (7d / 14d / 30d / 90d / All)**: `.btn-preset` needs a
+  `min-width: 3rem`. With padding alone the cell width follows the label, so "7d"
+  and "All" sit in ~39px cells between ~47px ones — each label is dead-centre in
+  its own cell, but the cells differ, and that is what reads as "All isn't
+  centred" (Joep, 2026-08-06). An "All" preset uses a FIXED start date, not an
+  open-ended range: the API wants both bounds.
 - **Checkboxes / radios**: `<input class="form-check-input" type="checkbox|radio">`
   in a `.form-check` with a `.form-check-label`. Keep the default Bootstrap accent —
   don't recolour. (Canonicals' bulk-select adds a `canon-select` class alongside
