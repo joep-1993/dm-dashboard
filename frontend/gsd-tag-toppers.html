@@ -266,8 +266,7 @@ function showUploadSummary(j) {
     // Bootstrap-namen (bg-success wordt grijs, bg-info ook), en dan hangt de kleur
     // af van welke regel wint. Zo staat hij vast en is hij gelijk aan de tabellen.
     s.innerHTML = '<span class="badge lbl lbl-orange">' + j.rows + ' rijen</span> ' +
-                  '<span class="badge lbl lbl-purple">' + j.total_ids + ' product ids</span> ' +
-                  '<span class="text-muted" style="font-size:0.85rem;">' + esc(j.filename || '') + '</span>';
+                  '<span class="badge lbl lbl-purple">' + j.total_ids + ' product ids</span>';
     const w = document.getElementById('uploadWarnings');
     if (j.warnings && j.warnings.length) {
         w.style.display = 'block';
