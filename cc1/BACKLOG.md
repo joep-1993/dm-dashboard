@@ -198,6 +198,12 @@ _What are we building and why?_
   Nu een scratchpad-script; als knop of maandelijkse job in de tool zou het de 180 campagnes
   waar de uitsluiting nóóit gedraaid heeft eerder hebben gevonden. Neem `build_fix_excel.py`
   mee — dat zet de uitkomst direct om in een uploadbare kandidatenlijst.
+- [ ] **De telcel-controle kijkt alleen naar kolom E** (logged 2026-08-07). `parse_workbook`
+  vergelijkt `number_of_productids` met het aantal gevonden ids, maar leest die telling uit
+  `raw[4]`. Bij brede rijen — waar de ids kolom D t/m N vullen en de telling erachteraan
+  schuift — is dat een id-string en wordt de check stilzwijgend overgeslagen. Juist bij die
+  rijen ving hij eerder een ontbrekende cel af (967 waar 2096 stond). Beter: de laatste
+  numerieke cel van de rij als telling nemen, ongeacht de kolom.
 - [ ] **Weesbudgetten voorkomen in plaats van opruimen** (logged 2026-08-07). Het budget wordt
   vóór de campagne aangemaakt (dat moet, een campagne vereist een budget), dus elke mislukte
   create laat er één achter — 101 opgeruimd op 7 aug. Overweeg het budget op te ruimen in het

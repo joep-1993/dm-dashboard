@@ -69,6 +69,17 @@ ook add-only.
 - [x] **Run-historie compleet**: runs bewaren nu de volledige rijen inclusief `targets`
       (~2 KB/rij), dus een run is aan te klikken en zet het resultatenscherm terug zoals het
       was — tegels, tabel én uitklap. Plus CSV-export per run en paginering (25/pagina).
+- [x] **Toolmax NL+BE gedraaid** (de twee brede rijen uit de kandidatenlijst, die in de eerdere
+      runs ontbraken omdat daar de *kopie* van 620 rijen was geüpload): **4.192 ids toegevoegd,
+      33.536 uitsluitingen, 0 fouten**. Dat is meteen de zwaarste bevestiging dat de fixes van
+      7 aug houden — vier keer zwaarder dan de run waarop ze gevonden zijn.
+- [x] **Twee bugs uit run 8 gefixt** (zie LEARNINGS): item-id OTHERS zonder case_value in
+      multi-label bomen (gaf REQUIRED_FIELD_MISSING op elke ad group van een shop), en de
+      CONCURRENT_MODIFICATION-retry die stilzwijgend was uitgeschakeld door het aanzetten van
+      `partial_failure`.
+- [x] **Voortgang en Cancel op mutatie-korrel** — teller van geschreven criteria naast de
+      rijteller, `indeterminate` balk zolang geen rij klaar is, en cancel die tussen
+      mutatie-blokken grijpt in plaats van pas tussen rijen.
 - [ ] **Open: het volume van een volledige run.** Toolmax NL alleen is 2096 ids ×
       8 containerplekken = 16.768 uitsluitingen; over alle 622 rijen loopt dat hard op.
       Preview geeft het totaal vóór er iets geschreven wordt — kijk daar eerst naar.

@@ -1,6 +1,73 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `partial_failure` aanzetten schakelde de retry uit die er al zat (2026-08-07)
+
+De scherpste les van de GSD Tag Toppers-dag. Volgorde:
+
+1. CONCURRENT_MODIFICATION brak een convert → retry met backoff toegevoegd op het
+   **exception**-pad. Werkte.
+2. Later bleek dat één "bestaat al" een blok van 1000 operaties meesleurde →
+   `partial_failure=True` aangezet. Werkte ook.
+3. Volgende run: Invulboekjes.nl, **242 van de 484 uitsluitingen niet geland**, allemaal
+   CONCURRENT_MODIFICATION — zonder één nieuwe poging.
+
+Want met `partial_failure` komt een per-operatie fout niet meer als `GoogleAdsException`
+binnen maar als regel in `partial_failure_error.details`. De retry keek daar niet. **Fix 2
+heeft fix 1 stilzwijgend uitgeschakeld, en niets in de code wees daarop.**
+
+- **Als je de foutafhandeling verlegt, loop na wie er nog meer op dat pad zat.** Een
+  vlag die "alleen maar" bepaalt hóé fouten terugkomen, verandert welke code ze ziet.
+- De oplossing is per-operatie: `_submit_chunk()` dient precies de botsende indexen
+  opnieuw in met backoff, in plaats van het hele blok. Alleen bij uitgeputte pogingen
+  wordt het alsnog een fout.
+- **Dit was alleen zichtbaar doordat de uitklap per campagne "242/484" toonde.** Op
+  rijniveau stond er "deels" en dat had niemand nagelopen — zie ook de entry hieronder
+  over totalen die verbergen waar het misgaat.
+
+## Item-id OTHERS heeft in multi-label bomen géén case_value (2026-08-07)
+
+`REQUIRED_FIELD_MISSING` ("The required field was not present") bij het uitsluiten, over
+alle ad groups van een shop. De boom:
+
+```
+SUBDIVISION (root)
+├─ CL0 OTHERS                [NEGATIVE]
+└─ CL0 "c"  SUBDIVISION
+   ├─ UNIT zonder case_value [NEGATIVE]
+   └─ UNIT zonder case_value [POSITIVE, bid]   <- item-id OTHERS
+```
+
+Die positieve UNIT **zonder case_value** ís het item-id niveau; de API toont zijn dimensie
+als ROOT en een reader die alleen op `product_item_id` let leest hem als `dim=None`.
+
+- **Gevolg van de misdetectie was dubbel**: de code wilde hem converteren naar een
+  SUBDIVISION (want "nog geen item-id"), en bouwde die dan zónder case_value — wat niet
+  mag. Terwijl de juiste actie was: niets converteren, de uitsluitingen er als broertjes
+  bij hangen.
+- **Test je containerdetectie op een multi-label boom, niet alleen op de simpele vorm.**
+  De enkelvoudige `[label:a]`-bomen hebben wél een expliciete item-id OTHERS, dus daar
+  viel niets op.
+- Dit stond woordelijk in `cc1/LEARNINGS.md` van **GSD_tagtoppers.py** ("*POSITIVE UNITS
+  with no case_value, query shows dimension as ROOT*") en is bij het overzetten naar de
+  dashboard-service niet meegenomen. Net als het per-shop Merchant Center id. **Bij het
+  porten van een script: loop de LEARNINGS van dat script na als checklist**, niet alleen
+  de code.
+
+## Voortgang per rij liegt als er weinig rijen met veel werk zijn (2026-08-07)
+
+De Toolmax-run was 2 rijen en 33.536 mutaties. De balk telde afgeronde rijen, stond dus
+minutenlang op 0/2, en Cancel deed niets zichtbaars omdat de cancel-vlag alleen vóór het
+starten van een rij werd gelezen — beide rijen liepen al. Beide klachten van Joep, beide
+dezelfde oorzaak: de eenheid van voortgang was te grof.
+
+- **Tel iets dat continu doorloopt** (hier: geschreven criteria) náást de grove eenheid.
+- **Claim geen percentage dat je niet hebt**: zolang 0 rijen klaar zijn krijgt de balk
+  `indeterminate` uit `style.css` — beweging zonder getal.
+- **Cancel moet grijpen op dezelfde korrel als het werk**, dus tussen mutatie-blokken en
+  niet alleen tussen rijen. Bij een add-only tool is halverwege stoppen veilig: de boom
+  blijft consistent en een volgende run vult aan.
+
 ## "Resource was not found" bij campagne-aanmaken = verkeerd Merchant Center id (2026-08-07)
 
 Alle 61 campagne-aanmaakpogingen in de grote GSD Tag Toppers-run faalden hierop. De melding
