@@ -186,11 +186,7 @@
                                         <th>Al aanwezig</th>
                                         <th>Toe te voegen</th>
                                         <th>Toegevoegd</th>
-                                        <th>Zusters</th>
-                                        <th>Ad groups</th>
                                         <th>Uit te sluiten</th>
-                                        <th>Uitgesloten</th>
-                                        <th>Negatives</th>
                                         <th>Status</th>
                                     </tr>
                                 </thead>
@@ -372,11 +368,7 @@ function renderTable() {
         '<td>' + esc(r.ids_already_present) + '</td>' +
         '<td>' + esc(r.ids_to_add) + '</td>' +
         '<td>' + esc(r.ids_added) + '</td>' +
-        '<td>' + esc(r.siblings) + '</td>' +
-        '<td>' + esc(r.sibling_ad_groups) + '</td>' +
         '<td>' + esc(r.exclusions_to_add) + '</td>' +
-        '<td>' + esc(r.exclusions_added) + '</td>' +
-        '<td>' + esc(r.negatives_copied) + '</td>' +
         '<td>' + badge(r) + (r.errors && r.errors.length
             ? ' <span title="' + esc(r.errors.join(' | ')) + '">&#9432;</span>' : '') + '</td>' +
         '</tr>').join('');
