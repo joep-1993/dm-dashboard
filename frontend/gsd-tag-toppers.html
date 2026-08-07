@@ -592,8 +592,7 @@ function renderRuns() {
         '<td>' + esc(fmtTime(r.started_at)) + '</td>' +
         '<td>' + (r.dry_run
             ? '<span class="badge lbl lbl-purple">Preview</span>'
-            : '<span class="badge lbl lbl-orange">Run</span>') +
-            (r.cancelled ? ' <span class="badge lbl lbl-amber">afgebroken</span>' : '') + '</td>' +
+            : '<span class="badge lbl lbl-orange">Run</span>') + '</td>' +
         '<td>' + esc(r.n_rows) + '</td>' +
         '<td>' + esc(r.total_ids) + '</td>' +
         '<td>' + esc(r.campaigns_to_create) + '</td>' +
