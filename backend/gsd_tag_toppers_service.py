@@ -765,6 +765,31 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
     return done, skipped, errors
 
 
+def _merchant_id_for_shop(client, customer_id: str, shop_id: str) -> Optional[int]:
+    """Het Merchant Center id dat de bestaande campagnes van deze shop gebruiken.
+
+    Elke shop heeft een EIGEN MC-subaccount; het id in COUNTRY_ACCOUNTS is de
+    parent en kan niet aan een campagne gehangen worden — dat geeft
+    "Resource was not found" bij het aanmaken. GSD_tagtoppers.py leest het daarom
+    ook uit een bestaande campagne (get_merchant_id_for_campaign).
+    """
+    ga = client.get_service("GoogleAdsService")
+    q = f"""
+        SELECT campaign.shopping_setting.merchant_id
+        FROM campaign
+        WHERE campaign.name LIKE '%shop_id:{shop_id}]%'
+          AND campaign.status != 'REMOVED'
+    """
+    try:
+        for row in ga.search(customer_id=customer_id, query=q):
+            mid = row.campaign.shopping_setting.merchant_id
+            if mid:
+                return int(mid)
+    except GoogleAdsException as ex:
+        logger.warning("MC-id lookup mislukt voor shop %s: %s", shop_id, _err(ex))
+    return None
+
+
 def _create_tag_toppers_campaign(client, customer_id: str, country: str,
                                  shop_id: str, shop_name: str) -> Tuple[Optional[dict], List[str]]:
     """Maakt een tag_toppers-campagne aan (PAUSED) met ad group, boomwortel en ad.
@@ -777,7 +802,10 @@ def _create_tag_toppers_campaign(client, customer_id: str, country: str,
     base_shop = _clean_shop_name(shop_name)
     campaign_name = (f"[shop:{base_shop}] [shop_id:{shop_id}] "
                      f"[channel:directshopping] [label:tag_toppers]")
-    mc_id = COUNTRY_ACCOUNTS[country]["mc_id"]
+    mc_id = _merchant_id_for_shop(client, customer_id, shop_id)
+    if mc_id is None:
+        return None, ["geen Merchant Center id gevonden bij de bestaande campagnes "
+                      "van deze shop — campagne niet aangemaakt"]
 
     budget_service = client.get_service("CampaignBudgetService")
     budget_op = client.get_type("CampaignBudgetOperation")
