@@ -40,17 +40,18 @@
         /* Alleen het bestandsveld is smaller; de kaart houdt de volle col-md-10,
            zodat hij even breed is als de resultatenkaart eronder. */
         #fileInput { max-width: 480px; }
-        /* Overgeslagen = stond er al. Geen fout, maar ook geen mutatie — vandaar
-           een eigen kleur naast groen (geland) en rood (mislukt). */
-        .badge.badge-skipped { background: #0f766e; color: #fff; }
-        /* Actie-labels in de uitklap: outlined, zoals de OOS/MANUAL-labels in
-           DMA Exclusions (badge bg-transparent fw-bold + rand in de tekstkleur).
-           Een eigen kleur per actie, zodat de kolom te scannen is. */
-        .act-label { background: transparent; font-weight: 700; border: 1px solid currentColor; }
-        .act-create  { color: #e8730c; }   /* oranje, als OOS in DMA Exclusions */
-        .act-ids     { color: #198754; }   /* groen: er komt iets bij */
-        .act-neg     { color: #0f766e; }
-        .act-exclude { color: #dc3545; }   /* rood: er wordt iets geblokkeerd */
+        /* Eén outlined label-vocabulaire voor beide tabellen, in de vorm van de
+           OOS/MANUAL-labels in DMA Exclusions: transparante achtergrond, vette
+           tekst, rand in de tekstkleur (currentColor, dus één regel per kleur). */
+        .lbl { background: transparent; font-weight: 700; border: 1px solid currentColor; }
+        .lbl-green  { color: #198754; }
+        .lbl-red    { color: #dc3545; }
+        .lbl-purple { color: #5e4a90; }
+        .lbl-teal   { color: #0f766e; }
+        .lbl-orange { color: #e8730c; }
+        /* Bootstrap's amber (#ffc107) is als rand en tekst op wit niet te lezen;
+           dit is dezelfde tint, donker genoeg voor contrast. */
+        .lbl-amber  { color: #b26a00; }
     </style>
 </head>
 <body>
@@ -404,9 +405,9 @@ function renderTable() {
     });
 
     const badge = (r) => {
-        if (r.status === 'ok') return '<span class="badge bg-success">ok</span>';
-        if (r.status === 'deels') return '<span class="badge bg-warning text-dark">deels</span>';
-        return '<span class="badge bg-danger">fout</span>';
+        if (r.status === 'ok') return '<span class="badge lbl lbl-green">ok</span>';
+        if (r.status === 'deels') return '<span class="badge lbl lbl-amber">deels</span>';
+        return '<span class="badge lbl lbl-red">fout</span>';
     };
     document.getElementById('resultsBody').innerHTML = rows.map(r =>
         '<tr id="tt-row-' + r.excel_row + '" style="cursor:pointer;"' +
@@ -418,8 +419,8 @@ function renderTable() {
         '<td>' + esc(r.country) + '</td>' +
         '<td>' + esc(r.n_ids) + '</td>' +
         '<td>' + (r.campaign_action === 'aanmaken'
-            ? '<span class="badge bg-warning text-dark">aanmaken</span>'
-            : '<span class="badge bg-primary">bestaat</span>') + '</td>' +
+            ? '<span class="badge lbl lbl-amber">aanmaken</span>'
+            : '<span class="badge lbl lbl-purple">bestaat</span>') + '</td>' +
         '<td>' + esc(r.siblings) + '</td>' +
         '<td>' + esc(r.ids_already_present) + '</td>' +
         '<td>' + esc(r.ids_to_add) + '</td>' +
@@ -464,22 +465,22 @@ function openDetail(excelRow) {
     }
 
     const pill = (t) => {
-        if (t.status === 'ok')            return '<span class="badge bg-success">gelukt</span>';
-        if (t.status === 'overgeslagen')  return '<span class="badge badge-skipped">overgeslagen</span>';
-        if (t.status === 'deels')         return '<span class="badge bg-warning text-dark">deels</span>';
-        if (t.status === 'gepland')       return '<span class="badge bg-primary">gepland</span>';
-        return '<span class="badge bg-danger">mislukt</span>';
+        if (t.status === 'ok')            return '<span class="badge lbl lbl-green">gelukt</span>';
+        if (t.status === 'overgeslagen')  return '<span class="badge lbl lbl-teal">overgeslagen</span>';
+        if (t.status === 'deels')         return '<span class="badge lbl lbl-amber">deels</span>';
+        if (t.status === 'gepland')       return '<span class="badge lbl lbl-purple">gepland</span>';
+        return '<span class="badge lbl lbl-red">mislukt</span>';
     };
     const ACT_CLASS = {
-        'campagne aanmaken': 'act-create',
-        'toevoegen': 'act-ids',
-        'negatives overnemen': 'act-neg',
-        'uitsluiten': 'act-exclude',
+        'campagne aanmaken': 'lbl-orange',
+        'toevoegen': 'lbl-green',
+        'negatives overnemen': 'lbl-teal',
+        'uitsluiten': 'lbl-red',
     };
     const body = targets.map(t =>
         '<tr>' +
         '<td style="text-align:left; padding:8px 18px;">' +
-            '<span class="badge act-label ' + (ACT_CLASS[t.kind] || 'act-ids') + '">' +
+            '<span class="badge lbl ' + (ACT_CLASS[t.kind] || 'lbl-purple') + '">' +
             esc(t.kind) + '</span></td>' +
         // Geen ad-group id: deze campagnes hebben er precies één, dus het voegt
         // niets toe aan de campagnenaam.
