@@ -31,18 +31,12 @@
         .pagination-controls select { font-size: 0.85rem; width: auto; }
         .pagination-controls .page-info { color: #636e72; }
         .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
-        /* Samenvattingstegels. Elke metriek een eigen verzadigde kleur — geen grijs,
-           want dat leest als uitgeschakelde chrome (zie UI_BLUEPRINT "niet grijs").
-           Bootstrap's .bg-info/.bg-secondary-subtle zijn in style.css juist grijs
-           gethemed, dus die zijn hier bewust niet gebruikt. */
-        .sum-badge { display: inline-block; margin: 0 0.5rem 0.5rem 0; padding: 0.35rem 0.7rem;
-                     border-radius: 6px; font-size: 0.85rem; color: #fff; }
-        .sum-amber  { background: #b26a00; }
-        .sum-purple { background: #5e4a90; }
-        .sum-teal   { background: #0f766e; }
-        .sum-blue   { background: #1d4ed8; }
-        .sum-green  { background: #198754; }
-        .sum-red    { background: #b02a37; }
+        /* Samenvatting gebruikt de gedeelde .mini-stat-card uit style.css — zelfde
+           tegel als de andere tools: wit, gecentreerd, paars getal, grijs kapitaal
+           label. Alleen het foutental wijkt af en wordt rood zodra het niet 0 is;
+           dat is het enige cijfer waar een kleur iets betekent. */
+        #summaryRow { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+        #summaryRow .mini-stat-card .num.has-errors { color: #b02a37; }
     </style>
 </head>
 <body>
@@ -187,6 +181,7 @@
                                         <th>Toe te voegen</th>
                                         <th>Toegevoegd</th>
                                         <th>Uit te sluiten</th>
+                                        <th>Uitgesloten</th>
                                         <th>Status</th>
                                     </tr>
                                 </thead>
@@ -321,14 +316,15 @@ async function loadResults() {
     const s = j.summary || {};
     const errs = s.errors || 0;
     document.getElementById('summaryRow').innerHTML = [
-        ['Campagnes aan te maken', s.campaigns_to_create, 'sum-amber'],
-        [DRY ? 'Ids toe te voegen' : 'Ids toegevoegd', DRY ? s.ids_to_add : s.ids_added, 'sum-purple'],
-        [DRY ? 'Uitsluitingen te maken' : 'Uitsluitingen gemaakt', DRY ? s.exclusions_to_add : s.exclusions_added, 'sum-teal'],
-        [DRY ? 'Negatives over te nemen' : 'Negatives overgenomen', s.negatives_copied, 'sum-blue'],
-        // Fouten zijn het enige dat van kleur wisselt: rood zodra er ook maar één is.
-        ['Rijen met fouten', errs, errs ? 'sum-red' : 'sum-green'],
-    ].map(([k, v, cls]) => '<span class="sum-badge ' + cls + '">' +
-        k + ': <strong>' + (v || 0) + '</strong></span>').join('');
+        ['Campagnes aan te maken', s.campaigns_to_create, false],
+        [DRY ? 'Ids toe te voegen' : 'Ids toegevoegd', DRY ? s.ids_to_add : s.ids_added, false],
+        [DRY ? 'Uitsluitingen te maken' : 'Uitsluitingen gemaakt', DRY ? s.exclusions_to_add : s.exclusions_added, false],
+        [DRY ? 'Negatives over te nemen' : 'Negatives overgenomen', s.negatives_copied, false],
+        ['Rijen met fouten', errs, errs > 0],
+    ].map(([k, v, red]) =>
+        '<div class="mini-stat-card">' +
+        '<div class="num' + (red ? ' has-errors' : '') + '">' + (v || 0) + '</div>' +
+        '<div class="label">' + k + '</div></div>').join('');
 
     if (!document.getElementById('doneBanner').textContent) {
         const b = document.getElementById('doneBanner');
@@ -369,6 +365,7 @@ function renderTable() {
         '<td>' + esc(r.ids_to_add) + '</td>' +
         '<td>' + esc(r.ids_added) + '</td>' +
         '<td>' + esc(r.exclusions_to_add) + '</td>' +
+        '<td>' + esc(r.exclusions_added) + '</td>' +
         '<td>' + badge(r) + (r.errors && r.errors.length
             ? ' <span title="' + esc(r.errors.join(' | ')) + '">&#9432;</span>' : '') + '</td>' +
         '</tr>').join('');
