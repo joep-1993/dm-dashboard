@@ -43,6 +43,11 @@ ook add-only.
       backend-wijziging vereist een handmatige herstart en wiste tot nu toe de hele runstand.
 - [x] **Uitklapbare rijen** met de mutaties per campagne, in de opmaak van DMA Exclusions.
       Status per mutatie: gelukt / overgeslagen / deels / gepland / mislukt.
+- [x] **UI-ronde na Joep's testsessie** (7 aug, ~15 iteraties): Preview/Run in plaats van
+      Dry run/Voor het echt draaien, uitleg onder "i"-knoppen, één pad van Excel upload naar
+      Preview met Run in de resultatenkop, sorteerbare kolommen, tabel die zich tijdens een run
+      vult (Refresh weg), en alle labels outlined in één `.lbl`-vocabulaire. Actienamen kort
+      gehouden: aanmaken / toevoegen / negatives / uitsluiten.
 - [ ] **Open: het volume van een volledige run.** Toolmax NL alleen is 2096 ids ×
       8 containerplekken = 16.768 uitsluitingen; over alle 622 rijen loopt dat hard op.
       Preview geeft het totaal vóór er iets geschreven wordt — kijk daar eerst naar.

@@ -70,6 +70,14 @@ Bij het toevoegen van **Recent runs** aan GSD Tag Toppers, beide kosten een debu
   ook een `<svg>` bevat, wist die svg. De "i"-tooltip in de resultatenkop verdween dus zodra er
   resultaten binnenkwamen. Zet de tekst in een eigen `<span>` en target die.
 
+**Terzijde over het bouwproces:** deze tool kreeg na oplevering ~15 kleine UI-correcties op rij
+(labels, kleuren, kolommen, breedtes). Twee dingen die dat goedkoop hielden: het label-vocabulaire
+in één `.lbl`-klasse in plaats van per plek een kleur, en de actienamen als `kind`-string in de
+**backend** hernoemen in plaats van in de frontend te mappen — zo is er één naam per actie en
+kan een label niet uit de pas gaan lopen met wat de code doet. Wat het duur maakte: elke
+backend-wijziging vraagt een handmatige herstart (geen `--reload` op :8003), dus verzamel
+backend-aanpassingen voordat je herstart.
+
 ## `validate_only` bewijst de vórm van een mutatie, niet dat hij landt — en het ziet géén duplicaten (2026-08-07)
 
 Bij het bouwen van **GSD Tag Toppers** was de vraag hoe je een schrijfpad test als alles al in

@@ -990,11 +990,11 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 client, customer_id, country, row["shop_id"], row["shop_name"])
             res["errors"].extend(errs)
             if created is None:
-                target("campagne aanmaken", res["campaign_name"], 1, 0, errors=errs)
+                target("aanmaken", res["campaign_name"], 1, 0, errors=errs)
                 res["status"] = "fout"
                 return res
             res["campaign_name"] = created["name"]
-            target("campagne aanmaken", created["name"], 1, 1, errors=errs, note="PAUSED")
+            target("aanmaken", created["name"], 1, 1, errors=errs, note="PAUSED")
             added, skipped, errs2 = _apply_tag_toppers_adds(
                 client, customer_id, created["ad_group_id"], created["root_resource"], item_ids)
             res["ids_added"] = added
@@ -1006,16 +1006,16 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                                            created["id"], source)
                 res["negatives_copied"] = n
                 res["errors"].extend(errs3)
-                target("negatives overnemen", created["name"], n, n, errors=errs3,
-                       note=f"bron: {source['name']}")
+                # Geen "bron: <campagnenaam>" in de note: die naam is bijna even lang
+                # als de rij zelf en de zuster is al af te leiden uit de shop.
+                target("negatives", created["name"], n, n, errors=errs3)
         else:
-            target("campagne aanmaken", res["campaign_name"], 1, 0, note="PAUSED")
+            target("aanmaken", res["campaign_name"], 1, 0, note="PAUSED")
             target("toevoegen", res["campaign_name"], len(item_ids), 0)
             if source:
                 src_negs = _fetch_campaign_negatives(client, customer_id, source["id"])
                 res["negatives_copied"] = len(src_negs)
-                target("negatives overnemen", res["campaign_name"], len(src_negs), 0,
-                       note=f"bron: {source['name']}")
+                target("negatives", res["campaign_name"], len(src_negs), 0)
     else:
         res["campaign_action"] = "bestaat"
         res["campaign_name"] = tt["name"]
