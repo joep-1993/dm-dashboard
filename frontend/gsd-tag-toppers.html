@@ -619,7 +619,11 @@ function openDetail(excelRow) {
 
     row.insertAdjacentHTML('afterend',
         '<tr id="tt-detail-' + excelRow + '"><td colspan="' + cols + '" class="bg-light py-2">' +
-        '<div class="px-3 py-3" style="text-align:center;">' +
+        // overflow-x:auto op een eigen wrapper: de uitklaptabel hangt in een cel van
+        // de hoofdtabel en had daardoor geen eigen scrollbaar gebied meer toen die
+        // hoofdtabel smal genoeg werd om zelf niet meer te scrollen. auto = de balk
+        // verschijnt alleen als de inhoud écht breder is.
+        '<div class="px-3 py-3" style="text-align:center; overflow-x:auto;">' +
         '<table class="table table-bordered bg-white mb-0 small" ' +
         'style="width:80%; min-width:520px; margin:0 auto;">' +
         '<thead><tr>' +
