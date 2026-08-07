@@ -1308,31 +1308,37 @@ def _save_run(*, started_at, finished_at, dry_run, cancelled, filename,
         logger.error("Kon de run niet vastleggen: %s", ex)
 
 
-# Alleen de velden die de resultatentabel toont — de per-campagne targets blijven
-# eruit, anders wordt de opgeslagen JSON een veelvoud groter zonder dat de export
-# er iets mee doet.
-_EXPORT_FIELDS = ("excel_row", "shop_name", "shop_id", "country", "n_ids",
-                  "campaign_action", "campaign_name", "siblings",
-                  "ids_already_present", "ids_to_add", "ids_added",
-                  "exclusions_to_add", "exclusions_added", "negatives_copied",
-                  "status")
-
-
+# De volledige rijen, inclusief `targets` — die zijn de inhoud van de uitklap, dus
+# zonder hen kan een oude run niet teruggezet worden in het resultatenscherm. Kost
+# ruwweg 1-2 MB JSONB per run van 620 rijen; JSONB comprimeert dat verder.
 def _export_rows(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [{k: r.get(k) for k in _EXPORT_FIELDS} for r in results]
+    return results
 
 
-def get_run_results(run_id: int) -> Optional[List[Dict[str, Any]]]:
-    """De opgeslagen rijen van één run; None als de run niet bestaat."""
+def get_run_detail(run_id: int) -> Optional[Dict[str, Any]]:
+    """Rijen + samenvatting van één run; None als de run niet bestaat.
+
+    Genoeg om het resultatenscherm precies terug te zetten zoals het na die run was.
+    """
     _ensure_runs_table()
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT results FROM gsd_tag_toppers_runs WHERE id = %s", (run_id,))
+            cur.execute("""
+                SELECT results, summary, dry_run, started_at
+                FROM gsd_tag_toppers_runs WHERE id = %s
+            """, (run_id,))
             row = cur.fetchone()
             if row is None:
                 return None
-            return dict(row).get("results") or []
+            rec = dict(row)
+            started = rec.get("started_at")
+            return {
+                "results": rec.get("results") or [],
+                "summary": rec.get("summary") or {},
+                "dry_run": bool(rec.get("dry_run")),
+                "started_at": started.isoformat() if hasattr(started, "isoformat") else started,
+            }
     finally:
         return_db_connection(conn)
 

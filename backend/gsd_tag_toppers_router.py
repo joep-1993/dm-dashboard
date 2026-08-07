@@ -12,7 +12,7 @@ from backend.gsd_tag_toppers_service import (
     cancel_run,
     get_progress,
     get_results,
-    get_run_results,
+    get_run_detail,
     get_runs,
     get_uploaded,
     parse_workbook,
@@ -106,9 +106,10 @@ async def runs(limit: int = 100):
 
 @router.get("/runs/{run_id}/results")
 async def run_results(run_id: int):
-    """De rijen van één run, voor de export. Runs van vóór deze feature hebben
-    er geen; die geven een lege lijst in plaats van een 404."""
-    rows = get_run_results(run_id)
-    if rows is None:
+    """Rijen + samenvatting van één run, voor de export en om hem terug te zetten
+    in het resultatenscherm. Runs van vóór deze feature hebben geen rijen; die
+    geven een lege lijst in plaats van een 404."""
+    detail = get_run_detail(run_id)
+    if detail is None:
         raise HTTPException(status_code=404, detail="Run niet gevonden")
-    return {"run_id": run_id, "results": rows}
+    return {"run_id": run_id, **detail}

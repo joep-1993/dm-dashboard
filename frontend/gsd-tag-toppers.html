@@ -179,7 +179,9 @@
                             <span id="resultsTitle">Resultaten</span>
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="runTip">Preview leest alleen en schrijft niets. Run maakt ontbrekende tag_toppers-campagnes aan (PAUSED), zet de product ids erin en sluit ze uit in alle niet-REMOVED zustercampagnes. Alles is add-only: bestaande ids en uitsluitingen blijven staan.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
                         </h5>
-                        <button class="btn btn-sm btn-run ms-auto" id="realBtn" onclick="startRun(false)" disabled>Run</button>
+                        <button class="btn btn-sm btn-outline-purple ms-auto" id="backToLatest"
+                                onclick="backToLatest()" style="display:none;">&#8592; Naar de laatste run</button>
+                        <button class="btn btn-sm btn-run" id="realBtn" onclick="startRun(false)" disabled>Run</button>
                     </div>
                     <div class="card-body">
                         <div id="summaryRow" class="mb-3"></div>
@@ -270,6 +272,8 @@ let HAS_DRY_RUN = false;
 let OPEN_DETAIL = null;
 // Actief tegelfilter, of null. De tegels vervangen de oude statusdropdown.
 let TILE_FILTER = null;
+// Id van de run die je uit de historie bekijkt, of null als dit de laatste run is.
+let VIEWING_RUN = null;
 let SORT_KEY = null;
 let SORT_DIR = 1;   // 1 = oplopend, -1 = aflopend
 let currentPage = 1;
@@ -368,9 +372,9 @@ function pollProgress() {
                 clearInterval(POLL); POLL = null;
                 document.getElementById('progressArea').style.display = 'none';
                 document.getElementById('dryBtn').disabled = false;
-                await loadResults();
+                if (!VIEWING_RUN) await loadResults();
                 if (p.dry_run) HAS_DRY_RUN = true;
-                document.getElementById('realBtn').disabled = !HAS_DRY_RUN;
+                document.getElementById('realBtn').disabled = !HAS_DRY_RUN || !!VIEWING_RUN;
                 // Alleen hier, want dit is de enige plek die wéét dat er zojuist een
                 // run is afgelopen. loadResults() draait ook bij het openen van de
                 // pagina en zou dan een "klaar"-melding tonen voor iets wat niet liep.
@@ -379,10 +383,11 @@ function pollProgress() {
                 b.textContent = (p.dry_run ? 'Preview klaar' : 'Run klaar') +
                     ' — ' + RESULTS.length + ' rijen verwerkt.';
                 loadRuns();   // de zojuist afgeronde run staat nu in de DB
-            } else if (++POLL_TICK % 4 === 0) {
+            } else if (++POLL_TICK % 4 === 0 && !VIEWING_RUN) {
                 // De backend schrijft elke afgeronde rij meteen weg, dus haal de
                 // tussenstand op. Elke 4e tick (~6s) in plaats van elke tick: de hele
                 // tabel hertekenen bij 622 rijen is te duur om elke 1,5s te doen.
+                // Niet terwijl je een oude run bekijkt — dat zou je weergave overschrijven.
                 await loadResults();
             }
         } catch (e) { /* poll faalt stil; volgende tick probeert opnieuw */ }
@@ -402,7 +407,11 @@ async function loadResults() {
     document.getElementById('resultsTitle').textContent =
         DRY ? 'Preview-resultaten' : 'Run-resultaten';
 
-    const s = j.summary || {};
+    renderTiles(j.summary || {});
+    renderTable();
+}
+
+function renderTiles(s) {
     const errs = s.errors || 0;
     document.getElementById('summaryRow').innerHTML = [
         ['Campagnes aan te maken', s.campaigns_to_create, false, 'campagne'],
@@ -415,8 +424,48 @@ async function loadResults() {
         ' onclick="toggleTile(\'' + key + '\')" title="Klik om de tabel hierop te filteren">' +
         '<div class="num' + (red ? ' has-errors' : '') + '">' + (v || 0) + '</div>' +
         '<div class="label">' + k + '</div></div>').join('');
+}
 
-    renderTable();
+// Zet een run uit de historie terug in het resultatenscherm. Run blijft daarbij
+// uit: die knop hoort bij de huidige upload, niet bij wat je aan het bekijken bent.
+async function viewRun(runId) {
+    try {
+        const r = await fetch('/api/gsd-tag-toppers/runs/' + runId + '/results');
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail || 'Ophalen mislukt');
+        if (!(j.results || []).length) {
+            alert('Deze run heeft geen opgeslagen rijen. Runs van vóór deze functie ' +
+                  'bewaarden alleen de samenvatting.');
+            return;
+        }
+        VIEWING_RUN = runId;
+        RESULTS = j.results;
+        DRY = j.dry_run;
+        TILE_FILTER = null;
+        OPEN_DETAIL = null;
+        currentPage = 1;
+        document.getElementById('resultsCard').style.display = 'block';
+        document.getElementById('resultsTitle').textContent =
+            (DRY ? 'Preview-resultaten' : 'Run-resultaten') + ' — run #' + runId +
+            ' van ' + fmtTime(j.started_at);
+        document.getElementById('backToLatest').style.display = '';
+        document.getElementById('realBtn').disabled = true;
+        renderTiles(j.summary || {});
+        renderTable();
+        document.getElementById('resultsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+        alert('Fout: ' + e.message);
+    }
+}
+
+async function backToLatest() {
+    VIEWING_RUN = null;
+    TILE_FILTER = null;
+    OPEN_DETAIL = null;
+    currentPage = 1;
+    document.getElementById('backToLatest').style.display = 'none';
+    await loadResults();
+    document.getElementById('realBtn').disabled = !HAS_DRY_RUN;
 }
 
 // Klik op een kop sorteert; nog een klik draait de richting om.
@@ -694,7 +743,8 @@ function renderRuns() {
     });
     document.getElementById('runsEmpty').style.display = rows.length ? 'none' : 'block';
     document.getElementById('runsBody').innerHTML = rows.map(r =>
-        '<tr>' +
+        '<tr style="cursor:pointer;" onclick="viewRun(' + r.id + ')"' +
+        ' title="Klik om deze run terug te zien in het resultatenscherm">' +
         '<td>' + esc(fmtTime(r.started_at)) + '</td>' +
         '<td>' + (r.dry_run
             ? '<span class="badge lbl lbl-purple">Preview</span>'
@@ -707,7 +757,7 @@ function renderRuns() {
         '<td>' + (r.rows_with_errors
             ? '<span class="badge lbl lbl-red">' + r.rows_with_errors + '</span>'
             : '<span class="badge lbl lbl-green">0</span>') + '</td>' +
-        '<td><button class="btn btn-sm btn-outline-orange" onclick="exportRun(' + r.id + ')">Export</button></td>' +
+        '<td><button class="btn btn-sm btn-outline-orange" onclick="event.stopPropagation(); exportRun(' + r.id + ')">Export</button></td>' +
         '</tr>').join('');
 }
 
