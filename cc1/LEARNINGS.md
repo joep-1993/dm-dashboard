@@ -1,6 +1,75 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Zonder `partial_failure` kost één afgekeurde operatie het hele blok (2026-08-07)
+
+De eerste echte run van **GSD Tag Toppers** (2 rijen) gaf 4/4 ids maar 32/35 uitsluitingen, en
+een latere run een muur van rode "mislukt" met *"Listing group cannot be added to the ad group
+because it already exists."* Dat leek een cosmetisch probleem en waren drie losse bugs.
+
+- **`LISTING_GROUP_ALREADY_EXISTS` is geen fout maar een no-op.** De node stond er al, wat bij
+  een add-only tool het gewenste eindresultaat is. Het verdient een eigen status
+  (`overgeslagen`), niet rood — anders wordt een geslaagde run als mislukt gelezen.
+- **De planner telde alleen NEGATIEVE item-id kinderen mee.** Google staat maar één node per
+  case value toe, **ongeacht de negative-vlag**, dus een id dat er al positief hing werd opnieuw
+  gepland en botste. Bij het plannen van uitsluitingen moet je dus álle bestaande item-id
+  kinderen uitsluiten, niet alleen de negatieve. Zelfde aan de andere kant: een id dat negatief
+  onder een tag_toppers-root hangt kan er niet positief bij.
+- **De echte schade zat in het ontbreken van `partial_failure`.** `mutate_ad_group_criteria`
+  zonder die vlag is alles-of-niets: één "bestaat al" tussen 1000 operaties gooide de andere 999
+  weg. Er ging dus werk verloren dat als "deels" gerapporteerd werd zonder dat iemand kon zien
+  wát. Bouw een `MutateAdGroupCriteriaRequest` met `partial_failure=True` en splits de respons
+  uit in geland / overgeslagen / fout — `partial_failure_error.details` deserialiseren naar
+  `GoogleAdsFailure` en per `operations`-index terugmappen.
+- **`CONCURRENT_MODIFICATION` is transient en hoort een retry te hebben.** Een convert direct na
+  de appends op dezelfde ad group faalt met *"Multiple requests were attempting to modify the
+  same resource at once."* De LEARNINGS van `GSD_tagtoppers.py` beschreven dit al ("wait 3+
+  seconds between delete and create"); ik had het niet ingebouwd. Nu vier pogingen met
+  exponentiële backoff vanaf 2s, alléén op deze foutsoort.
+- **Een totaal per rij verbergt waar het misgaat.** "32 van de 35" zegt niets zonder de plek.
+  De uitklap per campagne (gepland / geland / stond er al / fout) maakte alle drie de bugs in
+  één oogopslag zichtbaar; daarvóór waren het onverklaarbare rode rijen.
+
+## `style.css` themet Bootstrap's kleurnamen grijs — gebruik ze niet voor labels (2026-08-07)
+
+Joep: de badge "2 rijen" (`badge bg-success`) is lichtgrijs en nauwelijks te zien. Zijn
+screenshot van de inspector was beslissend: Bootstrap's `.bg-success` uit `_utilities.scss`
+staat **doorgestreept**, dus de grijze regel wint.
+
+- **`style.css` zet `.bg-success`, `.bg-info` en `.bg-primary:not(.navbar)` op
+  `var(--color-section)`** — lichtgrijs. Er staat wel een `.badge.bg-success { #198754 !important }`
+  naast, maar die kwam blijkens de inspector niet aan. Op papier heeft die hogere specificiteit;
+  in de praktijk dus niet te vertrouwen.
+- **Dezelfde val trof eerder dezelfde dag `.badge.bg-info`**, dat een onzichtbare grijze
+  "bestaat"-badge opleverde. Twee keer in één dag, twee verschillende ontwikkelaars-momenten.
+- **Doe het pagina-lokaal.** Een eigen `.lbl`-klasse (transparante achtergrond, vette tekst,
+  `border: 1px solid currentColor`) plus één `color`-regel per kleur is onafhankelijk van wat
+  `style.css` met de Bootstrap-namen doet, en levert meteen de outlined stijl van de
+  OOS/MANUAL-labels in DMA Exclusions.
+- **Let op bij het omzetten van gevuld naar outlined:** Bootstrap's amber `#ffc107` is prima als
+  vlak met donkere tekst, maar als rand-en-tekst op wit onleesbaar. Dezelfde tint donkerder
+  (`#b26a00`) houdt de betekenis en wint het contrast.
+- **`btn-outline-danger` rendert oranje.** `style.css` themet ook die naam
+  (`var(--color-button)`). Rood is `.btn-outline-red`. De knoppentabel in UI_BLUEPRINT noemde
+  bij Stop/Remove/Cancel nog `btn-outline-danger` terwijl de sectie eronder het tegendeel
+  uitlegde; die tabelregel is nu gecorrigeerd. **Ik ben er zelf ingetrapt door de tabel te
+  volgen** — als twee plekken in dezelfde doc elkaar tegenspreken, repareer de doc.
+
+## Twee valkuilen bij het opslaan en tonen van run-historie (2026-08-07)
+
+Bij het toevoegen van **Recent runs** aan GSD Tag Toppers, beide kosten een debugronde:
+
+- **De connection-pool levert een `RealDictCursor`.** Rijen zijn dus al dicts; het gebruikelijke
+  `dict(zip([d[0] for d in cur.description], row))` zet dan de kolom**namen** als waarden neer.
+  Het viel pas op bij `'str' object has no attribute 'isoformat'`. Gebruik `dict(row)`.
+- **Tijden naive UTC opslaan en pas in de browser omrekenen.** De shared Postgres draait
+  `Etc/UTC`; `datetime.now(timezone.utc).replace(tzinfo=None)` erin, en in JS `+ "Z"` vóór
+  `new Date()` en dan `toLocaleString('sv-SE', {timeZone:'Europe/Amsterdam'})`. Zonder die "Z"
+  leest JS de offset-loze string als lokale tijd en staat alles in de zomer 2 uur te vroeg.
+- **En een derde, buiten de historie:** `element.textContent = ...` op een `<h5>` die naast tekst
+  ook een `<svg>` bevat, wist die svg. De "i"-tooltip in de resultatenkop verdween dus zodra er
+  resultaten binnenkwamen. Zet de tekst in een eigen `<span>` en target die.
+
 ## `validate_only` bewijst de vórm van een mutatie, niet dat hij landt — en het ziet géén duplicaten (2026-08-07)
 
 Bij het bouwen van **GSD Tag Toppers** was de vraag hoe je een schrijfpad test als alles al in

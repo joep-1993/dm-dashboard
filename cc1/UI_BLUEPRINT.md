@@ -345,6 +345,27 @@ The class is declared **once** in `css/style.css`; never re-declare it per page
 (it was duplicated verbatim in seo-stats / healthscore / shop-campaigns before
 being consolidated). In use in SEO stats, Healthscore, Shop-campaigns, Thema Ads.
 
+## Labels / badges — never lean on Bootstrap's colour names
+
+`style.css` re-themes `.bg-success`, `.bg-info` and `.bg-primary:not(.navbar)` to
+`var(--color-section)` — **light grey**. There are `.badge.bg-*` rules that put the
+colour back, but they are not reliable: an inspector screenshot on 2026-08-07 showed
+Bootstrap's `.bg-success` struck through and the badge rendering grey anyway. The same
+trap produced an invisible `.badge.bg-info` on the same page earlier that day.
+
+For a label with a colour that has to survive, use a **page-local class**, and prefer
+the outlined form used by the OOS / MANUAL labels in DMA Exclusions:
+
+```css
+.lbl { background: transparent; font-weight: 700; border: 1px solid currentColor; }
+.lbl-green { color: #198754; }   /* one color rule per colour — the border follows */
+```
+
+Two notes when converting filled badges to outlined: Bootstrap's amber `#ffc107` is
+readable as a fill with dark text but **not** as border-and-text on white (use `#b26a00`,
+same hue, enough contrast), and `.badge` itself sets `color:#fff`, so your `.lbl-*` rule
+must load after Bootstrap — a page `<style>` block does.
+
 ## Info tooltips — the "i" button
 
 For a "what is this?" hint next to a header or field, use the inline

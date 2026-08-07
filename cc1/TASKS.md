@@ -30,10 +30,25 @@ ook add-only.
       geweest en vraagt daarna nog een bevestiging; `POST /run` weigert zonder `confirm=true`.
       Uitleg onder "i"-knoppen per UI_BLUEPRINT. Nav toegevoegd aan alle 34 pagina's
       (A-Z tussen GSD Check en MC ID Finder).
-- [ ] **Eerste echte run staat nog open.** Campagne-aanmaken en de daadwerkelijke schrijfacties
-      zijn het enige dat niet te valideren viel zonder ze uit te voeren — `validate_only` dekt
-      de vorm van elke mutatie, niet het landen ervan. Begin met een handvol rijen en lees terug.
-      Let op het volume: Toolmax NL alleen is 2096 ids × 8 containerplekken = 16.768 uitsluitingen.
+- [x] **Eerste echte run gedraaid** (Joep, 2 rijen): 4/4 ids toegevoegd, 32/35 uitsluitingen.
+      Het add-only schrijfpad doet wat het moet — dat was het enige dat `validate_only` niet
+      kon aantonen. De drie missers waren één `CONCURRENT_MODIFICATION` op een convert.
+- [x] **Drie bugs die die run blootlegde**, alle drie gefixt (zie LEARNINGS):
+      geen retry op CONCURRENT_MODIFICATION; de planner telde alleen NEGATIEVE item-ids mee
+      waardoor al bestaande nodes opnieuw werden gepland; en de mutates draaiden zonder
+      `partial_failure`, zodat één afgekeurde operatie een blok van maximaal 1000 sloopte.
+- [x] **`Recent runs`** — tabel `gsd_tag_toppers_runs` in Postgres, gevuld aan het eind van elke
+      run (datum, type, bestand, rijen, gepland vs geland, fouten, duur). 13 sorteerbare kolommen.
+      Geverifieerd dat het een herstart overleeft; dat is hier geen luxe, want elke
+      backend-wijziging vereist een handmatige herstart en wiste tot nu toe de hele runstand.
+- [x] **Uitklapbare rijen** met de mutaties per campagne, in de opmaak van DMA Exclusions.
+      Status per mutatie: gelukt / overgeslagen / deels / gepland / mislukt.
+- [ ] **Open: het volume van een volledige run.** Toolmax NL alleen is 2096 ids ×
+      8 containerplekken = 16.768 uitsluitingen; over alle 622 rijen loopt dat hard op.
+      Preview geeft het totaal vóór er iets geschreven wordt — kijk daar eerst naar.
+- [ ] **Open: rijen met een mislukte mutate opnieuw draaien.** Door de ontbrekende
+      `partial_failure` is er in de runs van 7 aug echt werk niet geland. Add-only, dus
+      Run opnieuw draaien vult alleen het gat.
 
 ### 2026-08-06 — Bot Hits: crawler-log dashboard (nieuw)
 

@@ -222,17 +222,12 @@
                                     <tr>
                                         <th class="sortable" data-sort="started_at" onclick="sortRunsBy('started_at')">Datum</th>
                                         <th class="sortable" data-sort="dry_run" onclick="sortRunsBy('dry_run')">Type</th>
-                                        <th class="sortable" data-sort="filename" onclick="sortRunsBy('filename')">Bestand</th>
                                         <th class="sortable" data-sort="n_rows" onclick="sortRunsBy('n_rows')">Rijen</th>
                                         <th class="sortable" data-sort="total_ids" onclick="sortRunsBy('total_ids')">Ids</th>
                                         <th class="sortable" data-sort="campaigns_to_create" onclick="sortRunsBy('campaigns_to_create')">Campagnes</th>
-                                        <th class="sortable" data-sort="ids_planned" onclick="sortRunsBy('ids_planned')">Ids gepland</th>
                                         <th class="sortable" data-sort="ids_added" onclick="sortRunsBy('ids_added')">Ids geland</th>
-                                        <th class="sortable" data-sort="exclusions_planned" onclick="sortRunsBy('exclusions_planned')">Uitsl. gepland</th>
                                         <th class="sortable" data-sort="exclusions_added" onclick="sortRunsBy('exclusions_added')">Uitsl. geland</th>
-                                        <th class="sortable" data-sort="negatives_copied" onclick="sortRunsBy('negatives_copied')">Negatives</th>
                                         <th class="sortable" data-sort="rows_with_errors" onclick="sortRunsBy('rows_with_errors')">Fouten</th>
-                                        <th class="sortable" data-sort="duration" onclick="sortRunsBy('duration')">Duur</th>
                                     </tr>
                                 </thead>
                                 <tbody id="runsBody"></tbody>
@@ -569,19 +564,6 @@ function fmtTime(iso) {
     return d.toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' }).slice(0, 16);
 }
 
-function runDuration(r) {
-    if (!r.started_at || !r.finished_at) return null;
-    const a = new Date(r.started_at + 'Z'), b = new Date(r.finished_at + 'Z');
-    return Math.max(0, Math.round((b - a) / 1000));
-}
-
-function fmtDuration(secs) {
-    if (secs === null) return '—';
-    if (secs < 60) return secs + 's';
-    const m = Math.floor(secs / 60), s = secs % 60;
-    return m + 'm ' + String(s).padStart(2, '0') + 's';
-}
-
 function sortRunsBy(key) {
     if (RUNS_SORT === key) { RUNS_DIR = -RUNS_DIR; } else { RUNS_SORT = key; RUNS_DIR = 1; }
     renderRuns();
@@ -591,7 +573,7 @@ async function loadRuns() {
     try {
         const r = await fetch('/api/gsd-tag-toppers/runs');
         const j = await r.json();
-        RUNS = (j.runs || []).map(x => Object.assign({}, x, { duration: runDuration(x) }));
+        RUNS = j.runs || [];
         renderRuns();
     } catch (e) { /* lege staat is prima */ }
 }
@@ -612,19 +594,14 @@ function renderRuns() {
             ? '<span class="badge lbl lbl-purple">Preview</span>'
             : '<span class="badge lbl lbl-orange">Run</span>') +
             (r.cancelled ? ' <span class="badge lbl lbl-amber">afgebroken</span>' : '') + '</td>' +
-        '<td>' + esc(r.filename || '—') + '</td>' +
         '<td>' + esc(r.n_rows) + '</td>' +
         '<td>' + esc(r.total_ids) + '</td>' +
         '<td>' + esc(r.campaigns_to_create) + '</td>' +
-        '<td>' + esc(r.ids_planned) + '</td>' +
         '<td>' + esc(r.ids_added) + '</td>' +
-        '<td>' + esc(r.exclusions_planned) + '</td>' +
         '<td>' + esc(r.exclusions_added) + '</td>' +
-        '<td>' + esc(r.negatives_copied) + '</td>' +
         '<td>' + (r.rows_with_errors
             ? '<span class="badge lbl lbl-red">' + r.rows_with_errors + '</span>'
             : '<span class="badge lbl lbl-green">0</span>') + '</td>' +
-        '<td>' + esc(fmtDuration(r.duration)) + '</td>' +
         '</tr>').join('');
 }
 
