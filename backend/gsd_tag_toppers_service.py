@@ -82,10 +82,12 @@ RUN_WORKERS = 6
 SIBLING_LABEL_PREF = ["[label:a]", "[label:b]", "[label:c]", "[label:no_ean]", "[label:no_data]"]
 NEG_MATCH_ORDER = {"EXACT": 0, "PHRASE": 1, "BROAD": 2}
 
-# Een product id is 27-29 alfanumerieke tekens. De ondergrens van 15 scheidt ze
-# van de `number_of_productids`-telcel (4 cijfers), zodat brede rijen — waar die
-# telcel achteraan is geschoven — geen aparte behandeling nodig hebben.
-_ID_RE = re.compile(r"^[A-Za-z0-9]{15,60}$")
+# Een product id is meestal 26-28 alfanumerieke tekens, maar niet altijd: in de
+# accounts staan ook ids van 7 (w2tjgr6, wqwgabp). Een ondergrens van 15 gooide die
+# stilletjes weg. De telcel `number_of_productids` wordt nu op twee andere manieren
+# uitgesloten: numerieke cellen slaan we over (Excel bewaart dat getal als int) en
+# een token dat volledig uit cijfers bestaat telt niet als id.
+_ID_RE = re.compile(r"^[A-Za-z0-9]{5,60}$")
 _SPLIT_RE = re.compile(r"[;,|\s]+")
 
 SHOP_RE = re.compile(r"\[shop:([^\]]+)\]")
@@ -140,13 +142,23 @@ def parse_workbook(data: bytes) -> Dict[str, Any]:
         country = raw[2] if len(raw) > 2 else None
 
         ids: "OrderedDict[str, None]" = OrderedDict()
+        numeriek_overgeslagen = []
         for cell in raw[3:]:
             if cell in (None, ""):
                 continue
+            # Een int/float-cel is de telling, nooit een id.
+            if isinstance(cell, (int, float)) and not isinstance(cell, bool):
+                continue
             for token in _SPLIT_RE.split(str(cell)):
                 token = token.strip().strip('"').strip("'")
-                if token and _ID_RE.match(token):
-                    ids[token] = None
+                if not token or not _ID_RE.match(token):
+                    continue
+                if token.isdigit():
+                    # Als tekst opgeslagen telling. Wordt gemeld, zodat een echt
+                    # numeriek product id niet ongemerkt verdwijnt.
+                    numeriek_overgeslagen.append(token)
+                    continue
+                ids[token] = None
 
         shop_id_s = str(shop_id).strip() if shop_id is not None else ""
         shop_name_s = str(shop_name).strip() if shop_name else ""
@@ -161,6 +173,13 @@ def parse_workbook(data: bytes) -> Dict[str, Any]:
         if not ids:
             warnings.append(f"Rij {excel_row}: geen product ids gevonden — overgeslagen")
             continue
+
+        if numeriek_overgeslagen:
+            warnings.append(
+                f"Rij {excel_row}: {len(numeriek_overgeslagen)} volledig numeriek(e) "
+                f"token(s) overgeslagen als telling ({', '.join(numeriek_overgeslagen[:3])}) "
+                f"— als dit product ids zijn, meld het"
+            )
 
         stated = raw[4] if len(raw) > 4 else None
         stated_n = stated if isinstance(stated, int) else None
@@ -1204,6 +1223,11 @@ def _ensure_runs_table() -> None:
                     summary              JSONB
                 )
             """)
+            # De rijen zelf, zodat een oude run geëxporteerd kan worden met
+            # dezelfde kolommen als de resultatentabel. Als losse ALTER omdat de
+            # tabel al bestond voordat de export er was.
+            cur.execute("ALTER TABLE gsd_tag_toppers_runs "
+                        "ADD COLUMN IF NOT EXISTS results JSONB")
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS gsd_tag_toppers_runs_started_idx
                 ON gsd_tag_toppers_runs (started_at DESC)
@@ -1230,8 +1254,8 @@ def _save_run(*, started_at, finished_at, dry_run, cancelled, filename,
                         (started_at, finished_at, dry_run, cancelled, filename,
                          n_rows, total_ids, campaigns_to_create,
                          ids_planned, ids_added, exclusions_planned, exclusions_added,
-                         negatives_copied, rows_with_errors, summary)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                         negatives_copied, rows_with_errors, summary, results)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """, (
                     started_at, finished_at, dry_run, cancelled, filename,
                     summary.get("rows", 0),
@@ -1244,6 +1268,7 @@ def _save_run(*, started_at, finished_at, dry_run, cancelled, filename,
                     summary.get("negatives_copied", 0),
                     summary.get("errors", 0),
                     json.dumps(summary),
+                    json.dumps(_export_rows(results)),
                 ))
             conn.commit()
         except Exception:
@@ -1253,6 +1278,35 @@ def _save_run(*, started_at, finished_at, dry_run, cancelled, filename,
             return_db_connection(conn)
     except Exception as ex:
         logger.error("Kon de run niet vastleggen: %s", ex)
+
+
+# Alleen de velden die de resultatentabel toont — de per-campagne targets blijven
+# eruit, anders wordt de opgeslagen JSON een veelvoud groter zonder dat de export
+# er iets mee doet.
+_EXPORT_FIELDS = ("excel_row", "shop_name", "shop_id", "country", "n_ids",
+                  "campaign_action", "campaign_name", "siblings",
+                  "ids_already_present", "ids_to_add", "ids_added",
+                  "exclusions_to_add", "exclusions_added", "negatives_copied",
+                  "status")
+
+
+def _export_rows(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [{k: r.get(k) for k in _EXPORT_FIELDS} for r in results]
+
+
+def get_run_results(run_id: int) -> Optional[List[Dict[str, Any]]]:
+    """De opgeslagen rijen van één run; None als de run niet bestaat."""
+    _ensure_runs_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT results FROM gsd_tag_toppers_runs WHERE id = %s", (run_id,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return dict(row).get("results") or []
+    finally:
+        return_db_connection(conn)
 
 
 def get_runs(limit: int = 100) -> List[Dict[str, Any]]:
