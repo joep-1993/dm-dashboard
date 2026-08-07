@@ -63,6 +63,16 @@
         /* Bootstrap's amber (#ffc107) is als rand en tekst op wit niet te lezen;
            dit is dezelfde tint, donker genoeg voor contrast. */
         .lbl-amber  { color: #b26a00; }
+        /* Gevulde variant, alleen voor de statuskolom in de uitklap: dezelfde kleuren
+           maar als vlak, zodat status en actie in dezelfde tabel visueel verschillen.
+           Twee klassen, dus dit wint van de outline-regel erboven. */
+        .lbl-solid { border-color: transparent; }
+        .lbl-solid.lbl-green  { background: #198754; color: #fff; }
+        .lbl-solid.lbl-red    { background: #dc3545; color: #fff; }
+        .lbl-solid.lbl-purple { background: #5e4a90; color: #fff; }
+        .lbl-solid.lbl-teal   { background: #0f766e; color: #fff; }
+        .lbl-solid.lbl-amber  { background: #b26a00; color: #fff; }
+        .lbl-solid.lbl-orange { background: #e8730c; color: #fff; }
     </style>
 </head>
 <body>
@@ -583,12 +593,13 @@ function openDetail(excelRow) {
         return;
     }
 
+    // Gevuld, in tegenstelling tot de outlined actielabels ernaast.
     const pill = (t) => {
-        if (t.status === 'ok')            return '<span class="badge lbl lbl-green">gelukt</span>';
-        if (t.status === 'overgeslagen')  return '<span class="badge lbl lbl-teal">overgeslagen</span>';
-        if (t.status === 'deels')         return '<span class="badge lbl lbl-amber">deels</span>';
-        if (t.status === 'gepland')       return '<span class="badge lbl lbl-purple">gepland</span>';
-        return '<span class="badge lbl lbl-red">mislukt</span>';
+        if (t.status === 'ok')            return '<span class="badge lbl lbl-solid lbl-green">gelukt</span>';
+        if (t.status === 'overgeslagen')  return '<span class="badge lbl lbl-solid lbl-teal">overgeslagen</span>';
+        if (t.status === 'deels')         return '<span class="badge lbl lbl-solid lbl-amber">deels</span>';
+        if (t.status === 'gepland')       return '<span class="badge lbl lbl-solid lbl-purple">gepland</span>';
+        return '<span class="badge lbl lbl-solid lbl-red">mislukt</span>';
     };
     const ACT_CLASS = {
         'aanmaken': 'lbl-green',
