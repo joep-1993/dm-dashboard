@@ -37,6 +37,10 @@
            dat is het enige cijfer waar een kleur iets betekent. */
         #summaryRow { display: flex; flex-wrap: wrap; gap: 0.75rem; }
         #summaryRow .mini-stat-card .num.has-errors { color: #b02a37; }
+        /* De uploadkaart is één bestandsveld plus een knop en heeft de volle
+           col-md-10 niet nodig. Links uitgelijnd, zodat hij dezelfde linkerrand
+           houdt als de resultatenkaart eronder. */
+        #uploadCard { max-width: 680px; }
     </style>
 </head>
 <body>
@@ -104,7 +108,7 @@
             <div class="col-md-10 mx-auto">
 
                 <!-- ------------------ Upload ------------------ -->
-                <div class="card mb-4">
+                <div class="card mb-4" id="uploadCard">
                     <div class="card-header">
                         <h5 class="mb-0">Excel upload
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="uploadTip">Excel met kolommen shop_id, shop_name, country, productids, number_of_productids. Product ids mogen komma-gescheiden in één cel staan of over meerdere cellen verdeeld zijn.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
