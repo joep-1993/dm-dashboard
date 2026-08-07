@@ -444,18 +444,10 @@ function openDetail(excelRow) {
             (t.errors && t.errors.length ? esc(t.errors.join(' | ')) : '&mdash;') + '</td>' +
         '</tr>').join('');
 
-    const failed = targets.filter(t => t.status === 'fout' || t.status === 'deels');
-    // 'overgeslagen' telt bewust niet als mislukking: die node stond er al.
     // Zelfde verhouding als DMA Exclusions: alles in een gecentreerde px-3 py-3
     // wrapper, met de tabel op 80% breed (min 520px) en margin:0 auto, zodat de
-    // uitklap duidelijk smaller is dan de rij waar hij onder hangt.
-    const warn = failed.length
-        ? '<div class="alert alert-danger py-2 px-3 small mt-3 mb-2" ' +
-          'style="width:80%; min-width:520px; margin:0 auto; text-align:left;">' +
-          '&#9888;&#65039; <strong>' + failed.length + '</strong> van de ' + targets.length +
-          ' mutaties is niet (volledig) geland. Draai Run opnieuw om het te herstellen — ' +
-          'alles is add-only, dus wat al staat blijft staan.</div>'
-        : '';
+    // uitklap duidelijk smaller is dan de rij waar hij onder hangt. Geen
+    // samenvattende banner eronder: de statuskolom zegt het per regel al.
 
     row.insertAdjacentHTML('afterend',
         '<tr id="tt-detail-' + excelRow + '"><td colspan="' + cols + '" class="bg-light py-2">' +
@@ -472,7 +464,7 @@ function openDetail(excelRow) {
         '<th style="padding:8px 18px;" title="Stond er al — bij een add-only tool is dat het gewenste eindresultaat">Stond er al</th>' +
         '<th style="padding:8px 18px;">Status</th>' +
         '<th style="text-align:left; padding:8px 18px;">Fout</th>' +
-        '</tr></thead><tbody>' + body + '</tbody></table>' + warn +
+        '</tr></thead><tbody>' + body + '</tbody></table>' +
         '</div></td></tr>');
 }
 
