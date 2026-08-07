@@ -153,8 +153,7 @@
                         <h5 class="mb-0" id="resultsTitle">Resultaten
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="runTip">Preview leest alleen en schrijft niets. Run maakt ontbrekende tag_toppers-campagnes aan (PAUSED), zet de product ids erin en sluit ze uit in alle niet-REMOVED zustercampagnes. Alles is add-only: bestaande ids en uitsluitingen blijven staan.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
                         </h5>
-                        <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadResults()">&#8635; Refresh</button>
-                        <button class="btn btn-sm btn-run" id="realBtn" onclick="startRun(false)" disabled>Run</button>
+                        <button class="btn btn-sm btn-run ms-auto" id="realBtn" onclick="startRun(false)" disabled>Run</button>
                     </div>
                     <div class="card-body">
                         <div id="summaryRow" class="mb-3"></div>
@@ -199,9 +198,13 @@
 
 <script>
 let POLL = null;
+let POLL_TICK = 0;
 let RESULTS = [];
 let DRY = true;
 let HAS_DRY_RUN = false;
+// Welke rijen staan uitgeklapt. renderTable() bouwt de tbody opnieuw op, dus
+// zonder dit klapt elke tussentijdse verversing tijdens een run ze dicht.
+const OPEN_DETAILS = new Set();
 
 function esc(s) {
     return String(s === null || s === undefined ? '' : s)
@@ -281,6 +284,7 @@ async function startRun(dry) {
 
 function pollProgress() {
     if (POLL) clearInterval(POLL);
+    POLL_TICK = 0;
     POLL = setInterval(async () => {
         try {
             const r = await fetch('/api/gsd-tag-toppers/progress');
@@ -304,6 +308,11 @@ function pollProgress() {
                 b.style.display = 'block';
                 b.textContent = (p.dry_run ? 'Preview klaar' : 'Run klaar') +
                     ' — ' + RESULTS.length + ' rijen verwerkt.';
+            } else if (++POLL_TICK % 4 === 0) {
+                // De backend schrijft elke afgeronde rij meteen weg, dus haal de
+                // tussenstand op. Elke 4e tick (~6s) in plaats van elke tick: de hele
+                // tabel hertekenen bij 622 rijen is te duur om elke 1,5s te doen.
+                await loadResults();
             }
         } catch (e) { /* poll faalt stil; volgende tick probeert opnieuw */ }
     }, 1500);
@@ -376,14 +385,25 @@ function renderTable() {
         '<td>' + badge(r) + (r.errors && r.errors.length
             ? ' <span title="' + esc(r.errors.join(' | ')) + '">&#9432;</span>' : '') + '</td>' +
         '</tr>').join('');
+    // Klapt de details terug open die vóór de hertekening open stonden.
+    OPEN_DETAILS.forEach(n => { if (document.getElementById('tt-row-' + n)) openDetail(n); });
 }
 
 // Klik op een rij klapt de mutaties per campagne uit. De detail zit al in de
 // resultaat-payload, dus geen extra call — anders dan DMA Exclusions, dat zijn
 // targets uit de database moet halen.
 function toggleDetail(excelRow) {
-    const existing = document.getElementById('tt-detail-' + excelRow);
-    if (existing) { existing.remove(); return; }
+    if (document.getElementById('tt-detail-' + excelRow)) {
+        document.getElementById('tt-detail-' + excelRow).remove();
+        OPEN_DETAILS.delete(excelRow);
+        return;
+    }
+    OPEN_DETAILS.add(excelRow);
+    openDetail(excelRow);
+}
+
+function openDetail(excelRow) {
+    if (document.getElementById('tt-detail-' + excelRow)) return;
     const row = document.getElementById('tt-row-' + excelRow);
     if (!row) return;
     const r = RESULTS.find(x => x.excel_row === excelRow);
