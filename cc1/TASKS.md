@@ -4,6 +4,37 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-07 — GSD Tag Toppers: bulk add-only tool (nieuw)
+
+Nieuwe tool onder Google Ads: `/static/gsd-tag-toppers.html` + `/api/gsd-tag-toppers`.
+Backend `backend/gsd_tag_toppers_service.py` (~1030 regels) + `gsd_tag_toppers_router.py`.
+Verwerkt een kandidaten-Excel (shop_id / shop_name / country / productids) en doet per rij:
+tag_toppers-campagne zoeken of aanmaken (PAUSED) mét negatives van een zuster, product ids
+**add-only** in de boom hangen, en dezelfde ids uitsluiten in alle niet-REMOVED zusters —
+ook add-only.
+
+- [x] **Excel-parser** — leest alle cellen vanaf kolom D en houdt tokens van 15+ alfanumerieke
+      tekens over. Daarmee is een rij die over 969 cellen is uitgesmeerd (Excel's celgrens van
+      32.767 tekens) dezelfde code als een normale rij, en valt de weggeschoven
+      `number_of_productids`-telcel er vanzelf buiten. Geverifieerd op
+      `add_only_kandidaten_2026-08-07.xlsx`: 622 rijen, 24.933 ids, **0 mismatches** met de telkolom.
+- [x] **Add-only bomen** — bewust NIET via `rebuild_tree_with_specific_item_ids` uit
+      GSD_tagtoppers.py; die sloopt de boom en bouwt hem opnieuw, wat precies de bestaande ids
+      zou wissen. Drie mutatievormen, alle drie serverside gevalideerd met `validate_only`:
+      positieve item-ids onder de tag_toppers-root, negatieve item-ids in een bestaande
+      item-id-container, en unit→subdivision conversie.
+- [x] **Zuster-negatives** — dezelfde matcher als de sync van 2026-07-28 (naam **én** shop_id,
+      genormaliseerd op case + suffix, ENABLED vóór PAUSED, dedupe op lowercase+matchtype).
+- [x] **Parallel** — 6 workers met een lock per (account, shop): volle preview van 70 → ~10 min.
+- [x] **Frontend** — upload → Preview → tabel → Run. `Run` blijft dicht tot er een preview is
+      geweest en vraagt daarna nog een bevestiging; `POST /run` weigert zonder `confirm=true`.
+      Uitleg onder "i"-knoppen per UI_BLUEPRINT. Nav toegevoegd aan alle 34 pagina's
+      (A-Z tussen GSD Check en MC ID Finder).
+- [ ] **Eerste echte run staat nog open.** Campagne-aanmaken en de daadwerkelijke schrijfacties
+      zijn het enige dat niet te valideren viel zonder ze uit te voeren — `validate_only` dekt
+      de vorm van elke mutatie, niet het landen ervan. Begin met een handvol rijen en lees terug.
+      Let op het volume: Toolmax NL alleen is 2096 ids × 8 containerplekken = 16.768 uitsluitingen.
+
 ### 2026-08-06 — Bot Hits: crawler-log dashboard (nieuw)
 
 Nieuwe tool onder SEO tools: `/static/bothits.html` + `/api/bothits`. Runbook en de

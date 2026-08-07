@@ -1,6 +1,50 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `validate_only` bewijst de vórm van een mutatie, niet dat hij landt — en het ziet géén duplicaten (2026-08-07)
+
+Bij het bouwen van **GSD Tag Toppers** was de vraag hoe je een schrijfpad test als alles al in
+sync is. `validate_only=True` op een mutate-request laat Google de operaties volledig valideren
+zonder te schrijven, en dat draagt verder dan verwacht: de listing-group structuurregels worden
+wél getoetst, dus een `LISTING_GROUP_REQUIRES_SAME_DIMENSION_TYPE_AS_SIBLINGS` of een kapotte
+parent-verwijzing komt eruit. Alle drie de boom-operaties zijn zo groen bevonden vóór er iets
+geschreven werd: positieve item-ids onder een root, negatieve item-ids in een bestaande
+item-id-container, en de unit→subdivision conversie (4 ops: remove leaf + subdivision +
+item-id OTHERS + negatief).
+
+- **Maar het toetst geen uniciteit.** Een keyword dat er letterlijk al staat (`Lobbes` PHRASE op
+  een campagne die hem heeft) gaat probleemloos door `validate_only`: `results=0`, geen
+  `partial_failure_error`. `CRITERION_DUPLICATE` en `LISTING_GROUP_ALREADY_EXISTS` zijn
+  bestaanschecks tegen de live data en die worden in validate-modus overgeslagen. **De dedupe in
+  je eigen code is dus de enige bescherming**, niet de API — precies andersom dan waar je op hoopt.
+- **`partial_failure` en `validate_only` sluiten elkaar NIET uit.** Ik had ze eerst als exclusief
+  gecodeerd (`partial_failure = not validate_only`) op basis van een aanname; de API accepteert ze
+  gewoon samen. Dat is belangrijk, want alleen zo valideer je exact dezelfde request als een
+  echte run — met `partial_failure=False` test je een andere codepad-tak dan die in productie loopt.
+- **Nog steeds geldig van 2026-07-28:** `partial_failure` als kwarg wordt geweigerd door
+  google-ads v28/v29; bouw een `Mutate…Request` en geef `request=req`. Geldt voor élke service.
+- **Wat validate_only níet dekt:** het aanmaken van een campagne en het daadwerkelijk landen van
+  de mutatie. Voor die laatste stap blijft de regel van 28 juli staan — kies een smoke-test op een
+  rij die écht muteert en lees terug.
+
+## Een Excel-rij die over 969 cellen is uitgesmeerd hoeft geen speciaal geval te zijn (2026-08-07)
+
+De kandidatenlijst voor Tag Toppers had twee Toolmax-rijen waarvan de product ids niet in kolom D
+stonden maar één-per-cel doorliepen tot kolom AKI — Excel's celgrens is 32.767 tekens en 2096 ids
+× 29 tekens is ~60k. Joep vroeg of ik dat geval apart wilde afvangen. Dat bleek niet nodig:
+
+- **Parse alle cellen vanaf kolom D en filter op vorm, niet op positie.** Een product id is 27-29
+  alfanumerieke tekens; de ondergrens op 15 zetten scheidt ze van de `number_of_productids`-telcel
+  (4 cijfers). Brede en normale rijen worden daarmee dezelfde code, zonder detectie-heuristiek.
+- **Dat vangt meteen de bijvangst op:** in de brede rijen was de telcel naar áchteren geschoven
+  (kolom 972 in plaats van E), en het laatste id had een blijven hangen `"` uit de export. Beide
+  vallen weg zonder aparte regel — de `"` door de strip, de telcel door de lengtefilter.
+- **Tel altijd terug tegen de telkolom en rapporteer het verschil.** De eerste versie van het
+  bestand had 967 ids waar de telcel 2096 zei: er miste een cel. Dat was met een lengtefilter
+  alleen niet zichtbaar geweest — de check `telcel != gevonden aantal` maakte het meteen duidelijk
+  en Joep kon het bestand aanvullen vóór er iets naar Google Ads ging. Nu: 622 rijen, 24.933 ids,
+  0 mismatches.
+
 ## Crawl-logs: de URL-ruimte is onbegrensd, de datum-korrel niet het probleem (2026-08-06)
 
 Bij het bouwen van **Bot Hits** was de eerste vraag waar 116 dagen CloudFront-logs moeten

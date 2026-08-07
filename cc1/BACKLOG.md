@@ -189,6 +189,13 @@ _What are we building and why?_
 
 ### GSD tag_toppers
 - [ ] **Clean the 7 malformed negative keywords at the SOURCE, then re-sync** (logged 2026-07-28). The tag_toppers negatives sync copies its source campaign verbatim, and Google **accepts** these rather than rejecting them, so they now exist in two places: `"Babywinkel'`, `"Lampenconcurrent.nl'` (2×), `"passasports.nl`, `Weidswonenenslapen.be""` (all stray quotes/apostrophes, BROAD), plus `KUUS.` (trailing dot) and `Beautyplaza.com/nl-be` (full suffixed domain as a keyword). `partial_failure=True` was set specifically so bad keywords would bounce individually — they didn't. Only 7 of 1,122, so low priority, but note the fix has to be **at the source campaign first**: cleaning only the tag_toppers copy leaves the source to re-propagate it on the next sync. Also worth checking whether the generator that writes these still emits them (`gsd_campaigns_service.get_negatives` was hardened on 2026-07-15 — these may be pre-hardening leftovers). See LEARNINGS "tag_toppers-negatives sync".
+- [x] **DEELS OPGELOST 2026-08-07.** De matcher-logica is opnieuw gebouwd en staat nu op twee
+  plekken in versiebeheer: `GSD_tagtoppers.py` (`find_sibling_campaign` / `sync_negatives_from_sibling`,
+  draait bij het aanmaken van een campagne) en `backend/gsd_tag_toppers_service.py` (de bulk-tool).
+  Geverifieerd: 881/881 tag_toppers-campagnes vinden hun zuster (NL 507 / BE 351 / DE 23, 0 missers).
+  **Wat nog mist t.o.v. het origineel:** de losse sweep over álle bestaande campagnes en het
+  audit-script dat bewijst dat een run geland is — de nieuwe code synct alleen bij aanmaken of
+  vanuit de Excel-tool, niet als periodieke job over de hele set.
 - [ ] **Persist the tag_toppers negatives sync out of the session scratchpad** (logged 2026-07-28). `gads_client.py` + `tag_toppers_sync.py` + `resync_unmatched.py` + `audit_workbook.py` (~300 lines of real logic) only exist in `/tmp/claude-1001/.../fd95554b-.../scratchpad/` and won't survive a reboot — same failure mode as the Q3 tag_toppers rebuild and the SEO-Titles extraction scripts. The sync is **idempotent** (a re-run over already-synced campaigns reports 0 added), so it works as a periodic job: `tag_toppers_sync.py --apply --include-paused` then `resync_unmatched.py --apply --allow-paused-source --strip-suffix`. `scripts_def/` per the `/newscript` convention would fit. **When moving it, take the audit script too** — it's what caught that campaign names aren't unique, and it's the only thing that proves a run landed. Consider whether this belongs as a button in the GSD Campaigns tool rather than a standalone script, since `gsd_campaigns_service` already owns negative-keyword generation.
 
 ### UI consistency
