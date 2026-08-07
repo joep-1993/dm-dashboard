@@ -26,16 +26,19 @@ De dry-run leest alleen; er gaat geen enkele mutatie naar Google Ads tenzij
 `start_run(dry_run=False)` wordt aangeroepen.
 """
 import io
+import json
 import logging
 import re
 import threading
 import time
 from collections import OrderedDict
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 
+from backend.database import get_db_connection, return_db_connection
 from backend.gsd_campaigns_service import (
     GEO_TARGETS,
     TRACKING_TEMPLATES,
@@ -888,8 +891,8 @@ def get_progress() -> Dict[str, Any]:
             "dry_run": _state["dry_run"],
             "current": _state["current"],
             "total": _state["total"],
-            "started_at": _state["started_at"],
-            "finished_at": _state["finished_at"],
+            "started_at": _state["started_at"].isoformat() if _state["started_at"] else None,
+            "finished_at": _state["finished_at"].isoformat() if _state["finished_at"] else None,
         }
 
 
@@ -1156,7 +1159,132 @@ def _run(rows: List[Dict[str, Any]], dry_run: bool) -> None:
             _state["running"] = False
             _state["results"] = list(results)
             _state["summary"] = summary
-            _state["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            _state["finished_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+            started = _state["started_at"]
+            cancelled = _state["cancel"]
+            finished = _state["finished_at"]
+            filename = _uploaded.get("filename")
+
+        _save_run(started_at=started, finished_at=finished, dry_run=dry_run,
+                  cancelled=cancelled, filename=filename,
+                  results=results, summary=summary)
+
+
+# ---------------------------------------------------------------------------
+# Run-historie (overleeft een herstart)
+# ---------------------------------------------------------------------------
+
+_RUNS_TABLE_READY = False
+
+
+def _ensure_runs_table() -> None:
+    global _RUNS_TABLE_READY
+    if _RUNS_TABLE_READY:
+        return
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gsd_tag_toppers_runs (
+                    id                   SERIAL PRIMARY KEY,
+                    started_at           TIMESTAMP NOT NULL,
+                    finished_at          TIMESTAMP,
+                    dry_run              BOOLEAN NOT NULL,
+                    cancelled            BOOLEAN NOT NULL DEFAULT FALSE,
+                    filename             TEXT,
+                    n_rows               INTEGER NOT NULL DEFAULT 0,
+                    total_ids            INTEGER NOT NULL DEFAULT 0,
+                    campaigns_to_create  INTEGER NOT NULL DEFAULT 0,
+                    ids_planned          INTEGER NOT NULL DEFAULT 0,
+                    ids_added            INTEGER NOT NULL DEFAULT 0,
+                    exclusions_planned   INTEGER NOT NULL DEFAULT 0,
+                    exclusions_added     INTEGER NOT NULL DEFAULT 0,
+                    negatives_copied     INTEGER NOT NULL DEFAULT 0,
+                    rows_with_errors     INTEGER NOT NULL DEFAULT 0,
+                    summary              JSONB
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS gsd_tag_toppers_runs_started_idx
+                ON gsd_tag_toppers_runs (started_at DESC)
+            """)
+        conn.commit()
+        _RUNS_TABLE_READY = True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        return_db_connection(conn)
+
+
+def _save_run(*, started_at, finished_at, dry_run, cancelled, filename,
+              results: List[Dict[str, Any]], summary: Dict[str, Any]) -> None:
+    """Legt één afgeronde run vast. Best-effort: een run mag hier niet op stuklopen."""
+    try:
+        _ensure_runs_table()
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO gsd_tag_toppers_runs
+                        (started_at, finished_at, dry_run, cancelled, filename,
+                         n_rows, total_ids, campaigns_to_create,
+                         ids_planned, ids_added, exclusions_planned, exclusions_added,
+                         negatives_copied, rows_with_errors, summary)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    started_at, finished_at, dry_run, cancelled, filename,
+                    summary.get("rows", 0),
+                    sum(r.get("n_ids", 0) for r in results),
+                    summary.get("campaigns_to_create", 0),
+                    summary.get("ids_to_add", 0),
+                    summary.get("ids_added", 0),
+                    summary.get("exclusions_to_add", 0),
+                    summary.get("exclusions_added", 0),
+                    summary.get("negatives_copied", 0),
+                    summary.get("errors", 0),
+                    json.dumps(summary),
+                ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            return_db_connection(conn)
+    except Exception as ex:
+        logger.error("Kon de run niet vastleggen: %s", ex)
+
+
+def get_runs(limit: int = 100) -> List[Dict[str, Any]]:
+    """Recente runs, nieuwste eerst. Tijden zijn UTC (de shared Postgres draait Etc/UTC)."""
+    try:
+        _ensure_runs_table()
+    except Exception as ex:
+        logger.error("Kon de run-tabel niet aanmaken: %s", ex)
+        return []
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, started_at, finished_at, dry_run, cancelled, filename,
+                       n_rows, total_ids, campaigns_to_create,
+                       ids_planned, ids_added, exclusions_planned, exclusions_added,
+                       negatives_copied, rows_with_errors
+                FROM gsd_tag_toppers_runs
+                ORDER BY started_at DESC
+                LIMIT %s
+            """, (limit,))
+            # De pool levert een RealDictCursor, dus rijen zijn al dicts.
+            out = []
+            for row in cur.fetchall():
+                rec = dict(row)
+                for k in ("started_at", "finished_at"):
+                    v = rec.get(k)
+                    rec[k] = v.isoformat() if hasattr(v, "isoformat") else v
+                out.append(rec)
+            return out
+    finally:
+        return_db_connection(conn)
 
 
 _uploaded: Dict[str, Any] = {"rows": [], "warnings": [], "filename": None}
@@ -1197,7 +1325,9 @@ def start_run(rows: List[Dict[str, Any]], dry_run: bool = True) -> Dict[str, Any
             "cancel": False,
             "results": [],
             "summary": {},
-            "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            # Naive UTC: de shared Postgres draait Etc/UTC en het frontend plakt er
+            # een "Z" achter voordat het naar Europe/Amsterdam omrekent.
+            "started_at": datetime.now(timezone.utc).replace(tzinfo=None),
             "finished_at": None,
         })
     threading.Thread(target=_run, args=(rows, dry_run), daemon=True).start()

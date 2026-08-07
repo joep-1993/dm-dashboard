@@ -12,6 +12,7 @@ from backend.gsd_tag_toppers_service import (
     cancel_run,
     get_progress,
     get_results,
+    get_runs,
     get_uploaded,
     parse_workbook,
     set_uploaded,
@@ -94,3 +95,9 @@ async def results():
 async def cancel():
     cancel_run()
     return {"cancelled": True}
+
+
+@router.get("/runs")
+async def runs(limit: int = 100):
+    """Afgeronde runs uit de database — overleeft een herstart van de backend."""
+    return {"runs": get_runs(max(1, min(limit, 500)))}

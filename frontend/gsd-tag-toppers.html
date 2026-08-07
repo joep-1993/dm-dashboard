@@ -207,6 +207,41 @@
                     </div>
                 </div>
 
+                <!-- ------------------ Recent runs ------------------ -->
+                <div class="card mb-4" id="runsCard">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <h5 class="mb-0">Recent runs
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title>Afgeronde previews en runs, uit de database — dit overzicht overleeft een herstart van de backend. Tijden in Europe/Amsterdam.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
+                        </h5>
+                        <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadRuns()">&#8635; Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm tool-table mb-0" id="runsTable">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" data-sort="started_at" onclick="sortRunsBy('started_at')">Datum</th>
+                                        <th class="sortable" data-sort="dry_run" onclick="sortRunsBy('dry_run')">Type</th>
+                                        <th class="sortable" data-sort="filename" onclick="sortRunsBy('filename')">Bestand</th>
+                                        <th class="sortable" data-sort="n_rows" onclick="sortRunsBy('n_rows')">Rijen</th>
+                                        <th class="sortable" data-sort="total_ids" onclick="sortRunsBy('total_ids')">Ids</th>
+                                        <th class="sortable" data-sort="campaigns_to_create" onclick="sortRunsBy('campaigns_to_create')">Campagnes</th>
+                                        <th class="sortable" data-sort="ids_planned" onclick="sortRunsBy('ids_planned')">Ids gepland</th>
+                                        <th class="sortable" data-sort="ids_added" onclick="sortRunsBy('ids_added')">Ids geland</th>
+                                        <th class="sortable" data-sort="exclusions_planned" onclick="sortRunsBy('exclusions_planned')">Uitsl. gepland</th>
+                                        <th class="sortable" data-sort="exclusions_added" onclick="sortRunsBy('exclusions_added')">Uitsl. geland</th>
+                                        <th class="sortable" data-sort="negatives_copied" onclick="sortRunsBy('negatives_copied')">Negatives</th>
+                                        <th class="sortable" data-sort="rows_with_errors" onclick="sortRunsBy('rows_with_errors')">Fouten</th>
+                                        <th class="sortable" data-sort="duration" onclick="sortRunsBy('duration')">Duur</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="runsBody"></tbody>
+                            </table>
+                        </div>
+                        <div id="runsEmpty" class="text-muted small mt-2" style="display:none;">Nog geen runs vastgelegd.</div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
@@ -328,6 +363,7 @@ function pollProgress() {
                 b.style.display = 'block';
                 b.textContent = (p.dry_run ? 'Preview klaar' : 'Run klaar') +
                     ' — ' + RESULTS.length + ' rijen verwerkt.';
+                loadRuns();   // de zojuist afgeronde run staat nu in de DB
             } else if (++POLL_TICK % 4 === 0) {
                 // De backend schrijft elke afgeronde rij meteen weg, dus haal de
                 // tussenstand op. Elke 4e tick (~6s) in plaats van elke tick: de hele
@@ -520,11 +556,84 @@ function openDetail(excelRow) {
         '</div></td></tr>');
 }
 
+// ---- Recent runs -----------------------------------------------------------
+let RUNS = [];
+let RUNS_SORT = 'started_at';
+let RUNS_DIR = -1;   // nieuwste bovenaan
+
+// De DB draait Etc/UTC en levert een offset-loze string; zonder de "Z" leest JS
+// die als lokale tijd en is de weergave in de zomer 2 uur te vroeg.
+function fmtTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+    return d.toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam' }).slice(0, 16);
+}
+
+function runDuration(r) {
+    if (!r.started_at || !r.finished_at) return null;
+    const a = new Date(r.started_at + 'Z'), b = new Date(r.finished_at + 'Z');
+    return Math.max(0, Math.round((b - a) / 1000));
+}
+
+function fmtDuration(secs) {
+    if (secs === null) return '—';
+    if (secs < 60) return secs + 's';
+    const m = Math.floor(secs / 60), s = secs % 60;
+    return m + 'm ' + String(s).padStart(2, '0') + 's';
+}
+
+function sortRunsBy(key) {
+    if (RUNS_SORT === key) { RUNS_DIR = -RUNS_DIR; } else { RUNS_SORT = key; RUNS_DIR = 1; }
+    renderRuns();
+}
+
+async function loadRuns() {
+    try {
+        const r = await fetch('/api/gsd-tag-toppers/runs');
+        const j = await r.json();
+        RUNS = (j.runs || []).map(x => Object.assign({}, x, { duration: runDuration(x) }));
+        renderRuns();
+    } catch (e) { /* lege staat is prima */ }
+}
+
+function renderRuns() {
+    const rows = RUNS.slice().sort((a, b) => RUNS_DIR * cmpValues(a[RUNS_SORT], b[RUNS_SORT]));
+    document.querySelectorAll('#runsTable th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.sort === RUNS_SORT) {
+            th.classList.add(RUNS_DIR === 1 ? 'sort-asc' : 'sort-desc');
+        }
+    });
+    document.getElementById('runsEmpty').style.display = rows.length ? 'none' : 'block';
+    document.getElementById('runsBody').innerHTML = rows.map(r =>
+        '<tr>' +
+        '<td>' + esc(fmtTime(r.started_at)) + '</td>' +
+        '<td>' + (r.dry_run
+            ? '<span class="badge lbl lbl-purple">Preview</span>'
+            : '<span class="badge lbl lbl-orange">Run</span>') +
+            (r.cancelled ? ' <span class="badge lbl lbl-amber">afgebroken</span>' : '') + '</td>' +
+        '<td>' + esc(r.filename || '—') + '</td>' +
+        '<td>' + esc(r.n_rows) + '</td>' +
+        '<td>' + esc(r.total_ids) + '</td>' +
+        '<td>' + esc(r.campaigns_to_create) + '</td>' +
+        '<td>' + esc(r.ids_planned) + '</td>' +
+        '<td>' + esc(r.ids_added) + '</td>' +
+        '<td>' + esc(r.exclusions_planned) + '</td>' +
+        '<td>' + esc(r.exclusions_added) + '</td>' +
+        '<td>' + esc(r.negatives_copied) + '</td>' +
+        '<td>' + (r.rows_with_errors
+            ? '<span class="badge lbl lbl-red">' + r.rows_with_errors + '</span>'
+            : '<span class="badge lbl lbl-green">0</span>') + '</td>' +
+        '<td>' + esc(fmtDuration(r.duration)) + '</td>' +
+        '</tr>').join('');
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
     try {
         const r = await fetch('/api/gsd-tag-toppers/uploaded');
         const j = await r.json();
         if (j.rows) showUploadSummary(j);
+        loadRuns();
         const p = await (await fetch('/api/gsd-tag-toppers/progress')).json();
         if (p.running) {
             document.getElementById('progressArea').style.display = 'block';
