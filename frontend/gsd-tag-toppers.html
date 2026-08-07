@@ -415,8 +415,9 @@ function renderTable() {
         '<td>' + esc(r.ids_added) + '</td>' +
         '<td>' + esc(r.exclusions_to_add) + '</td>' +
         '<td>' + esc(r.exclusions_added) + '</td>' +
-        '<td>' + badge(r) + (r.errors && r.errors.length
-            ? ' <span title="' + esc(r.errors.join(' | ')) + '">&#9432;</span>' : '') + '</td>' +
+        // Geen ⓘ meer met de foutmelding in een title: de uitklap toont ze per
+        // campagne, en dat is de plek waar je ze kunt lezen zonder te hoveren.
+        '<td>' + badge(r) + '</td>' +
         '</tr>').join('');
     // Klapt de details terug open die vóór de hertekening open stonden.
     OPEN_DETAILS.forEach(n => { if (document.getElementById('tt-row-' + n)) openDetail(n); });
