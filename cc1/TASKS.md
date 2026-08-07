@@ -53,6 +53,22 @@ ook add-only.
       Preview met Run in de resultatenkop, sorteerbare kolommen, tabel die zich tijdens een run
       vult (Refresh weg), en alle labels outlined in één `.lbl`-vocabulaire. Actienamen kort
       gehouden: aanmaken / toevoegen / negatives / uitsluiten.
+- [x] **Audit: staan alle getargete ids ook uitgesloten bij de zusters?** Read-only sweep over
+      alle 881 tag_toppers-campagnes (9 min, 10 workers). **257 met een gat (NL 190/507,
+      BE 64/351, DE 3/23), samen 48.172 unieke ids.** Opvallend: bij **180** ervan missen ÁLLE
+      getargete ids — daar is de uitsluiting nooit gedraaid, dat is iets anders dan de
+      gedeeltelijke gaten die de `partial_failure`-bug gaf. Deliverable
+      `Downloads\claude\tag_toppers_exclusion_audit.xlsx` (3 tabbladen: gaten / per ad group /
+      alles). Script `audit_tt.py` in de session-scratchpad — ⚠ ephemeral.
+- [x] **Fix-Excel gegenereerd** uit die audit: `tag_toppers_fix_kandidaten.xlsx`, 254 rijen /
+      50.108 ids, in het formaat dat de tool leest (ids over meerdere cellen waar nodig).
+      Alle 254 shops hebben een bestaande tag_toppers-campagne, dus dit pad maakt niets aan —
+      het dicht alleen de uitsluitingsgaten. Script `build_fix_excel.py`, ook scratchpad.
+- [x] **101 weesbudgetten opgeruimd** (NL 40 / BE 57 / DE 4), lijst in
+      `Downloads\claude\tag_toppers_weesbudgetten.csv`.
+- [x] **Run-historie compleet**: runs bewaren nu de volledige rijen inclusief `targets`
+      (~2 KB/rij), dus een run is aan te klikken en zet het resultatenscherm terug zoals het
+      was — tegels, tabel én uitklap. Plus CSV-export per run en paginering (25/pagina).
 - [ ] **Open: het volume van een volledige run.** Toolmax NL alleen is 2096 ids ×
       8 containerplekken = 16.768 uitsluitingen; over alle 622 rijen loopt dat hard op.
       Preview geeft het totaal vóór er iets geschreven wordt — kijk daar eerst naar.

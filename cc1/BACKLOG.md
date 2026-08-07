@@ -187,6 +187,22 @@ _What are we building and why?_
 - [ ] **No auth on the real-mutation endpoints `/ll/run` + `/ll/apply`** (logged 2026-07-22). Both endpoints (`backend/gsd_campaigns_router.py`) start real Pause/Enable mutations on GSD campaigns with **no authentication** — `/ll/run` even defaults `dry_run=False`. Anyone who can reach the dashboard URL (`https://win-htz-006.colo.beslist.net:3003/static/gsd-campaigns.html`) can trigger real campaign mutations. Surfaced by the 2026-07-22 mystery-run investigation: the automatic 09:50 leak was closed (zombie APScheduler killed + scheduler→load-only), but the noon run turned out to be a **human** on the shared office/VPN egress IP `94.142.210.226` clicking Apply — which nothing prevents. Options: (a) add auth (basic/SSO/shared token) in front of the GSD dashboard + endpoints; (b) require an explicit confirm/2-step on `/ll/apply`; (c) keep the **kill switch** ON on prod by default (it was OFF on 2026-07-22) and toggle off only for a deliberate run. Interim: kill switch already exists (`GSD_LL_KILL_SWITCH` / `POST /ll/kill-switch`). See `GSD_LL_MYSTERY_RUN.md` → RESOLUTION and LEARNINGS "GSD LL mystery run resolved (2026-07-22)".
 
 
+### GSD Tag Toppers (dashboard-tool)
+- [ ] **Twee runs staan open** (logged 2026-08-07). (a) `add_only_kandidaten_2026-08-07.xlsx`
+  opnieuw draaien voor de 61 campagnes die faalden op het Merchant Center id — dat is nu gefixt.
+  (b) `tag_toppers_fix_kandidaten.xlsx` draaien om de 48k historische uitsluitingsgaten te
+  dichten. Beide add-only, dus wat er staat blijft staan; volgorde maakt niet uit. Draai eerst
+  Preview voor het volume.
+- [ ] **De audit periodiek maken** (logged 2026-08-07). `audit_tt.py` beantwoordt "staat alles
+  wat een tag_toppers-campagne target ook uitgesloten bij de zusters?" in 9 minuten, read-only.
+  Nu een scratchpad-script; als knop of maandelijkse job in de tool zou het de 180 campagnes
+  waar de uitsluiting nóóit gedraaid heeft eerder hebben gevonden. Neem `build_fix_excel.py`
+  mee — dat zet de uitkomst direct om in een uploadbare kandidatenlijst.
+- [ ] **Weesbudgetten voorkomen in plaats van opruimen** (logged 2026-08-07). Het budget wordt
+  vóór de campagne aangemaakt (dat moet, een campagne vereist een budget), dus elke mislukte
+  create laat er één achter — 101 opgeruimd op 7 aug. Overweeg het budget op te ruimen in het
+  faalpad van `_create_tag_toppers_campaign`.
+
 ### GSD tag_toppers
 - [ ] **Clean the 7 malformed negative keywords at the SOURCE, then re-sync** (logged 2026-07-28). The tag_toppers negatives sync copies its source campaign verbatim, and Google **accepts** these rather than rejecting them, so they now exist in two places: `"Babywinkel'`, `"Lampenconcurrent.nl'` (2×), `"passasports.nl`, `Weidswonenenslapen.be""` (all stray quotes/apostrophes, BROAD), plus `KUUS.` (trailing dot) and `Beautyplaza.com/nl-be` (full suffixed domain as a keyword). `partial_failure=True` was set specifically so bad keywords would bounce individually — they didn't. Only 7 of 1,122, so low priority, but note the fix has to be **at the source campaign first**: cleaning only the tag_toppers copy leaves the source to re-propagate it on the next sync. Also worth checking whether the generator that writes these still emits them (`gsd_campaigns_service.get_negatives` was hardened on 2026-07-15 — these may be pre-hardening leftovers). See LEARNINGS "tag_toppers-negatives sync".
 - [x] **DEELS OPGELOST 2026-08-07.** De matcher-logica is opnieuw gebouwd en staat nu op twee

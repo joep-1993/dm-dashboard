@@ -1,6 +1,43 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## "Resource was not found" bij campagne-aanmaken = verkeerd Merchant Center id (2026-08-07)
+
+Alle 61 campagne-aanmaakpogingen in de grote GSD Tag Toppers-run faalden hierop. De melding
+wijst nergens naar; de oorzaak is dat `campaign.shopping_setting.merchant_id` het **parent**-MC
+account was in plaats van het MC-subaccount van die shop.
+
+- **Elke shop heeft een eigen Merchant Center subaccount.** Zurbrueggen.nl draait op 5824320751,
+  123impregneer.nl op 5810249407, 123accu.nl (BE) op 702343768 — terwijl de account-brede ids in
+  `gsd_campaigns_service.ACCOUNTS` (NL 5592708765, BE 5588879919, DE 5342886105) de parents zijn.
+  Aan een parent kun je geen campagne hangen, en Google meldt dat als een ontbrekende resource.
+- **Het id staat in de bestaande campagnes van diezelfde shop.** `GSD_tagtoppers.py` deed dat al
+  goed (`get_merchant_id_for_campaign`); bij het overzetten naar de dashboard-service is die stap
+  weggevallen. Lees het uit een niet-REMOVED campagne met dezelfde `[shop_id:N]`.
+- **Val niet terug op de parent als je er geen vindt** — dat levert precies deze onbegrijpelijke
+  fout op. Beter hard falen met "geen Merchant Center id gevonden".
+- **Het budget wordt vóór de campagne aangemaakt, dus elke mislukte poging laat er één achter.**
+  Er stonden 101 weesbudgetten van €30/dag (NL 40 / BE 57 / DE 4), deels ook van pogingen van
+  vóór deze tool. Ze kosten niets zonder campagne, maar ruim ze op met drie guards: naam-patroon,
+  `reference_count == 0`, en nooit een `explicitly_shared` budget. Wie deze volgorde wil
+  omdraaien: dat kan niet, een campagne vereist een bestaand budget.
+
+## Een ondergrens op tokenlengte is een slechte manier om data van metadata te scheiden (2026-08-07)
+
+De Excel-parser van GSD Tag Toppers eiste 15+ tekens per token, om de telcel
+`number_of_productids` (4 cijfers) buiten te sluiten zonder de kolompositie te hoeven kennen.
+Dat werkte tot er ids uit Google Ads teruggelezen werden: **er bestaan product ids van 7 tekens**
+(`w2tjgr6`, `wqwgabp`). Die verdwenen stil — het viel alleen op doordat het geschreven en het
+teruggelezen aantal 3 scheelden.
+
+- **Scheid op type, niet op lengte.** Een int/float-cel is de telling, een string is een id. En
+  binnen strings: een token dat volledig uit cijfers bestaat is geen id, ongeacht de lengte.
+- **Meld wat je weggooit.** De parser waarschuwt nu als hij een volledig numeriek token
+  overslaat, zodat een echt numeriek product id niet ongemerkt wegvalt.
+- **Tel altijd terug.** Schrijver en lezer op elkaar leggen (50.108 vs 50.105) is wat de bug
+  vond; zonder die vergelijking was hij onzichtbaar gebleven. Dezelfde check ving eerder al een
+  ontbrekende cel in het aangeleverde bestand.
+
 ## Zonder `partial_failure` kost één afgekeurde operatie het hele blok (2026-08-07)
 
 De eerste echte run van **GSD Tag Toppers** (2 rijen) gaf 4/4 ids maar 32/35 uitsluitingen, en
