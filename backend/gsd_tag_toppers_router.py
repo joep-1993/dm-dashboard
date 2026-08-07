@@ -10,6 +10,11 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from backend.gsd_tag_toppers_service import (
     cancel_run,
+    get_seed_progress,
+    import_items,
+    items_for_run,
+    items_summary,
+    start_seed_from_ads,
     get_progress,
     get_results,
     get_run_detail,
@@ -113,3 +118,46 @@ async def run_results(run_id: int):
     if detail is None:
         raise HTTPException(status_code=404, detail="Run niet gevonden")
     return {"run_id": run_id, **detail}
+
+
+# ---------------------------------------------------------------------------
+# Beheerde ids — de gewenste staat per shop/land
+# ---------------------------------------------------------------------------
+
+@router.get("/items/summary")
+async def items_overzicht():
+    return items_summary()
+
+
+@router.post("/items/import-excel")
+async def items_import_excel():
+    """Zet de geüploade Excel in de beheerde staat. Schrijft niets naar Google Ads."""
+    rows = uploaded_rows()
+    if not rows:
+        raise HTTPException(status_code=400, detail="Upload eerst een Excel")
+    naam = get_uploaded().get("filename") or "excel"
+    return import_items(rows, f"excel:{naam}")
+
+
+@router.post("/items/import-live")
+async def items_import_live():
+    """Vult de beheerde staat met wat er nu in Google Ads getarget wordt."""
+    try:
+        return start_seed_from_ads()
+    except RuntimeError as ex:
+        raise HTTPException(status_code=409, detail=str(ex))
+
+
+@router.get("/items/import-live/progress")
+async def items_import_live_progress():
+    return get_seed_progress()
+
+
+@router.post("/items/to-upload")
+async def items_to_upload():
+    """Laadt de beheerde staat als 'geüploade' rijen, zodat Preview/Run erop draait."""
+    rows = items_for_run()
+    if not rows:
+        raise HTTPException(status_code=400, detail="De beheerde staat is nog leeg")
+    set_uploaded({"rows": rows, "warnings": []}, "beheerde staat (tabel)")
+    return {"rows": len(rows), "total_ids": sum(len(r["item_ids"]) for r in rows)}

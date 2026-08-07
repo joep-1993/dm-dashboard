@@ -1461,6 +1461,296 @@ def get_runs(limit: int = 100) -> List[Dict[str, Any]]:
         return_db_connection(conn)
 
 
+# ---------------------------------------------------------------------------
+# Beheerde ids — de gewenste staat per shop/land, één regel per item id
+# ---------------------------------------------------------------------------
+#
+# Google Ads blijft de WERKELIJKE staat; deze tabel is wat er zou moeten staan.
+# Dat onderscheid is de hele reden dat hij bestaat: de audit van 2026-08-07 vond
+# 257 campagnes met gaten omdat "wat hoort hier te staan" nergens was vastgelegd
+# behalve in Google Ads zelf — precies de plek die je wilt controleren.
+
+_ITEMS_TABLE_READY = False
+
+
+def _ensure_items_table() -> None:
+    global _ITEMS_TABLE_READY
+    if _ITEMS_TABLE_READY:
+        return
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gsd_tag_toppers_items (
+                    id          SERIAL PRIMARY KEY,
+                    country     TEXT NOT NULL,
+                    shop_id     TEXT NOT NULL,
+                    shop_name   TEXT NOT NULL,
+                    shop_key    TEXT NOT NULL,
+                    item_id     TEXT NOT NULL,
+                    active      BOOLEAN NOT NULL DEFAULT TRUE,
+                    added_at    TIMESTAMP NOT NULL DEFAULT now(),
+                    removed_at  TIMESTAMP,
+                    source      TEXT
+                )
+            """)
+            # De sleutel is shop_id ÉN shop_key samen, precies de identiteit die de
+            # campagne-matcher gebruikt. Geen van beide alleen volstaat: shop_id is
+            # niet uniek per shop (652237 = Bruna.nl én Hubfootwear.com), en shop_key
+            # knipt op de eerste | waardoor Vente-unique.be (358561) en
+            # Vente-unique.be|Marketplace (665200) — twee echt verschillende shops —
+            # op één hoop zouden belanden.
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS gsd_tag_toppers_items_uniq
+                ON gsd_tag_toppers_items (country, shop_id, shop_key, item_id)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS gsd_tag_toppers_items_shop_idx
+                ON gsd_tag_toppers_items (country, shop_id, shop_key) WHERE active
+            """)
+        conn.commit()
+        _ITEMS_TABLE_READY = True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        return_db_connection(conn)
+
+
+def import_items(rows: List[Dict[str, Any]], source: str) -> Dict[str, Any]:
+    """Zet rijen (shop_id/shop_name/country/item_ids) in de beheerde staat.
+
+    Idempotent: bestaande actieve ids blijven ongemoeid, eerder verwijderde ids
+    worden weer actief. Er wordt hier niets naar Google Ads geschreven.
+    """
+    from psycopg2.extras import execute_values
+
+    _ensure_items_table()
+
+    # Eerst platslaan naar (country, shop_key) -> tuples, zodat we per shop kunnen
+    # opzoeken wat er al staat. Één INSERT per id zou ~96k round trips zijn naar
+    # 10.1.32.9; dit gaat in blokken.
+    per_shop: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for row in rows:
+        country = (row.get("country") or "").upper()
+        shop_id = str(row.get("shop_id") or "").strip()
+        shop_name = (row.get("shop_name") or "").strip()
+        key = _shop_key(shop_name)
+        if not country or not shop_id or not key:
+            continue
+        bucket = per_shop.setdefault((country, shop_id, key), {
+            "shop_name": shop_name, "ids": set()})
+        bucket["ids"].update(str(i) for i in (row.get("item_ids") or []))
+
+    nieuw = heractiveerd = ongewijzigd = 0
+    payload: List[Tuple] = []
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            for (country, shop_id, key), b in per_shop.items():
+                cur.execute("""
+                    SELECT item_id, active FROM gsd_tag_toppers_items
+                    WHERE country = %s AND shop_id = %s AND shop_key = %s
+                """, (country, shop_id, key))
+                bestaand = {dict(r)["item_id"]: dict(r)["active"] for r in cur.fetchall()}
+                for item_id in b["ids"]:
+                    was = bestaand.get(item_id)
+                    if was is None:
+                        nieuw += 1
+                    elif was is False:
+                        heractiveerd += 1
+                    else:
+                        ongewijzigd += 1
+                    payload.append((country, shop_id, b["shop_name"], key,
+                                    item_id, source))
+
+            for i in range(0, len(payload), 5000):
+                execute_values(cur, """
+                    INSERT INTO gsd_tag_toppers_items
+                        (country, shop_id, shop_name, shop_key, item_id, source)
+                    VALUES %s
+                    ON CONFLICT (country, shop_id, shop_key, item_id) DO UPDATE SET
+                        shop_id    = EXCLUDED.shop_id,
+                        shop_name  = EXCLUDED.shop_name,
+                        active     = TRUE,
+                        removed_at = NULL
+                """, payload[i:i + 5000])
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        return_db_connection(conn)
+
+    return {"nieuw": nieuw, "heractiveerd": heractiveerd,
+            "ongewijzigd": ongewijzigd, "shops": len(per_shop),
+            "totaal_verwerkt": len(payload), "bron": source}
+
+
+# --- vullen vanuit Google Ads ----------------------------------------------
+# Zonder dit start de tabel leeg en weerspiegelt hij de werkelijkheid niet. Leest
+# per tag_toppers-campagne welke ids POSITIEF getarget zijn; dat is per definitie
+# de huidige gewenste staat zoals die live staat.
+
+_seed_state: Dict[str, Any] = {"running": False, "current": 0, "total": 0,
+                               "result": None, "error": None}
+
+
+def get_seed_progress() -> Dict[str, Any]:
+    with _state_lock:
+        return dict(_seed_state)
+
+
+def collect_live_targets(progress: bool = True) -> List[Dict[str, Any]]:
+    """Alle tag_toppers-campagnes met de item ids die ze positief targeten."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    client = _get_client()
+    out: List[Dict[str, Any]] = []
+
+    for land in ("NL", "BE", "DE"):
+        cid = _customer_id(land)
+        ga = client.get_service("GoogleAdsService")
+        camps = [
+            {"id": r.campaign.id, "name": r.campaign.name}
+            for r in ga.search(customer_id=cid, query="""
+                SELECT campaign.id, campaign.name FROM campaign
+                WHERE campaign.status != 'REMOVED'
+            """)
+            if TAG_TOPPERS_TOKEN in r.campaign.name.lower()
+        ]
+        if progress:
+            with _state_lock:
+                _seed_state["total"] += len(camps)
+
+        def work(c):
+            shop = SHOP_RE.search(c["name"])
+            sid = SHOP_ID_RE.search(c["name"])
+            if not shop or not sid:
+                return None
+            trees = _read_campaign_tree(client, cid, c["id"])
+            if not trees:
+                return None
+            _, nodes = max(trees.items(), key=lambda kv: len(kv[1]))
+            ids = sorted({n["item_id"] for n in nodes.values()
+                          if n["dim"] == "item_id" and n["item_id"] and not n["negative"]})
+            if not ids:
+                return None
+            return {"shop_id": sid.group(1).strip(), "shop_name": shop.group(1),
+                    "country": land, "item_ids": ids}
+
+        with ThreadPoolExecutor(max_workers=RUN_WORKERS) as pool:
+            for fut in as_completed([pool.submit(work, c) for c in camps]):
+                try:
+                    res = fut.result()
+                except Exception as ex:
+                    logger.warning("seed: campagne overgeslagen: %s", _err(ex))
+                    res = None
+                if res:
+                    out.append(res)
+                if progress:
+                    with _state_lock:
+                        _seed_state["current"] += 1
+    return out
+
+
+def start_seed_from_ads() -> Dict[str, Any]:
+    """Vult de beheerde staat met wat er nu live getarget wordt. Draait in de
+    achtergrond: 881 campagnes uitlezen kost een paar minuten."""
+    with _state_lock:
+        if _seed_state["running"]:
+            raise RuntimeError("Er loopt al een vulling")
+        _seed_state.update({"running": True, "current": 0, "total": 0,
+                            "result": None, "error": None})
+
+    def run():
+        try:
+            rows = collect_live_targets()
+            res = import_items(rows, "google-ads")
+            with _state_lock:
+                _seed_state["result"] = res
+        except Exception as ex:
+            logger.exception("Vullen vanuit Google Ads mislukt")
+            with _state_lock:
+                _seed_state["error"] = _err(ex)
+        finally:
+            with _state_lock:
+                _seed_state["running"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"started": True}
+
+
+def items_summary() -> Dict[str, Any]:
+    """Per land/shop hoeveel ids beheerd worden, plus het totaal."""
+    try:
+        _ensure_items_table()
+    except Exception as ex:
+        logger.error("items-tabel niet beschikbaar: %s", ex)
+        return {"totaal": 0, "shops": 0, "per_land": [], "rijen": []}
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT country, shop_id, MAX(shop_name) AS shop_name, shop_key,
+                       COUNT(*) FILTER (WHERE active)     AS actief,
+                       COUNT(*) FILTER (WHERE NOT active) AS verwijderd,
+                       MAX(added_at) AS laatst_gewijzigd
+                FROM gsd_tag_toppers_items
+                GROUP BY country, shop_id, shop_key
+                ORDER BY country, MAX(shop_name)
+            """)
+            rijen = []
+            for r in cur.fetchall():
+                rec = dict(r)
+                lg = rec.get("laatst_gewijzigd")
+                rec["laatst_gewijzigd"] = lg.isoformat() if hasattr(lg, "isoformat") else lg
+                rijen.append(rec)
+            cur.execute("""
+                SELECT country, COUNT(*) FILTER (WHERE active) AS actief
+                FROM gsd_tag_toppers_items GROUP BY country ORDER BY country
+            """)
+            per_land = [dict(r) for r in cur.fetchall()]
+    finally:
+        return_db_connection(conn)
+    return {
+        "totaal": sum(r["actief"] for r in rijen),
+        "shops": len(rijen),
+        "per_land": per_land,
+        "rijen": rijen,
+    }
+
+
+def items_for_run(country: Optional[str] = None) -> List[Dict[str, Any]]:
+    """De beheerde staat in het rijformaat dat een run verwacht."""
+    _ensure_items_table()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT country, shop_id, MAX(shop_name) AS shop_name,
+                       shop_key, ARRAY_AGG(item_id ORDER BY item_id) AS ids
+                FROM gsd_tag_toppers_items
+                WHERE active AND (%s IS NULL OR country = %s)
+                GROUP BY country, shop_id, shop_key
+                ORDER BY country, shop_key, shop_id
+            """, (country, country))
+            out = []
+            for i, r in enumerate(cur.fetchall(), start=2):
+                rec = dict(r)
+                out.append({
+                    "excel_row": i,
+                    "shop_id": rec["shop_id"],
+                    "shop_name": rec["shop_name"],
+                    "country": rec["country"],
+                    "item_ids": list(rec["ids"]),
+                })
+            return out
+    finally:
+        return_db_connection(conn)
+
+
 _uploaded: Dict[str, Any] = {"rows": [], "warnings": [], "filename": None}
 
 
