@@ -44,6 +44,14 @@
         /* Overgeslagen = stond er al. Geen fout, maar ook geen mutatie — vandaar
            een eigen kleur naast groen (geland) en rood (mislukt). */
         .badge.badge-skipped { background: #0f766e; color: #fff; }
+        /* Actie-labels in de uitklap: outlined, zoals de OOS/MANUAL-labels in
+           DMA Exclusions (badge bg-transparent fw-bold + rand in de tekstkleur).
+           Een eigen kleur per actie, zodat de kolom te scannen is. */
+        .act-label { background: transparent; font-weight: 700; border: 1px solid currentColor; }
+        .act-create  { color: #e8730c; }
+        .act-ids     { color: #5e4a90; }
+        .act-neg     { color: #0f766e; }
+        .act-exclude { color: #1d4ed8; }
     </style>
 </head>
 <body>
@@ -459,9 +467,17 @@ function openDetail(excelRow) {
         if (t.status === 'gepland')       return '<span class="badge bg-primary">gepland</span>';
         return '<span class="badge bg-danger">mislukt</span>';
     };
+    const ACT_CLASS = {
+        'campagne aanmaken': 'act-create',
+        'ids toevoegen': 'act-ids',
+        'negatives overnemen': 'act-neg',
+        'uitsluiten': 'act-exclude',
+    };
     const body = targets.map(t =>
         '<tr>' +
-        '<td style="text-align:left; padding:8px 18px;">' + esc(t.kind) + '</td>' +
+        '<td style="text-align:left; padding:8px 18px;">' +
+            '<span class="badge act-label ' + (ACT_CLASS[t.kind] || 'act-ids') + '">' +
+            esc(t.kind) + '</span></td>' +
         // Geen ad-group id: deze campagnes hebben er precies één, dus het voegt
         // niets toe aan de campagnenaam.
         '<td style="text-align:left; padding:8px 18px; word-break:break-word;">' +
