@@ -186,7 +186,6 @@
                         <div class="filter-row d-flex gap-2 align-items-center mb-3">
                             <input type="text" class="form-control form-control-sm" id="tableFilter"
                                    placeholder="Zoek shop&hellip;" oninput="currentPage=1; renderTable()" style="max-width: 250px;">
-                            <span class="text-muted small" id="tileFilterHint"></span>
                         </div>
                         <div class="tool-table-wrap">
                             <table class="table table-sm tool-table mb-0">
@@ -593,22 +592,12 @@ function tileMatch(r) {
     }
 }
 
-const TILE_LABEL = {
-    campagne: 'campagnes die aangemaakt moeten worden',
-    ids: 'rijen met ids',
-    uitsluiting: 'rijen met uitsluitingen',
-    negatives: 'rijen met negatives',
-    fout: 'rijen met een fout',
-};
-
 function toggleTile(key) {
     TILE_FILTER = (TILE_FILTER === key) ? null : key;
     currentPage = 1;
     document.querySelectorAll('#summaryRow .mini-stat-card').forEach((el, i) => {
         el.classList.toggle('tile-on', ['campagne','ids','uitsluiting','negatives','fout'][i] === TILE_FILTER);
     });
-    document.getElementById('tileFilterHint').textContent =
-        TILE_FILTER ? 'gefilterd op ' + TILE_LABEL[TILE_FILTER] + ' — klik de tegel nog eens om dit uit te zetten' : '';
     renderTable();
 }
 
