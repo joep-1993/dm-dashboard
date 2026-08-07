@@ -119,28 +119,13 @@
                     <div class="card-body">
                         <label for="fileInput" class="form-label">Excel-bestand</label>
                         <input type="file" class="form-control" id="fileInput" accept=".xlsx,.xlsm">
-                        <!-- Samenvatting links, Upload rechts op dezelfde regel. ms-auto op de
+                        <!-- Samenvatting links, Preview rechts op dezelfde regel. ms-auto op de
                              knop houdt hem rechts, ook als de samenvatting nog verborgen is. -->
                         <div class="d-flex align-items-center gap-2 mt-3">
                             <div id="uploadSummary" style="display:none;"></div>
-                            <button class="btn btn-sm btn-outline-orange ms-auto" id="uploadBtn" onclick="uploadFile()">Upload</button>
+                            <button class="btn btn-sm btn-outline-purple ms-auto" id="dryBtn" onclick="uploadAndPreview()">Preview</button>
                         </div>
                         <div id="uploadWarnings" class="mt-2" style="display:none;"></div>
-                    </div>
-                </div>
-
-                <!-- ------------------ Run ------------------ -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0">Uitvoeren
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="runTip">Preview leest alleen en schrijft niets. Pas na een preview kun je Run draaien; die knop maakt ontbrekende tag_toppers-campagnes aan (PAUSED), zet de product ids erin en sluit ze uit in alle niet-REMOVED zustercampagnes. Alles is add-only.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="d-flex justify-content-end gap-2">
-                            <button class="btn btn-sm btn-outline-purple" id="dryBtn" onclick="startRun(true)" disabled>Preview</button>
-                            <button class="btn btn-sm btn-run" id="realBtn" onclick="startRun(false)" disabled>Run</button>
-                        </div>
 
                         <div class="progress-area mt-3" id="progressArea" style="display: none;">
                             <div class="d-flex justify-content-between mb-1" style="font-size: 0.85rem;">
@@ -166,10 +151,15 @@
                 </div>
 
                 <!-- ------------------ Resultaten ------------------ -->
+                <!-- Run staat hier en nergens anders: je komt pas bij deze kaart nadat een
+                     preview is gedraaid, dus de knop kan per definitie niet te vroeg geklikt. -->
                 <div class="card mb-4" id="resultsCard" style="display:none;">
-                    <div class="card-header d-flex align-items-center">
-                        <h5 class="mb-0" id="resultsTitle">Resultaten</h5>
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <h5 class="mb-0" id="resultsTitle">Resultaten
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="runTip">Preview leest alleen en schrijft niets. Run maakt ontbrekende tag_toppers-campagnes aan (PAUSED), zet de product ids erin en sluit ze uit in alle niet-REMOVED zustercampagnes. Alles is add-only: bestaande ids en uitsluitingen blijven staan.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
+                        </h5>
                         <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadResults()">&#8635; Refresh</button>
+                        <button class="btn btn-sm btn-run" id="realBtn" onclick="startRun(false)" disabled>Run</button>
                     </div>
                     <div class="card-body">
                         <div id="summaryRow" class="mb-3"></div>
@@ -226,38 +216,50 @@ function esc(s) {
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-async function uploadFile() {
+function showUploadSummary(j) {
+    const s = document.getElementById('uploadSummary');
+    s.style.display = 'block';
+    s.innerHTML = '<span class="badge bg-success">' + j.rows + ' rijen</span> ' +
+                  '<span class="badge bg-primary">' + j.total_ids + ' product ids</span> ' +
+                  '<span class="text-muted" style="font-size:0.85rem;">' + esc(j.filename || '') + '</span>';
+    const w = document.getElementById('uploadWarnings');
+    if (j.warnings && j.warnings.length) {
+        w.style.display = 'block';
+        w.innerHTML = '<div class="alert alert-warning mb-0" style="font-size:0.85rem;"><strong>' +
+            j.warnings.length + ' waarschuwing(en):</strong><ul class="mb-0">' +
+            j.warnings.slice(0, 40).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
+    } else { w.style.display = 'none'; }
+}
+
+// Eén knop voor twee stappen: een gekozen bestand wordt eerst geüpload, daarna
+// start de preview. Zonder nieuw bestand draait de preview op wat de server al heeft.
+async function uploadAndPreview() {
     const input = document.getElementById('fileInput');
-    if (!input.files.length) { alert('Kies eerst een bestand'); return; }
-    const btn = document.getElementById('uploadBtn');
-    btn.disabled = true; btn.textContent = 'Uploaden…';
-    const fd = new FormData();
-    fd.append('file', input.files[0]);
-    try {
-        const r = await fetch('/api/gsd-tag-toppers/upload', { method: 'POST', body: fd });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.detail || 'Upload mislukt');
-        const s = document.getElementById('uploadSummary');
-        s.style.display = 'block';
-        s.innerHTML = '<span class="badge bg-success">' + j.rows + ' rijen</span> ' +
-                      '<span class="badge bg-primary">' + j.total_ids + ' product ids</span> ' +
-                      '<span class="text-muted" style="font-size:0.85rem;">' + esc(j.filename) + '</span>';
-        const w = document.getElementById('uploadWarnings');
-        if (j.warnings && j.warnings.length) {
-            w.style.display = 'block';
-            w.innerHTML = '<div class="alert alert-warning mb-0" style="font-size:0.85rem;"><strong>' +
-                j.warnings.length + ' waarschuwing(en):</strong><ul class="mb-0">' +
-                j.warnings.slice(0, 40).map(x => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
-        } else { w.style.display = 'none'; }
-        document.getElementById('dryBtn').disabled = false;
-        // Run blijft dicht tot er een preview is geweest.
-        document.getElementById('realBtn').disabled = true;
-        HAS_DRY_RUN = false;
-    } catch (e) {
-        alert('Fout: ' + e.message);
-    } finally {
-        btn.disabled = false; btn.textContent = 'Upload';
+    const btn = document.getElementById('dryBtn');
+
+    if (input.files.length) {
+        btn.disabled = true; btn.textContent = 'Uploaden…';
+        const fd = new FormData();
+        fd.append('file', input.files[0]);
+        try {
+            const r = await fetch('/api/gsd-tag-toppers/upload', { method: 'POST', body: fd });
+            const j = await r.json();
+            if (!r.ok) throw new Error(j.detail || 'Upload mislukt');
+            showUploadSummary(j);
+            HAS_DRY_RUN = false;
+            document.getElementById('realBtn').disabled = true;
+        } catch (e) {
+            alert('Fout: ' + e.message);
+            btn.disabled = false; btn.textContent = 'Preview';
+            return;
+        } finally {
+            btn.textContent = 'Preview';
+        }
+    } else if (!document.getElementById('uploadSummary').innerHTML) {
+        alert('Kies eerst een bestand');
+        return;
     }
+    await startRun(true);
 }
 
 async function startRun(dry) {
@@ -384,14 +386,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     try {
         const r = await fetch('/api/gsd-tag-toppers/uploaded');
         const j = await r.json();
-        if (j.rows) {
-            document.getElementById('uploadSummary').style.display = 'block';
-            document.getElementById('uploadSummary').innerHTML =
-                '<span class="badge bg-success">' + j.rows + ' rijen</span> ' +
-                '<span class="badge bg-primary">' + j.total_ids + ' product ids</span> ' +
-                '<span class="text-muted" style="font-size:0.85rem;">' + esc(j.filename || '') + '</span>';
-            document.getElementById('dryBtn').disabled = false;
-        }
+        if (j.rows) showUploadSummary(j);
         const p = await (await fetch('/api/gsd-tag-toppers/progress')).json();
         if (p.running) {
             document.getElementById('progressArea').style.display = 'block';
