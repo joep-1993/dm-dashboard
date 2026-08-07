@@ -745,10 +745,16 @@ def _mutate_criteria(client, customer_id: str, ops: List[Any]) -> Tuple[int, int
     """
     done, skipped, errors = 0, 0, []
     for i in range(0, len(ops), MUTATE_CHUNK):
+        # Cancel grijpt tussen de blokken. Alles is add-only, dus halverwege stoppen
+        # laat een consistente boom achter en een volgende run vult de rest aan.
+        if _cancelled():
+            errors.append(f"afgebroken: {len(ops) - i} operatie(s) niet uitgevoerd")
+            break
         d, s, e = _submit_chunk(client, customer_id, ops[i:i + MUTATE_CHUNK])
         done += d
         skipped += s
         errors.extend(e)
+        _count_mutations(d + s)
     return done, skipped, errors
 
 
@@ -772,6 +778,8 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
     done, skipped, errors = 0, 0, []
 
     for app in plan["appends"]:
+        if _cancelled():
+            break
         temp = _Temp()
         ops = []
         for item_id in app["missing"]:
@@ -784,6 +792,8 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
         errors.extend(e)
 
     for conv in plan["converts"]:
+        if _cancelled():
+            break
         leaf = conv["leaf"]
         # Stap 1 is atomisch: de biddable leaf verdwijnt en wordt in dezelfde
         # mutate vervangen door een subdivision met item-id OTHERS, zodat de ad
@@ -984,7 +994,23 @@ _state: Dict[str, Any] = {
     "started_at": None,
     "finished_at": None,
     "summary": {},
+    # Aantal geschreven criteria. De voortgangsbalk telt rijen, en bij weinig rijen
+    # met veel werk (Toolmax: 2 rijen, 33.536 mutaties) beweegt die minutenlang niet.
+    # Deze teller loopt wél door en laat zien dat er iets gebeurt.
+    "mutations": 0,
 }
+
+
+def _cancelled() -> bool:
+    with _state_lock:
+        return bool(_state["cancel"])
+
+
+def _count_mutations(n: int) -> None:
+    if not n:
+        return
+    with _state_lock:
+        _state["mutations"] += n
 
 
 def get_progress() -> Dict[str, Any]:
@@ -996,6 +1022,8 @@ def get_progress() -> Dict[str, Any]:
             "total": _state["total"],
             "started_at": _state["started_at"].isoformat() if _state["started_at"] else None,
             "finished_at": _state["finished_at"].isoformat() if _state["finished_at"] else None,
+            "mutations": _state["mutations"],
+            "cancelling": bool(_state["cancel"]) and _state["running"],
         }
 
 
@@ -1152,6 +1180,8 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
 
     # ---- 3: uitsluiten in de zustercampagnes ---------------------------
     for sib in siblings:
+        if _cancelled():
+            break
         try:
             trees = _read_campaign_tree(client, customer_id, sib["id"])
         except GoogleAdsException as ex:
@@ -1469,6 +1499,7 @@ def start_run(rows: List[Dict[str, Any]], dry_run: bool = True) -> Dict[str, Any
             "cancel": False,
             "results": [],
             "summary": {},
+            "mutations": 0,
             # Naive UTC: de shared Postgres draait Etc/UTC en het frontend plakt er
             # een "Z" achter voordat het naar Europe/Amsterdam omrekent.
             "started_at": datetime.now(timezone.utc).replace(tzinfo=None),

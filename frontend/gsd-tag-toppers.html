@@ -379,12 +379,23 @@ function pollProgress() {
             const r = await fetch('/api/gsd-tag-toppers/progress');
             const p = await r.json();
             const pct = p.total ? Math.round(100 * p.current / p.total) : 0;
-            document.getElementById('progressBar').style.width = pct + '%';
-            document.getElementById('progressPercent').textContent = pct + '%';
+            const bar = document.getElementById('progressBar');
+            const prog = bar.parentElement;
+            // Zolang geen enkele rij klaar is staat de balk op 0% terwijl er wel
+            // gewerkt wordt — bij weinig rijen met veel werk duurt dat minuten. Dan
+            // een onbepaalde balk: beweging zonder een percentage te claimen.
+            const onbepaald = p.current === 0 && p.total > 0;
+            prog.classList.toggle('indeterminate', onbepaald);
+            bar.style.width = onbepaald ? '' : pct + '%';
+            document.getElementById('progressPercent').textContent = onbepaald ? '' : pct + '%';
+            const mut = p.mutations
+                ? ' · ' + p.mutations.toLocaleString('nl-NL') + ' mutaties geschreven' : '';
             document.getElementById('progressText').textContent =
-                (p.dry_run ? 'Preview' : 'Run') + ': rij ' + p.current + ' van ' + p.total;
+                (p.cancelling ? 'Afbreken… ' : '') +
+                (p.dry_run ? 'Preview' : 'Run') + ': rij ' + p.current + ' van ' + p.total + mut;
             if (!p.running) {
                 clearInterval(POLL); POLL = null;
+                document.getElementById('progressBar').parentElement.classList.remove('indeterminate');
                 document.getElementById('progressArea').style.display = 'none';
                 document.getElementById('dryBtn').disabled = false;
                 if (!VIEWING_RUN) await loadResults();
@@ -410,7 +421,12 @@ function pollProgress() {
 }
 
 async function cancelRun() {
+    const btn = document.getElementById('cancelBtn');
+    btn.disabled = true;
+    btn.textContent = 'Afbreken…';
     await fetch('/api/gsd-tag-toppers/cancel', { method: 'POST' });
+    // De run stopt tussen twee mutatie-blokken, dus dat duurt seconden, niet direct.
+    setTimeout(() => { btn.disabled = false; btn.textContent = 'Cancel'; }, 8000);
 }
 
 async function loadResults() {
