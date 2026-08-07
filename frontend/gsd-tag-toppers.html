@@ -296,6 +296,13 @@ function pollProgress() {
                 await loadResults();
                 if (p.dry_run) HAS_DRY_RUN = true;
                 document.getElementById('realBtn').disabled = !HAS_DRY_RUN;
+                // Alleen hier, want dit is de enige plek die wéét dat er zojuist een
+                // run is afgelopen. loadResults() draait ook bij het openen van de
+                // pagina en zou dan een "klaar"-melding tonen voor iets wat niet liep.
+                const b = document.getElementById('doneBanner');
+                b.style.display = 'block';
+                b.textContent = (p.dry_run ? 'Preview klaar' : 'Run klaar') +
+                    ' — ' + RESULTS.length + ' rijen verwerkt.';
             }
         } catch (e) { /* poll faalt stil; volgende tick probeert opnieuw */ }
     }, 1500);
@@ -327,11 +334,6 @@ async function loadResults() {
         '<div class="num' + (red ? ' has-errors' : '') + '">' + (v || 0) + '</div>' +
         '<div class="label">' + k + '</div></div>').join('');
 
-    if (!document.getElementById('doneBanner').textContent) {
-        const b = document.getElementById('doneBanner');
-        b.style.display = 'block';
-        b.textContent = (DRY ? 'Preview klaar' : 'Run klaar') + ' — ' + RESULTS.length + ' rijen verwerkt.';
-    }
     renderTable();
 }
 
