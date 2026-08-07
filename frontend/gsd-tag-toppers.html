@@ -232,8 +232,11 @@ function esc(s) {
 function showUploadSummary(j) {
     const s = document.getElementById('uploadSummary');
     s.style.display = 'block';
-    s.innerHTML = '<span class="badge bg-success">' + j.rows + ' rijen</span> ' +
-                  '<span class="badge bg-primary">' + j.total_ids + ' product ids</span> ' +
+    // Pagina-eigen .lbl in plaats van bg-success/bg-primary: style.css themet die
+    // Bootstrap-namen (bg-success wordt grijs, bg-info ook), en dan hangt de kleur
+    // af van welke regel wint. Zo staat hij vast en is hij gelijk aan de tabellen.
+    s.innerHTML = '<span class="badge lbl lbl-green">' + j.rows + ' rijen</span> ' +
+                  '<span class="badge lbl lbl-purple">' + j.total_ids + ' product ids</span> ' +
                   '<span class="text-muted" style="font-size:0.85rem;">' + esc(j.filename || '') + '</span>';
     const w = document.getElementById('uploadWarnings');
     if (j.warnings && j.warnings.length) {
