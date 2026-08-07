@@ -603,9 +603,10 @@ function openDetail(excelRow) {
             esc(t.kind) + '</span></td>' +
         // Geen ad-group id: deze campagnes hebben er precies één, dus het voegt
         // niets toe aan de campagnenaam.
+        // Geen note eronder ("niets te doen", "alle ids stonden er al"): de kolommen
+        // Geland en Status zeggen dat al, en de campagnenaam is lang genoeg.
         '<td style="text-align:left; padding:8px 18px; word-break:break-word;">' +
-            esc(t.campaign) +
-            (t.note ? '<div class="text-muted small">' + esc(t.note) + '</div>' : '') + '</td>' +
+            esc(t.campaign) + '</td>' +
         '<td style="padding:8px 18px;">' + esc(t.applied) + '/' + esc(t.planned) + '</td>' +
         '<td style="padding:8px 18px;">' + pill(t) + '</td>' +
         '<td style="text-align:left; padding:8px 18px; word-break:break-word;">' +
@@ -619,11 +620,11 @@ function openDetail(excelRow) {
 
     row.insertAdjacentHTML('afterend',
         '<tr id="tt-detail-' + excelRow + '"><td colspan="' + cols + '" class="bg-light py-2">' +
-        // overflow-x:auto op een eigen wrapper: de uitklaptabel hangt in een cel van
-        // de hoofdtabel en had daardoor geen eigen scrollbaar gebied meer toen die
-        // hoofdtabel smal genoeg werd om zelf niet meer te scrollen. auto = de balk
-        // verschijnt alleen als de inhoud écht breder is.
-        '<div class="px-3 py-3" style="text-align:center; overflow-x:auto;">' +
+        // Eigen scrollgebied voor de uitklap. De breedte wordt hieronder in JS op die
+        // van .tool-table-wrap gezet: zonder die grens rekt de brede uitklap de
+        // hoofdtabel op (die is width:max-content) en scrolt de BUITENSTE balk
+        // onderaan de hele tabel in plaats van de uitklap zelf.
+        '<div class="tt-detail-scroll px-3 py-3" style="text-align:center; overflow-x:auto;">' +
         '<table class="table table-bordered bg-white mb-0 small" ' +
         'style="width:80%; min-width:520px; margin:0 auto;">' +
         '<thead><tr>' +
@@ -634,6 +635,19 @@ function openDetail(excelRow) {
         '<th style="text-align:left; padding:8px 18px;">Fout</th>' +
         '</tr></thead><tbody>' + body + '</tbody></table>' +
         '</div></td></tr>');
+
+    sizeDetailScroll(excelRow);
+}
+
+// Zet de uitklap op de zichtbare breedte van de tabelwrapper en plak hem links vast,
+// zodat hij in beeld blijft terwijl je de hoofdtabel horizontaal scrollt.
+function sizeDetailScroll(excelRow) {
+    const wrap = document.querySelector('#resultsCard .tool-table-wrap');
+    const inner = document.querySelector('#tt-detail-' + excelRow + ' .tt-detail-scroll');
+    if (!wrap || !inner) return;
+    inner.style.width = wrap.clientWidth + 'px';
+    inner.style.position = 'sticky';
+    inner.style.left = '0';
 }
 
 // ---- Tegelfilter -----------------------------------------------------------
@@ -769,6 +783,10 @@ function renderRuns() {
         '<td><button class="btn btn-sm btn-outline-orange" onclick="event.stopPropagation(); exportRun(' + r.id + ')">Export</button></td>' +
         '</tr>').join('');
 }
+
+window.addEventListener('resize', () => {
+    if (OPEN_DETAIL !== null) sizeDetailScroll(OPEN_DETAIL);
+});
 
 window.addEventListener('DOMContentLoaded', async () => {
     try {

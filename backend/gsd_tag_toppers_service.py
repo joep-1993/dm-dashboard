@@ -342,6 +342,17 @@ def _plan_tag_toppers_adds(nodes: Dict[str, dict], item_ids: List[str]) -> Dict[
     return {"root": root, "existing": existing, "missing": missing}
 
 
+def _is_item_id_level(node: dict) -> bool:
+    """Zit dit knooppunt op het item-id niveau?
+
+    Behalve een expliciete product_item_id telt ook een UNIT zonder case_value: in
+    multi-label bomen is item-id OTHERS precies dat, en leest het als dim=None
+    (de API toont de dimensie dan als ROOT). Dat is de vorm die
+    GSD_tagtoppers.py's LEARNINGS beschrijven.
+    """
+    return node["dim"] == "item_id" or (node["type"] == "UNIT" and node["dim"] is None)
+
+
 def _item_id_containers(nodes: Dict[str, dict]) -> List[dict]:
     """SUBDIVISIONs die al een item-id niveau hebben (dus waar een negatief id bij kan)."""
     containers = []
@@ -349,7 +360,7 @@ def _item_id_containers(nodes: Dict[str, dict]) -> List[dict]:
         if n["type"] != "SUBDIVISION":
             continue
         kids = _children(nodes, n["resource"])
-        if any(k["dim"] == "item_id" for k in kids):
+        if any(_is_item_id_level(k) for k in kids):
             containers.append(n)
     return containers
 
@@ -365,8 +376,9 @@ def _convertible_leaves(nodes: Dict[str, dict]) -> List[dict]:
     for n in nodes.values():
         if n["type"] != "UNIT" or n["negative"]:
             continue
-        if n["dim"] == "item_id":
-            continue  # zit al op item-id niveau
+        if _is_item_id_level(n):
+            continue  # zit al op item-id niveau; converteren zou een SUBDIVISION
+                      # zonder case_value opleveren -> REQUIRED_FIELD_MISSING
         leaves.append(n)
     return leaves
 
@@ -641,12 +653,17 @@ def _mutate_with_retry(client, customer_id: str, ops: List[Any], retries: int = 
     return None, last
 
 
-def _read_partial_failure(client, resp) -> Tuple[int, List[str], set]:
-    """(overgeslagen, echte fouten, mislukte indexen) uit een partial_failure-respons."""
-    skipped, errors, failed = 0, [], set()
+def _read_partial_failure(client, resp) -> Tuple[int, List[str], set, set]:
+    """(overgeslagen, echte fouten, mislukte indexen, opnieuw-te-proberen indexen).
+
+    CONCURRENT_MODIFICATION komt met partial_failure niet meer als exception binnen
+    maar als regel in de respons. Die apart teruggeven, want alleen daar hoort een
+    retry op — de rest is een echte fout.
+    """
+    skipped, errors, failed, retryable = 0, [], set(), set()
     pfe = getattr(resp, "partial_failure_error", None)
     if not pfe or not pfe.details:
-        return skipped, errors, failed
+        return skipped, errors, failed, retryable
     failure_type = client.get_type("GoogleAdsFailure")
     for det in pfe.details:
         try:
@@ -661,14 +678,62 @@ def _read_partial_failure(client, resp) -> Tuple[int, List[str], set]:
             if idx is not None:
                 failed.add(idx)
             code = err.error_code
+            msg = err.message or ""
             is_dup = (getattr(code, "criterion_error", None)
                       and code.criterion_error.name == "LISTING_GROUP_ALREADY_EXISTS") \
-                or "already exists" in (err.message or "").lower()
+                or "already exists" in msg.lower()
+            is_busy = (getattr(code, "database_error", None)
+                       and code.database_error.name == "CONCURRENT_MODIFICATION") \
+                or "same resource at once" in msg
             if is_dup:
                 skipped += 1
+            elif is_busy and idx is not None:
+                retryable.add(idx)
             else:
-                errors.append(err.message)
-    return skipped, errors, failed
+                errors.append(msg)
+    return skipped, errors, failed, retryable
+
+
+def _submit_chunk(client, customer_id: str, ops: List[Any],
+                  retries: int = 4) -> Tuple[int, int, List[str]]:
+    """Eén blok uitvoeren, met retry op ALLEEN de operaties die botsten.
+
+    De retry in _mutate_with_retry vangt CONCURRENT_MODIFICATION op het
+    exception-pad. Met partial_failure aan komt diezelfde fout echter per operatie
+    in de respons terug en liep hij die retry mis — vandaar dat we hier de
+    afzonderlijke botsers opnieuw indienen in plaats van het hele blok.
+    """
+    pending = list(ops)
+    done, skipped, errors = 0, 0, []
+    delay = 2.0
+    for attempt in range(retries):
+        resp, ex = _mutate_with_retry(client, customer_id, pending)
+        if resp is None:
+            if _is_already_exists(ex):
+                skipped += len(pending)
+            else:
+                errors.append(_err(ex))
+            return done, skipped, errors
+
+        s, errs, failed, retryable = _read_partial_failure(client, resp)
+        skipped += s
+        errors.extend(errs)
+        done += sum(1 for j, r in enumerate(resp.results)
+                    if r.resource_name and j not in failed)
+
+        if not retryable:
+            return done, skipped, errors
+        if attempt == retries - 1:
+            errors.append(f"CONCURRENT_MODIFICATION na {retries} pogingen: "
+                          f"{len(retryable)} operatie(s) niet geland")
+            return done, skipped, errors
+
+        pending = [pending[j] for j in sorted(retryable) if j < len(pending)]
+        logger.warning("CONCURRENT_MODIFICATION op %d operatie(s), opnieuw over %.0fs "
+                       "(poging %d/%d)", len(pending), delay, attempt + 1, retries)
+        time.sleep(delay)
+        delay *= 2
+    return done, skipped, errors
 
 
 def _mutate_criteria(client, customer_id: str, ops: List[Any]) -> Tuple[int, int, List[str]]:
@@ -680,19 +745,10 @@ def _mutate_criteria(client, customer_id: str, ops: List[Any]) -> Tuple[int, int
     """
     done, skipped, errors = 0, 0, []
     for i in range(0, len(ops), MUTATE_CHUNK):
-        chunk = ops[i:i + MUTATE_CHUNK]
-        resp, ex = _mutate_with_retry(client, customer_id, chunk)
-        if resp is None:
-            if _is_already_exists(ex):
-                skipped += len(chunk)
-            else:
-                errors.append(_err(ex))
-            continue
-        s, errs, failed = _read_partial_failure(client, resp)
+        d, s, e = _submit_chunk(client, customer_id, ops[i:i + MUTATE_CHUNK])
+        done += d
         skipped += s
-        errors.extend(errs)
-        done += sum(1 for j, r in enumerate(resp.results)
-                    if r.resource_name and j not in failed)
+        errors.extend(e)
     return done, skipped, errors
 
 
