@@ -20,10 +20,11 @@
         .tool-table th, .tool-table td { white-space: nowrap; text-align: center; }
         .tool-table th { background: #f8f9fa; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         .tool-table td { vertical-align: middle; }
-        /* Shop (kolom 2) links: shopnamen verschillen sterk in lengte en lezen
-           gecentreerd als een rafelrand. De tellingen eromheen blijven gecentreerd. */
-        #resultsCard .tool-table th:nth-child(2),
-        #resultsCard .tool-table td:nth-child(2) { text-align: left; }
+        /* Shop (kolom 1, sinds de Rij-kolom weg is) links: shopnamen verschillen
+           sterk in lengte en lezen gecentreerd als een rafelrand. De tellingen
+           eromheen blijven gecentreerd. */
+        #resultsCard .tool-table th:nth-child(1),
+        #resultsCard .tool-table td:nth-child(1) { text-align: left; }
         .tool-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
         .tool-table th.sortable:hover { background: #e9ecef; }
         .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
@@ -191,17 +192,13 @@
                             <table class="table table-sm tool-table mb-0">
                                 <thead>
                                     <tr>
-                                        <th class="sortable" data-sort="excel_row" onclick="sortBy('excel_row')">Rij</th>
                                         <th class="sortable" data-sort="shop_name" onclick="sortBy('shop_name')">Shop</th>
                                         <th class="sortable" data-sort="shop_id" onclick="sortBy('shop_id')">Shop id</th>
                                         <th class="sortable" data-sort="country" onclick="sortBy('country')">Land</th>
                                         <th class="sortable" data-sort="n_ids" onclick="sortBy('n_ids')">Ids</th>
                                         <th class="sortable" data-sort="campaign_action" onclick="sortBy('campaign_action')">Campagne</th>
-                                        <th class="sortable" data-sort="siblings" onclick="sortBy('siblings')">Aantal campagnes</th>
-                                        <th class="sortable" data-sort="ids_already_present" onclick="sortBy('ids_already_present')">Al aanwezig</th>
-                                        <th class="sortable" data-sort="ids_to_add" onclick="sortBy('ids_to_add')">Toe te voegen</th>
+                                        <th class="sortable" data-sort="siblings" onclick="sortBy('siblings')">Campagnes</th>
                                         <th class="sortable" data-sort="ids_added" onclick="sortBy('ids_added')">Toegevoegd</th>
-                                        <th class="sortable" data-sort="exclusions_to_add" onclick="sortBy('exclusions_to_add')">Uit te sluiten</th>
                                         <th class="sortable" data-sort="exclusions_added" onclick="sortBy('exclusions_added')">Uitgesloten</th>
                                         <th class="sortable" data-sort="status" onclick="sortBy('status')">Status</th>
                                     </tr>
@@ -482,7 +479,6 @@ function renderTable() {
         '<tr id="tt-row-' + r.excel_row + '" style="cursor:pointer;"' +
         ' onclick="toggleDetail(' + r.excel_row + ')"' +
         ' title="Klik voor de mutaties per campagne">' +
-        '<td>' + esc(r.excel_row) + '</td>' +
         '<td>' + esc(r.shop_name) + '</td>' +
         '<td>' + esc(r.shop_id) + '</td>' +
         '<td>' + esc(r.country) + '</td>' +
@@ -491,11 +487,8 @@ function renderTable() {
             ? '<span class="badge lbl lbl-green">aanmaken</span>'
             : '<span class="badge lbl lbl-purple">bestaat</span>') + '</td>' +
         '<td>' + esc(r.siblings) + '</td>' +
-        '<td>' + esc(r.ids_already_present) + '</td>' +
-        '<td>' + esc(r.ids_to_add) + '</td>' +
-        '<td>' + esc(r.ids_added) + '</td>' +
-        '<td>' + esc(r.exclusions_to_add) + '</td>' +
-        '<td>' + esc(r.exclusions_added) + '</td>' +
+        '<td>' + esc(r.ids_added) + '/' + esc(r.ids_to_add) + '</td>' +
+        '<td>' + esc(r.exclusions_added) + '/' + esc(r.exclusions_to_add) + '</td>' +
         // Geen ⓘ meer met de foutmelding in een title: de uitklap toont ze per
         // campagne, en dat is de plek waar je ze kunt lezen zonder te hoveren.
         '<td>' + badge(r) + '</td>' +
