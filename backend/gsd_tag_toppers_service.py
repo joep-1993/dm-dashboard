@@ -996,7 +996,7 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 client, customer_id, created["ad_group_id"], created["root_resource"], item_ids)
             res["ids_added"] = added
             res["errors"].extend(errs2)
-            target("ids toevoegen", created["name"], len(item_ids), added,
+            target("toevoegen", created["name"], len(item_ids), added,
                    ad_group_id=created["ad_group_id"], errors=errs2, skipped=skipped)
             if source:
                 n, errs3 = _copy_negatives(client, customer_id, created["resource"],
@@ -1007,7 +1007,7 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                        note=f"bron: {source['name']}")
         else:
             target("campagne aanmaken", res["campaign_name"], 1, 0, note="PAUSED")
-            target("ids toevoegen", res["campaign_name"], len(item_ids), 0)
+            target("toevoegen", res["campaign_name"], len(item_ids), 0)
             if source:
                 src_negs = _fetch_campaign_negatives(client, customer_id, source["id"])
                 res["negatives_copied"] = len(src_negs)
@@ -1029,19 +1029,19 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 msg = "geen listing-tree gevonden in de tag_toppers ad group"
                 res["errors"].append(msg)
                 res["status"] = "fout"
-                target("ids toevoegen", tt["name"], len(plan["missing"]), 0,
+                target("toevoegen", tt["name"], len(plan["missing"]), 0,
                        ad_group_id=ag_id, errors=[msg])
             else:
                 added, skipped, errs = _apply_tag_toppers_adds(
                     client, customer_id, ag_id, plan["root"]["resource"], plan["missing"])
                 res["ids_added"] = added
                 res["errors"].extend(errs)
-                target("ids toevoegen", tt["name"], len(plan["missing"]), added,
+                target("toevoegen", tt["name"], len(plan["missing"]), added,
                        ad_group_id=ag_id, errors=errs, skipped=skipped)
         elif plan["missing"]:
-            target("ids toevoegen", tt["name"], len(plan["missing"]), 0, ad_group_id=ag_id)
+            target("toevoegen", tt["name"], len(plan["missing"]), 0, ad_group_id=ag_id)
         else:
-            target("ids toevoegen", tt["name"], 0, 0, ad_group_id=ag_id,
+            target("toevoegen", tt["name"], 0, 0, ad_group_id=ag_id,
                    note="alle ids stonden er al")
 
     # ---- 3: uitsluiten in de zustercampagnes ---------------------------

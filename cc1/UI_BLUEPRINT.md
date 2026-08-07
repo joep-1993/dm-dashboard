@@ -245,7 +245,7 @@ inline the hexes.
 | Orange non-run action (e.g. Export) | `btn btn-outline-orange` | orange outline, fills on hover | — |
 | Any other action | `btn btn-outline-purple` | purple outline, fills on hover | — |
 | Refresh | `btn btn-outline-purple` + `↻` glyph | purple outline **with arrow icon**, fills purple with white text on hover | usually right (`ms-auto`) |
-| Destructive (Stop / Remove / Cancel) | `btn btn-outline-danger` | **red outline**, fills red on hover — *only while available* | — |
+| Destructive (Stop / Remove / Cancel) | `btn btn-outline-red` | **red outline**, fills red on hover — *only while available* | — |
 | Not clickable / unavailable | add `disabled` | **grey outline** (`#6c757d`) — always, even for red buttons | — |
 
 **Refresh in a card header needs NO override — an inline `background:#5e4a90` on a

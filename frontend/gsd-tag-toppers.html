@@ -47,10 +47,10 @@
            DMA Exclusions (badge bg-transparent fw-bold + rand in de tekstkleur).
            Een eigen kleur per actie, zodat de kolom te scannen is. */
         .act-label { background: transparent; font-weight: 700; border: 1px solid currentColor; }
-        .act-create  { color: #e8730c; }
-        .act-ids     { color: #5e4a90; }
+        .act-create  { color: #e8730c; }   /* oranje, als OOS in DMA Exclusions */
+        .act-ids     { color: #198754; }   /* groen: er komt iets bij */
         .act-neg     { color: #0f766e; }
-        .act-exclude { color: #1d4ed8; }
+        .act-exclude { color: #dc3545; }   /* rood: er wordt iets geblokkeerd */
     </style>
 </head>
 <body>
@@ -162,7 +162,9 @@
                      preview is gedraaid, dus de knop kan per definitie niet te vroeg geklikt. -->
                 <div class="card mb-4" id="resultsCard" style="display:none;">
                     <div class="card-header d-flex align-items-center gap-2">
-                        <h5 class="mb-0" id="resultsTitle">Resultaten
+                        <h5 class="mb-0"><!-- De titeltekst in een eigen span: loadResults() zet die via
+                             textContent, en dat zou de "i"-svg als kind meeslepen. -->
+                            <span id="resultsTitle">Resultaten</span>
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="runTip">Preview leest alleen en schrijft niets. Run maakt ontbrekende tag_toppers-campagnes aan (PAUSED), zet de product ids erin en sluit ze uit in alle niet-REMOVED zustercampagnes. Alles is add-only: bestaande ids en uitsluitingen blijven staan.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
                         </h5>
                         <button class="btn btn-sm btn-run ms-auto" id="realBtn" onclick="startRun(false)" disabled>Run</button>
@@ -343,7 +345,7 @@ async function loadResults() {
     DRY = j.dry_run;
     document.getElementById('resultsCard').style.display = RESULTS.length ? 'block' : 'none';
     document.getElementById('resultsTitle').textContent =
-        (DRY ? 'Preview-resultaten' : 'Run-resultaten') + ' (' + RESULTS.length + ' rijen)';
+        DRY ? 'Preview-resultaten' : 'Run-resultaten';
 
     const s = j.summary || {};
     const errs = s.errors || 0;
@@ -470,7 +472,7 @@ function openDetail(excelRow) {
     };
     const ACT_CLASS = {
         'campagne aanmaken': 'act-create',
-        'ids toevoegen': 'act-ids',
+        'toevoegen': 'act-ids',
         'negatives overnemen': 'act-neg',
         'uitsluiten': 'act-exclude',
     };
@@ -500,8 +502,6 @@ function openDetail(excelRow) {
     row.insertAdjacentHTML('afterend',
         '<tr id="tt-detail-' + excelRow + '"><td colspan="' + cols + '" class="bg-light py-2">' +
         '<div class="px-3 py-3" style="text-align:center;">' +
-        '<div class="small text-muted mb-2">' +
-        '<strong>' + targets.length + '</strong> mutatie(s) op campagne-niveau:</div>' +
         '<table class="table table-bordered bg-white mb-0 small" ' +
         'style="width:80%; min-width:520px; margin:0 auto;">' +
         '<thead><tr>' +
