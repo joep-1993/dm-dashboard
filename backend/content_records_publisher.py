@@ -376,6 +376,19 @@ def publish_records(env: str = "production", mode: str = "new", limit: int = Non
     if prune and not cancelled:
         _set_progress(task_id, phase="retiring")
         stale = _fetch_stale(env)
+
+        # Same guard as the push phase: the records API rejects URLs > 255
+        # chars and one bad URL fails the entire chunk.  Filter them out and
+        # unstamp so they stop being reported as stale on every future run.
+        stale_too_long = [r for r in stale if len(_normalize_url(r["url"])) > MAX_URL_LEN]
+        if stale_too_long:
+            stale = [r for r in stale if len(_normalize_url(r["url"])) <= MAX_URL_LEN]
+            _unstamp([r["url_id"] for r in stale_too_long], env)
+            log.warning("Retire: dropped %d URLs exceeding %d chars from push_state: %s",
+                        len(stale_too_long), MAX_URL_LEN,
+                        [r["url"][:120] for r in stale_too_long[:10]])
+
+
         retired = retire_failed = 0
         for start in range(0, len(stale), chunk_size):
             if _is_cancelled(task_id):
@@ -402,7 +415,8 @@ def publish_records(env: str = "production", mode: str = "new", limit: int = Non
                 retire_failed += len(chunk)
             _set_progress(task_id, phase="retiring", retired=retired,
                           retire_failed=retire_failed)
-        result["stale_found"] = len(stale)
+        result["stale_found"] = len(stale) + len(stale_too_long)
+        result["stale_too_long"] = len(stale_too_long)
         result["urls_retired"] = retired
         result["retire_failed"] = retire_failed
         if retire_failed:
