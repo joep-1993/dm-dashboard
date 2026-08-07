@@ -310,9 +310,11 @@ def _plan_tag_toppers_adds(nodes: Dict[str, dict], item_ids: List[str]) -> Dict[
     root = _root(nodes)
     if root is None:
         return {"root": None, "existing": set(), "missing": list(item_ids)}
+    # Positief én negatief: Google staat maar één node per case value toe, dus een
+    # id dat al als negatief onder deze root hangt kan er niet positief bij.
     existing = {
         n["item_id"] for n in nodes.values()
-        if n["dim"] == "item_id" and n["item_id"] and not n["negative"]
+        if n["dim"] == "item_id" and n["item_id"]
     }
     missing = [i for i in item_ids if i not in existing]
     return {"root": root, "existing": existing, "missing": missing}
@@ -362,7 +364,10 @@ def _plan_sibling_exclusions(nodes: Dict[str, dict], item_ids: List[str]) -> Dic
     if containers:
         for c in containers:
             kids = _children(nodes, c["resource"])
-            already = {k["item_id"] for k in kids if k["dim"] == "item_id" and k["negative"] and k["item_id"]}
+            # Ook de POSITIEVE item-ids meetellen: één node per case value, dus een
+            # id dat er positief hangt kan er niet negatief bij en levert anders
+            # LISTING_GROUP_ALREADY_EXISTS op.
+            already = {k["item_id"] for k in kids if k["dim"] == "item_id" and k["item_id"]}
             missing = [i for i in item_ids if i not in already]
             if missing:
                 appends.append({"parent": c["resource"], "missing": missing})
@@ -527,6 +532,19 @@ def _remove_op(client, resource_name):
     return op
 
 
+def _dedupe_msgs(msgs: List[str]) -> List[str]:
+    """Identieke meldingen samenvouwen tot 'melding (3x)'.
+
+    Eén mislukte mutate levert per operatie dezelfde regel op; ongefilterd werd dat
+    een muur van drie keer dezelfde zin, drie keer herhaald.
+    """
+    counts: "OrderedDict[str, int]" = OrderedDict()
+    for m in msgs:
+        key = str(m).strip()
+        counts[key] = counts.get(key, 0) + 1
+    return [f"{k} ({v}x)" if v > 1 else k for k, v in counts.items()]
+
+
 def _err(ex: Exception) -> str:
     if isinstance(ex, GoogleAdsException):
         try:
@@ -552,14 +570,44 @@ def _is_concurrent_modification(ex: GoogleAdsException) -> bool:
     return False
 
 
+def _is_already_exists(ex: GoogleAdsException) -> bool:
+    """LISTING_GROUP_ALREADY_EXISTS is geen fout maar een no-op: de node staat er al.
+
+    Dat is precies wat add-only hoort te doen, dus zo'n operatie telt als
+    overgeslagen. Kan alsnog voorkomen als de boom een id al POSITIEF bevat waar wij
+    een negatief willen zetten — Google staat maar één node per case value toe,
+    ongeacht de negative-vlag.
+    """
+    try:
+        for e in ex.failure.errors:
+            code = e.error_code
+            if getattr(code, "criterion_error", None) and \
+                    code.criterion_error.name == "LISTING_GROUP_ALREADY_EXISTS":
+                return True
+            if "already exists" in (e.message or "").lower():
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _mutate_with_retry(client, customer_id: str, ops: List[Any], retries: int = 4):
-    """Voert één mutate uit en herhaalt bij CONCURRENT_MODIFICATION met backoff."""
-    agc = client.get_service("AdGroupCriterionService")
+    """Voert één mutate uit en herhaalt bij CONCURRENT_MODIFICATION met backoff.
+
+    partial_failure staat aan zodat één afgekeurde operatie niet het hele blok van
+    maximaal MUTATE_CHUNK sloopt — zonder dat kostte één 'bestaat al' tot 1000
+    geldige mutaties.
+    """
+    svc = client.get_service("AdGroupCriterionService")
     delay = 2.0
     last = None
     for attempt in range(retries):
+        req = client.get_type("MutateAdGroupCriteriaRequest")
+        req.customer_id = str(customer_id)
+        req.operations.extend(ops)
+        req.partial_failure = True
         try:
-            return agc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops), None
+            return svc.mutate_ad_group_criteria(request=req), None
         except GoogleAdsException as ex:
             last = ex
             if not _is_concurrent_modification(ex) or attempt == retries - 1:
@@ -571,24 +619,66 @@ def _mutate_with_retry(client, customer_id: str, ops: List[Any], retries: int = 
     return None, last
 
 
-def _mutate_criteria(client, customer_id: str, ops: List[Any]) -> Tuple[int, List[str]]:
-    """Voert criterion-operaties uit in blokken; telt geslaagde resultaten."""
-    done, errors = 0, []
+def _read_partial_failure(client, resp) -> Tuple[int, List[str], set]:
+    """(overgeslagen, echte fouten, mislukte indexen) uit een partial_failure-respons."""
+    skipped, errors, failed = 0, [], set()
+    pfe = getattr(resp, "partial_failure_error", None)
+    if not pfe or not pfe.details:
+        return skipped, errors, failed
+    failure_type = client.get_type("GoogleAdsFailure")
+    for det in pfe.details:
+        try:
+            f = type(failure_type).deserialize(det.value)
+        except Exception:
+            continue
+        for err in f.errors:
+            idx = None
+            for el in err.location.field_path_elements:
+                if el.field_name == "operations":
+                    idx = el.index
+            if idx is not None:
+                failed.add(idx)
+            code = err.error_code
+            is_dup = (getattr(code, "criterion_error", None)
+                      and code.criterion_error.name == "LISTING_GROUP_ALREADY_EXISTS") \
+                or "already exists" in (err.message or "").lower()
+            if is_dup:
+                skipped += 1
+            else:
+                errors.append(err.message)
+    return skipped, errors, failed
+
+
+def _mutate_criteria(client, customer_id: str, ops: List[Any]) -> Tuple[int, int, List[str]]:
+    """Voert criterion-operaties uit in blokken.
+
+    Geeft (geland, overgeslagen, fouten) terug. 'Overgeslagen' is uitsluitend
+    LISTING_GROUP_ALREADY_EXISTS — de node stond er al, wat bij een add-only tool
+    het gewenste eindresultaat is en dus geen fout.
+    """
+    done, skipped, errors = 0, 0, []
     for i in range(0, len(ops), MUTATE_CHUNK):
         chunk = ops[i:i + MUTATE_CHUNK]
         resp, ex = _mutate_with_retry(client, customer_id, chunk)
         if resp is None:
-            errors.append(_err(ex))
-        else:
-            done += len(resp.results)
-    return done, errors
+            if _is_already_exists(ex):
+                skipped += len(chunk)
+            else:
+                errors.append(_err(ex))
+            continue
+        s, errs, failed = _read_partial_failure(client, resp)
+        skipped += s
+        errors.extend(errs)
+        done += sum(1 for j, r in enumerate(resp.results)
+                    if r.resource_name and j not in failed)
+    return done, skipped, errors
 
 
 def _apply_tag_toppers_adds(client, customer_id: str, ad_group_id: str,
-                            root_resource: str, missing: List[str]) -> Tuple[int, List[str]]:
+                            root_resource: str, missing: List[str]) -> Tuple[int, int, List[str]]:
     """Hangt ontbrekende ids als POSITIEVE units onder de bestaande root. Add-only."""
     if not missing:
-        return 0, []
+        return 0, 0, []
     temp = _Temp()
     ops = []
     for item_id in missing:
@@ -599,9 +689,9 @@ def _apply_tag_toppers_adds(client, customer_id: str, ad_group_id: str,
 
 
 def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
-                              plan: Dict[str, Any]) -> Tuple[int, List[str]]:
+                              plan: Dict[str, Any]) -> Tuple[int, int, List[str]]:
     """Voegt negatieve item-ids toe. Bestaande uitsluitingen blijven staan."""
-    done, errors = 0, []
+    done, skipped, errors = 0, 0, []
 
     for app in plan["appends"]:
         temp = _Temp()
@@ -610,8 +700,9 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
             op, _ = _unit_op(client, customer_id, ad_group_id, temp, app["parent"],
                              item_id_value=item_id, negative=True)
             ops.append(op)
-        d, e = _mutate_criteria(client, customer_id, ops)
+        d, s, e = _mutate_criteria(client, customer_id, ops)
         done += d
+        skipped += s
         errors.extend(e)
 
     for conv in plan["converts"]:
@@ -631,7 +722,10 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
         ops.append(others_op)
         resp, ex = _mutate_with_retry(client, customer_id, ops)
         if resp is None:
-            errors.append(f"convert {leaf['resource']}: {_err(ex)}")
+            if _is_already_exists(ex):
+                skipped += 1
+            else:
+                errors.append(f"convert {leaf['resource']}: {_err(ex)}")
             continue
         real_sub = resp.results[1].resource_name
 
@@ -641,11 +735,12 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
             op, _ = _unit_op(client, customer_id, ad_group_id, temp2, real_sub,
                              item_id_value=item_id, negative=True)
             neg_ops.append(op)
-        d, e = _mutate_criteria(client, customer_id, neg_ops)
+        d, s, e = _mutate_criteria(client, customer_id, neg_ops)
         done += d
+        skipped += s
         errors.extend(e)
 
-    return done, errors
+    return done, skipped, errors
 
 
 def _create_tag_toppers_campaign(client, customer_id: str, country: str,
@@ -844,23 +939,31 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
         "targets": [],
     }
 
-    def target(kind, campaign, planned, applied=0, ad_group_id=None, errors=None, note=""):
-        errs = [e for e in (errors or [])]
+    def target(kind, campaign, planned, applied=0, ad_group_id=None, errors=None,
+               note="", skipped=0):
+        errs = _dedupe_msgs([str(e)[:300] for e in (errors or [])])
         if errs:
             status = "fout" if applied == 0 else "deels"
         elif dry_run:
             status = "gepland"
+        elif skipped and applied == 0:
+            # Niets geschreven omdat alles er al stond: dat is het gewenste
+            # eindresultaat van een add-only tool, geen mislukking.
+            status = "overgeslagen"
+        elif applied + skipped >= planned:
+            status = "ok"
         else:
-            status = "ok" if applied >= planned else ("deels" if applied else "fout")
+            status = "deels" if applied else "fout"
         res["targets"].append({
             "kind": kind,
             "campaign": campaign,
             "ad_group_id": ad_group_id,
             "planned": planned,
             "applied": applied,
+            "skipped": skipped,
             "status": status,
             "note": note,
-            "errors": [str(e)[:300] for e in errs[:5]],
+            "errors": errs[:5],
         })
 
     camps = _fetch_shop_campaigns(client, customer_id, row["shop_id"], row["shop_name"])
@@ -889,12 +992,12 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 return res
             res["campaign_name"] = created["name"]
             target("campagne aanmaken", created["name"], 1, 1, errors=errs, note="PAUSED")
-            added, errs2 = _apply_tag_toppers_adds(
+            added, skipped, errs2 = _apply_tag_toppers_adds(
                 client, customer_id, created["ad_group_id"], created["root_resource"], item_ids)
             res["ids_added"] = added
             res["errors"].extend(errs2)
             target("ids toevoegen", created["name"], len(item_ids), added,
-                   ad_group_id=created["ad_group_id"], errors=errs2)
+                   ad_group_id=created["ad_group_id"], errors=errs2, skipped=skipped)
             if source:
                 n, errs3 = _copy_negatives(client, customer_id, created["resource"],
                                            created["id"], source)
@@ -929,12 +1032,12 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 target("ids toevoegen", tt["name"], len(plan["missing"]), 0,
                        ad_group_id=ag_id, errors=[msg])
             else:
-                added, errs = _apply_tag_toppers_adds(
+                added, skipped, errs = _apply_tag_toppers_adds(
                     client, customer_id, ag_id, plan["root"]["resource"], plan["missing"])
                 res["ids_added"] = added
                 res["errors"].extend(errs)
                 target("ids toevoegen", tt["name"], len(plan["missing"]), added,
-                       ad_group_id=ag_id, errors=errs)
+                       ad_group_id=ag_id, errors=errs, skipped=skipped)
         elif plan["missing"]:
             target("ids toevoegen", tt["name"], len(plan["missing"]), 0, ad_group_id=ag_id)
         else:
@@ -957,18 +1060,18 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
             plan = _plan_sibling_exclusions(nodes, item_ids)
             res["exclusions_to_add"] += plan["n_new"]
             if not dry_run and plan["n_new"]:
-                done, errs = _apply_sibling_exclusions(client, customer_id, ag_id, plan)
+                done, skipped, errs = _apply_sibling_exclusions(client, customer_id, ag_id, plan)
                 res["exclusions_added"] += done
                 res["errors"].extend(f"{sib['name']}/{ag_id}: {e}" for e in errs)
                 target("uitsluiten", sib["name"], plan["n_new"], done,
-                       ad_group_id=ag_id, errors=errs)
+                       ad_group_id=ag_id, errors=errs, skipped=skipped)
             else:
                 target("uitsluiten", sib["name"], plan["n_new"], 0, ad_group_id=ag_id,
                        note="niets te doen" if not plan["n_new"] else "")
 
     if res["errors"]:
         res["status"] = "fout" if res["status"] == "fout" else "deels"
-    res["errors"] = res["errors"][:10]
+    res["errors"] = _dedupe_msgs(res["errors"])[:10]
     return res
 
 

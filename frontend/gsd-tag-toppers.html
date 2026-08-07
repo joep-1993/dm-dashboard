@@ -41,6 +41,9 @@
            col-md-10 niet nodig. Links uitgelijnd, zodat hij dezelfde linkerrand
            houdt als de resultatenkaart eronder. */
         #uploadCard { max-width: 680px; }
+        /* Overgeslagen = stond er al. Geen fout, maar ook geen mutatie — vandaar
+           een eigen kleur naast groen (geland) en rood (mislukt). */
+        .badge.badge-skipped { background: #0f766e; color: #fff; }
     </style>
 </head>
 <body>
@@ -413,34 +416,42 @@ function openDetail(excelRow) {
     if (!targets.length) {
         row.insertAdjacentHTML('afterend',
             '<tr id="tt-detail-' + excelRow + '"><td colspan="' + cols + '" class="bg-light py-2">' +
-            '<div class="px-3 py-1 small text-muted" style="text-align:left;">' +
+            '<div class="px-3 py-1 small text-muted" style="text-align:center;">' +
             'Geen mutaties vastgelegd voor deze rij.</div></td></tr>');
         return;
     }
 
     const pill = (t) => {
-        if (t.status === 'ok')      return '<span class="badge bg-success">gelukt</span>';
-        if (t.status === 'deels')   return '<span class="badge bg-warning text-dark">deels</span>';
-        if (t.status === 'gepland') return '<span class="badge bg-primary">gepland</span>';
+        if (t.status === 'ok')            return '<span class="badge bg-success">gelukt</span>';
+        if (t.status === 'overgeslagen')  return '<span class="badge badge-skipped">overgeslagen</span>';
+        if (t.status === 'deels')         return '<span class="badge bg-warning text-dark">deels</span>';
+        if (t.status === 'gepland')       return '<span class="badge bg-primary">gepland</span>';
         return '<span class="badge bg-danger">mislukt</span>';
     };
     const body = targets.map(t =>
         '<tr>' +
         '<td style="text-align:left; padding:8px 18px;">' + esc(t.kind) + '</td>' +
+        // Geen ad-group id: deze campagnes hebben er precies één, dus het voegt
+        // niets toe aan de campagnenaam.
         '<td style="text-align:left; padding:8px 18px; word-break:break-word;">' +
-            esc(t.campaign) + (t.ad_group_id
-                ? '<span class="text-muted small"> &middot; ad group ' + esc(t.ad_group_id) + '</span>' : '') +
+            esc(t.campaign) +
             (t.note ? '<div class="text-muted small">' + esc(t.note) + '</div>' : '') + '</td>' +
         '<td style="padding:8px 18px;">' + esc(t.planned) + '</td>' +
         '<td style="padding:8px 18px;">' + esc(t.applied) + '</td>' +
+        '<td style="padding:8px 18px;">' + esc(t.skipped || 0) + '</td>' +
         '<td style="padding:8px 18px;">' + pill(t) + '</td>' +
         '<td style="text-align:left; padding:8px 18px; word-break:break-word;">' +
             (t.errors && t.errors.length ? esc(t.errors.join(' | ')) : '&mdash;') + '</td>' +
         '</tr>').join('');
 
     const failed = targets.filter(t => t.status === 'fout' || t.status === 'deels');
+    // 'overgeslagen' telt bewust niet als mislukking: die node stond er al.
+    // Zelfde verhouding als DMA Exclusions: alles in een gecentreerde px-3 py-3
+    // wrapper, met de tabel op 80% breed (min 520px) en margin:0 auto, zodat de
+    // uitklap duidelijk smaller is dan de rij waar hij onder hangt.
     const warn = failed.length
-        ? '<div class="alert alert-danger py-2 px-3 small mt-3 mb-0" style="text-align:left;">' +
+        ? '<div class="alert alert-danger py-2 px-3 small mt-3 mb-2" ' +
+          'style="width:80%; min-width:520px; margin:0 auto; text-align:left;">' +
           '&#9888;&#65039; <strong>' + failed.length + '</strong> van de ' + targets.length +
           ' mutaties is niet (volledig) geland. Draai Run opnieuw om het te herstellen — ' +
           'alles is add-only, dus wat al staat blijft staan.</div>'
@@ -448,18 +459,21 @@ function openDetail(excelRow) {
 
     row.insertAdjacentHTML('afterend',
         '<tr id="tt-detail-' + excelRow + '"><td colspan="' + cols + '" class="bg-light py-2">' +
-        '<div class="small text-muted mb-2" style="text-align:left; padding-left:18px;">' +
-        targets.length + ' mutatie(s) op campagne-niveau:</div>' +
-        '<table class="table table-bordered bg-white mb-0 small" style="width:96%; margin:0 auto;">' +
+        '<div class="px-3 py-3" style="text-align:center;">' +
+        '<div class="small text-muted mb-2">' +
+        '<strong>' + targets.length + '</strong> mutatie(s) op campagne-niveau:</div>' +
+        '<table class="table table-bordered bg-white mb-0 small" ' +
+        'style="width:80%; min-width:520px; margin:0 auto;">' +
         '<thead><tr>' +
         '<th style="text-align:left; padding:8px 18px;">Actie</th>' +
         '<th style="text-align:left; padding:8px 18px;">Campagne</th>' +
         '<th style="padding:8px 18px;">Gepland</th>' +
         '<th style="padding:8px 18px;">Geland</th>' +
+        '<th style="padding:8px 18px;" title="Stond er al — bij een add-only tool is dat het gewenste eindresultaat">Stond er al</th>' +
         '<th style="padding:8px 18px;">Status</th>' +
         '<th style="text-align:left; padding:8px 18px;">Fout</th>' +
         '</tr></thead><tbody>' + body + '</tbody></table>' + warn +
-        '</td></tr>');
+        '</div></td></tr>');
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
