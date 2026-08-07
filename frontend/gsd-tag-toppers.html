@@ -179,9 +179,14 @@
                             <span id="resultsTitle">Resultaten</span>
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;"><title id="runTip">Preview leest alleen en schrijft niets. Run maakt ontbrekende tag_toppers-campagnes aan (PAUSED), zet de product ids erin en sluit ze uit in alle niet-REMOVED zustercampagnes. Alles is add-only: bestaande ids en uitsluitingen blijven staan.</title><circle cx="8" cy="8" r="8" fill="#5e4a90"/><circle cx="8" cy="4.2" r="1.1" fill="#fff"/><rect x="6.9" y="6.5" width="2.2" height="5.8" rx="0.4" fill="#fff"/></svg>
                         </h5>
-                        <button class="btn btn-sm btn-outline-purple ms-auto" id="backToLatest"
-                                onclick="backToLatest()" style="display:none;">&#8592; Naar de laatste run</button>
-                        <button class="btn btn-sm btn-run" id="realBtn" onclick="startRun(false)" disabled>Run</button>
+                        <!-- ms-auto op de GROEP, niet op een knop: backToLatest staat meestal
+                             op display:none en valt dan uit de flow, waardoor zijn ms-auto
+                             niets meer duwde en Run tegen de titel aan schoof. -->
+                        <div class="ms-auto d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-purple" id="backToLatest"
+                                    onclick="backToLatest()" style="display:none;">&#8592; Naar de laatste run</button>
+                            <button class="btn btn-sm btn-run" id="realBtn" onclick="startRun(false)" disabled>Run</button>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div id="summaryRow" class="mb-3"></div>
