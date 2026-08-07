@@ -30,6 +30,11 @@ ook add-only.
       geweest en vraagt daarna nog een bevestiging; `POST /run` weigert zonder `confirm=true`.
       Uitleg onder "i"-knoppen per UI_BLUEPRINT. Nav toegevoegd aan alle 34 pagina's
       (A-Z tussen GSD Check en MC ID Finder).
+- [x] **Grote echte run 7 aug 14:46 — 620 rijen: 18.956 ids toegevoegd, 181.511 uitsluitingen
+      gemaakt, 113 rijen met fouten.** Daarvan waren er 61 het mislukte campagne-aanmaken
+      (verkeerd Merchant Center id, zie LEARNINGS); de overige ~52 zijn niet meer na te kijken
+      omdat die run net vóór het opslaan van de rijen draaide. De run zelf is uit de historie
+      verwijderd op Joeps verzoek — deze regel is wat ervan over is.
 - [x] **Eerste echte run gedraaid** (Joep, 2 rijen): 4/4 ids toegevoegd, 32/35 uitsluitingen.
       Het add-only schrijfpad doet wat het moet — dat was het enige dat `validate_only` niet
       kon aantonen. De drie missers waren één `CONCURRENT_MODIFICATION` op een convert.
