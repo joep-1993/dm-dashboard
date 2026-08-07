@@ -20,6 +20,10 @@
         .tool-table th, .tool-table td { white-space: nowrap; text-align: center; }
         .tool-table th { background: #f8f9fa; position: sticky; top: 0; z-index: 1; padding: 6px 14px; font-size: 1rem; }
         .tool-table td { vertical-align: middle; }
+        /* Shop (kolom 2) links: shopnamen verschillen sterk in lengte en lezen
+           gecentreerd als een rafelrand. De tellingen eromheen blijven gecentreerd. */
+        #resultsCard .tool-table th:nth-child(2),
+        #resultsCard .tool-table td:nth-child(2) { text-align: left; }
         .tool-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
         .tool-table th.sortable:hover { background: #e9ecef; }
         .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
@@ -452,7 +456,7 @@ function renderTable() {
         '<td>' + esc(r.country) + '</td>' +
         '<td>' + esc(r.n_ids) + '</td>' +
         '<td>' + (r.campaign_action === 'aanmaken'
-            ? '<span class="badge lbl lbl-amber">aanmaken</span>'
+            ? '<span class="badge lbl lbl-green">aanmaken</span>'
             : '<span class="badge lbl lbl-purple">bestaat</span>') + '</td>' +
         '<td>' + esc(r.siblings) + '</td>' +
         '<td>' + esc(r.ids_already_present) + '</td>' +
