@@ -174,19 +174,19 @@
                             <table class="table table-sm tool-table mb-0">
                                 <thead>
                                     <tr>
-                                        <th>Rij</th>
-                                        <th>Shop</th>
-                                        <th>Shop id</th>
-                                        <th>Land</th>
-                                        <th>Ids</th>
-                                        <th>Campagne</th>
-                                        <th>Aantal campagnes</th>
-                                        <th>Al aanwezig</th>
-                                        <th>Toe te voegen</th>
-                                        <th>Toegevoegd</th>
-                                        <th>Uit te sluiten</th>
-                                        <th>Uitgesloten</th>
-                                        <th>Status</th>
+                                        <th class="sortable" data-sort="excel_row" onclick="sortBy('excel_row')">Rij</th>
+                                        <th class="sortable" data-sort="shop_name" onclick="sortBy('shop_name')">Shop</th>
+                                        <th class="sortable" data-sort="shop_id" onclick="sortBy('shop_id')">Shop id</th>
+                                        <th class="sortable" data-sort="country" onclick="sortBy('country')">Land</th>
+                                        <th class="sortable" data-sort="n_ids" onclick="sortBy('n_ids')">Ids</th>
+                                        <th class="sortable" data-sort="campaign_action" onclick="sortBy('campaign_action')">Campagne</th>
+                                        <th class="sortable" data-sort="siblings" onclick="sortBy('siblings')">Aantal campagnes</th>
+                                        <th class="sortable" data-sort="ids_already_present" onclick="sortBy('ids_already_present')">Al aanwezig</th>
+                                        <th class="sortable" data-sort="ids_to_add" onclick="sortBy('ids_to_add')">Toe te voegen</th>
+                                        <th class="sortable" data-sort="ids_added" onclick="sortBy('ids_added')">Toegevoegd</th>
+                                        <th class="sortable" data-sort="exclusions_to_add" onclick="sortBy('exclusions_to_add')">Uit te sluiten</th>
+                                        <th class="sortable" data-sort="exclusions_added" onclick="sortBy('exclusions_added')">Uitgesloten</th>
+                                        <th class="sortable" data-sort="status" onclick="sortBy('status')">Status</th>
                                     </tr>
                                 </thead>
                                 <tbody id="resultsBody"></tbody>
@@ -208,6 +208,8 @@ let HAS_DRY_RUN = false;
 // Welke rijen staan uitgeklapt. renderTable() bouwt de tbody opnieuw op, dus
 // zonder dit klapt elke tussentijdse verversing tijdens een run ze dicht.
 const OPEN_DETAILS = new Set();
+let SORT_KEY = null;
+let SORT_DIR = 1;   // 1 = oplopend, -1 = aflopend
 
 function esc(s) {
     return String(s === null || s === undefined ? '' : s)
@@ -350,6 +352,22 @@ async function loadResults() {
     renderTable();
 }
 
+// Klik op een kop sorteert; nog een klik draait de richting om.
+function sortBy(key) {
+    if (SORT_KEY === key) { SORT_DIR = -SORT_DIR; } else { SORT_KEY = key; SORT_DIR = 1; }
+    renderTable();
+}
+
+// Getallen numeriek, de rest als tekst. shop_id is een string van cijfers, dus
+// zonder deze check zou 1000 vóór 999 komen.
+function cmpValues(a, b) {
+    const na = parseFloat(a), nb = parseFloat(b);
+    const bothNum = !isNaN(na) && !isNaN(nb) && String(a).trim() !== '' && String(b).trim() !== '';
+    if (bothNum) return na - nb;
+    return String(a === null || a === undefined ? '' : a)
+        .localeCompare(String(b === null || b === undefined ? '' : b), 'nl', {numeric: true});
+}
+
 function renderTable() {
     const q = (document.getElementById('tableFilter').value || '').toLowerCase();
     const sf = document.getElementById('statusFilter').value;
@@ -362,6 +380,18 @@ function renderTable() {
                                r.campaign_action === 'aanmaken')) return false;
         return true;
     });
+
+    if (SORT_KEY) {
+        rows.sort((a, b) => SORT_DIR * cmpValues(a[SORT_KEY], b[SORT_KEY]));
+    }
+    // Pijl-indicator op de actieve kop; .sortable::after tekent ⇅ / ▲ / ▼.
+    document.querySelectorAll('.tool-table th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.sort === SORT_KEY) {
+            th.classList.add(SORT_DIR === 1 ? 'sort-asc' : 'sort-desc');
+        }
+    });
+
     const badge = (r) => {
         if (r.status === 'ok') return '<span class="badge bg-success">ok</span>';
         if (r.status === 'deels') return '<span class="badge bg-warning text-dark">deels</span>';
