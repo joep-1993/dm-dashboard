@@ -177,6 +177,7 @@
                                         <th>Land</th>
                                         <th>Ids</th>
                                         <th>Campagne</th>
+                                        <th>Aantal campagnes</th>
                                         <th>Al aanwezig</th>
                                         <th>Toe te voegen</th>
                                         <th>Toegevoegd</th>
@@ -352,7 +353,9 @@ function renderTable() {
         return '<span class="badge bg-danger">fout</span>';
     };
     document.getElementById('resultsBody').innerHTML = rows.map(r =>
-        '<tr>' +
+        '<tr id="tt-row-' + r.excel_row + '" style="cursor:pointer;"' +
+        ' onclick="toggleDetail(' + r.excel_row + ')"' +
+        ' title="Klik voor de mutaties per campagne">' +
         '<td>' + esc(r.excel_row) + '</td>' +
         '<td>' + esc(r.shop_name) + '</td>' +
         '<td>' + esc(r.shop_id) + '</td>' +
@@ -361,6 +364,7 @@ function renderTable() {
         '<td>' + (r.campaign_action === 'aanmaken'
             ? '<span class="badge bg-warning text-dark">aanmaken</span>'
             : '<span class="badge bg-primary">bestaat</span>') + '</td>' +
+        '<td>' + esc(r.siblings) + '</td>' +
         '<td>' + esc(r.ids_already_present) + '</td>' +
         '<td>' + esc(r.ids_to_add) + '</td>' +
         '<td>' + esc(r.ids_added) + '</td>' +
@@ -369,6 +373,70 @@ function renderTable() {
         '<td>' + badge(r) + (r.errors && r.errors.length
             ? ' <span title="' + esc(r.errors.join(' | ')) + '">&#9432;</span>' : '') + '</td>' +
         '</tr>').join('');
+}
+
+// Klik op een rij klapt de mutaties per campagne uit. De detail zit al in de
+// resultaat-payload, dus geen extra call — anders dan DMA Exclusions, dat zijn
+// targets uit de database moet halen.
+function toggleDetail(excelRow) {
+    const existing = document.getElementById('tt-detail-' + excelRow);
+    if (existing) { existing.remove(); return; }
+    const row = document.getElementById('tt-row-' + excelRow);
+    if (!row) return;
+    const r = RESULTS.find(x => x.excel_row === excelRow);
+    const targets = (r && r.targets) || [];
+    const cols = row.children.length;
+
+    if (!targets.length) {
+        row.insertAdjacentHTML('afterend',
+            '<tr id="tt-detail-' + excelRow + '"><td colspan="' + cols + '" class="bg-light py-2">' +
+            '<div class="px-3 py-1 small text-muted" style="text-align:left;">' +
+            'Geen mutaties vastgelegd voor deze rij.</div></td></tr>');
+        return;
+    }
+
+    const pill = (t) => {
+        if (t.status === 'ok')      return '<span class="badge bg-success">gelukt</span>';
+        if (t.status === 'deels')   return '<span class="badge bg-warning text-dark">deels</span>';
+        if (t.status === 'gepland') return '<span class="badge bg-primary">gepland</span>';
+        return '<span class="badge bg-danger">mislukt</span>';
+    };
+    const body = targets.map(t =>
+        '<tr>' +
+        '<td style="text-align:left; padding:8px 18px;">' + esc(t.kind) + '</td>' +
+        '<td style="text-align:left; padding:8px 18px; word-break:break-word;">' +
+            esc(t.campaign) + (t.ad_group_id
+                ? '<span class="text-muted small"> &middot; ad group ' + esc(t.ad_group_id) + '</span>' : '') +
+            (t.note ? '<div class="text-muted small">' + esc(t.note) + '</div>' : '') + '</td>' +
+        '<td style="padding:8px 18px;">' + esc(t.planned) + '</td>' +
+        '<td style="padding:8px 18px;">' + esc(t.applied) + '</td>' +
+        '<td style="padding:8px 18px;">' + pill(t) + '</td>' +
+        '<td style="text-align:left; padding:8px 18px; word-break:break-word;">' +
+            (t.errors && t.errors.length ? esc(t.errors.join(' | ')) : '&mdash;') + '</td>' +
+        '</tr>').join('');
+
+    const failed = targets.filter(t => t.status === 'fout' || t.status === 'deels');
+    const warn = failed.length
+        ? '<div class="alert alert-danger py-2 px-3 small mt-3 mb-0" style="text-align:left;">' +
+          '&#9888;&#65039; <strong>' + failed.length + '</strong> van de ' + targets.length +
+          ' mutaties is niet (volledig) geland. Draai Run opnieuw om het te herstellen — ' +
+          'alles is add-only, dus wat al staat blijft staan.</div>'
+        : '';
+
+    row.insertAdjacentHTML('afterend',
+        '<tr id="tt-detail-' + excelRow + '"><td colspan="' + cols + '" class="bg-light py-2">' +
+        '<div class="small text-muted mb-2" style="text-align:left; padding-left:18px;">' +
+        targets.length + ' mutatie(s) op campagne-niveau:</div>' +
+        '<table class="table table-bordered bg-white mb-0 small" style="width:96%; margin:0 auto;">' +
+        '<thead><tr>' +
+        '<th style="text-align:left; padding:8px 18px;">Actie</th>' +
+        '<th style="text-align:left; padding:8px 18px;">Campagne</th>' +
+        '<th style="padding:8px 18px;">Gepland</th>' +
+        '<th style="padding:8px 18px;">Geland</th>' +
+        '<th style="padding:8px 18px;">Status</th>' +
+        '<th style="text-align:left; padding:8px 18px;">Fout</th>' +
+        '</tr></thead><tbody>' + body + '</tbody></table>' + warn +
+        '</td></tr>');
 }
 
 window.addEventListener('DOMContentLoaded', async () => {

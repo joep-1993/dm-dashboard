@@ -536,17 +536,51 @@ def _err(ex: Exception) -> str:
     return f"{type(ex).__name__}: {ex}"[:400]
 
 
+def _is_concurrent_modification(ex: GoogleAdsException) -> bool:
+    """CONCURRENT_MODIFICATION is transient: Google was nog bezig met een eerdere
+    mutate op dezelfde ad group. Opnieuw proberen lost het op."""
+    try:
+        for e in ex.failure.errors:
+            code = e.error_code
+            if getattr(code, "database_error", None) and \
+                    code.database_error.name == "CONCURRENT_MODIFICATION":
+                return True
+            if "same resource at once" in (e.message or ""):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _mutate_with_retry(client, customer_id: str, ops: List[Any], retries: int = 4):
+    """Voert één mutate uit en herhaalt bij CONCURRENT_MODIFICATION met backoff."""
+    agc = client.get_service("AdGroupCriterionService")
+    delay = 2.0
+    last = None
+    for attempt in range(retries):
+        try:
+            return agc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops), None
+        except GoogleAdsException as ex:
+            last = ex
+            if not _is_concurrent_modification(ex) or attempt == retries - 1:
+                break
+            logger.warning("CONCURRENT_MODIFICATION, opnieuw over %.0fs (poging %d/%d)",
+                           delay, attempt + 1, retries)
+            time.sleep(delay)
+            delay *= 2
+    return None, last
+
+
 def _mutate_criteria(client, customer_id: str, ops: List[Any]) -> Tuple[int, List[str]]:
     """Voert criterion-operaties uit in blokken; telt geslaagde resultaten."""
-    agc = client.get_service("AdGroupCriterionService")
     done, errors = 0, []
     for i in range(0, len(ops), MUTATE_CHUNK):
         chunk = ops[i:i + MUTATE_CHUNK]
-        try:
-            resp = agc.mutate_ad_group_criteria(customer_id=customer_id, operations=chunk)
-            done += len(resp.results)
-        except GoogleAdsException as ex:
+        resp, ex = _mutate_with_retry(client, customer_id, chunk)
+        if resp is None:
             errors.append(_err(ex))
+        else:
+            done += len(resp.results)
     return done, errors
 
 
@@ -595,13 +629,11 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
         others_op, _ = _unit_op(client, customer_id, ad_group_id, temp, sub_res,
                                 item_id_value="", negative=False, bid=bid)
         ops.append(others_op)
-        try:
-            agc = client.get_service("AdGroupCriterionService")
-            resp = agc.mutate_ad_group_criteria(customer_id=customer_id, operations=ops)
-            real_sub = resp.results[1].resource_name
-        except GoogleAdsException as ex:
+        resp, ex = _mutate_with_retry(client, customer_id, ops)
+        if resp is None:
             errors.append(f"convert {leaf['resource']}: {_err(ex)}")
             continue
+        real_sub = resp.results[1].resource_name
 
         temp2 = _Temp()
         neg_ops = []
@@ -806,7 +838,30 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
         "negatives_copied": 0,
         "status": "ok",
         "errors": [],
+        # Per campagne/ad group wat er gepland en wat er echt geland is. De tabel
+        # klapt hierop uit, zodat een run niet alleen een totaal maar ook een
+        # aanwijsbare plek van mislukking geeft.
+        "targets": [],
     }
+
+    def target(kind, campaign, planned, applied=0, ad_group_id=None, errors=None, note=""):
+        errs = [e for e in (errors or [])]
+        if errs:
+            status = "fout" if applied == 0 else "deels"
+        elif dry_run:
+            status = "gepland"
+        else:
+            status = "ok" if applied >= planned else ("deels" if applied else "fout")
+        res["targets"].append({
+            "kind": kind,
+            "campaign": campaign,
+            "ad_group_id": ad_group_id,
+            "planned": planned,
+            "applied": applied,
+            "status": status,
+            "note": note,
+            "errors": [str(e)[:300] for e in errs[:5]],
+        })
 
     camps = _fetch_shop_campaigns(client, customer_id, row["shop_id"], row["shop_name"])
     siblings = camps["siblings"]
@@ -829,22 +884,32 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 client, customer_id, country, row["shop_id"], row["shop_name"])
             res["errors"].extend(errs)
             if created is None:
+                target("campagne aanmaken", res["campaign_name"], 1, 0, errors=errs)
                 res["status"] = "fout"
                 return res
             res["campaign_name"] = created["name"]
-            added, errs = _apply_tag_toppers_adds(
+            target("campagne aanmaken", created["name"], 1, 1, errors=errs, note="PAUSED")
+            added, errs2 = _apply_tag_toppers_adds(
                 client, customer_id, created["ad_group_id"], created["root_resource"], item_ids)
             res["ids_added"] = added
-            res["errors"].extend(errs)
+            res["errors"].extend(errs2)
+            target("ids toevoegen", created["name"], len(item_ids), added,
+                   ad_group_id=created["ad_group_id"], errors=errs2)
             if source:
-                n, errs = _copy_negatives(client, customer_id, created["resource"],
-                                          created["id"], source)
+                n, errs3 = _copy_negatives(client, customer_id, created["resource"],
+                                           created["id"], source)
                 res["negatives_copied"] = n
-                res["errors"].extend(errs)
+                res["errors"].extend(errs3)
+                target("negatives overnemen", created["name"], n, n, errors=errs3,
+                       note=f"bron: {source['name']}")
         else:
+            target("campagne aanmaken", res["campaign_name"], 1, 0, note="PAUSED")
+            target("ids toevoegen", res["campaign_name"], len(item_ids), 0)
             if source:
                 src_negs = _fetch_campaign_negatives(client, customer_id, source["id"])
                 res["negatives_copied"] = len(src_negs)
+                target("negatives overnemen", res["campaign_name"], len(src_negs), 0,
+                       note=f"bron: {source['name']}")
     else:
         res["campaign_action"] = "bestaat"
         res["campaign_name"] = tt["name"]
@@ -858,20 +923,32 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
 
         if not dry_run and plan["missing"]:
             if plan["root"] is None:
-                res["errors"].append("geen listing-tree gevonden in de tag_toppers ad group")
+                msg = "geen listing-tree gevonden in de tag_toppers ad group"
+                res["errors"].append(msg)
                 res["status"] = "fout"
+                target("ids toevoegen", tt["name"], len(plan["missing"]), 0,
+                       ad_group_id=ag_id, errors=[msg])
             else:
                 added, errs = _apply_tag_toppers_adds(
                     client, customer_id, ag_id, plan["root"]["resource"], plan["missing"])
                 res["ids_added"] = added
                 res["errors"].extend(errs)
+                target("ids toevoegen", tt["name"], len(plan["missing"]), added,
+                       ad_group_id=ag_id, errors=errs)
+        elif plan["missing"]:
+            target("ids toevoegen", tt["name"], len(plan["missing"]), 0, ad_group_id=ag_id)
+        else:
+            target("ids toevoegen", tt["name"], 0, 0, ad_group_id=ag_id,
+                   note="alle ids stonden er al")
 
     # ---- 3: uitsluiten in de zustercampagnes ---------------------------
     for sib in siblings:
         try:
             trees = _read_campaign_tree(client, customer_id, sib["id"])
         except GoogleAdsException as ex:
-            res["errors"].append(f"{sib['name']}: {_err(ex)}")
+            msg = _err(ex)
+            res["errors"].append(f"{sib['name']}: {msg}")
+            target("uitsluiten", sib["name"], 0, 0, errors=[msg])
             continue
         for ag_id, nodes in trees.items():
             if not nodes:
@@ -883,6 +960,11 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 done, errs = _apply_sibling_exclusions(client, customer_id, ag_id, plan)
                 res["exclusions_added"] += done
                 res["errors"].extend(f"{sib['name']}/{ag_id}: {e}" for e in errs)
+                target("uitsluiten", sib["name"], plan["n_new"], done,
+                       ad_group_id=ag_id, errors=errs)
+            else:
+                target("uitsluiten", sib["name"], plan["n_new"], 0, ad_group_id=ag_id,
+                       note="niets te doen" if not plan["n_new"] else "")
 
     if res["errors"]:
         res["status"] = "fout" if res["status"] == "fout" else "deels"
@@ -902,7 +984,7 @@ def _failed_row(row: Dict[str, Any], message: str) -> Dict[str, Any]:
         "siblings": 0, "sibling_ad_groups": 0,
         "exclusions_to_add": 0, "exclusions_added": 0,
         "negatives_source": "", "negatives_copied": 0,
-        "status": "fout", "errors": [message],
+        "status": "fout", "errors": [message], "targets": [],
     }
 
 
