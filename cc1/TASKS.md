@@ -80,6 +80,25 @@ ook add-only.
 - [x] **Voortgang en Cancel op mutatie-korrel** — teller van geschreven criteria naast de
       rijteller, `indeterminate` balk zolang geen rij klaar is, en cancel die tussen
       mutatie-blokken grijpt in plaats van pas tussen rijen.
+- [x] **Beheerde staat in een tabel** — `gsd_tag_toppers_items` in de gedeelde Postgres
+      (10.1.32.9 / n8n-vector-db, schema `public`, naast `gsd_tag_toppers_runs`): één regel
+      per item id per shop/land, soft delete via `active` + `removed_at`, `source` per regel.
+      Import is idempotent en gaat in blokken van 5.000 via `execute_values` — 24.933 ids in
+      ~16s. Endpoints: `/items/summary`, `/items/import-excel`, `/items/import-live` (vult
+      vanuit Google Ads, achtergrond), `/items/to-upload` (tabel als bron voor Preview/Run).
+      Sleutel = `(country, shop_id, shop_key, item_id)`; zie LEARNINGS waarom shop_key alleen
+      niet volstaat.
+- [x] **Tool op het startscherm** — tegel op `dashboard.html` in de Google Ads-kleur.
+      Daarbij hersteld dat het nav-script van 7 aug de link óók in dashboard.html had gezet,
+      waar geen navbar is: die landde als los linkje midden in de GSD Check-tegel.
+- [x] **Menu- en tegelvolgorde opgeschoond** — Bothits hernoemd (was "Bot Hits") en van de
+      paarse Generators-kleur naar het groene `#00b894` van de SEO-tools, en `DMA+` stond in
+      elke navbar tussen DMA Bidding en DMA Exclusions. Alle vier de navbar-dropdowns en alle
+      vier de tegelgroepen zijn nu A-Z.
+- [ ] **Volgende stap: frontend voor de beheerde staat** — kaart met de shops, import-knoppen
+      en Preview/Run vanaf de tabel. Daarna pas het verwijder-pad (diff-run die ids weghaalt
+      die op inactief staan), achter een aparte bevestiging met een limiet op het aantal
+      verwijderingen per run.
 - [ ] **Open: het volume van een volledige run.** Toolmax NL alleen is 2096 ids ×
       8 containerplekken = 16.768 uitsluitingen; over alle 622 rijen loopt dat hard op.
       Preview geeft het totaal vóór er iets geschreven wordt — kijk daar eerst naar.

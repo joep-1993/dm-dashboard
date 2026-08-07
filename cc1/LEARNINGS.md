@@ -1,6 +1,53 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een normalisatie die goed is om te MATCHEN kan fout zijn als SLEUTEL (2026-08-07)
+
+Bij het bouwen van `gsd_tag_toppers_items` (de gewenste staat per shop/land) leek
+`(country, shop_key, item_id)` de logische sleutel — `_shop_key()` is immers precies de
+normalisatie waarmee de tool een tag_toppers-campagne aan zijn zusters koppelt.
+
+Het viel op doordat de import **622 Excel-rijen als 620 shops** wegschreef. Twee paren
+vielen samen: `Vente-unique.be` (358561) en `Vente-unique.be|Marketplace` (665200), en
+hetzelfde voor `.nl`. `_shop_key` knipt op de eerste `|` — nodig om `e5.be|NL` en
+`e5.be/nl` als één shop te herkennen — maar dat zijn hier **twee echt verschillende
+shops met verschillende shop_ids**.
+
+- **Matchen mag verlies van informatie hebben, een sleutel niet.** Bij matchen wil je
+  varianten samentrekken; bij een sleutel wil je ze uit elkaar houden. Dezelfde functie
+  kan niet allebei.
+- **De sleutel is `(country, shop_id, shop_key)`** — precies de identiteit die de
+  campagne-matcher óók gebruikt (naam ÉN id). Geen van beide alleen volstaat: `shop_id`
+  is niet uniek per shop (652237 = Bruna.nl én Hubfootwear.com) en `shop_key` niet per
+  id.
+- **Tel wat je erin stopt tegen wat eruit komt.** 622 → 620 was het enige signaal;
+  zonder die vergelijking had de tabel stilzwijgend twee shops op één hoop gegooid en
+  had een latere run ids naar de verkeerde campagne geschreven.
+
+## Waarom de beheerde staat in Postgres staat en niet in Redshift (2026-08-07)
+
+Joep vroeg of `gsd_tag_toppers_items` niet in Redshift kon, als `pa.jvs_gsd_tag_toppers`.
+Omvang was het bezwaar niet — 96.637 rijen × ~130 bytes ≈ 14 MB ruw, met kolomcompressie
+een paar MB. De semantiek wel:
+
+- **Redshift kent geen `ON CONFLICT`.** De hele import is een upsert; daar wordt anders
+  handmatig staging + DELETE + INSERT van.
+- **Constraints zijn er informatief, niet afgedwongen.** Juist bij deze tabel is de
+  uniciteit van `(country, shop_id, shop_key, item_id)` de garantie dat een id niet
+  dubbel beheerd wordt.
+- **De snapshot-val** uit `redshift_serializable_read_after_write`: een lange transactie
+  is vastgepind op de snapshot van zijn eerste statement, dus lees-na-schrijf over één
+  verbinding liegt. Dat is precies het patroon van een tool die tijdens een run leest en
+  schrijft.
+- `gsd_tag_toppers_runs` staat al in Postgres; staat over twee databases verdelen is
+  slechter dan consequent één kiezen.
+
+**Wanneer Redshift wél zin heeft:** als je de ids wilt joinen met visits/omzet. Dan een
+kopie, weggeschreven door dezelfde code na elke import en run. Waarschuwing daarbij uit
+de eigen historie: bij IndexNow ontstond zo'n dubbele opslag en liep de Postgres-kopie
+maanden stil zonder dat iemand het merkte. Een spiegel werkt alleen als één kant
+onbetwist de bron is.
+
 ## `partial_failure` aanzetten schakelde de retry uit die er al zat (2026-08-07)
 
 De scherpste les van de GSD Tag Toppers-dag. Volgorde:
