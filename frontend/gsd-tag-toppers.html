@@ -41,6 +41,12 @@
            dat is het enige cijfer waar een kleur iets betekent. */
         #summaryRow { display: flex; flex-wrap: wrap; gap: 0.75rem; }
         #summaryRow .mini-stat-card .num.has-errors { color: #b02a37; }
+        /* De tegels zijn het filter; de dropdown die dat eerst deed is weg.
+           Klikken op een actieve tegel zet het filter weer uit. */
+        #summaryRow .mini-stat-card { cursor: pointer; transition: box-shadow .12s, outline-color .12s;
+                                      outline: 2px solid transparent; outline-offset: -2px; }
+        #summaryRow .mini-stat-card:hover { box-shadow: 0 2px 14px rgba(94,74,144,0.22); }
+        #summaryRow .mini-stat-card.tile-on { outline-color: #5e4a90; }
         /* Alleen het bestandsveld is smaller; de kaart houdt de volle col-md-10,
            zodat hij even breed is als de resultatenkaart eronder. */
         #fileInput { max-width: 480px; }
@@ -179,12 +185,7 @@
                         <div class="filter-row d-flex gap-2 align-items-center mb-3">
                             <input type="text" class="form-control form-control-sm" id="tableFilter"
                                    placeholder="Zoek shop&hellip;" oninput="currentPage=1; renderTable()" style="max-width: 250px;">
-                            <select class="form-select form-select-sm" id="statusFilter" onchange="currentPage=1; renderTable()" style="max-width:180px;">
-                                <option value="">Alle statussen</option>
-                                <option value="ok">Alleen ok</option>
-                                <option value="fout">Alleen fouten</option>
-                                <option value="werk">Alleen met werk</option>
-                            </select>
+                            <span class="text-muted small" id="tileFilterHint"></span>
                         </div>
                         <div class="tool-table-wrap">
                             <table class="table table-sm tool-table mb-0">
@@ -267,9 +268,12 @@ let POLL_TICK = 0;
 let RESULTS = [];
 let DRY = true;
 let HAS_DRY_RUN = false;
-// Welke rijen staan uitgeklapt. renderTable() bouwt de tbody opnieuw op, dus
-// zonder dit klapt elke tussentijdse verversing tijdens een run ze dicht.
-const OPEN_DETAILS = new Set();
+// Welke rij staat uitgeklapt — er kan er maar één tegelijk open zijn. renderTable()
+// bouwt de tbody opnieuw op, dus zonder dit klapt elke tussentijdse verversing of
+// sortering hem dicht.
+let OPEN_DETAIL = null;
+// Actief tegelfilter, of null. De tegels vervangen de oude statusdropdown.
+let TILE_FILTER = null;
 let SORT_KEY = null;
 let SORT_DIR = 1;   // 1 = oplopend, -1 = aflopend
 let currentPage = 1;
@@ -405,13 +409,14 @@ async function loadResults() {
     const s = j.summary || {};
     const errs = s.errors || 0;
     document.getElementById('summaryRow').innerHTML = [
-        ['Campagnes aan te maken', s.campaigns_to_create, false],
-        [DRY ? 'Ids toe te voegen' : 'Ids toegevoegd', DRY ? s.ids_to_add : s.ids_added, false],
-        [DRY ? 'Uitsluitingen te maken' : 'Uitsluitingen gemaakt', DRY ? s.exclusions_to_add : s.exclusions_added, false],
-        [DRY ? 'Negatives over te nemen' : 'Negatives overgenomen', s.negatives_copied, false],
-        ['Rijen met fouten', errs, errs > 0],
-    ].map(([k, v, red]) =>
-        '<div class="mini-stat-card">' +
+        ['Campagnes aan te maken', s.campaigns_to_create, false, 'campagne'],
+        [DRY ? 'Ids toe te voegen' : 'Ids toegevoegd', DRY ? s.ids_to_add : s.ids_added, false, 'ids'],
+        [DRY ? 'Uitsluitingen te maken' : 'Uitsluitingen gemaakt', DRY ? s.exclusions_to_add : s.exclusions_added, false, 'uitsluiting'],
+        [DRY ? 'Negatives over te nemen' : 'Negatives overgenomen', s.negatives_copied, false, 'negatives'],
+        ['Rijen met fouten', errs, errs > 0, 'fout'],
+    ].map(([k, v, red, key]) =>
+        '<div class="mini-stat-card' + (TILE_FILTER === key ? ' tile-on' : '') + '"' +
+        ' onclick="toggleTile(\'' + key + '\')" title="Klik om de tabel hierop te filteren">' +
         '<div class="num' + (red ? ' has-errors' : '') + '">' + (v || 0) + '</div>' +
         '<div class="label">' + k + '</div></div>').join('');
 
@@ -437,15 +442,10 @@ function cmpValues(a, b) {
 
 function renderTable() {
     const q = (document.getElementById('tableFilter').value || '').toLowerCase();
-    const sf = document.getElementById('statusFilter').value;
     const rows = RESULTS.filter(r => {
         if (q && !((r.shop_name || '').toLowerCase().includes(q) ||
                    String(r.shop_id || '').includes(q))) return false;
-        if (sf === 'ok' && r.status !== 'ok') return false;
-        if (sf === 'fout' && r.status === 'ok') return false;
-        if (sf === 'werk' && !(r.ids_to_add || r.exclusions_to_add ||
-                               r.campaign_action === 'aanmaken')) return false;
-        return true;
+        return tileMatch(r);
     });
 
     if (SORT_KEY) {
@@ -500,20 +500,24 @@ function renderTable() {
         // campagne, en dat is de plek waar je ze kunt lezen zonder te hoveren.
         '<td>' + badge(r) + '</td>' +
         '</tr>').join('');
-    // Klapt de details terug open die vóór de hertekening open stonden.
-    OPEN_DETAILS.forEach(n => { if (document.getElementById('tt-row-' + n)) openDetail(n); });
+    // Klapt de openstaande rij terug open, als die op deze pagina staat.
+    if (OPEN_DETAIL !== null && document.getElementById('tt-row-' + OPEN_DETAIL)) {
+        openDetail(OPEN_DETAIL);
+    }
 }
 
 // Klik op een rij klapt de mutaties per campagne uit. De detail zit al in de
 // resultaat-payload, dus geen extra call — anders dan DMA Exclusions, dat zijn
 // targets uit de database moet halen.
 function toggleDetail(excelRow) {
-    if (document.getElementById('tt-detail-' + excelRow)) {
-        document.getElementById('tt-detail-' + excelRow).remove();
-        OPEN_DETAILS.delete(excelRow);
-        return;
+    const open = document.getElementById('tt-detail-' + excelRow);
+    // Altijd eerst de bestaande uitklap weg: er mag er maar één tegelijk open zijn.
+    if (OPEN_DETAIL !== null) {
+        const prev = document.getElementById('tt-detail-' + OPEN_DETAIL);
+        if (prev) prev.remove();
     }
-    OPEN_DETAILS.add(excelRow);
+    if (open) { OPEN_DETAIL = null; return; }   // op zichzelf geklikt = dichtklappen
+    OPEN_DETAIL = excelRow;
     openDetail(excelRow);
 }
 
@@ -584,6 +588,39 @@ function openDetail(excelRow) {
         '<th style="text-align:left; padding:8px 18px;">Fout</th>' +
         '</tr></thead><tbody>' + body + '</tbody></table>' +
         '</div></td></tr>');
+}
+
+// ---- Tegelfilter -----------------------------------------------------------
+// Elke tegel filtert op de rijen die aan díe metriek bijdragen, zodat het getal op
+// de tegel en het aantal rijen in de tabel hetzelfde verhaal vertellen.
+function tileMatch(r) {
+    switch (TILE_FILTER) {
+        case 'campagne':    return r.campaign_action === 'aanmaken';
+        case 'ids':         return (DRY ? r.ids_to_add : r.ids_added) > 0;
+        case 'uitsluiting': return (DRY ? r.exclusions_to_add : r.exclusions_added) > 0;
+        case 'negatives':   return r.negatives_copied > 0;
+        case 'fout':        return r.status !== 'ok';
+        default:            return true;
+    }
+}
+
+const TILE_LABEL = {
+    campagne: 'campagnes die aangemaakt moeten worden',
+    ids: 'rijen met ids',
+    uitsluiting: 'rijen met uitsluitingen',
+    negatives: 'rijen met negatives',
+    fout: 'rijen met een fout',
+};
+
+function toggleTile(key) {
+    TILE_FILTER = (TILE_FILTER === key) ? null : key;
+    currentPage = 1;
+    document.querySelectorAll('#summaryRow .mini-stat-card').forEach((el, i) => {
+        el.classList.toggle('tile-on', ['campagne','ids','uitsluiting','negatives','fout'][i] === TILE_FILTER);
+    });
+    document.getElementById('tileFilterHint').textContent =
+        TILE_FILTER ? 'gefilterd op ' + TILE_LABEL[TILE_FILTER] + ' — klik de tegel nog eens om dit uit te zetten' : '';
+    renderTable();
 }
 
 // ---- Paginering ------------------------------------------------------------
