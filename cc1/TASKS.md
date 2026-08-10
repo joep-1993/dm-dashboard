@@ -47,6 +47,17 @@ dry-run**; de enige echte run die dag was #8 met een ander bestand. Daarna run #
       naar keek; vandaar de kale melding `subdivision niet aangemaakt`. Trof steeds de eerste
       convert in een ad group (bij VidaPlayer én Kalenderwinkel bleef `nd_c` als enige staan).
 
+- [x] **Item-id-niveau wordt opgezocht in plaats van aangenomen** — `_plan_tag_toppers_adds`
+      hing ids blind onder de root. Notino's `[label_test]`-campagne heeft daar eerst een
+      custom-attribute niveau, dus alle 1105 ids werden afgekeurd op `Dimension type`. Nu
+      `parent` in plaats van `root`, met een melding bij nul of meerdere kandidaten.
+      `validate_only`: Notino OK via het diepere niveau, Cameranu (normale boom) onveranderd.
+- [x] **Rij-retry op transportfouten** (`ROW_RETRIES` + `_is_transient`) — een 503 gooide de
+      hele rij eruit vóór er iets gepland was, wat als "Fout" met lege uitklap in beeld kwam
+      (Vente-unique.nl). Mag herhaald worden omdat de tool add-only is.
+- [x] **Export** `Downloads\claude\tag_toppers_aangemaakt_2026-08-10_1022.xlsx` — de 61
+      campagnes uit run #14 met id, naam en werkelijke uitkomst: 49 compleet, 12 zonder boom.
+
 **Open:**
 - Categorie-, staat- en kanaalniveaus zijn nog niet schrijfbaar. Komen in de gescande
   bomen niet voor; ze worden nu gemeld in plaats van fout te gaan.

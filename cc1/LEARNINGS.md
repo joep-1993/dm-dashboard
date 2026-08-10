@@ -1,6 +1,48 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Dezelfde dimensie-aanname zat op drie plekken, niet één (2026-08-10)
+
+Na het fixen van het uitsluitpad dook `Dimension type of listing group must be the same
+as that of its siblings` opnieuw op, nu in het **toevoegpad** en op de tag_toppers-
+campagne zelf: Notino's `[label_test]`-campagne, 1105 ids, allemaal afgekeurd.
+
+`_plan_tag_toppers_adds` nam aan dat item-ids direct onder de root horen. Dat klopt voor
+een boom die de tool zelf bouwt (root → item-id OTHERS), maar Notino's boom is:
+
+```
+ROOT SUBDIVISION
+└── SUBDIVISION custom_attr INDEX4 (others)
+    ├── UNIT item_id {} (others, negatief)
+    └── UNIT item_id "…" × 2200
+```
+
+Het item-id-niveau zit dus een laag dieper. `_plan_tag_toppers_adds` zoekt het nu op
+(`parent` in plaats van `root`) en meldt het als er geen of meerdere kandidaten zijn.
+Geverifieerd met `validate_only`: Notino accepteert de ops via het diepere niveau, en
+een normaal gebouwde boom (Cameranu, 842 nodes) blijft ongewijzigd op de root.
+
+- **Een aanname over datavorm zit zelden op één plek.** Dezelfde "item-id hangt hier"-
+  aanname stond in `_is_item_id_level` (zusters), in `_plan_tag_toppers_adds` (eigen
+  boom) en impliciet in de convert. De eerste fix haalde er één weg; grep op het
+  patroon, niet op de foutmelding.
+- **Bomen die de tool niet zelf heeft gebouwd zijn de echte testgevallen.**
+  `[label_test]`-campagnes zijn met de hand of door een ander script gemaakt.
+
+## Een 503 sloopt een hele rij vóór er iets gepland is (2026-08-10)
+
+Vente-unique.nl kwam terug als `Fout` met een **lege uitklap** — verwarrend, want dat
+leest als "er is iets misgegaan tijdens het muteren". In werkelijkheid gooide
+`ServiceUnavailable: 503` de rij eruit in `work()`, vóór `_process_row` één target had
+opgebouwd. Er was dus letterlijk niets gebeurd.
+
+- Er zit nu een retry per rij omheen (`ROW_RETRIES`, alleen bij `_is_transient`:
+  503/UNAVAILABLE, DEADLINE_EXCEEDED en soortgelijke transportfouten). Dat mag hier,
+  want de tool is add-only: wat er al staat komt als "bestaat al" terug, dus een
+  herhaling schrijft niets dubbel.
+- **Onderscheid "de rij is stuk" van "de verbinding was stuk".** Alleen het tweede is
+  te herhalen; een GoogleAdsException over de inhoud herhalen is zinloos.
+
 ## Een mislukte create laat een campagne achter die zichzelf niet meer repareert (2026-08-10)
 
 `_create_tag_toppers_campaign` maakt in volgorde: budget, campagne, label, ad group,
