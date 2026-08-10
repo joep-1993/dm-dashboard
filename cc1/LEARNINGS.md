@@ -1,6 +1,48 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De "Last push"-tegel las een tabel die de incrementele publishes nooit vullen (2026-08-10)
+
+Joep zag in Kopteksten én FAQs bij Content Publishing `Last push: 05-08-2026 10:58`, terwijl
+er net gepusht was. Geen cache en geen mislukte push: het endpoint keek naar de verkeerde
+tabel.
+
+`/api/content-publish/last-push` las uitsluitend `pa.publish_log`, en die tabel krijgt alléén
+een rij van de **volledige batch-publish** (`content_publisher._run_publish_task`). De twee
+incrementele publishes — de enige die in de praktijk nog lopen — schrijven er niets weg:
+
+| bron | schrijft in | laatste waarde bij de melding |
+|---|---|---|
+| batch (`publish_all_content`) | `pa.publish_log` | id 116, 05-08 10:58 UTC, 249.812 urls |
+| Kopteksten incrementeel | `pa.kopteksten_push_state.pushed_at` | 10-08 16:32 UTC (18:32 lokaal) |
+| FAQ v2 | `pa.faq_v2_push_state.pushed_at` | 10-08 21:14 UTC — liep op dat moment nog |
+
+- **De state-tabel is de betere bron, en werkt retroactief.** `pushed_at` wordt per url
+  bijgewerkt, dus `max(pushed_at)` ís de laatste push. Dat herstelt de tegel meteen voor
+  pushes die al gedaan zijn; loggen-vanaf-nu zou pas bij de volgende run iets tonen. De
+  batch-log blijft meedoen en wint als een batch recenter was.
+- **Eén endpoint, twee kaarten, geen `content_type`.** Beide pagina's riepen dezelfde URL
+  zonder parameter, dus de FAQ-kaart quootte de koptekst-batch en had nooit een eigen
+  waarheid. De batch draagt trouwens alléén `content_top`, dus voor FAQ is `publish_log`
+  categorisch geen bron.
+- **Naïeve UTC-kolom + `new Date(iso)` = 2 uur te vroeg.** De gedeelde DB staat op
+  `Etc/UTC` en `isoformat()` op een naïeve datetime levert geen offset, dus de browser las
+  het als lokale tijd. "10:58" was in werkelijkheid 12:58. Zie ook memory
+  `postgres_utc_timestamps_display`.
+- **Een refetch repareert geen verkeerde bron.** `app.js` en `faq.js` haalden de tegel al
+  opnieuw op na élke publish (en op page load) — dat werkte, en leverde trouw dezelfde
+  stale waarde op. Symptoom "verandert niet na een push" wijst dus niet automatisch op een
+  ontbrekende refresh.
+- **`to_regclass` vóór het lezen van een state-tabel.** Beide publishers maken hun tabel
+  lazy aan (`_ensure_state` / `_ensure_state_table`); een tool die nog nooit heeft gelopen
+  mag de tegel niet op een 500 zetten.
+- **`max(pushed_at)` is ook de check "loopt er nu een publish?"** Vlak voor de herstart bleek
+  de FAQ-push nog bezig: 6.660 state-rijen in 3 minuten en een `pushed_at` van 9 seconden
+  oud. Uvicorn draait zonder `--reload`, dus deploy = kill + relaunch, en dat had die run
+  gesloopt. Twee samples van `max(pushed_at)` (of `urls_pending` uit
+  `/api/faq/publish-v2/stats`) kosten niets en zijn het verschil tussen een deploy en een
+  afgebroken push.
+
 ## Titels van vóór 19-05-2026 dragen de categorie dubbel op type-facet-URLs (2026-08-10)
 
 Joep zag in Unique Titles `Vlinderkasten vogelhuisjes kopen? …` op

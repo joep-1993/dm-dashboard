@@ -4,6 +4,35 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-10 — Content Publishing: de "Last push"-tegel stond stil op 05-08
+
+Aanleiding: Joep meldde dat Kopteksten én FAQs `Last push: 05-08-2026 10:58` toonden terwijl
+er net gepusht was. Oorzaak: het endpoint las alleen `pa.publish_log`, die alleen de
+volledige batch-publish vult. Zie LEARNINGS 2026-08-10.
+
+- [x] **`/api/content-publish/last-push` herschreven** (`backend/main.py`). Neemt nu
+      `content_type` (`koptekst`|`faq`), pakt het maximum van de batch-log én de bijbehorende
+      `*_push_state.pushed_at`, guard met `to_regclass` zodat een nog niet aangemaakte
+      state-tabel de tegel niet 500't, en geeft de tijd tz-aware terug (`timezone.utc`) zodat
+      de browser hem niet 2 uur te vroeg toont.
+- [x] **Frontend gesplitst**: `app.js` vraagt `?content_type=koptekst`, `faq.js`
+      `?content_type=faq`. Tot nu quootte de FAQ-kaart de koptekst-batch.
+- [x] **Restart-taak van vanmiddag afgevinkt** (de `canon_key`-fix hieronder): uvicorn draait
+      als PID 590, gestart 18:35, ná de commit van 18:10 — die fix is dus al live.
+
+- [ ] **Backend herstarten** voor déze fix (`fuser -k 8003/tcp` + relaunch; geen `--reload`).
+      Wacht op de FAQ-publish die om 23:17 nog liep — watcher staat op `urls_pending=0` of
+      ~75s zonder nieuwe state-rijen. Daarna verifiëren: Kopteksten moet 10-08 18:32 tonen,
+      FAQs de eindtijd van deze run.
+- [ ] **Overwegen: incrementele publishes ook in `pa.publish_log` loggen.** Nu is die tabel
+      alleen batch-historie, terwijl de naam suggereert dat het de volledige push-historie is.
+      Eén rij per incrementele run zou de tegel én een echte historie geven (de state-tabel
+      kent alleen de laatste push per url, geen runs).
+- [ ] **Env-scoping van de tegel.** Hij staat naast de Environment-selector maar rapporteert
+      altijd `production`; wie naar staging pusht ziet dus een productiedatum. FAQ-staging
+      staat bijvoorbeeld nog op 03-08 13:05. Ofwel de selector doorgeven, ofwel het label
+      "(production)" laten zeggen.
+
 ### 2026-08-10 — SEO/Unique Titles: type-facet staleness en de blueprint-keys
 
 Aanleiding: Joep zag `Vlinderkasten vogelhuisjes` in Unique Titles en vroeg of
@@ -31,9 +60,8 @@ was stale, van vóór de facet_order-import van 19-05-2026. Zie LEARNINGS 2026-0
       gepubliceerd. 12× cat 9003879 (Insectenhotel), 1× cat 9001466 (Vogelhuisjes,
       `kleur~materiaal~merk~s_dierenhuis` — correct zónder `!!sub_category!!`).
 
-- [ ] **Backend herstarten** om de `canon_key`-fix live te krijgen. Draait op PID 66045
-      zonder `--reload`, dus deploy = `fuser -k 8003/tcp` + relaunch. Tot dan schrijft
-      `/api/seo-titles/create-built` nog rauwe keys weg.
+- [x] **Backend herstart, `canon_key`-fix is live.** Uvicorn draait als PID 590, gestart
+      18:35 — ná de commit van 18:10, dus `/api/seo-titles/create-built` canonicaliseert.
 - [ ] **De 13 built blueprints publiceren** met `publish_built(env="production")` — zij
       zijn nu de enige `built` rijen, dus dat pusht precies deze set.
 - [ ] **551 ongesorteerde keys** blijven staan (canonicalisatie bewust overgeslagen door
