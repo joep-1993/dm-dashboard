@@ -786,7 +786,15 @@ def update_blueprint(cat_id, key, title, h1_title, description):
 def upsert_blueprint_built(cat_id, key, cat_name, title, h1_title, description):
     """Create (or refresh) a blueprint as status='built' from an edited row.
     Used when an "existing combo" row is edited so it moves into the Built set.
-    Never downgrades a row that was already 'pushed'."""
+    Never downgrades a row that was already 'pushed'.
+
+    The key is canonicalised on the way in. build_blueprint() emits a sorted key,
+    but this path takes whatever /api/seo-titles/create-built was handed by the
+    frontend, i.e. the facet order as it appeared in the URL. Storing that raw
+    made the same combo insertable twice under two spellings — the PK is the raw
+    (cat_id, key) while the dedup in load_existing_combos() compares canon_key()
+    — which is how 450 combos ended up duplicated (cleaned up 2026-08-10)."""
+    key = canon_key(key)
     conn = get_db_connection()
     cur = conn.cursor()
     try:
