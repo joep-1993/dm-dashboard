@@ -20,10 +20,11 @@ volledige batch-publish vult. Zie LEARNINGS 2026-08-10.
 - [x] **Restart-taak van vanmiddag afgevinkt** (de `canon_key`-fix hieronder): uvicorn draait
       als PID 590, gestart 18:35, ná de commit van 18:10 — die fix is dus al live.
 
-- [ ] **Backend herstarten** voor déze fix (`fuser -k 8003/tcp` + relaunch; geen `--reload`).
-      Wacht op de FAQ-publish die om 23:17 nog liep — watcher staat op `urls_pending=0` of
-      ~75s zonder nieuwe state-rijen. Daarna verifiëren: Kopteksten moet 10-08 18:32 tonen,
-      FAQs de eindtijd van deze run.
+- [x] **Backend herstart om 23:22** (PID 6600), nadat de FAQ-publish om 23:20:56 leegliep
+      (`urls_pending=0`). Endpoint geverifieerd: `koptekst` → `16:32:33+00:00` (18:32 lokaal,
+      `source=incremental`), `faq` → `21:20:56+00:00` (23:20 lokaal), zonder parameter nog
+      steeds koptekst, `content_type=bogus` → 400. Let op: de startup hangt ~30s op de GSD
+      LL Excel-retry (Windows-pad onbereikbaar), dus :8003 antwoordt niet direct na relaunch.
 - [ ] **Overwegen: incrementele publishes ook in `pa.publish_log` loggen.** Nu is die tabel
       alleen batch-historie, terwijl de naam suggereert dat het de volledige push-historie is.
       Eén rij per incrementele run zou de tegel én een echte historie geven (de state-tabel
