@@ -170,7 +170,12 @@ def parse_workbook(data: bytes) -> Dict[str, Any]:
                     # numeriek product id niet ongemerkt verdwijnt.
                     numeriek_overgeslagen.append(token)
                     continue
-                ids[token] = None
+                # Google normaliseert item-ids naar kleine letters: de bomen bevatten
+                # uitsluitend lowercase, ook waar de bron hoofdletters heeft. Hier
+                # meteen normaliseren, anders vergelijkt de tool "4RjLg6oD…" met
+                # "4rjlg6od…", ziet elk id als ontbrekend, en stuurt ops die Google
+                # als duplicaat weigert. Zie de LEARNINGS bij Makro.nl.
+                ids[token.lower()] = None
 
         shop_id_s = str(shop_id).strip() if shop_id is not None else ""
         shop_name_s = str(shop_name).strip() if shop_name else ""
@@ -835,9 +840,15 @@ def _read_partial_failure(client, resp) -> Tuple[int, List[str], set, set]:
             is_busy = (getattr(code, "database_error", None)
                        and code.database_error.name == "CONCURRENT_MODIFICATION") \
                 or "same resource at once" in msg
+            # Product-group-ops zijn atomair per ad group: één ongeldige op laat álle
+            # andere ops voor diezelfde ad group falen met deze algemene melding. Dat
+            # is geen eigen fout maar bijvangst, dus opnieuw indienen zónder de echt
+            # ongeldige ops. Bij Makro.nl sloopten 28 duplicaten zo 392 goede ops.
+            is_bijvangst = ("atomic within the same ad group" in msg
+                            or "another operation targeting the same ad group" in msg)
             if is_dup:
                 skipped += 1
-            elif is_busy and idx is not None:
+            elif (is_busy or is_bijvangst) and idx is not None:
                 retryable.add(idx)
             else:
                 errors.append(msg)
@@ -874,13 +885,15 @@ def _submit_chunk(client, customer_id: str, ops: List[Any],
         if not retryable:
             return done, skipped, errors
         if attempt == retries - 1:
-            errors.append(f"CONCURRENT_MODIFICATION na {retries} pogingen: "
-                          f"{len(retryable)} operatie(s) niet geland")
+            errors.append(f"na {retries} pogingen niet geland: "
+                          f"{len(retryable)} operatie(s)")
             return done, skipped, errors
 
+        # Alleen de te herhalen ops: de duplicaten en de echt ongeldige vallen eruit,
+        # en juist dat maakt de volgende poging kansrijk bij de atomaire bijvangst.
         pending = [pending[j] for j in sorted(retryable) if j < len(pending)]
-        logger.warning("CONCURRENT_MODIFICATION op %d operatie(s), opnieuw over %.0fs "
-                       "(poging %d/%d)", len(pending), delay, attempt + 1, retries)
+        logger.warning("%d operatie(s) opnieuw indienen over %.0fs (poging %d/%d)",
+                       len(pending), delay, attempt + 1, retries)
         time.sleep(delay)
         delay *= 2
     return done, skipped, errors
@@ -1313,7 +1326,11 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
     """Eén Excel-regel: plannen en (als dry_run False) uitvoeren."""
     country = row["country"]
     customer_id = _customer_id(country)
-    item_ids = row["item_ids"]
+    # Ook hier normaliseren: een rij kan behalve uit de Excel ook uit
+    # gsd_tag_toppers_items komen, en daar staan de ids uit oudere imports nog met
+    # hoofdletters. Dedupe met behoud van volgorde, want twee ids die alleen in case
+    # verschillen zijn voor Google hetzelfde id.
+    item_ids = list(OrderedDict((i.lower(), None) for i in row["item_ids"]))
 
     res: Dict[str, Any] = {
         "excel_row": row["excel_row"],
