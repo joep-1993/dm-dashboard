@@ -72,6 +72,12 @@ BUDGET_MICROS = 30_000_000        # €30/dag — gelijk aan GSD_tagtoppers.py
 # Google Ads weigert erg grote mutates; ruim onder de limiet blijven.
 MUTATE_CHUNK = 1000
 
+# Pogingen voor één unit->subdivision conversie. CONCURRENT_MODIFICATION komt bij
+# partial_failure als regel in de respons terug in plaats van als exception, dus
+# _mutate_with_retry vangt hem daar niet; vooral de eerste convert in een ad group
+# botst met de mutate die eraan voorafging.
+CONVERT_RETRIES = 3
+
 # Rijen worden parallel verwerkt: het leeswerk is ~7s per rij en dat is bijna
 # helemaal wachten op de API. Elke rij is een andere shop en dus een andere
 # campagne, en gelijktijdige rijen op dezelfde shop worden alsnog geserialiseerd
@@ -907,25 +913,44 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
         others_op, _ = _unit_op(client, customer_id, ad_group_id, temp, sub_res,
                                 item_id_value="", negative=False, bid=bid)
         ops.append(others_op)
-        resp, ex = _mutate_with_retry(client, customer_id, ops)
-        if resp is None:
-            if _is_already_exists(ex):
-                skipped += 1
-            else:
-                errors.append(f"convert {leaf['resource']}: {_err(ex)}")
-            continue
         # partial_failure staat aan, dus een afgekeurde subdivision-op komt niet als
         # exception binnen maar als lege resource name. Daar geen kinderen onder
         # hangen: die krijgen dan een lege parent en falen op REQUIRED_FIELD_MISSING,
         # wat de echte oorzaak juist verbergt.
-        real_sub = resp.results[1].resource_name if len(resp.results) > 1 else ""
+        #
+        # CONCURRENT_MODIFICATION komt langs dezelfde weg terug — als regel in de
+        # respons, niet als exception — dus _mutate_with_retry ziet hem hier niet.
+        # Zonder eigen lus sneuvelt vooral de eerste convert in een ad group, terwijl
+        # Google nog bezig is met de vorige mutate. Opnieuw indienen is veilig: landde
+        # de remove wel en de subdivision niet, dan slaagt de tweede poging juist
+        # doordat de botsende node al weg is.
+        real_sub, reden, als_overgeslagen = "", "", False
+        for poging in range(CONVERT_RETRIES):
+            resp, ex = _mutate_with_retry(client, customer_id, ops)
+            if resp is None:
+                if _is_already_exists(ex):
+                    als_overgeslagen = True
+                else:
+                    reden = _err(ex)
+                break
+            real_sub = resp.results[1].resource_name if len(resp.results) > 1 else ""
+            if real_sub:
+                break
+            s, perrs, _f, retryable = _read_partial_failure(client, resp)
+            if s and not perrs and not retryable:
+                als_overgeslagen = True   # stond er al: gewenste eindtoestand
+                break
+            reden = perrs[0] if perrs else "botsende mutatie op dezelfde boom"
+            if not retryable or poging == CONVERT_RETRIES - 1:
+                break
+            time.sleep(2.0 * (poging + 1))
+
         if not real_sub:
-            s, perrs, _f, _r = _read_partial_failure(client, resp)
-            if s and not perrs:
+            if als_overgeslagen:
                 skipped += 1
             else:
                 errors.append(f"convert {leaf['resource']}: "
-                              + (perrs[0] if perrs else "subdivision niet aangemaakt"))
+                              + (reden or "subdivision niet aangemaakt"))
             continue
 
         temp2 = _Temp()
@@ -1098,6 +1123,78 @@ def _create_tag_toppers_campaign(client, customer_id: str, country: str,
         "ad_group_id": ad_group_id,
         "root_resource": root_resource,
     }, errors
+
+
+def _ensure_tag_toppers_tree(client, customer_id: str, campaign: dict):
+    """Herstelt een tag_toppers-campagne die bestaat maar geen listing-tree heeft.
+
+    Ontstaat als _create_tag_toppers_campaign strandde ná campagne en ad group maar
+    vóór de boomwortel: wat overblijft is een campagne die niets kan vertonen, en die
+    elke volgende run als "bestaat" leest en afserveert met "geen listing-tree
+    gevonden". Zonder herstel blijft dat zo, want de aanmaak-tak wordt nooit meer
+    bereikt. Kalenderwinkel.nl (24121408709) was er zo een: 1 ad group, 0 criteria,
+    0 advertenties.
+
+    Geeft (ad_group_id, root_resource, errors); root_resource is None als het misging.
+    """
+    ga = client.get_service("GoogleAdsService")
+    errors: List[str] = []
+
+    q = f"""
+        SELECT ad_group.id, ad_group.name FROM ad_group
+        WHERE campaign.id = {campaign['id']} AND ad_group.status != 'REMOVED'
+    """
+    ags = [(str(r.ad_group.id), r.ad_group.name) for r in ga.search(customer_id=customer_id, query=q)]
+    ag_id = next((i for i, name in ags if name == TAG_TOPPERS_AD_GROUP), None)
+    if ag_id is None and ags:
+        ag_id = ags[0][0]
+    if ag_id is None:
+        ag_op = client.get_type("AdGroupOperation")
+        ag = ag_op.create
+        ag.campaign = campaign["resource"]
+        ag.name = TAG_TOPPERS_AD_GROUP
+        ag.cpc_bid_micros = DEFAULT_BID_MICROS
+        ag.status = client.enums.AdGroupStatusEnum.ENABLED
+        try:
+            ag_res = client.get_service("AdGroupService").mutate_ad_groups(
+                customer_id=customer_id, operations=[ag_op]).results[0].resource_name
+            ag_id = ag_res.split("/")[-1]
+            time.sleep(1)
+        except GoogleAdsException as ex:
+            return None, None, errors + [f"ad group herstellen: {_err(ex)}"]
+
+    temp = _Temp()
+    root_op, root_tmp = _subdiv_op(client, customer_id, ag_id, temp, None, spec=None)
+    others_op, _ = _unit_op(client, customer_id, ag_id, temp, root_tmp,
+                            item_id_value="", negative=True)
+    resp, ex = _mutate_with_retry(client, customer_id, [root_op, others_op])
+    if resp is None:
+        return None, None, errors + [f"boomwortel herstellen: {_err(ex)}"]
+    landed = [r.resource_name for r in resp.results] if resp.results else []
+    if len(landed) < 2 or not all(landed[:2]):
+        _s, perrs, _f, _r = _read_partial_failure(client, resp)
+        return None, None, errors + [
+            "boomwortel herstellen: "
+            + (perrs[0] if perrs else "root of item-id OTHERS niet aangemaakt")]
+
+    # Zonder shopping ad vertoont de campagne nog steeds niets, en die ontbreekt bij
+    # precies dezelfde afgebroken aanmaak.
+    try:
+        q2 = (f"SELECT ad_group_ad.resource_name FROM ad_group_ad "
+              f"WHERE ad_group.id = {ag_id} AND ad_group_ad.status != 'REMOVED'")
+        if not list(ga.search(customer_id=customer_id, query=q2)):
+            time.sleep(1)
+            ad_op = client.get_type("AdGroupAdOperation")
+            ad = ad_op.create
+            ad.ad_group = f"customers/{customer_id}/adGroups/{ag_id}"
+            ad.status = client.enums.AdGroupAdStatusEnum.ENABLED
+            client.copy_from(ad.ad.shopping_product_ad, client.get_type("ShoppingProductAdInfo"))
+            client.get_service("AdGroupAdService").mutate_ad_group_ads(
+                customer_id=customer_id, operations=[ad_op])
+    except GoogleAdsException as ex:
+        errors.append(f"shopping ad herstellen: {_err(ex)}")
+
+    return ag_id, landed[0], errors
 
 
 # ---------------------------------------------------------------------------
@@ -1289,11 +1386,26 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
 
         if not dry_run and plan["missing"]:
             if plan["root"] is None:
-                msg = "geen listing-tree gevonden in de tag_toppers ad group"
-                res["errors"].append(msg)
-                res["status"] = "fout"
-                target("toevoegen", tt["name"], len(plan["missing"]), 0,
-                       ad_group_id=ag_id, errors=[msg])
+                # Campagne zonder boom: herstellen in plaats van elke run opnieuw
+                # dezelfde fout melden. Zo'n campagne kan tot dat moment niets vertonen.
+                heal_ag, heal_root, heal_errs = _ensure_tag_toppers_tree(
+                    client, customer_id, tt)
+                res["errors"].extend(heal_errs)
+                if heal_root is None:
+                    msg = "geen listing-tree gevonden en herstel mislukt"
+                    res["errors"].append(msg)
+                    res["status"] = "fout"
+                    target("toevoegen", tt["name"], len(plan["missing"]), 0,
+                           ad_group_id=ag_id, errors=heal_errs or [msg])
+                else:
+                    ag_id = heal_ag
+                    added, skipped, errs = _apply_tag_toppers_adds(
+                        client, customer_id, ag_id, heal_root, plan["missing"])
+                    res["ids_added"] = added
+                    res["errors"].extend(errs)
+                    target("toevoegen", tt["name"], len(plan["missing"]), added,
+                           ad_group_id=ag_id, errors=errs, skipped=skipped,
+                           note="boom hersteld")
             else:
                 added, skipped, errs = _apply_tag_toppers_adds(
                     client, customer_id, ag_id, plan["root"]["resource"], plan["missing"])
@@ -1302,7 +1414,9 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 target("toevoegen", tt["name"], len(plan["missing"]), added,
                        ad_group_id=ag_id, errors=errs, skipped=skipped)
         elif plan["missing"]:
-            target("toevoegen", tt["name"], len(plan["missing"]), 0, ad_group_id=ag_id)
+            target("toevoegen", tt["name"], len(plan["missing"]), 0, ad_group_id=ag_id,
+                   note="campagne heeft geen boom — wordt hersteld"
+                        if plan["root"] is None else "")
         else:
             target("toevoegen", tt["name"], 0, 0, ad_group_id=ag_id,
                    note="alle ids stonden er al")
