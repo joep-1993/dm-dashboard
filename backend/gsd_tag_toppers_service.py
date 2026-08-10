@@ -78,6 +78,12 @@ MUTATE_CHUNK = 1000
 # botst met de mutate die eraan voorafging.
 CONVERT_RETRIES = 3
 
+# Pogingen voor een hele rij. Een 503 uit de transportlaag slaat toe vóór er iets
+# gepland is, dus zo'n rij levert een "Fout" met een lege uitklap op — er is dan
+# letterlijk niets gebeurd. Opnieuw proberen mag: de tool is add-only en wat er al
+# staat komt als "bestaat al" terug, dus een herhaling schrijft niets dubbel.
+ROW_RETRIES = 3
+
 # Rijen worden parallel verwerkt: het leeswerk is ~7s per rij en dat is bijna
 # helemaal wachten op de API. Elke rij is een andere shop en dus een andere
 # campagne, en gelijktijdige rijen op dezelfde shop worden alsnog geserialiseerd
@@ -362,10 +368,33 @@ def _root(nodes: Dict[str, dict]) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 def _plan_tag_toppers_adds(nodes: Dict[str, dict], item_ids: List[str]) -> Dict[str, Any]:
-    """Welke ids ontbreken nog als POSITIEVE unit onder de root van de tag_toppers-boom."""
+    """Welke ids ontbreken nog als POSITIEVE unit, en ónder welk knooppunt ze horen.
+
+    In een boom die de tool zelf bouwt zit item-id direct onder de root. Maar niet elke
+    tag_toppers-campagne is zo gebouwd: Notino's [label_test]-campagne heeft onder de
+    root eerst een custom-attribute niveau en pas daaronder de item-ids. Blind onder de
+    root hangen gaf daar "Dimension type of listing group must be the same as that of
+    its siblings" voor alle 1105 ids. Het item-id-niveau wordt daarom opgezocht in
+    plaats van aangenomen.
+    """
     root = _root(nodes)
     if root is None:
-        return {"root": None, "existing": set(), "missing": list(item_ids)}
+        return {"root": None, "parent": None, "existing": set(),
+                "missing": list(item_ids), "note": ""}
+
+    parent, note = root, ""
+    if _level_dim(nodes, root["resource"]) != "item_id":
+        containers = _item_id_containers(nodes)
+        if len(containers) == 1:
+            parent = containers[0]
+            note = "item-ids zitten een niveau dieper"
+        elif len(containers) > 1:
+            parent, note = None, (f"{len(containers)} item-id-niveaus in de boom — "
+                                  "niet te bepalen waar de ids horen")
+        elif _children(nodes, root["resource"]):
+            parent, note = None, "geen item-id-niveau in de tag_toppers-boom"
+        # geen kinderen onder de root: item-id is dan het niveau dat we zelf maken
+
     # Positief én negatief: Google staat maar één node per case value toe, dus een
     # id dat al als negatief onder deze root hangt kan er niet positief bij.
     existing = {
@@ -373,7 +402,8 @@ def _plan_tag_toppers_adds(nodes: Dict[str, dict], item_ids: List[str]) -> Dict[
         if n["dim"] == "item_id" and n["item_id"]
     }
     missing = [i for i in item_ids if i not in existing]
-    return {"root": root, "existing": existing, "missing": missing}
+    return {"root": root, "parent": parent, "existing": existing,
+            "missing": missing, "note": note}
 
 
 def _level_spec(nodes: Dict[str, dict], parent_resource: Optional[str]) -> Optional[dict]:
@@ -681,6 +711,22 @@ def _dedupe_msgs(msgs: List[str]) -> List[str]:
         key = str(m).strip()
         counts[key] = counts.get(key, 0) + 1
     return [f"{k} ({v}x)" if v > 1 else k for k, v in counts.items()]
+
+
+def _is_transient(ex: Exception) -> bool:
+    """Transportfouten waarbij niet de rij stuk is maar de verbinding.
+
+    Google geeft onder belasting 503/UNAVAILABLE terug; dat komt langs als een
+    google.api_core-exception, dus buiten GoogleAdsException om, en gooit in `work()`
+    de hele rij eruit vóór er iets gepland is.
+    """
+    if type(ex).__name__ in ("ServiceUnavailable", "DeadlineExceeded",
+                             "InternalServerError", "TooManyRequests", "Aborted"):
+        return True
+    tekst = str(ex).lower()
+    return ("service is currently unavailable" in tekst
+            or "deadline exceeded" in tekst
+            or "try again later" in tekst)
 
 
 def _err(ex: Exception) -> str:
@@ -1406,17 +1452,22 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                     target("toevoegen", tt["name"], len(plan["missing"]), added,
                            ad_group_id=ag_id, errors=errs, skipped=skipped,
                            note="boom hersteld")
+            elif plan["parent"] is None:
+                # Boomvorm die we niet veilig kunnen aanvullen: melden in plaats van de
+                # ids naast een sibling van een andere dimensie hangen.
+                target("toevoegen", tt["name"], len(plan["missing"]), 0,
+                       ad_group_id=ag_id, note=plan["note"])
             else:
                 added, skipped, errs = _apply_tag_toppers_adds(
-                    client, customer_id, ag_id, plan["root"]["resource"], plan["missing"])
+                    client, customer_id, ag_id, plan["parent"]["resource"], plan["missing"])
                 res["ids_added"] = added
                 res["errors"].extend(errs)
                 target("toevoegen", tt["name"], len(plan["missing"]), added,
-                       ad_group_id=ag_id, errors=errs, skipped=skipped)
+                       ad_group_id=ag_id, errors=errs, skipped=skipped, note=plan["note"])
         elif plan["missing"]:
             target("toevoegen", tt["name"], len(plan["missing"]), 0, ad_group_id=ag_id,
-                   note="campagne heeft geen boom — wordt hersteld"
-                        if plan["root"] is None else "")
+                   note=("campagne heeft geen boom — wordt hersteld"
+                         if plan["root"] is None else plan["note"]))
         else:
             target("toevoegen", tt["name"], 0, 0, ad_group_id=ag_id,
                    note="alle ids stonden er al")
@@ -1528,15 +1579,24 @@ def _run(rows: List[Dict[str, Any]], dry_run: bool) -> None:
     done_count = 0
 
     def work(row):
-        with _state_lock:
-            if _state["cancel"]:
-                return None
-        try:
-            with _shop_lock(_customer_id(row["country"]), row["shop_id"]):
-                return _process_row(client, row, dry_run)
-        except Exception as ex:
-            logger.exception("Tag Toppers rij %s mislukt", row.get("excel_row"))
-            return _failed_row(row, _err(ex))
+        laatste = None
+        for poging in range(ROW_RETRIES):
+            with _state_lock:
+                if _state["cancel"]:
+                    return None
+            try:
+                with _shop_lock(_customer_id(row["country"]), row["shop_id"]):
+                    return _process_row(client, row, dry_run)
+            except Exception as ex:
+                laatste = ex
+                if not _is_transient(ex) or poging == ROW_RETRIES - 1:
+                    logger.exception("Tag Toppers rij %s mislukt", row.get("excel_row"))
+                    break
+                wacht = 3.0 * (poging + 1)
+                logger.warning("Tag Toppers rij %s: %s — opnieuw over %.0fs",
+                               row.get("excel_row"), _err(ex), wacht)
+                time.sleep(wacht)
+        return _failed_row(row, _err(laatste))
 
     try:
         with ThreadPoolExecutor(max_workers=RUN_WORKERS) as pool:
