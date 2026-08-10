@@ -4,6 +4,56 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-10 — SEO/Unique Titles: type-facet staleness en de blueprint-keys
+
+Aanleiding: Joep zag `Vlinderkasten vogelhuisjes` in Unique Titles en vroeg of
+`s_dierenhuis` een type-facet is. Dat is het (`is_type_facet=true`, order 484) — de titel
+was stale, van vóór de facet_order-import van 19-05-2026. Zie LEARNINGS 2026-08-10.
+
+- [x] **`s_dierenhuis` als type-facet bevestigd** voor beide tools. `seo_titles_service.
+      load_rules()` en `ai_titles_service._type_facet_override_by_slug()` lezen dezelfde
+      `pa.facet_position_rules`, en de slug zit niet in `_NEVER_URL_SLUGS`.
+- [x] **71/72 unique titles geregenereerd** via `process_single_url(url, True)` (niet via
+      `status='pending'` — de worker slaat gevulde rijen over). 44 H1's gewijzigd, dubbele
+      categorie weg. Snapshot: `Downloads\claude\unique_titles_s_dierenhuis_before_20260810.csv`.
+      1 URL faalt op `facet_not_available` (dode `merk~23814784`).
+- [x] **Blueprint-audit: alle 85.608 rijen hercompileerd** met de huidige regels. 84.906
+      byte-identiek; de 702 afwijkers zijn hand-edits, niet stale output. De type-facet-fout
+      zit dus níet in de blueprints (allemaal gebouwd 6–31 juli, ná de 19-05 import).
+- [x] **454 duplicaatrijen verwijderd** — 450 combo's stonden 2–3× onder verschillende
+      key-spellingen, met byte-identieke content. Canonieke rij behouden waar aanwezig (441),
+      anders de alfabetisch eerste (9). 85.154 over, 0 dubbele combo's. Rollback:
+      `Downloads\claude\seo_titles_blueprints_dedup_deleted_20260810.csv`.
+- [x] **`canon_key()` in `upsert_blueprint_built()`** zodat de UI-route geen ongesorteerde
+      keys meer kan wegschrijven. `update_blueprint()` bewust ongemoeid: schrijft de key
+      niet, en zijn `WHERE key=%s` moet de nog-ongesorteerde rijen editbaar houden.
+- [x] **13 nieuwe combo's aangemaakt** uit Joeps 33-URL-lijst, `status='built'`, niet
+      gepubliceerd. 12× cat 9003879 (Insectenhotel), 1× cat 9001466 (Vogelhuisjes,
+      `kleur~materiaal~merk~s_dierenhuis` — correct zónder `!!sub_category!!`).
+
+- [ ] **Backend herstarten** om de `canon_key`-fix live te krijgen. Draait op PID 66045
+      zonder `--reload`, dus deploy = `fuser -k 8003/tcp` + relaunch. Tot dan schrijft
+      `/api/seo-titles/create-built` nog rauwe keys weg.
+- [ ] **De 13 built blueprints publiceren** met `publish_built(env="production")` — zij
+      zijn nu de enige `built` rijen, dus dat pusht precies deze set.
+- [ ] **551 ongesorteerde keys** blijven staan (canonicalisatie bewust overgeslagen door
+      Joep, 2026-08-10). Functioneel ok: de dedup canonicaliseert bij vergelijking.
+- [ ] **15 misvormde blueprints opruimen**, allemaal live gepusht: 3 met een placeholder
+      die niet in de key zit (`!!soort_hals_trui_shirt!!` in cat 9000727, `!!inhoud!!` in
+      9005311/9005316) en dus nooit gesubstitueerd wordt; 5 met geplakte placeholders
+      (`!!doelgroep_schoenen!!!!sub_category!!`); 8 met spatie voor/achter of dubbele
+      spatie. Ook cat 9004736 heeft `dekens` hardcoded i.p.v. `!!sub_category!!`.
+      Fixen vergt `status='built'` + gerichte herpush.
+- [ ] **Steekproef op de 126.358 pre-19-05 titels** die op een type-facet-URL staan. Niet
+      allemaal fout — alleen waar de categorienaam ook echt werd aangeplakt. Voorstel: 500
+      random URLs regenereren en tellen hoeveel H1's veranderen, dán beslissen over de
+      volle sweep.
+- [ ] **Weeskeys in `/page-titles`**: 1.005 ongesorteerde keys zijn al gepusht en deze tool
+      heeft geen DELETE tegen die API. Uitzoeken bij de eigenaar of het live systeem bij
+      lookup canonicaliseert; zo niet, dan staan er dode page-titles.
+- [ ] **`merk~23814784`** is een dode taxonomy-facetwaarde die minstens 2 URLs raakt.
+      Taxonomy opschonen of die URLs uit de queue halen.
+
 ### 2026-08-10 — GSD Tag Toppers: de drie fouten uit run #14, en de tegels
 
 Aanleiding: Joep vroeg waarom er vrijdag geen campagnes waren aangemaakt. Antwoord: de

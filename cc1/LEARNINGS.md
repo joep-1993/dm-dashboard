@@ -1,6 +1,92 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Titels van vóór 19-05-2026 dragen de categorie dubbel op type-facet-URLs (2026-08-10)
+
+Joep zag in Unique Titles `Vlinderkasten vogelhuisjes kopen? …` op
+`/products/tuin_accessoires/tuin_accessoires_504077/c/s_dierenhuis~23579287`. Facetwaarde
+én categorienaam, precies wat een type-facet moet voorkomen.
+
+Geen live bug — stale titels. `s_dierenhuis` staat als `is_type_facet=true` in
+`pa.facet_position_rules` (order 484, `source='manual'`, reasoning "Imported from
+facet_order.xlsx 2026-05-19 … replace_category=1"). De 72 URLs met die facet splitsen
+exact op die importdatum:
+
+| batch | n | resultaat |
+|---|---|---|
+| 2–4 mei (vóór de import) | 43 | `Vlinderkasten vogelhuisjes`, `Egelhuisjes vogelhuisjes` |
+| 17/22 juni (na de import) | 29 | schoon — `CJ Wildlife Egelhuisjes` uit orig-H1 `… Nestkasten` |
+
+- **De vlaggen kwamen in één batch, de titels niet.** 748 slugs hebben
+  `is_type_facet=true`, bijna allemaal uit die ene xlsx-import. **126.358** titels van
+  vóór 19-05 staan op een URL met zo'n slug. Eerst mat ik 11.989 — die match eiste een
+  `/` vóór de slug en miste dus alle facets na `~~`, wat de meeste zijn. Een
+  URL-patroon dat op `/` ankert, ondertelt met een factor 10.
+- **`status='pending'` regenereert geen gevulde titel.** De batch-worker
+  (`get_unprocessed_urls`) heeft `AND (c.title IS NULL OR '' …)` en slaat gevulde rijen
+  over; de reset blijft eeuwig pending staan. Regenereren gaat via
+  `ai_titles_service.process_single_url(url, True)` per URL. 71/72 gelukt, 44 H1's
+  gewijzigd.
+- **`facet_not_available` is geen transient fout.** De 72e URL heeft `merk~23814784`, een
+  dode taxonomy-waarde; products-API geeft 400. Job → `failed`, content blijft intact
+  (`update_title_record` blankt nooit). Retry helpt niet.
+- **Merknaam-casing uit de taxonomy is bedoeld, geen regressie.** v3 neemt de merkwaarde
+  letterlijk over: `Elho` → `elho`, `Trixie` → `TRIXIE`. Beide zijn de officiële
+  merkstijl, en `ai_titles_v2.capitalize_first` heeft er een `lead_lowercase_brands`-lijst
+  voor. Leest wel vreemd midden in een titel (`Rode elho Kunststof Insectenhotels`).
+
+## De PK van seo_titles_blueprints staat op de rauwe key, de dedup op canon_key (2026-08-10)
+
+`build_blueprint()` emit een gesorteerde key (`'~'.join(sorted(types))`), maar
+`upsert_blueprint_built()` — het pad achter `/api/seo-titles/create-built`, voor geëdite
+"existing combo"-rijen — schreef de key rauw weg zoals de frontend hem aanleverde: de
+facetvolgorde uit de URL. Resultaat: 1.005 ongesorteerde keys, allemaal uit de batch van
+31-07.
+
+De dedup zelf bleef intact (`load_existing_combos()` past `canon_key()` op beide kanten
+toe), maar de **primary key is `(cat_id, key)` op de rauwe key**. Dezelfde combo was dus
+tweemaal insertable onder twee spellingen — 450 combo's stonden 2–3× in de tabel, met
+byte-identieke content.
+
+- **De live conventie ís alfabetisch.** In `pa.page_titles_existing` (de tblPageTitles-
+  export) zijn 229 van 59.446 multi-facet keys ongesorteerd = 0,4%; onze 31-07 batch zat
+  op 10,3%. 25× de legacy-ratio is geen tolerantie, dat is onze bug.
+- **`update_blueprint()` is geen dader** — die schrijft de `key`-kolom niet, alleen
+  title/h1/description. Zijn `WHERE key=%s` moet juist rauw blijven, anders zijn de
+  rijen die hun ongesorteerde key houden niet meer editbaar vanuit de UI.
+- **Al gepushte weeskeys zijn niet terug te halen.** Die 1.005 keys staan al in de live
+  page-titles-config en deze tool heeft geen DELETE tegen die API (de enige `DELETE` in
+  de service is lokaal). Of ze schade doen hangt ervan af of het live systeem bij lookup
+  canonicaliseert — open vraag aan de eigenaar van `/page-titles`.
+
+## Blueprint-drift meten kan deterministisch, zonder API of LLM (2026-08-10)
+
+Om te weten of opgeslagen blueprints nog kloppen met de huidige facetregels hoef je niets
+opnieuw te genereren: `build_blueprint(cat_id, cat_name, types, rules)` is een pure functie
+over de key. Alle 85.608 rijen hercompileren en diffen kost een paar minuten en geeft een
+exact antwoord — 84.906 (99,2%) waren byte-identiek.
+
+De 702 afwijkers bleken hand-edits, niet stale output. Drie onafhankelijke aanwijzingen,
+die als methode herbruikbaar zijn:
+
+1. **202 misten een placeholder die in hun key staat.** `build_blueprint` emit er altijd
+   één per type — dat kán de machine niet produceren.
+2. **99 hadden een legacy marketing-tail** (`kopen? | Ruime keus | beslist.nl`) in plaats
+   van `TAIL_TITLE`, dus ze kwamen via `upsert_blueprint_built` uit `page_titles_existing`.
+3. **Een gemengde split binnen één dag.** Bij combo's met `merk`+`kleur` staat merk eerst
+   in alle 12.217 rijen van 6–28 juli, en op 31 juli in 1.298 rijen wél en 158 niet. Een
+   codewijziging klapt een hele dag om; per-rij verschil betekent een mens.
+
+- **Merk-eerst is de regel, niet de fout** (`merk` order_index 3, `kleur` 22), en
+  `render_draft` zet `slots.lead` (merk) ook vóór de modifiers. Dat unique titles wél
+  kleur-eerst zijn (`Beige elho Insectenhotels`) komt uit de **AI-polish**, niet uit de
+  regels. `order_index` bereikt die polish alleen als "Volgorde:"-clausule via
+  `_facet_position_clause`, en de LLM overrulet die voor natuurlijk Nederlands.
+- **`order_index` is geen knop die je los kunt draaien.** merk van 3 naar 90 zetten om
+  kleur-eerst te forceren verplaatst merk óók achter `materiaal` in 10.295 blueprints
+  ("Katoenen Nike T-shirts"); de kleur-familie boven merk zetten raakt er 855. Meet de
+  nevenwerking vóór je aan de tabel komt.
+
 ## Google normaliseert item-ids naar lowercase; de vergelijking deed dat niet (2026-08-10)
 
 Makro.nl|Marketplace: 420 ids, 0 geland, en drie ad groups vol met
