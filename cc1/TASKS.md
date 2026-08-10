@@ -55,6 +55,11 @@ dry-run**; de enige echte run die dag was #8 met een ander bestand. Daarna run #
 - [x] **Rij-retry op transportfouten** (`ROW_RETRIES` + `_is_transient`) — een 503 gooide de
       hele rij eruit vóór er iets gepland was, wat als "Fout" met lege uitklap in beeld kwam
       (Vente-unique.nl). Mag herhaald worden omdat de tool add-only is.
+- [x] **Herstel neemt ook de negatives over** — de afgebroken aanmaak kwam nooit tot die
+      stap, dus alle 12 achtergebleven campagnes hadden er 0. Zonder deze aanvulling zou
+      een hersteld campagne-object structureel compleet zijn (boom + ad) maar zonder de
+      merk-negatives gaan vertonen zodra je hem aanzet. `_copy_negatives` vergelijkt met
+      wat er al staat en is dus idempotent. Alle 12 vinden een zustercampagne als bron.
 - [x] **Export** `Downloads\claude\tag_toppers_aangemaakt_2026-08-10_1022.xlsx` — de 61
       campagnes uit run #14 met id, naam en werkelijke uitkomst: 49 compleet, 12 zonder boom.
 
