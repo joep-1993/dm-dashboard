@@ -409,12 +409,21 @@ function pollProgress() {
                 b.textContent = (p.dry_run ? 'Preview klaar' : 'Run klaar') +
                     ' — ' + RESULTS.length + ' rijen verwerkt.';
                 loadRuns();   // de zojuist afgeronde run staat nu in de DB
-            } else if (++POLL_TICK % 4 === 0 && !VIEWING_RUN) {
+            } else if (!VIEWING_RUN) {
+                // Niet terwijl je een oude run bekijkt — dat zou je weergave overschrijven.
+                DRY = p.dry_run;
+                // De tegels lopen elke tick mee: /progress stuurt de tussenstand al mee,
+                // dus dit kost geen extra request en geen hertekening van de tabel.
+                if ((p.summary || {}).rows) {
+                    document.getElementById('resultsCard').style.display = 'block';
+                    document.getElementById('resultsTitle').textContent =
+                        DRY ? 'Preview-resultaten' : 'Run-resultaten';
+                    renderTiles(p.summary);
+                }
                 // De backend schrijft elke afgeronde rij meteen weg, dus haal de
                 // tussenstand op. Elke 4e tick (~6s) in plaats van elke tick: de hele
                 // tabel hertekenen bij 622 rijen is te duur om elke 1,5s te doen.
-                // Niet terwijl je een oude run bekijkt — dat zou je weergave overschrijven.
-                await loadResults();
+                if (++POLL_TICK % 4 === 0) await loadResults();
             }
         } catch (e) { /* poll faalt stil; volgende tick probeert opnieuw */ }
     }, 1500);
@@ -442,10 +451,18 @@ async function loadResults() {
     renderTable();
 }
 
+// Preview telt wat er nodig is, een run telt wat er echt is aangemaakt. Runs van
+// vóór `campaigns_created` hebben dat veld niet — dan terugvallen op de oude teller,
+// want 0 tonen voor een run die wél campagnes maakte is misleidender dan iets te hoog.
+function campagneCount(s) {
+    if (DRY) return s.campaigns_to_create;
+    return s.campaigns_created !== undefined ? s.campaigns_created : s.campaigns_to_create;
+}
+
 function renderTiles(s) {
     const errs = s.errors || 0;
     document.getElementById('summaryRow').innerHTML = [
-        ['Campagnes aan te maken', s.campaigns_to_create, false, 'campagne'],
+        [DRY ? 'Campagnes aan te maken' : 'Campagnes aangemaakt', campagneCount(s), false, 'campagne'],
         [DRY ? 'Ids toe te voegen' : 'Ids toegevoegd', DRY ? s.ids_to_add : s.ids_added, false, 'ids'],
         [DRY ? 'Uitsluitingen te maken' : 'Uitsluitingen gemaakt', DRY ? s.exclusions_to_add : s.exclusions_added, false, 'uitsluiting'],
         [DRY ? 'Negatives over te nemen' : 'Negatives overgenomen', s.negatives_copied, false, 'negatives'],
@@ -682,7 +699,10 @@ function sizeDetailScroll(excelRow) {
 // de tegel en het aantal rijen in de tabel hetzelfde verhaal vertellen.
 function tileMatch(r) {
     switch (TILE_FILTER) {
-        case 'campagne':    return r.campaign_action === 'aanmaken';
+        case 'campagne':    return DRY ? r.campaign_action === 'aanmaken'
+                                       : (r.campaign_created !== undefined
+                                            ? r.campaign_created > 0
+                                            : r.campaign_action === 'aanmaken');
         case 'ids':         return (DRY ? r.ids_to_add : r.ids_added) > 0;
         case 'uitsluiting': return (DRY ? r.exclusions_to_add : r.exclusions_added) > 0;
         case 'negatives':   return r.negatives_copied > 0;

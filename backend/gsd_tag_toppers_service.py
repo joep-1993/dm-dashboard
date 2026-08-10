@@ -271,6 +271,13 @@ def _read_campaign_tree(client, customer_id: str, campaign_id: int) -> Dict[str,
           ad_group_criterion.listing_group.case_value.product_custom_attribute.index,
           ad_group_criterion.listing_group.case_value.product_custom_attribute.value,
           ad_group_criterion.listing_group.case_value.product_item_id.value,
+          ad_group_criterion.listing_group.case_value.product_brand.value,
+          ad_group_criterion.listing_group.case_value.product_type.level,
+          ad_group_criterion.listing_group.case_value.product_type.value,
+          ad_group_criterion.listing_group.case_value.product_category.level,
+          ad_group_criterion.listing_group.case_value.product_category.category_id,
+          ad_group_criterion.listing_group.case_value.product_condition.condition,
+          ad_group_criterion.listing_group.case_value.product_channel.channel,
           ad_group_criterion.negative,
           ad_group_criterion.cpc_bid_micros
         FROM ad_group_criterion
@@ -287,7 +294,10 @@ def _read_campaign_tree(client, customer_id: str, campaign_id: int) -> Dict[str,
             continue
         cv = lg.case_value
         which = cv._pb.WhichOneof("dimension")
-        dim = index = value = item_id = None
+        # which is None bij een OTHERS-node: die heeft geen eigen case value en erft
+        # de dimensie van zijn siblings. dim blijft dan None — dat is NIET hetzelfde
+        # als "item-id niveau", zie _level_dim().
+        dim = index = value = item_id = level = None
         if which == "product_item_id":
             dim = "item_id"
             item_id = cv.product_item_id.value  # "" => OTHERS
@@ -295,6 +305,23 @@ def _read_campaign_tree(client, customer_id: str, campaign_id: int) -> Dict[str,
             dim = "custom_attr"
             index = cv.product_custom_attribute.index.name
             value = cv.product_custom_attribute.value
+        elif which == "product_brand":
+            dim = "brand"
+            value = cv.product_brand.value
+        elif which == "product_type":
+            dim = "product_type"
+            level = cv.product_type.level.name
+            value = cv.product_type.value
+        elif which == "product_category":
+            dim = "category"
+            level = cv.product_category.level.name
+            value = str(cv.product_category.category_id or "")
+        elif which == "product_condition":
+            dim = "condition"
+            value = cv.product_condition.condition.name
+        elif which == "product_channel":
+            dim = "channel"
+            value = cv.product_channel.channel.name
         ag_id = str(row.ad_group.id)
         out.setdefault(ag_id, {})[agc.resource_name] = {
             "resource": agc.resource_name,
@@ -303,7 +330,8 @@ def _read_campaign_tree(client, customer_id: str, campaign_id: int) -> Dict[str,
             "type": lg.type_.name,
             "parent": lg.parent_ad_group_criterion or None,
             "dim": dim,
-            "index": index,
+            "index": index,   # custom_attr: INDEX0..INDEX4
+            "level": level,   # product_type / category: LEVEL1..LEVEL5
             "value": value,
             "item_id": item_id,
             "negative": bool(agc.negative),
@@ -342,45 +370,71 @@ def _plan_tag_toppers_adds(nodes: Dict[str, dict], item_ids: List[str]) -> Dict[
     return {"root": root, "existing": existing, "missing": missing}
 
 
-def _is_item_id_level(node: dict) -> bool:
-    """Zit dit knooppunt op het item-id niveau?
+def _level_spec(nodes: Dict[str, dict], parent_resource: Optional[str]) -> Optional[dict]:
+    """Hoe is het niveau ónder `parent_resource` opgedeeld: {'dim','index','level'}.
 
-    Behalve een expliciete product_item_id telt ook een UNIT zonder case_value: in
-    multi-label bomen is item-id OTHERS precies dat, en leest het als dim=None
-    (de API toont de dimensie dan als ROOT). Dat is de vorm die
-    GSD_tagtoppers.py's LEARNINGS beschrijven.
+    Alle kinderen van één subdivision delen per definitie dezelfde dimensie, maar de
+    OTHERS-node draagt hem niet: die komt terug zonder case value. Dimensie én de
+    bijbehorende index/level zijn dus alleen af te lezen van de siblings die er wél
+    een hebben.
+
+    Eerder werd "UNIT zonder case value" als item-id niveau gelezen. Dat klopt alleen
+    als de siblings item-ids zijn; bij een niveau op merk of producttype leverde het
+    item-id-units onder brand-siblings op, en dus "Dimension type of listing group
+    must be the same as that of its siblings".
     """
-    return node["dim"] == "item_id" or (node["type"] == "UNIT" and node["dim"] is None)
+    spec = None
+    for k in _children(nodes, parent_resource):
+        if not k["dim"]:
+            continue
+        if spec is None:
+            spec = {"dim": k["dim"], "index": k["index"], "level": k["level"]}
+        elif spec["dim"] != k["dim"]:
+            return None   # gemengd niveau: bestaat niet volgens Google, dus niet raden
+    return spec
+
+
+def _level_dim(nodes: Dict[str, dict], parent_resource: Optional[str]) -> Optional[str]:
+    spec = _level_spec(nodes, parent_resource)
+    return spec["dim"] if spec else None
 
 
 def _item_id_containers(nodes: Dict[str, dict]) -> List[dict]:
-    """SUBDIVISIONs die al een item-id niveau hebben (dus waar een negatief id bij kan)."""
-    containers = []
-    for n in nodes.values():
-        if n["type"] != "SUBDIVISION":
-            continue
-        kids = _children(nodes, n["resource"])
-        if any(_is_item_id_level(k) for k in kids):
-            containers.append(n)
-    return containers
+    """SUBDIVISIONs waarvan het niveau eronder écht op item-id zit."""
+    return [n for n in nodes.values()
+            if n["type"] == "SUBDIVISION" and _level_dim(nodes, n["resource"]) == "item_id"]
 
 
-def _convertible_leaves(nodes: Dict[str, dict]) -> List[dict]:
-    """Positieve biddable UNIT-leaves die nog géén item-id niveau onder zich hebben.
+def _convertible_leaves(nodes: Dict[str, dict]) -> Tuple[List[dict], set]:
+    """(leaves die we mogen omzetten, dimensies die we niet aankunnen).
 
-    Die moeten een SUBDIVISION worden met item-id OTHERS (positief, originele bid)
-    plus de negatieve ids. NEGATIEVE units zijn uitsluitingen en blijven met rust —
-    die naar subdivisions omzetten zou bestaande uitsluitingen wissen.
+    Een positieve biddable UNIT wordt een SUBDIVISION met item-id OTHERS (positief,
+    originele bid) plus de negatieve ids. NEGATIEVE units zijn uitsluitingen en
+    blijven met rust — die omzetten zou bestaande uitsluitingen wissen.
+
+    De leaf wordt exact teruggebouwd uit het niveau-spec van zijn ouders plus zijn
+    eigen waarde; een lege waarde is de OTHERS-node van dat niveau. Dimensies buiten
+    WRITABLE_DIMS (categorie, staat, kanaal) kunnen we niet schrijven en worden
+    gemeld in plaats van benaderd met een op die Google toch afkeurt.
     """
-    leaves = []
+    leaves: List[dict] = []
+    unsupported: set = set()
     for n in nodes.values():
         if n["type"] != "UNIT" or n["negative"]:
             continue
-        if _is_item_id_level(n):
-            continue  # zit al op item-id niveau; converteren zou een SUBDIVISION
-                      # zonder case_value opleveren -> REQUIRED_FIELD_MISSING
-        leaves.append(n)
-    return leaves
+        lvl = _level_spec(nodes, n["parent"])
+        if lvl is None:
+            continue  # niveau niet te bepalen: niets doen is hier veiliger dan raden
+        if lvl["dim"] == "item_id":
+            continue  # zit al op item-id niveau
+        if lvl["dim"] not in WRITABLE_DIMS:
+            unsupported.add(lvl["dim"])
+            continue
+        # Eigen waarde als die er is, anders "" => dit ís de OTHERS-node.
+        spec = dict(lvl)
+        spec["value"] = n["value"] or ""
+        leaves.append({**n, "spec": spec})
+    return leaves, unsupported
 
 
 def _plan_sibling_exclusions(nodes: Dict[str, dict], item_ids: List[str]) -> Dict[str, Any]:
@@ -394,6 +448,7 @@ def _plan_sibling_exclusions(nodes: Dict[str, dict], item_ids: List[str]) -> Dic
     containers = _item_id_containers(nodes)
     appends: List[Dict[str, Any]] = []
     converts: List[Dict[str, Any]] = []
+    unsupported: set = set()
 
     if containers:
         for c in containers:
@@ -406,12 +461,14 @@ def _plan_sibling_exclusions(nodes: Dict[str, dict], item_ids: List[str]) -> Dic
             if missing:
                 appends.append({"parent": c["resource"], "missing": missing})
     else:
-        for leaf in _convertible_leaves(nodes):
+        leaves, unsupported = _convertible_leaves(nodes)
+        for leaf in leaves:
             converts.append({"leaf": leaf, "missing": list(item_ids)})
 
     return {
         "appends": appends,
         "converts": converts,
+        "unsupported": sorted(unsupported),
         "n_new": sum(len(a["missing"]) for a in appends) + sum(len(c["missing"]) for c in converts),
     }
 
@@ -516,8 +573,57 @@ class _Temp:
             customer_id, str(ad_group_id), str(self.n))
 
 
+# Dimensies die we terug kunnen schrijven. Alles daarbuiten (categorie, staat,
+# kanaal) wordt herkend bij het lezen maar nooit zelf aangemaakt.
+WRITABLE_DIMS = ("item_id", "custom_attr", "brand", "product_type")
+
+
+def _set_case_value(client, lg, spec: Dict[str, Any]) -> None:
+    """Schrijft de case value van één node.
+
+    Een lege `value` is de OTHERS-node van dat niveau: de dimensie moet dan wél
+    gezet zijn maar zonder waarde, anders leest Google hem als een node zonder
+    dimensie. Voor custom_attr en product_type hoort index respectievelijk level
+    er ook bij een OTHERS-node bij — die komen van een sibling, want de OTHERS-node
+    draagt ze zelf niet.
+    """
+    dim = spec["dim"]
+    value = spec.get("value") or ""
+    cv = lg.case_value
+    if dim == "item_id":
+        if value:
+            cv.product_item_id.value = value
+        else:
+            client.copy_from(cv.product_item_id, client.get_type("ProductItemIdInfo"))
+    elif dim == "custom_attr":
+        cv.product_custom_attribute.index = \
+            client.enums.ProductCustomAttributeIndexEnum[spec["index"]]
+        if value:
+            cv.product_custom_attribute.value = value
+    elif dim == "brand":
+        if value:
+            cv.product_brand.value = value
+        else:
+            client.copy_from(cv.product_brand, client.get_type("ProductBrandInfo"))
+    elif dim == "product_type":
+        cv.product_type.level = client.enums.ProductTypeLevelEnum[spec["level"]]
+        if value:
+            cv.product_type.value = value
+    else:
+        raise ValueError(f"dimensie {dim!r} kan niet geschreven worden")
+
+
+def _spec_from_legacy(item_id_value, custom_attr):
+    if item_id_value is not None:
+        return {"dim": "item_id", "value": item_id_value}
+    if custom_attr is not None:
+        return {"dim": "custom_attr", "index": custom_attr["index"],
+                "value": custom_attr["value"]}
+    return None
+
+
 def _unit_op(client, customer_id, ad_group_id, temp, parent_resource, *,
-             item_id_value=None, custom_attr=None, negative=False, bid=None):
+             item_id_value=None, custom_attr=None, spec=None, negative=False, bid=None):
     op = client.get_type("AdGroupCriterionOperation")
     cr = op.create
     cr.resource_name = temp.path(client, customer_id, ad_group_id)
@@ -528,22 +634,16 @@ def _unit_op(client, customer_id, ad_group_id, temp, parent_resource, *,
     lg.type_ = client.enums.ListingGroupTypeEnum.UNIT
     if parent_resource:
         lg.parent_ad_group_criterion = parent_resource
-    if item_id_value is not None:
-        if item_id_value != "":
-            lg.case_value.product_item_id.value = item_id_value
-        else:
-            client.copy_from(lg.case_value.product_item_id, client.get_type("ProductItemIdInfo"))
-    elif custom_attr is not None:
-        lg.case_value.product_custom_attribute.index = \
-            client.enums.ProductCustomAttributeIndexEnum[custom_attr["index"]]
-        if custom_attr["value"]:
-            lg.case_value.product_custom_attribute.value = custom_attr["value"]
+    spec = spec or _spec_from_legacy(item_id_value, custom_attr)
+    if spec is not None:
+        _set_case_value(client, lg, spec)
     if negative:
         cr.negative = True
     return op, cr.resource_name
 
 
-def _subdiv_op(client, customer_id, ad_group_id, temp, parent_resource, *, custom_attr):
+def _subdiv_op(client, customer_id, ad_group_id, temp, parent_resource, *,
+               custom_attr=None, spec=None):
     op = client.get_type("AdGroupCriterionOperation")
     cr = op.create
     cr.resource_name = temp.path(client, customer_id, ad_group_id)
@@ -552,11 +652,9 @@ def _subdiv_op(client, customer_id, ad_group_id, temp, parent_resource, *, custo
     lg.type_ = client.enums.ListingGroupTypeEnum.SUBDIVISION
     if parent_resource:
         lg.parent_ad_group_criterion = parent_resource
-    if custom_attr is not None:
-        lg.case_value.product_custom_attribute.index = \
-            client.enums.ProductCustomAttributeIndexEnum[custom_attr["index"]]
-        if custom_attr["value"]:
-            lg.case_value.product_custom_attribute.value = custom_attr["value"]
+    spec = spec or _spec_from_legacy(None, custom_attr)
+    if spec is not None:
+        _set_case_value(client, lg, spec)
     return op, cr.resource_name
 
 
@@ -797,13 +895,14 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
         leaf = conv["leaf"]
         # Stap 1 is atomisch: de biddable leaf verdwijnt en wordt in dezelfde
         # mutate vervangen door een subdivision met item-id OTHERS, zodat de ad
-        # group nooit even zonder dat targeting-pad zit.
+        # group nooit even zonder dat targeting-pad zit. De subdivision krijgt exact
+        # de case value van de leaf terug — of die nu op custom attribute, merk of
+        # producttype zit — anders verschuift het targeting-pad.
         temp = _Temp()
-        ca = {"index": leaf["index"], "value": leaf["value"] or ""} if leaf["dim"] == "custom_attr" else None
         bid = leaf["bid"] or DEFAULT_BID_MICROS
         ops = [_remove_op(client, leaf["resource"])]
         sub_op, sub_res = _subdiv_op(client, customer_id, ad_group_id, temp,
-                                     leaf["parent"], custom_attr=ca)
+                                     leaf["parent"], spec=leaf["spec"])
         ops.append(sub_op)
         others_op, _ = _unit_op(client, customer_id, ad_group_id, temp, sub_res,
                                 item_id_value="", negative=False, bid=bid)
@@ -815,7 +914,19 @@ def _apply_sibling_exclusions(client, customer_id: str, ad_group_id: str,
             else:
                 errors.append(f"convert {leaf['resource']}: {_err(ex)}")
             continue
-        real_sub = resp.results[1].resource_name
+        # partial_failure staat aan, dus een afgekeurde subdivision-op komt niet als
+        # exception binnen maar als lege resource name. Daar geen kinderen onder
+        # hangen: die krijgen dan een lege parent en falen op REQUIRED_FIELD_MISSING,
+        # wat de echte oorzaak juist verbergt.
+        real_sub = resp.results[1].resource_name if len(resp.results) > 1 else ""
+        if not real_sub:
+            s, perrs, _f, _r = _read_partial_failure(client, resp)
+            if s and not perrs:
+                skipped += 1
+            else:
+                errors.append(f"convert {leaf['resource']}: "
+                              + (perrs[0] if perrs else "subdivision niet aangemaakt"))
+            continue
 
         temp2 = _Temp()
         neg_ops = []
@@ -950,12 +1061,22 @@ def _create_tag_toppers_campaign(client, customer_id: str, country: str,
     root_op, root_tmp = _subdiv_op(client, customer_id, ad_group_id, temp, None, custom_attr=None)
     others_op, _ = _unit_op(client, customer_id, ad_group_id, temp, root_tmp,
                             item_id_value="", negative=True)
-    try:
-        agc = client.get_service("AdGroupCriterionService")
-        resp = agc.mutate_ad_group_criteria(customer_id=customer_id, operations=[root_op, others_op])
-        root_resource = resp.results[0].resource_name
-    except GoogleAdsException as ex:
+    # Via _mutate_with_retry: op een ad group die net is aangemaakt is Google intern
+    # nog bezig, en dan komt CONCURRENT_MODIFICATION terug ("same resource at once").
+    # Die is transient — retryen met backoff in plaats van de halve campagne laten
+    # stranden en een lege campagne + budget achterlaten.
+    resp, ex = _mutate_with_retry(client, customer_id, [root_op, others_op])
+    if resp is None:
         return None, errors + [f"boomwortel: {_err(ex)}"]
+    # Beide ops moeten geland zijn. _mutate_with_retry zet partial_failure aan, dus
+    # een mislukte OTHERS-op geeft geen exception — en zonder die negatieve OTHERS
+    # toont de campagne álle producten in plaats van alleen de tag toppers.
+    landed = [r.resource_name for r in resp.results] if resp.results else []
+    if len(landed) < 2 or not all(landed[:2]):
+        _s, perrs, _f, _r = _read_partial_failure(client, resp)
+        return None, errors + [
+            "boomwortel: " + (perrs[0] if perrs else "root of item-id OTHERS niet aangemaakt")]
+    root_resource = landed[0]
 
     time.sleep(1)
     try:
@@ -1024,6 +1145,9 @@ def get_progress() -> Dict[str, Any]:
             "finished_at": _state["finished_at"].isoformat() if _state["finished_at"] else None,
             "mutations": _state["mutations"],
             "cancelling": bool(_state["cancel"]) and _state["running"],
+            # Meegestuurd zodat de tegels elke poll kunnen meelopen. De tabel ophalen
+            # is duur (honderden rijen), deze dict is een handvol getallen.
+            "summary": dict(_state["summary"]),
         }
 
 
@@ -1056,6 +1180,10 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
         "n_ids": len(item_ids),
         "campaign_action": "",
         "campaign_name": "",
+        # 1 zodra de campagne er echt staat. `campaign_action == "aanmaken"` zegt
+        # alleen dát er een campagne nodig was: bij een mislukte create blijft die
+        # op "aanmaken" staan, dus tellen op dat veld overschat wat er is aangemaakt.
+        "campaign_created": 0,
         "ids_already_present": 0,
         "ids_to_add": 0,
         "ids_added": 0,
@@ -1125,6 +1253,7 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 res["status"] = "fout"
                 return res
             res["campaign_name"] = created["name"]
+            res["campaign_created"] = 1
             target("aanmaken", created["name"], 1, 1, errors=errs, note="PAUSED")
             added, skipped, errs2 = _apply_tag_toppers_adds(
                 client, customer_id, created["ad_group_id"], created["root_resource"], item_ids)
@@ -1202,8 +1331,19 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                 target("uitsluiten", sib["name"], plan["n_new"], done,
                        ad_group_id=ag_id, errors=errs, skipped=skipped)
             else:
+                # Een niveau op merk/producttype/categorie kunnen we niet terugbouwen.
+                # Dat expliciet melden, anders leest het als "niets te doen" terwijl de
+                # uitsluitingen daar wél nodig zijn.
+                onbekend = plan.get("unsupported") or []
+                if onbekend:
+                    note = ("niveau op " + "/".join(onbekend)
+                            + " — uitsluiten hier niet ondersteund")
+                elif not plan["n_new"]:
+                    note = "niets te doen"
+                else:
+                    note = ""
                 target("uitsluiten", sib["name"], plan["n_new"], 0, ad_group_id=ag_id,
-                       note="niets te doen" if not plan["n_new"] else "")
+                       note=note)
 
     if res["errors"]:
         res["status"] = "fout" if res["status"] == "fout" else "deels"
@@ -1224,6 +1364,7 @@ def _failed_row(row: Dict[str, Any], message: str) -> Dict[str, Any]:
         "exclusions_to_add": 0, "exclusions_added": 0,
         "negatives_source": "", "negatives_copied": 0,
         "status": "fout", "errors": [message], "targets": [],
+        "campaign_created": 0,
     }
 
 
@@ -1245,6 +1386,24 @@ def _shop_lock(customer_id: str, shop_id: str) -> threading.Lock:
                 lk = threading.Lock()
                 _shop_locks[key] = lk
     return lk
+
+
+def _summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """De tegels boven de resultatentabel. Draait ook tijdens de run over de tot dan
+    toe afgeronde rijen, zodat de tegels meelopen in plaats van op 0 te blijven tot
+    het eind. O(n) per afgeronde rij is verwaarloosbaar bij een paar honderd rijen."""
+    return {
+        "rows": len(results),
+        # to_create = wat er nodig was (de preview-kant), created = wat er echt staat.
+        "campaigns_to_create": sum(1 for r in results if r["campaign_action"] == "aanmaken"),
+        "campaigns_created": sum(r.get("campaign_created", 0) for r in results),
+        "ids_to_add": sum(r["ids_to_add"] for r in results),
+        "ids_added": sum(r["ids_added"] for r in results),
+        "exclusions_to_add": sum(r["exclusions_to_add"] for r in results),
+        "exclusions_added": sum(r["exclusions_added"] for r in results),
+        "negatives_copied": sum(r["negatives_copied"] for r in results),
+        "errors": sum(1 for r in results if r["status"] != "ok"),
+    }
 
 
 def _run(rows: List[Dict[str, Any]], dry_run: bool) -> None:
@@ -1276,18 +1435,10 @@ def _run(rows: List[Dict[str, Any]], dry_run: bool) -> None:
                 with _state_lock:
                     _state["current"] = done_count
                     _state["results"] = sorted(results, key=lambda r: r["excel_row"] or 0)
+                    _state["summary"] = _summarize(results)
         results.sort(key=lambda r: r["excel_row"] or 0)
     finally:
-        summary = {
-            "rows": len(results),
-            "campaigns_to_create": sum(1 for r in results if r["campaign_action"] == "aanmaken"),
-            "ids_to_add": sum(r["ids_to_add"] for r in results),
-            "ids_added": sum(r["ids_added"] for r in results),
-            "exclusions_to_add": sum(r["exclusions_to_add"] for r in results),
-            "exclusions_added": sum(r["exclusions_added"] for r in results),
-            "negatives_copied": sum(r["negatives_copied"] for r in results),
-            "errors": sum(1 for r in results if r["status"] != "ok"),
-        }
+        summary = _summarize(results)
         with _state_lock:
             _state["running"] = False
             _state["results"] = list(results)
