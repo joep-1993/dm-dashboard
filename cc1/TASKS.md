@@ -70,6 +70,16 @@ dry-run**; de enige echte run die dag was #8 met een ander bestand. Daarna run #
       Ook `_read_partial_failure` merkt die atomaire bijvangst nu als opnieuw-te-proberen,
       zodat één ongeldige op niet langer een hele batch kost.
 
+- [x] **Eindcontrole: de set staat compleet** — preview over alle 620 rijen (14:06–14:13,
+      niets geschreven): 620× status ok, 620× "bestaat", **0 aan te maken campagnes,
+      0 toe te voegen ids** (20.741 van 20.741 al aanwezig), **0 te maken uitsluitingen**
+      over **3.577** gecontroleerde zuster-ad-groups, 0 fouten en geen enkele melding over
+      niet-ondersteunde niveaus. Daarmee zijn ook de 12 lege campagnes, Makro en de
+      brand-niveaus (Koffiestore, Intratuin) afgerond. Kanttekening: dit is de tool die
+      zijn eigen plan herberekent, dus een blinde vlek in díe logica zou hier niet
+      opvallen — daarom zijn het item-id-niveau en de merk-vormen apart met
+      `validate_only` tegen de echte bomen getoetst.
+
 **Open:**
 - Categorie-, staat- en kanaalniveaus zijn nog niet schrijfbaar. Komen in de gescande
   bomen niet voor; ze worden nu gemeld in plaats van fout te gaan.
@@ -77,8 +87,8 @@ dry-run**; de enige echte run die dag was #8 met een ander bestand. Daarna run #
   DB-kolom. `campaigns_created` zit wel in de opgeslagen summary-JSON, dus het
   resultatenscherm van een teruggezette run klopt; alleen de historietabel niet. Fix zou
   een extra kolom in `gsd_tag_toppers_runs` zijn.
-- 13.209 uitsluitingen uit run #8 (26 rijen, status `deels`) zijn nooit geland. Die rijen
-  verdienen een herhaling nu bovenstaande fixes erin zitten.
+- ~~13.209 uitsluitingen uit run #8 zijn nooit geland~~ — afgehandeld: de eindcontrole
+  hierboven vindt geen openstaande uitsluitingen meer.
 
 ### 2026-08-07 — GSD Tag Toppers: bulk add-only tool (nieuw)
 
