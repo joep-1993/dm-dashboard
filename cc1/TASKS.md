@@ -36,6 +36,17 @@ dry-run**; de enige echte run die dag was #8 met een ander bestand. Daarna run #
 - [x] **Herstart + live** — backend draait weer op :8003 (zonder `--reload`, dus deploy is
       kill + relaunch), dashboard bereikbaar.
 
+- [x] **Campagne zonder boom herstelt zichzelf** — `_ensure_tag_toppers_tree()` bouwt ad
+      group (indien weg), boomwortel + item-id OTHERS en de ontbrekende shopping ad, in
+      plaats van elke run `geen listing-tree gevonden` te melden. Run #14 liet er 12 achter
+      (6 NL / 5 BE / 1 DE, allemaal PAUSED met 0 criteria en 0 ads). Ops serverside
+      geaccepteerd met `validate_only` op de echte lege ad group van Kalenderwinkel
+      (199154634477).
+- [x] **Convert retryt op partial-failure-regels** (`CONVERT_RETRIES`) — CONCURRENT_MODIFICATION
+      komt daar als respons-regel binnen en belandt in `retryable`, waar mijn eerste fix niet
+      naar keek; vandaar de kale melding `subdivision niet aangemaakt`. Trof steeds de eerste
+      convert in een ad group (bij VidaPlayer én Kalenderwinkel bleef `nd_c` als enige staan).
+
 **Open:**
 - Categorie-, staat- en kanaalniveaus zijn nog niet schrijfbaar. Komen in de gescande
   bomen niet voor; ze worden nu gemeld in plaats van fout te gaan.

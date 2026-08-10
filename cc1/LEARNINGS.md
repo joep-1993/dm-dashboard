@@ -1,6 +1,48 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een mislukte create laat een campagne achter die zichzelf niet meer repareert (2026-08-10)
+
+`_create_tag_toppers_campaign` maakt in volgorde: budget, campagne, label, ad group,
+boomwortel, shopping ad. Strandt hij op de boomwortel, dan bestaan campagne én ad group
+al. Vanaf dat moment leest elke volgende run die campagne als **"bestaat"**, valt
+`_read_campaign_tree` terug op `{}`, en meldt de tool `geen listing-tree gevonden in de
+tag_toppers ad group`. De aanmaak-tak wordt nooit meer bereikt, dus het herstelt nooit.
+
+Run #14 liet er **12 achter** (6 NL, 5 BE, 1 DE), allemaal PAUSED met 1 ad group,
+0 criteria en 0 advertenties — ze geven niets uit, maar produceerden wel elke run
+dezelfde fout.
+
+- **Een half aangemaakt object is erger dan een mislukte creatie.** Als een
+  meerstapsopbouw kan stranden, moet de "bestaat al"-tak kunnen afmaken wat de
+  aanmaak-tak begon. `_ensure_tag_toppers_tree()` doet dat nu: ad group zoeken (of
+  maken), boomwortel + item-id OTHERS zetten, en de ontbrekende shopping ad erbij —
+  want zonder ad vertoont de campagne alsnog niets.
+- **Zoek naar de restanten, niet alleen naar de fout.** Het aantal (12) kwam uit een
+  scan op tag_toppers-campagnes zónder LISTING_GROUP-criteria; uit de foutmeldingen
+  alleen was niet te zien hoeveel er stuk stonden.
+
+## Retry op het exception-pad dekt `partial_failure` niet — opnieuw (2026-08-10)
+
+Dezelfde val als in `28d7675`, nu in de convert-tak. `_mutate_with_retry` retryt op
+`_is_concurrent_modification(ex)`, dus alleen als de fout als **exception** binnenkomt.
+Met `partial_failure=True` komt CONCURRENT_MODIFICATION als **regel in de respons**, en
+`_read_partial_failure` zet hem in `retryable` — niet in `errors` en niet in `skipped`.
+De convert keek alleen naar die laatste twee en gaf daarom een kale
+`subdivision niet aangemaakt` zonder reden.
+
+Het trof vooral de **eerste** convert in een ad group, terwijl Google nog bezig was met
+de mutate ervoor: bij zowel VidaPlayer als Kalenderwinkel bleef precies dezelfde node
+(`nd_c`) als enige onomgezet, met de andere drie wél geconverteerd.
+
+- Er zit nu een eigen lus omheen (`CONVERT_RETRIES`), en opnieuw indienen is veilig:
+  landde de remove wél en de subdivision niet, dan slaagt de tweede poging juist doordat
+  de botsende node al weg is. Niet retryen is het gevaarlijkst — dan verdwijnt de leaf
+  zonder vervanging en verliest de ad group dat targeting-pad.
+- **Als je een foutpad "netter" maakt, controleer of het álle uitkomsten van de helper
+  afdekt.** Mijn eigen melding was een verbetering ten opzichte van de misleidende
+  "required field", maar liet de retryable-tak stil vallen.
+
 ## `dim=None` in een listing-tree betekent OTHERS, niet item-id (2026-08-10)
 
 Run #14 (620 rijen) gaf 34 foutrijen in drie soorten. De vervelendste was
