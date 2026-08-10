@@ -1,6 +1,41 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Google normaliseert item-ids naar lowercase; de vergelijking deed dat niet (2026-08-10)
+
+Makro.nl|Marketplace: 420 ids, 0 geland, en drie ad groups vol met
+`Product group operations are atomic within the same ad group. This operation failed
+because another operation targeting the same ad group ID was invalid. (392x)`.
+
+Die melding is bijvangst, geen oorzaak — hij zegt letterlijk dat je de op met de ándere
+foutcode moet zoeken. De echte oorzaak stond in de getallen: 28 overgeslagen + 392
+bijvangst = 420.
+
+| | |
+|---|---|
+| input-ids met hoofdletters | 420 van 420 (`4RjLg6oD3UvMm6N6AuM9c9e7Xy29`) |
+| ids in de boom met hoofdletters | 0 van 1130 (`4rjlg6eixvzqf8mpnyw68agsmden`) |
+| match case-gevoelig (oude code) | 0 → stuurt 420 ops |
+| match case-ongevoelig | 28 → had er 392 moeten sturen |
+
+Google slaat item-ids lowercase op en matcht ze case-ongevoelig. De tool vergeleek
+case-gevoelig, zag dus élk id als ontbrekend, en stuurde 28 ops voor nodes die er al
+stonden. Omdat product-group-ops **atomair per ad group** zijn, sloopten die 28
+duplicaten alle 392 geldige ops in dezelfde request.
+
+- **Normaliseren hoort bij de bron.** Nu in `parse_workbook` (`token.lower()`) én in
+  `_process_row`, want een rij kan ook uit `gsd_tag_toppers_items` komen waar oudere
+  imports nog hoofdletters hebben. Na normalisatie: 20.741 ids, 0 met hoofdletters,
+  0 telverschillen — en Makro leest correct 28 aanwezig / 392 te sturen.
+- **Atomair per ad group betekent dat `partial_failure` je niet redt.** Eén ongeldige
+  op laat alles voor die ad group falen. `_read_partial_failure` classificeert die
+  bijvangst nu als opnieuw-te-proberen, zodat `_submit_chunk` de rest zonder de
+  ongeldige ops opnieuw indient. Zonder die tweede maatregel kost één duplicaat nog
+  steeds een hele batch.
+- **Wantrouw een foutmelding die zichzelf als gevolg aankondigt.** "investigate
+  operations which failed with a different error code" is een aanwijzing dat je naar de
+  minderheid moet kijken, niet naar de 392.
+
 ## Dezelfde dimensie-aanname zat op drie plekken, niet één (2026-08-10)
 
 Na het fixen van het uitsluitpad dook `Dimension type of listing group must be the same

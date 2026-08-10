@@ -63,6 +63,13 @@ dry-run**; de enige echte run die dag was #8 met een ander bestand. Daarna run #
 - [x] **Export** `Downloads\claude\tag_toppers_aangemaakt_2026-08-10_1022.xlsx` — de 61
       campagnes uit run #14 met id, naam en werkelijke uitkomst: 49 compleet, 12 zonder boom.
 
+- [x] **Item-ids worden genormaliseerd naar lowercase** — Google slaat ze zo op en matcht
+      case-ongevoelig; de tool vergeleek case-gevoelig, zag élk id als ontbrekend en stuurde
+      duplicaten. Bij Makro.nl (420 ids) sloopten 28 duplicaten alle 392 geldige ops, want
+      product-group-ops zijn atomair per ad group. Na de fix: 28 aanwezig / 392 te sturen.
+      Ook `_read_partial_failure` merkt die atomaire bijvangst nu als opnieuw-te-proberen,
+      zodat één ongeldige op niet langer een hele batch kost.
+
 **Open:**
 - Categorie-, staat- en kanaalniveaus zijn nog niet schrijfbaar. Komen in de gescande
   bomen niet voor; ze worden nu gemeld in plaats van fout te gaan.
