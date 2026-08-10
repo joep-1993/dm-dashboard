@@ -860,7 +860,9 @@ async function resetFaqValidationHistory() {
 
 async function fetchLastPushTimestamp() {
     try {
-        const response = await fetch(`${API_BASE}/api/content-publish/last-push`);
+        // content_type=faq, else this reports the koptekst batch — the endpoint is
+        // shared with the kopteksten tool and used to answer for that one only.
+        const response = await fetch(`${API_BASE}/api/content-publish/last-push?content_type=faq`);
         const data = await response.json();
         const el = document.getElementById('lastPushTimestamp');
         if (el && data.last_push) {

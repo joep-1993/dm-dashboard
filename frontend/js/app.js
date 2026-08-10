@@ -1296,7 +1296,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
 async function fetchLastPushTimestamp() {
     try {
-        const response = await fetch(`${API_BASE}/api/content-publish/last-push`);
+        // Asks for koptekst explicitly: the endpoint is shared with the FAQ tool,
+        // and it answers per content type (batch log + incremental push state).
+        const response = await fetch(`${API_BASE}/api/content-publish/last-push?content_type=koptekst`);
         const data = await response.json();
         const el = document.getElementById('lastPushTimestamp');
         if (el && data.last_push) {

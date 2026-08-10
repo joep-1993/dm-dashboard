@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, RedirectResponse, Response, HTM
 import io
 import httpx
 from urllib.parse import urljoin
-from datetime import datetime
+from datetime import datetime, timezone
 from io import StringIO, BytesIO
 import csv
 import hashlib
@@ -3210,31 +3210,66 @@ async def faq_publish_v2_stats(environment: str = "production"):
 
 
 @app.get("/api/content-publish/last-push")
-async def get_last_publish():
-    """Get the timestamp of the last successful publish to production."""
+async def get_last_publish(content_type: str = "koptekst"):
+    """Timestamp of the last successful production push, per content type.
+
+    Three things this had to fix. pa.publish_log only ever gets a row from the
+    full-set batch publish, so reading it alone froze the timestamp on the last
+    batch run while the incremental publishes — the ones that actually run day to
+    day — went unrecorded; the per-url pushed_at in the push-state tables is the
+    authority for those, and the log still wins when a batch ran more recently.
+    FAQ is asked for separately, because both pages shared this endpoint and the
+    FAQ card was quoting the koptekst batch. And the timestamps go out tz-aware:
+    the columns are naive UTC (the shared DB runs Etc/UTC), and a bare ISO string
+    is parsed as local time by the browser, which showed every push 2 hours early.
+    """
+    if content_type not in ("koptekst", "faq"):
+        raise HTTPException(status_code=400, detail="Invalid content_type. Use: koptekst, faq")
+    state_table = "pa.kopteksten_push_state" if content_type == "koptekst" else "pa.faq_v2_push_state"
+
+    def _utc(dt):
+        return dt.replace(tzinfo=timezone.utc).isoformat() if dt and dt.tzinfo is None else (
+            dt.isoformat() if dt else None)
+
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("""
-            SELECT published_at, total_urls, content_type, payload_size_mb, duration_sec
-            FROM pa.publish_log
-            WHERE environment = 'production' AND status = 'success'
-            ORDER BY published_at DESC
-            LIMIT 1
-        """)
-        row = cur.fetchone()
+        last, source, meta = None, None, {}
+
+        # The batch publish carries content_top only, so it is not a source for FAQ.
+        if content_type == "koptekst":
+            cur.execute("""
+                SELECT published_at, total_urls, content_type, payload_size_mb, duration_sec
+                FROM pa.publish_log
+                WHERE environment = 'production' AND status = 'success'
+                ORDER BY published_at DESC
+                LIMIT 1
+            """)
+            row = cur.fetchone()
+            if row:
+                last, source = row['published_at'], 'batch'
+                meta = {
+                    "total_urls": row['total_urls'],
+                    "content_type": row['content_type'],
+                    "payload_size_mb": float(row['payload_size_mb']) if row['payload_size_mb'] else None,
+                    "duration_sec": float(row['duration_sec']) if row['duration_sec'] else None,
+                }
+
+        # to_regclass, because the state tables are created on first use by their
+        # publisher — a tool that has never run must not 500 this tile.
+        cur.execute("SELECT to_regclass(%s) IS NOT NULL AS exists", (state_table,))
+        if cur.fetchone()['exists']:
+            cur.execute(f"""SELECT max(pushed_at) AS last, count(*) AS n
+                              FROM {state_table} WHERE env = 'production'""")
+            st = cur.fetchone()
+            if st['last'] and (last is None or st['last'] > last):
+                last, source = st['last'], 'incremental'
+                meta = {"total_urls": st['n'], "content_type": content_type}
+
         cur.close()
         return_db_connection(conn)
 
-        if row:
-            return {
-                "last_push": row['published_at'].isoformat(),
-                "total_urls": row['total_urls'],
-                "content_type": row['content_type'],
-                "payload_size_mb": float(row['payload_size_mb']) if row['payload_size_mb'] else None,
-                "duration_sec": float(row['duration_sec']) if row['duration_sec'] else None,
-            }
-        return {"last_push": None}
+        return {"last_push": _utc(last), "source": source, **meta}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
