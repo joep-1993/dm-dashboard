@@ -4,6 +4,48 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-10 — GSD Tag Toppers: de drie fouten uit run #14, en de tegels
+
+Aanleiding: Joep vroeg waarom er vrijdag geen campagnes waren aangemaakt. Antwoord: de
+runs met `add_only_kandidaten` (620 rijen, `campaigns_to_create=61`) stonden **beide op
+dry-run**; de enige echte run die dag was #8 met een ander bestand. Daarna run #14
+(10 aug, echt): 47 campagnes aangemaakt, 13 mislukt, 34 foutrijen.
+
+- [x] **Tegel "Campagnes aan te maken" → "Campagnes aangemaakt"** bij een echte run.
+      Nieuw veld `campaign_created` (0/1) per rij, pas 1 als `_create_tag_toppers_campaign`
+      echt iets teruggeeft; `campaigns_to_create` telde rijen met `campaign_action ==
+      "aanmaken"` en dus ook de mislukte. In run #14 zou de tegel 61 hebben getoond bij
+      47 gelande campagnes. Tegelfilter volgt mee; oude runs zonder het veld vallen terug
+      op de oude teller.
+- [x] **Tegels lopen live mee tijdens een run.** `_state["summary"]` werd alleen in het
+      `finally` gezet terwijl `_state["results"]` al per rij bijwerkte — vandaar een
+      vullende tabel met tegels op 0. Berekening zit nu in `_summarize()` en draait ook in
+      de lus; `/progress` stuurt de samenvatting mee, zodat de tegels elke tick (1,5s)
+      bijwerken zonder de tabel te hertekenen (die blijft op elke 4e tick).
+- [x] **Boomwortel via `_mutate_with_retry`** — ging er rechtstreeks omheen, dus geen retry
+      op CONCURRENT_MODIFICATION. 14 foutrijen. Nu mét retry, en met de eis dat beide ops
+      landen.
+- [x] **Convert leest partial failures uit** in plaats van blind `resp.results[1]`. Dat
+      leverde negatieve units zonder parent op → misleidende `The required field was not
+      present`. 14 foutrijen.
+- [x] **Merk- en producttype-uitsluitingen werken** — `_read_campaign_tree` leest nu alle
+      zeven dimensies, `_level_spec()` leidt het niveau af uit de siblings, en één
+      `_set_case_value()` schrijft alle vormen. Bevestigd met `validate_only` op de echte
+      Koffiestore-boom. Voor/na: 169 van 179 ad groups identiek, 10 omgeslagen van append
+      naar convert (allemaal merk).
+- [x] **Herstart + live** — backend draait weer op :8003 (zonder `--reload`, dus deploy is
+      kill + relaunch), dashboard bereikbaar.
+
+**Open:**
+- Categorie-, staat- en kanaalniveaus zijn nog niet schrijfbaar. Komen in de gescande
+  bomen niet voor; ze worden nu gemeld in plaats van fout te gaan.
+- De kolom "Campagnes" in de run-historie toont nog `campaigns_to_create` uit de
+  DB-kolom. `campaigns_created` zit wel in de opgeslagen summary-JSON, dus het
+  resultatenscherm van een teruggezette run klopt; alleen de historietabel niet. Fix zou
+  een extra kolom in `gsd_tag_toppers_runs` zijn.
+- 13.209 uitsluitingen uit run #8 (26 rijen, status `deels`) zijn nooit geland. Die rijen
+  verdienen een herhaling nu bovenstaande fixes erin zitten.
+
 ### 2026-08-07 — GSD Tag Toppers: bulk add-only tool (nieuw)
 
 Nieuwe tool onder Google Ads: `/static/gsd-tag-toppers.html` + `/api/gsd-tag-toppers`.

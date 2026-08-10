@@ -1,6 +1,76 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `dim=None` in een listing-tree betekent OTHERS, niet item-id (2026-08-10)
+
+Run #14 (620 rijen) gaf 34 foutrijen in drie soorten. De vervelendste was
+`Dimension type of listing group must be the same as that of its siblings`, bij
+Koffiestore en Intratuin. De boom daar:
+
+```
+SUBDIVISION custom_attr "b"
+├── UNIT product_brand {}        (others)
+└── UNIT product_brand "jura"    (negatief)
+```
+
+`_read_campaign_tree` selecteerde alleen `product_custom_attribute` en
+`product_item_id`, dus **beide** brand-nodes kwamen binnen met `dim=None`. En
+`_is_item_id_level()` zei: UNIT + `dim is None` = item-id niveau. Dus hing de tool er
+`product_item_id`-units onder, tussen brand-siblings.
+
+- **Een OTHERS-node draagt geen case value.** Zijn dimensie is alleen af te leiden uit
+  de siblings die er wél een hebben — dat is nu `_level_spec()`, die ook de `index`
+  (custom attribute) en `level` (producttype) meegeeft, want ook die ontbreken op de
+  OTHERS-node terwijl je ze nodig hebt om hem terug te schrijven.
+- **Selecteer álle dimensies, ook die je niet ondersteunt.** Een niet-opgehaald veld is
+  in de respons niet te onderscheiden van een leeg veld. Herkennen en dan bewust
+  weigeren is veilig; niet ophalen is stil fout.
+- Wat je wél kunt schrijven staat nu in `WRITABLE_DIMS` (item-id, custom attribute,
+  merk, producttype). Categorie/staat/kanaal worden herkend en gemeld als
+  `niveau op <dim> — uitsluiten hier niet ondersteund`, in plaats van "niets te doen".
+
+## `partial_failure=True` geeft een lege resource name, geen exception (2026-08-10)
+
+Twee plekken lazen blind een resultaat uit een mutate die via `_mutate_with_retry`
+liep — en die zet `partial_failure=True`:
+
+- **De boomwortel** in `_create_tag_toppers_campaign` ging er zelfs helemaal omheen en
+  riep `mutate_ad_group_criteria` rechtstreeks aan. Geen retry, terwijl
+  CONCURRENT_MODIFICATION op een net aangemaakte ad group te verwachten is: Google is
+  intern nog bezig. 14 rijen strandden daarop, met een lege campagne + budget als rest.
+- **De convert** in `_apply_sibling_exclusions` las `resp.results[1].resource_name`.
+  Mislukte de subdivision-op, dan was dat een lege string, en werden de negatieve units
+  vervolgens **zonder parent** aangemaakt. Dát is de melding
+  `The required field was not present` — een symptoom drie stappen na de oorzaak, die
+  de echte fout juist verbergt. 14 rijen.
+
+Regel: na elke mutate met `partial_failure` eerst `_read_partial_failure()` en
+controleren dát de resource er is, vóór je er iets onder hangt. Bij de boomwortel
+moeten **beide** ops geland zijn — zonder de negatieve item-id-OTHERS toont de
+campagne álle producten in plaats van alleen de tag toppers.
+
+## Een regressietest moet ook de oude LEZER reproduceren (2026-08-10)
+
+Bij het valideren van bovenstaande fix draaide de eerste vergelijking de oude
+plan-logica op de nieuwe `_read_campaign_tree`, en meldde **169/179 gelijk, 10
+gewijzigd**. Na het toevoegen van merk-ondersteuning werd dat **179/179 gelijk** — wat
+leek te betekenen dat er niets veranderde, terwijl de operaties juist omsloegen van
+`append` naar `convert`.
+
+De oorzaak: de fix zat in de lezer én in de logica. Met de nieuwe lezer ziet ook de
+oude logica de brand-nodes correct, dus die vergelijking meet de fix weg. Pas met een
+`to_old_view()` die `dim`/`index`/`level`/`value` leegmaakt voor alles buiten
+custom_attr en item_id, kwam de echte voor/na eruit: **169 identiek, 10 gewijzigd van
+`oud(app=1, conv=0)` naar `nieuw(app=0, conv=1)`**, allemaal brand-niveaus.
+
+- **Vergelijk plan-structuur, niet alleen aantallen.** Op `n_new` waren oud en nieuw
+  identiek; het verschil zat in *welke* operaties, niet in hoeveel.
+- **`validate_only=True` toetst een nieuwe op-vorm op een echte boom zonder te
+  schrijven.** Merk is zo bevestigd in beide vormen (OTHERS en expliciete waarde).
+  Producttype komt in de gescande bomen niet voor; die vorm is alleen structureel
+  getoetst — onder een brand-niveau gehangen en afgewezen op siblings in plaats van op
+  vorm. Dimensies in gebruik: 315 item-id-niveaus, 290 custom attribute, 13 merk.
+
 ## Een normalisatie die goed is om te MATCHEN kan fout zijn als SLEUTEL (2026-08-07)
 
 Bij het bouwen van `gsd_tag_toppers_items` (de gewenste staat per shop/land) leek
