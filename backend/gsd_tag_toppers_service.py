@@ -1452,6 +1452,18 @@ def _process_row(client, row: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
                     target("toevoegen", tt["name"], len(plan["missing"]), added,
                            ad_group_id=ag_id, errors=errs, skipped=skipped,
                            note="boom hersteld")
+                    # De afgebroken aanmaak kwam nooit tot de negatives, dus die
+                    # ontbreken hier per definitie — geverifieerd: alle 12 achtergebleven
+                    # campagnes hadden er 0. _copy_negatives vergelijkt met wat er al
+                    # staat, dus dit blijft idempotent bij een volgende run.
+                    source = _pick_negatives_source(siblings)
+                    res["negatives_source"] = source["name"] if source else "geen zuster gevonden"
+                    if source:
+                        n_neg, errs3 = _copy_negatives(
+                            client, customer_id, tt["resource"], tt["id"], source)
+                        res["negatives_copied"] = n_neg
+                        res["errors"].extend(errs3)
+                        target("negatives", tt["name"], n_neg, n_neg, errors=errs3)
             elif plan["parent"] is None:
                 # Boomvorm die we niet veilig kunnen aanvullen: melden in plaats van de
                 # ids naast een sibling van een andere dimensie hangen.
