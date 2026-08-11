@@ -542,9 +542,21 @@
             autoLoadTimer = setTimeout(() => load(false), 400);
         }
 
-        function setPreset(days) {
+        // De presets eindigen op VANDAAG MIN 3 DAGEN, niet op vandaag (Joep,
+        // 2026-08-11). Op 11 augustus levert 7d dus 2 t/m 8 augustus. De laatste drie
+        // dagen zijn nog niet uitgekristalliseerd — conversies en omzet komen na, dus
+        // een reeks die op vandaag eindigt zakt aan de rechterkant weg en dat leest als
+        // een daling die er niet is. Wie die dagen wél wil ziet ze nog: de datumvelden
+        // zelf zijn niet begrensd, dit geldt alleen voor de snelkeuzes.
+        const PRESET_LAG_DAYS = 3;
+        function presetEnd() {
             const end = new Date();
-            const start = new Date();
+            end.setDate(end.getDate() - PRESET_LAG_DAYS);
+            return end;
+        }
+        function setPreset(days) {
+            const end = presetEnd();
+            const start = new Date(end);
             start.setDate(end.getDate() - (days - 1));
             setDates(start, end);
             load(false);
@@ -1104,8 +1116,12 @@
                 fpStart = flatpickr('#startDate', { ...fpOpts, onChange: autoLoad });
                 fpEnd = flatpickr('#endDate', { ...fpOpts, onChange: autoLoad });
             }
-            const end = new Date();
-            const start = new Date();
+            // Zelfde eindpunt als de presets (presetEnd = vandaag - 3): de pagina opent
+            // nu op exact wat "30d" geeft. Anders opent hij op 13-7..11-8 en levert een
+            // klik op 30d 10-7..8-8 — dezelfde knop, een andere reeks, zonder dat er
+            // iets veranderd is.
+            const end = presetEnd();
+            const start = new Date(end);
             start.setDate(end.getDate() - 29);
             setDates(start, end);
             load(false);
