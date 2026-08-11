@@ -56,6 +56,37 @@ veroorzakers krijgen per dag een naam in `bothits_unknown_daily`.
 
 ---
 
+## Omvang en groei — gemeten op 2026-08-11
+
+Na de backfill van alle 116 archiefdatums (2026-02-14 t/m 06-09), met de keep-list op
+`beslist.nl` actief:
+
+| tabel | rijen | heap | index | totaal |
+|---|---|---|---|---|
+| `bothits_url_daily` | 14.257.695 | 1.162 MB | 1.076 MB | **2.238 MB** |
+| `bothits_unknown_daily` | 587.507 | 84 MB | 110 MB | 194 MB |
+| `bothits_daily` (cube) | 159.210 | 18 MB | 19 MB | 37 MB |
+| dimensies + ledger | 186 | — | — | < 1 MB |
+| **totaal** | **15.004.598** | | | **2,41 GB** |
+
+Dat is **10,0% van de hele database** (24 GB). Kosten per rij, gemeten en bruikbaar voor
+elke volgende schatting: **165 B** voor een URL-rij, **347 B** voor een unknown-rij,
+**246 B** voor een cube-rij. De indexen zijn bijna zo groot als de data zelf — reken dus
+op ~2 MB op schijf per MB ruwe feiten.
+
+**Groei: gebruik de recente snelheid, niet het gemiddelde.** Het crawlvolume is over deze
+periode bijna verdubbeld (eerste 14 dagen 2,26M hits/dag, laatste 14 dagen 4,05M):
+
+| basis | rijen/dag | MB/dag | per jaar |
+|---|---|---|---|
+| hele periode (116 d) | 129.348 | 21,3 | 47,2M rijen / **7,6 GB** |
+| laatste 14 volledige dagen | 176.828 | 28,8 | 64,5M rijen / **10,3 GB** |
+
+Reken dus op **~10 GB per jaar** en 24 GB → ~34 GB als er een jaar bij komt, waarvan
+bothits dan ~35% is. Knijpt dat, dan is de goedkoopste knop een retentie op
+`bothits_url_daily` (94% van de omvang); de cube kost 0,3 MB/dag en houdt de lange
+historie telbaar, dus die kan blijven staan.
+
 ## Tabellen
 
 | Tabel | Korrel | Omvang |

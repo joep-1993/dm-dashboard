@@ -80,8 +80,8 @@ patronen staan in UI_BLUEPRINT, de twee bugs in LEARNINGS.
 - [ ] **`VACUUM FULL` overwegen.** De 169 MB is vrije ruimte binnen de tabellen, nog
       niet teruggegeven aan het OS. Bij ~27 MB/dag groei is het binnen een week
       hergebruikt, dus alleen doen als de DB-omvang nu knelt (exclusive lock).
-- [ ] **De 23 andere logdatums staan op `verify_state = 'unchecked'`.** Die krijgen pas
-      een verdict bij een re-ingest — combineer dat met de backfill die toch nog moet.
+- [x] **Alle 116 datums hebben een verdict** (2026-08-11): verified 88,01%,
+      unverifiable 11,11%, failed 0,88%.
 
 ### 2026-08-11 — Bot Hits haalt zijn eigen CloudFront-logs uit S3
 
@@ -107,9 +107,26 @@ die stap in de tool, bij de Refresh-knop van 'Hits per dag'. Zie BOTHITS_PROCESS
       over HTTP OK na herstart (PID nieuw, 11-08 10:54), `days=0`/`days=99` → 422.
 - [x] **`boto3` in `requirements.txt`** en in de venv geïnstalleerd (1.43.68); credentials in
       `.env` als `BOTHITS_S3_*`, niet in de repo.
-- [ ] **Backfill van het lokale archief** (2026-03-17 t/m 06-09, 85 datums die al op schijf
-      staan): `python3 -m backend.bothits_ingest backfill`. ~55 s per datum, dus ~1u20.
-      Dit hoort NIET via de S3-knop — dat zou ~75 GB downloaden voor data die er al is.
+- [x] **Backfill gedaan (2026-08-11)**: 92 datums (niet 85 — binnen het Feb-Mrt-venster
+      ontbraken 03-08, 03-09 en 03-11 ook), 187.536 bestanden, ~1u50, **0 mislukte datums**.
+      Daarna de redo van de 23 datums van vóór die dag, zodat alle 116 een `verify_state`
+      hebben. Eindstand: 116 datums 2026-02-14 t/m 06-09, 15.004.598 rijen, 2,41 GB
+      (10,0% van de database). Cijfers en groeiprognose in BOTHITS_PROCESS.md.
+- [x] **Ledger en cube kloppen weer op elkaar** (307.544.182 = 307.544.182, 0 datums met
+      verschil). Dat lukte niet in één keer: 2026-03-10 bleef 1.518.585 hits schelen, omdat
+      die om 11:46 opnieuw was geladen om `verify_state` te testen — vóórdat de keep-list
+      bestond. Zijn ledger-rij telde dus nog alle domeinen terwijl de cube-rijen later met
+      de hand waren opgeruimd, en hij viel buiten de redo-lijst omdat zijn `verify_state`
+      al gezet was. **Les voor een volgende handmatige DELETE: `bot_lines` in de ledger
+      wordt alleen door een ingest herschreven, dus die loopt uit de pas.**
+- [ ] **`failed` is (nog) geen historische spoofing-maat.** Over 116 dagen: 2.700.043
+      failed hits (0,88%), waarvan OpenAI 1.995.111 en Googlebot 689.241. Per week bekeken
+      is OpenAI structureel 4-12% en stijgend, maar Googlebot puntvormig: 4,59% in de week
+      van 16 feb en 0,7-1,9% in mei/juni, elders 0,00-0,03%. Dat past beter op **verlopen
+      IP-ranges** dan op spoofing — we toetsen logs van feb-juni aan de lijst van vandaag,
+      en Google rouleert. Als tripwire op VERSE logs is het bruikbaar; historisch niet.
+      Wil je dat wel: de opgehaalde `ipranges.json` per dag wegschrijven i.p.v.
+      overschrijven, dan kun je achteraf tegen de ranges van toen toetsen.
 - [ ] **Dagelijks ophalen aanzetten** zodra de backfill staat. De bucket bewaart ~42 dagen,
       dus zonder dagelijkse run verdwijnt er permanent historie. Nu staat
       `BOTHITS_AUTO_INGEST=false` en die timer draait alleen `run_drop()` op de dropfolder —
