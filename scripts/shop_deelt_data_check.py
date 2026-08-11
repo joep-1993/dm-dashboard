@@ -78,8 +78,7 @@ SELECT
     date            AS wijzigingsdatum
 FROM met_vorige
 WHERE date = (SELECT d FROM laatste)
-  AND vorige_waarde IS NOT NULL
-  AND vorige_waarde <> shop_deelt_data
+  AND (vorige_waarde IS NULL OR vorige_waarde <> shop_deelt_data)
   AND (is_gsd_nl_shop = 1 OR is_gsd_be_shop = 1 OR is_gsd_de_shop = 1)
 ORDER BY shop_name;
 """
