@@ -781,9 +781,19 @@
             return new Date(y, m - 1, d).toLocaleDateString('nl-NL', { weekday: 'long' });
         }
 
-        function pctBadge(pct, digits = 1) {
+        // Metrics where a RISE is bad news, so a positive delta has to read red and a
+        // negative one green. Bounce is the case: a higher share of visits without a
+        // product click is worse (Joep, 2026-08-11). Single source of truth — the
+        // per-day heatmap's inverted fade reads this same set.
+        const LOWER_IS_BETTER = new Set(['seo_bounce']);
+
+        function pctBadge(pct, digits = 1, invert = false) {
             if (pct === null || pct === undefined) return '<span class="delta-badge flat">n/a</span>';
-            const cls = pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat');
+            // .up is the green pill, .down the red one — the class names carry a COLOUR,
+            // not an arrow, so swapping them inverts the judgement without touching the
+            // sign. +5% bounce therefore still prints "+5%", only in red.
+            const good = invert ? pct < 0 : pct > 0;
+            const cls = pct === 0 ? 'flat' : (good ? 'up' : 'down');
             const sign = pct > 0 ? '+' : '';
             return `<span class="delta-badge ${cls}">${sign}${pct.toLocaleString('nl-NL', { maximumFractionDigits: digits })}%</span>`;
         }
@@ -1047,7 +1057,7 @@
                 card.onclick = () => toggleMetricFromTile(key);
                 let html = `<h3>${fmt(key, t[key])}</h3><div class="label">${METRICS[key].label}</div>`;
                 if (tileDeltas) {
-                    html += `<div class="stat-delta">${pctBadge(tileDeltas[key])}<span class="stat-delta-cap">vs prev ${tileDeltaDays}d</span></div>`;
+                    html += `<div class="stat-delta">${pctBadge(tileDeltas[key], 1, LOWER_IS_BETTER.has(key))}<span class="stat-delta-cap">vs prev ${tileDeltaDays}d</span></div>`;
                 }
                 // Same tile shape as Dagoverzicht: value, delta, then the trend behind
                 // it. No extra request — the per-day series is already in lastData.
@@ -1342,8 +1352,9 @@
         // independently (visitColScales), so adding them changes nothing else.
         const HEAT_KEYS = [...VISIT_KEYS, 'seo_omzet', 'dma_omzet', 'gsaas_omzet', 'seo_ctr', 'seo_bounce'];
         // Heatmap columns where high = bad: their scale is inverted so a high value
-        // fades red (not green). Bounce rate is the "lower is better" case.
-        const HEAT_INVERT_KEYS = ['seo_bounce'];
+        // fades red (not green). Same set as the delta badges' inversion — this used
+        // to be its own ['seo_bounce'] literal, which is how the tiles could stay
+        // green-on-rising while the column beside them faded red.
 
         function heatColor(t) {
             // Diverging scale: low = red fades, high = green fades, neutral white midpoint.
@@ -1406,7 +1417,7 @@
                     if (HEAT_KEYS.includes(k)) {
                         const s = sc[k];
                         let t = s.mx > s.mn ? (Number(r[k]) - s.mn) / (s.mx - s.mn) : 0.5;
-                        if (HEAT_INVERT_KEYS.includes(k)) t = 1 - t;   // high bounce = red
+                        if (LOWER_IS_BETTER.has(k)) t = 1 - t;   // high bounce = red
                         const wk = WOW_BY_KEY[k];
                         const attrs = wk ? ` title="WoW: ${wowText(r[wk])}" style="background:${heatColor(t)};cursor:help"` : ` style="background:${heatColor(t)}"`;
                         cell = `<td${attrs}>${fmt(k, r[k])}</td>`;
@@ -2219,7 +2230,13 @@
                     dashTile('SEO-omzet', fmtEuro(d.revenue), d.revenue_wow, 'sparkRevenue',
                              null, settlingNote) +
                     dashTile('CTR', pct(d.ctr), d.ctr_wow, 'sparkCtr') +
-                    dashTile('Bounce', pct(d.bounce), d.bounce_wow, 'sparkBounce') +
+                    // Bounce is the one tile where up is bad, so it hands dashTile a
+                    // pre-built inverted badge instead of a raw delta. Kept null when the
+                    // delta is missing, or badgeHtml would win with an "n/a" pill where
+                    // the other four tiles show no badge at all.
+                    dashTile('Bounce', pct(d.bounce), d.bounce_wow, 'sparkBounce',
+                             d.bounce_wow === null || d.bounce_wow === undefined
+                                 ? null : pctBadge(d.bounce_wow, 1, true)) +
                     dashTile('OPB', opb, d.opb_wow, 'sparkOpb', null, settlingNote);
                 const s = d.series || {};
                 const eur2 = v => '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
