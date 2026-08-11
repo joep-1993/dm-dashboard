@@ -24,3 +24,6 @@ tqdm>=4.65.0
 # that drops the pkg_resources dependency.
 setuptools<81
 ./backend/vendor/searchads360-py.tar.gz
+
+# Bot Hits: CloudFront-logs uit S3 halen (backend/bothits_s3.py)
+boto3>=1.28.0

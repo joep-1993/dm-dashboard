@@ -211,6 +211,51 @@ def ingest_run():
     return {"status": "started" if started else "already_running", **state}
 
 
+@router.get("/s3/preview")
+async def s3_preview(days: int = Query(3, ge=1, le=45)):
+    """Wat een ophaal van `days` dagen zou downloaden — zonder te downloaden.
+
+    Voedt de confirm-dialog van "Nieuwe logs ophalen": één dag is ~2.900 bestanden
+    en ~900 MB, dus die klik hoort een volume te quoten. Max 45 dagen omdat de
+    bucket ~42 dagen retentie heeft; ouder vragen levert alleen lege datums op.
+    """
+    from backend.bothits_s3 import S3NotConfigured, preview
+    try:
+        return await _run(preview, days)
+    except S3NotConfigured as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("bothits s3 preview failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/s3/fetch")
+def s3_fetch(days: int = Query(3, ge=1, le=45)):
+    """Download nieuwe CloudFront-logs uit S3 en verwerk ze meteen.
+
+    Deelt lock én statusveld met de dropfolder-ingest, dus dit is dezelfde poller
+    als de Verwerk-knop en twee gelijktijdige runs kunnen niet bestaan.
+    """
+    from backend.bothits_ingest import start_ingest_async
+    from backend.bothits_s3 import S3_DIR, S3NotConfigured, fetch, is_configured
+    if not is_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="S3-credentials ontbreken: zet BOTHITS_S3_ACCESS_KEY_ID en "
+                   "BOTHITS_S3_SECRET_ACCESS_KEY in .env")
+
+    def before(progress):
+        return fetch(days, progress=progress)
+
+    try:
+        started, state = start_ingest_async("s3", on_done=clear_cache,
+                                           src=S3_DIR, before=before)
+    except S3NotConfigured as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "started" if started else "already_running",
+            "days": days, **state}
+
+
 @router.post("/cache/clear")
 def cache_clear():
     clear_cache()
