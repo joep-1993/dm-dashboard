@@ -37,6 +37,13 @@ patronen staan in UI_BLUEPRINT, de twee bugs in LEARNINGS.
       gsd-campaigns, gsd-tag-toppers, gsd-check, shop-campaigns, mc-id-finder,
       seo-titles. Daar scrollen de sorteerbare headers dus ook weg. `_tool-template.html`
       is al gefixt, dus nieuwe tools erven het niet meer.
+- [x] **Punten 23-27 (tweede feedbackronde)**: "Invalid Date" in het uitklappaneel — het
+      hover-blok van de daggrafiek las de x-as-titel als datum, en die is daar "2 facets";
+      `weekdayLongOf` eist nu een ISO-datum en de sub-caption "hits per dag" verschijnt
+      alleen bij een datum-as. Verder: de inforegel boven het paneel weg, kadertje om de
+      facet-diepte-grafieken, de rij-hover van Bootstrap uitgezet op de detailrij (die
+      pakt élke tbody-rij, ook een paneel zonder klikbare inhoud), en het pijltje voor
+      "Nieuwe logs ophalen" eruit.
 - [ ] **Visueel nog niet beoordeeld.** `node --check` is groen en de endpoints geven de
       juiste data, maar er is hier geen browser: of de donut-labels binnen de kaart
       blijven en of het uitklappaneel op een smal venster niet knelt, moet iemand met

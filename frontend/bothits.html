@@ -73,6 +73,16 @@
         #botTable tbody tr.bot-row:hover > td { background: #f5f4f9; }
         #botTable tbody tr.bot-row.is-open > td { background: #f1edfa; font-weight: 600; }
         .bot-detail > td { background: #fbfbfd !important; padding: 0.9rem 1rem !important; }
+        /* Bootstraps .table-hover pakt élke tbody-rij, dus ook het uitklappaneel —
+           dan werd de hele detailrij grijs zodra je erover ging, terwijl er niets
+           klikbaars in zit (Joep, 2026-08-11). De hover-achtergrond van de tabel
+           uitzetten is genoeg; de eigen achtergrond blijft staan. */
+        #botTable tbody tr.bot-detail:hover > td { background: #fbfbfd !important; }
+        #botTable tbody tr.bot-detail > td { --bs-table-bg-state: transparent; }
+        /* Kadertje om de staafgrafiek, zoals .tool-table-wrap om een tabel. De twee
+           donuts hebben hun eigen ronde vorm als omlijning; een rechthoekige plot
+           heeft niets waardoor hij als blok leest. */
+        .chart-framed { border: 1px solid #eee; border-radius: 6px; padding: 0.5rem; }
         .bot-detail .donut-wrap { height: 250px; }
         .bot-detail .chart-box-sm { height: 250px; }
         .bot-caret { display: inline-block; width: 0.8rem; color: #8a8a96; transition: transform .12s ease; }
@@ -252,7 +262,7 @@
                            value="3" min="1" max="45" style="width:70px;"
                            title="Aantal volledige dagen terug vanaf gisteren. Vandaag valt er altijd buiten (nog geen 24 uur). Max 45: de bucket bewaart ~42 dagen.">
                     <button class="btn btn-sm btn-outline-orange" id="s3FetchBtn"
-                            title="Download nieuwe CloudFront-logs uit S3 en verwerk ze meteen">⤓ Nieuwe logs ophalen</button>
+                            title="Download nieuwe CloudFront-logs uit S3 en verwerk ze meteen">Nieuwe logs ophalen</button>
                 </div>
             </div>
             <div class="card-body">
@@ -348,7 +358,7 @@
                         <div class="card h-100">
                             <div class="card-header"><h5 class="mb-0">Facet-diepte — bekend vs onbekend</h5></div>
                             <div class="card-body">
-                                <div class="chart-box-sm"><canvas id="depthChart"></canvas></div>
+                                <div class="chart-box-sm chart-framed"><canvas id="depthChart"></canvas></div>
                             </div>
                         </div>
                     </div>
@@ -665,8 +675,13 @@
     const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g,
         c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     // Weekdag bij de datum in het hover-blok, zoals SEO Stats: "2026-03-10 (dinsdag)".
+    // Alleen een weekdag als de titel ECHT een datum is. Hetzelfde hover-blok
+    // bedient inmiddels ook de facet-diepte-staafgrafiek, en daar is de titel
+    // "geen facet" of "2 facets" — new Date() daarop gaf letterlijk "Invalid Date"
+    // in het paneel (Joep, 2026-08-11).
+    const ISO_DATE_RX = /^\d{4}-\d{2}-\d{2}$/;
     function weekdayLongOf(iso) {
-        if (!iso) return '';
+        if (!iso || !ISO_DATE_RX.test(iso)) return '';
         const [y, m, d] = iso.split('-').map(Number);
         return new Date(y, m - 1, d).toLocaleDateString('nl-NL', { weekday: 'long' });
     }
@@ -890,7 +905,7 @@
                                            .sort((a, b) => b.parsed.y - a.parsed.y);
         const total = tooltip.dataPoints.reduce((a, dp) => a + (dp.parsed.y || 0), 0);
         el.innerHTML = `<div class="ct-title">${escapeHtml(wd ? `${title} (${wd})` : title)}</div>`
-            + `<div class="ct-sub">hits per dag</div>`
+            + (wd ? `<div class="ct-sub">hits per dag</div>` : '')
             // De stip pakt backgroundColor, niet borderColor: bij een gestapelde
             // band is de rand wit (de scheiding) en draagt de VULLING de identiteit.
             // Aandeel van het DAGtotaal, niet van de hele periode: je hovert op één
@@ -1166,8 +1181,6 @@
         const det = document.createElement('tr');
         det.className = 'bot-detail';
         det.innerHTML = `<td colspan="12">
-            <div class="muted-note mb-2">Uitsplitsing voor <strong>${escapeHtml(fam)}</strong>
-                 — zelfde periode en filters als de pagina</div>
             <div class="row g-3">
               <div class="col-md-4"><div class="muted-note mb-1">URL-type</div>
                 <div class="donut-wrap"><canvas id="detTypeChart"></canvas>
@@ -1176,7 +1189,7 @@
                 <div class="donut-wrap"><canvas id="detHostChart"></canvas>
                      <div class="donut-center" id="detHostCenter"></div></div></div>
               <div class="col-md-4"><div class="muted-note mb-1">Facet-diepte</div>
-                <div class="chart-box-sm"><canvas id="detDepthChart"></canvas></div></div>
+                <div class="chart-box-sm chart-framed"><canvas id="detDepthChart"></canvas></div></div>
             </div></td>`;
         tr.after(det);
 
