@@ -70,6 +70,55 @@ def _range(start_date, end_date):
 
 
 # ---------------------------------------------------------------------------
+# URL-type: de zes buckets waarin de tool praat (Joep, 2026-08-11)
+#
+# De parser schrijft twaalf fijnere types weg (product, category_facet, search,
+# list, sitemap, robots, info, …). Naar buiten toe zijn dat zes groepen, met exact
+# de namen en de PRIORITEIT die seo_stats_service._urltype_case() gebruikt — /r/
+# vóór /c/ vóór /p/ vóór /products/ — zodat een URL met zowel /r/ als /c/ in beide
+# tools een R-url is.
+#
+# Bewust een mapping in de QUERYLAAG en niet in de parser: het ruwe type blijft in
+# de cube staan, de 24 geladen logdatums hoeven niet opnieuw ingest, en de indeling
+# is een presentatiekeuze die je later kunt bijstellen zonder de data aan te raken.
+# Wat je ervoor inlevert: de mapping gaat van type naar bucket, niet van URL naar
+# bucket, dus hij kan alleen zo fijn zijn als de parser al was. Voor deze zes
+# valt dat samen — `search` IS /r/, `category_facet` IS /products/ + /c/.
+URLTYPE_BUCKETS = [
+    ("R-url",    ["search"]),
+    ("C-url",    ["category_facet"]),
+    ("PLP",      ["product", "product_legacy"]),
+    ("Cat-url",  ["category", "category_legacy"]),
+    ("Homepage", ["home"]),
+    ("Overige",  ["list", "sitemap", "robots", "info", "other"]),
+]
+URLTYPE_ORDER = [name for name, _raw in URLTYPE_BUCKETS]
+# bucket -> ruwe types, en de omgekeerde weg voor het filter
+BUCKET_TO_RAW = {name: raw for name, raw in URLTYPE_BUCKETS}
+
+
+def _urltype_case(alias="d"):
+    """SQL CASE die het ruwe url_type op zijn bucket afbeeldt."""
+    whens = " ".join(
+        f"WHEN {alias}.url_type = ANY(ARRAY[{','.join(repr(t) for t in raw)}]) THEN {name!r}"
+        for name, raw in URLTYPE_BUCKETS
+    )
+    return f"CASE {whens} ELSE 'Overige' END"
+
+
+def _expand_urltype(value):
+    """Bucketnamen -> ruwe types. Onbekende waarden blijven staan, zodat een
+    directe API-call met een ruw type (bijv. url_type=product) blijft werken."""
+    out = []
+    for part in (value or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        out.extend(BUCKET_TO_RAW.get(part, [part]))
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Filters shared by every endpoint
 # ---------------------------------------------------------------------------
 def _filters(host=None, bot_class=None, bot_family=None, url_type=None,
@@ -87,7 +136,7 @@ def _filters(host=None, bot_class=None, bot_family=None, url_type=None,
         params.append([x.strip() for x in bot_family.split(",") if x.strip()])
     if url_type:
         sql.append(f"{alias}.url_type = ANY(%s)")
-        params.append([x.strip() for x in url_type.split(",") if x.strip()])
+        params.append(_expand_urltype(url_type))
     if known == "known":
         sql.append(f"{alias}.is_known_url")
     elif known == "unknown":
@@ -124,8 +173,10 @@ def get_meta(force=False):
                 GROUP BY bot_family, bot_class, is_tracked
                 ORDER BY bot_class, bot_family
             """),
-            "url_types": [r["url_type"] for r in _query(
-                "SELECT DISTINCT url_type FROM pa.bothits_daily ORDER BY url_type")],
+            # De zes buckets in hun vaste volgorde, niet de ruwe DISTINCT: de
+            # filterlijst moet dezelfde taal spreken als de grafiek, en een vaste
+            # volgorde houdt de checkbox-lijst stabiel als een type een dag mist.
+            "url_types": URLTYPE_ORDER,
         }
     return _cached("meta", run, force)
 
@@ -143,12 +194,16 @@ def get_daily(start_date=None, end_date=None, host=None, bot_class=None,
         "bot_class": "b.bot_class",
         "bot_family": "b.bot_family",
         "bot_name": "b.bot_name",
-        "url_type": "d.url_type",
+        "url_type": _urltype_case("d"),
         "host": "h.host",
         "status_class": "d.status_class",
         "edge_result": "d.edge_result",
         "facet_depth": "d.facet_depth::text",
         "is_known_url": "CASE WHEN d.is_known_url THEN 'in pa.urls' ELSE 'not in pa.urls' END",
+        # IP-verificatie tegen de gepubliceerde ranges van de operator. Zit hier
+        # omdat 'failed' een tripwire is: zonder een splitsing in de grafiek is de
+        # dag waarop iemand Googlebot gaat imiteren niet te zien.
+        "verify_state": "d.verify_state",
         "none": "'all'",
     }
     col = cols.get(group_by, cols["bot_class"])
@@ -203,15 +258,19 @@ def get_summary(start_date=None, end_date=None, host=None, bot_class=None,
             WHERE d.log_date BETWEEN %s AND %s {frag}
             GROUP BY 1, 2 ORDER BY 3 DESC
         """, args)
+        # Zes buckets, en in de VASTE volgorde van URLTYPE_BUCKETS — niet op
+        # omvang. De donut en de filterlijst moeten dezelfde rij-orde hebben,
+        # anders wisselt een segment van kleur zodra een type groeit.
         by_type = _query(f"""
-            SELECT d.url_type, sum(d.hits)::bigint AS hits,
+            SELECT {_urltype_case('d')} AS url_type, sum(d.hits)::bigint AS hits,
                    sum(d.hits) FILTER (WHERE d.is_known_url)::bigint AS hits_known
             FROM pa.bothits_daily d
             JOIN pa.bothits_host h ON h.host_id = d.host_id
             JOIN pa.bothits_bot  b ON b.bot_id  = d.bot_id
             WHERE d.log_date BETWEEN %s AND %s {frag}
-            GROUP BY 1 ORDER BY 2 DESC
-        """, args)
+            GROUP BY 1
+            ORDER BY array_position(%s::text[], {_urltype_case('d')})
+        """, args + [URLTYPE_ORDER])
         by_depth = _query(f"""
             SELECT d.facet_depth, sum(d.hits)::bigint AS hits,
                    sum(d.hits) FILTER (WHERE d.is_known_url)::bigint AS hits_known
@@ -238,12 +297,14 @@ def get_summary(start_date=None, end_date=None, host=None, bot_class=None,
         # puts the number near 94% and means nothing. The real signal is what
         # share of CATEGORY-shaped crawling lands on facet permutations that
         # are not part of our indexable set.
-        CATALOG = ("category", "category_facet", "category_legacy")
+        # by_type draagt nu buckets, dus de tegels rekenen daarop: C-url + Cat-url
+        # zijn samen precies de oude CATALOG-set (category_facet + category +
+        # category_legacy), en PLP is product + product_legacy.
+        CATALOG = ("C-url", "Cat-url")
         catalog = [r for r in by_type if r["url_type"] in CATALOG]
         catalog_hits = sum(r["hits"] for r in catalog)
         catalog_known = sum(r["hits_known"] or 0 for r in catalog)
-        product_hits = sum(r["hits"] for r in by_type
-                           if r["url_type"] in ("product", "product_legacy"))
+        product_hits = sum(r["hits"] for r in by_type if r["url_type"] == "PLP")
         return {
             "start_date": start, "end_date": end,
             "total_hits": total, "known_hits": known_hits,

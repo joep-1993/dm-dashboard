@@ -50,11 +50,18 @@ CREATE TABLE IF NOT EXISTS pa.bothits_daily (
     is_known_url  boolean  NOT NULL,   -- present in pa.urls
     status_class  text     NOT NULL,   -- 2xx / 3xx / 4xx / 5xx
     edge_result   text     NOT NULL,   -- CloudFront Hit / Miss / RefreshHit ...
+    -- Komt het IP echt van de operator die de user-agent claimt? Getoetst aan de
+    -- officieel gepubliceerde IP-ranges (backend/bothits_verify.py), zonder rDNS.
+    -- verified / failed / unverifiable (operator publiceert geen lijst) /
+    -- unchecked (lijsten niet op te halen, of rij geladen vóór 2026-08-11).
+    -- Bewust een DIMENSIE en geen filter: de spoof-graad is 0,4% van de hits, dus
+    -- 'failed' is nuttiger als tripwire dan als stille correctie.
+    verify_state  text     NOT NULL DEFAULT 'unchecked',
     hits          bigint   NOT NULL,
     bytes         bigint   NOT NULL DEFAULT 0,
     sum_time_ms   bigint   NOT NULL DEFAULT 0,
     PRIMARY KEY (log_date, host_id, bot_id, url_type, facet_depth,
-                 is_known_url, status_class, edge_result)
+                 is_known_url, status_class, edge_result, verify_state)
 );
 CREATE INDEX IF NOT EXISTS ix_bothits_daily_date ON pa.bothits_daily (log_date);
 CREATE INDEX IF NOT EXISTS ix_bothits_daily_bot  ON pa.bothits_daily (bot_id, log_date);

@@ -49,6 +49,7 @@ from urllib.parse import unquote
 from psycopg2.extras import execute_values
 
 from backend.database import get_db_connection, return_db_connection
+from backend.bothits_verify import load as load_ip_ranges, verdict
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,32 @@ def norm_host(h):
     return h[4:] if h.startswith("www.") else h
 
 
+# Welke domeinen de tellingen in mogen — een KEEP-list, geen skip-list (Joep,
+# 2026-08-11). Elk domein dekt zichzelf plus zijn subdomeinen, dus "beslist.nl"
+# houdt beslist.nl én shop.beslist.nl binnen.
+#
+# Een keep-list omdat er drie soorten hosts wegvielen die niets gemeen hebben:
+# andere landen (beslist.be, shopcaddy.de en hun shop.*-varianten) en de
+# CDN-distributies zelf (*.cloudfront.net, geen site maar de oorsprong). Met een
+# skip-list moet je die alle drie blijven onderhouden en glipt een nieuwe
+# distributie of markt er stil in; met een keep-list valt alles wat we niet
+# expliciet willen automatisch af.
+#
+# Wat dit weghaalt, gemeten over de 23 geladen datums: 43.525.762 hits (45,08%),
+# 790,6 GB uitgeserveerd verkeer en ~169 MB tabelruimte. Terugzetten staat in
+# cc1/BOTHITS_PROCESS.md — het is deze env-var plus een re-ingest.
+KEEP_DOMAINS = tuple(
+    d.strip().lower()
+    for d in os.getenv("BOTHITS_KEEP_DOMAINS", "beslist.nl").split(",")
+    if d.strip()
+)
+
+
+def skip_host(h):
+    """True als deze host niet onder KEEP_DOMAINS valt."""
+    return not any(h == d or h.endswith("." + d) for d in KEEP_DOMAINS)
+
+
 def status_class(s):
     return (s[0] + "xx") if s and s[0:1].isdigit() else "?"
 
@@ -234,7 +261,8 @@ def process_file(path):
     """Parse one .gz log file.
 
     Returns (cube, known, unknown, raw_lines, bot_lines) where
-      cube    : (host, family, name, url_type, depth, is_known, status, edge)
+      cube    : (host, family, name, url_type, depth, is_known, status, edge,
+                 verify_state)
                 -> [hits, bytes, time_ms]
       known   : (url_id, host, family, name) -> [hits, bytes, n2, n3, n4, n5]
       unknown : (host, family, name, url_type, depth, url) -> hits
@@ -267,7 +295,14 @@ def process_file(path):
                     edge = p[idx["x-edge-result-type"]] or "-"
                     nbytes = p[idx["sc-bytes"]]
                     taken = p[idx["time-taken"]]
+                    cip = p[idx["c-ip"]]
                 except (IndexError, KeyError):
+                    continue
+                # Vóór de bot-check, ná raw_lines: een host buiten KEEP_DOMAINS
+                # verdwijnt uit alle tellingen, maar raw_lines blijft het aantal
+                # regels in de logbestanden — dat is de volledigheidsmaat van de
+                # ledger en moet op het bestand kloppen.
+                if skip_host(host):
                     continue
 
                 fam = None
@@ -296,7 +331,13 @@ def process_file(path):
                 except ValueError:
                     tms = 0
 
-                c = cube[(host, fam, bot, ut, depth, url_id is not None, sc, edge)]
+                # IP-verificatie op de gepubliceerde ranges van de operator. Zit als
+                # dimensie in de cube en NIET als filter: de spoof-graad is 0,4% van
+                # de hits, dus wegfilteren verandert geen cijfer maar kost wel data.
+                # 'failed' is daarmee een tripwire i.p.v. een stille correctie.
+                vs = verdict(cip, fam)
+
+                c = cube[(host, fam, bot, ut, depth, url_id is not None, sc, edge, vs)]
                 c[0] += 1
                 c[1] += nb
                 c[2] += tms
@@ -325,6 +366,34 @@ def process_file(path):
 # ---------------------------------------------------------------------------
 # Dimension upserts
 # ---------------------------------------------------------------------------
+# verify_state is later toegevoegd (2026-08-11), dus de bestaande tabel moet
+# meegroeien. Zelfde vorm als faq_v2_publisher's migratie: eerst een goedkope
+# catalogus-check, want ALTER TABLE pakt een AccessExclusiveLock óók als er niets
+# te doen valt, en dat deadlockt tegen een lopende ingest. Bestaande rijen krijgen
+# 'unchecked' — eerlijk, want die zijn geladen vóór er verificatie was.
+SCHEMA_MIGRATE = """
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'pa' AND table_name = 'bothits_daily'
+           AND column_name = 'verify_state'
+    ) THEN
+        ALTER TABLE pa.bothits_daily
+            ADD COLUMN verify_state text NOT NULL DEFAULT 'unchecked';
+        ALTER TABLE pa.bothits_daily DROP CONSTRAINT bothits_daily_pkey;
+        ALTER TABLE pa.bothits_daily ADD PRIMARY KEY
+            (log_date, host_id, bot_id, url_type, facet_depth, is_known_url,
+             status_class, edge_result, verify_state);
+    END IF;
+END $$;
+"""
+
+
+def _ensure_schema(cur):
+    cur.execute(SCHEMA_MIGRATE)
+
+
 def _dim_ids(conn, hosts, bots):
     """Ensure host/bot dimension rows exist; return {host: id}, {(fam,name): id}."""
     cur = conn.cursor()
@@ -365,6 +434,11 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
     """
     t0 = time.time()
     logger.info("[%s] %s files (%s/24 hours)", log_date, f"{len(files):,}", n_hours)
+
+    # In de PARENT, vóór het forken — net als load_url_ids(). De workers erven de
+    # opzoektabel dan via fork in plaats van de lijsten twaalf keer op te halen.
+    # Een mislukte fetch is geen fout: verdict() geeft dan 'unchecked'.
+    load_ip_ranges()
 
     cube = collections.defaultdict(lambda: [0, 0, 0])
     known = collections.defaultdict(lambda: [0, 0, 0, 0, 0, 0])
@@ -408,6 +482,7 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
     try:
         host_ids, bot_ids = _dim_ids(conn, hosts, bots)
         cur = conn.cursor()
+        _ensure_schema(cur)
         # Delete-then-insert makes a re-run idempotent.
         for tbl in ("pa.bothits_daily", "pa.bothits_url_daily",
                     "pa.bothits_unknown_daily"):
@@ -416,10 +491,10 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
         execute_values(cur, """
             INSERT INTO pa.bothits_daily
               (log_date, host_id, bot_id, url_type, facet_depth, is_known_url,
-               status_class, edge_result, hits, bytes, sum_time_ms)
+               status_class, edge_result, verify_state, hits, bytes, sum_time_ms)
             VALUES %s
         """, [(log_date, host_ids[k[0]], bot_ids[(k[1], k[2])], k[3], k[4],
-               k[5], k[6], k[7], v[0], v[1], v[2]) for k, v in cube.items()],
+               k[5], k[6], k[7], k[8], v[0], v[1], v[2]) for k, v in cube.items()],
             page_size=5000)
 
         execute_values(cur, """
@@ -614,7 +689,8 @@ AUTO_INGEST_AT = os.getenv("BOTHITS_AUTO_INGEST_AT", "04:30")
 
 _ingest_lock = threading.Lock()
 _ingest_state = {"running": False, "started_at": None, "finished_at": None,
-                 "result": None, "error": None, "trigger": None}
+                 "result": None, "error": None, "trigger": None, "phase": None,
+                 "fetch": None}
 _timer = None
 
 
@@ -622,21 +698,38 @@ def ingest_state():
     return dict(_ingest_state)
 
 
-def start_ingest_async(trigger="manual", on_done=None):
-    """Run a drop-folder ingest on a worker thread. -> (started, state)."""
+def start_ingest_async(trigger="manual", on_done=None, src=None, before=None):
+    """Run a drop-folder ingest on a worker thread. -> (started, state).
+
+    `src` overrides the folder to scan, and `before` runs inside the worker before
+    the ingest — that is how the S3 fetch hangs off this same call instead of
+    growing its own thread and lock. Download and ingest under ONE lock matters:
+    they touch the same files, so a nightly pass firing halfway through a download
+    would otherwise ingest a date whose 24th hour is still arriving.
+
+    `before` gets a progress callback and whatever it returns is published on the
+    state as `fetch`, so the UI can show what was downloaded while the (much
+    longer) parse phase runs.
+    """
     if not _ingest_lock.acquire(blocking=False):
         return False, dict(_ingest_state)
     _ingest_state.update(running=True, error=None, result=None, trigger=trigger,
-                         finished_at=None,
+                         finished_at=None, fetch=None,
+                         phase="fetch" if before else "ingest",
                          started_at=datetime.now().isoformat(timespec="seconds"))
 
     def worker():
         try:
-            _ingest_state["result"] = run_drop()
+            if before:
+                _ingest_state["fetch"] = before(
+                    lambda msg: _ingest_state.update(phase=f"fetch: {msg}"))
+                _ingest_state["phase"] = "ingest"
+            _ingest_state["result"] = run_drop(src)
         except Exception as exc:
             logger.error("bothits ingest (%s) failed: %s", trigger, exc, exc_info=True)
             _ingest_state["error"] = str(exc)
         finally:
+            _ingest_state["phase"] = None
             _ingest_state["running"] = False
             _ingest_state["finished_at"] = datetime.now().isoformat(timespec="seconds")
             _ingest_lock.release()
