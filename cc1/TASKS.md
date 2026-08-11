@@ -14,8 +14,15 @@ patronen staan in UI_BLUEPRINT, de twee bugs in LEARNINGS.
       (DMA Exclusions), donut-layout (SEO Stats), footer.
 - [x] **Eigen keuzes bijgeschreven in UI_BLUEPRINT**: de eerste-drie-kleuren-regel
       (lichtblauw `#1f99c4` / roze `#be4693` / lichtgroen `#91c34e`, met ΔE), stat-tiles,
-      donut met directe labels, hover-blok, klikbare legenda boven het plot, en dat de
-      alpha-ladder niet voor gestapelde reeksen geldt.
+      hover-blok, klikbare legenda boven het plot, en dat de alpha-ladder niet voor
+      gestapelde reeksen geldt.
+- [x] **Donut (punt 22-23, na Joeps feedback)**: de directe labels zijn er weer uit —
+      te veel chrome rond een kleine ring. In plaats daarvan `donutMinAngle`, die elk
+      niet-leeg segment op ~1,8° trekt zodat Homepage (0,2%) en R-url (0,0003%) een
+      zichtbare, hoverbare lijn zijn; `spacing: 0`, want 2px vreet zo'n boog op.
+      Bewuste vertekening, de tooltip noemt de echte aantallen. Facet-diepte: gelijke
+      hoogte als de donut-kaart (die 60px witruimte was `h-100` + ongelijke plots) en
+      de staart 7..11 (967 hits) datagestuurd samengevouwen tot "7+".
 - [x] **URL-type naar zes buckets** (R-url / C-url / PLP / Cat-url / Homepage / Overige)
       in de QUERYLAAG, met de prioriteit van `seo_stats_service._urltype_case()`. Geen
       re-ingest nodig; ruwe types blijven in de cube.

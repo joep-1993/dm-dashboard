@@ -348,16 +348,24 @@ the reference. The anatomy:
   `.donut-center` (`.dc-total` big + `.dc-cap` small uppercase caption).
 - **Segments get air**: `borderColor:'#fff'`, `borderWidth:2`, `spacing:2`,
   `borderRadius:6`, `hoverOffset:10`.
-- **Chart.js' legend is OFF, and so is a legend row of your own** — the segments
-  carry **direct labels with leader lines** instead (Bot Hits' URL-type ring,
-  2026-08-11): `naam 31,8%` outside the arc, a 1,25px leader in the segment's own
-  colour, and a declutter pass that pushes labels 13px apart per side so a 0,2%
-  slice still gets a readable line. A legend can *name* a 0,1% share but it cannot
-  *point at it*; direct labels do both, which also satisfies "identity is never
-  colour-alone" without a second block of chrome. Two details that bite: reserve
-  `layout.padding` left/right (~66px) or the labels fall outside the canvas and are
-  silently clipped, and never print `0%` for a segment that has hits — render
-  `<0,1%`, because `0%` reads as empty.
+- **Chart.js' legend is OFF, no legend row, and no direct labels either** — the ring
+  is identified by hover alone (Bot Hits' URL-type ring, 2026-08-11). That went
+  through two rejected states, so don't re-derive it: a legend row beside/under the
+  ring can *name* a 0,1% share but never *point at* it, and direct labels with leader
+  lines (which do both) turned out to be too much chrome around a small ring — six
+  labels plus leaders read busier than the data they annotate.
+- **What makes hover-only workable is a minimum arc.** A 0,2% slice is a fraction of
+  a pixel and `spacing` swallows it entirely, so it is neither visible nor hoverable.
+  A small `afterUpdate` plugin lifts every non-empty segment to ~1,8° and takes the
+  shortfall proportionally from the segments that have room (Bot Hits'
+  `donutMinAngle`: R-url at 0,0003% becomes a 3,8px sliver, the ring still sums to
+  exactly 360°). This **deliberately distorts the proportion** — the ring becomes a
+  "which types exist and which dominates" picture, not a measuring stick — and that
+  trade is only acceptable because the tooltip names the true count and the true
+  share. Set `spacing: 0` and let a 1px white border do the separation; 2px of
+  spacing on both sides eats a 1,8° arc whole.
+- Never print `0%` for a segment that has hits — render `<0,1%`, because `0%` reads
+  as empty.
 - **Its own DOM tooltip (`.donut-tip`), not the canvas one.** Chart.js paints its
   tooltip INSIDE the canvas while `.donut-center` is an absolute layer on top, so the
   canvas tooltip renders *under* the total. Hence an external node in
@@ -386,6 +394,20 @@ order is for identity, the tooltip order is for reading.
 period's — you are pointing at one day — and a series that the user switched off is
 out of that denominator as well, or the percentages add up to something not on
 screen. Never render `0%` for a non-zero value; use `<0,1%`.
+
+### Two charts in one row
+
+- **Equal plot heights, or the shorter card ends in dead space.** Bootstrap's `h-100`
+  makes both cards as tall as the taller one, so a 300px donut beside a 260px bar
+  chart leaves 40px of white under the bar chart (Joep, 2026-08-11). Give both plot
+  boxes the same height and keep them in sync when one changes.
+- **Fold an invisible tail instead of plotting it.** Bot Hits' facet-depth chart had
+  five trailing categories worth 967 hits out of 51M — they render as nothing but
+  still claim axis width, which squeezes the columns that do carry data. Fold the
+  trailing run into one `N+` bucket, **data-driven** (walk back while a category is
+  under ~0,05% of the total, fold when it is more than one) rather than on a
+  hard-coded index, and keep the total intact so nothing disappears. Fewer categories
+  then also earns wider bars (`categoryPercentage` ~0,82, `barPercentage` ~0,98).
 
 ## Buttons
 

@@ -20,7 +20,7 @@
            aan de ENTITEIT, nooit aan de rangorde, en elke grafiek draagt een legenda
            plus de tabel eronder omdat een paar hues onder 3:1 contrast zitten. */
         .chart-box { position: relative; height: 340px; }
-        .chart-box-sm { position: relative; height: 260px; }
+        .chart-box-sm { position: relative; height: 300px; }   /* gelijk aan .donut-wrap */
 
         /* ---- Stat tiles — de GSD Budgets-vorm (Joep, 2026-08-11) --------------
            Waren een grid van 1px-omlijnde blokjes met een grijs uppercase label
@@ -131,9 +131,11 @@
         /* Donut — de SEO Stats-layout: ring met de totalen in het gat, en een eigen
            DOM-tooltip erboven omdat Chart.js zijn tooltip IN de canvas tekent en
            .donut-center daar als absolute laag bovenop ligt. */
-        /* Hoger dan de 260px van .chart-box-sm: met directe labels rond de ring
-           moeten zes regels naast elkaar passen zonder op elkaar te vallen. */
-        .donut-wrap { position: relative; height: 320px; }
+        /* Deze twee moeten GELIJK zijn: de URL-type-kaart en de Facet-diepte-kaart
+           staan naast elkaar in een `row` met `h-100`, dus de hoogste kaart bepaalt
+           de hoogte van beide. Stond de donut op 320px en de staafgrafiek op 260px,
+           dan hield die tweede kaart 60px witruimte onderaan (Joep, 2026-08-11). */
+        .donut-wrap { position: relative; height: 300px; }
         .donut-center { position: absolute; inset: 0; display: flex; flex-direction: column;
                         align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
         .donut-center .dc-total { font-size: 1.35rem; font-weight: 700; color: #2d2a3a; line-height: 1.1; }
@@ -960,7 +962,10 @@
                     data: rows.map(r => Number(r.hits)),
                     backgroundColor: rows.map(r => colorFor('url_type', r.url_type)),
                     borderColor: '#fff', borderWidth: 2,
-                    borderRadius: 6, spacing: 2, hoverOffset: 10, hoverBorderColor: '#fff',
+                    // spacing: 0 — 2px tussenruimte aan weerszijden vreet een segment
+                    // van 1,8° (~3px booglengte) volledig op. De 1px witte rand doet
+                    // de scheiding; hoverOffset laat het aangewezen segment uitspringen.
+                    borderRadius: 4, spacing: 0, hoverOffset: 12, hoverBorderColor: '#fff',
                 }],
             },
             options: {
@@ -968,7 +973,9 @@
                 // Ruimte links/rechts voor de labels buiten de ring. Zonder deze
                 // padding tekent Chart.js de ring tot de rand en valt elk label
                 // buiten de canvas — het wordt dan stil afgekapt.
-                layout: { padding: { left: 66, right: 66, top: 12, bottom: 12 } },
+                // Geen brede zijmarges meer nu de labels weg zijn; de ring mag de
+                // kaart vullen.
+                layout: { padding: 8 },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
@@ -977,7 +984,7 @@
                     },
                 },
             },
-            plugins: [donutLabels],
+            plugins: [donutMinAngle],
         });
         const center = document.getElementById('typeCenter');
         if (center) {
@@ -986,70 +993,43 @@
         }
     }
 
-    // Directe labels rond de ring, met aanwijslijntje. Vervangt de legenda-rij
-    // eronder (Joep, 2026-08-11): een legenda kan een aandeel van 0,1% wel noemen
-    // maar niet aanwijzen, en met labels op de grafiek is identiteit nooit meer
-    // alleen kleur — dat is de eis waar een legenda voor stond, dus die kan weg.
+    // Elk segment moet een zichtbare, aanwijsbare lijn zijn (Joep, 2026-08-11:
+    // "homepage toevoegen als lijn op de donut, inclusief hover effect"). Homepage is
+    // 0,2% en R-url 0,0003%; proportioneel is dat een boog van een fractie van een
+    // pixel, en met `spacing` erbij verdwijnt hij helemaal — vandaar dat die twee
+    // eerst niet te zien of te raken waren.
     //
-    // Elk segment krijgt een label, ook Homepage (0,1%) en R-url (0,00%). Daarom
-    // twee dingen: de lijntjes gaan naar BUITEN (in een 68%-ring is binnenin geen
-    // ruimte), en er loopt een declutter-pas over de y-posities, want de kleintjes
-    // liggen vlak naast elkaar op de rand en zouden anders over elkaar vallen.
-    const donutLabels = {
-        id: 'donutLabels',
-        afterDatasetsDraw(chart) {
-            const { ctx } = chart;
-            const meta = chart.getDatasetMeta(0);
-            const data = chart.data.datasets[0].data;
-            const total = data.reduce((a, b) => a + Number(b), 0) || 1;
-            const items = [];
-            meta.data.forEach((arc, i) => {
-                if (!Number(data[i])) return;          // 0 hits: niets om aan te wijzen
-                const mid = (arc.startAngle + arc.endAngle) / 2;
-                const cos = Math.cos(mid), sin = Math.sin(mid);
-                items.push({
-                    i, cos, sin,
-                    x0: arc.x + cos * (arc.outerRadius + 1),
-                    y0: arc.y + sin * (arc.outerRadius + 1),
-                    x1: arc.x + cos * (arc.outerRadius + 11),
-                    y1: arc.y + sin * (arc.outerRadius + 11),
-                    right: cos >= 0,
-                    colour: chart.data.datasets[0].backgroundColor[i],
-                    // Een segment met hits mag nooit "0%" zeggen — dat leest als leeg,
-                    // en juist de kleintjes zichtbaar maken is het doel van deze labels.
-                    text: `${chart.data.labels[i]} ${(() => {
-                        const share = Number(data[i]) / total * 100;
-                        return share > 0 && share < 0.05
-                            ? '<0,1%'
-                            : share.toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + '%';
-                    })()}`,
-                });
+    // Deze plugin trekt elk niet-leeg segment op tot minstens `minDeg` graden en haalt
+    // dat tekort proportioneel bij de segmenten die ruimte over hebben. Dat is bewust
+    // een vertekening van de verhouding: de ring wordt dan een "welke soorten zijn er
+    // en welke domineert"-beeld, geen meetlat. Wat je erdoor terugkrijgt is dat de
+    // hover van élk type werkt, en die noemt het echte aantal én het echte aandeel —
+    // dus er valt niets verkeerd af te lezen, alleen niet meer op de graad na.
+    const donutMinAngle = {
+        id: 'donutMinAngle',
+        afterUpdate(chart, _args, opts) {
+            const arcs = chart.getDatasetMeta(0).data;
+            if (!arcs.length) return;
+            const min = ((opts && opts.minDeg) || 1.8) * Math.PI / 180;
+            const vals = chart.data.datasets[0].data.map(Number);
+            const total = vals.reduce((a, b) => a + b, 0);
+            if (!total) return;
+            const circle = Math.PI * 2;
+            let sweeps = vals.map(v => (v > 0 ? v / total * circle : 0));
+            const short = sweeps.reduce((a, x) => a + (x > 0 && x < min ? min - x : 0), 0);
+            const donors = sweeps.reduce((a, x) => a + (x >= min ? x : 0), 0);
+            // Alleen herschalen als de gevers het tekort kunnen dragen; anders is de
+            // ring te vol voor een minimum en laat je hem liever proportioneel.
+            if (short > 0 && donors > short) {
+                const f = (donors - short) / donors;
+                sweeps = sweeps.map(x => (x > 0 && x < min ? min : x * f));
+            }
+            let ang = arcs[0].startAngle;
+            arcs.forEach((arc, i) => {
+                arc.startAngle = ang;
+                arc.endAngle = ang + sweeps[i];
+                ang = arc.endAngle;
             });
-            // Declutter per kant: van boven naar onder minimaal 13px tussenruimte.
-            [true, false].forEach(side => {
-                const col = items.filter(it => it.right === side).sort((a, b) => a.y1 - b.y1);
-                for (let i = 1; i < col.length; i++) {
-                    const gap = col[i].y1 - col[i - 1].y1;
-                    if (gap < 13) col[i].y1 = col[i - 1].y1 + 13;
-                }
-            });
-            ctx.save();
-            ctx.font = '600 11px system-ui, -apple-system, "Segoe UI", sans-serif';
-            ctx.textBaseline = 'middle';
-            items.forEach(it => {
-                const x2 = it.x1 + (it.right ? 16 : -16);
-                ctx.strokeStyle = it.colour;
-                ctx.lineWidth = 1.25;
-                ctx.beginPath();
-                ctx.moveTo(it.x0, it.y0);
-                ctx.lineTo(it.x1, it.y1);
-                ctx.lineTo(x2, it.y1);
-                ctx.stroke();
-                ctx.fillStyle = '#2d2a3a';
-                ctx.textAlign = it.right ? 'left' : 'right';
-                ctx.fillText(it.text, x2 + (it.right ? 4 : -4), it.y1);
-            });
-            ctx.restore();
         },
     };
 
@@ -1080,7 +1060,25 @@
     }
 
     function drawDepth(s) {
-        const rows = s.by_facet_depth || [];
+        // De staart samenvouwen. Dieptes 7 t/m 11 zijn samen 967 hits op 51 miljoen:
+        // vijf kolommen die als niets renderen maar wel breedte opeisen, waardoor de
+        // kolommen die er wél zijn smal worden. Datagestuurd en niet op een vaste
+        // grens: pak van achteren af alles wat onder 0,05% van het totaal zit, en vouw
+        // dat samen zodra het meer dan één kolom betreft. Het totaal blijft kloppen —
+        // de bak heet "7+ facets", er verdwijnt niets.
+        const all = s.by_facet_depth || [];
+        const grand = all.reduce((a, r) => a + Number(r.hits), 0) || 1;
+        let cut = all.length;
+        while (cut > 1 && Number(all[cut - 1].hits) / grand < 0.0005) cut--;
+        let rows = all;
+        if (all.length - cut >= 2) {
+            const tail = all.slice(cut);
+            rows = all.slice(0, cut).concat([{
+                facet_depth: `${all[cut].facet_depth}+`,
+                hits: tail.reduce((a, r) => a + Number(r.hits), 0),
+                hits_known: tail.reduce((a, r) => a + Number(r.hits_known || 0), 0),
+            }]);
+        }
         const known = rows.map(r => Number(r.hits_known || 0));
         const unknown = rows.map(r => Number(r.hits) - Number(r.hits_known || 0));
         CHARTS.depth?.destroy();
@@ -1098,6 +1096,10 @@
             options: {
                 responsive: true, maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
+                // Brede staven: met acht kolommen in plaats van twaalf mag de kolom de
+                // categorie vullen, anders staat er evenveel lucht als data.
+                datasets: { bar: { categoryPercentage: 0.82, barPercentage: 0.98 } },
+                layout: { padding: { top: 8, right: 8 } },
                 scales: {
                     x: { stacked: true, grid: { display: false }, ticks: { color: '#636e72' } },
                     y: { stacked: true, beginAtZero: true, grid: { color: '#f1f1f1' }, ticks: { color: '#636e72', callback: v => fmt(v) } },
@@ -1244,20 +1246,20 @@
                 datasets: [{
                     data: rows.map(([, v]) => v),
                     backgroundColor: rows.map(([k]) => colorFor(dim, k)),
-                    borderColor: '#fff', borderWidth: 2,
-                    borderRadius: 6, spacing: 2, hoverOffset: 8, hoverBorderColor: '#fff',
+                    borderColor: '#fff', borderWidth: 1,
+                    borderRadius: 4, spacing: 0, hoverOffset: 10, hoverBorderColor: '#fff',
                 }],
             },
             options: {
                 responsive: true, maintainAspectRatio: false, cutout: '68%',
-                layout: { padding: { left: 58, right: 58, top: 10, bottom: 10 } },
+                layout: { padding: 6 },
                 plugins: {
                     legend: { display: false },
                     tooltip: { enabled: false, external: donutTooltip,
                                callbacks: { label: c => `${fmt(c.parsed)} · ${pctOf(c.parsed, total)}` } },
                 },
             },
-            plugins: [donutLabels],
+            plugins: [donutMinAngle],
         });
     }
 
