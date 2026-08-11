@@ -30,8 +30,13 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   │   #   86% van de rijen staat niet in pa.urls -> URL-detail alleen voor pa.urls-leden (21M).
 │   │   # scan_tree(): mapnaam != logdatum, 1 datum kan over 2 mappen liggen, dedupe op basename,
 │   │   #   alleen .gz (1039 uitgepakte kopieen hebben allemaal een .gz-tweeling).
+│   ├── bothits_s3.py         # Bot Hits: CloudFront-logs uit S3 -> staging (~/bothits_s3), dan run_drop()
+│   │   # prefix per (distributie, datum) = 6 lists/dag i.p.v. de hele bucket scannen;
+│   │   # 6 distributies via Delimiter="."; RETENTIE ~42 DAGEN, dus wat je laat liggen is weg;
+│   │   # ~2.900 files / ~900 MB per logdatum; staging is WSL-lokaal, NIET de OneDrive-dropfolder.
 │   ├── bothits_service.py    # Bot Hits querylaag (cube + URL-tabellen), 5-min in-process cache
 │   ├── bothits_router.py     # Bot Hits APIRouter (/api/bothits), deelt ingest-lock met de scheduler
+│   │   # + /s3/preview (list-only, voedt de confirm) en /s3/fetch (download + ingest, 1 lock)
 │   ├── ai_titles_service.py  # AI-powered title generation
 │   ├── canonical_service.py  # Canonical URL transformation
 │   ├── redirect_301_service.py # 301 redirect management

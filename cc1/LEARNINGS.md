@@ -1,6 +1,46 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een specifiekere `position` sloopt `position: sticky` — en dat propageerde uit het template (2026-08-11)
+
+Joep: "de kolomheaders in Per bot-familie allemaal vast zetten, nu zijn alleen Aandeel,
+in pa.urls en Cache-hit vast." Precies die drie zijn de énige niet-sorteerbare kolommen.
+
+```css
+.tool-table th          { position: sticky; top: 0; }   /* basis */
+.tool-table th.sortable { position: relative; }         /* wint, en sticky is weg */
+```
+
+- **De diagnose zat in het rijtje zelf.** "Alleen deze drie blijven staan" is geen
+  toeval maar de complementaire verzameling van `.sortable` — als een symptoom precies
+  samenvalt met een selector, is de selector de verdachte.
+- `relative` stond er voor het `::after`-sorteerglyph, dat een positioned ancestor
+  nodig heeft. **`sticky` is ook positioned**, dus `relative` weglaten kost niets.
+- **`seo-stats.html` had het al goed** (`.perf-table th.sortable` zonder position) en
+  `_tool-template.html` niet. Dat is de verspreidingsroute: elke tool die van het
+  template is gekopieerd draagt de bug. Nog aanwezig in gsd-campaigns,
+  gsd-tag-toppers, gsd-check, shop-campaigns, mc-id-finder en seo-titles.
+- **Les: fix de bron mee, niet alleen de pagina waar het opvalt.** Het template is nu
+  ook aangepast, anders draagt de volgende nieuwe tool hem opnieuw.
+
+## De alpha-ladder van SEO Stats geldt niet voor gestapelde reeksen (2026-08-11)
+
+Ik nam voor Bot Hits' daggrafiek de chrome van "Performance per day" over, inclusief de
+fill-alpha die omlaag stapt bij meer series (`'2b'` / `'22'` / `'14'`). Joep: "er zijn
+nu grote grijze vlakken zichtbaar."
+
+- Die ladder bestaat voor **overlappende** lijn-vlakken: de was ligt onder z'n eigen
+  lijn en moet doorschijnend zijn, anders dekt serie 8 serie 1 af.
+- Bot Hits **stapelt**, en dan ís de vulling de serie. Bij vijf series koos de ladder
+  `'14'` = 7,8% dekking, en de search-band (96% van het volume) werd een bleek veld dat
+  als grijs las.
+- Gestapeld hoort: **volle kleur + 2px witte rand** tussen de banden — ook de
+  dataviz-regel voor aangrenzende vlakken. Bijgevolg leest de tooltip-stip
+  `backgroundColor` en niet `borderColor`, want die rand is nu de witte scheiding.
+- **Les: chrome overnemen is niet hetzelfde als encoding overnemen.** Grid, ticks,
+  tooltip en tension zijn overdraagbaar; hoe een serie zijn identiteit draagt hangt van
+  de vorm af.
+
 ## De content-API's zijn al multi-market; alleen onze publishers zijn dat niet (2026-08-11)
 
 Joep vroeg of we een FAQ op een beslist.be-pagina kunnen zetten, en of de upload een

@@ -4,6 +4,93 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-11 — Bot Hits: 19 visuele punten uit suggestions_new.txt
+
+Aanleiding: Joep's lijst met visuele aanpassingen (regels 1-20). Alles gedaan; de
+patronen staan in UI_BLUEPRINT, de twee bugs in LEARNINGS.
+
+- [x] **Overgenomen uit andere tools**: hover-blok + daggrafiek-chrome + datumvelden
+      (SEO Stats), tabs (Canonicals), tegels (GSD Budgets), outlined uppercase labels
+      (DMA Exclusions), donut-layout (SEO Stats), footer.
+- [x] **Eigen keuzes bijgeschreven in UI_BLUEPRINT**: de eerste-drie-kleuren-regel
+      (lichtblauw `#1f99c4` / roze `#be4693` / lichtgroen `#91c34e`, met ΔE), stat-tiles,
+      donut met directe labels, hover-blok, klikbare legenda boven het plot, en dat de
+      alpha-ladder niet voor gestapelde reeksen geldt.
+- [x] **URL-type naar zes buckets** (R-url / C-url / PLP / Cat-url / Homepage / Overige)
+      in de QUERYLAAG, met de prioriteit van `seo_stats_service._urltype_case()`. Geen
+      re-ingest nodig; ruwe types blijven in de cube.
+- [x] **Layout**: tegels boven Filters, "In pa.urls"-filter weg, Reset/Toepassen
+      rechtsonder, ophaal-knop naast de dekkingstekst, infotekst compacter.
+- [x] **Per bot-familie**: alle headers weer sticky (de `position: relative`-bug),
+      Soort-kolom gecentreerd, rijen uitklapbaar met drie grafieken per familie
+      (donut URL-type + donut Domein + staaf Facet-diepte) uit `/summary?bot_family=`.
+- [x] **Hover-info**: aandeel per regel, met het dagtotaal als noemer en uitgezette
+      banden eruit.
+- [ ] **`position: relative` op `th.sortable` staat nog in zes andere tools**:
+      gsd-campaigns, gsd-tag-toppers, gsd-check, shop-campaigns, mc-id-finder,
+      seo-titles. Daar scrollen de sorteerbare headers dus ook weg. `_tool-template.html`
+      is al gefixt, dus nieuwe tools erven het niet meer.
+- [ ] **Visueel nog niet beoordeeld.** `node --check` is groen en de endpoints geven de
+      juiste data, maar er is hier geen browser: of de donut-labels binnen de kaart
+      blijven en of het uitklappaneel op een smal venster niet knelt, moet iemand met
+      een browser bekijken.
+
+### 2026-08-11 — Bot Hits: IP-verificatie, en alleen nog beslist.nl
+
+- [x] **`backend/bothits_verify.py`**: IP's toetsen aan de officieel gepubliceerde
+      ranges. Alleen de `RANGE_SOURCES`-tabel uit `~/bothits_verify.py` overgenomen,
+      aangevuld met bingbot/Applebot/Google user-triggered. Geen rDNS (onnodig: de vier
+      grootste families matchen 100% op range), geen keep-set die data weggooit.
+      `verify_state` is een dimensie op de cube met verified/failed/unverifiable/unchecked.
+- [x] **Gemeten na re-ingest van 2026-03-10**: verified 87,15%, unverifiable 12,51%,
+      failed **0,35%** (OpenAI 12.570, Googlebot 85, Anthropic 67, Bing 4). Ingest-tijd
+      onveranderd (66 s), cube nog 10 MB. Zichtbaar als splitsing "IP-verificatie".
+- [x] **Domeinfilter naar een keep-list**: `BOTHITS_KEEP_DOMAINS`, default `beslist.nl`.
+      beslist.be, shopcaddy.de en de shop.*-varianten eruit (43.525.762 hits = 45,08%,
+      790,8 GB verkeer, ~169 MB). Bestaande rijen ook verwijderd, want een reeks die
+      halverwege van samenstelling verandert leest als een verkeersval. **Terugzetten
+      staat in BOTHITS_PROCESS.md** — env-var plus re-ingest, en dat kan alleen zolang
+      `BOTHITS_BACKUP_DIR` bestaat: dat archief is de enige kopie van BE/DE feb–juni.
+- [ ] **`VACUUM FULL` overwegen.** De 169 MB is vrije ruimte binnen de tabellen, nog
+      niet teruggegeven aan het OS. Bij ~27 MB/dag groei is het binnen een week
+      hergebruikt, dus alleen doen als de DB-omvang nu knelt (exclusive lock).
+- [ ] **De 23 andere logdatums staan op `verify_state = 'unchecked'`.** Die krijgen pas
+      een verdict bij een re-ingest — combineer dat met de backfill die toch nog moet.
+
+### 2026-08-11 — Bot Hits haalt zijn eigen CloudFront-logs uit S3
+
+Aanleiding: Joep wees op `~/projects/cloudfront-logs/download_cloudfront_logs.py` en wilde
+die stap in de tool, bij de Refresh-knop van 'Hits per dag'. Zie BOTHITS_PROCESS.md.
+
+- [x] **`backend/bothits_s3.py`**: `preview(days)` (list-only, per datum files/MB/uren +
+      reden) en `fetch(days)` (parallelle download naar `BOTHITS_S3_DIR`, overslaan wat er
+      met dezelfde grootte al ligt). Listen per (distributie, datum)-prefix; distributies
+      uit `Delimiter="."` in plaats van hardcoded.
+- [x] **`start_ingest_async(src=, before=)`**: download en ingest onder hetzelfde lock, met
+      `phase` + `fetch` op de status zodat de UI de downloadfase kan tonen. Bestaand gedrag
+      van de Verwerk-knop en de nachtelijke timer ongewijzigd.
+- [x] **Endpoints** `GET /api/bothits/s3/preview` en `POST /api/bothits/s3/fetch`
+      (`days` 1-45), 400 als de credentials missen. Status via de bestaande `/ingest/status`.
+- [x] **UI**: dagen-input + "⤓ Nieuwe logs ophalen" náást Refresh in de kaartkop van Hits
+      per dag, met confirm die files/MB/datums quoot, een poller die ook een elders gestarte
+      run oppikt, en `refresh(true)` als hij klaar is.
+- [x] **Getest**: preview tegen de echte bucket (3 dagen = 8.683 files / 2.705 MB), 10 echte
+      keys gedownload (0,8 s, geldige gzip, `#Version: 1.0`), `scan_tree` leest de datum uit
+      de bestandsnaam, en de hele keten met een stub voor de 900 MB — de 24-uur-poort weigerde
+      de halve dag correct (`incomplete (3/24 hours)`) en `on_done` leegde de cache. Endpoints
+      over HTTP OK na herstart (PID nieuw, 11-08 10:54), `days=0`/`days=99` → 422.
+- [x] **`boto3` in `requirements.txt`** en in de venv geïnstalleerd (1.43.68); credentials in
+      `.env` als `BOTHITS_S3_*`, niet in de repo.
+- [ ] **Backfill van het lokale archief** (2026-03-17 t/m 06-09, 85 datums die al op schijf
+      staan): `python3 -m backend.bothits_ingest backfill`. ~55 s per datum, dus ~1u20.
+      Dit hoort NIET via de S3-knop — dat zou ~75 GB downloaden voor data die er al is.
+- [ ] **Dagelijks ophalen aanzetten** zodra de backfill staat. De bucket bewaart ~42 dagen,
+      dus zonder dagelijkse run verdwijnt er permanent historie. Nu staat
+      `BOTHITS_AUTO_INGEST=false` en die timer draait alleen `run_drop()` op de dropfolder —
+      voor S3 moet die kant ook de fetch aanroepen (`before=`), of de knop wordt handwerk.
+- [ ] **20 dagen zijn definitief weg**: 2026-06-10 t/m 06-29 zit niet in S3 (retentie) en
+      niet in het archief. Als die gaten storen in de grafiek: annoteren, niet zoeken.
+
 ### 2026-08-11 — Eerste BE-content live: FAQ op /products/elektronica/
 
 Aanleiding: Joep vroeg of we een FAQ op een beslist.be-pagina kunnen maken, en of de upload

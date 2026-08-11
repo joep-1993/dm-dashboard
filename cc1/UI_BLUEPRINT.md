@@ -102,6 +102,28 @@ other tool uses the grey default. New tools follow the grey default.
 - **Sortable headers**: add `class="sortable" data-sort="<key>" onclick="sortBy('<key>')"`.
   The `.sortable` CSS shows a `⇅` idle glyph and `▲`/`▼` for the active sort
   direction (toggled by adding `sort-asc` / `sort-desc` to the active `<th>`).
+  **Never put `position: relative` on `th.sortable`.** The base `.tool-table th`
+  rule sets `position: sticky; top: 0`, and a more specific `position` silently
+  beats it — so the sortable columns stop sticking while the plain ones keep
+  sticking, which looks like "only Aandeel, In pa.urls and Cache-hit are fixed"
+  (Joep, 2026-08-11). The `::after` glyph needs a positioned ancestor and `sticky`
+  already is one, so dropping `relative` costs nothing. `seo-stats.html` had it
+  right; `_tool-template.html` did not, which is how it spread — still present in
+  gsd-campaigns, gsd-tag-toppers, gsd-check, shop-campaigns, mc-id-finder and
+  seo-titles.
+- **A row that expands: one open at a time.** For a per-row breakdown (Bot Hits'
+  bot-family table), make the `<tr>` clickable, add a `▸` caret that rotates on
+  `.is-open`, and insert a sibling `<tr class="…-detail"><td colspan="N">` with the
+  charts. Close whatever was open first **and destroy its Chart.js instances** —
+  three charts per row times 25 rows is 75 live charts that all redraw on a resize.
+  Fetch the panel's data from the existing list endpoint with the row's own filter
+  value added (`/summary?bot_family=X`), passing the page's current filters along so
+  the panel and the page agree about the period. After the await, check the canvas
+  still exists: the row may have been closed or re-rendered while the request was in
+  flight.
+- **A category column of labels is centred** (`text-align: center`) — an outlined
+  `.lbl` is a block with its own edges, so left-aligning it against a numeric
+  column's right-aligned digits leaves a ragged gutter between them.
 - All of this CSS is in the template's `<style>` block — keep it as-is.
 - **Loading state = skeleton rows, not a spinner.** While a table fetches, draw
   shimmering placeholder rows so it reads as "the table is being drawn". The point
@@ -201,6 +223,26 @@ height: 420px }`):
   `0 0 0 1px rgba(255,255,255,0.45)` ring so a dark series colour stays visible,
   `.ct-label` nowrap, date heading with the weekday — `2026-07-24 (vrijdag)`.
 
+**A swatch legend goes ABOVE the plot, centred, and is clickable** (Bot Hits' Hits
+per dag, 2026-08-11) — `display:flex; flex-wrap:wrap; justify-content:center` in a
+`.daily-legend`, one `.leg-item` per series. Click toggles that band via
+`chart.setDatasetVisibility(i, …)` + `chart.update()`, never a refetch. The off state
+dims the item, strikes the label through, and makes the swatch **hollow**
+(`box-shadow: inset 0 0 0 2px currentColor`) — the colour has to stay legible or you
+cannot tell which band you are switching back on. Keep the hidden set OUTSIDE the
+draw function and keyed per split dimension, so a Refresh or a different split does
+not silently restore what the user switched off, and re-apply it as `hidden:` on the
+dataset when redrawing.
+
+**Stacked bands are SOLID, and the alpha ladder does not apply to them.** The ladder
+above exists for *overlapping* line-areas, where the wash sits under its own line.
+In a stacked chart the fill IS the series: at five series the ladder's `'14'` (7,8%
+opacity) turned Bot Hits' 96%-of-volume band into a pale field that read as grey
+(Joep, 2026-08-11). Stacked → full colour, separated by a **2px white border**, which
+is also the dataviz rule for adjacent fills. Consequence for the tooltip: its dot
+must read `dataset.backgroundColor`, not `borderColor` — the border is the white
+separator there.
+
 **Summary tiles double as the legend and the toggles.** One `selected` Set behind
 the tiles and the chart. A tile carries the series colour (a sparkline in SEO
 stats; a 7px `.tile-dot` next to the label where tiles are too narrow for one),
@@ -223,6 +265,38 @@ bails out: a newer load owns it then. The tiles shimmer on the same fetch (label
 and on/off border stay, only the value goes to a `.skel-bar`), because the tiles
 are the range's totals and stale numbers above a loading chart look current.
 
+**The first three colours of any table or chart are lichtblauw, roze, lichtgroen**
+(Joep, 2026-08-11) — the brand base hues, i.e. `primary-500`, `secondary-500`,
+`accent-500` of the Kleursysteem base row:
+
+| # | naam | hex | waar het al zo is |
+|---|---|---|---|
+| 1 | lichtblauw | `#1f99c4` | `METRICS.seo_visits`, `URLTYPE_STYLE['R-url']`, Bot Hits "in pa.urls" |
+| 2 | roze | `#be4693` | `METRICS.seo_omzet`, Bot Hits "niet in pa.urls" |
+| 3 | lichtgroen | `#91c34e` | `METRICS.gsaas_visits` |
+
+Measured as a trio (dataviz validator, light, surface `#fff`): CVD-min **7,7 ΔE**
+(deutan, lichtblauw↔roze), normal-min **24,1**. The 7,7 sits in the 6–8 band that
+is legal ONLY with secondary encoding, so a chart using these **must** carry a
+legend or a table beside it — which every chart here does anyway.
+
+Two caveats that are not optional:
+
+* **Three is where this rule stops.** Beyond three series, go back to the search
+  described below — `accent-500` (lichtgroen) is exactly the hue that creates this
+  palette's worst pairs in a larger set, so "just keep going down the base row" is
+  what the 2026-07-29 measurement already disproved (10 of 45 pairs failed).
+* **A two-series chart takes the first two, not one plus grey.** Grey is reserved
+  for "everything else"/unlisted, so using it as one half of a binary split reads
+  as if that half were a residual.
+* **The first colour belongs on the biggest series, not on slot 1 of a shared
+  map.** Bot Hits inherited its URL-type hues 1-on-1 from `dashDonutUrlType`, which
+  put lichtblauw on R-url — 2 hits on a day with 2,1M PLP hits, so the chart's
+  first-choice colour never appeared on screen (Joep, 2026-08-11). PLP and R-url
+  were swapped there. Consequence to keep in mind: a hue that means one thing in
+  tool A now means another in tool B, so if you swap, either swap in both or record
+  the divergence where both maps live.
+
 **Colours: run the validator, never eyeball ΔE.** The palette is SEO stats'
 (`seo-stats.html` — the Kleursysteem base row with the bordeaux/navy departures).
 A page that needs fewer than ten series picks a SUBSET, and *which* one it drops is
@@ -233,6 +307,85 @@ that a computed one clears by 10 ΔE. Use the `dataviz` skill's
 `scripts/validate_palette.js`, light mode, surface `#fff`, and check **both**
 `--pairs all` (every line is on screen at once) and the default adjacent run.
 Record the measured numbers next to `METRICS` so the next change has a baseline.
+
+### Stat tiles — the GSD Budgets card
+
+The canonical KPI tile is `.stat-card` as defined in `gsd-budgets.html`, and it is
+**value-first**: the number on top in brand purple, the label under it, an optional
+`.detail` line under that. No border — a 12px radius plus a soft purple shadow
+(`0 4px 16px rgba(94,74,144,0.14)`) is what separates it from the page.
+
+```css
+.stat-card { border-radius: 12px; background: #fff; color: #2d3436; padding: 1.25rem;
+             text-align: center; min-width: 140px;
+             box-shadow: 0 4px 16px rgba(94,74,144,0.14); }
+.stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; }
+.stat-card .label  { font-size: 0.85rem; color: #636e72; }
+.stat-card .detail { font-size: 0.75rem; color: #999; margin-top: 0.25rem; }
+```
+
+```html
+<div class="stat-card"><h3>92.897.176</h3><div class="label">Bot-hits totaal</div>
+  <div class="detail">2026-02-14 t/m 2026-03-16</div></div>
+```
+
+Three tiles sit in `d-flex flex-wrap gap-3 justify-content-center`; from about five
+onwards use a grid (`repeat(auto-fit, minmax(170px, 1fr))`) so the last row is as
+wide as the others instead of centred under them. Do **not** put the label above the
+value in a small grey uppercase line — that was Bot Hits' own `.tile` variant and it
+buried the number, which is the tile's whole point.
+
+Note the collision: **SEO stats also has a `.stat-card`, but that is the chart's
+legend-and-toggle tile** (sparkline, `.metric-on`/`.metric-off` border) — same class
+name, different job. A page that needs both must rename one.
+
+### Donut / part-to-whole — the SEO stats ring
+
+`dashDonutVisits` / `dashDonutRevenue` / `dashDonutUrlType` in `seo-stats.html` are
+the reference. The anatomy:
+
+- **`cutout: '68%'`** with the totals in the hole via an absolutely positioned
+  `.donut-center` (`.dc-total` big + `.dc-cap` small uppercase caption).
+- **Segments get air**: `borderColor:'#fff'`, `borderWidth:2`, `spacing:2`,
+  `borderRadius:6`, `hoverOffset:10`.
+- **Chart.js' legend is OFF, and so is a legend row of your own** — the segments
+  carry **direct labels with leader lines** instead (Bot Hits' URL-type ring,
+  2026-08-11): `naam 31,8%` outside the arc, a 1,25px leader in the segment's own
+  colour, and a declutter pass that pushes labels 13px apart per side so a 0,2%
+  slice still gets a readable line. A legend can *name* a 0,1% share but it cannot
+  *point at it*; direct labels do both, which also satisfies "identity is never
+  colour-alone" without a second block of chrome. Two details that bite: reserve
+  `layout.padding` left/right (~66px) or the labels fall outside the canvas and are
+  silently clipped, and never print `0%` for a segment that has hits — render
+  `<0,1%`, because `0%` reads as empty.
+- **Its own DOM tooltip (`.donut-tip`), not the canvas one.** Chart.js paints its
+  tooltip INSIDE the canvas while `.donut-center` is an absolute layer on top, so the
+  canvas tooltip renders *under* the total. Hence an external node in
+  `.donut-wrap` with a higher z-index; flip it below the caret when above would clip.
+
+Reach for the ring only for a real part-to-whole with few, well-separated slices.
+For a distribution where two of the parts differ by ~10x, the dataviz skill sends you
+to a 100% stacked bar instead (that is why Dagoverzicht's device split is a bar).
+
+### Hover block — the dark panel is `.chart-tooltip`
+
+Every chart's own tooltip is off (`tooltip: { enabled: false, external: … }`) and
+replaced by the dark panel from `seo-stats.html`: `#242628`, 10px radius,
+`.ct-title` (date **with weekday**, `2026-03-10 (dinsdag)`), an optional `.ct-sub`
+caption, then a `.ct-row` per series with `.ct-dot` / `.ct-label` / `.ct-val`. The
+dot carries a `0 0 0 1px rgba(255,255,255,0.45)` ring so a dark series colour stays
+visible on the dark panel.
+
+On a **stacked** chart, add a total row (top border, `rgba(255,255,255,0.14)`) —
+when you hover a stack the sum is the thing you are asking for, and Chart.js cannot
+produce it. Sort the rows by value descending and drop the zero series; the legend
+order is for identity, the tooltip order is for reading.
+
+**Each row carries its share too**, in muted ink after the value (`1.191.326 ·
+58%`). Two rules: the denominator is the **hovered point's** total, not the
+period's — you are pointing at one day — and a series that the user switched off is
+out of that denominator as well, or the percentages add up to something not on
+screen. Never render `0%` for a non-zero value; use `<0,1%`.
 
 ## Buttons
 
@@ -247,6 +400,13 @@ inline the hexes.
 | Refresh | `btn btn-outline-purple` + `↻` glyph | purple outline **with arrow icon**, fills purple with white text on hover | usually right (`ms-auto`) |
 | Destructive (Stop / Remove / Cancel) | `btn btn-outline-red` | **red outline**, fills red on hover — *only while available* | — |
 | Not clickable / unavailable | add `disabled` | **grey outline** (`#6c757d`) — always, even for red buttons | — |
+
+**In a filter card the buttons go under the filters, bottom-right** — not in a
+column beside them (Bot Hits, 2026-08-11). A filter row is a set of equal columns;
+hanging Reset/Toepassen in the last one makes that column mean something different
+from its five neighbours and ties the button position to whatever field happens to
+sit above it. `<div class="d-flex justify-content-end gap-2 mt-3">` after the
+`.row`, secondary left of primary.
 
 **Refresh in a card header needs NO override — an inline `background:#5e4a90` on a
 `.card-header` is dead CSS (2026-07-31).** `style.css` has
@@ -366,6 +526,23 @@ readable as a fill with dark text but **not** as border-and-text on white (use `
 same hue, enough contrast), and `.badge` itself sets `color:#fff`, so your `.lbl-*` rule
 must load after Bootstrap — a page `<style>` block does.
 
+**Category labels in a table column are UPPERCASE and outlined** (Bot Hits' Soort
+column, 2026-08-11) — same form as OOS / MANUAL, with the hue as the *text* colour
+and `currentColor` as the border:
+
+```css
+.lbl { background: transparent; font-weight: 700; border: 1px solid currentColor;
+       text-transform: uppercase; letter-spacing: .03em; font-size: 0.7rem;
+       padding: 0.2em 0.55em; border-radius: 0.375rem; display: inline-block; }
+```
+
+Going outlined has a knock-on effect worth knowing: a *filled* badge can carry a
+light hue (with dark text on it), an outlined one cannot — light-on-white is
+unreadable. So a chart hue that doubles as a label needs to be mid-to-dark. That
+constraint replaced a luminance-based `textOn()` helper in Bot Hits: picking the
+readable text colour per background works, but keeping the label palette dark is one
+rule instead of a function.
+
 ## Info tooltips — the "i" button
 
 For a "what is this?" hint next to a header or field, use the inline
@@ -395,6 +572,12 @@ blue) with this per-page CSS:
 .nav-tabs .nav-link.active { color:#3a3a3a; font-weight:bold; }
 ```
 
+**Not purple links with a dark active state.** Bot Hits had
+`.nav-link { color:#5e4a90 }` + `.nav-link.active { color:#212529 }`, which inverts
+the emphasis: the four you can click glow brand purple and the one you are on goes
+quiet. Bootstrap's active tab already carries the white pane and the border; the
+label only has to stay dark and bold in all three states (2026-08-11).
+
 ## Form controls — inputs, date pickers, checkboxes, radios, selects
 
 Plain Bootstrap 5.3 — **no custom skinning**, so the brand theme in style.css
@@ -405,7 +588,8 @@ carries through automatically:
 - **Date pickers**: markup is always a native
   `<input type="date" class="form-control">` (or `form-control-sm`, ~160px wide),
   with **flatpickr layered on top** for the calendar itself — that is what SEO
-  stats, SEO titles, GSD Campaigns, GSD Budgets and Shop-campaigns all render, and
+  stats, SEO titles, GSD Campaigns, GSD Budgets, Shop-campaigns and Bot Hits all
+  render, and
   it is the canonical look (purple month/weekday headers, purple selected day).
   This doc previously said "no JS date library anywhere", which was already untrue
   when item 18 asked for GSD Budgets' pickers to "match the blueprint" — what was
@@ -606,6 +790,11 @@ Every page ends with:
     <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
 </footer>
 ```
+
+**Every page** — a tool without it ends in whitespace and reads as if the page
+failed to finish loading. Bot Hits had none until 2026-08-11. Place it after the
+last `.container` and before the `<script>` tags, so it sits outside the content
+column and stays centred on the viewport.
 
 ## Deploy note
 
