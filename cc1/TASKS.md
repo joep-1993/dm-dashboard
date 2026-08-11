@@ -44,6 +44,18 @@ patronen staan in UI_BLUEPRINT, de twee bugs in LEARNINGS.
       facet-diepte-grafieken, de rij-hover van Bootstrap uitgezet op de detailrij (die
       pakt élke tbody-rij, ook een paneel zonder klikbare inhoud), en het pijltje voor
       "Nieuwe logs ophalen" eruit.
+- [x] **Punten 28-30 (derde ronde)**: de facet-diepte-grafiek was de laatste met de
+      standaard Chart.js-tooltip → nu hetzelfde donkere blok en dezelfde chrome.
+      Reset-knop in Filters weg (Toepassen blijft: de checkbox-lijsten laden niet
+      automatisch). Shop Campaigns' presets eindigen op vandaag − 3, en de begin-range
+      bij het openen is meegetrokken zodat de pagina opent op wat "30d" geeft.
+- [ ] **"All"-preset in Shop Campaigns eindigt nog op vandaag.** Zelfde staart van
+      onvolledige dagen als de andere presets hadden, maar "alles" dat op −3 stopt is
+      ook vreemd. Joeps keuze.
+- [ ] **`ymd()` in seo-stats.html gebruikt `toISOString()`.** Dat schuift in CEST een
+      dag terug bij middernacht. Latent, want flatpickr krijgt daar Date-objecten, maar
+      het is dezelfde off-by-one die mij in een testformatter beet. Shop-campaigns doet
+      het goed met lokale datumdelen.
 - [ ] **Visueel nog niet beoordeeld.** `node --check` is groen en de endpoints geven de
       juiste data, maar er is hier geen browser: of de donut-labels binnen de kaart
       blijven en of het uitklappaneel op een smal venster niet knelt, moet iemand met

@@ -1,6 +1,24 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## `toISOString()` als datum-formatter schuift in CEST een dag terug (2026-08-11)
+
+Bij het narekenen van Shop-campaigns' nieuwe presets ("7d op 11 augustus moet 2 t/m 8
+augustus geven") kwam mijn eigen test uit op 1 t/m 7. De app was goed, mijn formatter niet.
+
+- `new Date(2026, 7, 8)` is **lokale** middernacht. In CEST (UTC+2) is dat 7 augustus
+  22:00 UTC, dus `toISOString().slice(0,10)` levert `2026-08-07`.
+- Bouw een `YYYY-MM-DD` daarom altijd uit `getFullYear()` / `getMonth()+1` /
+  `getDate()`. Shop-campaigns' `ymd()` doet dat; **`seo-stats.html` gebruikt
+  `toISOString()`** en heeft dus dezelfde val liggen — daar valt het niet op omdat
+  flatpickr Date-objecten krijgt in plaats van strings.
+- `bothits.html:shiftDays()` had er al een comment over ("avoids the UTC drift
+  toISOString would introduce"). Die waarschuwing stond dus in de codebase en ik liep er
+  alsnog in — vandaar nu ook in UI_BLUEPRINT bij de datumpickers.
+- **Les: reken een datumverwachting na met de formatter van de pagina zelf**, niet met
+  een die je in de test even opschrijft. Anders test je twee dingen tegelijk en weet je
+  bij een verschil niet welke van de twee fout is.
+
 ## Een specifiekere `position` sloopt `position: sticky` — en dat propageerde uit het template (2026-08-11)
 
 Joep: "de kolomheaders in Per bot-familie allemaal vast zetten, nu zijn alleen Aandeel,

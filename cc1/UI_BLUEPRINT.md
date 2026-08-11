@@ -651,6 +651,20 @@ carries through automatically:
   4. A **generation token** (`loadToken`) — two loads can now be in flight at once,
      so every async step that writes shared state checks the token it started with
      and bails. Without it a slow older range paints over a newer one.
+- **A preset ends on today − 3, not on today** (Joep, 2026-08-11, Shop-campaigns).
+  Clicking 7d on 11 August gives **2 t/m 8 August**. The last three days have not
+  settled — conversions and revenue land late — so a range that runs to today sags on
+  the right and reads as a decline that did not happen. Two things go with it: the
+  date inputs stay unbounded (the lag is a property of the shortcut, not of the tool),
+  and **the range the page opens on must use the same end date**, or the page opens on
+  one range and its own 30d button produces a different one without anything having
+  changed.
+- **`ymd()` must build the string from local date parts, never `toISOString()`.**
+  `toISOString` converts to UTC, so local midnight in CEST becomes 22:00 the previous
+  day and the whole range shifts back one day. Shop-campaigns does it right
+  (`getFullYear` / `getMonth` / `getDate`); **`seo-stats.html` still uses
+  `toISOString`** — latent, because flatpickr there receives Date objects rather than
+  strings, but it is the same off-by-one waiting to happen.
 - **Preset group (7d / 14d / 30d / 90d / All)**: `.btn-preset` needs a
   `min-width: 3rem`. With padding alone the cell width follows the label, so "7d"
   and "All" sit in ~39px cells between ~47px ones — each label is dead-centre in
