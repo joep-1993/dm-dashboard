@@ -6,35 +6,42 @@
     <title>Bothits</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
+    <!-- flatpickr ná style.css, per UI_BLUEPRINT "Form controls": de datumvelden
+         blijven native inputs, dit legt alleen de paarse kalender erover. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         /* ---- Chart palette -------------------------------------------------
-           Validated categorical set (adjacent-pair CVD ΔE 9.1, normal-vision
-           19.6 on a light surface). Slots are assigned to a FIXED entity map
-           below, never by rank — filtering out a bot must not repaint the
-           ones that remain. Three slots sit under 3:1 contrast, so every
-           chart ships a legend AND the matching table underneath it. */
-        .viz-root {
-            --surface-1: #ffffff;
-            --series-1: #2a78d6;  /* blue    */
-            --series-2: #eb6834;  /* orange  */
-            --series-3: #1baf7a;  /* aqua    */
-            --series-4: #eda100;  /* yellow  */
-            --series-5: #e87ba4;  /* magenta */
-            --series-6: #008300;  /* green   */
-            --series-7: #4a3aa7;  /* violet  */
-            --series-8: #e34948;  /* red     */
-            --series-other: #9aa0a6;
-        }
+           Staat sinds 2026-08-11 in JS, niet meer hier: de hues komen nu uit SEO
+           Stats (URLTYPE_STYLE + METRICS) zodat één kleur in beide tools hetzelfde
+           betekent, en die twee zijn daar ook JS-constanten. Zie `PAL` in het script
+           onderaan. De eigenschap die de oude slot-set had blijft gelden: kleur hangt
+           aan de ENTITEIT, nooit aan de rangorde, en elke grafiek draagt een legenda
+           plus de tabel eronder omdat een paar hues onder 3:1 contrast zitten. */
         .chart-box { position: relative; height: 340px; }
         .chart-box-sm { position: relative; height: 260px; }
 
-        /* ---- Stat tiles ---- */
-        .tile-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
-        .tile { background: #fff; border: 1px solid #eee; border-radius: 6px; padding: 0.8rem 1rem; }
-        .tile .tile-label { font-size: 0.78rem; color: #636e72; text-transform: uppercase; letter-spacing: 0.03em; }
-        .tile .tile-value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; margin-top: 0.15rem; }
-        .tile .tile-sub { font-size: 0.78rem; color: #636e72; }
+        /* ---- Stat tiles — de GSD Budgets-vorm (Joep, 2026-08-11) --------------
+           Waren een grid van 1px-omlijnde blokjes met een grijs uppercase label
+           erboven. Nu de canonieke .stat-card: 12px radius, paarse schaduw, geen
+           border, waarde in brand-paars bóven het label. Wat afwijkt van GSD
+           Budgets is bewust: die heeft drie tegels in een flex-row met
+           justify-content-center, hier zijn het zes en dan laat een grid ze even
+           breed worden in plaats van de laatste rij te centreren. */
+        .tile-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; }
+        .stat-card {
+            border-radius: 12px;
+            background: white;
+            color: #2d3436;
+            padding: 1.25rem;
+            text-align: center;
+            min-width: 140px;
+            box-shadow: 0 4px 16px rgba(94, 74, 144, 0.14);
+        }
+        .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; }
+        .stat-card .label { font-size: 0.85rem; color: #636e72; }
+        .stat-card .detail { font-size: 0.75rem; color: #999; margin-top: 0.25rem; }
 
         /* ---- Standard table look ---- */
         .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; max-height: 620px; }
@@ -45,7 +52,13 @@
             padding: 6px 14px; font-size: 1rem;
         }
         .tool-table td { vertical-align: middle; }
-        .tool-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+        /* GEEN position:relative hier. De basisregel hierboven zet position:sticky,
+           en een specifiekere position overschrijft dat — waardoor precies de
+           sorteerbare kolommen NIET meer bleven staan bij scrollen en alleen
+           Aandeel / In pa.urls / Cache-hit wel (Joep, 2026-08-11). Het ::after-
+           sorteerglyph heeft een positioned ancestor nodig, en sticky IS dat, dus
+           relative weglaten kost niets. seo-stats.html had dit al goed. */
+        .tool-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
         .tool-table th.sortable:hover { background: #e9ecef; }
         .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
@@ -53,6 +66,17 @@
         .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .url-cell { max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
         .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+        .col-mid { text-align: center; }
+        /* Uitklapbare rij in Per bot-familie: de rij zelf klikbaar, het paneel
+           eronder als één cel over de volle breedte. */
+        #botTable tbody tr.bot-row { cursor: pointer; }
+        #botTable tbody tr.bot-row:hover > td { background: #f5f4f9; }
+        #botTable tbody tr.bot-row.is-open > td { background: #f1edfa; font-weight: 600; }
+        .bot-detail > td { background: #fbfbfd !important; padding: 0.9rem 1rem !important; }
+        .bot-detail .donut-wrap { height: 250px; }
+        .bot-detail .chart-box-sm { height: 250px; }
+        .bot-caret { display: inline-block; width: 0.8rem; color: #8a8a96; transition: transform .12s ease; }
+        tr.is-open .bot-caret { transform: rotate(90deg); }
 
         .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
         .filter-row select, .filter-row input { font-size: 0.9rem; }
@@ -60,9 +84,88 @@
         /* nowrap keeps a long host like d36j60x09x33dn.cloudfront.net on the same
            line as its checkbox instead of wrapping underneath it. */
         .chk-list label { display: block; cursor: pointer; white-space: nowrap; }
-        .nav-tabs .nav-link { color: #5e4a90; }
-        .nav-tabs .nav-link.active { color: #212529; font-weight: 600; }
+        /* Tabs — de Canonicals-vorm uit UI_BLUEPRINT: donker + bold, niet paars.
+           Stond hier op #5e4a90 met een donkere active-state, waardoor de actieve
+           tab juist het minst opvallend was van de vijf. */
+        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
+        .nav-tabs .nav-link:hover { color: #1a1a1a; }
+        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
         .muted-note { font-size: 0.82rem; color: #636e72; }
+
+        /* Klikbare legenda boven de grafiek, gecentreerd (Joep, 2026-08-11). De
+           uit-stand dimt het item en maakt de swatch hol: de kleur blijft zichtbaar
+           (je moet weten welke lijn je terugzet) maar leest niet meer als "staat aan". */
+        .daily-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.25rem 1rem; }
+        .leg-item { cursor: pointer; user-select: none; white-space: nowrap;
+                    font-size: 0.82rem; color: #3a3a3a; padding: 1px 4px;
+                    border-radius: 4px; transition: opacity .12s ease; }
+        .leg-item:hover { background: #f5f4f9; }
+        .leg-item.leg-off { opacity: 0.45; text-decoration: line-through; }
+        .leg-item.leg-off .swatch { background: transparent !important; box-shadow: inset 0 0 0 2px currentColor; }
+
+        /* Uitgelijnde labels in de Soort-kolom, zoals OOS/MANUAL in DMA Exclusions:
+           transparant met een 1px border in de eigen kleur, uppercase. Bootstrap's
+           .badge zet color:#fff, dus deze regels moeten ná Bootstrap laden — een
+           page <style>-blok doet dat. */
+        .lbl { background: transparent; font-weight: 700; border: 1px solid currentColor;
+               text-transform: uppercase; letter-spacing: .03em; font-size: 0.7rem;
+               padding: 0.2em 0.55em; border-radius: 0.375rem; display: inline-block; }
+
+        /* Hover-blok van de grafieken — zelfde donkere paneel als SEO Stats. */
+        .chart-tooltip {
+            position: fixed; z-index: 20; pointer-events: none; opacity: 0;
+            transition: opacity .12s ease; background: #242628; color: #fff;
+            border-radius: 10px; padding: 9px 12px; font-size: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.28); min-width: 160px;
+        }
+        .chart-tooltip.is-on { opacity: 1; }
+        .chart-tooltip .ct-title { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+        .chart-tooltip .ct-sub { font-size: 10px; font-weight: 600; color: #a9a9b5;
+                                 text-transform: uppercase; letter-spacing: .03em; margin-bottom: 8px; }
+        .chart-tooltip .ct-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+        .chart-tooltip .ct-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
+                                 box-shadow: 0 0 0 1px rgba(255,255,255,0.45); }
+        .chart-tooltip .ct-label { flex: 1 1 auto; color: #b9b9c4; white-space: nowrap; }
+        .chart-tooltip .ct-val { font-weight: 600; margin-left: 16px; white-space: nowrap; }
+
+        /* Donut — de SEO Stats-layout: ring met de totalen in het gat, en een eigen
+           DOM-tooltip erboven omdat Chart.js zijn tooltip IN de canvas tekent en
+           .donut-center daar als absolute laag bovenop ligt. */
+        /* Hoger dan de 260px van .chart-box-sm: met directe labels rond de ring
+           moeten zes regels naast elkaar passen zonder op elkaar te vallen. */
+        .donut-wrap { position: relative; height: 320px; }
+        .donut-center { position: absolute; inset: 0; display: flex; flex-direction: column;
+                        align-items: center; justify-content: center; pointer-events: none; z-index: 2; }
+        .donut-center .dc-total { font-size: 1.35rem; font-weight: 700; color: #2d2a3a; line-height: 1.1; }
+        .donut-center .dc-cap { font-size: 0.68rem; text-transform: uppercase; letter-spacing: .04em;
+                                color: #8a8a96; margin-top: 2px; }
+        .donut-tip { position: absolute; z-index: 3; pointer-events: none; opacity: 0;
+                     transition: opacity .12s ease; background: #242628; color: #fff;
+                     border-radius: 8px; padding: 6px 10px; font-size: 12px;
+                     display: flex; align-items: center; gap: 7px; white-space: nowrap;
+                     box-shadow: 0 8px 22px rgba(0,0,0,0.26); }
+        .donut-tip.is-on { opacity: 1; }
+        .donut-tip .dt-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+        .donut-tip .dt-label { color: #f0f0f3; font-weight: 600; }
+
+        /* flatpickr, paars — het blok uit gsd-budgets.html / seo-stats.html. */
+        .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
+        .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
+        .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+        .flatpickr-month, .flatpickr-current-month, .flatpickr-weekday { color: #5e4a90 !important; fill: #5e4a90 !important; }
+        .flatpickr-monthDropdown-months, .numInput { color: #5e4a90 !important; font-weight: 600; }
+        .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #5e4a90 !important; }
+        .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
+        .flatpickr-day.today { border-color: #5e4a90; }
+        .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
+        /* Zelfde vorm als de datumvelden ernaast, zoals in SEO Stats. */
+        #startDate, #endDate {
+            border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
+            box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+        #startDate:hover, #endDate:hover { border-color: #b9b0d8; }
+        #startDate:focus, #endDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
     </style>
 </head>
 <body>
@@ -126,13 +229,29 @@
         </div>
     </nav>
 
-    <div class="container-fluid mt-4 pb-5 viz-root" style="max-width: 1500px;">
+    <div class="container-fluid mt-4 pb-5" style="max-width: 1500px;">
+
+        <!-- ============================ TILES ============================ -->
+        <div class="tile-row mb-3" id="tiles"></div>
 
         <!-- ============================ FILTERS ============================ -->
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Filters</h5>
-                <span id="coverageNote" class="muted-note"></span>
+                <!-- Het ophalen staat naast de dekkingstekst (Joep, 2026-08-11): die tekst
+                     zegt tot welke datum er data is, en dit is de knop die dat verandert —
+                     dus vraag en antwoord op één regel. Refresh blijft in Hits per dag, want
+                     dat hertekent alleen de grafiek. Input en knop blijven bij elkaar: los
+                     van elkaar is "3" een getal zonder betekenis. -->
+                <div class="d-flex gap-2 align-items-center ms-auto">
+                    <span id="coverageNote" class="muted-note"></span>
+                    <label class="muted-note mb-0" for="s3Days">Dagen ophalen</label>
+                    <input type="number" class="form-control form-control-sm" id="s3Days"
+                           value="3" min="1" max="45" style="width:70px;"
+                           title="Aantal volledige dagen terug vanaf gisteren. Vandaag valt er altijd buiten (nog geen 24 uur). Max 45: de bucket bewaart ~42 dagen.">
+                    <button class="btn btn-sm btn-outline-orange" id="s3FetchBtn"
+                            title="Download nieuwe CloudFront-logs uit S3 en verwerk ze meteen">⤓ Nieuwe logs ophalen</button>
+                </div>
             </div>
             <div class="card-body">
                 <!-- align-items-start, not -end: the checkbox lists are much taller than
@@ -159,27 +278,20 @@
                         <label class="form-label mb-1">URL-type</label>
                         <div class="chk-list" id="typeFilter"><span class="text-muted">laden…</span></div>
                     </div>
-                    <div class="col-md-2 d-flex flex-column gap-3">
-                        <div>
-                            <label class="form-label mb-1">In pa.urls</label>
-                            <select class="form-select form-select-sm" id="knownFilter">
-                                <option value="">Alles</option>
-                                <option value="known">Alleen bekende URL's</option>
-                                <option value="unknown">Alleen onbekende URL's</option>
-                            </select>
-                        </div>
-                        <div class="d-flex justify-content-end gap-2">
-                            <button class="btn btn-sm btn-outline-purple" id="resetBtn">Reset</button>
-                            <button class="btn btn-sm btn-run" id="applyBtn">Toepassen</button>
-                        </div>
-                    </div>
                 </div>
+                <!-- Reset/Toepassen onder de filters, rechts uitgelijnd (Joep,
+                     2026-08-11). Ze stonden in de zesde kolom onder de "In pa.urls"-
+                     select; nu die weg is zou die kolom alleen nog knoppen dragen, en
+                     dan hoort de primaire actie onderaan rechts te staan zoals
+                     UI_BLUEPRINT voor elke sectie voorschrijft. -->
+                <div class="d-flex justify-content-end gap-2 mt-3">
+                    <button class="btn btn-sm btn-outline-purple" id="resetBtn">Reset</button>
+                    <button class="btn btn-sm btn-run" id="applyBtn">Toepassen</button>
+                </div>
+                <div id="s3Status" class="muted-note mt-3 d-none"></div>
                 <div id="partialWarn" class="alert alert-warning py-2 px-3 mt-3 mb-0 d-none" style="font-size:0.85rem;"></div>
             </div>
         </div>
-
-        <!-- ============================ TILES ============================ -->
-        <div class="tile-row mb-3" id="tiles"></div>
 
         <!-- ============================ TABS ============================ -->
         <ul class="nav nav-tabs mb-3" id="mainTabs" role="tablist">
@@ -205,6 +317,7 @@
                                 <option value="host">Domein</option>
                                 <option value="status_class">HTTP-status</option>
                                 <option value="is_known_url">Bekend / onbekend</option>
+                                <option value="verify_state">IP-verificatie</option>
                                 <option value="facet_depth">Facet-diepte</option>
                                 <option value="none">Totaal</option>
                             </select>
@@ -212,6 +325,7 @@
                         </div>
                     </div>
                     <div class="card-body">
+                        <div id="dailyLegend" class="daily-legend mb-2"></div>
                         <div class="chart-box"><canvas id="dailyChart"></canvas></div>
                     </div>
                 </div>
@@ -221,7 +335,10 @@
                         <div class="card h-100">
                             <div class="card-header"><h5 class="mb-0">URL-type</h5></div>
                             <div class="card-body">
-                                <div class="chart-box-sm"><canvas id="typeChart"></canvas></div>
+                                <div class="donut-wrap">
+                                    <canvas id="typeChart"></canvas>
+                                    <div class="donut-center" id="typeCenter"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -242,7 +359,7 @@
                             <table class="table table-hover tool-table" id="botTable">
                                 <thead><tr>
                                     <th class="sortable" data-k="bot_family">Bot-familie</th>
-                                    <th class="sortable" data-k="bot_class">Soort</th>
+                                    <th class="sortable col-mid" data-k="bot_class">Soort</th>
                                     <th class="sortable num" data-k="hits">Hits</th>
                                     <th class="num">Aandeel</th>
                                     <th class="sortable num" data-k="per_day">Per dag</th>
@@ -391,43 +508,166 @@
         </div>
     </div>
 
+    <footer class="text-center py-4">
+        <small class="text-muted">Digital Marketing tools by Joep van Schagen - 2026</small>
+    </footer>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     const API = '/api/bothits';
 
-    // ---- Fixed entity -> palette slot ------------------------------------
-    // Keyed on the entity, never on rank: filtering a bot out must not
-    // recolour the ones that stay. Anything not listed falls to "Other" grey,
-    // which also keeps the chart within the validated 8-hue set.
-    const CSS = getComputedStyle(document.querySelector('.viz-root') || document.body);
-    const SLOT = n => CSS.getPropertyValue('--series-' + n).trim() || '#888';
-    const OTHER = () => CSS.getPropertyValue('--series-other').trim() || '#9aa0a6';
-
-    const COLOR_MAPS = {
-        bot_class: { ai: 1, search: 2, 'seo-tool': 3, social: 4, monitoring: 5, other: 6 },
-        bot_family: { Googlebot: 1, OpenAI: 2, GoogleOther: 3, Apple: 4, 'Meta-AI': 5,
-                      Anthropic: 6, 'Google-AI': 7, Bing: 8 },
-        url_type: { product: 1, category_facet: 2, category: 3, sitemap: 4, home: 5,
-                    product_legacy: 6, robots: 7, other: 8 },
-        host: { 'beslist.nl': 1, 'beslist.be': 2, 'shopcaddy.de': 3, 'shop.beslist.nl': 4,
-                'shop.beslist.be': 5, 'shop.shopcaddy.de': 6 },
-        // Status is a reserved palette, not categorical slots: 2xx good,
-        // 3xx informational, 4xx warning, 5xx critical. Always label-bearing.
-        status_class: { '2xx': 6, '3xx': 1, '4xx': 4, '5xx': 8 },
-        is_known_url: { 'in pa.urls': 1, 'not in pa.urls': 2 },
+    // ---- Palet, gedeeld met SEO Stats ------------------------------------
+    // Eén kleur moet in beide tools hetzelfde betekenen, dus dit palet is geen
+    // eigen set meer maar een overname (Joep, 2026-08-11):
+    //
+    //   * de eerste vijf komen 1-op-1 uit `URLTYPE_STYLE` — het palet van
+    //     dashDonutUrlType in seo-stats.html;
+    //   * de rest uit `METRICS[*].color`, de kleuren van de metric-tiles
+    //     (.stat-card.metric-tile) daar.
+    //
+    // Hex-constanten in JS, net als in seo-stats.html, zodat de twee bestanden
+    // dezelfde waarden op dezelfde manier opschrijven en een diff ze naast elkaar
+    // legt. Er zit geen rood in dit palet; 5xx pakt daarom bordeaux (zie hieronder).
+    const PAL = {
+        // URLTYPE_STYLE (dashDonutUrlType)
+        rurl:      '#1f99c4',   // R-url        — ook METRICS.seo_visits (primary-500)
+        curl:      '#7BAB3A',   // C-url
+        plp:       '#e8a21e',   // PLP
+        browse:    '#AA3A95',   // Browse
+        overig:    '#9a9aa6',   // Overig
+        // De eerste drie van het merkpalet — de reeks die elke tabel/grafiek als
+        // eerste pakt. Dit zijn primary-500 / secondary-500 / accent-500 uit de
+        // Kleursysteem base-rij, dezelfde hues die seo-stats.html op seo_visits,
+        // seo_omzet en gsaas_visits zet.
+        lichtblauw: '#1f99c4',  // == rurl
+        roze:       '#be4693',  // == secondary
+        lichtgroen: '#91c34e',  // == accent
+        // METRICS[*].color (stat-card metric-tile)
+        violet:    '#8459cf',   // dma_visits    (violet-500)
+        accent:    '#91c34e',   // gsaas_visits  (accent-500)
+        secondary: '#be4693',   // seo_omzet     (secondary-500)
+        bordeaux:  '#722F37',   // dma_omzet
+        navy:      '#001F3F',   // gsaas_omzet
+        cta:       '#f37632',   // seo_ctr       (cta-500)
+        green:     '#26a660',   // seo_bounce    (green-500)
+        turquoise: '#107063',   // total_visits
+        yellow:    '#936305',   // total_omzet   (yellow-800)
     };
+    const OTHER = () => PAL.overig;
+
+    // Kleur hangt aan de ENTITEIT, nooit aan de rangorde: een bot wegfilteren mag
+    // de overblijvers niet herverven. Wat niet in de map staat wordt grijs.
+    const COLOR_MAPS = {
+        // Vier van de vijf donut-hues vallen hier op hun eigen begrip: /r/ is de
+        // R-url, /products/…/c/… de C-url, /p/ de PLP en /products/ zonder facet de
+        // Browse-pagina. Dat is precies dezelfde indeling als _urltype_case() in
+        // seo_stats_service.py, alleen met de interne namen van de logparser.
+        // De legacy-vormen krijgen de donkere tweeling van hun moderne broer
+        // (product_legacy = donker amber, category_legacy = donker magenta), zodat de
+        // verwantschap zichtbaar is zonder dat het dezelfde band lijkt.
+        // De zes buckets die de querylaag teruggeeft (URLTYPE_BUCKETS in
+        // bothits_service.py). Homepage bestaat niet in dashDonutUrlType en pakt
+        // violet — gemeten ΔE 10,0 (CVD) / 17,2 (normaal) tegen de rest.
+        //
+        // PLP en R-url zijn OMGEDRAAID t.o.v. dashDonutUrlType (Joep, 2026-08-11):
+        // lichtblauw hoort als eerste keuzekleur zichtbaar te zijn, en in deze tool
+        // is R-url verwaarloosbaar (2 hits op een dag met 2,1M PLP-hits) terwijl PLP
+        // het grootste segment is. Met de kleuren op hun SEO Stats-plek kwam
+        // lichtblauw dus nooit in beeld. Omdraaien in plaats van vervangen houdt de
+        // set exact de zes gevalideerde hues, zonder dubbele kleur.
+        //
+        // Prijs hiervan, bewust betaald: Bot Hits en SEO Stats zijn het nu ONEENS
+        // over PLP (hier lichtblauw, daar amber) en R-url (hier amber, daar
+        // lichtblauw). De andere vier vallen nog wél samen. Wil je ze weer gelijk,
+        // dan moet dezelfde wissel in URLTYPE_STYLE van seo-stats.html.
+        url_type: {
+            PLP: PAL.lichtblauw, 'C-url': PAL.curl, 'R-url': PAL.plp,
+            'Cat-url': PAL.browse, Homepage: PAL.violet, Overige: PAL.overig,
+        },
+        // Deze drie dimensies hebben geen tegenhanger in de donut, dus ze vullen aan
+        // uit de metric-tiles. WELKE hues, dat is een zoekopdracht en geen voorkeur
+        // (UI_BLUEPRINT): de subset bepaalt welke paren naast elkaar komen. Alle
+        // combinaties uit het palet zijn doorgerekend met de validator van de
+        // dataviz-skill; de gekozen sets staan hieronder met hun gemeten vloeren.
+        // Een "logische" toewijzing haalde 4,9 ΔE, deze 8,0 — vandaar dat merkkleuren
+        // hier ondergeschikt zijn aan scheidbaarheid.
+        //
+        //   bot_class   (6)  CVD-min 10,0 ΔE   normaal-min 17,2
+        //   bot_family  (8)  CVD-min  8,0 ΔE   normaal-min 16,4  <- de ENIGE 8-set van
+        //                    1287 die beide vloeren haalt (CVD >= 8 en normaal >= 15)
+        //   host        (6)  CVD-min 10,0 ΔE   normaal-min 17,2
+        //
+        // Alle drie halen dus beide vloeren. Twee eerdere, "logischer" toewijzingen
+        // deden dat niet: merkkleuren voor de bots gaven 4,9 ΔE (accent-groen naast
+        // cta-oranje) en een set met twee groenen bleef op 13,4 normaal-zicht steken.
+        //
+        // bot_class draagt ook het label in de tabel; dat is nu outlined (.lbl), dus
+        // de hue is de TEKSTkleur en licht-op-wit zou onleesbaar zijn — vandaar geen
+        // accent-groen hier. `other` pakt geel en geen grijs: dit is
+        // een benoemde familie, en een grijs label leest als uitgeschakeld. Grijs
+        // blijft zo voorbehouden aan wat écht niet in de map staat (de fallback), wat
+        // "catch-all familie" en "onbekende entiteit" onderscheidbaar houdt.
+        bot_class: { ai: PAL.rurl, search: PAL.navy, 'seo-tool': PAL.violet,
+                     social: PAL.cta, monitoring: PAL.bordeaux, other: PAL.yellow },
+        bot_family: { Googlebot: PAL.rurl, OpenAI: PAL.green, Anthropic: PAL.plp,
+                      GoogleOther: PAL.turquoise, 'Google-AI': PAL.violet,
+                      Apple: PAL.navy, 'Meta-AI': PAL.yellow, Bing: PAL.bordeaux },
+        host: { 'beslist.nl': PAL.rurl, 'beslist.be': PAL.plp, 'shopcaddy.de': PAL.violet,
+                'shop.beslist.nl': PAL.navy, 'shop.beslist.be': PAL.yellow,
+                'shop.shopcaddy.de': PAL.bordeaux },
+        // Status is een semantisch palet, geen categorische slots: 2xx goed, 3xx
+        // informatief, 4xx waarschuwing, 5xx kritiek. Bordeaux is de donkerste warme
+        // hue die het gedeelde palet heeft — een echt rood zou van buiten SEO Stats
+        // moeten komen en dan betekent dezelfde kleur daar iets anders.
+        status_class: { '2xx': PAL.green, '3xx': PAL.rurl, '4xx': PAL.plp, '5xx': PAL.bordeaux },
+        // De eerste drie kleuren van het merkpalet, de reeks die elke tabel/grafiek
+        // als eerste pakt (Joep, 2026-08-11): lichtblauw, roze, lichtgroen. Hier
+        // zijn er twee series nodig, dus lichtblauw + roze. Gemeten met de
+        // dataviz-validator: ΔE 7,7 (deutan) / 25,7 (normaal) — dat eerste zit in de
+        // 6-8-band die alleen mag mét secundaire encoding, en die is er: beide
+        // grafieken dragen een legenda én de tabel eronder.
+        is_known_url: { 'in pa.urls': PAL.lichtblauw, 'not in pa.urls': PAL.roze },
+        // IP-verificatie: groen = IP zit in de gepubliceerde range van de operator,
+        // bordeaux = claimt een operator mét lijst maar zit erbuiten (de tripwire),
+        // grijs = geen lijst om tegen te toetsen (Meta, ByteDance, other-bot),
+        // navy = lijsten waren niet op te halen of de rij is van vóór 11-08-2026.
+        verify_state: { verified: PAL.curl, failed: PAL.bordeaux,
+                        unverifiable: PAL.overig, unchecked: PAL.navy },
+    };
+
+    // Facet-diepte is ordinaal, niet categorisch. Vaste reeks op index = diepte, dus
+    // 0 (categoriepagina zonder facet) houdt zijn eigen kleur in plaats van grijs te
+    // worden — het is de grootste legitieme bak, geen restpost.
+    const DEPTH_RAMP = [PAL.rurl, PAL.curl, PAL.plp, PAL.browse, PAL.violet,
+                        PAL.turquoise, PAL.bordeaux, PAL.navy, PAL.yellow];
 
     function colorFor(groupBy, key) {
         const m = COLOR_MAPS[groupBy];
         if (groupBy === 'facet_depth') {
             const n = parseInt(key, 10);
-            return isNaN(n) || n > 8 ? OTHER() : SLOT(Math.max(1, n === 0 ? 1 : n));
+            return isNaN(n) || n > 8 ? OTHER() : DEPTH_RAMP[n];
         }
-        if (!m) return SLOT(1);
-        return m[key] ? SLOT(m[key]) : OTHER();
+        if (!m) return PAL.rurl;
+        return m[key] || OTHER();
     }
 
     const fmt = n => (n == null ? '—' : Number(n).toLocaleString('nl-NL'));
+    // Aandeel als tekst; een waarde > 0 mag nooit als "0%" lezen.
+    function pctOf(v, total) {
+        if (!total) return '—';
+        const share = Number(v) / total * 100;
+        return share > 0 && share < 0.05
+            ? '<0,1%'
+            : share.toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + '%';
+    }
+    const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    // Weekdag bij de datum in het hover-blok, zoals SEO Stats: "2026-03-10 (dinsdag)".
+    function weekdayLongOf(iso) {
+        if (!iso) return '';
+        const [y, m, d] = iso.split('-').map(Number);
+        return new Date(y, m - 1, d).toLocaleDateString('nl-NL', { weekday: 'long' });
+    }
     const pct = (a, b) => (!b ? '—' : (a / b * 100).toFixed(1) + '%');
     function fmtBytes(b) {
         if (!b) return '—';
@@ -455,8 +695,11 @@
         if (h.length && h.length < (META?.hosts?.length || 99)) p.set('host', h.join(','));
         if (c.length && c.length < Object.keys(classCounts()).length) p.set('bot_class', c.join(','));
         if (t.length && t.length < (META?.url_types?.length || 99)) p.set('url_type', t.join(','));
-        const k = document.getElementById('knownFilter').value;
-        if (k) p.set('known', k);
+        // Het "In pa.urls"-filter is weg (Joep, 2026-08-11): de splitsing
+        // "Bekend / onbekend" in Hits per dag laat hetzelfde onderscheid zien
+        // zonder de rest van de pagina te versmallen, en de Crawl-verspilling-tab
+        // is al per definitie de onbekende kant. De `known`-parameter blijft in de
+        // API bestaan — die wordt nog gebruikt door /top-urls en /top-waste.
         for (const [key, v] of Object.entries(extra)) if (v !== '' && v != null) p.set(key, v);
         return p.toString();
     }
@@ -476,13 +719,28 @@
     async function boot() {
         META = await (await fetch(API + '/meta')).json();
         const cov = META.coverage || {};
+        // "2026-02-14 t/m 2026-03-16 geladen · 92.897.176 hits" (Joep, 2026-08-11).
+        // Het aantal dagen is eruit: dat volgt uit de reeks, en het stond vóór de
+        // datums waardoor je twee keer moest lezen om te zien tot wanneer er data is.
         document.getElementById('coverageNote').textContent =
-            cov.days ? `${cov.days} dagen geladen · ${cov.first_day} t/m ${cov.last_day} · ${fmt(cov.bot_lines)} bot-hits` : 'nog geen data geladen';
+            cov.days ? `${cov.first_day} t/m ${cov.last_day} geladen · ${fmt(cov.bot_lines)} hits`
+                     : 'nog geen data geladen';
         if (cov.last_day) {
             document.getElementById('endDate').value = cov.last_day;
             const d = new Date(cov.last_day); d.setDate(d.getDate() - 29);
             const lo = cov.first_day && d < new Date(cov.first_day) ? cov.first_day : d.toISOString().slice(0, 10);
             document.getElementById('startDate').value = lo;
+        }
+        // Flatpickr ná het zetten van .value: hij neemt de huidige waarde van het
+        // veld over en zet het type naar text, dus een YYYY-MM-DD er later in
+        // schrijven is niet gelijkwaardig (UI_BLUEPRINT "Form controls"). Guarded,
+        // zodat een onbereikbare CDN degradeert naar de werkende native input.
+        if (window.flatpickr) {
+            const fpOpts = { dateFormat: 'Y-m-d', allowInput: true,
+                             disableMobile: true, locale: { firstDayOfWeek: 1 },
+                             onChange: () => refresh() };
+            flatpickr('#startDate', fpOpts);
+            flatpickr('#endDate', fpOpts);
         }
         chkbox('hostFilter', META.hosts || []);
         chkbox('classFilter', Object.keys(classCounts()));
@@ -495,6 +753,11 @@
                 META.partial_days.map(p => `${p.log_date} (${p.hours_present}/24u)`).join(', ') + '.';
         }
         await refresh();
+        // Pikt een run op die op de Ingest-tab of door de nachtelijke timer is
+        // gestart — anders staat de ophaalknop hier klikbaar terwijl er al een
+        // ingest loopt, en levert de klik alleen een already_running op.
+        fetch(API + '/ingest/status').then(r => r.json())
+            .then(st => { if (st.running) s3Poll(); }).catch(() => {});
     }
 
     // ---- Overview --------------------------------------------------------
@@ -525,8 +788,11 @@
             ['Facet-verspilling', s.waste_pct + '%', 'van categorie-crawls valt buiten pa.urls'],
             ['Verkeer', fmtBytes((s.bots || []).reduce((a, b) => a + Number(b.bytes || 0), 0)), 'uitgeserveerd aan bots'],
         ];
+        // .stat-card zoals GSD Budgets: waarde in brand-paars bóven het label, met
+        // de toelichting als .detail eronder.
         document.getElementById('tiles').innerHTML = tiles.map(([l, v, sub]) =>
-            `<div class="tile"><div class="tile-label">${l}</div><div class="tile-value">${v}</div><div class="tile-sub">${sub}</div></div>`).join('');
+            `<div class="stat-card"><h3>${v}</h3><div class="label">${l}</div>`
+            + `<div class="detail">${sub}</div></div>`).join('');
     }
 
     function drawDaily(data, gb) {
@@ -544,14 +810,34 @@
             idx[k] = idx[k] || {};
             idx[k][r.log_date] = (idx[k][r.log_date] || 0) + Number(r.hits);
         });
-        const ds = keys.map(k => ({
-            label: k,
-            data: dates.map(d => (idx[k] || {})[d] || 0),
-            backgroundColor: k === 'Overig' ? OTHER() : colorFor(gb, k),
-            borderColor: '#ffffff',          // 2px surface gap between bands
-            borderWidth: 2,
-            fill: true, pointRadius: 0, tension: 0,
-        }));
+        // Chrome van "Performance per day" in SEO Stats (UI_BLUEPRINT "Charts"):
+        // recessief grid, geen assen-furniture, eigen donker hover-blok, geen
+        // Chart.js-legenda, tension 0.35.
+        //
+        // MAAR NIET de alpha-ladder van daar. Die bestaat voor OVERLAPPENDE lijnen:
+        // de was ligt onder de lijn, dus hij mag doorschijnend zijn en moet dat zelfs
+        // worden als er tien op elkaar liggen. Hier stapelen de banden, en dan ís de
+        // vulling de serie. Met '14' (7,8% dekking) bij vijf series werd de
+        // search-band — 96% van het volume — een groot bleek vlak dat als grijs las
+        // (Joep, 2026-08-11). Gestapeld dus: volle kleur, en de scheiding is een 2px
+        // witte rand, precies wat de dataviz-regel "2px surface gap between fills"
+        // voor stacked segmenten voorschrijft.
+        const ds = keys.map(k => {
+            const col = k === 'Overig' ? OTHER() : colorFor(gb, k);
+            return {
+                label: k,
+                data: dates.map(d => (idx[k] || {})[d] || 0),
+                // Een band die de gebruiker had uitgezet blijft uit na een redraw.
+                hidden: (hiddenSeries[gb] || new Set()).has(k),
+                backgroundColor: col,
+                borderColor: '#ffffff',
+                borderWidth: 2, borderCapStyle: 'round', borderJoinStyle: 'round',
+                fill: true, tension: 0.35,
+                pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 12,
+                pointHoverBackgroundColor: col, pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 2,
+            };
+        });
         CHARTS.daily?.destroy();
         CHARTS.daily = new Chart(document.getElementById('dailyChart'), {
             type: 'line',
@@ -559,21 +845,112 @@
             options: {
                 responsive: true, maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
+                layout: { padding: { top: 12, right: 12 } },
                 scales: {
-                    x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 14, color: '#636e72' } },
-                    y: { stacked: true, beginAtZero: true, grid: { color: '#f1f1f1' },
-                         ticks: { color: '#636e72', callback: v => fmt(v) } },
+                    x: { stacked: true, border: { display: false },
+                         grid: { color: '#eef0f2', drawTicks: false },
+                         ticks: { maxTicksLimit: 8, color: '#9a9aa6', font: { size: 11 }, padding: 8 } },
+                    y: { stacked: true, beginAtZero: true, border: { display: false },
+                         grid: { color: '#eef0f2', drawTicks: false },
+                         ticks: { maxTicksLimit: 6, color: '#9a9aa6', font: { size: 11 }, padding: 8,
+                                  callback: v => fmt(v) } },
                 },
                 plugins: {
-                    legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded' } },
-                    tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } },
+                    // Chart.js' eigen legenda blijft uit; de legenda is de tabel
+                    // eronder plus ons hover-blok. Dat is ook de "relief" die het
+                    // palet nodig heeft (zie PAL).
+                    legend: { display: false },
+                    tooltip: { enabled: false, external: chartTooltip },
                 },
             },
         });
+        renderDailyLegend(keys, gb);
     }
 
+    // Eigen donker hover-blok, zelfde vorm als externalTooltip in seo-stats.html:
+    // titel met weekdag, dan een rij per band met stip, label en waarde. Een
+    // stapelgrafiek krijgt er een totaalregel bij — dat is bij stacked de vraag die
+    // je stelt als je gaat hoveren, en Chart.js kan die niet zelf.
+    function chartTooltip({ chart, tooltip }) {
+        let el = chart.canvas.parentNode.querySelector('.chart-tooltip');
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'chart-tooltip';
+            chart.canvas.parentNode.appendChild(el);
+        }
+        if (!tooltip.opacity || !tooltip.dataPoints || !tooltip.dataPoints.length) {
+            el.classList.remove('is-on');
+            return;
+        }
+        const title = (tooltip.title && tooltip.title[0]) || '';
+        const wd = weekdayLongOf(title);
+        const pts = [...tooltip.dataPoints].filter(dp => dp.parsed.y > 0)
+                                           .sort((a, b) => b.parsed.y - a.parsed.y);
+        const total = tooltip.dataPoints.reduce((a, dp) => a + (dp.parsed.y || 0), 0);
+        el.innerHTML = `<div class="ct-title">${escapeHtml(wd ? `${title} (${wd})` : title)}</div>`
+            + `<div class="ct-sub">hits per dag</div>`
+            // De stip pakt backgroundColor, niet borderColor: bij een gestapelde
+            // band is de rand wit (de scheiding) en draagt de VULLING de identiteit.
+            // Aandeel van het DAGtotaal, niet van de hele periode: je hovert op één
+            // dag, dus "58%" moet over die dag gaan. Bij een uitgezette band valt hij
+            // ook uit de noemer — anders telt een percentage naar iets wat niet in
+            // beeld staat.
+            + pts.map(dp => `<div class="ct-row">`
+                + `<span class="ct-dot" style="background:${dp.dataset.backgroundColor}"></span>`
+                + `<span class="ct-label">${escapeHtml(dp.dataset.label)}</span>`
+                + `<span class="ct-val">${fmt(dp.parsed.y)}`
+                + `<span style="color:#a9a9b5; font-weight:500;"> · ${pctOf(dp.parsed.y, total)}</span>`
+                + `</span></div>`).join('')
+            + `<div class="ct-row" style="border-top:1px solid rgba(255,255,255,0.14); margin-top:4px; padding-top:5px;">`
+            + `<span class="ct-label" style="color:#f0f0f3;">Totaal</span>`
+            + `<span class="ct-val">${fmt(total)}</span></div>`;
+        el.classList.add('is-on');
+        const r = chart.canvas.getBoundingClientRect();
+        const x = Math.min(r.left + tooltip.caretX + 14, window.innerWidth - el.offsetWidth - 12);
+        el.style.left = Math.max(8, x) + 'px';
+        el.style.top = Math.max(8, r.top + tooltip.caretY - el.offsetHeight / 2) + 'px';
+    }
+
+    // Welke banden uit staan. Buiten drawDaily, zodat een Refresh of een andere
+    // splitsing de keuze niet stilletjes terugzet — en per splitsing gescheiden,
+    // want "search" uitzetten bij Bot-soort zegt niets over "PLP" bij URL-type.
+    const hiddenSeries = {};
+
+    // Legenda boven de grafiek, gecentreerd en klikbaar. Chart.js' eigen legenda
+    // staat uit (die kan niet gecentreerd bovenaan zonder de plot te verkleinen, en
+    // haar hitbox is het hele label-blok), maar een legenda is verplicht: dit palet
+    // heeft hem nodig als secundaire encoding en identiteit mag nooit alleen kleur
+    // zijn. Klikken schakelt de band via setDatasetVisibility — geen refetch, dus
+    // het voelt direct.
+    function renderDailyLegend(keys, gb) {
+        const el = document.getElementById('dailyLegend');
+        if (!el) return;
+        const off = hiddenSeries[gb] || (hiddenSeries[gb] = new Set());
+        el.innerHTML = keys.map((k, i) =>
+            `<span class="leg-item${off.has(k) ? ' leg-off' : ''}" data-i="${i}" data-k="${escapeHtml(k)}"`
+            + ` style="color:${k === 'Overig' ? OTHER() : colorFor(gb, k)}"`
+            + ` title="Klik om deze band aan of uit te zetten">`
+            + `<span class="swatch" style="background:${k === 'Overig' ? OTHER() : colorFor(gb, k)}"></span>`
+            + `<span style="color:#3a3a3a;">${escapeHtml(k)}</span></span>`).join('');
+        el.querySelectorAll('.leg-item').forEach(item => {
+            item.onclick = () => {
+                const k = item.dataset.k, i = Number(item.dataset.i);
+                const on = !off.has(k);
+                if (on) off.add(k); else off.delete(k);
+                item.classList.toggle('leg-off', on);
+                const ch = CHARTS.daily;
+                if (ch) { ch.setDatasetVisibility(i, !on); ch.update(); }
+            };
+        });
+    }
+
+    // Donut in de SEO Stats-vorm: 68% cutout, 2px witte spacer tussen de segmenten,
+    // 6px afgeronde uiteinden, het totaal in het gat, en een eigen DOM-tooltip.
+    // Chart.js' legenda gaat uit — de .donut-legend eronder draagt naam én aandeel,
+    // wat een ring rechts van de grafiek niet kan zonder smal te worden.
     function drawType(s) {
         const rows = (s.by_url_type || []).slice(0, 8);
+        const total = rows.reduce((a, r) => a + Number(r.hits), 0);
         CHARTS.type?.destroy();
         CHARTS.type = new Chart(document.getElementById('typeChart'), {
             type: 'doughnut',
@@ -582,17 +959,124 @@
                 datasets: [{
                     data: rows.map(r => Number(r.hits)),
                     backgroundColor: rows.map(r => colorFor('url_type', r.url_type)),
-                    borderColor: '#ffffff', borderWidth: 2,
+                    borderColor: '#fff', borderWidth: 2,
+                    borderRadius: 6, spacing: 2, hoverOffset: 10, hoverBorderColor: '#fff',
                 }],
             },
             options: {
-                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                responsive: true, maintainAspectRatio: false, cutout: '68%',
+                // Ruimte links/rechts voor de labels buiten de ring. Zonder deze
+                // padding tekent Chart.js de ring tot de rand en valt elk label
+                // buiten de canvas — het wordt dan stil afgekapt.
+                layout: { padding: { left: 66, right: 66, top: 12, bottom: 12 } },
                 plugins: {
-                    legend: { position: 'right', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded' } },
-                    tooltip: { callbacks: { label: c => ` ${c.label}: ${fmt(c.parsed)} (${pct(c.parsed, s.total_hits)})` } },
+                    legend: { display: false },
+                    tooltip: {
+                        enabled: false, external: donutTooltip,
+                        callbacks: { label: c => `${fmt(c.parsed)} · ${pct(c.parsed, total)}` },
+                    },
                 },
             },
+            plugins: [donutLabels],
         });
+        const center = document.getElementById('typeCenter');
+        if (center) {
+            center.innerHTML = `<div class="dc-total">${fmt(total)}</div>`
+                             + `<div class="dc-cap">bot-hits</div>`;
+        }
+    }
+
+    // Directe labels rond de ring, met aanwijslijntje. Vervangt de legenda-rij
+    // eronder (Joep, 2026-08-11): een legenda kan een aandeel van 0,1% wel noemen
+    // maar niet aanwijzen, en met labels op de grafiek is identiteit nooit meer
+    // alleen kleur — dat is de eis waar een legenda voor stond, dus die kan weg.
+    //
+    // Elk segment krijgt een label, ook Homepage (0,1%) en R-url (0,00%). Daarom
+    // twee dingen: de lijntjes gaan naar BUITEN (in een 68%-ring is binnenin geen
+    // ruimte), en er loopt een declutter-pas over de y-posities, want de kleintjes
+    // liggen vlak naast elkaar op de rand en zouden anders over elkaar vallen.
+    const donutLabels = {
+        id: 'donutLabels',
+        afterDatasetsDraw(chart) {
+            const { ctx } = chart;
+            const meta = chart.getDatasetMeta(0);
+            const data = chart.data.datasets[0].data;
+            const total = data.reduce((a, b) => a + Number(b), 0) || 1;
+            const items = [];
+            meta.data.forEach((arc, i) => {
+                if (!Number(data[i])) return;          // 0 hits: niets om aan te wijzen
+                const mid = (arc.startAngle + arc.endAngle) / 2;
+                const cos = Math.cos(mid), sin = Math.sin(mid);
+                items.push({
+                    i, cos, sin,
+                    x0: arc.x + cos * (arc.outerRadius + 1),
+                    y0: arc.y + sin * (arc.outerRadius + 1),
+                    x1: arc.x + cos * (arc.outerRadius + 11),
+                    y1: arc.y + sin * (arc.outerRadius + 11),
+                    right: cos >= 0,
+                    colour: chart.data.datasets[0].backgroundColor[i],
+                    // Een segment met hits mag nooit "0%" zeggen — dat leest als leeg,
+                    // en juist de kleintjes zichtbaar maken is het doel van deze labels.
+                    text: `${chart.data.labels[i]} ${(() => {
+                        const share = Number(data[i]) / total * 100;
+                        return share > 0 && share < 0.05
+                            ? '<0,1%'
+                            : share.toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + '%';
+                    })()}`,
+                });
+            });
+            // Declutter per kant: van boven naar onder minimaal 13px tussenruimte.
+            [true, false].forEach(side => {
+                const col = items.filter(it => it.right === side).sort((a, b) => a.y1 - b.y1);
+                for (let i = 1; i < col.length; i++) {
+                    const gap = col[i].y1 - col[i - 1].y1;
+                    if (gap < 13) col[i].y1 = col[i - 1].y1 + 13;
+                }
+            });
+            ctx.save();
+            ctx.font = '600 11px system-ui, -apple-system, "Segoe UI", sans-serif';
+            ctx.textBaseline = 'middle';
+            items.forEach(it => {
+                const x2 = it.x1 + (it.right ? 16 : -16);
+                ctx.strokeStyle = it.colour;
+                ctx.lineWidth = 1.25;
+                ctx.beginPath();
+                ctx.moveTo(it.x0, it.y0);
+                ctx.lineTo(it.x1, it.y1);
+                ctx.lineTo(x2, it.y1);
+                ctx.stroke();
+                ctx.fillStyle = '#2d2a3a';
+                ctx.textAlign = it.right ? 'left' : 'right';
+                ctx.fillText(it.text, x2 + (it.right ? 4 : -4), it.y1);
+            });
+            ctx.restore();
+        },
+    };
+
+    // Chart.js tekent zijn tooltip IN de canvas, en .donut-center ligt daar als
+    // absolute laag bovenop — vandaar een eigen node met een hogere z-index.
+    function donutTooltip({ chart, tooltip }) {
+        const wrap = chart.canvas.parentNode;
+        let tip = wrap.querySelector('.donut-tip');
+        if (!tip) {
+            tip = document.createElement('div');
+            tip.className = 'donut-tip';
+            wrap.appendChild(tip);
+        }
+        if (!tooltip.opacity || !tooltip.dataPoints || !tooltip.dataPoints.length) {
+            tip.classList.remove('is-on');
+            return;
+        }
+        const colour = (tooltip.labelColors?.[0]?.backgroundColor) || OTHER();
+        tip.innerHTML = `<span class="dt-dot" style="background:${colour};"></span>`
+                      + `<span class="dt-label">${escapeHtml((tooltip.title || []).join(' '))}</span>`
+                      + `<span>${escapeHtml((tooltip.body || []).map(b => b.lines.join(' ')).join(' '))}</span>`;
+        tip.classList.add('is-on');
+        const x = chart.canvas.offsetLeft + tooltip.caretX;
+        const y = chart.canvas.offsetTop + tooltip.caretY;
+        tip.style.left = x + 'px';
+        const above = y - tip.offsetHeight - 10;
+        tip.style.top = (above < 0 ? y + 14 : above) + 'px';
     }
 
     function drawDepth(s) {
@@ -605,8 +1089,10 @@
             data: {
                 labels: rows.map(r => r.facet_depth === 0 ? 'geen facet' : r.facet_depth + ' facets'),
                 datasets: [
-                    { label: 'in pa.urls', data: known, backgroundColor: SLOT(1), borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
-                    { label: 'niet in pa.urls', data: unknown, backgroundColor: SLOT(2), borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
+                    // Zelfde twee kleuren als de is_known_url-splitsing in de daggrafiek,
+                    // zodat "bekend" en "verspilling" niet per grafiek van kleur wisselen.
+                    { label: 'in pa.urls', data: known, backgroundColor: colorFor('is_known_url', 'in pa.urls'), borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
+                    { label: 'niet in pa.urls', data: unknown, backgroundColor: colorFor('is_known_url', 'not in pa.urls'), borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
                 ],
             },
             options: {
@@ -633,9 +1119,9 @@
     function renderBotTable(total) {
         total = total || botRows.reduce((a, b) => a + b.hits, 0);
         document.querySelector('#botTable tbody').innerHTML = botRows.map(b => `
-            <tr>
-              <td><span class="swatch" style="background:${colorFor('bot_family', b.bot_family)}"></span>${b.bot_family}</td>
-              <td><span class="badge" style="background:${colorFor('bot_class', b.bot_class)}">${b.bot_class}</span></td>
+            <tr class="bot-row" data-fam="${escapeHtml(b.bot_family)}">
+              <td><span class="bot-caret">▸</span><span class="swatch" style="background:${colorFor('bot_family', b.bot_family)}"></span>${b.bot_family}</td>
+              <td class="col-mid"><span class="lbl" style="color:${colorFor('bot_class', b.bot_class)}">${b.bot_class}</span></td>
               <td class="num">${fmt(b.hits)}</td>
               <td class="num">${pct(b.hits, total)}</td>
               <td class="num">${fmt(b.per_day)}</td>
@@ -647,6 +1133,132 @@
               <td class="num">${pct(b.cache_hits, b.hits)}</td>
               <td class="num">${fmtBytes(b.bytes)}</td>
             </tr>`).join('');
+        document.querySelectorAll('#botTable tbody tr.bot-row').forEach(tr => {
+            tr.onclick = () => toggleBotDetail(tr);
+        });
+    }
+
+    // ---- Uitklapbare rij per bot-familie ---------------------------------
+    // Eén rij open tegelijk, met opzet: elk paneel houdt drie Chart.js-instanties
+    // vast, en 25 families open laten staan is 75 charts die allemaal opnieuw
+    // tekenen bij een resize. Een accordeon houdt het bij drie, en de vraag is
+    // toch "hoe ziet DEZE bot eruit", niet "vergelijk er tien".
+    //
+    // De data komt uit /summary met bot_family erbij — dat filter bestond al, dus
+    // hier zit geen nieuw endpoint achter. De huidige periode- en domeinfilters
+    // gaan mee via params(), zodat het paneel dezelfde selectie toont als de rest
+    // van de pagina.
+    async function toggleBotDetail(tr) {
+        const open = tr.classList.contains('is-open');
+        // Altijd eerst sluiten wat open staat, inclusief de charts opruimen.
+        document.querySelectorAll('#botTable tbody tr.bot-detail').forEach(d => d.remove());
+        document.querySelectorAll('#botTable tbody tr.bot-row.is-open')
+                .forEach(r => r.classList.remove('is-open'));
+        ['detType', 'detHost', 'detDepth'].forEach(k => {
+            if (CHARTS[k]) { CHARTS[k].destroy(); CHARTS[k] = null; }
+        });
+        if (open) return;                       // dit was een klik om te sluiten
+
+        const fam = tr.dataset.fam;
+        tr.classList.add('is-open');
+        const det = document.createElement('tr');
+        det.className = 'bot-detail';
+        det.innerHTML = `<td colspan="12">
+            <div class="muted-note mb-2">Uitsplitsing voor <strong>${escapeHtml(fam)}</strong>
+                 — zelfde periode en filters als de pagina</div>
+            <div class="row g-3">
+              <div class="col-md-4"><div class="muted-note mb-1">URL-type</div>
+                <div class="donut-wrap"><canvas id="detTypeChart"></canvas>
+                     <div class="donut-center" id="detTypeCenter"></div></div></div>
+              <div class="col-md-4"><div class="muted-note mb-1">Domein</div>
+                <div class="donut-wrap"><canvas id="detHostChart"></canvas>
+                     <div class="donut-center" id="detHostCenter"></div></div></div>
+              <div class="col-md-4"><div class="muted-note mb-1">Facet-diepte</div>
+                <div class="chart-box-sm"><canvas id="detDepthChart"></canvas></div></div>
+            </div></td>`;
+        tr.after(det);
+
+        let s;
+        try {
+            s = await fetch(API + '/summary?' + params({ bot_family: fam })).then(r => r.json());
+        } catch (e) {
+            det.querySelector('td').innerHTML =
+                `<span class="text-danger">Uitsplitsing laden mislukt: ${escapeHtml(e.message)}</span>`;
+            return;
+        }
+        // De rij kan inmiddels gesloten of hertekend zijn; dan is er niets om te vullen.
+        if (!document.getElementById('detTypeChart')) return;
+
+        CHARTS.detType = miniDonut('detTypeChart', 'detTypeCenter',
+            (s.by_url_type || []).map(r => [r.url_type, Number(r.hits)]), 'url_type');
+        CHARTS.detHost = miniDonut('detHostChart', 'detHostCenter',
+            (s.by_host || []).map(r => [r.host, Number(r.hits)]), 'host');
+
+        const dep = s.by_facet_depth || [];
+        CHARTS.detDepth = new Chart(document.getElementById('detDepthChart'), {
+            type: 'bar',
+            data: {
+                labels: dep.map(r => r.facet_depth === 0 ? 'geen facet' : r.facet_depth + ' facets'),
+                datasets: [
+                    { label: 'in pa.urls', data: dep.map(r => Number(r.hits_known || 0)),
+                      backgroundColor: colorFor('is_known_url', 'in pa.urls'),
+                      borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
+                    { label: 'niet in pa.urls',
+                      data: dep.map(r => Number(r.hits) - Number(r.hits_known || 0)),
+                      backgroundColor: colorFor('is_known_url', 'not in pa.urls'),
+                      borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
+                ],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: { stacked: true, border: { display: false }, grid: { display: false },
+                         ticks: { color: '#9a9aa6', font: { size: 10 } } },
+                    y: { stacked: true, beginAtZero: true, border: { display: false },
+                         grid: { color: '#eef0f2', drawTicks: false },
+                         ticks: { color: '#9a9aa6', font: { size: 10 }, maxTicksLimit: 5,
+                                  callback: v => fmt(v) } },
+                },
+                plugins: { legend: { display: false }, tooltip: { enabled: false, external: chartTooltip } },
+            },
+        });
+    }
+
+    // Kleine donut voor het uitklappaneel: zelfde vorm als de URL-type-ring
+    // (68% cutout, witte spacers, directe labels, totaal in het gat).
+    function miniDonut(canvasId, centerId, pairs, dim) {
+        const rows = pairs.filter(([, v]) => v > 0);
+        const total = rows.reduce((a, [, v]) => a + v, 0);
+        const el = document.getElementById(canvasId);
+        const center = document.getElementById(centerId);
+        if (center) {
+            center.innerHTML = `<div class="dc-total" style="font-size:1.05rem;">${fmt(total)}</div>`
+                             + `<div class="dc-cap">hits</div>`;
+        }
+        if (!rows.length) return null;
+        return new Chart(el, {
+            type: 'doughnut',
+            data: {
+                labels: rows.map(([k]) => k),
+                datasets: [{
+                    data: rows.map(([, v]) => v),
+                    backgroundColor: rows.map(([k]) => colorFor(dim, k)),
+                    borderColor: '#fff', borderWidth: 2,
+                    borderRadius: 6, spacing: 2, hoverOffset: 8, hoverBorderColor: '#fff',
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '68%',
+                layout: { padding: { left: 58, right: 58, top: 10, bottom: 10 } },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { enabled: false, external: donutTooltip,
+                               callbacks: { label: c => `${fmt(c.parsed)} · ${pctOf(c.parsed, total)}` } },
+                },
+            },
+            plugins: [donutLabels],
+        });
     }
 
     // ---- Generic client-side sorting ------------------------------------
@@ -778,6 +1390,70 @@
         document.getElementById('ingestBtn').disabled = !!st.running;
     }
 
+    // ---- S3-ophaal -------------------------------------------------------
+    // Deelt lock en status met de dropfolder-ingest, dus deze poller leest hetzelfde
+    // /ingest/status. Daarom kan hij ook een run oppikken die op de Ingest-tab of
+    // door de nachtelijke timer is gestart.
+    let s3Polling = false;
+    function s3Msg(html, cls = '') {
+        const el = document.getElementById('s3Status');
+        el.classList.remove('d-none');
+        el.innerHTML = cls ? `<span class="${cls}">${html}</span>` : html;
+    }
+    async function s3Fetch() {
+        const btn = document.getElementById('s3FetchBtn');
+        const days = Number(document.getElementById('s3Days').value) || 3;
+        btn.disabled = true;
+        try {
+            s3Msg('Bucket bekijken…');
+            const p = await fetch(API + `/s3/preview?days=${days}`).then(r => r.json());
+            if (p.detail) { s3Msg(`Kan niet ophalen: ${p.detail}`, 'text-danger'); return; }
+            // Elke datum krijgt zijn eigen reden te zien. Zonder dat leest "0 dagen op
+            // te halen" als een defecte knop, terwijl het meestal "al geïngest" of
+            // "buiten de 42-daagse retentie" betekent.
+            const lines = p.dates.map(d => `${d.log_date}: ${d.state}`
+                + (d.files ? ` (${fmt(d.files)} files, ${(d.bytes / 1048576).toFixed(0)} MB)` : '')).join('\n');
+            if (!p.fetch_files) { s3Msg('Niets op te halen —<br>' + lines.replace(/\n/g, '<br>')); return; }
+            if (!confirm(`${fmt(p.fetch_files)} bestanden, ${p.fetch_mb} MB downloaden naar `
+                + `${p.dest} en direct verwerken?\n\n${lines}\n\n`
+                + `Verwerken kost ~1 minuut per logdatum.`)) return;
+            const r = await fetch(API + `/s3/fetch?days=${days}`, { method: 'POST' }).then(r => r.json());
+            if (r.detail) { s3Msg(`Kan niet ophalen: ${r.detail}`, 'text-danger'); return; }
+            if (r.status === 'already_running') { s3Msg('Er loopt al een ingest — die wordt gevolgd.'); }
+            s3Poll();
+        } catch (e) {
+            s3Msg(`Ophalen mislukt: ${e.message}`, 'text-danger');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+    async function s3Poll() {
+        if (s3Polling) return;
+        s3Polling = true;
+        try {
+            for (;;) {
+                const st = await fetch(API + '/ingest/status').then(r => r.json());
+                document.getElementById('s3FetchBtn').disabled = !!st.running;
+                if (st.running) {
+                    s3Msg(`Bezig sinds ${st.started_at} — ${st.phase || 'verwerken'}…`);
+                    await new Promise(r => setTimeout(r, 5000));
+                    continue;
+                }
+                if (st.error) { s3Msg(`Fout: ${st.error}`, 'text-danger'); return; }
+                const f = st.fetch || {}, p = st.result?.processed || [];
+                s3Msg(`Klaar ${st.finished_at}: ${fmt(f.downloaded || 0)} bestanden gedownload`
+                    + `${f.mb ? ` (${f.mb} MB)` : ''}${f.failed ? `, ${f.failed} mislukt` : ''}`
+                    + `, ${p.length} logdatum(s) verwerkt.`);
+                // De cache is serverside al geleegd (on_done), dus dit haalt echt
+                // nieuwe cijfers op in plaats van de oude vijf minuten.
+                await refresh(true);
+                return;
+            }
+        } finally {
+            s3Polling = false;
+        }
+    }
+
     function toCsv(rows, cols) {
         const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
         return [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
@@ -791,10 +1467,10 @@
     // ---- Wiring ----------------------------------------------------------
     document.getElementById('applyBtn').onclick = () => refresh();
     document.getElementById('refreshBtn').onclick = () => refresh(true);
+    document.getElementById('s3FetchBtn').onclick = s3Fetch;
     document.getElementById('groupBy').onchange = () => refresh();
     document.getElementById('resetBtn').onclick = () => {
         document.querySelectorAll('.chk-list input').forEach(i => i.checked = true);
-        document.getElementById('knownFilter').value = '';
         refresh();
     };
     document.getElementById('urlLoad').onclick = loadUrls;

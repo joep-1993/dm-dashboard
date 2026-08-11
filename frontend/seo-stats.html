@@ -1961,6 +1961,13 @@
         //
         // "Overig" stays neutral grey on purpose: a 0,3% residual bucket, not a
         // category, so it gets the de-emphasis colour rather than a hue of its own.
+        // Deze vijf zijn sinds 2026-08-11 ook het palet van de URL-type-splitsing in
+        // Bot Hits, zodat een kleur in beide tools hetzelfde betekent. Gemeten met de
+        // validator van de dataviz-skill (light, surface #fff), zodat een volgende
+        // wijziging een basislijn heeft: CVD-min 2,7 ΔE (protan, C-url ↔ PLP) en
+        // normaal-min 12,0 (R-url ↔ Overig). Beide onder de vloer — het is dus geen
+        // set om nóg een serie aan toe te voegen, en de relief die dat legaal maakt is
+        // verplicht: legenda + de tabel eronder, en 2px surface-gap tussen de vlakken.
         const URLTYPE_STYLE = {
             'R-url':  { label: 'R-url',  color: '#1f99c4' },
             'C-url':  { label: 'C-url',  color: '#7BAB3A' },

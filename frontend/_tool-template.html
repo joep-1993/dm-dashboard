@@ -45,7 +45,11 @@
         }
         .tool-table td { vertical-align: middle; }
         /* Clickable / sortable headers with the ⇅ / ▲ / ▼ affordance. */
-        .tool-table th.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 1.2rem; }
+        /* Geen position:relative: de basisregel hierboven zet position:sticky en een
+           specifiekere position overschrijft dat, waardoor sorteerbare headers niet
+           meer meescrollen (gevonden in Bot Hits, 2026-08-11). Het ::after-glyph
+           heeft een positioned ancestor nodig en sticky is dat al. */
+        .tool-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
         .tool-table th.sortable:hover { background: #e9ecef; }
         .tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
         .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
