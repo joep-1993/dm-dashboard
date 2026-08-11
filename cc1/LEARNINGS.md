@@ -1,6 +1,66 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De content-API's zijn al multi-market; alleen onze publishers zijn dat niet (2026-08-11)
+
+Joep vroeg of we een FAQ op een beslist.be-pagina kunnen zetten, en of de upload een
+country-veld heeft of absolute URLs accepteert. Antwoord: **een country-veld, geen absolute
+URLs** — en de hele keten stond er al klaar voor.
+
+De live OpenAPI-spec staat inline in de swagger-UI op de root van
+`website-configuration.api.beslist.nl` (`<script id="swagger-data">`); `/swagger/v1/swagger.json`
+en `/openapi.json` geven 404. Handig, want die spec is verder dan onze docstrings:
+
+| endpoint | land-veld | default |
+|---|---|---|
+| `POST/GET/DELETE /faq` | `country_code`, enum `BE`/`NL`/`DE` | `NL` |
+| `/automated-content(/records)` | `country_language`, enum `nl-nl`/`be-nl`/`de-de` | `nl-nl` |
+| `productsearch-v2 /search/products` | `countryLanguage`, idem `nl-nl`/`be-nl`/`de-de` | — |
+
+- **`url` is altijd het relatieve pad; het land is een aparte dimensie.** De upsert-key van
+  `/faq` is `(url, question, country_code)`, dus hetzelfde pad draagt een NL- én een BE-FAQ
+  naast elkaar. Een absolute URL is dus niet het mechanisme — die zou nergens op matchen.
+- **De .be-frontend vraagt de FAQ al op.** In de HTML van een .be-categoriepagina staat de
+  Apollo-cache-key `faq({"countryCode":"BE","url":"/products/elektronica/"})`. Zelfde
+  component als NL (waar `Faq:10/11/12`-refs in staan), zelfde paden (200 op beide domeinen),
+  alleen leeg. Er was dus **0** BE- en DE-content in dat systeem — geen frontend-werk nodig,
+  alleen records.
+- **Het BE-assortiment is écht anders.** `countryLanguage=be-nl` op productsearch geeft een
+  andere top (NL: Insta360 X5 / iPhone 17; BE: Kobo Clara / Galaxy A16). Een BE-FAQ hoeft dus
+  geen omgekatte NL-content te zijn. `nl-be` en `nl-BE` geven 400 — de enige geldige
+  BE-waarde is `be-nl`.
+- **`faq_service` is hard NL.** `BASE_URL` en de prompt-voorbeelden staan op
+  `https://www.beslist.nl`, en de scraper haalt `www.beslist.nl` op. Bij een BE-run moeten de
+  voorbeeld-URLs in de prompt mee omgeschreven worden, anders bouwt het model alsnog
+  .nl-links na, en dan staan er cross-domain links op de .be-site.
+- **`pa.urls` kent geen land.** De tabel heeft alleen `url` (relatief pad, 0 van 1.031.796
+  rijen is absoluut) plus cat-namen. Er is dus géén BE-URL-set; een BE-publish moet ofwel de
+  NL-set spiegelen ofwel een eigen vlag krijgen.
+- **CloudFront zit voor de bewijsvoering.** De .be-pagina komt met
+  `cache-control: public, max-age=604800` en negeert de querystring: `?cb=`, `?disableCache=true`,
+  `?page=2` en `?sort=price` geven allemaal dezelfde cache-hit met een oplopende `age`. Van
+  buiten is een verse render dus niet te forceren — API-verificatie doe je via
+  `GET /faq?url=…&country_code=BE`, niet via de pagina.
+
+## Bounce-tegel: twee "lager is beter"-lijsten die uit elkaar liepen (2026-08-11)
+
+De Bounce-delta in Dagoverzicht kleurde groen bij een stijging. `pctBadge()` kende maar één
+richting (`pct > 0` → `.up` = groen), terwijl de dagtabel ernaast al wél inverteerde via een
+eigen `HEAT_INVERT_KEYS = ['seo_bounce']`. Twee lijstjes voor hetzelfde begrip, dus precies
+één ervan kon achterlopen. Nu is er één `LOWER_IS_BETTER`-set die beide paden lezen.
+
+- **De badge-klassen dragen een kleur, geen richting.** `.delta-badge.up` is groen,
+  `.down` rood, en er zit geen pijltje in de CSS. Omdraaien is daarom veilig: het teken blijft
+  de echte richting tonen (`+5%` in rood).
+- **Dezelfde tegel stond er twee keer.** Behalve Dagoverzicht rendert `renderStats()` een
+  Bounce-tegel, want `ORDER` bevat `seo_bounce`. Bij een fix op een tegel-badge dus altijd
+  beide rijen langs.
+- **`badgeHtml` van `dashTile` wint van `delta`, ook bij null.** Een pre-built badge
+  meegeven betekent dat je zelf de null-check moet doen, anders verschijnt er een "n/a"-pil
+  waar de andere tegels niets tonen.
+- **De dagtabel heeft geen bounce-delta.** `hasWow()` sluit percentagemetrics uit van de
+  WoW-kolommen, dus daar viel niets te inverteren.
+
 ## De "Last push"-tegel las een tabel die de incrementele publishes nooit vullen (2026-08-10)
 
 Joep zag in Kopteksten én FAQs bij Content Publishing `Last push: 05-08-2026 10:58`, terwijl

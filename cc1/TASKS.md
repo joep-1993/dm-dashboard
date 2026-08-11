@@ -4,6 +4,54 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-11 — Eerste BE-content live: FAQ op /products/elektronica/
+
+Aanleiding: Joep vroeg of we een FAQ op een beslist.be-pagina kunnen maken, en of de upload
+een country-veld heeft. Dat heeft hij (`country_code`, enum BE/NL/DE), en de .be-frontend
+vraagt de FAQ al op. Zie LEARNINGS 2026-08-11.
+
+- [x] **6 FAQ's gegenereerd tegen het BE-assortiment** (`countryLanguage=be-nl` op
+      productsearch, 30 producten, 15 met ≥2 shops als linkbron). Zelfde productie-prompt uit
+      `faq_service.build_faq_prompt`, met `www.beslist.nl` → `www.beslist.be` geswapt, óók in
+      de voorbeeld-URLs. Alle 6 links geverifieerd: HTTP 200 op .be, geen redirect, elk
+      product met live BE-aanbod (2–10 shops). Los script in de scratchpad, JSON-kopie in
+      `Downloads\claude` (`be_faq_elektronica_20260811.json` + `..._records_20260811.json`).
+- [x] **Naar productie gepusht**: `POST /faq` → 200, `{"records":6}`, ids 2290437-2290442.
+      `GET ?country_code=BE` geeft 6 rijen, `country_code=NL` nog steeds zijn eigen 6
+      (626155-626160) — de country-scope van de upsert-key houdt dus stand. Terugdraaien kan
+      met `DELETE /faq?url=/products/elektronica/&country_code=BE`.
+- [x] **Bewust NIET in de DB gezet.** `/products/elektronica/` bestaat al als NL-rij in
+      `pa.urls`; BE-content in `pa.faq_content_v2` zou meeliften op de gewone NL-publish.
+- [ ] **Rendering op de .be-pagina bevestigen.** Stond bij het afsluiten nog op
+      `faq(...): []` en geen `FAQPage`-schema, met een CloudFront-object dat alleen ouder
+      werd (`age` 203 → 503s). Querystrings worden genegeerd, dus busten kan niet van buiten:
+      wachten tot het object verloopt, of een invalidatie voor `/products/elektronica/` laten
+      draaien door iemand met toegang tot die distributie.
+- [ ] **`faq_v2_publisher` multi-market maken** als dit breder uitgerold wordt. Drie dingen:
+      `country_code` niet meer hardcoden (regel ~203), `pa.faq_v2_push_state` van
+      `(url_id, env)` naar `(url_id, env, country)` — anders overschrijven een NL- en een
+      BE-push elkaars md5 en slaat de volgende `mode="new"`-run URL's onterecht over — en een
+      BE-URL-set, want `pa.urls` kent geen land.
+- [ ] **Docstring van `faq_v2_publisher` bijwerken.** Die zegt dat `GET /faq` alleen een
+      exacte url accepteert en dat er geen list-all is; inmiddels bestaan wildcards (`*`/`%`),
+      `limit` (max 1000) en een `country_code`-filter.
+
+### 2026-08-11 — SEO Stats: Bounce-delta kleurde groen bij een stijging
+
+Aanleiding: Joep zag in Dagoverzicht een groene delta op de Bounce-tegel, terwijl een
+stijgende bounce slechter is. Zie LEARNINGS 2026-08-11.
+
+- [x] **`pctBadge()` heeft een `invert`-parameter** (`frontend/seo-stats.html`). Positief →
+      rood, negatief → groen, teken en waarde ongewijzigd. Nul en n/a blijven grijs.
+- [x] **Beide Bounce-tegels gedraaid**: Dagoverzicht via de `badgeHtml`-ingang van `dashTile`
+      (met eigen null-check) en de samenvattingsrij via `LOWER_IS_BETTER.has(key)`, want
+      `ORDER` bevat `seo_bounce`.
+- [x] **`HEAT_INVERT_KEYS` opgeruimd** ten gunste van één `LOWER_IS_BETTER`-set, die zowel de
+      badges als de heatmap-fade in de dagtabel voedt.
+- [x] **Geverifieerd**: `node --check` op het inline script OK, `pctBadge` doorgemeten op 8
+      gevallen (niet-geïnverteerd gedrag ongewijzigd), en :8003 serveert het nieuwe bestand al
+      — statisch bestand, dus alleen Ctrl+Shift+R, geen herstart.
+
 ### 2026-08-10 — Content Publishing: de "Last push"-tegel stond stil op 05-08
 
 Aanleiding: Joep meldde dat Kopteksten én FAQs `Last push: 05-08-2026 10:58` toonden terwijl
