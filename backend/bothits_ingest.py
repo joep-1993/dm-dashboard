@@ -643,7 +643,15 @@ def run_drop(src=None):
     done = already_ingested()
 
     processed, skipped = [], []
+    cancelled = False
     for d in sorted(by_date):
+        # Annuleergrens: tussen twee logdatums. Alles wat al geladen is blijft
+        # staan en is geldig; de rest ligt nog in de dropfolder en wordt bij een
+        # volgende run alsnog opgepakt.
+        if _cancel.is_set():
+            cancelled = True
+            skipped.append({"log_date": d, "reason": "geannuleerd"})
+            continue
         if len(hours[d]) < 24:
             skipped.append({"log_date": d, "reason": f"incomplete ({len(hours[d])}/24 hours)"})
             continue
@@ -660,7 +668,8 @@ def run_drop(src=None):
         except Exception as exc:
             logger.error("[%s] FAILED: %s", d, exc, exc_info=True)
             skipped.append({"log_date": d, "reason": f"error: {exc}"})
-    return {"status": "ok", "dir": src, "processed": processed, "skipped": skipped}
+    return {"status": "cancelled" if cancelled else "ok", "dir": src,
+            "cancelled": cancelled, "processed": processed, "skipped": skipped}
 
 
 def _archive(src, log_date, files):
@@ -690,8 +699,30 @@ AUTO_INGEST_AT = os.getenv("BOTHITS_AUTO_INGEST_AT", "04:30")
 _ingest_lock = threading.Lock()
 _ingest_state = {"running": False, "started_at": None, "finished_at": None,
                  "result": None, "error": None, "trigger": None, "phase": None,
-                 "fetch": None, "fetch_progress": None}
+                 "fetch": None, "fetch_progress": None, "cancelling": False}
 _timer = None
+
+# Coöperatieve annulering. Geen thread kill: de worker kijkt zelf op veilige
+# grenzen of de vlag staat. Die grenzen zijn met opzet grof gekozen — tussen
+# bestanden tijdens de download, en tussen LOGDATUMS tijdens het verwerken.
+# Middenin ingest_date() stoppen zou een halve dag in de cube achterlaten die
+# daarna als "geïngest" telt; per datum stoppen laat de ledger kloppen, want een
+# datum is dan óf helemaal geladen óf helemaal niet.
+_cancel = threading.Event()
+
+
+def request_cancel() -> bool:
+    """Vraag de lopende run te stoppen. -> of er iets liep om te stoppen."""
+    if not _ingest_state["running"]:
+        return False
+    _cancel.set()
+    _ingest_state["cancelling"] = True
+    logger.info("bothits ingest: annulering aangevraagd")
+    return True
+
+
+def cancel_requested() -> bool:
+    return _cancel.is_set()
 
 
 def ingest_state():
@@ -713,8 +744,12 @@ def start_ingest_async(trigger="manual", on_done=None, src=None, before=None):
     """
     if not _ingest_lock.acquire(blocking=False):
         return False, dict(_ingest_state)
+    # Wissen ONDER de lock en vóór de worker start: een annulering van de vorige
+    # run mag de volgende niet meteen weer afbreken.
+    _cancel.clear()
     _ingest_state.update(running=True, error=None, result=None, trigger=trigger,
                          finished_at=None, fetch=None, fetch_progress=None,
+                         cancelling=False,
                          phase="fetch" if before else "ingest",
                          started_at=datetime.now().isoformat(timespec="seconds"))
 
@@ -728,7 +763,7 @@ def start_ingest_async(trigger="manual", on_done=None, src=None, before=None):
                     _ingest_state["phase"] = f"fetch: {msg}"
                     _ingest_state["fetch_progress"] = stats
 
-                _ingest_state["fetch"] = before(on_progress)
+                _ingest_state["fetch"] = before(on_progress, cancel_requested)
                 # Downloaden is meetbaar, parsen niet: de ingest heeft geen teller die
                 # vooraf bekend is. De tellers gaan hier dus weg, zodat de UI van een
                 # bepaalde balk naar een onbepaalde schakelt in plaats van op 100% te

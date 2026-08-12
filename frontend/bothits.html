@@ -241,7 +241,12 @@
         </div>
     </nav>
 
-    <div class="container-fluid mt-4 pb-5" style="max-width: 1500px;">
+    <!-- Bootstrap's .container, net als seo-stats.html — was container-fluid met een
+         eigen max-width van 1500px. Die week niet alleen af van SEO Stats maar ook van
+         de kopbalk hierboven, die al .container is: de inhoud liep dus breder dan zijn
+         eigen balk. De brede tabellen hebben hun eigen overflow (.tool-table-wrap), dus
+         smaller worden kost hier niets. -->
+    <div class="container mt-4 pb-5">
 
         <!-- ============================ TILES ============================ -->
         <div class="tile-row mb-3" id="tiles"></div>
@@ -299,11 +304,22 @@
                 <div class="d-flex justify-content-end gap-2 mt-3">
                     <button class="btn btn-sm btn-run" id="applyBtn">Toepassen</button>
                 </div>
-                <div id="s3Status" class="muted-note mt-3 d-none"></div>
-                <!-- Inline variant uit UI_BLUEPRINT (geen Cancel): een lopende
-                     S3-download is niet af te breken, en de ingest die erop volgt
-                     deelt zijn lock met de nachtelijke timer. Halverwege stoppen zou
-                     een halve logdatum op schijf achterlaten. -->
+                <div id="partialWarn" class="alert alert-warning py-2 px-3 mt-3 mb-0 d-none" style="font-size:0.85rem;"></div>
+            </div>
+        </div>
+
+        <!-- ====================== LOGS OPHALEN — status ======================
+             Eigen sectie onder Filters (Joep, 2026-08-12). Stond eerst onderin de
+             Filters-kaart, waar het onder de filtervelden hing en dus las als iets
+             wat bij "Toepassen" hoorde. De trigger blijft wél in de Filters-kop,
+             naast de dekkingstekst: die tekst zegt tot welke datum er data is en de
+             knop is wat dat verandert.
+
+             De hele kaart is verborgen tot er iets te melden is. Een permanent lege
+             kaart onder Filters zou de pagina alleen langer maken. -->
+        <div class="card mb-3 d-none" id="s3Card">
+            <div class="card-body">
+                <div id="s3Status" class="muted-note"></div>
                 <div id="s3Progress" class="mt-2" style="display:none;">
                     <div class="d-flex justify-content-between align-items-center small text-muted mb-1">
                         <span id="s3ProgressLabel">Bezig…</span><span id="s3ProgressPct"></span>
@@ -314,7 +330,12 @@
                              aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
                     </div>
                 </div>
-                <div id="partialWarn" class="alert alert-warning py-2 px-3 mt-3 mb-0 d-none" style="font-size:0.85rem;"></div>
+                <!-- Rood-omlijnd en ONDER de balk, zoals UI_BLUEPRINT voor de volledige
+                     statusvariant voorschrijft. Alleen zichtbaar terwijl er iets loopt. -->
+                <div class="d-flex justify-content-end mt-2" id="s3CancelWrap" style="display:none;">
+                    <button class="btn btn-sm btn-outline-danger" id="s3CancelBtn"
+                            title="Stopt op de eerstvolgende veilige grens: tussen bestanden tijdens het downloaden, tussen logdatums tijdens het verwerken. Wat al geladen is blijft staan.">Annuleren</button>
+                </div>
             </div>
         </div>
 
@@ -567,6 +588,30 @@
         lichtblauw: '#1f99c4',  // == rurl
         roze:       '#be4693',  // == secondary
         lichtgroen: '#91c34e',  // == accent
+        // ALLEEN in Bot Hits, en alleen omdat bot_family acht benoemde reeksen heeft
+        // (Joep, 2026-08-12). Met de merktrio op de eerste drie plekken haalt geen
+        // enkele 8-set uit het bestaande palet de kleurenblind-vloer nog: het beste
+        // was 4,9 ΔE (cta-oranje ↔ lichtgroen, deutan) tegen 8,0 vóór de trio-regel.
+        // Deze hue is gezocht met de validator van de dataviz-skill en brengt de
+        // benoemde acht terug op 7,7 — de ondergrens van de trio zélf, dus het
+        // maximaal haalbare zolang die drie vaststaan.
+        //
+        // GEMETEN MÉT DE OVERIG-BAND ERBIJ, want zo rendert de grafiek: other-bot,
+        // Perplexity en ByteDance vallen in grijs, dus het zijn negen banden en niet
+        // acht. Dat verandert welke keuze goed is. Een eerdere kandidaat (#ce887e)
+        // zat op 9,3 ΔE van dat grijs en was daarmee het nieuwe zwakste paar; deze
+        // zit op 12,5 en laat de bestaande bodem staan.
+        //
+        // Die bodem is grijs ↔ lichtblauw op 12,0 (normaal) / 5,9 (protan) en zit er
+        // NU AL in — het is hetzelfde paar dat in seo-stats.html als "normaal-min
+        // 12,0 (R-url ↔ Overig)" genoteerd staat. Onoplosbaar met een achtste kleur:
+        // geen tint ter wereld verandert de afstand tussen grijs en lichtblauw. Wie
+        // dat wil repareren moet de Overig-band aanpakken, niet het palet.
+        //
+        // Prijs, bewust betaald: SEO Stats kent deze hue niet, dus het gedeelde palet
+        // is hier één tint groter. Komt er ooit een negende familie bij, dan is dit
+        // GEEN set om nog iets aan toe te voegen — dan vouwt hij naar Overig.
+        terracotta: '#c7706b',
         // METRICS[*].color (stat-card metric-tile)
         violet:    '#8459cf',   // dma_visits    (violet-500)
         accent:    '#91c34e',   // gsaas_visits  (accent-500)
@@ -605,9 +650,12 @@
         // over PLP (hier lichtblauw, daar amber) en R-url (hier amber, daar
         // lichtblauw). De andere vier vallen nog wél samen. Wil je ze weer gelijk,
         // dan moet dezelfde wissel in URLTYPE_STYLE van seo-stats.html.
+        // Legenda-volgorde is op volume: PLP 45%, C-url 45%, Cat-url 8%. Die drie
+        // dragen de merkkleuren; Overige blijft grijs (restpost, geen categorie), dus
+        // er zijn vijf gekleurde slots. PLP hield lichtblauw al om de reden hierboven.
         url_type: {
-            PLP: PAL.lichtblauw, 'C-url': PAL.curl, 'R-url': PAL.plp,
-            'Cat-url': PAL.browse, Homepage: PAL.violet, Overige: PAL.overig,
+            PLP: PAL.lichtblauw, 'C-url': PAL.roze, 'Cat-url': PAL.lichtgroen,
+            Homepage: PAL.navy, 'R-url': PAL.turquoise, Overige: PAL.overig,
         },
         // Deze drie dimensies hebben geen tegenhanger in de donut, dus ze vullen aan
         // uit de metric-tiles. WELKE hues, dat is een zoekopdracht en geen voorkeur
@@ -632,14 +680,39 @@
         // een benoemde familie, en een grijs label leest als uitgeschakeld. Grijs
         // blijft zo voorbehouden aan wat écht niet in de map staat (de fallback), wat
         // "catch-all familie" en "onbekende entiteit" onderscheidbaar houdt.
-        bot_class: { ai: PAL.rurl, search: PAL.navy, 'seo-tool': PAL.violet,
-                     social: PAL.cta, monitoring: PAL.bordeaux, other: PAL.yellow },
-        bot_family: { Googlebot: PAL.rurl, OpenAI: PAL.green, Anthropic: PAL.plp,
-                      GoogleOther: PAL.turquoise, 'Google-AI': PAL.violet,
-                      Apple: PAL.navy, 'Meta-AI': PAL.yellow, Bing: PAL.bordeaux },
-        host: { 'beslist.nl': PAL.rurl, 'beslist.be': PAL.plp, 'shopcaddy.de': PAL.violet,
-                'shop.beslist.nl': PAL.navy, 'shop.beslist.be': PAL.yellow,
-                'shop.shopcaddy.de': PAL.bordeaux },
+        // De eerste drie van de LEGENDA dragen de merkkleuren (Joep, 2026-08-12). De
+        // legenda volgt de volgorde waarin de querylaag de reeksen teruggeeft, en die
+        // is op volume: search 83%, ai 11%, other 5%. Die drie krijgen dus lichtblauw,
+        // roze, lichtgroen; de rest is opnieuw gezocht met de validator van de
+        // dataviz-skill omdat lichtgroen andere paren maakt dan de vorige set.
+        // Gemeten (light, #fff, all-pairs): CVD-min 7,7 ΔE (deutan, lichtblauw↔roze),
+        // normaal-min 17,2. Die 7,7 is de ondergrens van de merktrio ZELF — geen set
+        // die deze drie bevat komt hoger — en zit in de 6-8-band die alleen mag mét
+        // secundaire encoding. Die is er: legenda plus de tabel eronder.
+        bot_class: { search: PAL.lichtblauw, ai: PAL.roze, other: PAL.lichtgroen,
+                     'seo-tool': PAL.turquoise, social: PAL.bordeaux,
+                     monitoring: PAL.navy },
+        // Eerste drie van de legenda = merkkleuren. De legenda volgt de volgorde van de
+        // querylaag en die is op volume: Googlebot 46%, Apple 24%, GoogleOther 13%.
+        // De overige vijf zijn opnieuw gezocht met de validator (252 combinaties uit
+        // het eigen palet, plus een sweep van 1093 tinten daarbuiten voor het achtste
+        // slot — zie PAL.terracotta voor waarom dat nodig was).
+        // Gemeten (light, #fff, all-pairs): CVD-min 7,7 ΔE (deutan, lichtblauw↔roze),
+        // normaal-min 16,4. Gelijk aan de andere dimensies en gelijk aan de vloer van
+        // de trio zelf; de 6-8-band mag mét secundaire encoding en die is er (legenda
+        // plus de tabel eronder, waar de familie ook met naam staat).
+        bot_family: { Googlebot: PAL.lichtblauw, Apple: PAL.roze,
+                      GoogleOther: PAL.lichtgroen, OpenAI: PAL.turquoise,
+                      Bing: PAL.bordeaux, 'Google-AI': PAL.navy,
+                      'Meta-AI': PAL.yellow, Anthropic: PAL.terracotta },
+        // In de praktijk dragen maar twee hosts verkeer (beslist.nl 99%,
+        // shop.beslist.nl 1%), en die twee pakken de eerste twee merkkleuren — niet
+        // "eentje plus grijs", want grijs is voorbehouden aan de restpost en zou de
+        // tweede helft van een tweedeling als rest laten lezen (UI_BLUEPRINT).
+        // beslist.be staat derde in de rij en krijgt lichtgroen voor als hij opduikt.
+        host: { 'beslist.nl': PAL.lichtblauw, 'shop.beslist.nl': PAL.roze,
+                'beslist.be': PAL.lichtgroen, 'shop.beslist.be': PAL.turquoise,
+                'shopcaddy.de': PAL.bordeaux, 'shop.shopcaddy.de': PAL.navy },
         // Status is een semantisch palet, geen categorische slots: 2xx goed, 3xx
         // informatief, 4xx waarschuwing, 5xx kritiek. Bordeaux is de donkerste warme
         // hue die het gedeelde palet heeft — een echt rood zou van buiten SEO Stats
@@ -1437,9 +1510,21 @@
     // door de nachtelijke timer is gestart.
     let s3Polling = false;
     function s3Msg(html, cls = '') {
+        // De sectie zelf komt tevoorschijn bij het eerste bericht; hij staat verborgen
+        // zodat er niet permanent een lege kaart onder Filters hangt.
+        document.getElementById('s3Card').classList.remove('d-none');
         const el = document.getElementById('s3Status');
-        el.classList.remove('d-none');
         el.innerHTML = cls ? `<span class="${cls}">${html}</span>` : html;
+    }
+    // Annuleren is coöperatief: de knop zet alleen een vlag serverside. Hij gaat
+    // daarom meteen op slot met een tekst die zegt dat het verzoek staat — anders
+    // klikt de gebruiker nog drie keer omdat er "niets gebeurt" terwijl de worker
+    // netjes zijn huidige bestand afmaakt.
+    function s3Cancel(show, requested = false) {
+        document.getElementById('s3CancelWrap').style.display = show ? '' : 'none';
+        const b = document.getElementById('s3CancelBtn');
+        b.disabled = requested;
+        b.textContent = requested ? 'Annuleren aangevraagd…' : 'Annuleren';
     }
     async function s3Fetch() {
         const btn = document.getElementById('s3FetchBtn');
@@ -1514,7 +1599,10 @@
                 const st = await fetch(API + '/ingest/status').then(r => r.json());
                 document.getElementById('s3FetchBtn').disabled = !!st.running;
                 if (st.running) {
-                    s3Msg(`Bezig sinds ${st.started_at} — ${st.phase || 'verwerken'}…`);
+                    s3Msg(st.cancelling
+                        ? `Annuleren… — stopt na het huidige bestand of de huidige logdatum.`
+                        : `Bezig sinds ${st.started_at} — ${st.phase || 'verwerken'}…`);
+                    s3Cancel(true, !!st.cancelling);
                     const fp = st.fetch_progress;
                     if (fp && fp.files_total) {
                         // De balk loopt op bestanden; MB staat erbij omdat dat de maat
@@ -1538,11 +1626,20 @@
                     continue;
                 }
                 s3BarHide();
+                s3Cancel(false);
                 if (st.error) { s3Msg(`Fout: ${st.error}`, 'text-danger'); return; }
                 const f = st.fetch || {}, p = st.result?.processed || [];
-                s3Msg(`Klaar ${st.finished_at}: ${fmt(f.downloaded || 0)} bestanden gedownload`
+                // Een geannuleerde run is geen fout en geen half resultaat: wat verwerkt
+                // is, is compleet en telt. Daarom dezelfde regel met de cijfers, alleen
+                // met een andere kop en de geruststelling erbij — anders leest "Klaar"
+                // als "alles opgehaald" terwijl er bewust is gestopt.
+                const afgebroken = f.cancelled || st.result?.cancelled;
+                s3Msg((afgebroken ? `Geannuleerd ${st.finished_at}: ` : `Klaar ${st.finished_at}: `)
+                    + `${fmt(f.downloaded || 0)} bestanden gedownload`
                     + `${f.mb ? ` (${f.mb} MB)` : ''}${f.failed ? `, ${f.failed} mislukt` : ''}`
-                    + `, ${p.length} logdatum(s) verwerkt.`);
+                    + `, ${p.length} logdatum(s) verwerkt.`
+                    + (afgebroken ? ' Wat verwerkt is, is volledig — de rest wordt bij een'
+                                  + ' volgende ophaal opgepakt.' : ''));
                 // De cache is serverside al geleegd (on_done), dus dit haalt echt
                 // nieuwe cijfers op in plaats van de oude vijf minuten.
                 await refresh(true);
@@ -1567,6 +1664,17 @@
     document.getElementById('applyBtn').onclick = () => refresh();
     document.getElementById('refreshBtn').onclick = () => refresh(true);
     document.getElementById('s3FetchBtn').onclick = s3Fetch;
+    document.getElementById('s3CancelBtn').onclick = async () => {
+        // Direct op slot, vóór het antwoord: het verzoek is verstuurd en een tweede
+        // klik verandert daar niets aan. De poller houdt de stand daarna bij.
+        s3Cancel(true, true);
+        try {
+            await fetch(API + '/ingest/cancel', { method: 'POST' });
+        } catch (e) {
+            s3Cancel(true, false);
+            s3Msg(`Annuleren mislukt: ${escapeHtml(e.message)}`, 'text-danger');
+        }
+    };
     document.getElementById('groupBy').onchange = () => refresh();
     document.getElementById('urlLoad').onclick = loadUrls;
     document.getElementById('urlSearch').addEventListener('keydown', e => { if (e.key === 'Enter') loadUrls(); });

@@ -191,7 +191,7 @@ def preview(days: int = 3):
             "distributions": distributions()}
 
 
-def fetch(days: int = 3, dest: str = None, progress=None):
+def fetch(days: int = 3, dest: str = None, progress=None, should_cancel=None):
     """Download de ontbrekende dagen naar `dest`. -> stats-dict.
 
     Alleen datums met 24 uur die nog niet in de ledger staan; de rest wordt
@@ -203,6 +203,11 @@ def fetch(days: int = 3, dest: str = None, progress=None):
     (`files_done` / `files_total` / `bytes_done` / `bytes_total` / `log_date` /
     `date_index` / `date_total`). De tweede parameter is optioneel voor de aanroeper:
     oudere callbacks die alleen `msg` aannemen blijven werken zolang ze hem negeren.
+
+    `should_cancel()` wordt tussen elk bestand geraadpleegd. Afbreken is hier veilig
+    en goedkoop: half gedownloade dagen blijven gewoon op schijf staan, worden niet
+    geïngest (de ingest eist 24 volledige uren) en een volgende poging slaat over wat
+    er al ligt. Een gedeeltelijke download kost dus hooguit tijd, nooit correctheid.
     """
     dest = dest or S3_DIR
     os.makedirs(dest, exist_ok=True)
@@ -247,12 +252,22 @@ def fetch(days: int = 3, dest: str = None, progress=None):
                            "bytes_done": bytes_done, "bytes_total": bytes_total,
                            **extra})
 
+    cancelled = False
     for idx, (d, keys, hours, size) in enumerate(plan, 1):
+        if should_cancel and should_cancel():
+            cancelled = True
+            break
         report(f"download {d}: {len(keys)} bestanden, {size / 1024 / 1024:.0f} MB",
                log_date=d, date_index=idx, date_total=len(plan))
         got = skip = fail = got_bytes = 0
 
         def one(item):
+            # De pool krijgt alle keys in één keer; annuleren gebeurt daarom hier,
+            # door de nog niet gestarte taken meteen te laten terugkeren. Dat leegt
+            # de wachtrij in milliseconden zonder futures te hoeven cancellen, en
+            # een download die al onderweg is mag gewoon aflopen.
+            if should_cancel and should_cancel():
+                return "cancel", 0
             key, ksize = item
             local = os.path.join(dest, os.path.basename(key))
             if os.path.exists(local) and os.path.getsize(local) == ksize:
@@ -264,6 +279,7 @@ def fetch(days: int = 3, dest: str = None, progress=None):
                 logger.warning("bothits s3: %s mislukt: %s", key, exc)
                 return "fail", 0
 
+        aborted = 0
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
             for fut in as_completed(pool.submit(one, k) for k in keys):
                 what, n = fut.result()
@@ -272,6 +288,8 @@ def fetch(days: int = 3, dest: str = None, progress=None):
                     got_bytes += n
                 elif what == "skip":
                     skip += 1
+                elif what == "cancel":
+                    aborted += 1
                 else:
                     fail += 1
                 files_done += 1
@@ -283,16 +301,23 @@ def fetch(days: int = 3, dest: str = None, progress=None):
                 if files_done % 25 == 0 or files_done == files_total:
                     report(f"download {d}: {got + skip}/{len(keys)} bestanden",
                            log_date=d, date_index=idx, date_total=len(plan))
+        if aborted:
+            cancelled = True
         stats["dates"].append({"log_date": d, "files": len(keys), "hours": len(hours),
                                "downloaded": got, "skipped": skip, "failed": fail,
-                               "state": "gedownload" if not fail else "deels_mislukt"})
+                               "state": "geannuleerd" if aborted
+                                        else ("gedownload" if not fail else "deels_mislukt")})
         stats["downloaded"] += got
         stats["skipped"] += skip
         stats["failed"] += fail
         stats["bytes"] += got_bytes
         report(f"{d}: {got} nieuw, {skip} al aanwezig"
-               + (f", {fail} mislukt" if fail else ""),
+               + (f", {fail} mislukt" if fail else "")
+               + (f", {aborted} niet meer opgehaald (geannuleerd)" if aborted else ""),
                log_date=d, date_index=idx, date_total=len(plan))
+        if cancelled:
+            break
 
     stats["mb"] = round(stats["bytes"] / 1024 / 1024, 1)
+    stats["cancelled"] = cancelled
     return stats

@@ -244,8 +244,8 @@ def s3_fetch(days: int = Query(3, ge=1, le=45)):
             detail="S3-credentials ontbreken: zet BOTHITS_S3_ACCESS_KEY_ID en "
                    "BOTHITS_S3_SECRET_ACCESS_KEY in .env")
 
-    def before(progress):
-        return fetch(days, progress=progress)
+    def before(progress, should_cancel):
+        return fetch(days, progress=progress, should_cancel=should_cancel)
 
     try:
         started, state = start_ingest_async("s3", on_done=clear_cache,
@@ -254,6 +254,19 @@ def s3_fetch(days: int = Query(3, ge=1, le=45)):
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "started" if started else "already_running",
             "days": days, **state}
+
+
+@router.post("/ingest/cancel")
+def ingest_cancel():
+    """Vraag de lopende ophaal/ingest-run te stoppen op de eerstvolgende veilige grens.
+
+    Geen harde stop: de worker kijkt zelf tussen bestanden (download) en tussen
+    logdatums (verwerken). Alles wat al in de cube staat blijft geldig — een datum is
+    óf helemaal geladen óf helemaal niet, dus de ledger blijft kloppen en een volgende
+    run pakt de rest gewoon op.
+    """
+    from backend.bothits_ingest import request_cancel
+    return {"status": "cancelling" if request_cancel() else "niets_actief"}
 
 
 @router.post("/cache/clear")
