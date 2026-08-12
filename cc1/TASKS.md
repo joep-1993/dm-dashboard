@@ -38,10 +38,15 @@ in een Excel met vergelijkbare post-its onder elkaar, fases losgelaten.
 
 Vier punten van Joep in één ronde (`2f120ec`).
 
-- [x] **Paginabreedte gelijk aan SEO Stats**: `container-fluid` + eigen max-width 1500px
-      → Bootstrap `.container`. Zelfde klasse, zelfde BS-versie, geen overrides in beide
-      bestanden, dus gelijk per constructie. Week ook af van de kopbalk van deze pagina
-      zelf, die al `.container` was.
+- [x] **Paginabreedte gelijk aan SEO Stats** — in twee stappen, want de eerste was niet
+      goed. `container-fluid` + eigen max-width 1500px werd eerst een blote
+      `.container` (`2f120ec`), en dat rapporteerde ik als "gelijk per constructie" op
+      grond van dezelfde klasse en dezelfde BS-versie. Joep vroeg het na; gemeten was
+      het 1194px tegen 1304px. SEO Stats zit in het blueprint-skelet
+      `container > row > col-lg-11 mx-auto`, en een blote container is precies zo'n vorm
+      die de blueprint verbiedt. Rechtgezet in `16ff551`, nagemeten op de gerenderde
+      randen bij 1280/1400/1600px: overal identiek. Zie LEARNINGS voor de les én voor
+      de meetfout die ik onderweg maakte.
 - [x] **Eerste drie legendakleuren = lichtblauw/roze/lichtgroen** in bot_family,
       bot_class, host en url_type. Overige slots opnieuw gezocht met de validator.
       url_type wordt er béter van (CVD 2,7 → 5,9); bot_class en host zakken van 10,0
