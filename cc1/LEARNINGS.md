@@ -1,6 +1,66 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een board-PDF (FigJam/Miro) is een lossy export — vraag om een afbeelding (2026-08-12)
+
+Bij het uitlezen van `SEO_GEO brainstorm.pdf` naar Excel. De PDF zag er compleet uit: 4
+pagina's, 1,4 MB. Hij was het niet, en dat is niet te zien zonder ernaar te zoeken.
+
+- **Geen tekstlaag.** `page.get_text()` gaf 0 tekens op alle 4 pagina's; elke pagina is één
+  ingebedde JPEG (1769 × 5082) die de hele pagina vult. Alles moet visueel gelezen worden.
+- **De pagina's zijn verticale slices van één breed bord**, elk met een eigen kolom
+  (Awareness, Consideration, …). Te extraheren met `doc.extract_image(xref)` — dat geeft de
+  slices op volle resolutie, veel scherper dan `get_pixmap()` op de pagina.
+- **Tussen de slices zit een ontbrekende strook van ~200 px.** Post-its die over een
+  paginagrens vielen zijn aan bééde kanten afgekapt: links `H… (U… we…`, rechts `…)`. Het
+  middenstuk staat in geen van de vier pagina's. 11 post-its onleesbaar, plus de titel van
+  het derde paneel en een afgekapte rechterkant met nog twee post-its.
+- **Naad-detectie via correlatie werkte niet.** Ik zocht de horizontale overlap door de
+  rechterkolommen van slice N te matchen tegen de linkerkolommen van slice N+1. Dat vond
+  "overlap 416 px" met een verdacht hoge diff (21,0) — het matchte **witruimte**, waar een
+  board-export vol mee staat. Naast elkaar plakken en naar de naad kijken was sneller en
+  gaf direct het echte antwoord.
+
+De les zit niet in het stitchen maar in het **detecteren**: een lossy board-export ziet er
+volledig uit tot je op een naad inzoomt. Doe die check als eerste, niet nadat je alles hebt
+getranscribeerd. En vraag bij twijfel om een **PNG-export of screenshot** van het hele bord —
+die van Joep vulde alle 11 gaten in één keer.
+
+**Les: bij een bord-PDF is de eerste vraag niet "wat staat er" maar "mist er iets". Zoom in
+op elke paginanaad vóór je begint; een afgekapt glyph aan beide kanten van een naad betekent
+dat de bron onbruikbaar is en je een afbeelding moet vragen.**
+
+## CPR vs CPC bij GSD-shops: twee vlaggen op bt.shop_list, en ze blijven staan (2026-08-12)
+
+Joep vroeg waar `create GSD-campaigns.py` het onderscheid CPC/CPR maakt. Er staat **geen
+`CASE` in SQL** — de query haalt twee vlaggen op uit `beslistbi.bt.shop_list` en het label
+valt in Python (`getRedShiftData`, regel ~1660):
+
+```python
+model = "CPR" if is_wecantrack_shop == 1 or is_pixel_shop == 1 else "CPC"
+```
+
+- **`bt.shop_list` is een dagsnapshot.** Zonder `date = (SELECT MAX(date) …)` krijg je de
+  hele historie. Snapshot 2026-08-12: 53.844 shops, 1.914 CPR (779 wecantrack, 1.135 pixel,
+  **geen overlap**), 51.930 CPC.
+- **De `is_gsd_*_shop`-vlaggen zijn sticky.** Van de 1.461 GSD-shops zijn er maar **1.029
+  live** (`hide_online = 0 AND is_disabled = 0`). Bij CPR valt dat mee (953 van 1.114), bij
+  **CPC niet: 76 van 332**. De vlag zegt "heeft GSD-campagnes (gehad)", niet "is nu actief" —
+  filter dus altijd op live als je een werklijst maakt.
+- **`shop_phase = 1` is de enige fase met verkeer** (4,7 mln outclicks/30d over alle shops;
+  alle andere fases 0–5). Fase 23 is de afgezwaaide groep: 317 GSD-shops, waarvan 293
+  niet-live.
+- **`shop_charging_model` zegt bijna hetzelfde** (CPR-shops hebben `CPR` of `Affiliate`)
+  maar niet exact: 1 shop had `charging_model = 'CPC'` terwijl de vlaggen CPR zeggen. De
+  vlaggen zijn leidend, want die gebruikt het script.
+- **`live` betekent niet "heeft producten"**: 590 van de 1.029 live GSD-shops hebben
+  `product_count = 0`.
+
+Query ligt in `Downloads\claude\shop_model_cpr_cpc.sql` (met en zonder live-filter).
+
+**Les: een `is_*_shop`-vlag op een snapshot-tabel is een historie-vlag, geen statusvlag.
+Combineer hem altijd met `hide_online`/`is_disabled` voordat je hem als werklijst gebruikt.**
+
 ## Een voortgangsbalk is een datavraag, niet een opmaakvraag — plan vóór je werkt (2026-08-12)
 
 Joep vroeg een balk bij "Nieuwe logs ophalen" in Bot Hits. De verleiding is om naar de

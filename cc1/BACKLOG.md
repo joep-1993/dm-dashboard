@@ -8,6 +8,33 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### SEO/GEO brainstorm: 50 onderwerpen wachten op prioritering (logged 2026-08-12)
+- [ ] **Bepaal per onderwerp of het nieuw is of een uitbreiding van iets dat er al staat.**
+  Het brainstormbord is op 2026-08-12 uitgelezen naar **50 post-its in 7 thema's** —
+  volledige inventaris in `cc1/SEO_GEO_BRAINSTORM.md`, Excel in
+  `Downloads\claude\SEO_GEO_brainstorm_onderwerpen.xlsx`, generator in
+  `cc1/seo_geo_brainstorm_to_xlsx.py`. De fase-indeling (Awareness / Consideration /
+  Decision / Trust Validation) is op verzoek losgelaten; gegroepeerd op onderwerp.
+
+  Verdeling: Contentformats & paginatypes **16**, Keuzehulp & onderbouwing op de site **10**,
+  Autoriteit/auteurs/reviews **6**, Off-site/links/social **6**, Technisch &
+  LLM-vindbaarheid **5**, Eigen data als contentmotor **4**, Loyaliteit & accounts **3**.
+
+  Waarom dit nog niet oppakbaar is: **er staat geen enkele prioriteit op het bord** op één
+  TOP!-sticker na (datagedreven trendrapporten). Geen effort, geen eigenaar, geen
+  onderbouwing per idee. Wie hier verder mee wil, moet eerst die laag toevoegen — en dat is
+  een gesprek, geen invuloefening. De Excel heeft die kolommen daarom bewust niet.
+
+  Wat wél alvast te doen is zonder besluit: **het overlap-onderzoek**. Meerdere onderwerpen
+  raken bestaande onderdelen van het dashboard — `Schema markup toevoegen` en `Javascript
+  rendering afbeeldingen` liggen dicht bij de SEO Rulings-checks, `FAQ` heeft al een
+  generator (`faq_service.py` + `faq_v2_publisher.py`), en de contentkalender-ideeën leunen
+  op dezelfde Redshift-data als SEO stats. Dat scheidt "nieuw bouwen" van "uitbreiden"
+  vóórdat er over prioriteit gepraat wordt.
+
+  Let op bij verifiëren: de bron-PDF is een **kapotte export** (zie LEARNINGS 2026-08-12) —
+  vraag om de afbeelding van het bord, niet om de PDF.
+
 ### Basements deepest-cats: welke vorm krijgt de results-check? (logged 2026-08-06)
 - [ ] **Kies een aanpak voordat we `basements_deepest_cats_{nl,be,de}.json` verbouwen.** De
   `check_and_results`-node (uit `basements_homepage_nl`, op 2026-08-06 ook in de drie

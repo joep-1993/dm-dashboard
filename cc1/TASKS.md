@@ -4,6 +4,36 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-12 — SEO/GEO brainstormbord uitgelezen naar Excel + CPR/CPC-overzichtsquery
+
+Aanleiding: Joep vroeg (1) waar `create GSD-campaigns.py` het CPC/CPR-onderscheid maakt en
+een Redshift-query voor shopnaam + type, en (2) de onderwerpen van het SEO/GEO brainstormbord
+in een Excel met vergelijkbare post-its onder elkaar, fases losgelaten.
+
+- [x] **CPR/CPC gevonden in Python, niet in SQL.** `getRedShiftData` (regel ~1660) labelt op
+      twee vlaggen uit `bt.shop_list`: `is_wecantrack_shop` of `is_pixel_shop` → CPR. Query
+      geschreven en getest (`Downloads\claude\shop_model_cpr_cpc.sql`), teruggebracht tot
+      `shop_name` / `shop_id` / `model` op verzoek. 1.461 GSD-shops.
+- [x] **Live-check erbij op vraag van Joep**: maar **1.029 van de 1.461 is live**, en bij CPC
+      is het 76 van 332 — de `is_gsd_*_shop`-vlaggen blijven staan nadat een shop offline
+      gaat. Variant met live-filter in hetzelfde .sql-bestand. Cijfers in LEARNINGS.
+- [x] **Brainstormbord: 50 post-its in 7 thema's** naar
+      `Downloads\claude\SEO_GEO_brainstorm_onderwerpen.xlsx` (tabs `Onderwerpen` +
+      `Samenvatting`, kleurcel gevuld met de echte post-itkleur, filter + freeze panes).
+      Inventaris vastgelegd in `cc1/SEO_GEO_BRAINSTORM.md`, generator in
+      `cc1/seo_geo_brainstorm_to_xlsx.py` zodat de Excel herbouwbaar is.
+- [x] **De bron-PDF bleek kapot** (4 slices, ~200 px weg per naad, rechterkant afgekapt →
+      11 onleesbare post-its). Compleet gemaakt met een afbeelding van het bord die Joep
+      stuurde. Detectiemethode + waarom correlatie op witruimte misgaat: zie LEARNINGS.
+- [ ] **Geen prioritering opgenomen** — op het bord staat alleen een TOP!-sticker op
+      "Datagedreven trendrapporten". Kolommen voor prioriteit/effort/eigenaar zouden
+      verzonnen zijn. Joep is gevraagd of hij een variant met scorekolommen wil; geparkeerd
+      in BACKLOG samen met het overlap-onderzoek (welke onderwerpen bestaan al in het
+      dashboard).
+- [ ] **Twee blokjes boven de panelen blijven onleesbaar** (iets met "…samen groeien"). Ze
+      vallen in zowel de PDF als de afbeelding buiten beeld; alleen op te lossen met een
+      nieuwe export.
+
 ### 2026-08-12 — Bot Hits: voortgangsbalk bij "Nieuwe logs ophalen"
 
 Aanleiding: Joep zag alleen `Bezig sinds … — fetch: download 2026-08-09: 2904 bestanden,
