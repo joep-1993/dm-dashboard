@@ -1,6 +1,46 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een vraag over een label kan een datafout zijn — toets de premisse vóór je hem inwilligt (2026-08-12)
+
+Joep: "in de grafiek 'Facet-diepte — bekend vs onbekend' staat geen onbekend, moet die
+beschrijving dan niet gewoon 'Facet-diepte' zijn?" Een redelijk verzoek, twee tekens werk,
+en het zou een echte bug hebben dichtgeplamuurd. De grafiek toonde één kleur omdat
+`is_known_url` false is voor elke rij die ná de backfill is geladen — 30 datums, precies
+het bereik waarop de tool standaard opent. Zie TASKS voor de volledige bevinding.
+
+- **"Er staat geen X" is een waarneming over de uitkomst, niet over de bedoeling.** De
+  splitsing wegnemen omdat er maar één helft zichtbaar is, verwijdert juist het signaal
+  dat er iets mis is.
+- De juiste volgorde was: eerst kijken wát de grafiek tekent (twee datasets, één met
+  nullen), dan pas naar de titel. Dat kostte één query.
+- Wat er wél mis was aan de titel: hij gebruikte woorden ("bekend", "onbekend") die
+  nergens in de grafiek voorkomen — de legenda zegt "in pa.urls" / "niet in pa.urls".
+  Dat is het echte, kleine defect, en dat is ook gefixt.
+
+**Les: als een gebruiker een naam wil veranderen omdat de inhoud niet klopt, controleer
+eerst de inhoud. Een label aanpassen aan kapotte data maakt de data niet minder kapot,
+alleen minder zichtbaar.**
+
+## Vier symptomen, één oorzaak — zoek de gedeelde bron voor je ze los oplost (2026-08-12)
+
+In dezelfde ronde meldde Joep vier dingen die los van elkaar leken: de facet-grafiek
+zonder tweede kleur, de tegel "0 daarvan in pa.urls", "Facet-verspilling 100%", en
+"andere tabbladen geven geen resultaten". Vier tickets, zou je denken.
+
+Het was er één: `is_known_url`. De tegels tellen hem op, de grafiek splitst erop, en de
+tabbladen URL's / Crawl-verspilling / Categorieën lezen `pa.bothits_url_daily` — een
+tabel die alleen `pa.urls`-leden bevat en dus leeg blijft als niets als bekend geldt.
+
+- **Twee of meer klachten uit hetzelfde scherm in dezelfde minuut: zoek eerst de kolom
+  die ze delen.** Hier had elk symptoom apart een plausibele eigen verklaring (labeling,
+  afronding, filter te smal) en had ik er drie kunnen "oplossen" zonder iets te repareren.
+- De tabel-tot-tabel-route is het snelst te vinden via de kolom, niet via de UI: één
+  `grep` op `is_known_url` gaf de service-query, de cube en de drie afnemers.
+
+**Les: tel de symptomen. Meer dan twee tegelijk uit één scherm is zelden toeval, en de
+gedeelde kolom is een goedkopere eerste hypothese dan vier losse onderzoeken.**
+
 ## "Zelfde klasse" is geen bewijs van zelfde breedte — meet de gerenderde randen (2026-08-12)
 
 Joep vroeg de paginabreedte van Bot Hits gelijk te trekken aan SEO Stats. Ik verving

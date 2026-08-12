@@ -34,6 +34,51 @@ in een Excel met vergelijkbare post-its onder elkaar, fases losgelaten.
       vallen in zowel de PDF als de afbeelding buiten beeld; alleen op te lossen met een
       nieuwe export.
 
+### 2026-08-12 — BUG: `is_known_url` staat op false voor alles ná de backfill
+
+**Prioriteit: dit maakt vier onderdelen van Bot Hits onbruikbaar.** Gevonden doordat Joep
+vroeg waarom de grafiek "Facet-diepte — bekend vs onbekend" geen onbekend toonde; het
+bleek geen labelkwestie maar een datafout.
+
+Wat er staat, gemeten op 2026-08-12:
+
+| geïngest op | datums | hits met `is_known_url` |
+|---|---|---|
+| 2026-08-11 (backfill uit het archief) | 116 | normaal |
+| 2026-08-12 (via de S3-ophaal) | 30 | **0** |
+
+De 30 kapotte datums zijn 2026-07-13 t/m 2026-08-11 — precies het bereik waar de tool
+standaard op opent. Bewijs dat het fout is en niet gewoon zo: URL's die aantoonbaar wél
+in `pa.urls` staan (`/products/mode`, `/products/gezond_mooi`, `/products/huis_tuin`)
+zijn in die dagen als onbekend geteld.
+
+**Symptomen die hier allemaal op terug te voeren zijn:**
+- Tegel "Categorie-URL's" zegt `0 daarvan in pa.urls`, tegel "Facet-verspilling" zegt
+  100% (was 86,7%, zie [[bothits_dashboard]]).
+- De facet-diepte-grafiek toont maar één kleur.
+- **De tabbladen URL's, Crawl-verspilling en Categorieën geven "geen resultaten"** — die
+  lezen `pa.bothits_url_daily`, en die tabel stopt op 2026-06-09.
+
+**Wat het NIET is** (nagetrokken, zodat niemand dit opnieuw hoeft te doen):
+- `pa.urls` is niet leeg of veranderd: 1.031.796 rijen, laatste instroom 2026-07-29, dus
+  compleet toen die ingests draaiden.
+- De lookup werkt: `load_url_ids()` levert 1.031.794 sleutels en `/products/mode` zit
+  erin.
+- Fork-overerving werkt: een `ProcessPoolExecutor`-child ziet de global van de parent.
+- De huidige code werkt: `process_file()` op een echt logbestand geeft 708 bekende hits
+  tegen 3.294 onbekende.
+
+- [ ] **Herlaad de 30 datums 2026-07-13 t/m 2026-08-11.** De bronbestanden van die runs
+      zijn opgeruimd, dus opnieuw ophalen uit S3 — alle 30 vallen nog binnen de ~42-daagse
+      retentie, maar dat venster schuift, dus dit heeft haast. Voor 07-13 is de deadline
+      ongeveer 08-24.
+- [ ] **Kijk bij die herlaad-run of het reproduceert.** Zo ja, dan is de oorzaak te
+      vangen; zo nee, dan was het eenmalig en is de data hersteld. Dit is meteen de enige
+      manier om er nog achter te komen — de logbestanden van vanochtend zijn weg.
+- [ ] **Overweeg een tripwire**: een ingest die eindigt met 0% bekende URL's op een dag
+      met miljoenen hits is per definitie verdacht. Nu merkte niemand het tot een
+      grafiek er raar uitzag.
+
 ### 2026-08-12 — Bot Hits: merkkleuren, breedte, annuleren, eigen statussectie
 
 Vier punten van Joep in één ronde (`2f120ec`).
