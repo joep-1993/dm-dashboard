@@ -1433,7 +1433,10 @@
         btn.disabled = true;
         try {
             s3Msg('Bucket bekijken…');
-            const p = await fetch(API + `/s3/preview?days=${days}`).then(r => r.json());
+            const ac = new AbortController();
+            const timer = setTimeout(() => ac.abort(), 120_000);
+            const p = await fetch(API + `/s3/preview?days=${days}`, { signal: ac.signal })
+                .then(r => { clearTimeout(timer); return r.json(); });
             if (p.detail) { s3Msg(`Kan niet ophalen: ${p.detail}`, 'text-danger'); return; }
             // Elke datum krijgt zijn eigen reden te zien. Zonder dat leest "0 dagen op
             // te halen" als een defecte knop, terwijl het meestal "al geïngest" of
@@ -1449,7 +1452,10 @@
             if (r.status === 'already_running') { s3Msg('Er loopt al een ingest — die wordt gevolgd.'); }
             s3Poll();
         } catch (e) {
-            s3Msg(`Ophalen mislukt: ${e.message}`, 'text-danger');
+            const msg = e.name === 'AbortError'
+                ? 'Timeout: bucket reageerde niet binnen 2 minuten — controleer de S3-credentials en netwerk.'
+                : e.message;
+            s3Msg(`Ophalen mislukt: ${msg}`, 'text-danger');
         } finally {
             btn.disabled = false;
         }

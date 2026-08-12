@@ -87,9 +87,14 @@ def client():
                     raise S3NotConfigured(
                         "BOTHITS_S3_ACCESS_KEY_ID / _SECRET_ACCESS_KEY niet gezet")
                 import boto3  # lokaal: de rest van het dashboard hoeft boto3 niet
+                from botocore.config import Config
                 _client = boto3.client("s3", aws_access_key_id=key,
                                        aws_secret_access_key=secret,
-                                       region_name=REGION)
+                                       region_name=REGION,
+                                       config=Config(
+                                           connect_timeout=10,
+                                           read_timeout=30,
+                                           retries={"max_attempts": 2}))
     return _client
 
 
