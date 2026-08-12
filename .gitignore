@@ -61,6 +61,8 @@ backend/data/seo_prio_categories.json
 redshift
 scripts/amazon_cred
 backend/service_accounts/
+# Losse credential-kladlijst naast .env — bevat AWS-keys in platte tekst
+/keys.txt
 
 # Google Ads automation (contains sensitive config)
 thema_ads_optimized
