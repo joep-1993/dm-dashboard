@@ -1,6 +1,80 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een veld toevoegen aan een externe Chart.js-tooltip is een layout-wijziging, geen tekstwijziging (2026-08-12)
+
+Bij de WoW-delta in de donut-hovers van SEO Stats. Drie dingen die je niet ziet als je
+denkt "ik plak er een getal achter":
+
+- **Wat door `tooltip.body` loopt, wordt één platte, ge-escapete string.** `donutTooltip`
+  bouwt zijn HTML uit `tooltip.title` + `tooltip.body`, precies zodat de bewoording één
+  bron heeft. Een delta moet groen of rood zijn, dus die kán daar niet doorheen. Oplossing:
+  de rij achter de arc op de chart-instance parkeren (`donuts[which].$dist = dist`) en in
+  de external tooltip opzoeken via `dataPoints[0].dataIndex`. Voordeel boven een aparte
+  registry: `destroy()` neemt hem mee, dus een stale delta kan de chart niet overleven.
+- **De tip is `nowrap` en op de caret gecentreerd**, dus elk extra woord maakt hem breder
+  en duwt hem bij een slice aan de rand buiten de kaart. Er zat geen horizontale clamp op
+  (de sparkline-tooltip had die al wél). Toegevoegd, met centreren als de tip breder is
+  dan de wrapper.
+- **De pil-kleuren van de tegels overleven de verhuizing naar het donkere blok niet.**
+  `#00854c` / `#c0392b` staan op ~2:1 tegen `#242628`. Zie UI_BLUEPRINT voor het paar dat
+  het wél haalt.
+
+**Les: een tooltip die uit een gedeelde functie komt heeft drie contracten tegelijk —
+escaping, breedte en contrast. Loop ze alle drie langs voordat je er iets in hangt.**
+
+## Reken slice-delta's terug naar de headline — dat vangt een verkeerde basislijn die unit-tests missen (2026-08-12)
+
+Nadat de donuts een `wow` per slice kregen, was de vraag: klopt d-7 wel, en is het wel
+dezelfde d-7 als de tegels gebruiken? Unit-tests op `_as_distribution` zeggen daar niets
+over — die voeden hun eigen `prev_raw` aan.
+
+Wat het wél aantoont, gratis: **de gewogen som van de slice-delta's moet uitkomen op de
+delta van de kop-tegel.** Op 11-08 gaf mobile −5,9% / tablet −10,1% / desktop −6,1% terug
+naar een totaal van −6,06%, en de tegel zei −6,1%. Zelfde voor omzet (−35,5%). Dat kán
+alleen kloppen als beide kanten dezelfde vergelijkdag én dezelfde filters gebruiken.
+
+- Een part-to-whole met een delta erop heeft altijd deze controle beschikbaar: de delen
+  reconstrueren het geheel, in waarde én in verandering.
+- Was de basislijn per ongeluk d-1 geweest, of hadden de split-queries een andere
+  channel-derivation gehad, dan was de gewogen som er duidelijk naast komen te liggen.
+
+**Les: bij een afgeleid cijfer naast een bestaand cijfer — zoek eerst de identiteit die
+de twee moet verbinden, en reken die na op echte data. Dat is een sterkere check dan een
+tabel met verzonnen invoer.**
+
+## Herstart je de backend vóór een `git pull`, dan draait :8003 oudere code dan `main` (2026-08-12)
+
+De backend draait zonder `--reload`, dus een deploy is kill + relaunch. Deze volgorde
+gaat mis en is makkelijk per ongeluk te maken:
+
+1. code wijzigen → herstarten → getest en goed
+2. committen → `git pull --rebase` haalt een commit van een collega binnen
+3. **die commit staat nu op schijf maar niet in het geheugen van de draaiende server**
+
+In dit geval was dat `fix(bothits): timeouts op S3-preview` — en omdat de frontend
+statisch van schijf komt, riep de nieuwe `bothits.html` de oude `bothits_s3.py` aan.
+Dat is precies het soort mismatch dat je later als spookbug terugziet.
+
+**Les: pull vóór de herstart, of herstart nog een keer ná de pull. Na een `/lcp` is de
+vraag "draait :8003 nog wat er in `main` staat?" en het antwoord is niet vanzelf ja.**
+
+## Een credential-kladbestand naast `.env` erft diens `.gitignore`-regel niet (2026-08-12)
+
+`keys.txt` in de repo-root bevatte de S3-credentials van de CloudFront-logbucket, en
+stond onder geen enkel patroon — `.env` wel. Eén `git add .` had een `AKIA…`-key naar
+GitHub gestuurd, waar AWS' secret-scanner hem oppikt en automatisch blokkeert: dan ligt
+het ophalen van de bothits stil om een reden die niets met de tool te maken heeft.
+
+- Nu genegeerd als `/keys.txt` (geankerd), onder de bestaande `# Credentials`-sectie.
+- **Let op bij `cc1/`**: dat staat óók in `.gitignore` maar de bestanden zijn eerder
+  toegevoegd, dus ze zijn getrackt en wijzigingen erin worden gewoon meegecommit. Een
+  regel in `.gitignore` is dus geen bewijs dat iets buiten de repo blijft — `git
+  check-ignore -v <pad>` en `git ls-files <pad>` zijn dat wel.
+
+**Les: als je een credential in een bestand zet, controleer diezelfde minuut of git hem
+negeert. Niet aannemen dat "hij staat naast `.env`" genoeg is.**
+
 ## `toISOString()` als datum-formatter schuift in CEST een dag terug (2026-08-11)
 
 Bij het narekenen van Shop-campaigns' nieuwe presets ("7d op 11 augustus moet 2 t/m 8

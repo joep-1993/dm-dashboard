@@ -370,10 +370,26 @@ the reference. The anatomy:
   tooltip INSIDE the canvas while `.donut-center` is an absolute layer on top, so the
   canvas tooltip renders *under* the total. Hence an external node in
   `.donut-wrap` with a higher z-index; flip it below the caret when above would clip.
+  It is `nowrap` and centred on the caret, so it **also needs a horizontal clamp** —
+  without one a slice near the edge pushes the panel outside the card. Centre it when
+  the panel is wider than the wrapper.
+- **The hover carries the WoW delta per slice** (2026-08-12): `Mobiel · 44.903 · 71,9%
+  · −5,9% vs. 7d`. It is the percentage change of that slice's **value**, not of its
+  share — the same operation as the stat tiles above, so one number means one thing on
+  the whole screen. Say this out loud in review, because the two readings diverge: when
+  every slice moves by the same factor, every delta is identical while the ring itself
+  has not changed. The delta describes the slice's volume, the arc describes the mix.
+  A slice absent on d-7 renders `n/a`, never `+100%`.
+- **The delta cannot come out of `callbacks.label`.** Everything routed through
+  `tooltip.body` is escaped into one flat string, so a colour-coded element has to be
+  built in the external tooltip from data parked on the chart instance
+  (`donuts[which].$dist = dist`, then `dataPoints[0].dataIndex`). `destroy()` takes it
+  with the chart, so a stale delta cannot outlive the ring it belonged to.
 
 Reach for the ring only for a real part-to-whole with few, well-separated slices.
 For a distribution where two of the parts differ by ~10x, the dataviz skill sends you
-to a 100% stacked bar instead (that is why Dagoverzicht's device split is a bar).
+to a 100% stacked bar instead — Dagoverzicht's device split is the exception, a donut
+on Joep's explicit request (the stacked bars it replaced are in git history).
 
 ### Hover block — the dark panel is `.chart-tooltip`
 
@@ -394,6 +410,14 @@ order is for identity, the tooltip order is for reading.
 period's — you are pointing at one day — and a series that the user switched off is
 out of that denominator as well, or the percentages add up to something not on
 screen. Never render `0%` for a non-zero value; use `<0,1%`.
+
+**A delta inside the dark panel does NOT reuse `.delta-badge`.** The tile pills are
+tuned for the white card and `#00854c` / `#c0392b` sit at roughly 2:1 against
+`#242628`. Use the `.dt-delta` pair from `seo-stats.html` instead — `#5fce8f` up,
+`#ff8b7d` down, `#b9b9c4` for flat and `n/a` — which clears 6,9:1 on that ground. The
+judgement is unchanged: green is the good direction, red the bad one, and for a metric
+where up is bad you swap the class, never the sign (a rising bounce still prints `+5%`,
+only in red).
 
 ### Two charts in one row
 

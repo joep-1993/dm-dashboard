@@ -4,6 +4,36 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-12 — SEO Stats: WoW-delta per slice in de donut-hovers
+
+Aanleiding: Joep vroeg de WoW-delta (procentueel) in de hover van "Type urls - Visits",
+en als het kon ook in "Apparaten - Visits" en "Apparaten - Omzet". Alle drie gedaan
+(`237bff6`).
+
+- [x] **Backend**: `_fetch_device_split` en `_fetch_urltype_split` draaien er ook voor
+      d-7 bij; `_as_distribution` krijgt `prev_raw` en zet een `wow` per bucket. Drie
+      extra Redshift-queries op een cache-miss, niets op een hit. Niet af te leiden uit
+      `daily` — dat is een dagtotaal per metriek zonder device- of url-type-dimensie.
+- [x] **Definitie**: procentuele verandering van de **waarde** van de slice, niet van
+      zijn aandeel, zodat het dezelfde bewerking is als de tegels erboven. Staat in
+      UI_BLUEPRINT, inclusief waar de twee lezingen uit elkaar lopen.
+- [x] **Frontend**: delta van de chart-instance af (`$dist`) in plaats van uit de
+      label-callback, eigen kleurenpaar voor het donkere blok, en een horizontale clamp
+      omdat de tip breder werd. Patronen in UI_BLUEPRINT, valkuil in LEARNINGS.
+- [x] **`Apparaten - Omzet` krijgt het `*`-markertje** van de omzet/OPB-tegels: de
+      per-device delta's daar vergelijken een dag die nog vult met een dag die een week
+      geleden klaar was.
+- [x] **Nagerekend op 11-08 vs 04-08**: elke donut telt op tot de kop-tegel en de
+      gewogen slice-delta's komen uit op de headline (visits −6,1%, omzet −35,5%).
+      Randgevallen apart getest (ontbrekende bucket → `n/a`, nul → `0%`, vaste
+      slice-volgorde, clamp).
+- [ ] **Openstaande vraag voor Joep**: wil hij er ook de verschuiving van het *aandeel*
+      in procentpunten bij? Nu staat alleen de volumedelta erin. Bij een dag waarop
+      alles met dezelfde factor beweegt, zegt de volumedelta niets over de mix.
+- [ ] **`keys.txt` is nu genegeerd** (`21c7fef`) maar staat nog wel op schijf met echte
+      AWS-keys erin. Prima als lokale kladlijst; wel iets om te weten bij het delen van
+      de map of een backup.
+
 ### 2026-08-11 — Bot Hits: 19 visuele punten uit suggestions_new.txt
 
 Aanleiding: Joep's lijst met visuele aanpassingen (regels 1-20). Alles gedaan; de
