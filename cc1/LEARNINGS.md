@@ -1,6 +1,44 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een voortgangsbalk is een datavraag, niet een opmaakvraag — plan vóór je werkt (2026-08-12)
+
+Joep vroeg een balk bij "Nieuwe logs ophalen" in Bot Hits. De verleiding is om naar de
+CSS te gaan. Het echte probleem zat een laag dieper: `bothits_s3.fetch()` riep zijn
+`progress()` precies één keer per logdatum aan, vóórdat de download begon. Er was dus
+geen teller om een balk mee te vullen, alleen een zin die 924 MB lang bleef staan.
+
+- **De listing zat in dezelfde lus als de download.** Daardoor was het totaal pas bekend
+  als de laatste datum al binnen was. Opgesplitst in een plan- en een downloadfase; dat
+  kost geen extra S3-calls, het is dezelfde `list_date()` een fase eerder.
+- **Vraag altijd eerst: bestaat de noemer al vóór het werk begint?** Zo niet, dan is de
+  eerste taak die noemer construeren, niet de balk tekenen. Zo nee én onmogelijk, dan is
+  het antwoord een onbepaalde balk en geen percentage.
+
+**Les: "kan hier een balk bij?" beantwoord je in de backend. Als het antwoord daar niet
+ligt, geeft de frontend hoogstens een balk die liegt.**
+
+## Laat een voortgangsbalk op eenheden werk lopen, niet op bytes (2026-08-12)
+
+Voor de hand liggend bij een download van 924 MB: percentage = bytes binnen / bytes
+totaal. Fout, en de reden is de hervattingstak.
+
+`fetch()` slaat een bestand over als het al met dezelfde grootte op schijf staat — dat is
+wat een tweede klik na een afgebroken download goedkoop maakt. Zo'n overgeslagen bestand
+levert **nul bytes** op. Nagemeten met een tweede run over dezelfde map: 120 van de 120
+bestanden afgehandeld, `bytes_done` aan het eind nog steeds 0. Een bytes-balk staat daar
+op 0% terwijl de tool vol aan het werk is.
+
+- Op bestanden geteld loopt dezelfde run netjes naar 120/120.
+- Ook getest met een bucket die alleen maar gooit: 48 mislukte downloads, balk eindigt
+  op 48/48. **Een mislukking is ook voortgang** — het werk is afgehandeld, alleen niet
+  goed. Tel hem mee, anders blijft de balk hangen op een run die klaar is.
+- MB blijft er wél bij staan in het label, want dat is de maat waarin de gebruiker het
+  volume in de bevestigingsvraag kreeg voorgeschoteld.
+
+**Les: de noemer is "eenheden werk", niet "hoeveelheid data". Zoek de tak waarin een
+eenheid nul data oplevert — als die bestaat, is bytes de verkeerde as.**
+
 ## Een veld toevoegen aan een externe Chart.js-tooltip is een layout-wijziging, geen tekstwijziging (2026-08-12)
 
 Bij de WoW-delta in de donut-hovers van SEO Stats. Drie dingen die je niet ziet als je

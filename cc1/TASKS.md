@@ -4,6 +4,28 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-12 — Bot Hits: voortgangsbalk bij "Nieuwe logs ophalen"
+
+Aanleiding: Joep zag alleen `Bezig sinds … — fetch: download 2026-08-09: 2904 bestanden,
+924 MB…` staan en vroeg om een balk (`9358121`).
+
+- [x] **De oorzaak zat in de backend**, niet in de opmaak: `progress()` vuurde één keer
+      per logdatum, vóór de download. `fetch()` plant nu eerst en downloadt daarna, zodat
+      het totaal vóór de eerste byte bekend is. Geen extra S3-calls — dezelfde
+      `list_date()`, een fase eerder.
+- [x] **Tellers elke 25 bestanden** naar `_ingest_state["fetch_progress"]`, dat
+      `/ingest/status` al doorgaf. Balk loopt op **bestanden**, niet op bytes (zie
+      LEARNINGS voor waarom de hervattingstak dat afdwingt).
+- [x] **Twee standen** volgens UI_BLUEPRINT: bepaald tijdens downloaden (poll 1,5s),
+      onbepaald tijdens verwerken doordat de tellers bij de faseovergang gewist worden.
+      Inline variant zonder Cancel — een lopende download is niet af te breken.
+- [x] **Getest met een nagebootste S3-client** (geen 924 MB getrokken): noemer laat al
+      geïngeste dagen buiten beschouwing, tellers monotoon tot exact het totaal, mislukte
+      downloads blokkeren de balk niet, faseovergang wist op het juiste moment.
+- [ ] **Nog niet met een echte ophaalactie gezien.** De logica is end-to-end getest maar
+      de eerstvolgende echte run is het bewijs; als de balk raar doet, kijk eerst of
+      `/ingest/status` een `fetch_progress` teruggeeft.
+
 ### 2026-08-12 — SEO Stats: WoW-delta per slice in de donut-hovers
 
 Aanleiding: Joep vroeg de WoW-delta (procentueel) in de hover van "Type urls - Visits",

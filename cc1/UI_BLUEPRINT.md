@@ -733,6 +733,16 @@ Two flavours — pick by whether the work is cancellable:
    </div>
    ```
 
+**Pick the denominator before you pick the markup** (added 2026-08-12, Bot Hits'
+"Nieuwe logs ophalen"). Count **units of work**, not volume. That download skips a file
+that is already on disk at the right size, which is what makes a retry after an aborted
+run cheap — and a skipped file contributes zero bytes, so a bytes-driven bar sits at 0%
+through a run that is genuinely working. Files: 120/120. Bytes: 0. Count a **failure as
+progress** too (the unit is handled, just not well), or the bar hangs on a finished run.
+Keep the volume in the label — it is the unit the user was quoted in the confirm dialog
+— but off the axis. And if the denominator does not exist before the work starts,
+building it is the first task; a bar without one is not a bar.
+
 ### The status-bar lifecycle — three rules (added 2026-07-31)
 
 Learned from SEO Titles' Publish, which sat at **100% / "Pushing AI unique titles…"**
