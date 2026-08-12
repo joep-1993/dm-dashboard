@@ -241,12 +241,19 @@
         </div>
     </nav>
 
-    <!-- Bootstrap's .container, net als seo-stats.html — was container-fluid met een
-         eigen max-width van 1500px. Die week niet alleen af van SEO Stats maar ook van
-         de kopbalk hierboven, die al .container is: de inhoud liep dus breder dan zijn
-         eigen balk. De brede tabellen hebben hun eigen overflow (.tool-table-wrap), dus
-         smaller worden kost hier niets. -->
+    <!-- Paginabreedte: het vaste skelet uit UI_BLUEPRINT (container > row >
+         col-lg-11 mx-auto), gelijk aan SEO Stats. Dit was `container-fluid` met een
+         eigen max-width van 1500px, en die vorm noemt de blueprint expliciet als de
+         ene die nooit mag ("never container-fluid or a bare container") — een blote
+         container dus ook niet, want dan is de pagina wél gecentreerd maar nog steeds
+         breder dan elke andere tool.
+         `col-lg-11` en niet de standaard `col-md-10`, omdat dit net als SEO Stats een
+         data-dense pagina is: zes tegels op één rij en tabellen met acht kolommen.
+         De brede tabellen hebben hun eigen overflow (.tool-table-wrap), dus smaller
+         worden kost hier niets. -->
     <div class="container mt-4 pb-5">
+      <div class="row">
+        <div class="col-lg-11 mx-auto">
 
         <!-- ============================ TILES ============================ -->
         <div class="tile-row mb-3" id="tiles"></div>
@@ -552,6 +559,8 @@
                 </div>
             </div>
         </div>
+        </div><!-- /col-lg-11 -->
+      </div><!-- /row -->
     </div>
 
     <footer class="text-center py-4">

@@ -1,6 +1,35 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## "Zelfde klasse" is geen bewijs van zelfde breedte — meet de gerenderde randen (2026-08-12)
+
+Joep vroeg de paginabreedte van Bot Hits gelijk te trekken aan SEO Stats. Ik verving
+`container-fluid` + `max-width: 1500px` door een blote `.container`, constateerde dat
+beide pagina's dezelfde klasse, dezelfde Bootstrap-versie en geen overrides hadden, en
+meldde "gelijk per constructie". Fout. Toen Joep het navroeg en ik het écht mat:
+**1194px tegen 1304px.**
+
+De oorzaak: SEO Stats zit niet in een blote container maar in het skelet dat UI_BLUEPRINT
+voorschrijft, `container > row > col-lg-11 mx-auto`. Elf twaalfde van 1320 is 1210, min
+gutters 1194 — exact het gemeten getal. De blueprint zegt zelfs letterlijk "never
+`container-fluid` or a bare container", dus ik had de pagina van de ene verboden vorm naar
+de andere gebracht.
+
+- **De klasse op de wrapper is één schakel; de breedte komt uit de hele keten.** Een
+  `row`/`col` erbinnen, padding op een ouder, een `mx-auto` — allemaal onzichtbaar als je
+  alleen de buitenste klasse vergelijkt.
+- **Ook de meetmethode kan liegen.** Mijn eerste meting nam de breedste inhoudsrij en gaf
+  asymmetrische marges (107 links, 37 rechts) voor een gecentreerde pagina. Dat kán niet,
+  en dus was het de methode: die rij liep door de tegelrij, en die is
+  `justify-content-center` en vult de container niet. De modus van de linkerrand over álle
+  rijen gaf wel het goede antwoord — elke volle kaart draagt de echte containerrand.
+  **Een uitkomst die fysiek onmogelijk is, is een bug in de meting, niet in het object.**
+- Uiteindelijk op drie venstergroottes bevestigd (1280/1400/1600), want gelijk op één
+  breedte kan toeval zijn bij verschillende breakpoints.
+
+**Les: bij "is X nu gelijk aan Y?" is het antwoord een meting, niet een redenering over de
+broncode. En als de meting iets onmogelijks zegt, repareer eerst de meting.**
+
 ## Valideer een palet zoals de grafiek hem TEKENT, niet zoals de map hem declareert (2026-08-12)
 
 Bij het vooropzetten van de merkkleuren in Bot Hits' legenda. Ik meette de acht benoemde

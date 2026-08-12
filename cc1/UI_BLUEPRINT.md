@@ -35,9 +35,17 @@ hexes inline, use the token or the class that references it:
   - **Default: `container mt-5 pb-5` › `row` › `col-md-10 mx-auto`** (~950px at a
     1200-1399px window, ~1074px at ≥1400px). Every tool uses this unless it is on
     the list below.
-  - **Data-dense exception: `col-lg-11 mx-auto`** (~1045px / ~1184px) for the four
+  - **Data-dense exception: `col-lg-11 mx-auto`** (~1045px / ~1184px) for the five
     pages whose content genuinely needs it: **SEO stats, Healthscore, SEO titles,
-    DMA Exclusions**. SEO stats and Healthscore ran on a *bare* container (~1140px /
+    DMA Exclusions, Bot Hits**. Bot Hits joined on 2026-08-12 (Joep: "gelijktrekken
+    aan SEO stats") — it was the last page still on `container-fluid` with a hand-set
+    `max-width: 1500px`, and six tiles on one row plus eight-column tables put it in
+    the same bracket as SEO stats. Watch the trap that cost a round here: swapping
+    `container-fluid` for a **bare** container centres the page but leaves it wider
+    than every other tool, and it *looks* fixed. The width only matches once the
+    `row` › `col-lg-11` wrapper is there too — verify by measuring the rendered
+    edges at two window sizes, not by comparing the class names.
+    SEO stats and Healthscore ran on a *bare* container (~1140px /
     ~1320px) until this date, which is why they read visibly wider than the rest of
     the app; `col-lg-11` brings them into a sanctioned width without squeezing
     them. At `col-md-10`, SEO stats' 8 summary tiles wrap 7+1 and its 10 metric
