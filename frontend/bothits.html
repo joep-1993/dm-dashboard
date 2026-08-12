@@ -39,9 +39,25 @@
             min-width: 140px;
             box-shadow: 0 4px 16px rgba(94, 74, 144, 0.14);
         }
-        .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; }
-        .stat-card .label { font-size: 0.85rem; color: #636e72; }
-        .stat-card .detail { font-size: 0.75rem; color: #999; margin-top: 0.25rem; }
+        .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; line-height: 1.15; }
+        .stat-card .label { font-size: 0.85rem; color: #636e72; line-height: 1.3; }
+        /* De drie regels moeten over de zes tegels drie horizontale banden vormen.
+           Dat lukte niet omdat de toelichting bij twee tegels op twee regels valt en
+           bij vier op één: de kaarten zijn wel even hoog (grid), maar de tekst is
+           bovenaan gepakt, dus onder de korte toelichtingen bleef losse ruimte staan.
+           `min-height` van twee regels reserveert die ruimte altijd, zodat elke
+           toelichting op dezelfde hoogte begint en de rij als band leest. Twee en niet
+           drie: geen enkele toelichting loopt over twee regels heen op de smalste
+           tegel die dit grid maakt (~145px tekstbreedte bij zes tegels op col-lg-11). */
+        .stat-card .detail {
+            font-size: 0.75rem; color: #999; margin-top: 0.25rem;
+            line-height: 1.3; min-height: 2.6em;
+        }
+        /* Een datum mag niet middenin afbreken. Browsers breken graag ná een
+           koppelteken, dus "2026-07-13 t/m 2026-08-11" werd "…2026-08-" / "11".
+           De datums krijgen daarom elk hun eigen nowrap; de afbreking valt nu op de
+           spaties rond "t/m", waar hij hoort. */
+        .stat-card .detail .nb { white-space: nowrap; }
 
         /* ---- Standard table look ---- */
         .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; max-height: 620px; }
@@ -397,7 +413,15 @@
                     </div>
                     <div class="col-md-6">
                         <div class="card h-100">
-                            <div class="card-header"><h5 class="mb-0">Facet-diepte — bekend vs onbekend</h5></div>
+                            <!-- Titel volgt de woorden van de legenda eronder ("in
+                                 pa.urls" / "niet in pa.urls"). Stond als "bekend vs
+                                 onbekend", en die twee woorden komen in de grafiek
+                                 nergens voor — Joep zocht op 2026-08-12 naar een
+                                 "onbekend"-reeks die er onder die naam niet was.
+                                 De splitsing zelf blijft: hij is de kern van de
+                                 verspillingsvraag. Staat er één kleur, dan is dat een
+                                 datasignaal en geen opmaakkwestie. -->
+                            <div class="card-header"><h5 class="mb-0">Facet-diepte — in vs. niet in pa.urls</h5></div>
                             <div class="card-body">
                                 <div class="chart-box-sm chart-framed"><canvas id="depthChart"></canvas></div>
                             </div>
@@ -893,7 +917,8 @@
         // product pages, so counting /p/ as "not in pa.urls" would report ~94%
         // and mean nothing.
         const tiles = [
-            ['Bot-hits totaal', fmt(s.total_hits), `${s.start_date} t/m ${s.end_date}`],
+            ['Bot-hits totaal', fmt(s.total_hits),
+             `<span class="nb">${s.start_date}</span> t/m <span class="nb">${s.end_date}</span>`],
             ['AI-crawlers', fmt(ai), pct(ai, s.total_hits) + ' van alle bot-hits'],
             ['Productpagina\'s', fmt(s.product_hits), pct(s.product_hits, s.total_hits) + ' van alle bot-hits'],
             ['Categorie-URL\'s', fmt(s.catalog_hits), fmt(s.catalog_known) + ' daarvan in pa.urls'],
