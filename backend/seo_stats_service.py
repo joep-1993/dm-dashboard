@@ -664,18 +664,30 @@ def _fetch_urltype_split(conn, d: date) -> Dict[str, int]:
         return {r["t"]: int(r["visits"] or 0) for r in cur.fetchall()}
 
 
-def _as_distribution(raw: Dict[str, float], order: Optional[List[str]] = None) -> List[Dict]:
+def _as_distribution(raw: Dict[str, float], order: Optional[List[str]] = None,
+                     prev_raw: Optional[Dict[str, float]] = None) -> List[Dict]:
     """{bucket: value} -> ordered list with shares. Buckets absent from the day are
     dropped rather than shown as a 0% slice. `order` fixes the slice sequence so it
-    never follows the day's ranking (colour must follow the entity, not its rank)."""
+    never follows the day's ranking (colour must follow the entity, not its rank).
+
+    `prev_raw` is the same mapping for d-7 and adds a per-bucket `wow`: the percentage
+    change of the bucket's own VALUE, not of its share. That is the same definition the
+    tiles use (Joep, 2026-07-31), so "+3,2%" in the donut hover and "+3,2%" on a tile
+    mean the same operation. Consequence worth knowing when reading it: on a day where
+    every bucket moved by the same factor, every slice shows the same delta and the ring
+    itself is unchanged — the delta describes the slice's volume, the arc describes the
+    mix. A bucket that did not exist on d-7 gets None (n/a), not +100%.
+    """
     total = sum(raw.values())
+    prev_raw = prev_raw or {}
     out = []
     for dev in (order or _DEVICE_ORDER):
         v = raw.get(dev)
         if not v:
             continue
         out.append({"device": dev, "value": round(v, 2),
-                    "share": round(100.0 * v / total, 1) if total else None})
+                    "share": round(100.0 * v / total, 1) if total else None,
+                    "wow": _pct_delta(prev_raw.get(dev), v)})
     # AUDIT LOW flagged this loop as dead code, and on today's inputs it IS unreachable:
     # both callers pass the order list that matches their SQL CASE exactly (device ->
     # tablet/mobile/unknown/desktop, urltype -> R-url/C-url/PLP/Browse/Overig).
@@ -694,7 +706,8 @@ def _as_distribution(raw: Dict[str, float], order: Optional[List[str]] = None) -
                 dev, order or _DEVICE_ORDER,
             )
             out.append({"device": dev, "value": round(v, 2),
-                        "share": round(100.0 * v / total, 1) if total else None})
+                        "share": round(100.0 * v / total, 1) if total else None,
+                        "wow": _pct_delta(prev_raw.get(dev), v)})
     return out
 
 
@@ -776,6 +789,14 @@ def get_dashboard(target_date: Optional[str] = None, force: bool = False) -> Dic
         daily = _fetch_daily(conn, spark_days)
         devices = _fetch_device_split(conn, d)
         urltypes = _fetch_urltype_split(conn, d)
+        # The same two splits for d-7, purely to give every donut slice its own WoW
+        # delta. Three extra queries on a cache miss (device visits + device revenue +
+        # urltype); they are the same shape as the ones above, single-day and grouped,
+        # so they add ~30% to this endpoint's Redshift time and nothing to a cache hit.
+        # Deliberately NOT derived from `daily`: that is a whole-day total per metric and
+        # carries no device or url-type dimension, so there is nothing in it to subtract.
+        prev_devices = _fetch_device_split(conn, prev)
+        prev_urltypes = _fetch_urltype_split(conn, prev)
     finally:
         return_redshift_connection(conn)
 
@@ -819,9 +840,9 @@ def get_dashboard(target_date: Optional[str] = None, force: bool = False) -> Dic
         "ctr_wow_pp": _pp_delta(_ratio(pre, "seo_clicks"), _ratio(cur, "seo_clicks")),
         "bounce_wow_pp": _pp_delta(_ratio(pre, "seo_noprod"), _ratio(cur, "seo_noprod")),
         "opb_wow": _pct_delta(_opb(pre), _opb(cur)),
-        "devices_visits": _as_distribution(devices["visits"]),
-        "devices_revenue": _as_distribution(devices["revenue"]),
-        "urltypes_visits": _as_distribution(urltypes, _URLTYPE_ORDER),
+        "devices_visits": _as_distribution(devices["visits"], None, prev_devices["visits"]),
+        "devices_revenue": _as_distribution(devices["revenue"], None, prev_devices["revenue"]),
+        "urltypes_visits": _as_distribution(urltypes, _URLTYPE_ORDER, prev_urltypes),
         "series": _spark_series(daily, spark_days),
         "generated_at": datetime.now().isoformat(),
     }

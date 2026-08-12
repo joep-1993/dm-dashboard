@@ -226,6 +226,15 @@
         .donut-tip.is-on { opacity: 1; }
         .donut-tip .dt-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
         .donut-tip .dt-label { color: #f0f0f3; font-weight: 600; }
+        /* WoW delta per slice. NOT the .delta-badge pills the tiles use: those are
+           tuned for the white card (#00854c / #c0392b) and drop to ~2:1 on this
+           #242628 block. These two are the same judgement (green up / red down) at
+           luminances that clear 6.9:1 on that background. */
+        .donut-tip .dt-delta { font-weight: 600; }
+        .donut-tip .dt-delta.up { color: #5fce8f; }
+        .donut-tip .dt-delta.down { color: #ff8b7d; }
+        .donut-tip .dt-delta.flat { color: #b9b9c4; }
+        .donut-tip .dt-vs { opacity: .65; }
         .donut-center .dc-total { font-size: 1.35rem; font-weight: 700; color: #2d2a3a; line-height: 1.1; }
         .donut-center .dc-cap { font-size: 0.68rem; text-transform: uppercase;
                                 letter-spacing: .04em; color: #8a8a8a; margin-top: 2px; }
@@ -548,7 +557,7 @@
                         </div>
                     </div>
                     <div class="col-lg-4">
-                        <div class="dash-sub">Apparaten - Omzet</div>
+                        <div class="dash-sub" id="dashSubRevenue">Apparaten - Omzet</div>
                         <div class="donut-wrap">
                             <canvas id="dashDonutRevenue"></canvas>
                             <div class="donut-center" id="dashCenterRevenue"></div>
@@ -2100,6 +2109,21 @@
             return (v === null || v === undefined) ? '–' : String(v).replace('.', ',') + '%';
         }
 
+        // WoW delta for one donut slice. Percentage change of THAT SLICE'S VALUE against
+        // the same slice seven days earlier — not of its share, so it reads the same way
+        // as the tile badges above. `null` means the slice had no traffic on d-7, which
+        // is a real answer ("new") and not a zero.
+        function donutDeltaHtml(wow) {
+            if (wow === null || wow === undefined) {
+                return '<span class="dt-delta flat">n/a</span>';
+            }
+            const cls = wow === 0 ? 'flat' : (wow > 0 ? 'up' : 'down');
+            const sign = wow > 0 ? '+' : '';
+            const txt = sign + wow.toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + '%';
+            return `<span class="dt-delta ${cls}">${txt}</span>`
+                 + `<span class="dt-vs">vs. 7d</span>`;
+        }
+
         // External tooltip for the donuts, so the hover block sits IN FRONT of the
         // centre total instead of behind it (see .donut-tip). Text still comes from
         // the chart's own `callbacks.label`, so there is one source for the wording.
@@ -2119,15 +2143,29 @@
                             && tooltip.labelColors[0].backgroundColor) || '#9a9aa6';
             const title = (tooltip.title || []).join(' ');
             const body = (tooltip.body || []).map(b => b.lines.join(' ')).join(' ');
+            // The WoW delta comes off the chart instance rather than out of the label
+            // callback, because it needs its own colour-coded element and everything
+            // that flows through `body` is escaped into one flat string.
+            const slice = (chart.$dist || [])[(tooltip.dataPoints[0] || {}).dataIndex];
             tip.innerHTML = `<span class="dt-dot" style="background:${colour};"></span>`
                           + `<span class="dt-label">${escapeHtml(title)}</span>`
-                          + `<span>${escapeHtml(body)}</span>`;
+                          + `<span>${escapeHtml(body)}</span>`
+                          + donutDeltaHtml(slice && slice.wow);
             tip.classList.add('is-on');
             // caretX/Y are canvas-relative; the canvas fills .donut-wrap, but offset
             // in anyway so this survives future padding on the wrapper.
             const x = chart.canvas.offsetLeft + tooltip.caretX;
             const y = chart.canvas.offsetTop + tooltip.caretY;
-            tip.style.left = x + 'px';
+            // Clamp horizontally. The tip is nowrap and centred on the caret, and the
+            // delta made it wide enough that a slice near the left or right edge pushed
+            // it outside the card — so keep it inside the wrapper unless it is wider
+            // than the wrapper, in which case centring is the least-bad option.
+            const halfW = tip.offsetWidth / 2;
+            const wrapW = wrap.clientWidth;
+            const clampedX = halfW * 2 > wrapW
+                ? wrapW / 2
+                : Math.min(Math.max(x, halfW), wrapW - halfW);
+            tip.style.left = clampedX + 'px';
             // Prefer above the caret; flip below when that would clip out of the card.
             const above = y - tip.offsetHeight - 10;
             tip.style.top = (above < 0 ? y + 14 : above) + 'px';
@@ -2188,6 +2226,11 @@
                     },
                 },
             });
+            // The external tooltip needs the row behind the hovered arc (for `wow`), and
+            // Chart.js hands it only the chart. Parking it on the instance keeps the two
+            // in sync by construction: destroy() takes the dist with it, so a stale delta
+            // cannot outlive the chart it belonged to.
+            donuts[which].$dist = dist;
             center.innerHTML = `<div class="dc-total">${fmtValue(total)}</div>`
                              + `<div class="dc-cap">${caption}</div>`;
         }
@@ -2256,6 +2299,13 @@
                 renderSpark('sparkOpb',     s.dates, s.opb,     '#936305',                eur2);
                 renderDeviceDonut('visits', 'dashDonutVisits', 'dashCenterVisits',
                                   d.devices_visits, fmtInt, 'visits');
+                // Same late-settling caveat as the omzet/OPB tiles, and for the same
+                // reason: the per-device WoW deltas in this donut's hover compare a day
+                // that is still filling in against one that finished a week ago. Marked
+                // with the tile convention (visible *, explanation on hover) rather than
+                // silently corrected — the number is real, just less complete.
+                document.getElementById('dashSubRevenue').innerHTML = 'Apparaten - Omzet'
+                    + (settlingNote ? ` <span class="tile-note" title="${escapeHtml(settlingNote)}">*</span>` : '');
                 renderDeviceDonut('revenue', 'dashDonutRevenue', 'dashCenterRevenue',
                                   d.devices_revenue, fmtEuro, 'omzet');
                 renderDeviceDonut('urltype', 'dashDonutUrlType', 'dashCenterUrlType',
