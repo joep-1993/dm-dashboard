@@ -690,7 +690,7 @@ AUTO_INGEST_AT = os.getenv("BOTHITS_AUTO_INGEST_AT", "04:30")
 _ingest_lock = threading.Lock()
 _ingest_state = {"running": False, "started_at": None, "finished_at": None,
                  "result": None, "error": None, "trigger": None, "phase": None,
-                 "fetch": None}
+                 "fetch": None, "fetch_progress": None}
 _timer = None
 
 
@@ -714,15 +714,26 @@ def start_ingest_async(trigger="manual", on_done=None, src=None, before=None):
     if not _ingest_lock.acquire(blocking=False):
         return False, dict(_ingest_state)
     _ingest_state.update(running=True, error=None, result=None, trigger=trigger,
-                         finished_at=None, fetch=None,
+                         finished_at=None, fetch=None, fetch_progress=None,
                          phase="fetch" if before else "ingest",
                          started_at=datetime.now().isoformat(timespec="seconds"))
 
     def worker():
         try:
             if before:
-                _ingest_state["fetch"] = before(
-                    lambda msg: _ingest_state.update(phase=f"fetch: {msg}"))
+                # De callback krijgt een zin voor `phase` en tellers voor
+                # `fetch_progress`, waar de UI zijn balk op vult. `stats` is
+                # optioneel zodat een `before` die alleen zinnen stuurt blijft werken.
+                def on_progress(msg, stats=None):
+                    _ingest_state["phase"] = f"fetch: {msg}"
+                    _ingest_state["fetch_progress"] = stats
+
+                _ingest_state["fetch"] = before(on_progress)
+                # Downloaden is meetbaar, parsen niet: de ingest heeft geen teller die
+                # vooraf bekend is. De tellers gaan hier dus weg, zodat de UI van een
+                # bepaalde balk naar een onbepaalde schakelt in plaats van op 100% te
+                # blijven staan (UI_BLUEPRINT, status-bar-lifecycle regel 1).
+                _ingest_state["fetch_progress"] = None
                 _ingest_state["phase"] = "ingest"
             _ingest_state["result"] = run_drop(src)
         except Exception as exc:

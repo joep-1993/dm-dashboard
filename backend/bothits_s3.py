@@ -198,6 +198,11 @@ def fetch(days: int = 3, dest: str = None, progress=None):
     gerapporteerd, niet gedownload. Bestaat een bestand al met dezelfde grootte, dan
     wordt het overgeslagen — dat maakt een tweede klik na een afgebroken download
     goedkoop in plaats van een volledige herhaling.
+
+    `progress(msg, stats)` wordt aangeroepen met een zin én een tellerdict
+    (`files_done` / `files_total` / `bytes_done` / `bytes_total` / `log_date` /
+    `date_index` / `date_total`). De tweede parameter is optioneel voor de aanroeper:
+    oudere callbacks die alleen `msg` aannemen blijven werken zolang ze hem negeren.
     """
     dest = dest or S3_DIR
     os.makedirs(dest, exist_ok=True)
@@ -205,6 +210,11 @@ def fetch(days: int = 3, dest: str = None, progress=None):
     stats = {"dest": dest, "dates": [], "downloaded": 0, "skipped": 0,
              "failed": 0, "bytes": 0}
 
+    # EERST plannen, dan pas downloaden. De listing gebeurde vroeger in dezelfde lus
+    # als de download, dus het totaal was pas bekend als de laatste datum al binnen
+    # was — en een voortgangsbalk zonder noemer is geen balk. Dit kost geen extra
+    # S3-calls, het is dezelfde list_date() een fase eerder.
+    plan = []
     for d in reversed(target_dates(days)):     # oud -> nieuw, zodat de ingest volgt
         keys, size, hours = list_date(d)
         if not keys:
@@ -218,10 +228,28 @@ def fetch(days: int = 3, dest: str = None, progress=None):
             stats["dates"].append({"log_date": d, "files": len(keys),
                                    "state": f"incompleet ({len(hours)}/24 uur)"})
             continue
+        plan.append((d, keys, hours, size))
 
+    files_total = sum(len(k) for _, k, _, _ in plan)
+    bytes_total = sum(s for _, _, _, s in plan)
+    files_done = bytes_done = 0
+
+    def report(msg, **extra):
+        """Voortgang in twee vormen: een zin voor `phase` en tellers voor de balk.
+
+        De balk loopt op BESTANDEN, niet op bytes: een bestand dat al op schijf staat
+        levert 0 bytes op maar is wel een afgevinkte eenheid werk, en een balk die op
+        bytes loopt staat tijdens een hervatte download stil terwijl er wel degelijk
+        wordt doorgewerkt.
+        """
         if progress:
-            progress(f"download {d}: {len(keys)} bestanden, "
-                     f"{size / 1024 / 1024:.0f} MB")
+            progress(msg, {"files_done": files_done, "files_total": files_total,
+                           "bytes_done": bytes_done, "bytes_total": bytes_total,
+                           **extra})
+
+    for idx, (d, keys, hours, size) in enumerate(plan, 1):
+        report(f"download {d}: {len(keys)} bestanden, {size / 1024 / 1024:.0f} MB",
+               log_date=d, date_index=idx, date_total=len(plan))
         got = skip = fail = got_bytes = 0
 
         def one(item):
@@ -246,6 +274,15 @@ def fetch(days: int = 3, dest: str = None, progress=None):
                     skip += 1
                 else:
                     fail += 1
+                files_done += 1
+                bytes_done += n
+                # Elke 25 bestanden, plus de laatste. De poller haalt dit hooguit
+                # elke seconde op, dus per bestand rapporteren zou alleen de state
+                # laten klapperen; elke 25 is bij 8 workers nog altijd meerdere
+                # updates per seconde.
+                if files_done % 25 == 0 or files_done == files_total:
+                    report(f"download {d}: {got + skip}/{len(keys)} bestanden",
+                           log_date=d, date_index=idx, date_total=len(plan))
         stats["dates"].append({"log_date": d, "files": len(keys), "hours": len(hours),
                                "downloaded": got, "skipped": skip, "failed": fail,
                                "state": "gedownload" if not fail else "deels_mislukt"})
@@ -253,9 +290,9 @@ def fetch(days: int = 3, dest: str = None, progress=None):
         stats["skipped"] += skip
         stats["failed"] += fail
         stats["bytes"] += got_bytes
-        if progress:
-            progress(f"{d}: {got} nieuw, {skip} al aanwezig"
-                     + (f", {fail} mislukt" if fail else ""))
+        report(f"{d}: {got} nieuw, {skip} al aanwezig"
+               + (f", {fail} mislukt" if fail else ""),
+               log_date=d, date_index=idx, date_total=len(plan))
 
     stats["mb"] = round(stats["bytes"] / 1024 / 1024, 1)
     return stats

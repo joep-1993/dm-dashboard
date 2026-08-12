@@ -300,6 +300,20 @@
                     <button class="btn btn-sm btn-run" id="applyBtn">Toepassen</button>
                 </div>
                 <div id="s3Status" class="muted-note mt-3 d-none"></div>
+                <!-- Inline variant uit UI_BLUEPRINT (geen Cancel): een lopende
+                     S3-download is niet af te breken, en de ingest die erop volgt
+                     deelt zijn lock met de nachtelijke timer. Halverwege stoppen zou
+                     een halve logdatum op schijf achterlaten. -->
+                <div id="s3Progress" class="mt-2" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center small text-muted mb-1">
+                        <span id="s3ProgressLabel">Bezig…</span><span id="s3ProgressPct"></span>
+                    </div>
+                    <div class="progress" id="s3ProgressTrack" style="height:1.1rem;">
+                        <div id="s3ProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                             style="width:0%; background-color:#00b894;" role="progressbar"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+                    </div>
+                </div>
                 <div id="partialWarn" class="alert alert-warning py-2 px-3 mt-3 mb-0 d-none" style="font-size:0.85rem;"></div>
             </div>
         </div>
@@ -1455,11 +1469,43 @@
             const msg = e.name === 'AbortError'
                 ? 'Timeout: bucket reageerde niet binnen 2 minuten — controleer de S3-credentials en netwerk.'
                 : e.message;
+            s3BarHide();   // een balk van een vorige poging mag niet blijven staan
             s3Msg(`Ophalen mislukt: ${msg}`, 'text-danger');
         } finally {
             btn.disabled = false;
         }
     }
+    // ---- Voortgangsbalk voor het ophalen ---------------------------------
+    // Twee standen, en het verschil is niet cosmetisch (UI_BLUEPRINT, regel 1 van de
+    // status-bar-lifecycle): downloaden heeft een noemer die vóór de eerste byte
+    // bekend is, verwerken niet. Een bepaalde balk die na de download op 100% blijft
+    // staan terwijl de ingest nog een minuut per logdatum bezig is, leest als
+    // "klaar en vastgelopen" — precies de verkeerde conclusie.
+    function s3Bar(pct, label) {
+        const wrap = document.getElementById('s3Progress');
+        const track = document.getElementById('s3ProgressTrack');
+        const bar = document.getElementById('s3ProgressBar');
+        wrap.style.display = '';
+        document.getElementById('s3ProgressLabel').textContent = label;
+        if (pct === null) {                       // onbepaald: beweging, geen belofte
+            track.classList.add('indeterminate');
+            bar.style.width = '';
+            document.getElementById('s3ProgressPct').textContent = '';
+            bar.removeAttribute('aria-valuenow');
+            return;
+        }
+        track.classList.remove('indeterminate');
+        const p = Math.max(0, Math.min(100, Math.round(pct)));
+        bar.style.width = p + '%';
+        bar.setAttribute('aria-valuenow', p);
+        document.getElementById('s3ProgressPct').textContent = p + '%';
+    }
+    function s3BarHide() {
+        document.getElementById('s3Progress').style.display = 'none';
+        document.getElementById('s3ProgressTrack').classList.remove('indeterminate');
+    }
+    const s3Mb = b => (b / 1048576).toFixed(0);
+
     async function s3Poll() {
         if (s3Polling) return;
         s3Polling = true;
@@ -1469,9 +1515,29 @@
                 document.getElementById('s3FetchBtn').disabled = !!st.running;
                 if (st.running) {
                     s3Msg(`Bezig sinds ${st.started_at} — ${st.phase || 'verwerken'}…`);
-                    await new Promise(r => setTimeout(r, 5000));
+                    const fp = st.fetch_progress;
+                    if (fp && fp.files_total) {
+                        // De balk loopt op bestanden; MB staat erbij omdat dat de maat
+                        // is waarin de gebruiker het volume kreeg voorgeschoteld in de
+                        // bevestigingsvraag ("2904 bestanden, 924 MB downloaden?").
+                        const dag = fp.date_total > 1
+                            ? ` (dag ${fp.date_index} van ${fp.date_total})` : '';
+                        s3Bar(100 * fp.files_done / fp.files_total,
+                              `${fp.log_date || 'Downloaden'}${dag} — `
+                              + `${fmt(fp.files_done)} / ${fmt(fp.files_total)} bestanden, `
+                              + `${s3Mb(fp.bytes_done)} / ${s3Mb(fp.bytes_total)} MB`);
+                    } else {
+                        s3Bar(null, st.phase === 'ingest'
+                            ? 'Logs verwerken — ~1 minuut per logdatum…'
+                            : 'Bucket bekijken…');
+                    }
+                    // Tijdens het downloaden schuift de balk echt op, dus daar is 5s
+                    // te traag om als voortgang te lezen; de parse-fase is onbepaald
+                    // en hoeft niet vaak bevraagd te worden.
+                    await new Promise(r => setTimeout(r, fp ? 1500 : 5000));
                     continue;
                 }
+                s3BarHide();
                 if (st.error) { s3Msg(`Fout: ${st.error}`, 'text-danger'); return; }
                 const f = st.fetch || {}, p = st.result?.processed || [];
                 s3Msg(`Klaar ${st.finished_at}: ${fmt(f.downloaded || 0)} bestanden gedownload`
