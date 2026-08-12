@@ -34,6 +34,33 @@ in een Excel met vergelijkbare post-its onder elkaar, fases losgelaten.
       vallen in zowel de PDF als de afbeelding buiten beeld; alleen op te lossen met een
       nieuwe export.
 
+### 2026-08-12 — Bot Hits: merkkleuren, breedte, annuleren, eigen statussectie
+
+Vier punten van Joep in één ronde (`2f120ec`).
+
+- [x] **Paginabreedte gelijk aan SEO Stats**: `container-fluid` + eigen max-width 1500px
+      → Bootstrap `.container`. Zelfde klasse, zelfde BS-versie, geen overrides in beide
+      bestanden, dus gelijk per constructie. Week ook af van de kopbalk van deze pagina
+      zelf, die al `.container` was.
+- [x] **Eerste drie legendakleuren = lichtblauw/roze/lichtgroen** in bot_family,
+      bot_class, host en url_type. Overige slots opnieuw gezocht met de validator.
+      url_type wordt er béter van (CVD 2,7 → 5,9); bot_class en host zakken van 10,0
+      naar 7,7, wat de bodem van de merktrio zelf is. Details in UI_BLUEPRINT.
+- [x] **Nieuwe hue `#c7706b`** voor bot_family, omdat acht reeksen mét de trio niet
+      onder het bestaande palet passen (beste was 4,9 ΔE). Joeps keuze tussen "familie
+      naar Overig" en "tint toevoegen". Enige kleur in deze codebase die in Bot Hits
+      bestaat en niet in SEO Stats.
+- [x] **Cancel-knop** op de ophaalactie, coöperatief: tussen bestanden bij downloaden,
+      tussen logdatums bij verwerken. Getest in beide fases plus de vlag-hygiëne.
+- [x] **Status + balk + Cancel in een eigen `card-body`-sectie onder Filters**, verborgen
+      tot er iets te melden is. Ophaalknop blijft in de Filters-kop.
+- [ ] **Grijs ↔ lichtblauw staat op 12,0 normaal (vloer is 15) en dat is pre-existing.**
+      Niet op te lossen met een seriekleur — alleen door de Overig-band anders te doen
+      (andere neutrale tint, of arcering i.p.v. kleur). Geldt in Bot Hits én in
+      `dashDonutUrlType` van SEO Stats, waar hetzelfde paar al genoteerd staat.
+- [ ] **Nog niet met een echte ophaalactie gezien**, net als de balk zelf: annuleren is
+      getest met een nagebootste S3-client, niet op 924 MB.
+
 ### 2026-08-12 — Bot Hits: voortgangsbalk bij "Nieuwe logs ophalen"
 
 Aanleiding: Joep zag alleen `Bezig sinds … — fetch: download 2026-08-09: 2904 bestanden,

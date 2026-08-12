@@ -1,6 +1,82 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Valideer een palet zoals de grafiek hem TEKENT, niet zoals de map hem declareert (2026-08-12)
+
+Bij het vooropzetten van de merkkleuren in Bot Hits' legenda. Ik meette de acht benoemde
+bot-families en concludeerde dat een nieuwe tint (#ce887e) de set op 7,7 ΔE hield. Fout:
+`drawDaily()` vouwt elke familie zonder vaste kleur in een **grijze Overig-band**, dus de
+grafiek tekent negen banden. Met dat grijs erbij zat mijn nieuwe kleur op 9,3 ΔE van het
+grijs en was hij zélf het zwakste paar geworden — precies het probleem dat ik dacht op te
+lossen. Opnieuw gezocht mét de Overig-band in de set: #c7706b, 12,5 van het grijs.
+
+- **De vraag is niet "welke kleuren staan in COLOR_MAPS", maar "welke vlakken staan er op
+  het scherm".** Een fallback-kleur, een restpost-band of een "overig"-bucket is een
+  serie als elke andere zodra hij getekend wordt.
+- Hetzelfde geldt de andere kant op: de map declareert acht families, maar er stonden er
+  maar vijf in de data. Voor de vloer telt wat er kán renderen, niet wat er vandaag staat.
+
+**Les: reken het palet door op de dataset die de grafiek écht produceert. Bij een
+part-to-whole met een catch-all is die catch-all onderdeel van de meting.**
+
+## Meet een palet vóór én na, anders schrijf je een bestaande fout op je eigen conto (2026-08-12)
+
+Na de omkleuring meldde de validator een harde FAIL op grijs ↔ lichtblauw: 12,0 normaal,
+onder de vloer van 15. Mijn eerste reflex was dat ik dat had veroorzaakt. Baseline gemeten
+op de oude set: **precies dezelfde 12,0, hetzelfde paar.** Het zat er al in, en het staat
+zelfs met naam in een comment in seo-stats.html ("normaal-min 12,0 (R-url ↔ Overig)").
+
+Wat de before/after-meting daarnaast opleverde, en wat ik zonder die meting verkeerd zou
+hebben gerapporteerd: url_type ging van 2,7 naar 5,9 — de omkleuring maakte die dimensie
+**beter**, want de oude set had amber ↔ donkergroen op 2,7 onder protanopie.
+
+- Onoplosbaar met de kleur die je aan het kiezen bent: geen achtste tint verandert de
+  afstand tussen grijs en lichtblauw. Wie 12,0 wil repareren moet de Overig-band aanpakken.
+- Rapporteer de delta, niet de absolute uitkomst. "Faalt op 12,0" en "faalde al op 12,0 en
+  is verder onaangeraakt" leiden tot heel verschillende besluiten.
+
+**Les: bij een wijziging aan iets meetbaars is de baseline onderdeel van het werk. Zonder
+before/after weet je niet of je iets sloopte, repareerde of onaangeroerd liet.**
+
+## Kies de annuleergrens op consistentie, niet op reactiesnelheid (2026-08-12)
+
+Bij de Cancel-knop op Bot Hits' ophaalactie. De verleiding is de grens zo fijn mogelijk te
+maken zodat de knop snel voelt. Verkeerde maatstaf — de vraag is wat er heel moet blijven.
+
+- **Download: tussen bestanden.** Afbreken kost niets. Half binnengehaalde dagen worden
+  niet geïngest (de ingest eist 24 volledige uren) en de volgende poging slaat over wat er
+  al ligt. Een gedeeltelijke download kost dus tijd, nooit correctheid.
+- **Verwerken: tussen LOGDATUMS**, en met opzet niet fijner. Middenin `ingest_date()`
+  stoppen laat een halve dag in de cube achter die daarna als geïngest telt — de ledger
+  gaat liegen. Per datum stoppen betekent: óf helemaal geladen, óf helemaal niet.
+- **Een ThreadPoolExecutor annuleer je in de worker, niet via de futures.** `as_completed`
+  consumeert de generator dus alle taken zijn al ingediend; laat de nog niet gestarte
+  taken meteen terugkeren. Dat leegt de wachtrij in milliseconden, en wat al onderweg is
+  mag aflopen. Gemeten: stoppen bij 50 bestanden gaf 58 downloads — de acht die liepen.
+- **Twee hygiëneregels voor de vlag**, waarvan de tweede me bijna beet: zet hem alleen als
+  er iets loopt, en wis hem ONDER de lock bij het starten. Anders breekt een annulering
+  van de vorige run de volgende meteen af.
+
+**Les: "waar mag ik stoppen" is een vraag over de datamodel-invariant, niet over UX. Zoek
+de grens waarachter een half resultaat als een heel resultaat gaat tellen.**
+
+## Twee Claude-sessies in één werkmap: stage altijd met naam (2026-08-12)
+
+Tijdens deze sessie liep er een tweede in dezelfde repo. Ik zag ineens `cc1/BACKLOG.md`
+gestaged staan met inhoud over een brainstormbord die ik nooit had aangeraakt, en tussen
+twee `git`-commando's schoof HEAD onder me door omdat de andere sessie committe.
+
+- **Index en werkmap zijn gedeeld.** Eén `git add .` of `git add -A` van een van de twee
+  sleept het halve werk van de ander mee in een commit met een boodschap die er niet over
+  gaat.
+- `git commit <pad>` commit alleen die paden en laat de rest van de index staan — dat is
+  de veilige vorm als er al iets van iemand anders in de index ligt.
+- Herlees `git status` vlak vóór het stagen, niet één ronde eerder. Het antwoord kan
+  tussentijds verouderd zijn.
+
+**Les: de /lcp-regel "noem de bestanden expliciet, nooit `git add -A`" is geen netheid maar
+een veiligheidsmaatregel. Met meer dan één sessie is hij verplicht.**
+
 ## Een board-PDF (FigJam/Miro) is een lossy export — vraag om een afbeelding (2026-08-12)
 
 Bij het uitlezen van `SEO_GEO brainstorm.pdf` naar Excel. De PDF zag er compleet uit: 4

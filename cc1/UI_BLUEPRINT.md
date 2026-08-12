@@ -296,6 +296,35 @@ Two caveats that are not optional:
   were swapped there. Consequence to keep in mind: a hue that means one thing in
   tool A now means another in tool B, so if you swap, either swap in both or record
   the divergence where both maps live.
+* **"First three" means first three IN THE LEGEND**, which here is the order the
+  query layer returns — i.e. by volume. Bot Hits' four dimensions resolved to
+  Googlebot/Apple/GoogleOther, search/ai/other, beslist.nl/shop.beslist.nl and
+  PLP/C-url/Cat-url (2026-08-12). Re-derive it from the data, don't guess from the
+  map's declaration order.
+
+**What the rule costs, measured (2026-08-12).** The trio's own floor is CVD **7,7**
+(lichtblauw↔roze, deutan), so *no* set containing all three can score higher — 7,7 is
+the ceiling, not a defect to fix. What varies is whether the remaining slots hold it:
+
+| series | best achievable with the trio fixed |
+|---|---|
+| 4–7 | CVD 7,7 — the trio's own floor, nothing lost |
+| 8 | CVD **4,9** — a real FAIL (cta-orange ↔ lichtgroen) |
+
+At eight series the rule and the floor genuinely conflict, and the third brand hue is
+what does it (with only lichtblauw+roze fixed, eight still makes 7,7). Two ways out,
+both legitimate: fold the smallest series into "Overig" so the set is seven, or add one
+new validated hue. Bot Hits' `bot_family` took the second (Joep's call) — see
+`PAL.terracotta` in `bothits.html`, the only hue in this codebase that exists in one
+tool and not in SEO Stats. **Nine series is not a question to ask**: fold instead.
+
+**Count the bands the chart DRAWS, not the entries in the map.** A catch-all "Overig"
+band is a series the moment it renders, and `drawDaily()` always draws one. Validating
+the eight named families while the chart showed nine bands is how the first candidate
+hue got picked — it sat 9,3 ΔE from the grey and became the weakest pair itself. And
+measure the old set too: Bot Hits' url_type turned out to *improve* (CVD 2,7 → 5,9),
+while the grey ↔ lichtblauw pair at 12,0 normal was pre-existing and is unfixable by
+any choice of series hue — only reworking the Overig band touches it.
 
 **Colours: run the validator, never eyeball ΔE.** The palette is SEO stats'
 (`seo-stats.html` — the Kleursysteem base row with the bordeaux/navy departures).
@@ -732,6 +761,19 @@ Two flavours — pick by whether the work is cancellable:
      </div>
    </div>
    ```
+
+**A Cancel button needs a boundary, and you pick it on consistency — not on how
+responsive the button feels** (added 2026-08-12, Bot Hits' "Nieuwe logs ophalen").
+Cooperative only: the button sets a server-side flag and the worker checks it where
+stopping leaves a whole result behind. In that tool that is *between files* while
+downloading (a partial download costs time, never correctness — the ingest demands 24
+full hours and a retry skips what is already on disk) and *between log dates* while
+parsing, deliberately no finer, because stopping inside one date leaves half a day in
+the cube that then counts as ingested. Show the request landed — the button goes
+disabled with "Annuleren aangevraagd…" the instant it is clicked, or the user clicks
+three more times while the worker finishes its current file. And name the outcome
+honestly: a cancelled run says **"Geannuleerd"**, not "Klaar", with the same figures
+plus the reassurance that what did get processed is complete.
 
 **Pick the denominator before you pick the markup** (added 2026-08-12, Bot Hits'
 "Nieuwe logs ophalen"). Count **units of work**, not volume. That download skips a file
