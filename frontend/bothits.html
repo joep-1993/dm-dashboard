@@ -364,6 +364,11 @@
             </div>
         </div>
 
+        <!-- Foutmelding voor een mislukte laadslag. Boven de tabs omdat een fout op
+             /daily of /summary álle panelen raakt; showLoadError() maakt de visuals
+             leeg zodat de cijfers van de vorige selectie niet als de nieuwe lezen. -->
+        <div id="loadError" class="alert alert-danger py-2 px-3 mb-3 d-none"></div>
+
         <!-- ============================ TABS ============================ -->
         <ul class="nav nav-tabs mb-3" id="mainTabs" role="tablist">
             <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-overview" type="button">Overzicht</button></li>
@@ -486,7 +491,10 @@
                                  Bootstrap met een inline width, zoals UI_BLUEPRINT voor een
                                  dichte toolbar voorschrijft. type=search geeft het native
                                  kruisje, en dat vuurt ook `input`, dus wissen herlaadt. -->
+                            <!-- maxlength spiegelt Query(max_length=200) op /top-urls: zonder
+                                 dat gaf een lange gekopieerde URL een 422 (audit 2026-08-13). -->
                             <input type="search" class="form-control form-control-sm" id="urlQ"
+                                   maxlength="200"
                                    style="width: 230px;" placeholder="Zoek in URL's…"
                                    title="Zoekt op een deel van de URL. Meerdere woorden: alle woorden moeten erin voorkomen, volgorde maakt niet uit.">
                             <label class="muted-note mb-0" for="urlLimit">Top</label>
@@ -788,6 +796,34 @@
     }
     const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g,
         c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    // Elke fetch op deze pagina liep via `.then(r => r.json())` zonder r.ok te checken
+    // (audit 2026-08-13). Elke route hier geeft bij een fout een 500 met body
+    // {"detail": "..."}, dus die tekst kwam als geldige JSON binnen en werd daarna als
+    // dáta behandeld: `daily.rows` is dan undefined en drawDaily() klapte om op
+    // data.rows.map — binnen een niet-afgevangen promise, dus zonder melding en met de
+    // grafieken van de VORIGE selectie nog in beeld. Eén helper, één plek waar dat kan.
+    async function getJSON(url) {
+        const r = await fetch(url);
+        if (!r.ok) {
+            let detail = `HTTP ${r.status}`;
+            try { detail = (await r.json()).detail || detail; } catch (e) { /* geen JSON-body */ }
+            throw new Error(detail);
+        }
+        return r.json();
+    }
+    // Foutmelding boven de kaarten, plus de visuals leegmaken. Stale cijfers laten
+    // staan is erger dan niets tonen: die lezen als het resultaat van je nieuwe filter.
+    function showLoadError(msg) {
+        const el = document.getElementById('loadError');
+        if (el) {
+            el.textContent = `Laden mislukt: ${msg}`;
+            el.classList.remove('d-none');
+        }
+    }
+    function clearLoadError() {
+        document.getElementById('loadError')?.classList.add('d-none');
+    }
     // Weekdag bij de datum in het hover-blok, zoals SEO Stats: "2026-03-10 (dinsdag)".
     // Alleen een weekdag als de titel ECHT een datum is. Hetzelfde hover-blok
     // bedient inmiddels ook de facet-diepte-staafgrafiek, en daar is de titel
@@ -888,7 +924,19 @@
 
     // ---- Boot ------------------------------------------------------------
     async function boot() {
-        META = await (await fetch(API + '/meta')).json();
+        try {
+            META = await getJSON(API + '/meta');
+        } catch (e) {
+            // Zonder /meta is er geen filterlijst en geen datumbereik, dus doorgaan
+            // levert een refresh() zonder datums op. Hiervoor bleven de drie
+            // filterlijsten gewoon op "laden…" staan zonder enige melding.
+            showLoadError(`/meta onbereikbaar — ${e.message}. De pagina kan niet laden.`);
+            ['hostFilter', 'classFilter', 'typeFilter'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = '<span class="text-danger">niet geladen</span>';
+            });
+            return;
+        }
         // cov vult nog steeds de datumvelden; de dekkingstekst die hier stond is weg
         // (Joep, 2026-08-13) — zie de Filters-kop.
         const cov = META.coverage || {};
@@ -928,10 +976,24 @@
         syncPartialWarn();
         const gb = document.getElementById('groupBy').value;
         const f = force ? { force: 'true' } : {};
-        const [daily, summary] = await Promise.all([
-            fetch(API + '/daily?' + params({ group_by: gb, ...f })).then(r => r.json()),
-            fetch(API + '/summary?' + params(f)).then(r => r.json()),
-        ]);
+        let daily, summary;
+        try {
+            [daily, summary] = await Promise.all([
+                getJSON(API + '/daily?' + params({ group_by: gb, ...f })),
+                getJSON(API + '/summary?' + params(f)),
+            ]);
+        } catch (e) {
+            // Leegmaken, niet laten staan: een grafiek van de vorige selectie onder een
+            // nieuwe datumkeuze is een verkeerd antwoord, geen oud antwoord.
+            showLoadError(e.message);
+            ['daily', 'type', 'depth'].forEach(k => {
+                if (CHARTS[k]) { CHARTS[k].destroy(); CHARTS[k] = null; }
+            });
+            const tb = document.querySelector('#botTable tbody');
+            if (tb) tb.innerHTML = '';
+            return;
+        }
+        clearLoadError();
         drawDaily(daily, gb);
         drawType(summary);
         drawDepth(summary);
@@ -1596,17 +1658,24 @@
             // de lege-staat horen jouw term terug te geven.
             const qSend = urlQuery.split(/\s+/).map(t => t.replace(/\/+$/, ''))
                 .filter(Boolean).join(' ');
-            urlRows = await (await fetch(API + '/top-urls?' + params({ limit, q: qSend || null }))).json();
+            urlRows = await getJSON(API + '/top-urls?' + params({ limit, q: qSend || null }));
+            // Binnen de try (audit 2026-08-13). De normalisatie hieronder stond erbuiten,
+            // dus bij een niet-lijst antwoord gooide .forEach een TypeError als
+            // unhandled rejection en bleef de tabel eeuwig op "laden…" staan. Dat was
+            // ook zonder serverfout te bereiken: #urlQ had geen maxlength terwijl de
+            // route q op max_length=200 zet, dus een lange URL plakken gaf een 422.
+            if (!Array.isArray(urlRows)) throw new Error('onverwacht antwoord van /top-urls');
+            // per_day hier en niet in SQL: het aantal dagen is dat waarop DEZE url in de
+            // dagelijkse top-500 stond, dus het is "hits per dag dat hij opviel".
+            urlRows.forEach(r => {
+                r.hits = Number(r.hits); r.days = Number(r.days);
+                r.per_day = r.days ? Math.round(r.hits / r.days) : 0;
+            });
         } catch (e) {
+            urlRows = [];
             tb.innerHTML = `<tr><td colspan="6" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
             return;
         }
-        // per_day hier en niet in SQL: het aantal dagen is dat waarop DEZE url in de
-        // dagelijkse top-500 stond, dus het is "hits per dag dat hij opviel".
-        urlRows.forEach(r => {
-            r.hits = Number(r.hits); r.days = Number(r.days);
-            r.per_day = r.days ? Math.round(r.hits / r.days) : 0;
-        });
         renderUrls();
     }
     // De ingest slaat elk pad zonder trailing slash op (`.rstrip("/")` in
@@ -1728,11 +1797,32 @@
     }
 
     // ---- Ingest ----------------------------------------------------------
+    // Eén poll-keten, met handle (audit 2026-08-13). Dit was een blote
+    // `setTimeout(loadIngest, 5000)` zonder id, zonder clear en zonder re-entry-guard:
+    // de keten liep door nadat je de tab verliet én er kwam er per tabbezoek tijdens een
+    // run een NIEUWE bij, dus twee bezoeken = twee ketens, en zo verder. s3Poll() had
+    // die guard al wel.
+    let ingestTimer = null, ingestPolling = false;
+    function stopIngestPoll() {
+        if (ingestTimer) { clearTimeout(ingestTimer); ingestTimer = null; }
+        ingestPolling = false;
+    }
     async function loadIngest() {
-        const [log, st] = await Promise.all([
-            fetch(API + '/ingest/log?limit=400').then(r => r.json()),
-            fetch(API + '/ingest/status').then(r => r.json()),
-        ]);
+        let log, st;
+        try {
+            [log, st] = await Promise.all([
+                getJSON(API + '/ingest/log?limit=400'),
+                getJSON(API + '/ingest/status'),
+            ]);
+            if (!Array.isArray(log)) throw new Error('onverwacht antwoord van /ingest/log');
+        } catch (e) {
+            // Keten stoppen én het zeggen. Hiervoor eindigde de poll stil bij de eerste
+            // fout en bleef de tabel op de oude stand staan alsof dat de waarheid was.
+            stopIngestPoll();
+            document.querySelector('#ingestTable tbody').innerHTML =
+                `<tr><td colspan="8" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
+            return;
+        }
         document.querySelector('#ingestTable tbody').innerHTML = log.map(r => `
             <tr>
               <td>${r.log_date}</td>
@@ -1745,7 +1835,12 @@
               <td class="muted-note">${(r.ingested_at || '').replace('T', ' ').slice(0, 16)}</td>
             </tr>`).join('') || '<tr><td colspan="8" class="p-3 text-muted">Nog niets geladen.</td></tr>';
         renderIngestStatus(st);
-        if (st.running) setTimeout(loadIngest, 5000);
+        if (st.running) {
+            ingestPolling = true;
+            ingestTimer = setTimeout(loadIngest, 5000);
+        } else {
+            stopIngestPoll();
+        }
     }
     function renderIngestStatus(st) {
         const auto = st.auto_ingest
@@ -1760,9 +1855,15 @@
         if (st.running) s += ` <span class="badge badge-purple">bezig sinds ${escapeHtml(st.started_at || '')}</span>`;
         else if (st.error) s += ` <span class="badge bg-danger">fout: ${escapeHtml(st.error)}</span>`;
         else if (st.finished_at) {
-            const p = st.result?.processed || [], k = st.result?.skipped || [];
+            const p = st.result?.processed || [], k = st.result?.skipped || [],
+                  bad = st.result?.failed || [];
             s += ` Laatste run ${st.finished_at}: ${p.length} datum(s) verwerkt`;
-            if (k.length) s += `, ${k.length} overgeslagen (${k.map(x => x.log_date + ': ' + x.reason).join('; ')})`;
+            if (k.length) s += `, ${k.length} overgeslagen (${escapeHtml(k.map(x => x.log_date + ': ' + x.reason).join('; '))})`;
+            // Mislukte datums zitten sinds de audit van 2026-08-13 in een eigen lijst en
+            // moeten ROOD, niet als neutraal "overgeslagen". Zonder deze regel zouden ze
+            // helemaal uit de UI verdwijnen nu ze niet meer in `skipped` zitten.
+            if (bad.length) s += ` <span class="text-danger fw-bold">— ${bad.length} MISLUKT` +
+                ` (${escapeHtml(bad.map(x => x.log_date + ': ' + x.reason).join('; '))})</span>`;
         }
         document.getElementById('ingestStatus').innerHTML = s;
         document.getElementById('ingestBtn').disabled = !!st.running;
@@ -1936,10 +2037,30 @@
     document.getElementById('groupBy').onchange = () => refresh();
     document.getElementById('ingestBtn').onclick = async () => {
         document.getElementById('ingestBtn').disabled = true;
-        await fetch(API + '/ingest/run', { method: 'POST' });
+        try {
+            const r = await fetch(API + '/ingest/run', { method: 'POST' });
+            if (!r.ok) {
+                let d = `HTTP ${r.status}`;
+                try { d = (await r.json()).detail || d; } catch (e) { /* geen JSON */ }
+                throw new Error(d);
+            }
+        } catch (e) {
+            // De knop stond onherroepelijk op disabled als dit misging, want alleen
+            // renderIngestStatus() zet hem terug en die werd nooit bereikt.
+            document.getElementById('ingestBtn').disabled = false;
+            document.getElementById('ingestStatus').innerHTML =
+                `<span class="text-danger">Starten mislukt: ${escapeHtml(e.message)}</span>`;
+            return;
+        }
         loadIngest();
     };
-    document.querySelector('[data-bs-target="#tab-ingest"]').addEventListener('shown.bs.tab', loadIngest);
+    // Geen tweede keten starten als er al één loopt.
+    document.querySelector('[data-bs-target="#tab-ingest"]').addEventListener(
+        'shown.bs.tab', () => { if (!ingestPolling) loadIngest(); });
+    // En stoppen bij het verlaten van de tab: doorpollen op een tab die niemand ziet
+    // is werk voor de server zonder lezer.
+    document.querySelector('[data-bs-target="#tab-ingest"]').addEventListener(
+        'hidden.bs.tab', stopIngestPoll);
     // Eén keer laden bij het openen van de tab; daarna alleen op verzoek. `once` zou
     // een wissel van de datumfilters negeren, dus dit blijft aan de tab hangen — de
     // 5-minutencache in de service vangt het herhaalde ophalen af.

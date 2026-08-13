@@ -359,6 +359,18 @@ def load_url_ids():
     return URL_IDS
 
 
+# De acht kolommen die de parser nodig heeft, in de volgorde waarin process_file ze
+# uitpakt. Staan hier als lijst en niet als losse idx[...]-lookups zodat er precies
+# één plek is die weet wat "leesbaar logbestand" betekent — en zodat een hernoemd
+# veld een RuntimeError geeft in plaats van een dag met nul bots (audit 2026-08-13).
+# x-host-header en niet cs(Host): de oude CSV-export liet die kolom vallen en werd
+# daardoor onbruikbaar als bron, want dan weet je het domein niet meer.
+REQUIRED_FIELDS = (
+    "cs(User-Agent)", "x-host-header", "cs-uri-stem", "sc-status",
+    "x-edge-result-type", "sc-bytes", "time-taken", "c-ip",
+)
+
+
 def process_file(path):
     """Parse one .gz log file.
 
@@ -376,7 +388,8 @@ def process_file(path):
     unknown = collections.Counter()
     raw_lines = 0
     bot_lines = 0
-    idx = None
+    bad_lines = 0
+    cols = None
     try:
         with gzip.open(path, "rt", encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -384,22 +397,46 @@ def process_file(path):
                     if line.startswith("#Fields:"):
                         names = line[len("#Fields:"):].split()
                         idx = {n: i for i, n in enumerate(names)}
+                        # Namen één keer omzetten in posities (audit 2026-08-13), en
+                        # hard falen als er één mist. Hiervóór stond er per regel een
+                        # `except (IndexError, KeyError): continue`: hernoemt AWS een
+                        # veld, dan gooide idx[...] op ELKE regel een KeyError, bleef
+                        # raw_lines gewoon doortellen (die += staat ervóór) en werd
+                        # bot_lines 0. Geen van beide tripwires ziet dat — die van
+                        # ingest_date eist raw_lines == 0, en de known-URL-tripwire
+                        # eist bot_lines > 100.000. Precies het gat waardoor een
+                        # kapotte dag als een goede dag in de ledger belandt.
+                        missing = [f for f in REQUIRED_FIELDS if f not in idx]
+                        if missing:
+                            raise RuntimeError(
+                                f"{os.path.basename(path)}: CloudFront-log mist "
+                                f"veld(en) {missing}. Kolommen in dit bestand: "
+                                f"{names}. De parser kan deze datum niet lezen — "
+                                f"pas REQUIRED_FIELDS/process_file aan en draai hem "
+                                f"opnieuw. Niets weggeschreven."
+                            )
+                        cols = tuple(idx[f] for f in REQUIRED_FIELDS)
                     continue
-                if idx is None:
+                if cols is None:
                     continue
                 raw_lines += 1
                 p = line.rstrip("\n").split("\t")
+                i_ua, i_host, i_stem, i_st, i_edge, i_bytes, i_taken, i_cip = cols
                 try:
                     # RUW, niet ge-unquote: classify_ua() doet dat achter zijn memo.
-                    raw_ua = p[idx["cs(User-Agent)"]]
-                    host = norm_host(p[idx["x-host-header"]])
-                    stem = unquote(p[idx["cs-uri-stem"]]).rstrip("/") or "/"
-                    st = p[idx["sc-status"]]
-                    edge = p[idx["x-edge-result-type"]] or "-"
-                    nbytes = p[idx["sc-bytes"]]
-                    taken = p[idx["time-taken"]]
-                    cip = p[idx["c-ip"]]
-                except (IndexError, KeyError):
+                    raw_ua = p[i_ua]
+                    host = norm_host(p[i_host])
+                    stem = unquote(p[i_stem]).rstrip("/") or "/"
+                    st = p[i_st]
+                    edge = p[i_edge] or "-"
+                    nbytes = p[i_bytes]
+                    taken = p[i_taken]
+                    cip = p[i_cip]
+                except IndexError:
+                    # Alleen nog een te korte regel; de KeyError-tak is hierboven
+                    # afgevangen. Geteld i.p.v. genegeerd, zodat een bestand dat
+                    # massaal afgekapte regels bevat zichzelf meldt.
+                    bad_lines += 1
                     continue
                 # Vóór de bot-check, ná raw_lines: een host buiten KEEP_DOMAINS
                 # verdwijnt uit alle tellingen, maar raw_lines blijft het aantal
@@ -456,7 +493,19 @@ def process_file(path):
                 elif ut not in PRODUCTISH:
                     unknown[(host, fam, bot, ut, depth, stem)] += 1
     except (EOFError, OSError, gzip.BadGzipFile) as exc:
-        logger.warning("skipping unreadable %s: %s", os.path.basename(path), exc)
+        # LET OP: dit houdt de regels die vóór de fout zijn gelezen. De tellers gaan
+        # dus SHORT mee naar de ledger en de dag blijft is_complete=true. Dat is
+        # bevinding 5 van de audit en staat als fase 2 in cc1/TASKS.md — hier alleen
+        # nog een luidere logregel, geen gedragswijziging.
+        logger.warning("skipping unreadable %s (na %s regels): %s",
+                       os.path.basename(path), f"{raw_lines:,}", exc)
+    # Twee dingen die hiervóór volledig stil waren.
+    if cols is None:
+        logger.warning("%s: geen #Fields:-header gevonden, 0 regels gelezen",
+                       os.path.basename(path))
+    elif bad_lines:
+        logger.warning("%s: %s van %s regels te kort om te parsen",
+                       os.path.basename(path), f"{bad_lines:,}", f"{raw_lines:,}")
     return dict(cube), dict(known), unknown, raw_lines, bot_lines
 
 
@@ -468,6 +517,14 @@ def process_file(path):
 # catalogus-check, want ALTER TABLE pakt een AccessExclusiveLock óók als er niets
 # te doen valt, en dat deadlockt tegen een lopende ingest. Bestaande rijen krijgen
 # 'unchecked' — eerlijk, want die zijn geladen vóór er verificatie was.
+#
+# hours_present en is_complete zijn hier op 2026-08-13 bijgekomen (audit). Die twee
+# bestonden alleen in de LIVE database, met de hand ge-ALTERd en nergens vastgelegd:
+# niet in scripts/bothits_schema.sql en niet hier. Wie de tabellen uit dat bestand
+# opbouwde kreeg dus een ledger waar de ingest niet in kán schrijven — de INSERT
+# faalt op UndefinedColumn ná een parse van ~30 s, en /meta, /daily en /ingest/log
+# 500'en allemaal omdat de querylaag ze wél leest. Nu convergeert een bestaande
+# installatie via ADD COLUMN IF NOT EXISTS en klopt het schemabestand als bron.
 SCHEMA_MIGRATE = """
 DO $$
 BEGIN
@@ -482,6 +539,28 @@ BEGIN
         ALTER TABLE pa.bothits_daily ADD PRIMARY KEY
             (log_date, host_id, bot_id, url_type, facet_depth, is_known_url,
              status_class, edge_result, verify_state);
+    END IF;
+
+    -- Zelfde vorm en om dezelfde reden een catalogus-check en niet alleen
+    -- ADD COLUMN IF NOT EXISTS: die variant pakt de AccessExclusiveLock óók als er
+    -- niets te doen valt, en deze migratie loopt bij ELKE ingest_date().
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'pa' AND table_name = 'bothits_ingest'
+           AND column_name = 'hours_present'
+    ) THEN
+        ALTER TABLE pa.bothits_ingest ADD COLUMN hours_present smallint;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'pa' AND table_name = 'bothits_ingest'
+           AND column_name = 'is_complete'
+    ) THEN
+        -- DEFAULT true omdat elke rij die al bestond een volledige dag was; de
+        -- ingest geeft de waarde daarna altijd expliciet mee.
+        ALTER TABLE pa.bothits_ingest
+            ADD COLUMN is_complete boolean NOT NULL DEFAULT true;
     END IF;
 END $$;
 """
@@ -787,12 +866,21 @@ def run_backfill(src=None, limit=None, redo=False, only=None):
     done = set() if redo else already_ingested()
     todo = sorted(d for d in by_date if d not in done)
     if only:
-        todo = [d for d in by_date if d in set(only)]
+        # sorted() en niet de dict-volgorde van by_date (audit 2026-08-13): die volgt
+        # os.walk, dus meerdere --date-vlaggen werden in willekeurige volgorde
+        # verwerkt. En een gevraagde datum die niet in de boom staat leverde stil
+        # "0 to do" op zonder te zeggen WELKE hij niet vond — juist op het herstelpad.
+        todo = sorted(set(only) & set(by_date))
+        absent = sorted(set(only) - set(by_date))
+        if absent:
+            logger.warning("backfill: gevraagde datum(s) niet gevonden onder %s: %s",
+                           src, ", ".join(absent))
     if limit:
         todo = todo[:limit]
     logger.info("backfill: %s dates found, %s already ingested, %s to do",
                 len(by_date), len(done & set(by_date)), len(todo))
-    results = []
+    results, failed = [], []
+    cancelled = False
     for i, d in enumerate(todo, 1):
         # Zelfde annuleergrens als run_drop: tussen twee logdatums (2026-08-13).
         #
@@ -805,13 +893,18 @@ def run_backfill(src=None, limit=None, redo=False, only=None):
         # of een signal-handler op komt; hij doet vandaag alleen niets.
         if _cancel.is_set():
             logger.info("backfill: geannuleerd na %s van %s datums", i - 1, len(todo))
+            cancelled = True
             break
         logger.info("=== %s/%s : %s ===", i, len(todo), d)
         try:
             results.append(ingest_date(date.fromisoformat(d), by_date[d],
                                        ",".join(sorted(dirs[d])), len(hours[d])))
         except Exception as exc:
+            # Gefaalde datums werden alleen gelogd en verdwenen daarna volledig: ze
+            # kwamen niet in `results`, dus de aanroeper kon "mislukt" niet van
+            # "stond er niet" onderscheiden (audit 2026-08-13). Nu komen ze terug.
             logger.error("[%s] FAILED: %s", d, exc, exc_info=True)
+            failed.append({"log_date": d, "reason": str(exc)})
     # Ook hier opruimen (audit 2026-08-13). _prune_archive hing alleen aan run_drop,
     # terwijl het werk juist via backfill loopt — het herstelpad, de 30-datum-herlaad,
     # de CLI. Gevolg gemeten op 13-08: 18 datummappen voorbij de 21-daagse grens,
@@ -820,7 +913,19 @@ def run_backfill(src=None, limit=None, redo=False, only=None):
     freed = _prune_archive(src)
     if freed:
         logger.info("backfill: %s MB staging opgeruimd", round(freed / 1e6))
-    return results
+    if failed:
+        logger.error("backfill: %s van %s datums mislukt (%s)", len(failed), len(todo),
+                     ", ".join(f["log_date"] for f in failed))
+    # Zelfde vorm als run_drop (audit 2026-08-13). Hiervoor kwam er een plátte lijst
+    # terug waarin een mislukte datum simpelweg ontbrak, dus "mislukt" en "stond er
+    # niet" waren niet te onderscheiden. Geen enkele aanroeper las de oude
+    # returnwaarde — main() gooide hem weg — dus dit breekt niets.
+    return {"status": ("cancelled" if cancelled else
+                       "failed" if failed and not results else
+                       "partial" if failed else "ok"),
+            "dir": src, "cancelled": cancelled, "processed": results,
+            "failed": failed,
+            "archive_freed_mb": round(freed / 1e6) if freed else 0}
 
 
 def run_drop(src=None):
@@ -843,12 +948,16 @@ def run_drop(src=None):
     """
     src = src or DROP_DIR
     if not os.path.isdir(src):
-        return {"status": "no_drop_dir", "dir": src, "processed": []}
+        # Zelfde sleutels als de gewone uitgang, zodat een aanroeper niet hoeft te
+        # weten via welke tak hij hier komt.
+        return {"status": "no_drop_dir", "dir": src, "cancelled": False,
+                "processed": [], "skipped": [], "failed": [],
+                "archive_freed_mb": 0}
     load_url_ids()
     by_date, hours, dirs = scan_tree(src)
     done = already_ingested()
 
-    processed, skipped = [], []
+    processed, skipped, failed = [], [], []
     cancelled = False
     for d in sorted(by_date):
         # Annuleergrens: tussen twee logdatums. Alles wat al geladen is blijft
@@ -872,13 +981,32 @@ def run_drop(src=None):
             if not KEEP_SOURCE:
                 _archive(src, d, by_date[d])
         except Exception as exc:
+            # Naar `failed` en niet naar `skipped` (audit 2026-08-13). Een fout stond
+            # hiervoor tussen "al geïngest" en "incomplete" in dezelfde lijst, en de
+            # UI rendert die allemaal als hetzelfde neutrale "N overgeslagen".
             logger.error("[%s] FAILED: %s", d, exc, exc_info=True)
-            skipped.append({"log_date": d, "reason": f"error: {exc}"})
+            failed.append({"log_date": d, "reason": str(exc)})
     # Ná de datums, niet ertussen: opruimen mag nooit concurreren met een ingest die
     # nog bestanden aan het lezen is.
     freed = _prune_archive(src)
-    return {"status": "cancelled" if cancelled else "ok", "dir": src,
+    # Een run waarin álles omviel meldde "ok" (audit 2026-08-13) — het enige verschil
+    # zat in `skipped`, en niemand keek daarin naar het woord "error". Nu zegt status
+    # wat er gebeurde, zodat de nachtelijke taak erop kan afgaan.
+    if cancelled:
+        status = "cancelled"
+    elif failed and not processed:
+        status = "failed"
+    elif failed:
+        status = "partial"
+    else:
+        status = "ok"
+    if failed:
+        logger.error("run_drop: %s van %s datums mislukt (%s)", len(failed),
+                     len(failed) + len(processed),
+                     ", ".join(f["log_date"] for f in failed))
+    return {"status": status, "dir": src,
             "cancelled": cancelled, "processed": processed, "skipped": skipped,
+            "failed": failed,
             "archive_freed_mb": round(freed / 1e6) if freed else 0}
 
 
@@ -903,8 +1031,16 @@ def _prune_archive(src, days=None):
         except ValueError:
             continue                      # geen datummap: laat staan
         path = os.path.join(root, name)
-        size = sum(os.path.getsize(os.path.join(path, f))
-                   for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)))
+        # os.walk en niet listdir (audit 2026-08-13): rmtree wist de hele boom, maar de
+        # oude som keek alleen naar bestanden in de bovenste laag. Een submap werd dus
+        # wél verwijderd en niet meegeteld, waardoor archive_freed_mb in het
+        # API-antwoord minder meldde dan er werkelijk weg was.
+        size = 0
+        for dirpath, _dirs, fnames in os.walk(path):
+            for f in fnames:
+                fp = os.path.join(dirpath, f)
+                if os.path.isfile(fp):
+                    size += os.path.getsize(fp)
         try:
             shutil.rmtree(path)
         except OSError as exc:
@@ -1033,7 +1169,22 @@ def start_ingest_async(trigger="manual", on_done=None, src=None, before=None):
                 except Exception:
                     logger.warning("bothits ingest on_done hook failed", exc_info=True)
 
-    threading.Thread(target=worker, daemon=True, name="bothits-ingest").start()
+    # De release zit ALLEEN in de finally van worker(), dus als de thread niet start
+    # komt hij er nooit — dan houdt dit proces de lock voor altijd vast en meldt elke
+    # volgende knop-klik én elke timer "er loopt al een ingest", terwijl er niets
+    # loopt. Alleen te herstellen met een herstart van uvicorn. Thread.start() faalt
+    # bij thread- of geheugenuitputting (RuntimeError: can't start new thread), en dat
+    # is precies het soort dag waarop je de knop nodig hebt (audit 2026-08-13).
+    try:
+        threading.Thread(target=worker, daemon=True, name="bothits-ingest").start()
+    except BaseException as exc:
+        logger.error("bothits ingest (%s): worker-thread start mislukt: %s",
+                     trigger, exc, exc_info=True)
+        _ingest_state.update(running=False, cancelling=False, phase=None,
+                             error=f"worker-thread start mislukt: {exc}",
+                             finished_at=datetime.now().isoformat(timespec="seconds"))
+        _ingest_lock.release()
+        raise
     return True, dict(_ingest_state)
 
 
@@ -1124,13 +1275,29 @@ def main():
     a = ap.parse_args()
 
     if a.command == "backfill":
-        run_backfill(a.src, a.limit, a.redo, a.dates)
+        # Exitcode volgt de status (audit 2026-08-13): een backfill waarin datums
+        # omvielen eindigde met 0, dus een wrapper of scheduled task zag "gelukt".
+        res = run_backfill(a.src, a.limit, a.redo, a.dates)
+        print(f"  status                       {res['status']}")
+        print(f"  verwerkt                     {len(res['processed'])}")
+        print(f"  mislukt                      {len(res['failed'])}")
+        for f in res["failed"]:
+            print(f"    {f['log_date']}: {f['reason']}")
+        return 1 if res["status"] in ("failed", "partial") else 0
     elif a.command == "drop":
-        print(run_drop(a.src))
+        res = run_drop(a.src)
+        print(f"  status                       {res['status']}")
+        print(f"  verwerkt                     {len(res.get('processed', []))}")
+        print(f"  overgeslagen                 {len(res.get('skipped', []))}")
+        print(f"  mislukt                      {len(res.get('failed', []))}")
+        for f in res.get("failed", []):
+            print(f"    {f['log_date']}: {f['reason']}")
+        return 1 if res["status"] in ("failed", "partial") else 0
     else:
         for k, v in status().items():
             print(f"  {k:<28} {v}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

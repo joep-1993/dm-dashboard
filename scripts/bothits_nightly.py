@@ -46,9 +46,18 @@ for r in res.get("processed", []):
              "   <-- VERDACHT: NUL BEKENDE URLS" if verdacht else "")
 for s in res.get("skipped", []):
     log.info("  overgeslagen %s: %s", s["log_date"], s.get("reason"))
+# Mislukte datums staan sinds de audit van 2026-08-13 in een eigen lijst en niet meer
+# tussen de overgeslagen datums. Ze tellen mee in de exitcode: een nacht waarin de
+# ingest omviel moet de Windows-taak op 'mislukt' zetten, en dat deed hij niet — de
+# oude exitcode keek alleen naar de nul-bekende-URL's-tripwire, dus een run waarin
+# ELKE datum een exception gaf eindigde met 0.
+for f in res.get("failed", []):
+    log.error("  MISLUKT %s: %s", f["log_date"], f.get("reason"))
+fout += len(res.get("failed", []))
 if res.get("archive_freed_mb"):
     log.info("staging opgeruimd: %s MB", res["archive_freed_mb"])
 
-log.info("=== KLAAR (%s verwerkt, %s overgeslagen)",
-         len(res.get("processed", [])), len(res.get("skipped", [])))
+log.info("=== KLAAR: status=%s (%s verwerkt, %s overgeslagen, %s mislukt)",
+         res.get("status"), len(res.get("processed", [])),
+         len(res.get("skipped", [])), len(res.get("failed", [])))
 sys.exit(1 if fout else 0)      # exitcode 1 => Windows-taak markeert 'm als mislukt

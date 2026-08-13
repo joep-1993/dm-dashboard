@@ -107,13 +107,22 @@ CREATE INDEX IF NOT EXISTS ix_bothits_unknown_date ON pa.bothits_unknown_daily (
 -- Idempotency ledger. Ingest is keyed on log_date: re-running a date deletes
 -- and rewrites it, so dropping the same CloudFront folder in twice is safe.
 -- ---------------------------------------------------------------------------
+-- hours_present / is_complete: hoeveel van de 24 uurbuckets deze logdatum draagt.
+-- Een halve dag naast hele dagen leest als een verkeersinstorting die nooit gebeurde,
+-- dus dat wordt vastgelegd en niet gladgestreken; het dashboard waarschuwt erover.
+-- Deze twee stonden tot 2026-08-13 alleen in de live database (met de hand ge-ALTERd)
+-- en niet in dit bestand — waardoor een herbouw uit dit schema een ledger opleverde
+-- waar de ingest niet in kon schrijven. SCHEMA_MIGRATE in backend/bothits_ingest.py
+-- laat een bestaande installatie hierheen convergeren.
 CREATE TABLE IF NOT EXISTS pa.bothits_ingest (
-    log_date     date PRIMARY KEY,
-    files        integer,
-    raw_lines    bigint,
-    bot_lines    bigint,
-    known_rows   integer,
-    source_dirs  text,
-    duration_s   integer,
-    ingested_at  timestamp NOT NULL DEFAULT now()
+    log_date      date PRIMARY KEY,
+    files         integer,
+    raw_lines     bigint,
+    bot_lines     bigint,
+    known_rows    integer,
+    source_dirs   text,
+    duration_s    integer,
+    hours_present smallint,
+    is_complete   boolean NOT NULL DEFAULT true,
+    ingested_at   timestamp NOT NULL DEFAULT now()
 );

@@ -244,7 +244,13 @@ def get_daily(start_date=None, end_date=None, host=None, bot_class=None,
         "verify_state": "d.verify_state",
         "none": "'all'",
     }
-    col = cols.get(group_by, cols["bot_class"])
+    # Onbekende group_by valt terug op bot_class, maar het antwoord echode tot
+    # 2026-08-13 de GEVRAAGDE naam terug — dus `?group_by=bot_familly` gaf een
+    # bot_class-uitsplitsing met "bot_familly" erboven, en de cache bewaarde hem onder
+    # de typefout. Nu noemt het antwoord de kolom die echt gebruikt is. Alle negen
+    # opties die de UI aanbiedt staan in `cols`, dus voor de frontend verandert niets.
+    group_by = group_by if group_by in cols else "bot_class"
+    col = cols[group_by]
     key = ("daily", start, end, host, bot_class, bot_family, url_type, known, group_by)
 
     def run():

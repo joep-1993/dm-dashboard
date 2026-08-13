@@ -186,7 +186,14 @@ def ingest_run():
     nightly pass is going returns already_running instead of double-processing.
     """
     from backend.bothits_ingest import start_ingest_async
-    started, state = start_ingest_async("manual", on_done=clear_cache)
+    try:
+        started, state = start_ingest_async("manual", on_done=clear_cache)
+    except Exception as e:
+        # Was het enige endpoint zonder vangnet, samen met /s3/fetch: een fout gaf een
+        # kale 500 met traceback terwijl de frontend `detail` uitleest, dus de gebruiker
+        # zag niets bruikbaars (audit 2026-08-13).
+        logger.error("bothits ingest start failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
     return {"status": "started" if started else "already_running", **state}
 
 
@@ -216,7 +223,7 @@ def s3_fetch(days: int = Query(3, ge=1, le=45)):
     als de Verwerk-knop en twee gelijktijdige runs kunnen niet bestaan.
     """
     from backend.bothits_ingest import start_ingest_async
-    from backend.bothits_s3 import S3_DIR, S3NotConfigured, fetch, is_configured
+    from backend.bothits_s3 import S3_DIR, fetch, is_configured
     if not is_configured():
         raise HTTPException(
             status_code=400,
@@ -226,11 +233,17 @@ def s3_fetch(days: int = Query(3, ge=1, le=45)):
     def before(progress, should_cancel):
         return fetch(days, progress=progress, should_cancel=should_cancel)
 
+    # De `except S3NotConfigured` die hier stond kon nooit vuren (audit 2026-08-13):
+    # start_ingest_async start alleen een thread, en `before` — dus fetch() en client() —
+    # loopt IN die thread. Een S3NotConfigured komt daar terecht in de except van de
+    # worker en verschijnt via _ingest_state["error"] in de poller, niet hier. De
+    # is_configured()-guard hierboven dekt het credential-geval al af.
     try:
         started, state = start_ingest_async("s3", on_done=clear_cache,
                                            src=S3_DIR, before=before)
-    except S3NotConfigured as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("bothits s3 fetch start failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
     return {"status": "started" if started else "already_running",
             "days": days, **state}
 

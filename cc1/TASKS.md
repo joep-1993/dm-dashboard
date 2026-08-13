@@ -4,7 +4,7 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
-### 2026-08-13 — Audit Bothits, ronde 2: fase 0 uitgevoerd, fases 1–4 open
+### 2026-08-13 — Audit Bothits, ronde 2: fase 0 + 1 uitgevoerd, fases 2–4 open
 
 Tweede audit over 5.020 regels (vijf parallelle reviewers, daarna nagerekend tegen de live
 DB en het echte archief). De elf bevindingen van de eerste ronde staan verderop; dit zijn
@@ -47,27 +47,58 @@ onleesbare `.gz`. Vijf partiële datums staan al in de ledger (03-26, 04-13, 04-
       leven · `verify.py` claimde een all-or-nothing guard die er niet is · `get_top_urls`'
       docstring beschreef een defect dat niet meer bestaat.
 
-**Fase 1 — hard falen i.p.v. stil falen (gedrag behouden, geen cijfer verandert):**
+**Fase 1 — hard falen i.p.v. stil falen — GEDAAN (geen cijfer verandert):**
 
-- [ ] **`hours_present` en `is_complete` staan in GEEN enkele DDL** — live handmatig
-      toegevoegd. Herbouw uit `scripts/bothits_schema.sql` → ingest crasht op de ledger-INSERT
-      en `/meta` 500't. Toevoegen aan de CREATE TABLE **plus** een `ADD COLUMN IF NOT EXISTS`
-      in `SCHEMA_MIGRATE`.
-- [ ] **Veldnaam-wijziging bij CloudFront is onzichtbaar**: `except (IndexError, KeyError):
-      continue` op elke regel, terwijl `raw_lines` al geteld is. Wordt een veld hernoemd, dan
-      blijft `raw_lines` 6,9 mln, `bot_lines` 0, en **geen van beide tripwires vuurt**.
-      Veldnamen één keer resolven bij `#Fields:` en hard falen als er één mist.
-- [ ] **Frontend controleert `response.ok` nergens** → een 500 laat de vórige selectie op het
-      scherm staan (`refresh()`), of de tabel hangt eeuwig op "laden…" (de `forEach` staat
-      buiten de `try`). Één `getJSON()`-helper + zichtbare foutstaat.
-- [ ] **Ingest-lock lekt permanent** als `Thread.start()` faalt: release zit alleen in de
-      `finally` van de worker, dus knop én timer zijn daarna dood tot herstart.
-- [ ] **Mislukte runs rapporteren `status: "ok"`**; `run_backfill` laat gefaalde datums
-      helemaal weg uit `results`.
-- [ ] Kleiner: twee POST-endpoints zonder foutafhandeling + een onbereikbare
-      `except S3NotConfigured` · onbekende `group_by` wordt stil `bot_class` maar echoot de
-      typo · `_prune_archive` onderrapporteert vrijgekomen bytes (niet-recursief) ·
-      `--date` verliest de sortering en no-opt stil op een datum die niet in de boom zit.
+Regressiepoort voor de hot-loop-wijziging: `process_file()` over 24 echte bestanden uit
+6 distributies (13,4 MB, 103.840 regels, 45.174 bot-hits) met md5 over de gesorteerde
+cube-, known- én unknown-items. **Byte-voor-byte identiek** vóór en ná. Harnas staat in
+`scratchpad/bothits_parse_fingerprint.py` — sorteer de steekproef op GROOTTE per
+distributie, want alfabetisch pak je 20 kruimelbestanden van 480 B met nul bots.
+
+- [x] **`hours_present` en `is_complete` staan nu in de DDL** én in `SCHEMA_MIGRATE`
+      (catalogus-guard, niet `ADD COLUMN IF NOT EXISTS` — die pakt de AccessExclusiveLock
+      óók als er niets te doen valt, en de migratie loopt bij élke `ingest_date()`).
+      Getest: migratie is een no-op tegen live en idempotent bij twee runs, en een VERSE
+      opbouw uit `bothits_schema.sql` slikt de echte ledger-INSERT — beide in een
+      transactie met rollback, dus zonder de shared DB aan te raken.
+- [x] **Veldnamen worden één keer geresolveerd bij `#Fields:`**, via `REQUIRED_FIELDS`, en
+      een ontbrekend veld geeft een `RuntimeError` met de kolomlijst uit het bestand erbij.
+      Bewezen op vier synthetische gevallen: hernoemd veld → fout, weggehaald veld → fout,
+      géén `#Fields:`-header → waarschuwing (was volledig stil), te korte regels → geteld
+      als `bad_lines` met een waarschuwing (waren stil genegeerd). De per-regel `KeyError`
+      kan niet meer bestaan, dus de tak die een kapotte dag als een goede dag liet
+      doorgaan is weg.
+- [x] **Frontend: één `getJSON()`** die op `!r.ok` gooit met `detail` als melding, plus een
+      `#loadError`-banner boven de tabs. Bij een fout worden de drie charts en de bot-tabel
+      LEEGGEMAAKT — cijfers van de vorige selectie laten staan is erger dan niets tonen.
+      Toegepast op `refresh()`, `loadUrls()` (de `forEach` staat nu binnen de `try`),
+      `loadIngest()` (had helemaal geen `try`) en `boot()` (liet bij een kapotte `/meta`
+      alle drie de filterlijsten op "laden…" staan). Plus `maxlength="200"` op `#urlQ`,
+      want de route zet `max_length=200` en een lange gekopieerde URL gaf een 422 die de
+      tabel eeuwig op "laden…" zette.
+- [x] **Ingest-lock lekt niet meer**: `Thread.start()` in een `try`, en bij een fout gaat
+      de state terug op niet-lopend en wordt de lock vrijgegeven. Hiervoor hield één
+      mislukte thread-start de lock voor de rest van het procesleven vast — knop én timer
+      dood tot een herstart van uvicorn.
+- [x] **Mislukte runs zeggen dat ze mislukt zijn.** `run_drop` en `run_backfill` geven nu
+      dezelfde vorm terug met een eigen `failed`-lijst en `status` ∈
+      `ok` / `partial` / `failed` / `cancelled` / `no_drop_dir`; fouten staan niet meer
+      tussen de "overgeslagen" datums. `run_backfill` gaf hiervoor een plátte lijst waarin
+      een mislukte datum simpelweg ontbrak. De CLI print een samenvatting en geeft
+      **exitcode 1** bij `failed`/`partial`. `scripts/bothits_nightly.py` telt `failed` mee
+      in zijn exitcode — een nacht waarin élke datum omviel eindigde met 0, dus de
+      Windows-taak stond op "gelukt". Alle drie de statustakken bewezen met een
+      gesimuleerde parse-fout.
+- [x] Kleiner: beide POST-endpoints hebben nu foutafhandeling en de onbereikbare
+      `except S3NotConfigured` is weg (met uitleg waaróm hij niet kon vuren) · de
+      Verwerk-knop blijft niet meer onherroepelijk disabled als de POST faalt ·
+      onbekende `group_by` echoot niet meer de typefout maar de kolom die echt gebruikt
+      is (geverifieerd: `?group_by=bot_familly` → `bot_class`) · `_prune_archive` telt met
+      `os.walk` zodat `archive_freed_mb` klopt met wat `rmtree` wist · `--date` sorteert
+      (bewezen met drie datums omgekeerd opgegeven) en noemt in een waarschuwing WELKE
+      gevraagde datum niet in de boom zit · de ingest-poll heeft een handle, een
+      re-entry-guard en een `clearTimeout` op `hidden.bs.tab` (elk tabbezoek tijdens een
+      run startte een extra keten).
 
 **Fase 2 — het volledigheidscontract (gedragswijzigend, moet gated):**
 
