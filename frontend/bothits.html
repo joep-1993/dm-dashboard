@@ -22,43 +22,11 @@
         .chart-box { position: relative; height: 340px; }
         .chart-box-sm { position: relative; height: 300px; }   /* gelijk aan .donut-wrap */
 
-        /* ---- Stat tiles — de GSD Budgets-vorm (Joep, 2026-08-11) --------------
-           Waren een grid van 1px-omlijnde blokjes met een grijs uppercase label
-           erboven. Nu de canonieke .stat-card: 12px radius, paarse schaduw, geen
-           border, waarde in brand-paars bóven het label. Wat afwijkt van GSD
-           Budgets is bewust: die heeft drie tegels in een flex-row met
-           justify-content-center, hier zijn het zes en dan laat een grid ze even
-           breed worden in plaats van de laatste rij te centreren. */
-        .tile-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; }
-        .stat-card {
-            border-radius: 12px;
-            background: white;
-            color: #2d3436;
-            padding: 1.25rem;
-            text-align: center;
-            min-width: 140px;
-            box-shadow: 0 4px 16px rgba(94, 74, 144, 0.14);
-        }
-        .stat-card h3 { font-size: 2rem; font-weight: 700; margin: 0; color: #5e4a90; line-height: 1.15; }
-        .stat-card .label { font-size: 0.85rem; color: #636e72; line-height: 1.3; }
-        /* De drie regels moeten over de zes tegels drie horizontale banden vormen.
-           Dat lukte niet omdat de toelichting bij twee tegels op twee regels valt en
-           bij vier op één: de kaarten zijn wel even hoog (grid), maar de tekst is
-           bovenaan gepakt, dus onder de korte toelichtingen bleef losse ruimte staan.
-           `min-height` van twee regels reserveert die ruimte altijd, zodat elke
-           toelichting op dezelfde hoogte begint en de rij als band leest. Twee en niet
-           drie: geen enkele toelichting loopt over twee regels heen op de smalste
-           tegel die dit grid maakt (~145px tekstbreedte bij zes tegels op col-lg-11). */
-        .stat-card .detail {
-            font-size: 0.75rem; color: #999; margin-top: 0.25rem;
-            line-height: 1.3; min-height: 2.6em;
-        }
-        /* Een datum mag niet middenin afbreken. Browsers breken graag ná een
-           koppelteken, dus "2026-07-13 t/m 2026-08-11" werd "…2026-08-" / "11".
-           De datums krijgen daarom elk hun eigen nowrap; de afbreking valt nu op de
-           spaties rond "t/m", waar hij hoort. */
-        .stat-card .detail .nb { white-space: nowrap; }
-
+        /* De zes stat-tegels stonden hier (Joep, 2026-08-13: eruit). Ze zaten in
+           .tile-row/.stat-card met een cqw-clamp op de waarde omdat een getal van tien
+           cijfers niet in een tegel van 184px past. Alles weg: de CSS, de markup en
+           drawTiles(). Wat ze toonden staat er nog — het totaal in de donut, de
+           verspilling in de facet-grafiek — en de pagina begint nu bij de filters. */
         /* ---- Standard table look ---- */
         .tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; max-height: 620px; }
         .tool-table { font-size: 0.9rem; margin-bottom: 0; }
@@ -80,24 +48,37 @@
         .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
         .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
         .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        /* Lange URL's in de URL's-tab: één regel, monospace, met ellipsis. De volledige
+           URL zit in de title en de link opent hem. */
         .url-cell { max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
         .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
         .col-mid { text-align: center; }
-        /* Uitklapbare rij in Per bot-familie: de rij zelf klikbaar, het paneel
-           eronder als één cel over de volle breedte. */
-        #botTable tbody tr.bot-row { cursor: pointer; }
-        #botTable tbody tr.bot-row:hover > td { background: #f5f4f9; }
-        #botTable tbody tr.bot-row.is-open > td { background: #f1edfa; font-weight: 600; }
+        /* Uitklapbare rij: de rij zelf klikbaar, het paneel eronder als één cel over de
+           volle breedte. Geldt voor Per bot-familie én voor de URL's-tabel (Joep,
+           2026-08-13) — vandaar op de klassen en niet meer op #botTable. */
+        .tool-table tbody tr.bot-row,
+        .tool-table tbody tr.url-row { cursor: pointer; }
+        .tool-table tbody tr.bot-row:hover > td,
+        .tool-table tbody tr.url-row:hover > td { background: #f5f4f9; }
+        .tool-table tbody tr.bot-row.is-open > td,
+        .tool-table tbody tr.url-row.is-open > td { background: #f1edfa; font-weight: 600; }
         .bot-detail > td { background: #fbfbfd !important; padding: 0.9rem 1rem !important; }
         /* Bootstraps .table-hover pakt élke tbody-rij, dus ook het uitklappaneel —
            dan werd de hele detailrij grijs zodra je erover ging, terwijl er niets
            klikbaars in zit (Joep, 2026-08-11). De hover-achtergrond van de tabel
            uitzetten is genoeg; de eigen achtergrond blijft staan. */
-        #botTable tbody tr.bot-detail:hover > td { background: #fbfbfd !important; }
-        #botTable tbody tr.bot-detail > td { --bs-table-bg-state: transparent; }
-        /* Kadertje om de staafgrafiek, zoals .tool-table-wrap om een tabel. De twee
-           donuts hebben hun eigen ronde vorm als omlijning; een rechthoekige plot
-           heeft niets waardoor hij als blok leest. */
+        .tool-table tbody tr.bot-detail:hover > td { background: #fbfbfd !important; }
+        .tool-table tbody tr.bot-detail > td { --bs-table-bg-state: transparent; }
+        /* Een open URL-rij houdt zijn monospace-cel, maar niet de vetgedrukte
+           font-weight van de regel hierboven op de link zelf — die verspringt dan in
+           breedte en de ellipsis schuift mee. */
+        .tool-table tbody tr.url-row.is-open > td.url-cell { font-weight: 400; }
+        /* Kadertje om een grafiek, zoals .tool-table-wrap om een tabel. In de kaarten
+           van het overzicht zit hij alleen om de staafgrafiek: een donut heeft zijn eigen
+           ronde vorm als omlijning en de kaart eromheen doet de rest.
+           In het uitklappaneel dragen de vier grafieken het allemaal (Joep, 2026-08-13).
+           Daar is geen kaart om ze heen, dus zonder kader zweven de donuts naast een
+           omlijnde staafgrafiek en leest de rij als ongelijke blokken. */
         .chart-framed { border: 1px solid #eee; border-radius: 6px; padding: 0.5rem; }
         .bot-detail .donut-wrap { height: 250px; }
         .bot-detail .chart-box-sm { height: 250px; }
@@ -117,6 +98,10 @@
         .nav-tabs .nav-link:hover { color: #1a1a1a; }
         .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
         .muted-note { font-size: 0.82rem; color: #636e72; }
+        /* Bootstrap zet .alert-dismissible .btn-close op padding 1.25rem 1rem, gemaakt
+           voor een alert met de standaard py-3. Deze balk is py-2, dus daar reikt het
+           kruisje buiten de balk; kleiner gezet zit hij netjes in de hoek. */
+        #partialWarn .btn-close { padding: 0.55rem 0.7rem; background-size: 0.7em; }
 
         /* Klikbare legenda boven de grafiek, gecentreerd (Joep, 2026-08-11). De
            uit-stand dimt het item en maakt de swatch hol: de kleur blijft zichtbaar
@@ -271,26 +256,27 @@
       <div class="row">
         <div class="col-lg-11 mx-auto">
 
-        <!-- ============================ TILES ============================ -->
-        <div class="tile-row mb-3" id="tiles"></div>
-
         <!-- ============================ FILTERS ============================ -->
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">Filters</h5>
-                <!-- Het ophalen staat naast de dekkingstekst (Joep, 2026-08-11): die tekst
-                     zegt tot welke datum er data is, en dit is de knop die dat verandert —
-                     dus vraag en antwoord op één regel. Refresh blijft in Hits per dag, want
-                     dat hertekent alleen de grafiek. Input en knop blijven bij elkaar: los
-                     van elkaar is "3" een getal zonder betekenis. -->
+                <!-- Ophalen zit in de Filters-kop; Refresh blijft in Hits per dag, want dat
+                     hertekent alleen de grafiek. Input en knop blijven bij elkaar: los van
+                     elkaar is "3" een getal zonder betekenis.
+                     De dekkingstekst ("… t/m … geladen · … hits") stond hier en is weg op
+                     verzoek van Joep (2026-08-13). Tot welke datum er data is, staat al in
+                     het Tot-en-met-veld dat boot() op de laatste dag zet, en de Ingest-tab
+                     draagt de volledige laadhistorie.
+                     De knop draagt hetzelfde ↻ en dezelfde outline-paars als de
+                     Refresh-knop: het zijn beide "haal opnieuw op"-acties, en oranje
+                     (btn-outline-orange) is in UI_BLUEPRINT de exportkleur. -->
                 <div class="d-flex gap-2 align-items-center ms-auto">
-                    <span id="coverageNote" class="muted-note"></span>
                     <label class="muted-note mb-0" for="s3Days">Dagen ophalen</label>
                     <input type="number" class="form-control form-control-sm" id="s3Days"
-                           value="3" min="1" max="45" style="width:70px;"
+                           value="3" min="1" max="45" style="width:50px;"
                            title="Aantal volledige dagen terug vanaf gisteren. Vandaag valt er altijd buiten (nog geen 24 uur). Max 45: de bucket bewaart ~42 dagen.">
-                    <button class="btn btn-sm btn-outline-orange" id="s3FetchBtn"
-                            title="Download nieuwe CloudFront-logs uit S3 en verwerk ze meteen">Nieuwe logs ophalen</button>
+                    <button class="btn btn-sm btn-outline-purple" id="s3FetchBtn"
+                            title="Download nieuwe CloudFront-logs uit S3 en verwerk ze meteen">↻ Logs ophalen</button>
                 </div>
             </div>
             <div class="card-body">
@@ -319,15 +305,23 @@
                         <div class="chk-list" id="typeFilter"><span class="text-muted">laden…</span></div>
                     </div>
                 </div>
-                <!-- Reset/Toepassen onder de filters, rechts uitgelijnd (Joep,
-                     2026-08-11). Ze stonden in de zesde kolom onder de "In pa.urls"-
-                     select; nu die weg is zou die kolom alleen nog knoppen dragen, en
-                     dan hoort de primaire actie onderaan rechts te staan zoals
-                     UI_BLUEPRINT voor elke sectie voorschrijft. -->
+                <!-- Wegklikbaar (Joep, 2026-08-13): het is een waarschuwing die je één
+                     keer leest, geen filter dat je later nog nodig hebt. `pe-5` en niet
+                     `px-3`, want Bootstraps .alert-dismissible reserveert rechts 3rem voor
+                     het kruisje en een px-utility zou die met !important terugzetten naar
+                     1rem — dan valt de X over de tekst. -->
+                <div id="partialWarn" class="alert alert-warning alert-dismissible fade show py-2 ps-3 pe-5 mt-3 mb-0 d-none"
+                     style="font-size:0.85rem;" role="alert"></div>
+                <!-- Toepassen ONDER de waarschuwing (Joep, 2026-08-13), niet erboven. De
+                     banner hoort bij de selectie die je staat te maken — welke dagen
+                     kunstmatig laag uitvallen — dus die tekst is het laatste wat je leest
+                     vóór je op de knop drukt. Rechts uitgelijnd blijft: de primaire actie
+                     van een sectie staat onderaan rechts (UI_BLUEPRINT).
+                     Let op bij wegklikken: Bootstrap haalt de banner uit de DOM, en de
+                     knop staat er los van — die blijft dus staan. -->
                 <div class="d-flex justify-content-end gap-2 mt-3">
                     <button class="btn btn-sm btn-run" id="applyBtn">Toepassen</button>
                 </div>
-                <div id="partialWarn" class="alert alert-warning py-2 px-3 mt-3 mb-0 d-none" style="font-size:0.85rem;"></div>
             </div>
         </div>
 
@@ -366,8 +360,6 @@
         <ul class="nav nav-tabs mb-3" id="mainTabs" role="tablist">
             <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-overview" type="button">Overzicht</button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-urls" type="button">URL's</button></li>
-            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-waste" type="button">Crawl-verspilling</button></li>
-            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-cats" type="button">Categorieën</button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ingest" type="button">Ingest</button></li>
         </ul>
 
@@ -379,9 +371,17 @@
                         <h5 class="mb-0">Hits per dag</h5>
                         <div class="d-flex gap-2 align-items-center">
                             <label class="muted-note mb-0">Splitsen op</label>
+                            <!-- Bot-familie is de standaardsplitsing (Joep, 2026-08-13), niet
+                                 Bot-soort. De soort zegt "search / ai / other" — vier banden waarvan
+                                 er één 96% is — terwijl de vraag bij het openen van de tool "wie
+                                 crawlt er" is, en dat is de familie. Het palet is hier ook op
+                                 gebouwd: PAL.terracotta bestaat alleen omdat de acht benoemde
+                                 FAMILIES een achtste kleur nodig hadden (zie PAL).
+                                 De optielijst blijft in dezelfde grof→fijn-orde staan; alleen
+                                 `selected` verhuist. -->
                             <select class="form-select form-select-sm" id="groupBy" style="width:auto;">
                                 <option value="bot_class">Bot-soort</option>
-                                <option value="bot_family">Bot-familie</option>
+                                <option value="bot_family" selected>Bot-familie</option>
                                 <option value="url_type">URL-type</option>
                                 <option value="host">Domein</option>
                                 <option value="status_class">HTTP-status</option>
@@ -413,15 +413,17 @@
                     </div>
                     <div class="col-md-6">
                         <div class="card h-100">
-                            <!-- Titel volgt de woorden van de legenda eronder ("in
-                                 pa.urls" / "niet in pa.urls"). Stond als "bekend vs
-                                 onbekend", en die twee woorden komen in de grafiek
-                                 nergens voor — Joep zocht op 2026-08-12 naar een
-                                 "onbekend"-reeks die er onder die naam niet was.
-                                 De splitsing zelf blijft: hij is de kern van de
-                                 verspillingsvraag. Staat er één kleur, dan is dat een
-                                 datasignaal en geen opmaakkwestie. -->
-                            <div class="card-header"><h5 class="mb-0">Facet-diepte — in vs. niet in pa.urls</h5></div>
+                            <!-- Eén reeks: hits per facet-diepte, zonder de splitsing in
+                                 "in pa.urls" / "niet in pa.urls" (Joep, 2026-08-13).
+                                 Die splitsing zat er als kern van de verspillingsvraag, maar
+                                 kan die vraag niet beantwoorden zolang is_known_url kapot is
+                                 (false voor elke rij die ná de backfill is geladen — zie de
+                                 bevinding in cc1). Wat je overhield was een stapel van één
+                                 kleur met een titel die twee beloofde.
+                                 De verspilling zelf staat er nog twee keer wél goed: als
+                                 tegel ("Facet-verspilling") en als eigen tab
+                                 (Crawl-verspilling). Deze grafiek gaat over diepte. -->
+                            <div class="card-header"><h5 class="mb-0">Facet-diepte</h5></div>
                             <div class="card-body">
                                 <div class="chart-box-sm chart-framed"><canvas id="depthChart"></canvas></div>
                             </div>
@@ -455,94 +457,47 @@
                 </div>
             </div>
 
-            <!-- ---------------------- TOP URLS ---------------------- -->
+            <!-- ---------------------- TOP URLS ----------------------
+                 Terug op 2026-08-13, en smaller dan de tab die er tot vandaag stond:
+                 alleen de top X op hits, geen zoekveld, geen maincat-kolom en geen
+                 CSV-export. Laadt bij het openen van de tab, dus geen Laden-knop.
+                 De bron is pa.bothits_unknown_daily en niet de per-URL-tabel — zie
+                 get_top_urls() voor waarom, en de alert hieronder zegt het de
+                 gebruiker ook. -->
             <div class="tab-pane fade" id="tab-urls">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Meest gecrawlde URL's <span class="muted-note">(alleen URL's uit pa.urls)</span></h5>
+                        <!-- De kop volgt de Top-keuze (2026-08-13): met een vaste "Top 250"
+                             zou hij liegen zodra je 500 of 1000 kiest. loadUrls() schrijft
+                             hem bij. -->
+                        <h5 class="mb-0" id="urlHeading">Top 250 URL's</h5>
                         <div class="d-flex gap-2 align-items-center">
-                            <input type="text" class="form-control form-control-sm" id="urlSearch" placeholder="zoek in URL…" style="width:230px;">
+                            <label class="muted-note mb-0" for="urlLimit">Top</label>
                             <select class="form-select form-select-sm" id="urlLimit" style="width:auto;">
-                                <option>50</option><option selected>100</option><option>250</option><option>500</option><option>1000</option>
+                                <option>50</option><option>100</option>
+                                <option selected>250</option><option>500</option><option>1000</option>
                             </select>
-                            <button class="btn btn-sm btn-outline-orange" id="urlExport">Export CSV</button>
-                            <button class="btn btn-sm btn-run" id="urlLoad">Laden</button>
+                            <button class="btn btn-sm btn-outline-purple" id="urlLoad">↻ Refresh</button>
                         </div>
                     </div>
                     <div class="card-body">
+                        <!-- Hier stond een gele waarschuwing met drie dingen: dat dit een
+                             dagelijkse top-500 per familie is, dat pa.bothits_url_daily
+                             stilstaat sinds 2026-06-09, en dat assets bovenaan staan. Eruit
+                             op verzoek van Joep (2026-08-13) — hij kent ze. Ze staan nog
+                             wél in de docstring van get_top_urls(), want dat is waar de
+                             volgende die deze lijst leest ze nodig heeft. -->
                         <div class="tool-table-wrap">
                             <table class="table table-hover tool-table" id="urlTable">
-                                <thead><tr>
-                                    <th class="sortable" data-k="url">URL</th>
-                                    <th class="sortable" data-k="main_cat_name">Maincat</th>
-                                    <th class="sortable num" data-k="hits">Hits</th>
-                                    <th class="sortable num" data-k="days">Dagen</th>
-                                    <th class="sortable num" data-k="n_2xx">2xx</th>
-                                    <th class="sortable num" data-k="n_3xx">3xx</th>
-                                    <th class="sortable num" data-k="n_4xx">4xx</th>
-                                    <th class="sortable num" data-k="n_5xx">5xx</th>
-                                    <th class="sortable" data-k="bots">Bots</th>
-                                </tr></thead>
-                                <tbody><tr><td colspan="9" class="text-muted p-3">Klik op Laden.</td></tr></tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ---------------------- WASTE ---------------------- -->
-            <div class="tab-pane fade" id="tab-waste">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Crawl-verspilling <span class="muted-note">(URL's die niet in pa.urls staan)</span></h5>
-                        <div class="d-flex gap-2 align-items-center">
-                            <select class="form-select form-select-sm" id="wasteLimit" style="width:auto;">
-                                <option>50</option><option selected>100</option><option>250</option><option>500</option><option>1000</option>
-                            </select>
-                            <button class="btn btn-sm btn-outline-orange" id="wasteExport">Export CSV</button>
-                            <button class="btn btn-sm btn-run" id="wasteLoad">Laden</button>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div class="alert alert-info py-2 px-3 muted-note">
-                            Dit is een <strong>dagelijkse top-500 per bot-familie</strong>, geen volledige ranglijst van de
-                            hele onbekende staart. Lees het als “de luidste veroorzakers”, niet als een uitputtende telling.
-                            De totalen per dag in het Overzicht kloppen wél volledig.
-                        </div>
-                        <div class="tool-table-wrap">
-                            <table class="table table-hover tool-table" id="wasteTable">
                                 <thead><tr>
                                     <th class="sortable" data-k="url">URL</th>
                                     <th class="sortable" data-k="url_type">Type</th>
                                     <th class="sortable num" data-k="facet_depth">Facets</th>
                                     <th class="sortable num" data-k="hits">Hits</th>
                                     <th class="sortable num" data-k="days">Dagen</th>
-                                    <th class="sortable" data-k="bots">Bots</th>
+                                    <th class="sortable num" data-k="per_day">Per dag</th>
                                 </tr></thead>
-                                <tbody><tr><td colspan="6" class="text-muted p-3">Klik op Laden.</td></tr></tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ---------------------- CATEGORIES ---------------------- -->
-            <div class="tab-pane fade" id="tab-cats">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Per hoofdcategorie <span class="muted-note">(alleen URL's uit pa.urls)</span></h5>
-                        <button class="btn btn-sm btn-run" id="catLoad">Laden</button>
-                    </div>
-                    <div class="card-body">
-                        <div class="tool-table-wrap">
-                            <table class="table table-hover tool-table" id="catTable">
-                                <thead><tr>
-                                    <th class="sortable" data-k="main_cat_name">Hoofdcategorie</th>
-                                    <th class="sortable num" data-k="hits">Hits</th>
-                                    <th class="sortable num" data-k="urls_crawled">Unieke URL's</th>
-                                    <th class="sortable num" data-k="per_url">Hits per URL</th>
-                                </tr></thead>
-                                <tbody><tr><td colspan="4" class="text-muted p-3">Klik op Laden.</td></tr></tbody>
+                                <tbody><tr><td colspan="6" class="text-muted p-3">Laden…</td></tr></tbody>
                             </table>
                         </div>
                     </div>
@@ -554,7 +509,7 @@
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Nieuwe logs verwerken</h5>
-                        <button class="btn btn-sm btn-run" id="ingestBtn">Verwerk dropfolder</button>
+                        <button class="btn btn-sm btn-outline-purple" id="ingestBtn">Verwerk dropfolder</button>
                     </div>
                     <div class="card-body">
                         <p class="muted-note mb-2">
@@ -621,32 +576,27 @@
         lichtblauw: '#1f99c4',  // == rurl
         roze:       '#be4693',  // == secondary
         lichtgroen: '#91c34e',  // == accent
-        // ALLEEN in Bot Hits, en alleen omdat bot_family acht benoemde reeksen heeft
-        // (Joep, 2026-08-12). Met de merktrio op de eerste drie plekken haalt geen
-        // enkele 8-set uit het bestaande palet de kleurenblind-vloer nog: het beste
-        // was 4,9 ΔE (cta-oranje ↔ lichtgroen, deutan) tegen 8,0 vóór de trio-regel.
-        // Deze hue is gezocht met de validator van de dataviz-skill en brengt de
-        // benoemde acht terug op 7,7 — de ondergrens van de trio zélf, dus het
-        // maximaal haalbare zolang die drie vaststaan.
+        // Terracotta was hier het achtste bot_family-slot. Sinds de familielijst en het
+        // palet op 2026-08-13 opnieuw zijn gemeten, staat dat slot op violet — zie
+        // COLOR_MAPS.bot_family. De tint blijft staan omdat de meting hem als reserve
+        // noemt, niet omdat een grafiek hem nog gebruikt.
         //
-        // GEMETEN MÉT DE OVERIG-BAND ERBIJ, want zo rendert de grafiek: other-bot,
-        // Perplexity en ByteDance vallen in grijs, dus het zijn negen banden en niet
-        // acht. Dat verandert welke keuze goed is. Een eerdere kandidaat (#ce887e)
-        // zat op 9,3 ΔE van dat grijs en was daarmee het nieuwe zwakste paar; deze
-        // zit op 12,5 en laat de bestaande bodem staan.
-        //
-        // Die bodem is grijs ↔ lichtblauw op 12,0 (normaal) / 5,9 (protan) en zit er
-        // NU AL in — het is hetzelfde paar dat in seo-stats.html als "normaal-min
-        // 12,0 (R-url ↔ Overig)" genoteerd staat. Onoplosbaar met een achtste kleur:
-        // geen tint ter wereld verandert de afstand tussen grijs en lichtblauw. Wie
-        // dat wil repareren moet de Overig-band aanpakken, niet het palet.
-        //
-        // Prijs, bewust betaald: SEO Stats kent deze hue niet, dus het gedeelde palet
-        // is hier één tint groter. Komt er ooit een negende familie bij, dan is dit
-        // GEEN set om nog iets aan toe te voegen — dan vouwt hij naar Overig.
+        // De vaste bodem van dit palet, en die verandert niet meer: grijs ↔ lichtblauw
+        // op 12,0 (normaal) / 5,9 (protan). Hetzelfde paar dat in seo-stats.html als
+        // "normaal-min 12,0 (R-url ↔ Overig)" staat. Zolang er een grijze Overig-band
+        // ís, is dát het zwakste paar — geen tint ter wereld verandert de afstand tussen
+        // grijs en lichtblauw. Wie dat wil repareren moet de Overig-band aanpakken.
         terracotta: '#c7706b',
-        // METRICS[*].color (stat-card metric-tile)
-        violet:    '#8459cf',   // dma_visits    (violet-500)
+        // METRICS[*].color (de metric-tiles van seo-stats.html)
+        //
+        // violet komt NIET uit seo-stats maar uit de Base-kolom van het
+        // Kleursysteem-document (Joep, 2026-08-13): violet-500 = #a855f7. Dat is een
+        // andere tint dan de #8459cf die seo-stats.html op dma_visits zet, en dat
+        // verschil is de bedoeling — met #8459cf zakt het zwakste paar van de acht
+        // bot-families naar 14,1 ΔE op normaal zicht (violet ↔ roze) en met de
+        // documentwaarde haalt het 15,8, precies over de vloer. Geen betekenisconflict:
+        // violet staat hier op DuckAssist en op facet-diepte 4, niet op DMA-verkeer.
+        violet:    '#a855f7',   // violet-500 uit het Kleursysteem (Base-kolom)
         accent:    '#91c34e',   // gsaas_visits  (accent-500)
         secondary: '#be4693',   // seo_omzet     (secondary-500)
         bordeaux:  '#722F37',   // dma_omzet
@@ -699,8 +649,8 @@
         // hier ondergeschikt zijn aan scheidbaarheid.
         //
         //   bot_class   (6)  CVD-min 10,0 ΔE   normaal-min 17,2
-        //   bot_family  (8)  CVD-min  8,0 ΔE   normaal-min 16,4  <- de ENIGE 8-set van
-        //                    1287 die beide vloeren haalt (CVD >= 8 en normaal >= 15)
+        //   bot_family  (8)  CVD-min  7,7 ΔE   normaal-min 15,8  <- opnieuw gemeten op
+        //                    2026-08-13, zie daar
         //   host        (6)  CVD-min 10,0 ΔE   normaal-min 17,2
         //
         // Alle drie halen dus beide vloeren. Twee eerdere, "logischer" toewijzingen
@@ -725,19 +675,47 @@
         bot_class: { search: PAL.lichtblauw, ai: PAL.roze, other: PAL.lichtgroen,
                      'seo-tool': PAL.turquoise, social: PAL.bordeaux,
                      monitoring: PAL.navy },
-        // Eerste drie van de legenda = merkkleuren. De legenda volgt de volgorde van de
-        // querylaag en die is op volume: Googlebot 46%, Apple 24%, GoogleOther 13%.
-        // De overige vijf zijn opnieuw gezocht met de validator (252 combinaties uit
-        // het eigen palet, plus een sweep van 1093 tinten daarbuiten voor het achtste
-        // slot — zie PAL.terracotta voor waarom dat nodig was).
-        // Gemeten (light, #fff, all-pairs): CVD-min 7,7 ΔE (deutan, lichtblauw↔roze),
-        // normaal-min 16,4. Gelijk aan de andere dimensies en gelijk aan de vloer van
-        // de trio zelf; de 6-8-band mag mét secundaire encoding en die is er (legenda
-        // plus de tabel eronder, waar de familie ook met naam staat).
+        // ACHT benoemde families — het gemeten maximum (Joep, 2026-08-13).
+        //
+        // De vraag was: geef alle twaalf gevolgde families een eigen kleur, want
+        // Perplexity viel onder Overig terwijl hij 1,8% is. Uitgezocht met de validator
+        // van de dataviz-skill, inclusief de Base-kolom (500-stops) van het
+        // Kleursysteem-document. Wat de meting zegt, met de merktrio vast op de eerste
+        // drie plekken (UI_BLUEPRINT: lichtblauw, roze, lichtgroen):
+        //
+        //   6 tinten  CVD 7,7  normaal 17,2   OK
+        //   7 tinten  CVD 7,7  normaal 16,4   OK
+        //   8 tinten  CVD 7,7  normaal 15,8   OK  <- de grens
+        //   9 tinten  CVD 7,7  normaal 11,3   FAIL (normaal < 15 = harde fail)
+        //  12 tinten  CVD 5,5  normaal  7,1   FAIL
+        //
+        // Acht is dus het plafond, en dat is niet aan het palet te wijten: de Base-
+        // kolom ALLEEN haalt zelfs zes niet (CVD 7,7 / normaal 11,3), want die veertien
+        // tinten staan allemaal op stop 500 en hebben daardoor nauwelijks
+        // lichtheidsverschil — en lichtheid is wat een tint op normaal zicht apart
+        // houdt. Wat het wél haalt, is Base aangevuld met de DONKERE stops van dezelfde
+        // families: turquoise = teal-800, bordeaux = red-900, navy = blue-950,
+        // yellow = yellow-800. Vandaar deze acht.
+        //
+        // De acht grootste families krijgen ze, want de legenda-orde volgt het volume:
+        // Googlebot 51%, Apple 18%, GoogleOther 15,3%, OpenAI 7,4%, ByteDance 2,0%,
+        // Perplexity 1,8%, Bing 0,5%, DuckAssist 0,12%. De vier kleinste (Amazon,
+        // Meta-AI, Anthropic, Google-AI — samen 0,19%) vallen in de grijze restband;
+        // hun banden zijn subpixel, dus een eigen kleur zou daar niets tonen wat de
+        // legenda niet al zegt. De swatch van Overig draagt hun namen als title en de
+        // tabel eronder noemt alle twaalf met hun cijfers.
+        //
+        // Gemeten (light, #fcfcfb, all-pairs) over deze acht: CVD-min 7,7 ΔE (deutan,
+        // lichtblauw ↔ roze — de vloer van het merktrio zelf, dus onverbeterbaar zolang
+        // die drie vaststaan), normaal-min 15,8. De 6-8-band mag mét secundaire
+        // encoding en die is er: legenda plus de tabel eronder.
+        // De grijze Overig-band blijft het zwakste paar van het geheel (5,9 / 12,0
+        // tegen lichtblauw) — zie PAL.terracotta; dat is de bestaande vloer van beide
+        // tools en die staat los van deze acht.
         bot_family: { Googlebot: PAL.lichtblauw, Apple: PAL.roze,
                       GoogleOther: PAL.lichtgroen, OpenAI: PAL.turquoise,
-                      Bing: PAL.bordeaux, 'Google-AI': PAL.navy,
-                      'Meta-AI': PAL.yellow, Anthropic: PAL.terracotta },
+                      ByteDance: PAL.bordeaux, Perplexity: PAL.navy,
+                      Bing: PAL.yellow, DuckAssist: PAL.violet },
         // In de praktijk dragen maar twee hosts verkeer (beslist.nl 99%,
         // shop.beslist.nl 1%), en die twee pakken de eerste twee merkkleuren — niet
         // "eentje plus grijs", want grijs is voorbehouden aan de restpost en zou de
@@ -833,9 +811,9 @@
         if (t.length && t.length < (META?.url_types?.length || 99)) p.set('url_type', t.join(','));
         // Het "In pa.urls"-filter is weg (Joep, 2026-08-11): de splitsing
         // "Bekend / onbekend" in Hits per dag laat hetzelfde onderscheid zien
-        // zonder de rest van de pagina te versmallen, en de Crawl-verspilling-tab
-        // is al per definitie de onbekende kant. De `known`-parameter blijft in de
-        // API bestaan — die wordt nog gebruikt door /top-urls en /top-waste.
+        // zonder de rest van de pagina te versmallen. De `known`-parameter bestaat
+        // nog wel op /daily en /summary; sinds de Crawl-verspilling-tab eruit is
+        // (2026-08-13) stuurt deze pagina hem nergens meer mee.
         for (const [key, v] of Object.entries(extra)) if (v !== '' && v != null) p.set(key, v);
         return p.toString();
     }
@@ -854,13 +832,9 @@
     // ---- Boot ------------------------------------------------------------
     async function boot() {
         META = await (await fetch(API + '/meta')).json();
+        // cov vult nog steeds de datumvelden; de dekkingstekst die hier stond is weg
+        // (Joep, 2026-08-13) — zie de Filters-kop.
         const cov = META.coverage || {};
-        // "2026-02-14 t/m 2026-03-16 geladen · 92.897.176 hits" (Joep, 2026-08-11).
-        // Het aantal dagen is eruit: dat volgt uit de reeks, en het stond vóór de
-        // datums waardoor je twee keer moest lezen om te zien tot wanneer er data is.
-        document.getElementById('coverageNote').textContent =
-            cov.days ? `${cov.first_day} t/m ${cov.last_day} geladen · ${fmt(cov.bot_lines)} hits`
-                     : 'nog geen data geladen';
         if (cov.last_day) {
             document.getElementById('endDate').value = cov.last_day;
             const d = new Date(cov.last_day); d.setDate(d.getDate() - 29);
@@ -884,9 +858,15 @@
         if ((META.partial_days || []).length) {
             const w = document.getElementById('partialWarn');
             w.classList.remove('d-none');
+            // Het kruisje zit IN de innerHTML en niet in de statische markup: deze regel
+            // overschrijft de inhoud van de balk, dus een knop uit de HTML zou hier
+            // sneuvelen. Bootstrap haalt de balk bij sluiten uit de DOM; /meta wordt na
+            // boot() niet opnieuw gelezen, dus hij komt terug na een reload en niet
+            // eerder — precies wat je van een wegklikbare melding verwacht.
             w.innerHTML = '<strong>Let op — onvolledige dagen.</strong> Deze logdatums hebben niet alle 24 uur in het archief, ' +
                 'dus hun totalen liggen kunstmatig laag: ' +
-                META.partial_days.map(p => `${p.log_date} (${p.hours_present}/24u)`).join(', ') + '.';
+                META.partial_days.map(p => `${p.log_date} (${p.hours_present}/24u)`).join(', ') + '.' +
+                '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Sluiten"></button>';
         }
         await refresh();
         // Pikt een run op die op de Ingest-tab of door de nachtelijke timer is
@@ -904,40 +884,25 @@
             fetch(API + '/daily?' + params({ group_by: gb, ...f })).then(r => r.json()),
             fetch(API + '/summary?' + params(f)).then(r => r.json()),
         ]);
-        drawTiles(summary);
         drawDaily(daily, gb);
         drawType(summary);
         drawDepth(summary);
         drawBotTable(summary);
     }
 
-    function drawTiles(s) {
-        const ai = (s.bots || []).filter(b => b.bot_class === 'ai').reduce((a, b) => a + Number(b.hits), 0);
-        // Waste is measured over catalog (/c/) URLs only — pa.urls contains no
-        // product pages, so counting /p/ as "not in pa.urls" would report ~94%
-        // and mean nothing.
-        const tiles = [
-            ['Bot-hits totaal', fmt(s.total_hits),
-             `<span class="nb">${s.start_date}</span> t/m <span class="nb">${s.end_date}</span>`],
-            ['AI-crawlers', fmt(ai), pct(ai, s.total_hits) + ' van alle bot-hits'],
-            ['Productpagina\'s', fmt(s.product_hits), pct(s.product_hits, s.total_hits) + ' van alle bot-hits'],
-            ['Categorie-URL\'s', fmt(s.catalog_hits), fmt(s.catalog_known) + ' daarvan in pa.urls'],
-            ['Facet-verspilling', s.waste_pct + '%', 'van categorie-crawls valt buiten pa.urls'],
-            ['Verkeer', fmtBytes((s.bots || []).reduce((a, b) => a + Number(b.bytes || 0), 0)), 'uitgeserveerd aan bots'],
-        ];
-        // .stat-card zoals GSD Budgets: waarde in brand-paars bóven het label, met
-        // de toelichting als .detail eronder.
-        document.getElementById('tiles').innerHTML = tiles.map(([l, v, sub]) =>
-            `<div class="stat-card"><h3>${v}</h3><div class="label">${l}</div>`
-            + `<div class="detail">${sub}</div></div>`).join('');
-    }
+    // Hier stond drawTiles(): zes tegels met totaal, AI-aandeel, productpagina's,
+    // categorie-URL's, facet-verspilling en uitgeserveerd verkeer. Eruit op verzoek
+    // van Joep (2026-08-13). /summary levert die velden nog (total_hits, product_hits,
+    // catalog_hits, waste_pct) — ze hebben nu alleen geen lezer in de frontend.
 
     function drawDaily(data, gb) {
         const dates = [...new Set(data.rows.map(r => r.log_date))].sort();
         const groups = [...new Set(data.rows.map(r => r.grp))];
-        // Keep the chart inside the validated 8-hue set: everything without a
-        // fixed slot collapses into one "Overig" band. The table below carries
-        // the full per-family detail.
+        // Alleen wat een gevalideerd kleurslot heeft krijgt een eigen band; de rest
+        // valt samen in één "Overig". Bij Bot-familie zijn dat de vijf kleine
+        // AI-crawlers (samen 0,31%) — zie COLOR_MAPS.bot_family voor waarom het
+        // niet meer dan zes benoemde kunnen zijn. De legenda-swatch van Overig
+        // draagt hun namen, en de tabel eronder noemt ze met hun cijfers.
         const named = groups.filter(g => (COLOR_MAPS[gb] || {})[g] || gb === 'facet_depth' || gb === 'none');
         const rest = groups.filter(g => !named.includes(g));
         const keys = [...named, ...(rest.length ? ['Overig'] : [])];
@@ -1001,7 +966,18 @@
                 },
             },
         });
-        renderDailyLegend(keys, gb);
+        renderDailyLegend(keys, gb, rest);
+    }
+
+    // Welke kleur de stip in het hover-blok krijgt. Twee vormen op deze pagina:
+    //
+    //   * gestapelde banden en staven — de rand is wit (de scheiding), dus de VULLING
+    //     draagt de identiteit: backgroundColor;
+    //   * één lijn met was (de daglijn per bot-familie) — daar is het omgekeerd: de
+    //     vulling is 22% doorschijnend en de LIJN draagt de kleur. Zo'n dataset zet
+    //     daarom `dotColor`; Chart.js negeert die eigenschap, wij niet.
+    function dotColorOf(dp) {
+        return dp.dataset.dotColor || dp.dataset.backgroundColor;
     }
 
     // Eigen donker hover-blok, zelfde vorm als externalTooltip in seo-stats.html:
@@ -1024,6 +1000,18 @@
         const pts = [...tooltip.dataPoints].filter(dp => dp.parsed.y > 0)
                                            .sort((a, b) => b.parsed.y - a.parsed.y);
         const total = tooltip.dataPoints.reduce((a, dp) => a + (dp.parsed.y || 0), 0);
+        // Bij één reeks in beeld — de facet-dieptegrafieken en de twee daglijnen — is
+        // het aandeel van het HOVERPUNT zinloos ("100%"), maar het aandeel van de hele
+        // reeks juist wel informatief: "geen facet = 56% van alle crawls in deze
+        // selectie", "deze dag was 4,2% van de periode" (Joep, 2026-08-13). De noemer
+        // is dus de som van álle punten in de reeks, en de voetregel noemt hem bij naam
+        // zodat "Totaal" nooit twee dingen kan betekenen: bij een stapel is het het
+        // DAGtotaal, hier de hele reeks.
+        const single = tooltip.dataPoints.length === 1;
+        const seriesTotal = single
+            ? (tooltip.dataPoints[0].dataset.data || []).reduce((a, v) => a + Number(v || 0), 0)
+            : 0;
+        const denom = single ? seriesTotal : total;
         el.innerHTML = `<div class="ct-title">${escapeHtml(wd ? `${title} (${wd})` : title)}</div>`
             + (wd ? `<div class="ct-sub">hits per dag</div>` : '')
             // De stip pakt backgroundColor, niet borderColor: bij een gestapelde
@@ -1033,14 +1021,14 @@
             // ook uit de noemer — anders telt een percentage naar iets wat niet in
             // beeld staat.
             + pts.map(dp => `<div class="ct-row">`
-                + `<span class="ct-dot" style="background:${dp.dataset.backgroundColor}"></span>`
+                + `<span class="ct-dot" style="background:${dotColorOf(dp)}"></span>`
                 + `<span class="ct-label">${escapeHtml(dp.dataset.label)}</span>`
                 + `<span class="ct-val">${fmt(dp.parsed.y)}`
-                + `<span style="color:#a9a9b5; font-weight:500;"> · ${pctOf(dp.parsed.y, total)}</span>`
+                + `<span style="color:#a9a9b5; font-weight:500;"> · ${pctOf(dp.parsed.y, denom)}</span>`
                 + `</span></div>`).join('')
             + `<div class="ct-row" style="border-top:1px solid rgba(255,255,255,0.14); margin-top:4px; padding-top:5px;">`
-            + `<span class="ct-label" style="color:#f0f0f3;">Totaal</span>`
-            + `<span class="ct-val">${fmt(total)}</span></div>`;
+            + `<span class="ct-label" style="color:#f0f0f3;">${single ? 'Hele reeks' : 'Totaal'}</span>`
+            + `<span class="ct-val">${fmt(denom)}</span></div>`;
         el.classList.add('is-on');
         const r = chart.canvas.getBoundingClientRect();
         const x = Math.min(r.left + tooltip.caretX + 14, window.innerWidth - el.offsetWidth - 12);
@@ -1059,14 +1047,21 @@
     // heeft hem nodig als secundaire encoding en identiteit mag nooit alleen kleur
     // zijn. Klikken schakelt de band via setDatasetVisibility — geen refetch, dus
     // het voelt direct.
-    function renderDailyLegend(keys, gb) {
+    // `rest` = wat in de Overig-band zit. Die namen gaan als title op de swatch, zodat
+    // een grijze band niet anoniem is (Joep, 2026-08-13): hij vroeg zich af waar
+    // Perplexity was gebleven, en dat mag een gebruiker niet hoeven raden. Perplexity
+    // heeft nu zijn eigen kleur; wie er nog wél in Overig valt, staat in de tooltip.
+    function renderDailyLegend(keys, gb, rest = []) {
         const el = document.getElementById('dailyLegend');
         if (!el) return;
         const off = hiddenSeries[gb] || (hiddenSeries[gb] = new Set());
+        const restTitle = rest.length
+            ? `${rest.length} kleine reeksen samen: ${rest.join(', ')}`
+            : '';
         el.innerHTML = keys.map((k, i) =>
             `<span class="leg-item${off.has(k) ? ' leg-off' : ''}" data-i="${i}" data-k="${escapeHtml(k)}"`
             + ` style="color:${k === 'Overig' ? OTHER() : colorFor(gb, k)}"`
-            + ` title="Klik om deze band aan of uit te zetten">`
+            + ` title="${k === 'Overig' && restTitle ? escapeHtml(restTitle) + ' — k' : 'K'}lik om deze band aan of uit te zetten">`
             + `<span class="swatch" style="background:${k === 'Overig' ? OTHER() : colorFor(gb, k)}"></span>`
             + `<span style="color:#3a3a3a;">${escapeHtml(k)}</span></span>`).join('');
         el.querySelectorAll('.leg-item').forEach(item => {
@@ -1194,39 +1189,47 @@
         tip.style.top = (above < 0 ? y + 14 : above) + 'px';
     }
 
-    function drawDepth(s) {
-        // De staart samenvouwen. Dieptes 7 t/m 11 zijn samen 967 hits op 51 miljoen:
-        // vijf kolommen die als niets renderen maar wel breedte opeisen, waardoor de
-        // kolommen die er wél zijn smal worden. Datagestuurd en niet op een vaste
-        // grens: pak van achteren af alles wat onder 0,05% van het totaal zit, en vouw
-        // dat samen zodra het meer dan één kolom betreft. Het totaal blijft kloppen —
-        // de bak heet "7+ facets", er verdwijnt niets.
-        const all = s.by_facet_depth || [];
+    // De staart samenvouwen. Dieptes 7 t/m 11 zijn samen 967 hits op 51 miljoen:
+    // vijf kolommen die als niets renderen maar wel breedte opeisen, waardoor de
+    // kolommen die er wél zijn smal worden. Datagestuurd en niet op een vaste
+    // grens: pak van achteren af alles wat onder 0,05% van het totaal zit, en vouw
+    // dat samen zodra het meer dan één kolom betreft. Het totaal blijft kloppen —
+    // de bak heet "7+ facets", er verdwijnt niets.
+    //
+    // Staat los van drawDepth omdat het uitklappaneel dezelfde grafiek tekent, en
+    // dáár was de staart nooit gevouwen: elf kolommen in een col-md-4, met schuine
+    // labels en zes die op nul staan (Joep, 2026-08-13).
+    function foldDepthTail(all) {
         const grand = all.reduce((a, r) => a + Number(r.hits), 0) || 1;
         let cut = all.length;
         while (cut > 1 && Number(all[cut - 1].hits) / grand < 0.0005) cut--;
-        let rows = all;
-        if (all.length - cut >= 2) {
-            const tail = all.slice(cut);
-            rows = all.slice(0, cut).concat([{
-                facet_depth: `${all[cut].facet_depth}+`,
-                hits: tail.reduce((a, r) => a + Number(r.hits), 0),
-                hits_known: tail.reduce((a, r) => a + Number(r.hits_known || 0), 0),
-            }]);
-        }
-        const known = rows.map(r => Number(r.hits_known || 0));
-        const unknown = rows.map(r => Number(r.hits) - Number(r.hits_known || 0));
+        if (all.length - cut < 2) return all;
+        const tail = all.slice(cut);
+        return all.slice(0, cut).concat([{
+            facet_depth: `${all[cut].facet_depth}+`,
+            hits: tail.reduce((a, r) => a + Number(r.hits), 0),
+        }]);
+    }
+
+    function drawDepth(s) {
+        const rows = foldDepthTail(s.by_facet_depth || []);
         CHARTS.depth?.destroy();
         CHARTS.depth = new Chart(document.getElementById('depthChart'), {
             type: 'bar',
             data: {
                 labels: rows.map(r => r.facet_depth === 0 ? 'geen facet' : r.facet_depth + ' facets'),
-                datasets: [
-                    // Zelfde twee kleuren als de is_known_url-splitsing in de daggrafiek,
-                    // zodat "bekend" en "verspilling" niet per grafiek van kleur wisselen.
-                    { label: 'in pa.urls', data: known, backgroundColor: colorFor('is_known_url', 'in pa.urls'), borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
-                    { label: 'niet in pa.urls', data: unknown, backgroundColor: colorFor('is_known_url', 'not in pa.urls'), borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
-                ],
+                // Eén reeks, één kleur (Joep, 2026-08-13). Stond even met een kleur per
+                // staaf uit DEPTH_RAMP, maar diepte staat al op de as: dan zegt de kleur
+                // niets extra en leest de rij als acht categorieën in plaats van als één
+                // aflopende reeks. Roze en niet het blauw van de tegels, zodat de twee
+                // grafieken in deze rij (donut links, staven rechts) niet in elkaar
+                // overlopen. Geen legenda: die zou alleen "bot-hits" herhalen.
+                datasets: [{
+                    label: 'bot-hits',
+                    data: rows.map(r => Number(r.hits)),
+                    backgroundColor: PAL.roze,
+                    borderColor: '#fff', borderWidth: 2, borderRadius: 4,
+                }],
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
@@ -1240,20 +1243,16 @@
                 // Chart.js — deze grafiek was de laatste met de standaardtooltip
                 // (Joep, 2026-08-11). weekdayLongOf laat de datumregel weg zodra de
                 // titel geen ISO-datum is, dus "2 facets" krijgt geen weekdag.
-                datasets: { bar: { categoryPercentage: 0.82, barPercentage: 0.98 } },
-                layout: { padding: { top: 8, right: 8 } },
                 scales: {
-                    x: { stacked: true, border: { display: false }, grid: { display: false },
+                    x: { border: { display: false }, grid: { display: false },
                          ticks: { color: '#9a9aa6', font: { size: 11 }, padding: 6 } },
-                    y: { stacked: true, beginAtZero: true, border: { display: false },
+                    y: { beginAtZero: true, border: { display: false },
                          grid: { color: '#eef0f2', drawTicks: false },
                          ticks: { color: '#9a9aa6', font: { size: 11 }, padding: 8,
                                   maxTicksLimit: 6, callback: v => fmt(v) } },
                 },
                 plugins: {
-                    legend: { position: 'bottom',
-                              labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true,
-                                        pointStyle: 'rectRounded', color: '#3a3a3a' } },
+                    legend: { display: false },
                     tooltip: { enabled: false, external: chartTooltip },
                 },
             },
@@ -1270,7 +1269,13 @@
         total = total || botRows.reduce((a, b) => a + b.hits, 0);
         document.querySelector('#botTable tbody').innerHTML = botRows.map(b => `
             <tr class="bot-row" data-fam="${escapeHtml(b.bot_family)}">
-              <td><span class="bot-caret">▸</span><span class="swatch" style="background:${colorFor('bot_family', b.bot_family)}"></span>${b.bot_family}</td>
+              <!-- Geen kleurblokje meer voor de familie (Joep, 2026-08-13). De tabel is
+                   geen legenda van de daggrafiek: die heeft er zelf een boven de plot
+                   staan, en 25 rijen met een stip suggereren dat elke familie in de
+                   grafiek een eigen kleur heeft terwijl er daar acht benoemd zijn en de
+                   rest in Overig valt. De SOORT houdt zijn kleur wel — dat zijn vier
+                   waarden die op elke rij hetzelfde betekenen. -->
+              <td><span class="bot-caret">▸</span>${b.bot_family}</td>
               <td class="col-mid"><span class="lbl" style="color:${colorFor('bot_class', b.bot_class)}">${b.bot_class}</span></td>
               <td class="num">${fmt(b.hits)}</td>
               <td class="num">${pct(b.hits, total)}</td>
@@ -1304,7 +1309,7 @@
         document.querySelectorAll('#botTable tbody tr.bot-detail').forEach(d => d.remove());
         document.querySelectorAll('#botTable tbody tr.bot-row.is-open')
                 .forEach(r => r.classList.remove('is-open'));
-        ['detType', 'detHost', 'detDepth'].forEach(k => {
+        ['detDaily', 'detType', 'detHost', 'detDepth'].forEach(k => {
             if (CHARTS[k]) { CHARTS[k].destroy(); CHARTS[k] = null; }
         });
         if (open) return;                       // dit was een klik om te sluiten
@@ -1313,22 +1318,39 @@
         tr.classList.add('is-open');
         const det = document.createElement('tr');
         det.className = 'bot-detail';
+        // De daglijn staat op zijn eigen regel over de volle breedte en niet als
+        // vierde kolom erbij (Joep, 2026-08-13): een tijdreeks over ~30 dagen in een
+        // col-md-3 geeft ~9px per dag, en dan is de vorm van de lijn niet meer te
+        // lezen. De drie uitsplitsingen eronder houden hun col-md-4.
         det.innerHTML = `<td colspan="12">
             <div class="row g-3">
+              <div class="col-12">
+                <div class="muted-note mb-1">Hits per dag — ${escapeHtml(fam)}</div>
+                <div class="chart-box-sm chart-framed"><canvas id="detDailyChart"></canvas></div></div>
+            </div>
+            <div class="row g-3 mt-1">
               <div class="col-md-4"><div class="muted-note mb-1">URL-type</div>
-                <div class="donut-wrap"><canvas id="detTypeChart"></canvas>
+                <div class="donut-wrap chart-framed"><canvas id="detTypeChart"></canvas>
                      <div class="donut-center" id="detTypeCenter"></div></div></div>
               <div class="col-md-4"><div class="muted-note mb-1">Domein</div>
-                <div class="donut-wrap"><canvas id="detHostChart"></canvas>
+                <div class="donut-wrap chart-framed"><canvas id="detHostChart"></canvas>
                      <div class="donut-center" id="detHostCenter"></div></div></div>
               <div class="col-md-4"><div class="muted-note mb-1">Facet-diepte</div>
                 <div class="chart-box-sm chart-framed"><canvas id="detDepthChart"></canvas></div></div>
             </div></td>`;
         tr.after(det);
 
-        let s;
+        // Twee endpoints naast elkaar: /summary voor de drie uitsplitsingen en
+        // /daily voor de tijdreeks. Beide filteren op bot_family — dat filter bestond
+        // al in de API, dus ook hier zit geen nieuw endpoint achter. group_by=none
+        // geeft één reeks ('all'), want de vraag is "hoe loopt DEZE bot", niet "hoe
+        // valt hij uiteen"; dat laatste staat eronder.
+        let s, daily;
         try {
-            s = await fetch(API + '/summary?' + params({ bot_family: fam })).then(r => r.json());
+            [s, daily] = await Promise.all([
+                fetch(API + '/summary?' + params({ bot_family: fam })).then(r => r.json()),
+                fetch(API + '/daily?' + params({ bot_family: fam, group_by: 'none' })).then(r => r.json()),
+            ]);
         } catch (e) {
             det.querySelector('td').innerHTML =
                 `<span class="text-danger">Uitsplitsing laden mislukt: ${escapeHtml(e.message)}</span>`;
@@ -1337,35 +1359,86 @@
         // De rij kan inmiddels gesloten of hertekend zijn; dan is er niets om te vullen.
         if (!document.getElementById('detTypeChart')) return;
 
+        CHARTS.detDaily = miniDaily('detDailyChart', daily.rows || [], fam);
+
         CHARTS.detType = miniDonut('detTypeChart', 'detTypeCenter',
             (s.by_url_type || []).map(r => [r.url_type, Number(r.hits)]), 'url_type');
         CHARTS.detHost = miniDonut('detHostChart', 'detHostCenter',
             (s.by_host || []).map(r => [r.host, Number(r.hits)]), 'host');
 
-        const dep = s.by_facet_depth || [];
+        // Zelfde vorm als de grote Facet-diepte-grafiek: één reeks in één kleur. De
+        // splitsing in "in pa.urls" / "niet in pa.urls" is hier op 2026-08-13 met de
+        // grote mee verdwenen — twee gelijknamige grafieken op één pagina moeten
+        // hetzelfde tonen, en is_known_url is voor beide even kapot.
+        const dep = foldDepthTail(s.by_facet_depth || []);
         CHARTS.detDepth = new Chart(document.getElementById('detDepthChart'), {
             type: 'bar',
             data: {
                 labels: dep.map(r => r.facet_depth === 0 ? 'geen facet' : r.facet_depth + ' facets'),
-                datasets: [
-                    { label: 'in pa.urls', data: dep.map(r => Number(r.hits_known || 0)),
-                      backgroundColor: colorFor('is_known_url', 'in pa.urls'),
-                      borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
-                    { label: 'niet in pa.urls',
-                      data: dep.map(r => Number(r.hits) - Number(r.hits_known || 0)),
-                      backgroundColor: colorFor('is_known_url', 'not in pa.urls'),
-                      borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
-                ],
+                datasets: [{
+                    label: 'bot-hits',
+                    data: dep.map(r => Number(r.hits)),
+                    backgroundColor: PAL.roze,
+                    borderColor: '#fff', borderWidth: 2, borderRadius: 4,
+                }],
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
                 scales: {
-                    x: { stacked: true, border: { display: false }, grid: { display: false },
+                    x: { border: { display: false }, grid: { display: false },
                          ticks: { color: '#9a9aa6', font: { size: 10 } } },
-                    y: { stacked: true, beginAtZero: true, border: { display: false },
+                    y: { beginAtZero: true, border: { display: false },
                          grid: { color: '#eef0f2', drawTicks: false },
                          ticks: { color: '#9a9aa6', font: { size: 10 }, maxTicksLimit: 5,
+                                  callback: v => fmt(v) } },
+                },
+                plugins: { legend: { display: false }, tooltip: { enabled: false, external: chartTooltip } },
+            },
+        });
+    }
+
+    // De daglijn van één bot-familie. Zelfde chrome als "Hits per dag" hierboven —
+    // recessief grid, geen assen-furniture, tension 0.35, ons eigen hover-blok — met
+    // twee verschillen:
+    //
+    //   * altijd lichtblauw (Joep, 2026-08-13), niet de kleur van de familie. Er staat
+    //     één lijn in het paneel en de titel zegt al wélke familie dat is, dus de kleur
+    //     hoeft niets te onderscheiden — en meekleuren betekende dat het paneel van de
+    //     ene bot er anders uitzag dan van de volgende;
+    //   * de vulling is doorschijnend en de rand draagt de kleur. In de grote grafiek
+    //     stapelen de banden en ís de vulling de serie (witte rand = scheiding); hier
+    //     stapelt er niets, dus dit is de gewone lijn-met-was uit SEO Stats.
+    function miniDaily(canvasId, rows, fam) {
+        const dates = [...new Set(rows.map(r => r.log_date))].sort();
+        const byDate = {};
+        rows.forEach(r => { byDate[r.log_date] = (byDate[r.log_date] || 0) + Number(r.hits); });
+        const col = PAL.lichtblauw;
+        return new Chart(document.getElementById(canvasId), {
+            type: 'line',
+            data: {
+                labels: dates,
+                datasets: [{
+                    label: fam,
+                    data: dates.map(d => byDate[d] || 0),
+                    borderColor: col, backgroundColor: col + '38', dotColor: col,
+                    borderWidth: 2, borderCapStyle: 'round', borderJoinStyle: 'round',
+                    fill: true, tension: 0.35,
+                    pointRadius: 0, pointHoverRadius: 4, pointHitRadius: 12,
+                    pointHoverBackgroundColor: col, pointHoverBorderColor: '#fff',
+                    pointHoverBorderWidth: 2,
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                layout: { padding: { top: 10, right: 10 } },
+                scales: {
+                    x: { border: { display: false }, grid: { color: '#eef0f2', drawTicks: false },
+                         ticks: { maxTicksLimit: 8, color: '#9a9aa6', font: { size: 10 }, padding: 6 } },
+                    y: { beginAtZero: true, border: { display: false },
+                         grid: { color: '#eef0f2', drawTicks: false },
+                         ticks: { maxTicksLimit: 5, color: '#9a9aa6', font: { size: 10 }, padding: 6,
                                   callback: v => fmt(v) } },
                 },
                 plugins: { legend: { display: false }, tooltip: { enabled: false, external: chartTooltip } },
@@ -1428,78 +1501,104 @@
         });
     }
 
-    // ---- Top URLs --------------------------------------------------------
+    // ---- Top URL's -------------------------------------------------------
+    // Laadt bij het openen van de tab en verder alleen op Refresh of een wissel van
+    // de Top-keuze — niet mee met refresh() van het Overzicht, want dit is een
+    // aparte, zwaardere query en de tab staat meestal dicht.
     let urlRows = [];
     async function loadUrls() {
         const tb = document.querySelector('#urlTable tbody');
-        tb.innerHTML = '<tr><td colspan="9" class="p-3 text-muted">laden…</td></tr>';
-        urlRows = await (await fetch(API + '/top-urls?' + params({
-            limit: document.getElementById('urlLimit').value,
-            search: document.getElementById('urlSearch').value,
-        }))).json();
-        urlRows.forEach(r => { r.hits = Number(r.hits); r.days = Number(r.days); });
+        const limit = document.getElementById('urlLimit').value;
+        document.getElementById('urlHeading').textContent = `Top ${fmt(limit)} URL's`;
+        tb.innerHTML = '<tr><td colspan="7" class="p-3 text-muted">laden…</td></tr>';
+        try {
+            urlRows = await (await fetch(API + '/top-urls?' + params({ limit }))).json();
+        } catch (e) {
+            tb.innerHTML = `<tr><td colspan="7" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
+            return;
+        }
+        // per_day hier en niet in SQL: het aantal dagen is dat waarop DEZE url in de
+        // dagelijkse top-500 stond, dus het is "hits per dag dat hij opviel".
+        urlRows.forEach(r => {
+            r.hits = Number(r.hits); r.days = Number(r.days);
+            r.per_day = r.days ? Math.round(r.hits / r.days) : 0;
+        });
         renderUrls();
     }
     function renderUrls() {
         const tb = document.querySelector('#urlTable tbody');
-        if (!urlRows.length) { tb.innerHTML = '<tr><td colspan="9" class="p-3 text-muted">Geen resultaten.</td></tr>'; return; }
-        tb.innerHTML = urlRows.map(r => `
-            <tr>
-              <td class="url-cell" title="${r.url}"><a href="https://www.beslist.nl${r.url}" target="_blank" rel="noopener">${r.url}</a></td>
-              <td>${r.main_cat_name || "—"}</td>
-              <td class="num">${fmt(r.hits)}</td>
-              <td class="num">${fmt(r.days)}</td>
-              <td class="num">${fmt(r.n_2xx)}</td>
-              <td class="num">${fmt(r.n_3xx)}</td>
-              <td class="num">${fmt(r.n_4xx)}</td>
-              <td class="num">${fmt(r.n_5xx)}</td>
-              <td class="muted-note">${r.bots || ''}</td>
-            </tr>`).join('');
-    }
-
-    // ---- Waste -----------------------------------------------------------
-    let wasteRows = [];
-    async function loadWaste() {
-        const tb = document.querySelector('#wasteTable tbody');
-        tb.innerHTML = '<tr><td colspan="6" class="p-3 text-muted">laden…</td></tr>';
-        wasteRows = await (await fetch(API + '/top-waste?' + params({
-            limit: document.getElementById('wasteLimit').value,
-        }))).json();
-        wasteRows.forEach(r => { r.hits = Number(r.hits); r.days = Number(r.days); });
-        renderWaste();
-    }
-    function renderWaste() {
-        const tb = document.querySelector('#wasteTable tbody');
-        if (!wasteRows.length) { tb.innerHTML = '<tr><td colspan="6" class="p-3 text-muted">Geen resultaten.</td></tr>'; return; }
-        tb.innerHTML = wasteRows.map(r => `
-            <tr>
-              <td class="url-cell" title="${r.url}">${r.url}</td>
-              <td>${r.url_type}</td>
+        if (!urlRows.length) {
+            tb.innerHTML = '<tr><td colspan="6" class="p-3 text-muted">Geen resultaten in deze selectie.</td></tr>';
+            return;
+        }
+        // Zelfde vorm als Per bot-familie: caret vooraan, rij klikbaar, paneel eronder.
+        // De Bots-kolom is hierdoor overbodig geworden — een opsomming van twaalf namen
+        // in een cel zei niets over de verhouding, en dat is precies wat de donut wel doet.
+        tb.innerHTML = urlRows.map((r, i) => `
+            <tr class="url-row" data-i="${i}">
+              <td class="url-cell" title="${escapeHtml(r.url)}"><span class="bot-caret">▸</span><a href="https://www.beslist.nl${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a></td>
+              <td>${escapeHtml(r.url_type || '')}</td>
               <td class="num">${r.facet_depth}</td>
               <td class="num">${fmt(r.hits)}</td>
               <td class="num">${fmt(r.days)}</td>
-              <td class="muted-note">${r.bots || ''}</td>
+              <td class="num">${fmt(r.per_day)}</td>
             </tr>`).join('');
+        tb.querySelectorAll('tr.url-row').forEach(tr => {
+            tr.onclick = () => toggleUrlDetail(tr);
+            // De link in de URL-cel opent de pagina; die klik mag de rij niet ook
+            // openklappen. Zonder dit krijg je beide.
+            tr.querySelector('a').onclick = e => e.stopPropagation();
+        });
     }
 
-    // ---- Categories ------------------------------------------------------
-    let catRows = [];
-    async function loadCats() {
-        const tb = document.querySelector('#catTable tbody');
-        tb.innerHTML = '<tr><td colspan="4" class="p-3 text-muted">laden…</td></tr>';
-        catRows = await (await fetch(API + '/categories?' + params({ limit: 200 }))).json();
-        catRows.forEach(r => {
-            r.hits = Number(r.hits); r.urls_crawled = Number(r.urls_crawled);
-            r.per_url = r.urls_crawled ? +(r.hits / r.urls_crawled).toFixed(1) : 0;
+    // Uitklappaneel per URL: verdeling per bot-familie als donut, en de dagreeks van
+    // deze URL ernaast. Eén rij open tegelijk, net als bij Per bot-familie — twee
+    // Chart.js-instanties per paneel, en 250 rijen open laten staan is 500 charts.
+    async function toggleUrlDetail(tr) {
+        const open = tr.classList.contains('is-open');
+        document.querySelectorAll('#urlTable tbody tr.url-detail').forEach(d => d.remove());
+        document.querySelectorAll('#urlTable tbody tr.url-row.is-open')
+                .forEach(r => r.classList.remove('is-open'));
+        ['urlBot', 'urlDaily'].forEach(k => {
+            if (CHARTS[k]) { CHARTS[k].destroy(); CHARTS[k] = null; }
         });
-        renderCats();
-    }
-    function renderCats() {
-        const tb = document.querySelector('#catTable tbody');
-        if (!catRows.length) { tb.innerHTML = '<tr><td colspan="4" class="p-3 text-muted">Geen resultaten.</td></tr>'; return; }
-        tb.innerHTML = catRows.map(r => `
-            <tr><td>${r.main_cat_name}</td><td class="num">${fmt(r.hits)}</td>
-                <td class="num">${fmt(r.urls_crawled)}</td><td class="num">${r.per_url}</td></tr>`).join('');
+        if (open) return;
+
+        const row = urlRows[Number(tr.dataset.i)];
+        tr.classList.add('is-open');
+        const det = document.createElement('tr');
+        det.className = 'bot-detail url-detail';
+        det.innerHTML = `<td colspan="6">
+            <div class="row g-3">
+              <div class="col-md-4"><div class="muted-note mb-1">Per bot-familie</div>
+                <div class="donut-wrap chart-framed"><canvas id="urlBotChart"></canvas>
+                     <div class="donut-center" id="urlBotCenter"></div></div></div>
+              <div class="col-md-8"><div class="muted-note mb-1" id="urlDailyLabel">Hits per dag</div>
+                <div class="chart-box-sm chart-framed"><canvas id="urlDailyChart"></canvas></div></div>
+            </div></td>`;
+        tr.after(det);
+
+        let d;
+        try {
+            d = await fetch(API + '/url?' + params({ url: row.url })).then(r => r.json());
+        } catch (e) {
+            det.querySelector('td').innerHTML =
+                `<span class="text-danger">Uitsplitsing laden mislukt: ${escapeHtml(e.message)}</span>`;
+            return;
+        }
+        if (!document.getElementById('urlBotChart')) return;   // rij inmiddels gesloten
+
+        // De gaten in de reeks eerlijk benoemen: een dag zonder rij betekent "haalde de
+        // dagelijkse top-500 niet", niet "niet gecrawld". Bij 30 van 30 zwijgt het label.
+        const lab = document.getElementById('urlDailyLabel');
+        if (lab && d.days_in_range && d.days < d.days_in_range) {
+            lab.textContent = `Hits per dag — ${d.days} van de ${d.days_in_range} dagen in beeld`;
+            lab.title = 'Op de andere dagen haalde deze URL de dagelijkse top-500 per '
+                      + 'bot-familie niet; dat is niet hetzelfde als niet gecrawld.';
+        }
+        CHARTS.urlBot = miniDonut('urlBotChart', 'urlBotCenter',
+            (d.by_bot || []).map(r => [r.bot_family, Number(r.hits)]), 'bot_family');
+        CHARTS.urlDaily = miniDaily('urlDailyChart', d.by_day || [], 'bot-hits');
     }
 
     // ---- Ingest ----------------------------------------------------------
@@ -1684,15 +1783,9 @@
         }
     }
 
-    function toCsv(rows, cols) {
-        const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-        return [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
-    }
-    function download(name, text) {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8;' }));
-        a.download = name; a.click(); URL.revokeObjectURL(a.href);
-    }
+    // Hier stonden toCsv() en download(): de CSV-export van de URL's- en
+    // Crawl-verspilling-tabellen. Die tabs zijn weg (2026-08-13) en er is geen
+    // andere export op deze pagina, dus de helpers zijn met hun knoppen vertrokken.
 
     // ---- Wiring ----------------------------------------------------------
     document.getElementById('applyBtn').onclick = () => refresh();
@@ -1710,25 +1803,21 @@
         }
     };
     document.getElementById('groupBy').onchange = () => refresh();
-    document.getElementById('urlLoad').onclick = loadUrls;
-    document.getElementById('urlSearch').addEventListener('keydown', e => { if (e.key === 'Enter') loadUrls(); });
-    document.getElementById('wasteLoad').onclick = loadWaste;
-    document.getElementById('catLoad').onclick = loadCats;
-    document.getElementById('urlExport').onclick = () => download('bothits-urls.csv',
-        toCsv(urlRows, ['url', 'main_cat_name', 'hits', 'days', 'n_2xx', 'n_3xx', 'n_4xx', 'n_5xx', 'bots']));
-    document.getElementById('wasteExport').onclick = () => download('bothits-waste.csv',
-        toCsv(wasteRows, ['url', 'url_type', 'facet_depth', 'hits', 'days', 'bots']));
     document.getElementById('ingestBtn').onclick = async () => {
         document.getElementById('ingestBtn').disabled = true;
         await fetch(API + '/ingest/run', { method: 'POST' });
         loadIngest();
     };
     document.querySelector('[data-bs-target="#tab-ingest"]').addEventListener('shown.bs.tab', loadIngest);
+    // Eén keer laden bij het openen van de tab; daarna alleen op verzoek. `once` zou
+    // een wissel van de datumfilters negeren, dus dit blijft aan de tab hangen — de
+    // 5-minutencache in de service vangt het herhaalde ophalen af.
+    document.querySelector('[data-bs-target="#tab-urls"]').addEventListener('shown.bs.tab', loadUrls);
+    document.getElementById('urlLoad').onclick = loadUrls;
+    document.getElementById('urlLimit').onchange = loadUrls;
 
     makeSortable('botTable', () => botRows, () => renderBotTable());
     makeSortable('urlTable', () => urlRows, renderUrls);
-    makeSortable('wasteTable', () => wasteRows, renderWaste);
-    makeSortable('catTable', () => catRows, renderCats);
 
     boot();
     </script>

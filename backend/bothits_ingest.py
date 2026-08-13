@@ -161,6 +161,19 @@ CANON_BY_LOWER = {n.lower(): n for n in CANON_NAMES}
 # Families excluded from the per-URL tables. They still appear in the cube with
 # full hit counts — this only stops an unbounded catch-all from generating URL
 # rows. Override per bot afterwards via pa.bothits_bot.is_tracked.
+#
+# LET OP — die kolom heeft sinds 2026-08-13 een TWEEDE betekenis: bothits_service
+# filtert er ook het hele dashboard op, want Joep wil alleen de drie Google-bots,
+# Applebot en de grote AI-crawlers zien. In de DB staan daarom nog 16 families
+# extra op false (Bing, Yandex, DuckDuckGo, Petal, Sogou, Baidu, Seznam, Naver,
+# You.com, Cohere, Mistral, CommonCrawl, Diffbot, Apple-AI, Timpi, AllenAI).
+#
+# Die zestien staan hier met opzet NIET bij. Deze set bepaalt of er per-URL-rijen
+# geschreven worden, en de URL-tabellen mogen hun volle breedte houden — het waren
+# alleen de tabs die eruit gingen, niet de data. De DB-vlag is dus ruimer dan deze
+# set; dat is geen inconsistentie maar het verschil tussen "wat we bewaren" en
+# "wat we tonen". Wie een familie wil terugzetten in het dashboard doet dat met
+# één UPDATE op pa.bothits_bot, niet hier.
 UNTRACKED_FAMILIES = {"other-bot", "Monitoring", "SEO-tools", "Social"}
 
 PRODUCTISH = {"product", "product_legacy"}

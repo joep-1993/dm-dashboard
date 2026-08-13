@@ -1,4 +1,10 @@
-"""Bot Hits — FastAPI routes for the crawler-log dashboard."""
+"""Bot Hits — FastAPI routes for the crawler-log dashboard.
+
+Op 2026-08-13 zijn /top-urls, /top-waste, /categories en /url eruit gegaan met de
+drie tabs die ze voedden (URL's, Crawl-verspilling, Categorieën). /url had toen al
+geen aanroeper meer in de frontend. De ingest vult de URL-tabellen nog steeds, dus
+terugzetten is deze endpoints plus hun service-functies terughalen uit git.
+"""
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -8,8 +14,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.bothits_service import (
-    clear_cache, get_categories, get_daily, get_ingest_log, get_meta,
-    get_summary, get_top_urls, get_top_waste, get_url_detail,
+    clear_cache, get_daily, get_ingest_log, get_meta, get_summary, get_top_urls,
+    get_url_detail,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,77 +112,39 @@ async def top_urls(
     host: Optional[str] = Query(None),
     bot_class: Optional[str] = Query(None),
     bot_family: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
-    main_cat: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
+    url_type: Optional[str] = Query(None),
+    limit: int = Query(250, ge=1, le=1000),
     force: bool = Query(False),
 ):
-    """Most-crawled URLs that exist in pa.urls."""
+    """De meest gecrawlde URL's in de selectie — zie get_top_urls voor de bron."""
     _check_date(start_date, "start_date")
     _check_date(end_date, "end_date")
     try:
         return await _run(get_top_urls, start_date, end_date, host, bot_class,
-                          bot_family, limit, main_cat, search, force)
+                          bot_family, url_type, limit, force)
     except Exception as e:
         logger.error("bothits top-urls failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/top-waste")
-async def top_waste(
-    start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None),
-    host: Optional[str] = Query(None),
-    bot_family: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
-    force: bool = Query(False),
-):
-    """Most-crawled URLs absent from pa.urls — the crawl-budget leak."""
-    _check_date(start_date, "start_date")
-    _check_date(end_date, "end_date")
-    try:
-        return await _run(get_top_waste, start_date, end_date, host,
-                          bot_family, limit, force)
-    except Exception as e:
-        logger.error("bothits top-waste failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/url")
 async def url_detail(
-    url: str = Query(..., description="exact path, e.g. /products/mode/..."),
-    start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None),
-    force: bool = Query(False),
-):
-    """Per-day, per-bot crawl history for a single URL."""
-    _check_date(start_date, "start_date")
-    _check_date(end_date, "end_date")
-    try:
-        return await _run(get_url_detail, url, start_date, end_date, force)
-    except Exception as e:
-        logger.error("bothits url detail failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/categories")
-async def categories(
+    url: str = Query(..., description="exact pad, bijv. /products/mode"),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     host: Optional[str] = Query(None),
     bot_class: Optional[str] = Query(None),
-    bot_family: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=500),
+    url_type: Optional[str] = Query(None),
     force: bool = Query(False),
 ):
-    """Crawl volume per main category (known URLs only)."""
+    """Eén URL: verdeling per bot-familie en de dagreeks."""
     _check_date(start_date, "start_date")
     _check_date(end_date, "end_date")
     try:
-        return await _run(get_categories, start_date, end_date, host,
-                          bot_class, bot_family, limit, force)
+        return await _run(get_url_detail, url, start_date, end_date, host,
+                          bot_class, url_type, force)
     except Exception as e:
-        logger.error("bothits categories failed: %s", e)
+        logger.error("bothits url detail failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

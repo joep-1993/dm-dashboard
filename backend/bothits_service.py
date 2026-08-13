@@ -1,9 +1,16 @@
 """Bot Hits — query layer for the crawler-log dashboard.
 
-Everything here reads the pa.bothits_* aggregates built by bothits_ingest. The
-cube (pa.bothits_daily) answers the timeseries and split questions; the URL
-tables answer "which pages", and are deliberately smaller than the cube's
-coverage — see bothits_ingest for why.
+Everything here reads pa.bothits_daily — the cube built by bothits_ingest, which
+answers the timeseries and split questions.
+
+Sinds 2026-08-13 leest deze laag GEEN URL-tabellen meer. De drie tabs die dat
+deden (URL's, Crawl-verspilling, Categorieën) zijn eruit op verzoek van Joep, en
+daarmee get_top_urls / get_top_waste / get_url_detail / get_categories. De ingest
+vult pa.bothits_url_daily en pa.bothits_unknown_daily nog wél, dus de data loopt
+door en die tabs terugzetten is puur frontend- plus endpoint-werk.
+
+Alle queries tonen alleen GEVOLGDE bots (pa.bothits_bot.is_tracked) — zie
+_filters() voor het waarom.
 
 Results are cached in-process for 5 minutes, matching seo_stats_service; the
 dashboard's Refresh button passes force=True to bypass it.
@@ -44,15 +51,6 @@ def _query(sql, params=None):
         return rows
     finally:
         return_db_connection(conn)
-
-
-# pa.urls.main_cat_name is NULL on 968.503 of 1.031.796 rows (6.1% populated), so
-# grouping on it silently answers for a sixteenth of the table. Derive the main
-# category from the path instead — pa.urls is /c/-only, so segment 3 is always the
-# maincat slug. The regexp folds the ~20 broken paths that carry a subcat slug in
-# the maincat slot (/products/schoenen_430884/c/…) back onto their real maincat;
-# it strips only at "_" followed by a digit, so tuin_accessoires survives intact.
-MAIN_CAT_SQL = "regexp_replace(split_part(u.url, '/', 3), '_[0-9].*$', '')"
 
 
 def _range(start_date, end_date):
@@ -123,8 +121,24 @@ def _expand_urltype(value):
 # ---------------------------------------------------------------------------
 def _filters(host=None, bot_class=None, bot_family=None, url_type=None,
              known=None, alias="d"):
-    """-> (sql_fragment, params). Applied against the cube or a join onto it."""
-    sql, params = [], []
+    """-> (sql_fragment, params). Applied against the cube or a join onto it.
+
+    b.is_tracked staat er ALTIJD in (Joep, 2026-08-13). Van de 31 families in de
+    logs wil het dashboard er elf zien: de drie Google-bots en de grote
+    AI-crawlers, plus Applebot omdat die de nummer twee is. De rest — Bing,
+    Yandex, Social, SEO-tools, other-bot en een staart van scrapers met vier tot
+    duizend hits — was ruis in de tabel en in de legenda.
+
+    Via de vlag en niet via een lijst in de code: die vlag bestond al (de ingest
+    zette hem voor other-bot / Monitoring / SEO-tools / Social om de per-URL-
+    tabellen niet te laten ontploffen) en een bot terugzetten is nu één UPDATE in
+    pa.bothits_bot in plaats van een deploy. De ingest schrijft hem alleen bij een
+    nieuwe bot (ON CONFLICT DO NOTHING), dus handmatige wijzigingen blijven staan.
+
+    Let op: dit filtert de CUBE, en de cube houdt de volledige aantallen. De
+    tegels tellen dus 96,6% van de ruwe bot-hits — wat weg is, is bewust weg.
+    """
+    sql, params = ["b.is_tracked"], []
     if host:
         sql.append("h.host = ANY(%s)")
         params.append([x.strip() for x in host.split(",") if x.strip()])
@@ -166,10 +180,16 @@ def get_meta(force=False):
             "partial_days": partial,
             "hosts": [r["host"] for r in _query(
                 "SELECT host FROM pa.bothits_host ORDER BY host")],
+            # Alleen gevolgde bots, zodat de Bot-soort-checkboxen niet vragen om
+            # klassen die nergens meer in de cijfers zitten (Joep, 2026-08-13).
+            # is_tracked blijft in de SELECT staan: de kolom is nu de knop waarmee
+            # je een familie terugzet, dus wie /meta leest moet kunnen zien dat er
+            # gefilterd is.
             "bots": _query("""
                 SELECT bot_family, bot_class, is_tracked,
                        array_agg(bot_name ORDER BY bot_name) AS bot_names
                 FROM pa.bothits_bot
+                WHERE is_tracked
                 GROUP BY bot_family, bot_class, is_tracked
                 ORDER BY bot_class, bot_family
             """),
@@ -318,78 +338,68 @@ def get_summary(start_date=None, end_date=None, host=None, bot_class=None,
     return _cached(key, run, force)
 
 
+def _unknown_filters(host=None, bot_class=None, bot_family=None, url_type=None):
+    """Filters voor pa.bothits_unknown_daily (alias `w`) -> (fragment, params).
+
+    Apart van _filters(): die schrijft over de cube-alias `d` en kent is_known_url,
+    wat deze tabel niet heeft. b.is_tracked staat er altijd in, anders tonen de
+    URL-lijst en het paneel bots die de rest van de pagina niet meetelt.
+    """
+    sql, params = ["b.is_tracked"], []
+    if host:
+        sql.append("h.host = ANY(%s)")
+        params.append([x.strip() for x in host.split(",") if x.strip()])
+    if bot_class:
+        sql.append("b.bot_class = ANY(%s)")
+        params.append([x.strip() for x in bot_class.split(",") if x.strip()])
+    if bot_family:
+        sql.append("b.bot_family = ANY(%s)")
+        params.append([x.strip() for x in bot_family.split(",") if x.strip()])
+    if url_type:
+        sql.append("w.url_type = ANY(%s)")
+        params.append(_expand_urltype(url_type))
+    return " AND " + " AND ".join(sql), params
+
+
 def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
-                 bot_family=None, limit=100, main_cat=None, search=None,
-                 force=False):
-    """Most-crawled URLs that exist in pa.urls, with their bot split."""
-    start, end = _range(start_date, end_date)
-    limit = max(1, min(int(limit or 100), 1000))
-    key = ("topurls", start, end, host, bot_class, bot_family, limit, main_cat, search)
+                 bot_family=None, url_type=None, limit=250, force=False):
+    """De meest gecrawlde URL's in de selectie.
 
-    def run():
-        sql, params = [], []
-        if host:
-            sql.append("h.host = ANY(%s)")
-            params.append([x.strip() for x in host.split(",") if x.strip()])
-        if bot_class:
-            sql.append("b.bot_class = ANY(%s)")
-            params.append([x.strip() for x in bot_class.split(",") if x.strip()])
-        if bot_family:
-            sql.append("b.bot_family = ANY(%s)")
-            params.append([x.strip() for x in bot_family.split(",") if x.strip()])
-        if main_cat:
-            sql.append(f"{MAIN_CAT_SQL} = ANY(%s)")
-            params.append([x.strip() for x in main_cat.split(",") if x.strip()])
-        if search:
-            sql.append("u.url ILIKE %s")
-            params.append(f"%{search}%")
-        frag = (" AND " + " AND ".join(sql)) if sql else ""
-        return _query(f"""
-            SELECT u.url, {MAIN_CAT_SQL} AS main_cat_name,
-                   sum(t.hits)::bigint AS hits,
-                   sum(t.n_2xx)::bigint AS n_2xx, sum(t.n_3xx)::bigint AS n_3xx,
-                   sum(t.n_4xx)::bigint AS n_4xx, sum(t.n_5xx)::bigint AS n_5xx,
-                   count(DISTINCT t.log_date) AS days,
-                   count(DISTINCT b.bot_family) AS n_bots,
-                   string_agg(DISTINCT b.bot_family, ', ' ORDER BY b.bot_family) AS bots
-            FROM pa.bothits_url_daily t
-            JOIN pa.urls u          ON u.url_id  = t.url_id
-            JOIN pa.bothits_host h  ON h.host_id = t.host_id
-            JOIN pa.bothits_bot  b  ON b.bot_id  = t.bot_id
-            WHERE t.log_date BETWEEN %s AND %s {frag}
-            GROUP BY u.url
-            ORDER BY hits DESC
-            LIMIT %s
-        """, [start, end] + params + [limit])
-    return _cached(key, run, force)
+    BRON: pa.bothits_unknown_daily, en dat is een keuze uit nood (2026-08-13).
 
+    De tabel die hiervoor bedoeld was — pa.bothits_url_daily, per URL uit pa.urls —
+    staat stil sinds 2026-06-09: elke ingest daarna schrijft known_rows = 0, want de
+    match tegen pa.urls levert niets meer op. Dat is hetzelfde defect dat
+    `is_known_url` overal op false zet (zie de bevinding in cc1). Een top-X uit die
+    tabel zou voor elke recente selectie leeg zijn.
 
-def get_top_waste(start_date=None, end_date=None, host=None, bot_family=None,
-                  limit=100, force=False):
-    """Most-crawled URLs that are NOT in pa.urls — where crawl budget leaks.
+    pa.bothits_unknown_daily loopt wél door tot vandaag, en omdat de match kapot is
+    valt op dit moment prakisch élke gecrawlde URL daarin. Dus tot de ingest gerepareerd
+    is, IS dit de lijst van meest gecrawlde URL's.
 
-    Sourced from pa.bothits_unknown_daily, which keeps the top 500 per day per
-    bot family. It is a daily top-N, so treat it as "the loudest offenders",
-    not as an exhaustive ranking of the whole unknown tail.
+    Wat je ervoor inlevert, en dat moet de UI zeggen: die tabel bewaart per dag de top
+    500 per bot-familie. Een URL die elke dag net onder die grens blijft, staat er niet
+    in. Lees het als "de luidste veroorzakers", niet als een uitputtende ranglijst — de
+    dagtotalen in het Overzicht kloppen wél volledig, want die komen uit de cube.
+
+    Gemeten over de standaardselectie van 30 dagen: 85.307 unieke URL's, 2,25 mln hits.
+    De top 50 draagt daarvan 53%, de top 250 62%, de top 1000 74% — de knik zit dus heel
+    vroeg. Vandaar 250 als standaard: ruim voorbij de knik, rij #250 heeft nog 701 hits
+    (~23 per dag) en een tabel van 250 rijen is nog te scannen en te sorteren.
     """
     start, end = _range(start_date, end_date)
-    limit = max(1, min(int(limit or 100), 1000))
-    key = ("topwaste", start, end, host, bot_family, limit)
+    limit = max(1, min(int(limit or 250), 1000))
+    key = ("topurls", start, end, host, bot_class, bot_family, url_type, limit)
 
     def run():
-        sql, params = [], []
-        if host:
-            sql.append("h.host = ANY(%s)")
-            params.append([x.strip() for x in host.split(",") if x.strip()])
-        if bot_family:
-            sql.append("b.bot_family = ANY(%s)")
-            params.append([x.strip() for x in bot_family.split(",") if x.strip()])
-        frag = (" AND " + " AND ".join(sql)) if sql else ""
+        frag, params = _unknown_filters(host, bot_class, bot_family, url_type)
+        # Geen string_agg van de bot-families meer (Joep, 2026-08-13): die kolom is uit
+        # de tabel en het uitklappaneel toont de verdeling nu als donut. Scheelt ook een
+        # sort per groep in de query.
         return _query(f"""
             SELECT w.url, w.url_type, w.facet_depth,
                    sum(w.hits)::bigint AS hits,
-                   count(DISTINCT w.log_date) AS days,
-                   string_agg(DISTINCT b.bot_family, ', ' ORDER BY b.bot_family) AS bots
+                   count(DISTINCT w.log_date) AS days
             FROM pa.bothits_unknown_daily w
             JOIN pa.bothits_host h ON h.host_id = w.host_id
             JOIN pa.bothits_bot  b ON b.bot_id  = w.bot_id
@@ -400,58 +410,53 @@ def get_top_waste(start_date=None, end_date=None, host=None, bot_family=None,
     return _cached(key, run, force)
 
 
-def get_url_detail(url, start_date=None, end_date=None, force=False):
-    """Per-day, per-bot crawl history for one URL."""
+def get_url_detail(url, start_date=None, end_date=None, host=None, bot_class=None,
+                   url_type=None, force=False):
+    """Eén URL uitgesplitst: per bot-familie en per dag.
+
+    Zelfde bron en dus dezelfde beperking als get_top_urls: dit is de dagelijkse top
+    500 per bot-familie. Een dag waarop deze URL die grens niet haalde, levert géén
+    rij — dus de dagreeks kan gaten hebben, en die gaten betekenen "niet in de top-500
+    van die dag", niet "niet gecrawld". Daarom komt `days` mee: de frontend kan dan
+    zeggen op hoeveel van de dagen in de selectie deze URL in beeld was.
+
+    bot_family zit met opzet NIET in de parameters: dit paneel gaat over de verdeling
+    over families, en die eerst wegfilteren zou de vraag beantwoorden met het antwoord.
+    """
     start, end = _range(start_date, end_date)
-    key = ("urldetail", url, start, end)
+    key = ("urldetail", url, start, end, host, bot_class, url_type)
 
     def run():
+        frag, params = _unknown_filters(host, bot_class, None, url_type)
+        args = [start, end, url] + params
+        where = f"WHERE w.log_date BETWEEN %s AND %s AND w.url = %s {frag}"
+        by_bot = _query(f"""
+            SELECT b.bot_family, sum(w.hits)::bigint AS hits
+            FROM pa.bothits_unknown_daily w
+            JOIN pa.bothits_host h ON h.host_id = w.host_id
+            JOIN pa.bothits_bot  b ON b.bot_id  = w.bot_id
+            {where}
+            GROUP BY 1 ORDER BY 2 DESC
+        """, args)
+        by_day = _query(f"""
+            SELECT w.log_date::text AS log_date, sum(w.hits)::bigint AS hits
+            FROM pa.bothits_unknown_daily w
+            JOIN pa.bothits_host h ON h.host_id = w.host_id
+            JOIN pa.bothits_bot  b ON b.bot_id  = w.bot_id
+            {where}
+            GROUP BY 1 ORDER BY 1
+        """, args)
         return {
-            "url": url,
-            "rows": _query("""
-                SELECT t.log_date::text AS log_date, b.bot_family, b.bot_name,
-                       h.host, t.hits, t.n_2xx, t.n_3xx, t.n_4xx, t.n_5xx
-                FROM pa.bothits_url_daily t
-                JOIN pa.urls u         ON u.url_id  = t.url_id
-                JOIN pa.bothits_host h ON h.host_id = t.host_id
-                JOIN pa.bothits_bot  b ON b.bot_id  = t.bot_id
-                WHERE u.url = %s AND t.log_date BETWEEN %s AND %s
-                ORDER BY t.log_date, b.bot_family
-            """, (url.rstrip("/"), start, end)),
+            "url": url, "start_date": start, "end_date": end,
+            "hits": sum(r["hits"] for r in by_bot),
+            "days": len(by_day),
+            # Hoeveel dagen de SELECTIE lang is, zodat de frontend "17 van de 30" kan
+            # zeggen zonder zelf datums te gaan rekenen.
+            "days_in_range": _query(
+                "SELECT count(*) AS n FROM pa.bothits_ingest "
+                "WHERE log_date BETWEEN %s AND %s", (start, end))[0]["n"],
+            "by_bot": by_bot, "by_day": by_day,
         }
-    return _cached(key, run, force)
-
-
-def get_categories(start_date=None, end_date=None, host=None, bot_class=None,
-                   bot_family=None, limit=100, force=False):
-    """Crawl volume rolled up to main category — known URLs only."""
-    start, end = _range(start_date, end_date)
-    limit = max(1, min(int(limit or 100), 500))
-    key = ("cats", start, end, host, bot_class, bot_family, limit)
-
-    def run():
-        sql, params = [], []
-        if host:
-            sql.append("h.host = ANY(%s)")
-            params.append([x.strip() for x in host.split(",") if x.strip()])
-        if bot_class:
-            sql.append("b.bot_class = ANY(%s)")
-            params.append([x.strip() for x in bot_class.split(",") if x.strip()])
-        if bot_family:
-            sql.append("b.bot_family = ANY(%s)")
-            params.append([x.strip() for x in bot_family.split(",") if x.strip()])
-        frag = (" AND " + " AND ".join(sql)) if sql else ""
-        return _query(f"""
-            SELECT nullif({MAIN_CAT_SQL}, '') AS main_cat_name,
-                   sum(t.hits)::bigint AS hits,
-                   count(DISTINCT t.url_id) AS urls_crawled
-            FROM pa.bothits_url_daily t
-            JOIN pa.urls u         ON u.url_id  = t.url_id
-            JOIN pa.bothits_host h ON h.host_id = t.host_id
-            JOIN pa.bothits_bot  b ON b.bot_id  = t.bot_id
-            WHERE t.log_date BETWEEN %s AND %s {frag}
-            GROUP BY 1 ORDER BY 2 DESC LIMIT %s
-        """, [start, end] + params + [limit])
     return _cached(key, run, force)
 
 
