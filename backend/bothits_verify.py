@@ -92,9 +92,21 @@ _memo = {}
 
 
 def _fetch_all():
-    out = {}
+    """-> ({operator: [cidr]}, alles_gelukt).
+
+    ALL-OR-NOTHING PER OPERATOR, en dat is de hele bedoeling (fase 3 van de audit).
+    Hier stond `if cidrs: out[op] = cidrs`, oftewel "eentje is genoeg": viel bij Google
+    één van de drie bronnen weg, dan kwam die operator met een INCOMPLETE prefixlijst
+    binnen en kreeg elk echt crawler-IP daarbuiten `failed`. Bij bing, anthropic en
+    apple is er maar één bron-URL, dus daar kantelde de hele familie in één keer.
+
+    Dat is precies wat de ontwerpnotitie bovenaan verbiedt: een mislukte fetch mag echte
+    Googlebot nooit als spoof wegzetten. Een operator die niet compleet binnenkomt gaat
+    er nu helemaal uit, en `verdict()` geeft voor zo'n operator `unchecked`.
+    """
+    out, all_ok = {}, True
     for op, urls in RANGE_SOURCES.items():
-        cidrs = []
+        cidrs, ok = [], True
         for u in urls:
             try:
                 raw = urllib.request.urlopen(
@@ -105,22 +117,16 @@ def _fetch_all():
                         cidrs.append(cidr)
             except Exception as exc:
                 logger.warning("bothits verify: %s niet op te halen: %s", u, exc)
-        # LET OP — dit is GEEN all-or-nothing guard, ook al stond dat hier tot
-        # 2026-08-13. `if cidrs` is "eentje is genoeg": valt bij Google één van de drie
-        # bronnen weg (of bij OpenAI één van de drie), dan komt de operator met een
-        # INCOMPLETE prefixlijst binnen, wordt _loaded alsnog True, en krijgt elk echt
-        # crawler-IP buiten het geladen deel 'failed' — precies wat de ontwerpnotitie
-        # bovenaan verbiedt. Bij bing/anthropic/apple is het één URL, dus daar kantelt
-        # de hele familie naar 'failed'.
-        #
-        # Nog niet gebeurd: gemeten 13-08 zijn er nul (datum, familie)-paren boven 50%
-        # failed en is 'unchecked' 0% van de cube. Het is een val, geen actuele fout.
-        # De fix (per-bron falen bijhouden, operator dan laten vallen, en verdict()
-        # 'unchecked' laten geven voor een operator die niet in _TABLE staat) verandert
-        # gedrag en staat als fase 3 in cc1/TASKS.md.
-        if cidrs:
-            out[op] = cidrs
-    return out
+                ok = False
+        if not ok or not cidrs:
+            all_ok = False
+            logger.error("bothits verify: operator %s onvolledig opgehaald (%s van %s "
+                         "bronnen) — die familie wordt deze run 'unchecked' i.p.v. "
+                         "onterecht 'failed'", op, "0" if not cidrs else "<alle>",
+                         len(urls))
+            continue
+        out[op] = cidrs
+    return out, all_ok
 
 
 def _load_cidrs(force=False):
@@ -133,22 +139,32 @@ def _load_cidrs(force=False):
                 return data
         except Exception:
             pass
-    data = _fetch_all()
-    if data:
+    data, all_ok = _fetch_all()
+    if data and all_ok:
         try:
             os.makedirs(os.path.dirname(CACHE), exist_ok=True)
             json.dump(data, open(CACHE, "w"))
         except Exception as exc:
             logger.warning("bothits verify: cache niet te schrijven: %s", exc)
         return data
-    # Fetch mislukt: val terug op een verouderde cache. Oude ranges zijn beter
-    # dan geen ranges — ze verschuiven met weken, niet met uren.
+    # Onvolledig opgehaald: een VERLOPEN cache is beter dan een halve verse lijst.
+    # Ranges verschuiven met weken, niet met uren, dus oude prefixes leveren hooguit
+    # een handvol verkeerde verdicts op — terwijl een half opgehaalde operator een hele
+    # familie op 'failed' zet. En bewust NIET wegschrijven: dan zou die halve lijst zich
+    # 24 uur lang als waarheid voordoen.
     if os.path.exists(CACHE):
         try:
-            return json.load(open(CACHE))
+            cached = json.load(open(CACHE))
+            if cached:
+                logger.warning("bothits verify: terugval op de cache (%s operators); de "
+                               "verse ophaal was onvolledig", len(cached))
+                return cached
         except Exception:
             pass
-    return {}
+    if data:
+        logger.warning("bothits verify: geen cache, dus verder met %s van %s operators; "
+                       "de rest wordt 'unchecked'", len(data), len(RANGE_SOURCES))
+    return data
 
 
 def load(force=False):
@@ -200,6 +216,12 @@ def verdict(ip, family):
     if op is None:
         return "unverifiable"
     if not _loaded:
+        return "unchecked"
+    if op not in _TABLE:
+        # De operator publiceert wél een lijst, maar die is deze run niet (volledig)
+        # opgehaald. Zonder deze regel viel hij door naar _in(), dat False teruggeeft
+        # voor een onbekende operator, en dan werd élke hit van die familie 'failed' —
+        # een storing bij bing.com als bewijs van spoofing (fase 3).
         return "unchecked"
     key = (ip, op)
     v = _memo.get(key)

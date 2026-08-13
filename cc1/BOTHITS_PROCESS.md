@@ -397,6 +397,20 @@ al veilig binnen is — buiten het S3-venster van ~42 dagen is er geen tweede ko
 pagina's. De tegel **Facet-verspilling** rekent daarom alleen over
 `category` + `category_facet` + `category_legacy`.
 
+**Dezelfde val zat sinds 2026-08-13 óók in de Facet-diepte-grafiek**, en die stond er
+langer in. `facet_depth()` geeft 0 terug voor álles zonder `/c/` — productpagina's, de
+homepage, `robots.txt`, assets — dus die vielen allemaal in de nul-balk. Over het
+standaardvenster van 30 dagen was depth 0 **49.225.165 hits waarvan maar 7.682.976
+(15,6%) categorie-vormig**. De grafiek las dus als "de meeste crawl gaat naar
+categoriepagina's zonder facetten", terwijl 84% van die balk verkeer was dat per
+definitie geen facetten *heeft*. De query filtert nu op dezelfde drie url_types en de
+kaartkop noemt de reikwijdte. Depth ≥1 verandert nauwelijks maar niet nul: daar valt
+1.355 hits weg (`/l/`-URL's met `/c/` erin, plus wat `other`).
+
+Regel voor de volgende die hier iets meet: **elke noemer die over "facetten" of
+"verspilling" gaat, hoort beperkt te zijn tot category-URL's.** Er zijn er nu twee, en
+ze horen bij elkaar te blijven.
+
 ---
 
 ## Metriek-valkuil: `status_class = '2xx'` bevat de WAF-challenge (2026-08-13)
@@ -421,6 +435,25 @@ conclusie over levende versus dode URL's moet uit de ruwe logs komen (`sc-status
 naar de luidruchtige assets, dus een platte verdeling valt er volledig buiten. Gemeten:
 nul rijen met `url_type = 'product_legacy'`, terwijl de cube 3,0 mln legacy-hits telt —
 want dat zijn 224.242 URL's met gemiddeld 1,14 hit.
+
+**Sinds 2026-08-13 raakt die beperking nog maar de hélft van de URL's-tab.** Die leest nu
+uit twee tabellen, samengevoegd en opnieuw gerankt:
+
+| bron | wat erin zit | hoe volledig |
+|---|---|---|
+| `pa.bothits_url_daily` | URL's die in `pa.urls` staan | **uitputtend** — elke hit, elke dag |
+| `pa.bothits_unknown_daily` | de staart daarbuiten | top-500 per dag per bot-familie |
+
+De kolom **"In pa.urls"** zegt per rij welke van de twee je leest, want de benen zijn niet
+symmetrisch en dat mag je niet verstoppen. Daarvoor las de tab alléén de onbekende tabel:
+op 2026-08-12 zag hij 41.427 van 3,39 mln bot-hits (**1,2%**) en kon hij geen enkele
+indexeerbare `/c/`-URL tonen. Dat was een noodgreep uit de periode dat `url_daily` stilstond
+(`known_rows = 0`), en die reden verviel met de fork-fix zonder dat de querylaag meeging.
+
+**Productpagina's blijven onzichtbaar in deze tab**, en dat is nu de echte beperking: ze
+staan niet in `pa.urls` en gaan ook nooit naar `unknown_daily` (bijna uniek per hit, dus een
+top-N erover is ruis). Filter je op PLP, dan zegt de tab dat met zoveel woorden i.p.v. een
+lege tabel te tonen. Hun hits tellen wél volledig mee in het Overzicht — dat komt uit de cube.
 
 Terugvalpad is de ruwe log, en dat is betrouwbaar: parsen met `classify_ua`, `url_type`,
 `norm_host` en `skip_host` uit `bothits_ingest.py` gaf op 2026-08-12 exact de cube-cijfers

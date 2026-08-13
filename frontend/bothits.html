@@ -436,7 +436,16 @@
                                  De verspilling zelf staat er nog twee keer wél goed: als
                                  tegel ("Facet-verspilling") en als eigen tab
                                  (Crawl-verspilling). Deze grafiek gaat over diepte. -->
-                            <div class="card-header"><h5 class="mb-0">Facet-diepte</h5></div>
+                            <div class="card-header">
+                                <h5 class="mb-0">Facet-diepte</h5>
+                                <!-- De reikwijdte hoort in de kop, niet in een voetnoot: de
+                                     grafiek telt sinds 2026-08-13 alleen category-vormige
+                                     URL's. Daarvoor viel élke URL zonder /c/ in de nul-balk
+                                     (product, home, robots, assets) en was 84% van die balk
+                                     verkeer dat per definitie geen facetten heeft. -->
+                                <div class="muted-note">alleen categorie-URL's — een pagina
+                                    zonder <code>/c/</code> heeft geen facetdiepte</div>
+                            </div>
                             <div class="card-body">
                                 <div class="chart-box-sm chart-framed"><canvas id="depthChart"></canvas></div>
                             </div>
@@ -472,11 +481,16 @@
 
             <!-- ---------------------- TOP URLS ----------------------
                  Terug op 2026-08-13, en smaller dan de tab die er tot vandaag stond:
-                 alleen de top X op hits, geen zoekveld, geen maincat-kolom en geen
-                 CSV-export. Laadt bij het openen van de tab, dus geen Laden-knop.
-                 De bron is pa.bothits_unknown_daily en niet de per-URL-tabel — zie
-                 get_top_urls() voor waarom, en de alert hieronder zegt het de
-                 gebruiker ook. -->
+                 alleen de top X op hits, geen maincat-kolom en geen CSV-export.
+                 Laadt bij het openen van de tab, dus geen Laden-knop.
+
+                 Sinds fase 3 van de audit komen de rijen uit TWEE tabellen, samengevoegd
+                 en opnieuw gerankt: pa.bothits_url_daily (staat in pa.urls, uitputtend
+                 geteld) en pa.bothits_unknown_daily (de staart daarbuiten, dagelijkse
+                 top-500 per bot-familie). Daarvoor was het alleen die tweede, waardoor
+                 de tab 1,2% van het verkeer zag en geen enkele indexeerbare /c/-URL kón
+                 tonen. De kolom "In pa.urls" zegt per rij uit welke bak hij komt — de
+                 twee zijn niet symmetrisch en dat mag je niet verstoppen. -->
             <div class="tab-pane fade" id="tab-urls">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
@@ -516,13 +530,18 @@
                             <table class="table table-hover tool-table" id="urlTable">
                                 <thead><tr>
                                     <th class="sortable" data-k="url">URL</th>
+                                    <!-- Sinds fase 3 komt deze lijst uit TWEE tabellen, en het
+                                         verschil is de SEO-vraag zelf: staat deze URL in
+                                         pa.urls (indexeerbaar) of heeft een crawler hem zelf
+                                         in elkaar gezet? -->
+                                    <th class="sortable" data-k="source">In pa.urls</th>
                                     <th class="sortable" data-k="url_type">Type</th>
                                     <th class="sortable num" data-k="facet_depth">Facets</th>
                                     <th class="sortable num" data-k="hits">Hits</th>
                                     <th class="sortable num" data-k="days">Dagen</th>
                                     <th class="sortable num" data-k="per_day">Per dag</th>
                                 </tr></thead>
-                                <tbody><tr><td colspan="6" class="text-muted p-3">Laden…</td></tr></tbody>
+                                <tbody><tr><td colspan="7" class="text-muted p-3">Laden…</td></tr></tbody>
                             </table>
                         </div>
                     </div>
@@ -1378,8 +1397,16 @@
 
     let botRows = [];
     function drawBotTable(s) {
-        const days = Math.max(1, ...(s.bots || []).map(b => Number(b.days || 1)));
-        botRows = (s.bots || []).map(b => ({ ...b, hits: Number(b.hits), per_day: Math.round(Number(b.hits) / days) }));
+        // De eigen `days` van de rij, niet de grootste van de hele set (fase 3).
+        // /summary levert per familie count(DISTINCT log_date), en die werd weggegooid
+        // voor één noemer: de breedste familie. Een familie die op 14 van de 30 dagen
+        // crawlde werd dus door 30 gedeeld — Google-AI stond zo op 28/dag terwijl het er
+        // 59 zijn. De URL-tabel hiernaast rekende al wél met de eigen days van de rij,
+        // dus dezelfde kolomnaam gaf op één pagina twee verschillende dingen aan.
+        botRows = (s.bots || []).map(b => ({
+            ...b, hits: Number(b.hits),
+            per_day: Math.round(Number(b.hits) / Math.max(1, Number(b.days) || 1)),
+        }));
         renderBotTable(s.total_hits);
     }
     function renderBotTable(total) {
@@ -1716,18 +1743,28 @@
             ? `Top ${fmt(lim)} URL's — "${urlQuery}" (${fmt(urlRows.length)} ${urlRows.length === 1 ? 'rij' : 'rijen'})`
             : `Top ${fmt(lim)} URL's`;
         if (!urlRows.length) {
-            // Bij een zoekterm is "geen resultaten" makkelijk te lezen als "deze URL
-            // wordt niet gecrawld", en dat staat er niet: de bron is de dagelijkse
-            // top-500 per bot-familie (zie get_top_urls), dus een URL die die grens
-            // nooit haalde ontbreekt ook als hij wél hits heeft. Dat hoort erbij te
-            // staan, anders trek je een conclusie die de data niet dekt.
-            tb.innerHTML = urlQuery
-                ? `<tr><td colspan="6" class="p-3 text-muted">Geen URL in deze selectie bevat
-                     <strong>${escapeHtml(urlQuery)}</strong>. Let op: deze lijst komt uit de dagelijkse
-                     top-500 per bot-familie, dus een URL die die grens nooit haalde staat er niet in —
-                     ook niet als hij wel gecrawld is. Een ruimere periode of een kortere zoekterm
-                     vergroot de kans.</td></tr>`
-                : '<tr><td colspan="6" class="p-3 text-muted">Geen resultaten in deze selectie.</td></tr>';
+            // Drie verschillende "leeg", en ze betekenen niet hetzelfde.
+            //
+            // PLP is er structureel een: productpagina's staan niet in pa.urls en de
+            // ingest schrijft ze ook nooit naar de onbekende-tabel, want ze zijn bijna
+            // uniek per hit. Die selectie kán dus nooit rijen opleveren, terwijl de
+            // donut in het Overzicht er wel honderden miljoenen hits voor toont — zonder
+            // deze tekst lees je dat als "er wordt niets gecrawld" (fase 3).
+            const types = checked('typeFilter');
+            const plpOnly = types.length > 0 && types.every(t => t === 'PLP');
+            tb.innerHTML = plpOnly
+                ? `<tr><td colspan="7" class="p-3 text-muted">Productpagina's staan <strong>niet</strong>
+                     in deze lijst. Ze zitten niet in <code>pa.urls</code> en worden ook niet als
+                     "onbekende" URL bewaard — een top-N over pagina's die vrijwel uniek zijn per hit
+                     zegt niets. Hun hits tellen wél volledig mee in het Overzicht.</td></tr>`
+                : urlQuery
+                ? `<tr><td colspan="7" class="p-3 text-muted">Geen URL in deze selectie bevat
+                     <strong>${escapeHtml(urlQuery)}</strong>. Let op: URL's búiten <code>pa.urls</code>
+                     komen uit de dagelijkse top-500 per bot-familie, dus zo'n URL die die grens nooit
+                     haalde staat er niet in — ook niet als hij wel gecrawld is. URL's ín
+                     <code>pa.urls</code> zijn wél uitputtend geteld. Een ruimere periode of een kortere
+                     zoekterm vergroot de kans.</td></tr>`
+                : '<tr><td colspan="7" class="p-3 text-muted">Geen resultaten in deze selectie.</td></tr>';
             return;
         }
         // Zelfde vorm als Per bot-familie: caret vooraan, rij klikbaar, paneel eronder.
@@ -1737,6 +1774,9 @@
         tb.innerHTML = urlRows.map((r, i) => `
             <tr class="url-row" data-i="${i}">
               <td class="url-cell" title="${escapeHtml(urlPath(r))}"><span class="bot-caret">▸</span><a href="${escapeHtml(urlHref(r))}" target="_blank" rel="noopener">${escapeHtml(urlPath(r))}</a></td>
+              <td>${r.source === 'pa.urls'
+                    ? '<span class="lbl" style="color:#5e4a90">ja</span>'
+                    : '<span class="lbl" style="color:#b8860b" title="Door een crawler zelf samengestelde URL. Deze kant van de lijst is de dagelijkse top-500 per bot-familie, dus niet uitputtend.">nee</span>'}</td>
               <td>${escapeHtml(r.url_type || '')}</td>
               <td class="num">${r.facet_depth}</td>
               <td class="num">${fmt(r.hits)}</td>

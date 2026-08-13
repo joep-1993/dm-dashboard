@@ -4,7 +4,7 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
-### 2026-08-13 — Audit Bothits, ronde 2: fase 0 t/m 2 uitgevoerd, fases 3–4 open
+### 2026-08-13 — Audit Bothits, ronde 2: fase 0 t/m 3 uitgevoerd, fase 4 open
 
 Tweede audit over 5.020 regels (vijf parallelle reviewers, daarna nagerekend tegen de live
 DB en het echte archief). De elf bevindingen van de eerste ronde staan verderop; dit zijn
@@ -154,30 +154,54 @@ CloudFront schrijft dan geen bestand. Als poort zou 14% van de datums omvallen a
 **waarschuwing** (`_warn_thin_distributions`), niet als eis. Het bestandsAANTAL is om
 dezelfde reden geen maat: complete dagen lopen legitiem van 1.591 tot 4.969 bestanden.
 
-**Fase 3 — metriekcorrecties (cijfers op het scherm veranderen):**
+**Fase 3 — metriekcorrecties — GEDAAN (cijfers op het scherm zijn veranderd):**
 
-- [ ] **Facet-diepte-grafiek is niet beperkt tot `/c/`.** `facet_depth()` geeft 0 voor álles
-      zonder `/c/`, dus depth-0 is over 30 dagen 49.225.165 hits waarvan maar **7.682.976
-      (15,6%)** categorie-vormig; depth ≥1 is 100%. Dezelfde val die `waste_pct` 25 regels
-      lager al ontwijkt. Na de fix moet depth-0 exact 49.225.165 → 7.682.976 gaan.
-- [ ] **URL's-tab terug naar `pa.bothits_url_daily`** (risico A). Gemeten 21,5s koud / 9,4s
-      warm over 30 dagen, of 4,5s met de query omgebouwd (eerst aggregeren op `url_id`, dan
-      pas `pa.urls` erbij voor de top 250).
-- [ ] **Partiële IP-range-fetch markeert echte crawlers als `failed`.** `if cidrs:` is
-      "eentje is genoeg", en `verdict()` geeft alleen `unchecked` op de globale `_loaded`-vlag,
-      dus een operator die niet in `_TABLE` staat valt door naar `failed`. Bing/Anthropic/Apple
-      hebben één bron-URL, dus daar kantelt de hele familie. **Nog niet gebeurd** (nul
-      (datum, familie)-paren boven 50% failed, `unchecked` = 0% van de cube) — val, geen schade.
-      Regressiepoort: die >50%-query moet 0 rijen blijven geven, split ~89,4/9,6/1,0.
-- [ ] **Alleen "PLP" aanvinken maakt de URL-tab stil leeg** terwijl de donut ernaast 220 mln
-      toont — de ingest schrijft productrijen nooit naar `unknown_daily`.
-- [ ] **"Per dag" op twee manieren**: de bot-tabel deelt élke familie door de *grootste*
-      `days` in de set (Google-AI: 826 hits over 14 dagen wordt /30), de URL-tabel gebruikt
-      de eigen `days` van de rij.
-- [ ] **`get_meta` neemt het venster uit de ledger** en omzeilt daarmee de cube-fix van
-      `_range()`; de frontend seedt de datumvelden ermee en stuurt daarna altijd beide.
-- [ ] **`waste_pct` wordt 0 of 100 zodra `known` gezet is** — de filter bepaalt het antwoord,
-      niet de data. Plus zes velden zonder lezer sinds de tegels eruit gingen.
+- [x] **Facet-diepte telt alleen nog category-URL's.** `facet_depth()` geeft 0 voor álles
+      zonder `/c/`, dus de nul-balk zat vol productpagina's — pagina's die per definitie
+      géén facetten hebben. Depth 0 gaat van **49.225.165 naar 7.682.976**. De kaartkop
+      noemt de reikwijdte nu ook.
+      **Let op, mijn eerste formulering van deze poort was fout.** Ik schreef "depth ≥1 is
+      100% category, dus die blijven gelijk". Niet waar: depth 1/2/3 verliezen samen 1.355
+      hits (1.060 `list`, 293 `other`, 2 `product` — URL's mét `/c/` die geen
+      categoriepagina zijn). De juiste verwachting is de *category-shaped* kolom uit de
+      meting: depth 1 = 15.252.392, depth 2 = 5.402.707, depth 3 = 6.491.495, depth 4–6
+      onveranderd. Zo gemeten, zo uitgekomen.
+- [x] **URL's-tab leest nu BEIDE tabellen**, samengevoegd en opnieuw gerankt:
+      `pa.bothits_url_daily` (in `pa.urls`, uitputtend geteld) + `pa.bothits_unknown_daily`
+      (de staart, dagelijkse top-500 per familie). Nieuwe kolom **"In pa.urls"** zegt per rij
+      uit welke bak hij komt, want de twee zijn niet symmetrisch. In de standaard-top-250
+      staan nu 238 rijen uit `pa.urls` die er hiervoor per constructie niet in konden:
+      `/products/gezond_mooi/` (9.048 hits), `/products/mode/` (8.321), `/products/huis_tuin/`
+      (8.078). Snelheid **5,8s koud / 0,08s warm**; de eerste opzet van het `url_type`-filter
+      kostte 37s (een `ANY()` met ~1 mln url_id's) en is nu een `EXISTS` in de aggregatie —
+      10,9s voor C-url, 2,0s voor Cat-url.
+- [x] **`get_url_detail` volgt mee.** Zonder dat gaf elke rij uit de bekende kant een leeg
+      uitklappaneel, want die URL's staan niet in de onbekende tabel. Beide benen getest:
+      paneeltotaal exact gelijk aan het rijtotaal.
+- [x] **`url_type`/`facet_depth` voor de bekende kant komen uit `pa.urls.url`** — een VIERDE
+      kopie van dat vocabulaire, dus geverifieerd i.p.v. gehoopt: op 20.000 echte
+      `pa.urls`-rijen geeft de SQL exact hetzelfde als `url_type()`/`facet_depth()` uit de
+      ingest, 0 verschillen op beide. Herhaal die test zodra een van die functies verandert.
+- [x] **Partiële IP-range-fetch zet echte crawlers niet meer op `failed`.** `_fetch_all` is
+      all-or-nothing per operator en geeft `(data, all_ok)`; `verdict()` geeft `unchecked`
+      voor een operator die niet in `_TABLE` staat; en een onvolledige ophaal wordt **niet**
+      gecached (anders doet die halve lijst zich 24 uur als waarheid voor) maar valt terug op
+      de verouderde cache. Getest met bing eruit: `unchecked` i.p.v. `failed`, Googlebot
+      ongemoeid. Poort gehaald: 0 (datum,familie)-paren boven 50% failed, split onveranderd
+      89,38 / 9,63 / 0,99.
+- [x] **Alleen "PLP" aanvinken zegt nu waaróm de lijst leeg is.** Productpagina's staan niet
+      in `pa.urls` én gaan nooit naar `unknown_daily`, dus die selectie kán geen rijen
+      opleveren terwijl het Overzicht er honderden miljoenen hits voor toont.
+- [x] **"Per dag" gebruikt de eigen `days` van de rij.** De bot-tabel deelde élke familie
+      door de grootste `days` in de set: Google-AI (826 hits over 14 dagen) stond op 28/dag
+      i.p.v. 59. De URL-tabel deed het al goed, dus dezelfde kolomnaam betekende op één
+      pagina twee dingen.
+- [x] **`get_meta` haalt `first_day`/`last_day` uit de cube**, de rest uit de ledger. De
+      cube-fix zat alleen in `_range()`, maar de frontend seedt de datumvelden uit `/meta` en
+      stuurt daarna altijd beide datums mee — dus `_range()` sloot kort en paste zijn eigen
+      bescherming nooit toe.
+- [x] **`waste_pct` is `None` zodra er op `known` gefilterd wordt** i.p.v. een zelfverzekerde
+      0,0 of 100,0. De noemer is dan al gefilterd op precies de eigenschap die de teller meet.
 
 **Fase 4 — perf en dedup (gedrag behouden):**
 
