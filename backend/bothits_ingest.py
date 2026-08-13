@@ -200,9 +200,13 @@ def classify_ua(raw_ua):
     if hit is not None:
         return hit
     ua = unquote(raw_ua)
-    if not ANY_BOT_RX.search(ua):
-        out = (None, None)
-    else:
+    # Onvoorwaardelijk gezet (audit 2026-08-13). De unie-regex is uit dezelfde
+    # patronen opgebouwd, dus "unie matcht maar geen enkel patroon" kan niet — geprobeerd
+    # op alle 33 alternatieven en op 1.030 echte UA's, nul afwijkingen. Maar als die
+    # invariant ooit breekt, gaf dit een UnboundLocalError in een worker en die sleept
+    # via fut.result() de hele ingest mee. Een regel vangnet is goedkoper dan die dag.
+    out = (None, None)
+    if ANY_BOT_RX.search(ua):
         # De unie matchte, dus één van de patronen doet dat ook: fam wordt gezet.
         for name, _cls, rx in BOT_RX:
             if rx.search(ua):
@@ -331,7 +335,12 @@ def load_url_ids():
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT url_id, url FROM pa.urls")
+        # ORDER BY url_id (audit 2026-08-13): de dict-comprehension hieronder is
+        # last-wins, en twee pa.urls-rijen kunnen na rstrip("/") dezelfde sleutel geven
+        # (gemeten: 2 sleutels uit 4 rijen). Zonder vaste volgorde bepaalt Postgres welk
+        # url_id overleeft, en dan herstelt een re-ingest níet exact dezelfde rijen —
+        # wat BOTHITS_PROCESS.md wel belooft.
+        cur.execute("SELECT url_id, url FROM pa.urls ORDER BY url_id")
         rows = cur.fetchall()
         cur.close()
     finally:
@@ -785,10 +794,15 @@ def run_backfill(src=None, limit=None, redo=False, only=None):
                 len(by_date), len(done & set(by_date)), len(todo))
     results = []
     for i, d in enumerate(todo, 1):
-        # Zelfde annuleergrens als run_drop: tussen twee logdatums (2026-08-13). Dit
-        # is de LANGSTE job van het systeem — 116 datums uit het archief — en hij was
-        # de enige die niet naar de vlag keek, dus een Cancel liet hem doorlopen tot
-        # het eind.
+        # Zelfde annuleergrens als run_drop: tussen twee logdatums (2026-08-13).
+        #
+        # NUANCE na de audit van 2026-08-13: in-process is deze tak niet te bereiken.
+        # _cancel wordt alleen gezet door request_cancel(), die niets doet tenzij
+        # _ingest_state["running"] aan staat, en dat zet alleen start_ingest_async —
+        # wiens worker run_DROP aanroept, nooit run_backfill. De enige aanroeper van
+        # run_backfill is main(), een eigen CLI-proces met eigen module-globals.
+        # De guard blijft staan omdat hij correct is en meteen werkt zodra er een route
+        # of een signal-handler op komt; hij doet vandaag alleen niets.
         if _cancel.is_set():
             logger.info("backfill: geannuleerd na %s van %s datums", i - 1, len(todo))
             break
@@ -798,6 +812,14 @@ def run_backfill(src=None, limit=None, redo=False, only=None):
                                        ",".join(sorted(dirs[d])), len(hours[d])))
         except Exception as exc:
             logger.error("[%s] FAILED: %s", d, exc, exc_info=True)
+    # Ook hier opruimen (audit 2026-08-13). _prune_archive hing alleen aan run_drop,
+    # terwijl het werk juist via backfill loopt — het herstelpad, de 30-datum-herlaad,
+    # de CLI. Gevolg gemeten op 13-08: 18 datummappen voorbij de 21-daagse grens,
+    # 18 GB, terwijl de retentie er sinds 13-08 in zit en dacht zijn werk te doen.
+    # Ná de datums, niet ertussen, om dezelfde reden als in run_drop.
+    freed = _prune_archive(src)
+    if freed:
+        logger.info("backfill: %s MB staging opgeruimd", round(freed / 1e6))
     return results
 
 
@@ -999,6 +1021,10 @@ def start_ingest_async(trigger="manual", on_done=None, src=None, before=None):
         finally:
             _ingest_state["phase"] = None
             _ingest_state["running"] = False
+            # cancelling meteen terug op false (audit 2026-08-13). Hij bleef anders
+            # tot de vólgende start_ingest_async op true staan, dus /ingest/status
+            # bleef "annuleren…" melden over een run die al klaar was.
+            _ingest_state["cancelling"] = False
             _ingest_state["finished_at"] = datetime.now().isoformat(timespec="seconds")
             _ingest_lock.release()
             if on_done:

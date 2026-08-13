@@ -104,10 +104,20 @@ def _fetch_all():
                     if cidr:
                         cidrs.append(cidr)
             except Exception as exc:
-                # Eén kapotte bron mag de rest niet meesleuren; de operator komt
-                # dan met minder prefixes binnen, wat hoogstens extra 'failed'
-                # oplevert — daarom hieronder de all-or-nothing guard.
                 logger.warning("bothits verify: %s niet op te halen: %s", u, exc)
+        # LET OP — dit is GEEN all-or-nothing guard, ook al stond dat hier tot
+        # 2026-08-13. `if cidrs` is "eentje is genoeg": valt bij Google één van de drie
+        # bronnen weg (of bij OpenAI één van de drie), dan komt de operator met een
+        # INCOMPLETE prefixlijst binnen, wordt _loaded alsnog True, en krijgt elk echt
+        # crawler-IP buiten het geladen deel 'failed' — precies wat de ontwerpnotitie
+        # bovenaan verbiedt. Bij bing/anthropic/apple is het één URL, dus daar kantelt
+        # de hele familie naar 'failed'.
+        #
+        # Nog niet gebeurd: gemeten 13-08 zijn er nul (datum, familie)-paren boven 50%
+        # failed en is 'unchecked' 0% van de cube. Het is een val, geen actuele fout.
+        # De fix (per-bron falen bijhouden, operator dan laten vallen, en verdict()
+        # 'unchecked' laten geven voor een operator die niet in _TABLE staat) verandert
+        # gedrag en staat als fase 3 in cc1/TASKS.md.
         if cidrs:
             out[op] = cidrs
     return out

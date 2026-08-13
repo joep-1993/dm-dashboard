@@ -178,23 +178,31 @@ te weten sinds de audit:
   een run datummappen op die ouder zijn dan de grens. Ze bleven eerder eeuwig staan:
   ~900 MB per logdatum, 30 GB op de meetdag. 21 dagen omdat de bucket ~42 dagen bewaart —
   binnen die termijn is een datum zowel opnieuw te downloaden áls lokaal te herladen.
+
+  **Sinds 2026-08-13 ruimt óók `backfill` op, en dat was de hele bug.** `_prune_archive`
+  hing alleen aan `run_drop`, terwijl het werk juist via `backfill` liep — het herstelpad,
+  de 30-datum-herlaad, de CLI. De retentie zat er dus wel in en vuurde nooit: gemeten op
+  13-08 stonden er 18 datummappen voorbij de grens, **18 GB**, met de oudste op 2026-07-04.
+  Als je de staging ziet groeien terwijl retentie "aan" staat, is dit de eerste plek om te
+  kijken: welk codepad heeft de laatste runs gedaan.
 * **Het archief wordt écht overgeslagen.** De skip in `scan_tree` vergeleek de basename
   met `_processed` en sloeg dus alleen die map zelf over, niet de datum-submappen: elke
   run schuimde het hele archief af (46.097 bestanden op de meetdag, +2.900/dag).
 * **Herstel van één datum**, en dit is de procedure die je wilt als een ingest fout ging:
 
   ```bash
-  # ledger-rij weg, anders slaat de ingest de datum over
-  # (de feiten blijven staan tot de herverwerking ze vervangt)
-  python - <<'PY'
-  from backend.database import get_db_connection, return_db_connection
-  c = get_db_connection(); cur = c.cursor()
-  cur.execute("DELETE FROM pa.bothits_ingest WHERE log_date = '2026-08-12'")
-  c.commit(); return_db_connection(c)
-  PY
-  # opnieuw verwerken UIT HET ARCHIEF, zonder te downloaden
+  # opnieuw verwerken UIT HET ARCHIEF, zonder te downloaden. Eén commando.
   python -m backend.bothits_ingest backfill --src ~/bothits_s3 --date 2026-08-12
   ```
+
+  **De ledger-rij hoef je NIET weg te gooien** — dat stond hier tot 2026-08-13 wel, en
+  het was onnodig. `--date` vult `only` en `run_backfill` bouwt `todo` dan opnieuw op
+  zonder de `already_ingested()`-filter (`bothits_ingest.py:764-765`), dus de datum wordt
+  gewoon opgepakt. De ingest is idempotent per logdatum (`DELETE ... WHERE log_date = X`),
+  dus de oude feiten worden vervangen. Die DELETE was ook actief schadelijk zolang het
+  standaard datumbereik nog aan de ledger hing: hij verschoof stil het venster waarop de
+  tool opende. Dat hangt sinds `a5ecefa` aan de cube, maar `/meta` leest nog wél de ledger
+  (fase 3 van de audit), dus voeg die stap niet terug toe.
 
   `--date` zet `include_archived=True`, dus dit leest wél uit `_processed/`. Zonder die
   vlag vindt een gerichte herlaad niets en moet je 900 MB per dag opnieuw uit S3 halen.

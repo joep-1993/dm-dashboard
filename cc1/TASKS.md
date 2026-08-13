@@ -4,6 +4,138 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-13 — Audit Bothits, ronde 2: fase 0 uitgevoerd, fases 1–4 open
+
+Tweede audit over 5.020 regels (vijf parallelle reviewers, daarna nagerekend tegen de live
+DB en het echte archief). De elf bevindingen van de eerste ronde staan verderop; dit zijn
+nieuwe. Twee structurele risico's staan bovenaan omdat ze de rest ordenen:
+
+**A. De URL's-tab beantwoordt zijn eigen vraag niet.** `get_top_urls()` leest
+`pa.bothits_unknown_daily` op grond van een docstring die zegt dat de `pa.urls`-match kapot
+is. Die match is op 13-08 gerepareerd (`a2ee990`) en de querylaag ging niet mee. Gemeten op
+2026-08-12: de tab ziet **41.427 van 3,39 mln bot-hits (1,2%)** en sluit álle 191.108
+known-URL-hits én alle productpagina's per constructie uit. Zichtbaar bewijs: de top-3
+"meest gecrawlde URL's" is `/data/graphql`, een OG-fallback-plaatje en `/favicon.ico`.
+`pa.bothits_url_daily` staat op 20.300.271 rijen t/m 08-12, dus de blokkade is weg.
+
+**B. "Staat in de ledger" wordt gelezen als "is compleet".** `already_ingested()` test alleen
+aanwezigheid; `run_drop` archiveert daarop bronbestanden en `_prune_archive` wist ze na de
+retentie — na het S3-venster van ~42 dagen definitief. `is_complete` komt alleen uit 24
+uurstempels: niet uit het aantal distributies, niet uit mislukte downloads, niet uit
+onleesbare `.gz`. Vijf partiële datums staan al in de ledger (03-26, 04-13, 04-21, 05-01, 06-09).
+
+**Fase 0 — gedaan (geen gedragswijziging):**
+
+- [x] **Staging-retentie vuurde niet, en dat was de hele bug.** `_prune_archive` hing alleen
+      aan `run_drop`, terwijl het werk via `backfill` liep. 18 datummappen voorbij de grens,
+      **18,88 GB opgeruimd** (38 → 20 GB); nu ook aangeroepen vanuit `run_backfill`. Vóór het
+      wissen per datum getoetst op `is_complete` + `known_rows > 0`.
+- [x] **`/top-urls` tie-break** `ORDER BY hits DESC, w.url` — rang 250 zat op 208 hits met
+      drie rijen gelijk, dus de lijst flapte tussen identieke verzoeken.
+- [x] **XSS-sink dicht**: `chkbox()` escapet nu `META.hosts` (host-header → `norm_host`
+      lowercaset alleen, `skip_host` laat alles door dat op `.beslist.nl` eindigt). Eén van
+      de twee sinks in het bestand die het niet deed; de URL-tabel escapete al correct.
+- [x] **Filters herladen de URL's-tab** als die openstaat — de filterkaart staat boven de
+      tabstrip, dus Toepassen liet oude rijen staan onder een kop met de oude telling.
+- [x] **`badge bg-info` → `badge-purple`** (was wit-op-lichtgrijs, de val die UI_BLUEPRINT
+      zelf beschrijft) · `colspan="7"` → 6 · `cancelling` reset in de `finally` ·
+      `ORDER BY url_id` in `load_url_ids` (2 botsende sleutels, last-wins was ongedefinieerd) ·
+      `out = (None, None)` onvoorwaardelijk in `classify_ua` · dode `else`-tak in `_filters` weg.
+- [x] **Doc-drift**: bevinding 8 stond hier onterecht open (gefixt in `53fcea2`) · het
+      herstelrecept in BOTHITS_PROCESS eiste onnodig een ledger-DELETE (`--date` omzeilt de
+      done-filter al) · router-docstring zei dat `/top-urls` en `/url` weg waren terwijl ze
+      leven · `verify.py` claimde een all-or-nothing guard die er niet is · `get_top_urls`'
+      docstring beschreef een defect dat niet meer bestaat.
+
+**Fase 1 — hard falen i.p.v. stil falen (gedrag behouden, geen cijfer verandert):**
+
+- [ ] **`hours_present` en `is_complete` staan in GEEN enkele DDL** — live handmatig
+      toegevoegd. Herbouw uit `scripts/bothits_schema.sql` → ingest crasht op de ledger-INSERT
+      en `/meta` 500't. Toevoegen aan de CREATE TABLE **plus** een `ADD COLUMN IF NOT EXISTS`
+      in `SCHEMA_MIGRATE`.
+- [ ] **Veldnaam-wijziging bij CloudFront is onzichtbaar**: `except (IndexError, KeyError):
+      continue` op elke regel, terwijl `raw_lines` al geteld is. Wordt een veld hernoemd, dan
+      blijft `raw_lines` 6,9 mln, `bot_lines` 0, en **geen van beide tripwires vuurt**.
+      Veldnamen één keer resolven bij `#Fields:` en hard falen als er één mist.
+- [ ] **Frontend controleert `response.ok` nergens** → een 500 laat de vórige selectie op het
+      scherm staan (`refresh()`), of de tabel hangt eeuwig op "laden…" (de `forEach` staat
+      buiten de `try`). Één `getJSON()`-helper + zichtbare foutstaat.
+- [ ] **Ingest-lock lekt permanent** als `Thread.start()` faalt: release zit alleen in de
+      `finally` van de worker, dus knop én timer zijn daarna dood tot herstart.
+- [ ] **Mislukte runs rapporteren `status: "ok"`**; `run_backfill` laat gefaalde datums
+      helemaal weg uit `results`.
+- [ ] Kleiner: twee POST-endpoints zonder foutafhandeling + een onbereikbare
+      `except S3NotConfigured` · onbekende `group_by` wordt stil `bot_class` maar echoot de
+      typo · `_prune_archive` onderrapporteert vrijgekomen bytes (niet-recursief) ·
+      `--date` verliest de sortering en no-opt stil op een datum die niet in de boom zit.
+
+**Fase 2 — het volledigheidscontract (gedragswijzigend, moet gated):**
+
+- [ ] **Onleesbare/afgebroken `.gz` levert partiële tellingen** die als volledig doorgaan; de
+      dag wordt tóch `is_complete=true`. `failed_files` teruggeven, tellen, in de ledger.
+- [ ] **Ledger-aanwezigheid ≠ compleet** → bronbestanden van een half geladen datum worden
+      gearchiveerd en later gewist; S3 meldt zo'n datum eeuwig `al_geingest`.
+      `already_ingested()` moet `{datum: is_complete}` teruggeven.
+- [ ] **Known-URL-tripwire vuurt ná `conn.commit()`** — de kapotte datum staat er dan al in
+      en zijn bestanden gaan op de archiefstapel. Vóór de write en `raise`, zoals de
+      nul-regels-tripwire het al doet.
+- [ ] **Volledigheid = 24 uurstempels én `(distributie, uur)` én `failed_files` én het
+      verwachte S3-bestandsaantal.** Let op: bestandsaantal is géén detector — complete dagen
+      lopen legitiem van 1.591 tot 4.969 bestanden. `raw_lines` (5,6–7,9 mln/dag) is stabiel.
+- **Regressiepoort**: herverwerk 2026-08-12 uit `~/bothits_s3/_processed/2026-08-12/`
+  (2.905 bestanden, staat er nog) en vergelijk met de ledgerregel `files=2905,
+  raw_lines=6.946.608, bot_lines=3.550.758, known_rows=142.054` + md5 over de cube-rijen.
+
+**Fase 3 — metriekcorrecties (cijfers op het scherm veranderen):**
+
+- [ ] **Facet-diepte-grafiek is niet beperkt tot `/c/`.** `facet_depth()` geeft 0 voor álles
+      zonder `/c/`, dus depth-0 is over 30 dagen 49.225.165 hits waarvan maar **7.682.976
+      (15,6%)** categorie-vormig; depth ≥1 is 100%. Dezelfde val die `waste_pct` 25 regels
+      lager al ontwijkt. Na de fix moet depth-0 exact 49.225.165 → 7.682.976 gaan.
+- [ ] **URL's-tab terug naar `pa.bothits_url_daily`** (risico A). Gemeten 21,5s koud / 9,4s
+      warm over 30 dagen, of 4,5s met de query omgebouwd (eerst aggregeren op `url_id`, dan
+      pas `pa.urls` erbij voor de top 250).
+- [ ] **Partiële IP-range-fetch markeert echte crawlers als `failed`.** `if cidrs:` is
+      "eentje is genoeg", en `verdict()` geeft alleen `unchecked` op de globale `_loaded`-vlag,
+      dus een operator die niet in `_TABLE` staat valt door naar `failed`. Bing/Anthropic/Apple
+      hebben één bron-URL, dus daar kantelt de hele familie. **Nog niet gebeurd** (nul
+      (datum, familie)-paren boven 50% failed, `unchecked` = 0% van de cube) — val, geen schade.
+      Regressiepoort: die >50%-query moet 0 rijen blijven geven, split ~89,4/9,6/1,0.
+- [ ] **Alleen "PLP" aanvinken maakt de URL-tab stil leeg** terwijl de donut ernaast 220 mln
+      toont — de ingest schrijft productrijen nooit naar `unknown_daily`.
+- [ ] **"Per dag" op twee manieren**: de bot-tabel deelt élke familie door de *grootste*
+      `days` in de set (Google-AI: 826 hits over 14 dagen wordt /30), de URL-tabel gebruikt
+      de eigen `days` van de rij.
+- [ ] **`get_meta` neemt het venster uit de ledger** en omzeilt daarmee de cube-fix van
+      `_range()`; de frontend seedt de datumvelden ermee en stuurt daarna altijd beide.
+- [ ] **`waste_pct` wordt 0 of 100 zodra `known` gezet is** — de filter bepaalt het antwoord,
+      niet de data. Plus zes velden zonder lezer sinds de tegels eruit gingen.
+
+**Fase 4 — perf en dedup (gedrag behouden):**
+
+- [ ] **`n_2xx..n_5xx` hebben nul lezers** (alleen DDL + INSERT): 4 branches per bot-regel
+      over ~500 mln regels en ~450 MB tabel. Óf aansluiten op het URL-detailpaneel (een
+      per-URL 4xx-rate is nuttig), óf schrappen.
+- [ ] **`0xx` valt in geen `n_*`-bucket** (31.107 hits; 1.984 rijen rekenen niet op).
+      CloudFront logt `sc-status 000` bij afgebroken verbindingen. Niet in 2xx vouwen.
+- [ ] **`distributions()` pagineert niet** (`list_date` wel) en `_dists` is procesbreed
+      gecached, dus een 7e distributie vereist een herstart — terwijl de docstring belooft
+      dat hij automatisch wordt opgepikt. `force` heeft geen aanroeper.
+- [ ] **`preview()` doet 6 LIST-calls per datum serieel** op de gedeelde 4-thread pool
+      (270 round-trips bij `days=45`, vandaar de 120s AbortController); `fetch()` doet
+      dezelfde listing nóg eens.
+- [ ] Dedup: één `_filters` (nu woordelijk gedupliceerd in `_unknown_filters`, en dat is hoe
+      de blinde vlek van risico A overleefde) · één vocabulairebron voor de ruwe `url_type`s
+      (nu string-literals in ingest, service én frontend) · `FILE_DATE_RX` en de ledger-query
+      delen tussen ingest en s3 · veldindices hoisten en `unquote` ná de bot-check (~8%
+      gemeten, 55% van de regels is non-bot) · `heapq.nlargest` i.p.v. een volledige sort.
+
+**Twee dingen om te weten bij het oppakken:** :8003 draait met `--reload`, dus elke `.py`-edit
+herstart de server en breekt een lopende ingest af — draai een regressie-ingest als los
+`setsid`-proces. En de scheduler-crash op een kapotte `BOTHITS_AUTO_INGEST_AT` (`replace()`
+staat buiten de `try`) is nu onbereikbaar omdat `AUTO_INGEST` uit staat; wie hem aanzet moet
+die eerst fixen.
+
 ### 2026-08-13 — SEO Priority: false positives op globaal uitgeschakelde facetten
 
 Vervolg op de sessie hieronder. Joep meldde dat de tool zei dat het **Winkel**-facet aanstond
@@ -204,9 +336,10 @@ Elf bevindingen over 4.005 regels (`a5ecefa`). Wat er af is:
 - [x] **Parser 4× sneller**: memo op de ruwe UA-string plus een unie-regex als snelle
       afwijzing. 0 verschillen op 117.492 echte logregels, end-to-end byte-voor-byte
       identiek (incl. md5 over alle cube-rijen), en 125s → **29s** per logdatum.
-- [ ] **Bevinding 8, nog open**: 160 `pa.urls`-rijen met `%`-encoding kunnen nooit matchen,
-      want de parser `unquote()`t de logpaden. 0,015% van de tabel; fix is beide vormen in
-      `URL_IDS` zetten en geldt alleen voor datums die je daarna verwerkt.
+- [x] **Bevinding 8 is gefixt** in `53fcea2` — stond hier tot 2026-08-13 onterecht als open.
+      160 `pa.urls`-rijen met `%`-encoding konden nooit matchen omdat de parser de logpaden
+      `unquote()`t; `load_url_ids()` zet nu de gedecodeerde vorm als extra sleutel erbij
+      (letterlijke sleutel wint). Geldt alleen voor datums die je daarna verwerkt.
 - [ ] **`get_top_urls()` terug naar `pa.bothits_url_daily`** is géén omzetting maar een
       ontwerpkeuze. Gemeten op 30 dagen: **21,5s koud / 9,4s warm**, tegen ~1s op de
       huidige bron. Met de query omgebouwd (eerst aggregeren op `url_id`, dan pas `pa.urls`

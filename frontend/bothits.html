@@ -877,8 +877,13 @@
 
     function chkbox(container, values, labels) {
         const el = document.getElementById(container);
+        // escapeHtml op beide (audit 2026-08-13). `values` voor hostFilter is
+        // META.hosts, dus pa.bothits_host.host, dus de x-host-header uit de log —
+        // norm_host() lowercaset alleen en skip_host() laat alles door dat op
+        // .beslist.nl eindigt. Elke andere data-sink in dit bestand escapet al; dit
+        // was er één van de twee die het niet deed.
         el.innerHTML = values.map((v, i) =>
-            `<label><input type="checkbox" value="${v}" checked> ${labels ? labels[i] : v}</label>`).join('');
+            `<label><input type="checkbox" value="${escapeHtml(v)}" checked> ${escapeHtml(labels ? labels[i] : v)}</label>`).join('');
     }
 
     // ---- Boot ------------------------------------------------------------
@@ -931,6 +936,13 @@
         drawType(summary);
         drawDepth(summary);
         drawBotTable(summary);
+        // Alleen als de URL's-tab ÓPEN staat (audit 2026-08-13). De filterkaart zit
+        // boven de tabstrip en is dus ook bruikbaar met die tab open: Toepassen
+        // verversde dan het Overzicht en liet de URL-rijen van de vórige selectie
+        // staan, onder een kop die de oude telling nog noemde. De reden om niet
+        // standaard mee te liften (zwaardere query, tab meestal dicht) blijft gelden —
+        // daarom de conditie in plaats van een onvoorwaardelijke aanroep.
+        if (document.getElementById('tab-urls')?.classList.contains('active')) loadUrls();
     }
 
     // Hier stond drawTiles(): zes tegels met totaal, AI-aandeel, productpagina's,
@@ -1586,7 +1598,7 @@
                 .filter(Boolean).join(' ');
             urlRows = await (await fetch(API + '/top-urls?' + params({ limit, q: qSend || null }))).json();
         } catch (e) {
-            tb.innerHTML = `<tr><td colspan="7" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
+            tb.innerHTML = `<tr><td colspan="6" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
             return;
         }
         // per_day hier en niet in SQL: het aantal dagen is dat waarop DEZE url in de
@@ -1739,9 +1751,14 @@
         const auto = st.auto_ingest
             ? `automatisch elke nacht om ${st.auto_ingest_at}`
             : 'automatische run staat uit (zet <code>BOTHITS_AUTO_INGEST=true</code>)';
-        let s = `Dropfolder: <code>${st.drop_dir}</code> — ${auto}.`;
-        if (st.running) s += ` <span class="badge bg-info">bezig sinds ${st.started_at}</span>`;
-        else if (st.error) s += ` <span class="badge bg-danger">fout: ${st.error}</span>`;
+        let s = `Dropfolder: <code>${escapeHtml(st.drop_dir || '')}</code> — ${auto}.`;
+        // badge-purple i.p.v. bg-info (audit 2026-08-13): style.css hertint .bg-info naar
+        // var(--color-section) — licht grijs — terwijl Bootstrap color:#fff laat staan, dus
+        // deze badge was wit-op-lichtgrijs en dus onleesbaar. Exact de val die
+        // UI_BLUEPRINT.md onder "Labels / badges" beschrijft. .badge-purple staat in
+        // style.css voor status-chips en overleeft die hertinting.
+        if (st.running) s += ` <span class="badge badge-purple">bezig sinds ${escapeHtml(st.started_at || '')}</span>`;
+        else if (st.error) s += ` <span class="badge bg-danger">fout: ${escapeHtml(st.error)}</span>`;
         else if (st.finished_at) {
             const p = st.result?.processed || [], k = st.result?.skipped || [];
             s += ` Laatste run ${st.finished_at}: ${p.length} datum(s) verwerkt`;

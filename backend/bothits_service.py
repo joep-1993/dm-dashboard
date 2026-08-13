@@ -170,7 +170,10 @@ def _filters(host=None, bot_class=None, bot_family=None, url_type=None,
         sql.append(f"{alias}.is_known_url")
     elif known == "unknown":
         sql.append(f"NOT {alias}.is_known_url")
-    return (" AND " + " AND ".join(sql) if sql else ""), params
+    # Geen `if sql else ""` meer (audit 2026-08-13): sql begint op ["b.is_tracked"],
+    # dus de lege tak was aantoonbaar onbereikbaar en suggereerde een filterloos pad
+    # dat niet bestaat.
+    return " AND " + " AND ".join(sql), params
 
 
 # ---------------------------------------------------------------------------
@@ -380,17 +383,25 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
                  bot_family=None, url_type=None, limit=250, force=False, q=None):
     """De meest gecrawlde URL's in de selectie.
 
-    BRON: pa.bothits_unknown_daily, en dat is een keuze uit nood (2026-08-13).
+    BRON: pa.bothits_unknown_daily — en LET OP, de reden daarvoor bestaat niet meer.
 
-    De tabel die hiervoor bedoeld was — pa.bothits_url_daily, per URL uit pa.urls —
-    staat stil sinds 2026-06-09: elke ingest daarna schrijft known_rows = 0, want de
-    match tegen pa.urls levert niets meer op. Dat is hetzelfde defect dat
-    `is_known_url` overal op false zet (zie de bevinding in cc1). Een top-X uit die
-    tabel zou voor elke recente selectie leeg zijn.
+    Deze keuze is op 2026-08-13 gemaakt omdat pa.bothits_url_daily stil stond: elke
+    ingest schreef known_rows = 0, dus praktisch élke gecrawlde URL viel in de
+    "onbekende" tabel en die tabel WAS toen de lijst van meest gecrawlde URL's.
 
-    pa.bothits_unknown_daily loopt wél door tot vandaag, en omdat de match kapot is
-    valt op dit moment prakisch élke gecrawlde URL daarin. Dus tot de ingest gerepareerd
-    is, IS dit de lijst van meest gecrawlde URL's.
+    Dat defect is diezelfde dag gerepareerd (expliciete fork-context, a2ee990), en
+    daarmee is de rechtvaardiging vervallen. Gemeten 2026-08-13: url_daily staat op
+    20.300.271 rijen t/m 2026-08-12, geen enkele ledgerdatum heeft nog known_rows = 0.
+    Gevolg voor DEZE functie, en dat is nu een echte beperking in plaats van een
+    tijdelijke: wat hier staat is alleen wat NIET in pa.urls zit. Op 2026-08-12 is dat
+    41.427 van 3,39 mln bot-hits (1,2%), en de 191.108 hits op bekende /c/-URL's —
+    precies de indexeerbare set — kunnen hier per constructie niet in voorkomen.
+    Productpagina's evenmin: ingest.py:447 schrijft die nooit naar deze tabel.
+
+    Terugzetten naar pa.bothits_url_daily is een ontwerpkeuze met een prijs, geen
+    omzetting: gemeten 21,5s koud / 9,4s warm over 30 dagen, of 4,5s met de query
+    omgebouwd (eerst aggregeren op url_id, dan pas pa.urls erbij voor de top 250).
+    Zie cc1/TASKS.md — dit is fase 3 van de audit, niet iets om en passant te doen.
 
     Wat je ervoor inlevert, en dat moet de UI zeggen: die tabel bewaart per dag de top
     500 per bot-familie. Een URL die elke dag net onder die grens blijft, staat er niet
@@ -445,7 +456,11 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
             JOIN pa.bothits_bot  b ON b.bot_id  = w.bot_id
             WHERE w.log_date BETWEEN %s AND %s {frag}
             GROUP BY w.url, w.url_type, w.facet_depth
-            ORDER BY hits DESC LIMIT %s
+            -- w.url als tie-break (audit 2026-08-13): op de standaardselectie zit rang
+            -- 250 op 208 hits met drie rijen gelijk, dus zonder tweede sleutel kiest
+            -- Postgres willekeurig welke twee je ziet en flapt de lijst tussen twee
+            -- identieke verzoeken. De hits zelf veranderen niet.
+            ORDER BY hits DESC, w.url LIMIT %s
         """, [start, end] + params + [limit])
     return _cached(key, run, force)
 

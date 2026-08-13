@@ -1,9 +1,13 @@
 """Bot Hits — FastAPI routes for the crawler-log dashboard.
 
-Op 2026-08-13 zijn /top-urls, /top-waste, /categories en /url eruit gegaan met de
-drie tabs die ze voedden (URL's, Crawl-verspilling, Categorieën). /url had toen al
-geen aanroeper meer in de frontend. De ingest vult de URL-tabellen nog steeds, dus
-terugzetten is deze endpoints plus hun service-functies terughalen uit git.
+Op 2026-08-13 zijn /top-waste en /categories eruit gegaan met de tabs die ze voedden
+(Crawl-verspilling, Categorieën). De ingest vult de URL-tabellen nog steeds, dus
+terugzetten is die endpoints plus hun service-functies terughalen uit git.
+
+/top-urls en /url stonden hier ook bij als verwijderd, maar zijn diezelfde dag met de
+herbouwde URL's-tab teruggekomen (e6d45cc). Ze leven en worden aangeroepen vanuit
+frontend/bothits.html — niet opruimen op gezag van deze docstring. Gecorrigeerd na de
+audit van 2026-08-13.
 """
 import asyncio
 import logging
