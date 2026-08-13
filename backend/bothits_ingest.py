@@ -585,6 +585,25 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
     hosts = {k[0] for k in cube}
     bots = {(k[1], k[2]) for k in cube}
 
+    # Tripwire vóór de DB-write (2026-08-13). De bestaande tripwire hieronder eist
+    # `bot_lines > 100_000`, dus juist het ergste geval glipt erdoor: een parse die
+    # HELEMAAL niets oplevert. Gemeten: 2026-08-09 kreeg een ledgerregel met
+    # files=2904, raw_lines=0, duration_s=0 en nul rijen in alle drie de tabellen —
+    # "2904 bestanden verwerkt" in nul seconden. De worker-pool was stuk (de machine
+    # kwam net uit host-slaap) en gaf lege resultaten terug; niets in de keten vond dat
+    # verdacht, en de dag stond daarna als volledig in de ledger met is_complete=true.
+    #
+    # Een dag met bestanden MOET regels opleveren; een CloudFront-logbestand is nooit
+    # leeg. Daarom hier hard stoppen in plaats van waarschuwen: een ontbrekende
+    # ledgerregel laat de dag opnieuw oppakken, een geschreven regel met nullen
+    # verstopt zich in de cijfers als een verkeersinstorting die nooit gebeurd is.
+    if files and not raw_lines:
+        raise RuntimeError(
+            f"[{log_date}] parse leverde 0 regels uit {len(files)} bestanden — "
+            f"vermoedelijk een kapotte worker-pool. Niets weggeschreven; "
+            f"draai deze datum opnieuw."
+        )
+
     conn = get_db_connection()
     try:
         host_ids, bot_ids = _dim_ids(conn, hosts, bots)
