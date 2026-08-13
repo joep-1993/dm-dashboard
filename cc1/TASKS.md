@@ -4,6 +4,103 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-13 — SEO Priority: false positives op globaal uitgeschakelde facetten
+
+Vervolg op de sessie hieronder. Joep meldde dat de tool zei dat het **Winkel**-facet aanstond
+op categorie Insectenhotel terwijl hij dat live niet zag. De taxonomy API gaf de website
+gelijk; onderweg bleek de settings-rij-fallback van diezelfde ochtend te ruim. Volledige
+uitleg in LEARNINGS (bovenaan).
+
+- [x] **Gecontroleerd tegen taxv2: Winkel staat níet aan op Insectenhotel (9003879).** Facet
+      3252 heeft `isEnabled=false`, hangt aan **0** categorieën API-breed, en de
+      `CategoryFacetSettings`-rij (40901) heeft `seoPriority=null` — een restant van de
+      bulk-seed van 16-03, geen bewijs van leven.
+- [x] **BUG: `resolve()`-fallback promoveerde dode facetten tot schrijfbare kandidaat.** Een
+      settings-rij bewijst *identiteit*, niet *levensvatbaarheid*. De master-`isEnabled` werd
+      nergens in de pipeline gelezen terwijl hij gratis in beide payloads meekomt.
+- [x] **Guard in `resolve()`** — vierde returnwaarde `blocked_reason`; zulke rijen worden
+      `keep` / `disabled` mét reden i.p.v. een voorstel. `_parse_target("disabled")` → `None`.
+- [x] **Onafhankelijke guard in `_apply_one()`** — weigert te schrijven naar een
+      `isEnabled=false` facet, ongeacht wat de run voorstelde. Nodig omdat oude runs
+      `proposed_seo_prio='1'` al opgeslagen hebben en een heropende run die anders alsnog
+      doorduwt. Bij een API-storing bewust *niet* blokkeren (falen naar schrijven).
+- [x] **Impact gemeten op de run van 19 mei**: 2.538 rijen op globaal uitgeschakelde
+      facetten, waarvan **1.711 een flip voorstelden**; 98% is `winkel`. Nooit toegepast —
+      `pa.seo_prio_apply_log` bevat geen winkel-write, dus niets op te ruimen.
+- [x] **Getest**: offline stub-test (alle guards + de `s_dierenhuis`-case die moet blijven
+      werken) én live tegen taxv2 op 9003879 — winkel BLOCKED, de zes echte facetten ok.
+- [x] **Skill-docs gecorrigeerd** (`~/.claude/skills/beslist-apis/`, buiten deze repo):
+      `Winkel (ID: 1)` was fout (404); het zijn **31 facetten**, alle `isEnabled=false`.
+      Plus de bredere val: **slugs zijn niet uniek** (Merk 1289 *én* 3253, Kleur 5657 *én*
+      3255 — één kopie per hoofdcategorie-boom). Nieuwe sectie *"Verifying a facet is
+      actually live"* met het drielagenmodel.
+
+**Openstaand:**
+
+- [ ] **De 43 slugs die tijdens de impactmeting timeouten nog natellen.** De 2.538 is een
+      ondergrens: de telling keek alleen naar slugs waarvan élke kopie uitstaat, terwijl de
+      guard ook per-categorie dode kopieën vangt. #priority:low
+- [ ] **Overweeg `isHidden` net zo te behandelen als `isEnabled`.** Een facet met
+      `isHidden=true` op déze categorie rendert hier ook niet, maar `seoPriority` erop zetten
+      is niet per se zinloos (het is een andere as). Nu stelt de tool er nog flips op voor —
+      bewust gelaten, maar het verdient een expliciet besluit. #priority:medium
+- [ ] **Run-brede assert uitbreiden**: naast "0% geresolved" ook alarmeren als een
+      significant deel van de voorgestelde flips op `blocked` facetten landt. #priority:low
+
+### 2026-08-13 — SEO Priority: resultatentabel met vinkjes + write-back naar taxv2
+
+Vraag van Joep: na een run kreeg je alleen "Download excel"; hij wilde de resultaten in een
+tabel zien en geselecteerde rijen doorschieten naar de Taxonomy API. Onderweg bleken drie
+leesfouten in de bestaande analyse — zonder die fixes was er niets te schrijven geweest.
+Volledige uitleg in LEARNINGS (bovenaan).
+
+- [x] **Resultatentabel is niet meer verstopt.** Klapt vanzelf open als een run klaar is, en
+      er staat nu een **Results**-knop per run in de historie (de tabel zat achter een klik
+      op het run-id — niemand vond dat). Nieuwe kolommen: `seoPriority` (`inherit → ON`) en
+      `Applied`.
+- [x] **Vinkjes + apply-balk.** Per rij een checkbox (uit bij `keep`, bij een ontbrekend
+      `facet_id` en bij al toegepaste rijen, met een `title` die zegt wáárom), select-all in
+      de header, *Select all actionable* over het hele filter heen, *Clear*. Selectie
+      overleeft sorteren/filteren/pagineren omdat hij op `(deepest_cat_id, facet_slug)` zit
+      — dezelfde sleutel waarop de backend de rij opzoekt.
+- [x] **`POST /api/seo-prio/apply/{run_id}`** — read-merge-write + read-back per facet, max
+      300 rijen per call, categorieën 4-parallel en facetten binnen een categorie serieel.
+      Dry-run schakelaar; de knoptekst verandert mee ("Preview (dry run)" vs "Apply N to
+      Taxonomy") zodat een preview nooit als een echte push leest. Live pushen vraagt een
+      confirm met de ON/OFF-aantallen.
+- [x] **Audit-trail** `pa.seo_prio_apply_log` (incl. dry runs, `applied_by`), plus
+      `applied_status/_value/_at/_error` op de resultaatrijen. Log overleeft het verwijderen
+      van een run.
+- [x] **BUG: legacy PDM-id gebruikt als taxv2 category-id.** Hele slug wordt nu gemapt via
+      `backend/data/cat_urls.csv`. 25.805/25.808 combo's resolven.
+- [x] **BUG: facet `urlSlug` uit `labels[]` lezen** i.p.v. van het facet-object — hierdoor
+      hadden ALLE rijen in alle bestaande runs `facet_id = NULL`.
+- [x] **BUG: `bool("inherit") is True`** in `_decide()` — `turn_on` kon nooit voorkomen en
+      `turn_off` werd voorgesteld voor facetten die nooit aan stonden.
+- [x] **Fallback voor verborgen facets** (staan niet in `GET /api/CategoryFacets`, houden wel
+      hun settings-rij) via `GET /api/Facets?searchTerm=`, alleen geaccepteerd als de
+      categorie al een settings-rij voor dat facet heeft.
+- [x] **Live geverifieerd met een omkeerbare write** (kleur/3255 @ Insectenhotel 9003879:
+      `inherit → ON`, read-back ok, `displayOrder 6` intact, daarna terug naar `null`; geen
+      ander facet geraakt). Resultaatrij daarna teruggezet.
+
+**Openstaand:**
+
+- [ ] **Bestaande runs opnieuw draaien.** Alles van vóór vandaag heeft verkeerde
+      voorstellen (en `facet_id = NULL`, dus de vinkjes staan uit — je kunt er niets mee
+      doorschieten). Niet automatisch te repareren: de `current_seo_prio` van die runs is
+      nooit echt gelezen. #priority:medium
+- [ ] **`current_seo_prio` is de EXPLICIETE waarde, niet de effectieve.** Staat een facet op
+      `inherit` terwijl de ouder `seoPriority=true` heeft, dan is hij feitelijk aan maar
+      leest de tool "inherit" — en `turn_off` vuurt alleen op expliciet-ON. Bewuste keuze
+      (conservatief), maar het betekent dat de tool erfelijk-aan-staande facetten niet kan
+      uitzetten. taxv2 geeft de effectieve waarde nergens kant-en-klaar terug: de
+      `seoPriority` op `LinkedFacetDto` is iets anders dan die in CategoryFacetSettings
+      (Grasmaaiers 3784: `null` vs `true`). Uitzoeken vóór iemand hierop vertrouwt.
+      #priority:medium
+- [ ] **Overweeg een run-brede assert**: als 0% van de facetten resolvet, is de run stuk —
+      nu wordt dat alleen naar de console geprint. #priority:low
+
 ### 2026-08-13 — Bot-analyse: ByteDance, legacy product-URL's en de WAF-challenge
 
 Analysesessie, geen codewijziging. Alles uit de ruwe CloudFront-logs (13–28 juli +

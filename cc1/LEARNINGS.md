@@ -1,6 +1,144 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## "Staat dit facet aan?" heeft drie antwoorden, en `seoPriority` is geen van drieën (2026-08-13)
+
+Joep: _"SEO Priority zegt dat de Winkel-facet aanstaat in categorie Insectenhotel, maar
+live zie ik dat niet."_ De taxonomy API gaf de website gelijk, en de weg daarheen legde
+een fout bloot in de fallback die we diezelfde dag hadden gebouwd (entry hieronder).
+
+**Of een facet rendert, hangt aan drie onafhankelijke lagen, in drie verschillende
+resources.** Eén ervan checken is precies hoe je een false positive maakt:
+
+| Laag | Endpoint | Blokkeert bij |
+|---|---|---|
+| 1. Master facet | `GET /api/Facets/{id}` | `isEnabled: false` → overal dood |
+| 2. Categorie-koppeling | `GET /api/CategoryFacets?categoryId=` | facet ontbreekt |
+| 3. Per-categorie settings | `GET /api/CategoryFacetSettings/{cat}/{facet}` | `isHidden: true` |
+
+`seoPriority` woont in laag 3 en staat **los van 1 en 2**: hij kan `true` zijn op een facet
+dat laag 1 al gekild heeft. `null` betekent *inherit / niet gezet*, niet `false`. Handige
+kruiscontrole: `GET /api/Facets/{id}/main-categories` geeft `categoryCount` +
+`isEnabledAnywhere` — `0` / `false` betekent dat het facet nergens aan hangt.
+
+Insectenhotel is **9003879** (Tuinartikelen 36000 › Vogelhuisjes 9001466), en daar:
+
+| Facet | `isEnabled` | Gekoppeld | `isHidden` | `seoPriority` | Live? |
+|---|---|---|---|---|---|
+| Winkel (3252) | **false** | **nee** (0 rijen API-breed) | null | null | nee — dood in laag 1 én 2 |
+| Soort (6086) | true | nee (verborgen facetten vallen eruit) | **true** | **true** | nee — laag 3 verbergt hem |
+| Materiaal (3254) | true | ja | null | true | ja |
+
+**Er is geen facet-ID 1.** `GET /api/Facets/1` geeft 404. Onze skill-docs noemden al jaren
+`Winkel (ID: 1)`. In werkelijkheid bestaat `winkel` als **31 losse facet-ID's** (3252,
+3643, 5474, 5837-5842, 47, 49, 101, ...) en **alle 31 staan op `isEnabled: false` met
+`categoryCount: 0`**. Dieper punt: **slugs zijn niet uniek.** Dezelfde `urlSlug` bestaat
+één keer per hoofdcategorie-boom — Merk is 1289 *én* 3253, Kleur is 5657 *én* 3255. Elke
+tabel die "facet X = ID N" claimt, liegt zodra je buiten die ene boom komt. Resolve altijd
+per categorie via `/api/CategoryFacets`.
+
+**De bug die dit blootlegde: het bewijs dat we voor de fallback kozen, bewees iets anders
+dan we dachten.** `resolve()` accepteert een kandidaat zodra de categorie een
+`CategoryFacetSettings`-rij voor dat facet heeft — bedoeld voor verborgen facetten als
+`s_dierenhuis`. Maar zo'n rij bewijst **identiteit** ("dít is het juiste facet voor deze
+categorie"), niet **leven** ("dit facet doet iets"). Insectenhotel heeft rij 40901 voor
+Winkel/3252, een restant van de bulk-seed van 2026-03-16. Daarmee promoveerde de fallback
+een lijk tot schrijfbare kandidaat, en `_decide()` kon er vrolijk `turn_on` op voorstellen.
+De master-`isEnabled` werd nergens in de pipeline gelezen, terwijl hij **gratis meekomt** in
+zowel de `CategoryFacets`- als de `Facets?searchTerm=`-payload.
+
+Omvang, gemeten op de laatste volledige run (19 mei, 25.808 rijen): **2.538 rijen op
+globaal uitgeschakelde facetten, waarvan 1.711 een flip voorstelden.** 98% is `winkel`
+(2.499 rijen / 1.680 flips / 145.342 visits). Ondergrens: die telling keek alleen naar
+slugs waarvan élke kopie uitstaat. Nooit daadwerkelijk toegepast —
+`pa.seo_prio_apply_log` bevat geen enkele winkel-write, dus niets op te ruimen.
+
+Fix in `backend/seo_prio_service.py`, drie guards, geen extra calls in het hoofdpad:
+- `_get_cat_facets()` / `_global_facets_by_slug()` dragen `enabled` mee uit de payload.
+- `resolve()` geeft een vierde waarde `blocked_reason`; zulke rijen worden `keep` /
+  `disabled` mét reden in plaats van een voorstel. `_parse_target("disabled")` → `None`.
+- `_apply_one()` weigert **onafhankelijk** te schrijven naar een `isEnabled=false` facet.
+  Nodig omdat runs van vóór vandaag `proposed_seo_prio='1'` al opgeslagen hebben; een
+  heropende run mag die niet alsnog doorduwen.
+- Bij een API-storing is `blocked` bewust `None` — een hapering mag Apply niet stilletjes
+  in een no-op veranderen. Falen naar "schrijven", niet naar "blokkeren".
+
+**Les: bij een fallback op "bewijs" — vraag je af waarvan het bewijs is.** Een settings-rij
+bewijst identiteit, niet levensvatbaarheid; wij gebruikten hem voor allebei. En: een kolom
+die `current → **proposed**` rendert, leest voor een gebruiker als de huidige stand. Joeps
+"staat aan" was letterlijk de vetgedrukte helft van ons eigen voorstel.
+
+## Een tool die alleen leest, verbergt zijn eigen leesfouten (SEO Priority) (2026-08-13)
+
+Vraag was klein: "ik krijg alleen Download excel, kan ik de resultaten in een tabel zien
+met vinkjes om ze door te schieten naar de taxonomy API?" De tabel bestond al (verstopt
+achter een klik op het run-id in de historie), dus dat was een half uur werk. Maar zodra
+de rijen ook echt geschreven moesten worden, bleek de analyse er al die tijd naast te
+zitten — en niets in de UI liet dat zien. **25.808 van de 25.808 rijen in de grote run
+hadden `facet_id = NULL`.** Niet één rij was schrijfbaar. Drie fouten, alle drie stil:
+
+**1. Het getal achteraan de URL-slug is niet het taxv2 category-id.** `parse_url()` pakte
+de laatste numerieke chunk: `tuin_accessoires_504077_5335060` → `5335060`. Dat is een
+legacy PDM-id. Het taxv2-id van diezelfde categorie (Insectenhotel) is **9003879**. En de
+API vertelt je dat niet: `GET /api/Categories/5335060` geeft netjes 404, maar
+`GET /api/CategoryFacetSettings?categoryId=5335060` geeft **200 met `[]`**. Een verkeerd
+id ziet er dus uit als "categorie zonder instellingen", niet als een fout. Elke rij kreeg
+daardoor `current_seo_prio = "inherit"` — een verzonnen waarde die volkomen echt oogt.
+- Fix: map de **hele** slug via `backend/data/cat_urls.csv` (`url_name;cat_id`), de cache
+  die `category_lookup.py` uit de taxonomy-walk schrijft. Dekking gemeten op de grote run:
+  **25.805 van 25.808 combo's**, 100,0% van de bezoeken. Scheelt de walk van ~168s.
+- Wat niet resolvet krijgt `deepest_cat_id = "slug:<urlslug>"` en een reden in de rij, in
+  plaats van een id dat toevallig een getal is.
+
+**2. `urlSlug` staat niet op het facet-object.** De resolver deed `facet.get("urlSlug")` en
+kreeg altijd `None`; de slug zit in `facet.labels[]` **per locale**. De hele
+slug→facet_id-mapping was dus permanent leeg. Zelfde valkuil als bij categorieën
+(`category_lookup.py` had het commentaar er al bij staan: _"NB urlSlug is not a top-level
+field"_) — dat inzicht was gewoon niet overgenomen in deze tool.
+
+**3. `bool("inherit")` is `True`.** `_decide()` kreeg de dict mét het al-omgezette
+**label** en deed `cur_on = bool(cur_raw) is True`. Elke waarde — `"ON"`, `"OFF"`,
+`"inherit"` — werd dus "staat al aan". Gevolgen: `turn_on` kon **nooit** voorkomen (de
+tool kon je nooit vertellen wat je aan moest zetten), en `turn_off` werd voorgesteld voor
+facetten die nooit aan hebben gestaan — Joeps `winkel`-rij op Insectenhotel stond op
+`inherit` en kreeg "currently ON" in de reden meegeschreven. De reden-tekst loog dus
+letterlijk mee. Fix: de rauwe `bool|None` gaat als aparte parameter mee.
+
+**De rode draad: dit waren drie leesfouten in een read-only tool, en read-only tools
+hebben geen moment waarop iemand controleert of wat ze lezen klopt.** Een run "slaagde",
+produceerde 25.808 keurige rijen, een Excel rolde eruit — en de kolom die het hele oordeel
+draagt (`current_seo_prio`) was voor 100% verzonnen. Pas toen die kolom een PUT moest
+worden, viel het om. Wie een analysetool bouwt tegen een externe API: **assert dat de
+lookup íets oplevert** (`0 van 25.808 facetten geresolved` had dit op dag één gevangen),
+en laat "onbekend" nooit dezelfde waarde krijgen als een geldige uitkomst — "inherit" was
+hier tegelijk een echte taxonomiewaarde én de stille foutcode.
+
+**Verborgen facets ontbreken in `GET /api/CategoryFacets` maar houden hun settings-rij.**
+`s_dierenhuis` (6086) is `isHidden=true` op Insectenhotel en staat dus niet in de
+linked-facets lijst, terwijl er wél een rij met `seoPriority=true` bestaat. "Facet niet
+gekoppeld" was daar een onterechte conclusie. Fallback: `GET /api/Facets?searchTerm=<slug>`
+en accepteer alleen een kandidaat waarvoor de categorie **al een settings-rij heeft** — die
+rij is het bewijs dat het het juiste facet is; een kale slug-match is dat niet (denk aan
+de vier "Fanshop"-facetten).
+
+**De write-back zelf** (`POST /api/seo-prio/apply/{run_id}`): read-merge-write per facet,
+daarna teruglezen en vergelijken vóór hij "applied" meldt. `unitAmount` zit wél in de live
+DTO maar niet in `scripts/swagger_taxv2.json`; hij gaat mee in de body en bij een 400 gaat
+de PUT opnieuw zónder dat veld — beter dan stilzwijgend een veld nullen dat de spec nog
+niet kent. Categorieën parallel (4), facetten binnen een categorie serieel, zodat twee
+writes op dezelfde categorie elkaar niet inhalen. Alles landt in `pa.seo_prio_apply_log`,
+dry runs inbegrepen en als zodanig gemarkeerd.
+
+**Live geverifieerd met een omkeerbare test** (afgestemd met Joep): `kleur` (3255) op
+Insectenhotel `inherit → ON`, read-back `true`, `displayOrder 6` intact, daarna terug naar
+`null`. Geen enkel ander facet in die categorie veranderde. Daarna de rij in
+`pa.seo_prio_results` teruggezet, want een tabel die "applied" zegt over een write die is
+teruggedraaid, is een tweede leugen.
+
+**Oude runs in de historie hebben verkeerde voorstellen.** Ze zijn niet gevaarlijk: zonder
+`facet_id` staan al hun vinkjes uit, dus je kúnt er niets mee doorschieten. Opnieuw
+draaien is de enige route.
+
 ## Een fix die je op één platform valideert kan op een ander niet eens starten (2026-08-13)
 
 Vanmiddag repareerde ik de kapotte `is_known_url` door de worker-pool expliciet te laten
@@ -4836,7 +4974,7 @@ User example: `/products/sport_outdoor_vrije-tijd/.../r/opvouwbare_wandelstok_an
 
 ## SEO week 23 vs 22 drop — internal factors cleared; seo_prio runs are PROPOSALS only (2026-06-12)
 Channel SEO wk23 (31 May–6 Jun) vs wk22: revenue −17%, visits −5%. Conclusion: **purely external** (summer-category seasonality + WK-voetbalshirt spike deflating + one-off orders). Key findings while verifying:
-- **`pa.seo_prio_runs`/`seo_prio_results` propose, never apply.** `seo_prio_service.py` is analysis-only (no PUT to taxv2 anywhere in dm-tools/dm-dashboard). The 2026-05-19 run proposed 10,709 `turn_off`s; live check of ALL 2,652 affected categories via `GET /api/CategoryFacetSettings?categoryId=` showed only **62 of them actually off** — and `pa.publish_log` is the daily ~250K-URL content publish (counts fluctuate daily), NOT a noindex push; don't read seo-prio application into it.
+- **`pa.seo_prio_runs`/`seo_prio_results` propose, never apply.** `seo_prio_service.py` is analysis-only (no PUT to taxv2 anywhere in dm-tools/dm-dashboard). **⚠️ ACHTERHAALD PER 2026-08-13** — de tool kán nu wél schrijven (`POST /api/seo-prio/apply/{run_id}`, alleen op handmatig aangevinkte rijen, gelogd in `pa.seo_prio_apply_log`). Voor forensiek ná die datum: een rij met `applied_status='applied'` is een echte write, en `pa.seo_prio_apply_log` is de bron voor wie/wanneer. Vóór 13-08-2026 blijft de conclusie hieronder staan. Zie de entry bovenaan dit document. Het onderzoek zelf: de 2026-05-19 run proposed 10,709 `turn_off`s; live check of ALL 2,652 affected categories via `GET /api/CategoryFacetSettings?categoryId=` showed only **62 of them actually off** — and `pa.publish_log` is the daily ~250K-URL content publish (counts fluctuate daily), NOT a noindex push; don't read seo-prio application into it.
 - **A real manual batch happened 2026-05-28** (in wk22): 446 CategoryFacetSettings flipped `seoPriority=false` tree-wide, concentrated in Meubels/Woonaccessoires (`t_meubelset` 120×, `kleur` 47×, `gelegenheid_woonacc` 40×, `t_stoel` 19×). Only 62 overlap the run's turn_off list; **8 were facets the run said KEEP**; 380 had ~zero visits. Status-check of the 70 with traffic (UA `Beslist script voor SEO`): 26×301 (taxonomy consolidation upward — flips justified), **44 still 200**. Biggest live-page loss: **Bureaustoelen `t_stoel`** (1,081 visits/yr, run said keep, page 200) — revert candidate. Net traffic impact of the whole batch ≈200 visits/wk → NOT a driver of the −17%.
 - **Verification recipe**: taxonomy IDs ≠ legacy URL ids — BFS `GET /api/Categories/{id}` per node (tree returns ONE level of subCategories per call; 3,575 fetches), map legacy id from the nl-NL urlSlug tail (`…_484303`), then sweep `CategoryFacetSettings` per category and filter `updatedAt`. ~3.5K+2.6K requests with 20-thread pool ≈ minutes.
 - **Shop-grain dissolves "anomalies"**: Bedden (+18% visits/−74% rev) = ONE Emma-sleep.nl €1,103 SEO transaction in wk22 (shop fully active wk23, all channels); Sportshirts = Voetbalshop.nl WK spike (558→109 outclicks, €1,873→€218, partly offset by Voetbalshirtskoning €70→285 / bol.com Plaza €99→575); Shirts = ~€2 transactional base, pure noise. Note `revenue_excl` (shop omzet, transaction grain) ≠ visit-grain attributed revenue — patterns match, absolutes don't.
