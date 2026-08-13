@@ -216,11 +216,22 @@ dezelfde reden geen maat: complete dagen lopen legitiem van 1.591 tot 4.969 best
 - [ ] **`preview()` doet 6 LIST-calls per datum serieel** op de gedeelde 4-thread pool
       (270 round-trips bij `days=45`, vandaar de 120s AbortController); `fetch()` doet
       dezelfde listing nóg eens.
-- [ ] Dedup: één `_filters` (nu woordelijk gedupliceerd in `_unknown_filters`, en dat is hoe
-      de blinde vlek van risico A overleefde) · één vocabulairebron voor de ruwe `url_type`s
-      (nu string-literals in ingest, service én frontend) · `FILE_DATE_RX` en de ledger-query
-      delen tussen ingest en s3 · veldindices hoisten en `unquote` ná de bot-check (~8%
-      gemeten, 55% van de regels is non-bot) · `heapq.nlargest` i.p.v. een volledige sort.
+- [ ] **Dedup, en fase 3 heeft dit punt gróter gemaakt i.p.v. kleiner** — eerlijk opschrijven
+      want het is mijn eigen schuld:
+      * **Drie** filter-builders nu, geen twee: `_filters` (cube, alias `d`, kent
+        `is_known_url`), `_unknown_filters` (alias `w`) en het in fase 3 toegevoegde
+        `_known_filters` (alias `d` op `url_daily`, kent géén url_type). De host- /
+        bot_class- / bot_family-takken zijn in alle drie woordelijk gelijk. Zo overleefde
+        de blinde vlek van risico A, en er is nu één plek méér om te vergeten.
+      * **Vier** kopieën van het ruwe `url_type`-vocabulaire: `url_type()` in de ingest,
+        `URLTYPE_BUCKETS` in de service, `SLASH_TYPES` in de frontend, en sinds fase 3
+        `SQL_URL_TYPE`/`SQL_FACET_DEPTH` in SQL. Die laatste is geverifieerd tegen de
+        Python (20.000 rijen, 0 verschillen) maar dat is een momentopname, geen binding.
+        Één bron die `/api/bothits/meta` ook publiceert is de echte fix.
+      * `FILE_DATE_RX` en de ledger-query delen tussen ingest en s3.
+      * Perf: veldindices hoisten en `unquote` ná de bot-check (~8% gemeten, 55% van de
+        regels is non-bot) · `heapq.nlargest` i.p.v. een volledige sort van ~1,1 mln
+        tuples om er 500 te houden.
 
 **Twee dingen om te weten bij het oppakken:** :8003 draait met `--reload`, dus elke `.py`-edit
 herstart de server en breekt een lopende ingest af — draai een regressie-ingest als los
