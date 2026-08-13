@@ -1,6 +1,75 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een worker-pool erft de start-methode van hoe de app zélf gestart is (2026-08-13)
+
+De oorzaak van 30 verpeste logdatums. `uvicorn --reload` start de applicatie via een
+**spawn**-context, en een child erft die default. Elke `ProcessPoolExecutor` in de server
+spawnde daardoor in plaats van te forken: de workers importeerden de module opnieuw en
+begonnen met een lege `URL_IDS` en `IP_RANGES` — de twee dicts die de parent expliciet
+vóór het forken vult omdat ze via copy-on-write gedeeld moeten worden.
+
+- **Twee onafhankelijke globals die op dezelfde runs falen is het bewijs.** `known_rows = 0`
+  alleen leest als een matchprobleem; er ook `verify_state = 'unchecked'` naast zien
+  (terwijl de backfill-datums `verified`/`failed` dragen) sluit dat uit. Zoek bij een
+  vermoeden altijd een tweede, ongerelateerde consument van hetzelfde mechanisme.
+- **Waarom de tests van de dag ervoor allemaal "goed" waren:** die liepen in een SCRIPT, en
+  daar is de default fork. `process_file()` werkte, de lookup vulde zich, een worker erfde
+  de global — allemaal waar, allemaal in de omgeving waarin het niet kapot is. Reproduceer
+  in de omgeving waar het faalt, of je test iets anders dan wat je onderzoekt.
+- **Vertrouw niet op de default van `multiprocessing`.** Geef expliciet
+  `mp_context=multiprocessing.get_context("fork")` mee als je op copy-on-write leunt.
+  Python 3.14 zet de default op forkserver en op macOS is spawn al de default, dus dit gaat
+  hoe dan ook een keer om — en dan blijft de lookup stil leeg in plaats van te klagen.
+
+**Les: als een pool-worker "niets weet", check de start-methode vóór je de data verdenkt.
+En zet in de code vast wat je nodig hebt, want dit faalt zonder foutmelding.**
+
+## Doe een gratis probe voordat je een bulkoperatie start (2026-08-13)
+
+De opdracht was "haal die 30 logdatums opnieuw uit S3" — 87.228 bestanden, 29,8 GB, ~2½
+uur. Eén datum stond nog niet in de ledger, dus die kon ik ophalen zonder iets te
+verwijderen: 3,5 mln bot-hits, `known_rows = 0`. De bug was nog live, en de bulkoperatie
+zou 30 GB hebben gekost om 30× hetzelfde kapotte resultaat te produceren.
+
+- **Zoek de goedkoopste variant van de operatie die de aanname toetst.** Hier: een datum
+  die nog niet geladen was, dus nul risico en geen ledger-rijen om te verwijderen.
+- De probe leverde meteen ook het bewijsmateriaal dat de sessie ervoor ontbrak: de
+  bronbestanden bleven op schijf staan, dus het was naast de server na te spelen.
+- **De opdracht was "repareer die datums", niet "download 30 GB".** Dat onderscheid is wat
+  je toestaat om te stoppen na één datum en met een oorzaak terug te komen in plaats van
+  met 30 identiek kapotte dagen.
+
+## Een conditie lezen is niet hetzelfde als hem meten — ook niet in een audit (2026-08-13)
+
+In een audit rapporteerde ik: "`scan_tree` slaat `_processed/` over, dus het herstelpad
+vindt de bestanden niet." Ik had de regel gelezen:
+
+```python
+if os.path.basename(dirpath) == "_processed":
+    continue
+```
+
+Dat oogt sluitend en is het niet. `os.walk` levert elke submap als eigen tupel, dus voor
+`_processed/2026-08-12` is de basename `2026-08-12` en de check vuurt nooit. Het echte
+gedrag was het **omgekeerde** van wat ik rapporteerde: elke run schuimde het volledige
+archief af — gemeten 46.097 bestanden waarvan 2.905 gearchiveerd, groeiend met ~2.900 per
+dag — en "archiveerde" datums die er al stonden over zichzelf.
+
+- **Twintig regels Python die de oude en nieuwe skip-logica naast elkaar op de echte map
+  laten lopen, gaven het antwoord in vijf seconden.** Dat had ik moeten doen vóór ik het
+  als bevinding opschreef, niet erna.
+- Een audit die *één* bevinding omdraait, verliest niet één punt maar het vertrouwen in de
+  hele lijst. Meet de bevindingen waarvan het gedrag te meten is; laat de rest als
+  "needs verification" staan.
+- Bijgevolg was mijn "fix" een echte gedragswijziging (het archief wordt nu wél
+  overgeslagen) en moest er een expliciet herstelpad bij — `backfill --date` leest nu wél
+  uit het archief. Een verkeerd gediagnosticeerde bevinding maakt de fix duurder, niet
+  alleen de analyse.
+
+**Les: in een audit is "ik heb de conditie gelezen" geen bewijs. Als het gedrag met een
+script te meten is, meet het — zeker vóór je er een fix op bouwt.**
+
 ## Twee uvicorn-instanties op één poort: mijn deploys landden nergens (2026-08-13)
 
 Joep vroeg het dashboard te starten. `ps aux | grep uvicorn` gaf niets en

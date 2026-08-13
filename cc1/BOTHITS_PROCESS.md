@@ -126,6 +126,43 @@ benoemde familie vereist toch al een codewijziging in `CANON_NAMES`.
 
 ---
 
+## Staging, archief en het herstelpad (2026-08-13)
+
+Verwerkte bronbestanden verhuizen naar `<staging>/_processed/<datum>/`. Drie dingen om
+te weten sinds de audit:
+
+* **Retentie.** `BOTHITS_STAGING_RETENTION_DAYS` (default **21**, `0` = nooit) ruimt na
+  een run datummappen op die ouder zijn dan de grens. Ze bleven eerder eeuwig staan:
+  ~900 MB per logdatum, 30 GB op de meetdag. 21 dagen omdat de bucket ~42 dagen bewaart —
+  binnen die termijn is een datum zowel opnieuw te downloaden áls lokaal te herladen.
+* **Het archief wordt écht overgeslagen.** De skip in `scan_tree` vergeleek de basename
+  met `_processed` en sloeg dus alleen die map zelf over, niet de datum-submappen: elke
+  run schuimde het hele archief af (46.097 bestanden op de meetdag, +2.900/dag).
+* **Herstel van één datum**, en dit is de procedure die je wilt als een ingest fout ging:
+
+  ```bash
+  # ledger-rij weg, anders slaat de ingest de datum over
+  # (de feiten blijven staan tot de herverwerking ze vervangt)
+  python - <<'PY'
+  from backend.database import get_db_connection, return_db_connection
+  c = get_db_connection(); cur = c.cursor()
+  cur.execute("DELETE FROM pa.bothits_ingest WHERE log_date = '2026-08-12'")
+  c.commit(); return_db_connection(c)
+  PY
+  # opnieuw verwerken UIT HET ARCHIEF, zonder te downloaden
+  python -m backend.bothits_ingest backfill --src ~/bothits_s3 --date 2026-08-12
+  ```
+
+  `--date` zet `include_archived=True`, dus dit leest wél uit `_processed/`. Zonder die
+  vlag vindt een gerichte herlaad niets en moet je 900 MB per dag opnieuw uit S3 halen.
+
+**Draai een lange ingest nooit via de server met `--reload`.** Elke `.py`-edit herstart
+uvicorn en breekt de run af. Los proces:
+`setsid nohup env PYTHONPATH=<repo> ./venv/bin/python <script> > log 2>&1 &`. En het is
+ook nog sneller om een andere reden — zie hieronder.
+
+---
+
 ## Logs uit S3 halen (knop "Nieuwe logs ophalen", 2026-08-11)
 
 Tot 11-08 was dit handwerk: `~/projects/cloudfront-logs/download_cloudfront_logs.py`
@@ -197,6 +234,21 @@ python3 -m backend.bothits_ingest status
 
 ~55 s per logdatum op 16 cores; 116 dagen ≈ 1 uur 45.
 
+**Sinds 2026-08-13 sneller én betrouwbaarder** — en die twee hangen samen met hoe je hem
+start:
+
+* De UA-classificatie zat in de hot loop: per logregel een `unquote()` plus tot 33
+  regex-searches, terwijl een logdatum maar ~950 unieke user-agents draagt. Er zit nu een
+  memo op de ruwe UA-string met een unie-regex als snelle afwijzing ervoor. Gemeten:
+  0 verschillen op 117.492 echte logregels, byte-voor-byte identieke uitkomst
+  end-to-end, en **125 s → 29 s** voor 2026-08-12 (2.905 bestanden, 6,9 mln regels).
+* De pool krijgt een **expliciete fork-context**. Zonder dat erfde hij de start-methode
+  van hoe de app gestart was, en `uvicorn --reload` gebruikt spawn — dan importeren de
+  workers de module opnieuw en beginnen ze met een lege `URL_IDS` en `IP_RANGES`. Dat
+  heeft 30 logdatums verpest (`known_rows = 0`, `verify_state = 'unchecked'`). De
+  tripwire schreeuwt nu in het log als een datum met >100k bot-hits nul bekende URL's
+  oplevert.
+
 **Idempotent per logdatum**: elke ingest doet eerst `DELETE ... WHERE log_date = X`.
 Dezelfde map twee keer droppen verdubbelt dus niets. (Dat is ook waarom een
 `TRUNCATE` nooit nodig is — en die wordt door een hook geblokkeerd op deze
@@ -212,6 +264,8 @@ gedeelde DB, terecht.)
 | `BOTHITS_AUTO_INGEST_AT` | `04:30` | tijdstip |
 | `BOTHITS_WORKERS` | `12` | parallelle parsers |
 | `BOTHITS_KEEP_SOURCE` | — | `1` = niet naar `_processed/` verplaatsen |
+| `BOTHITS_STAGING_RETENTION_DAYS` | `21` | hoe lang `_processed/<datum>/` blijft staan; `0` = nooit opruimen |
+| `BOTHITS_UA_MEMO_MAX` | `50000` | grens op de UA→familie-memo (een spoofer kan oneindig unieke UA's sturen) |
 | `BOTHITS_S3_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` | — | S3-credentials; zonder deze geeft de knop een 400 i.p.v. een 500 |
 | `BOTHITS_S3_BUCKET` / `_PREFIX` / `_REGION` | zie `bothits_s3.py` | logbucket, `cloudfront/`, `eu-west-1` |
 | `BOTHITS_S3_DIR` | `~/bothits_s3` | staging voor de download (WSL-lokaal) |

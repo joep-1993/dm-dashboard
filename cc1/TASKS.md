@@ -4,6 +4,37 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-13 — Audit Bothits: fase A t/m C uitgevoerd
+
+Elf bevindingen over 4.005 regels (`a5ecefa`). Wat er af is:
+
+- [x] **Het standaard datumbereik hing aan `pa.bothits_ingest`** — een procestabel. Het
+      herstelrecept (ledger-rijen weggooien) verschoof daarmee stil het venster waarop de
+      tool opent; tijdens de herlaad stond `max(log_date)` even op 2026-06-09. Nu uit de
+      cube, net als `days_in_range` in `get_url_detail` (dezelfde fout, mijn eigen code).
+- [x] **`run_backfill` negeerde Cancel** — de langste job van het systeem.
+- [x] **Chart-lek** na een sorteerklik met een open paneel; opruimen zit nu in één
+      `closeDetails()` die ook de render-functies aanroepen. Plus `escapeHtml` op
+      `bot_family` en een dode conditie weg.
+- [x] **`scan_tree` sloeg `_processed/` niet echt over** — en dit is een bevinding die ik
+      eerst OMGEKEERD had gerapporteerd, zie LEARNINGS. De check vergeleek de basename, dus
+      alleen die map zelf viel af en niet de datum-submappen: elke run schuimde het hele
+      archief af (46.097 bestanden, +2.900/dag). Nu echt overgeslagen, met
+      `backfill --date` als expliciet herstelpad dat er juist wél in leest.
+- [x] **Staging-retentie**: `BOTHITS_STAGING_RETENTION_DAYS` (default 21, 0 = nooit).
+      Verwerkte bronbestanden bleven eeuwig staan, ~900 MB per datum, 30 GB op de meetdag.
+- [x] **Parser 4× sneller**: memo op de ruwe UA-string plus een unie-regex als snelle
+      afwijzing. 0 verschillen op 117.492 echte logregels, end-to-end byte-voor-byte
+      identiek (incl. md5 over alle cube-rijen), en 125s → **29s** per logdatum.
+- [ ] **Bevinding 8, nog open**: 160 `pa.urls`-rijen met `%`-encoding kunnen nooit matchen,
+      want de parser `unquote()`t de logpaden. 0,015% van de tabel; fix is beide vormen in
+      `URL_IDS` zetten en geldt alleen voor datums die je daarna verwerkt.
+- [ ] **`get_top_urls()` terug naar `pa.bothits_url_daily`** is géén omzetting maar een
+      ontwerpkeuze. Gemeten op 30 dagen: **21,5s koud / 9,4s warm**, tegen ~1s op de
+      huidige bron. Met de query omgebouwd (eerst aggregeren op `url_id`, dan pas `pa.urls`
+      erbij voor de top 250) wordt het 4,5s. Onder een seconde alleen met een kleiner
+      standaardvenster of een dagrollup.
+
 ### 2026-08-13 — Bot Hits opschonen: 12 families, twee tabs, en de URL's-tab herbouwd
 
 Een lange ronde losse verzoeken van Joep (`e6d45cc`), plus twee dingen die onderweg
@@ -112,16 +143,32 @@ zijn in die dagen als onbekend geteld.
 - De huidige code werkt: `process_file()` op een echt logbestand geeft 708 bekende hits
   tegen 3.294 onbekende.
 
-- [ ] **Herlaad de 30 datums 2026-07-13 t/m 2026-08-11.** De bronbestanden van die runs
-      zijn opgeruimd, dus opnieuw ophalen uit S3 — alle 30 vallen nog binnen de ~42-daagse
-      retentie, maar dat venster schuift, dus dit heeft haast. Voor 07-13 is de deadline
-      ongeveer 08-24.
-- [ ] **Kijk bij die herlaad-run of het reproduceert.** Zo ja, dan is de oorzaak te
-      vangen; zo nee, dan was het eenmalig en is de data hersteld. Dit is meteen de enige
-      manier om er nog achter te komen — de logbestanden van vanochtend zijn weg.
-- [ ] **Overweeg een tripwire**: een ingest die eindigt met 0% bekende URL's op een dag
-      met miljoenen hits is per definitie verdacht. Nu merkte niemand het tot een
-      grafiek er raar uitzag.
+> **OPGELOST 2026-08-13 — het was de start-methode van de worker-pool** (`a2ee990`).
+> `uvicorn --reload` start de app zelf via een **spawn**-context en een child erft die
+> default, dus `ProcessPoolExecutor` in de server spawnde in plaats van te forken. Elke
+> worker importeerde de module opnieuw en begon met een **lege `URL_IDS` én `IP_RANGES`**.
+> Eén oorzaak, beide symptomen: `known_rows = 0` (elke URL leek onbekend) en
+> `verify_state = 'unchecked'` voor álles. Dat tweede was het bewijs — twee
+> onafhankelijke globals die op dezelfde runs falen, terwijl de backfill-datums netjes
+> `verified`/`failed` dragen.
+>
+> Daarom was alles wat hier onder "wat het NIET is" staat óók echt niet fout: die tests
+> liepen in een SCRIPT, en daar is de default fork. De code was nooit stuk in de
+> omgeving waarin hij getest werd. Fix: expliciete fork-context. Gemeten op 2026-08-12,
+> dezelfde 2.905 bestanden: server vóór 0 · script 142.054 · server ná 142.054.
+
+- [x] **Herlaad de 30 datums 2026-07-13 t/m 2026-08-11.** Loopt sinds 13-08 12:50, buiten
+      de server (los proces, want `uvicorn --reload` breekt bij elke .py-edit af).
+      87.228 bestanden / 29,8 GB, ~2½ uur. Eerst één gratis probe gedaan met 12 augustus
+      — die stond nog niet in de ledger — en dáár bleek de bug nog live: 30 datums
+      ophalen zou 30 GB hebben gekost voor 30× hetzelfde kapotte resultaat.
+- [x] **Reproduceert het? Ja**, en dat was precies de observatie die de oorzaak gaf. Deze
+      keer bleven de bronbestanden staan (`~/bothits_s3/_processed/<datum>/`), dus het was
+      naast de server na te spelen — en daar werkte het, wat het verschil aanwees.
+- [x] **Tripwire ingebouwd**: >100k bot-hits met nul bekende URL's is nu een ERROR in het
+      log met de vermoedelijke oorzaak erbij.
+- [ ] **De tripwire is alleen een logregel.** Dat helpt alleen wie kijkt. Een vlag in
+      `pa.bothits_ingest` zou de Ingest-tab de verdachte datum kunnen laten tonen.
 
 ### 2026-08-12 — Bot Hits: merkkleuren, breedte, annuleren, eigen statussectie
 
