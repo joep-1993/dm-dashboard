@@ -1,6 +1,59 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Audit Bothits ronde 2: vier keer sprak de meting de bevinding tegen (2026-08-13)
+
+Vijf fases over 5.020 regels. De code-bevindingen staan in TASKS; dit gaat over het
+patroon eronder, want dat kwam vier keer terug: **een bevinding is een hypothese, ook als
+hij van een audit komt, en de meting hoort vóór de implementatie.** Twee keer bleek mijn
+eigen aanbeveling schadelijk, één keer was de baseline zelf fout, één keer bewees de test
+niets.
+
+**1. "Eis dat elke distributie 24 uur heeft" was fout.** De audit stelde dat voor als
+volledigheidscheck. Gemeten op de 21 staging-datums: drie hebben een distributie met
+minder (07-31: 22 uur, 08-10: 23, 08-11: 23) en het is elke keer `E14VW8EO449KG7` — de
+kleinste, 139 bestanden/dag ≈ 5,8 per uur — met de missende uren 00, 02 en 19. **Een uur
+zonder één request levert geen logbestand op.** Als poort zou 14% van de datums omvallen
+als "incompleet", waarna `run_drop` ze nooit meer oppakt. Het zit er nu als waarschuwing
+in. De enige harde volledigheidsmaat is wat S3 zelf zegt te hebben (`expected_files` uit
+een manifest); het bestandsAANTAL zegt niets, want complete dagen lopen legitiem van
+1.591 tot 4.969 bestanden.
+
+**2. De regressiebaseline was zelf verouderd.** Herverwerking van 2026-08-12 gaf identieke
+`raw_lines`, `bot_lines` en cube-rijen, maar `known_rows` ging van 142.054 naar 142.057.
+Verleidelijk om dat als ruis af te doen. Uitgezocht: de %-alias-fix uit `53fcea2` gold nog
+niet toen die datum oorspronkelijk geladen werd (dat was de meting van de parser-
+versnelling, vóór dat commit). Bewezen door dezelfde dag twee keer te parsen — **zonder
+aliassen 142.054, met aliassen 142.057**, exact het verschil. Les: als een baseline en de
+code uit verschillende commits komen, meet je twee dingen tegelijk. Zet bij een baseline
+altijd de commit waarop hij is gemaakt.
+
+**3. Een groene regressietest die niets bewees.** Het parse-harnas pakte de eerste 20
+bestanden alfabetisch. Dat waren 20 kruimels van ~480 B: samen 335 regels en **nul
+bot-hits**. Alle md5's kwamen identiek terug en de test zei "geslaagd" over een codepad dat
+hij niet had aangeraakt. Sorteren op **grootte per distributie** gaf 24 bestanden / 13,4 MB
+/ 103.840 regels / 45.174 bot-hits — en dekt meteen beide takken van `skip_host`. Het
+harnas staat nu in `scripts/bothits_parse_fingerprint.py` met die valkuil in de docstring.
+
+**4. "Depth ≥1 blijft gelijk" klopte niet.** Bij het beperken van de facet-diepte-grafiek
+tot category-URL's had ik als poort opgeschreven dat alleen de nul-balk zou veranderen,
+op grond van een afgeronde "100,0% category". In werkelijkheid verdwijnt er 1.355 hits uit
+depth 1/2/3: `/l/`-URL's die wél `/c/` bevatten. Een afgerond percentage is geen bewijs van
+nul.
+
+**Bonus, en het kostte 37 seconden om te leren: de selectiviteit van een filter bepaalt de
+queryvorm.** Een zoekterm raakt een handvol URL's → eerst de `url_id`'s opzoeken en de
+feitentabel daarop filteren (0,8s). Een URL-type raakt bijna de hele tabel → datzelfde
+trucje betekent een `ANY()` met ~1 mln elementen (37s); dat hoort een `EXISTS`-predicaat in
+de aggregatie te zijn (10,9s). Zelfde filter, zelfde tabellen, factor 3,4 verschil door de
+vorm.
+
+**En één die geen bevinding was maar wel telt:** `status_class()` kent naast 2xx–5xx ook
+`0xx` (CloudFront logt `sc-status 000` bij een afgebroken verbinding). `n_2xx..n_5xx` zijn
+daardoor een **subset** van `hits`, geen partitie — 31.107 hits site-breed, 1.984
+`url_daily`-rijen die niet optellen. Wie die kolommen toont moet het verschil als "overig"
+benoemen, anders leest het als een telfout.
+
 ## "Staat dit facet aan?" heeft drie antwoorden, en `seoPriority` is geen van drieën (2026-08-13)
 
 Joep: _"SEO Priority zegt dat de Winkel-facet aanstaat in categorie Insectenhotel, maar

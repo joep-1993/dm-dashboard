@@ -285,6 +285,15 @@ python3 -m backend.bothits_ingest status
 
 ~55 s per logdatum op 16 cores; 116 dagen ≈ 1 uur 45.
 
+**Elke wijziging in `process_file()` hoort langs `scripts/bothits_parse_fingerprint.py`.**
+Dat draait de parser over een vaste set echte `.gz`-bestanden en zet een md5 over de
+gesorteerde cube-, known- én unknown-items; identiek vóór en ná betekent dat de hot loop
+niet is verschoven. Twee dingen die het harnas zelf moest leren: sorteer de steekproef op
+**grootte per distributie** (alfabetisch pak je 20 bestanden van ~480 B met samen 335
+regels en nul bot-hits — een groene test die niets aanraakt), en zet bij een baseline altijd
+de **commit** waarop hij gemaakt is, want anders meet je een codewijziging en een
+datawijziging tegelijk (zie LEARNINGS, de 142.054-vs-142.057-kwestie).
+
 **Sinds 2026-08-13 sneller én betrouwbaarder** — en die twee hangen samen met hoe je hem
 start:
 

@@ -698,6 +698,20 @@ SEO titles / prio / stats, DMA Exclusions, DM Review, Redirect Tool, R-URL Optim
 
 ## Tabs — multi-section cards (see Canonicals)
 
+> **PROEF LOOPT (2026-08-13): Bot Hits volgt deze sectie NIET.** Op verzoek van Joep staat
+> daar een Semrush-achtige variant: tabs zonder kader met alleen een onderlijn — grijs bij
+> hover, brand-paars bij selectie — plus lichtere typografie (14px systeem-stack),
+> filtercontrols als afgeronde pillen op een zachte achtergrond (`.filter-shell`) en de
+> periode als één kader met kalendericoon (`.date-box`). Voorbeeld:
+> `Downloads\claude\2026-08-13 18 11 15.png`.
+>
+> Het zit bewust in **één blok bovenin `frontend/bothits.html`**, niet in `css/style.css`,
+> zodat het antwoord binair is: bevalt het, dan verhuist het blok hierheen en trekken de
+> andere tools bij; bevalt het niet, dan is het één blok verwijderen. Zolang dit open staat
+> wijkt Bot Hits zichtbaar af van de rest van het dashboard — dat is de prijs van de proef,
+> niet een slordigheid. Eén afwijking van het voorbeeld is bewust: de actieve tab is
+> `#5e4a90` en niet Semrush-blauw, omdat blauw hier nergens accentkleur is.
+
 When one card holds several parallel rule-sets or modes, use Bootstrap tabs:
 `ul.nav.nav-tabs` › `li.nav-item` › `button.nav-link` with
 `data-bs-toggle="tab" data-bs-target="#pane"`; panes are `div.tab-pane.fade`

@@ -4,7 +4,7 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
-### 2026-08-13 — Audit Bothits, ronde 2: fase 0 t/m 3 uitgevoerd, fase 4 open
+### 2026-08-13 — Audit Bothits, ronde 2: alle vijf fases uitgevoerd
 
 Tweede audit over 5.020 regels (vijf parallelle reviewers, daarna nagerekend tegen de live
 DB en het echte archief). De elf bevindingen van de eerste ronde staan verderop; dit zijn
@@ -203,35 +203,68 @@ dezelfde reden geen maat: complete dagen lopen legitiem van 1.591 tot 4.969 best
 - [x] **`waste_pct` is `None` zodra er op `known` gefilterd wordt** i.p.v. een zelfverzekerde
       0,0 of 100,0. De noemer is dan al gefilterd op precies de eigenschap die de teller meet.
 
-**Fase 4 — perf en dedup (gedrag behouden):**
+**Fase 4 — perf en dedup — GEDAAN (geen enkel cijfer verandert):**
 
-- [ ] **`n_2xx..n_5xx` hebben nul lezers** (alleen DDL + INSERT): 4 branches per bot-regel
-      over ~500 mln regels en ~450 MB tabel. Óf aansluiten op het URL-detailpaneel (een
-      per-URL 4xx-rate is nuttig), óf schrappen.
-- [ ] **`0xx` valt in geen `n_*`-bucket** (31.107 hits; 1.984 rijen rekenen niet op).
-      CloudFront logt `sc-status 000` bij afgebroken verbindingen. Niet in 2xx vouwen.
-- [ ] **`distributions()` pagineert niet** (`list_date` wel) en `_dists` is procesbreed
-      gecached, dus een 7e distributie vereist een herstart — terwijl de docstring belooft
-      dat hij automatisch wordt opgepikt. `force` heeft geen aanroeper.
-- [ ] **`preview()` doet 6 LIST-calls per datum serieel** op de gedeelde 4-thread pool
-      (270 round-trips bij `days=45`, vandaar de 120s AbortController); `fetch()` doet
-      dezelfde listing nóg eens.
-- [ ] **Dedup, en fase 3 heeft dit punt gróter gemaakt i.p.v. kleiner** — eerlijk opschrijven
-      want het is mijn eigen schuld:
-      * **Drie** filter-builders nu, geen twee: `_filters` (cube, alias `d`, kent
-        `is_known_url`), `_unknown_filters` (alias `w`) en het in fase 3 toegevoegde
-        `_known_filters` (alias `d` op `url_daily`, kent géén url_type). De host- /
-        bot_class- / bot_family-takken zijn in alle drie woordelijk gelijk. Zo overleefde
-        de blinde vlek van risico A, en er is nu één plek méér om te vergeten.
-      * **Vier** kopieën van het ruwe `url_type`-vocabulaire: `url_type()` in de ingest,
-        `URLTYPE_BUCKETS` in de service, `SLASH_TYPES` in de frontend, en sinds fase 3
-        `SQL_URL_TYPE`/`SQL_FACET_DEPTH` in SQL. Die laatste is geverifieerd tegen de
-        Python (20.000 rijen, 0 verschillen) maar dat is een momentopname, geen binding.
-        Één bron die `/api/bothits/meta` ook publiceert is de echte fix.
-      * `FILE_DATE_RX` en de ledger-query delen tussen ingest en s3.
-      * Perf: veldindices hoisten en `unquote` ná de bot-check (~8% gemeten, 55% van de
-        regels is non-bot) · `heapq.nlargest` i.p.v. een volledige sort van ~1,1 mln
-        tuples om er 500 te houden.
+Hot loop opnieuw byte-voor-byte identiek getoetst met `scripts/bothits_parse_fingerprint.py`.
+
+- [x] **`unquote()` staat nu ná `skip_host` en `classify_ua`.** 56,5% van de regels is
+      non-bot (103.840 → 45.174 in de steekproef), dus meer dan de helft van het
+      decodeerwerk ging naar een pad dat daarna werd weggegooid. Kan omdat `stem` tot dat
+      punt nergens gebruikt wordt.
+- [x] **`skip_host` op een voorgekookte frozenset + tuple** i.p.v. per regel `"." + d`
+      bouwen in een genexpr: **0,177 → 0,054 µs** per aanroep (3,3×).
+- [x] **`heapq.nlargest`** i.p.v. een volledige sort per bot-familie (~1,1 mln entries
+      sorteren om er 500 te houden). Uitkomst identiek: de `(hits, key)`-tuples zijn totaal
+      geordend, dus ties breken hetzelfde.
+- [x] **Eén filter-builder.** `_known_filters` en `_unknown_filters` zijn dunne wrappers om
+      `_filters`, met de echte verschillen als vlaggen (`alias`, `has_url_type`,
+      `has_known`). Dit was met fase 3 op drie gekomen.
+- [x] **`FILE_DATE_RX` komt uit de ingest**, niet nog eens gedefinieerd in `bothits_s3`.
+      Geen circulaire import (getest in beide volgordes + via `backend.main`).
+- [x] **`distributions()` pagineert**, en `preview()` haalt hem met `force=True` op zodat
+      de belofte "een zevende distributie wordt automatisch opgepikt" ook zonder herstart
+      geldt. `CommonPrefixes` en `Contents` delen dezelfde 1000-limiet.
+- [x] **`preview()` lijst parallel.** Serieel waren dat 270 round-trips bij `days=45`, op de
+      4-thread pool die álle leesroutes delen.
+- [x] **`n_2xx..n_5xx` hebben eindelijk een lezer**: de statusverdeling in het
+      URL-detailpaneel, mét `overig` expliciet erbij (de 0xx-rest). Aansluiten i.p.v.
+      schrappen, want een per-URL 4xx-aandeel is precies wat je van een crawlbudget-vreter
+      wil weten. Getest: 2xx+3xx+4xx+5xx+overig telt exact op tot `hits`.
+
+### 2026-08-13 — Vier losse punten van Joep (na de audit)
+
+- [x] **Type-kolom in Top X URL's spreekt nu dezelfde taal als Filters > URL-type.** De
+      tabel toonde het ruwe type (`category_facet`, `product`), het filter bood buckets aan
+      (`C-url`, `PLP`). Eén `RAW_TO_BUCKET` naast de bestaande `BUCKET_TO_RAW`. Het ruwe
+      type komt als `url_type_raw` mee, want de trailing-slash-regel hangt daaraan.
+- [x] **Look & feel van Bothits naar het Semrush-achtige voorbeeld** (screenshot in
+      `Downloads\claude\2026-08-13 18 11 15.png`): tabs zonder kader met alleen een
+      onderlijn (grijs bij hover, gekleurd bij selectie), lichtere typografie,
+      filtercontrols als afgeronde pillen op een zachte achtergrond, periode als één kader
+      met kalendericoon. **Dit is een PROEF en staat bewust in één apart blok in
+      `bothits.html`** — het wijkt af van UI_BLUEPRINT en van de rest van het dashboard.
+      Zie de notitie in UI_BLUEPRINT.md voor adopteren of terugdraaien.
+- [x] **Apply to Taxonomy is oranje**: `btn-run` i.p.v. `btn-success`. Dat is meteen de
+      canonieke huisklasse voor een primaire actie (`--color-button` = #CC5500), dus geen
+      losse kleur erbij, en disabled valt vanzelf terug op grijs outline.
+- [x] **SEO Priority onderscheidt drie soorten leeg.** "No rows match the current filter"
+      las als "zet je filter anders", terwijl de gewone reden is dat de run niets te doen
+      vond. Nu: 0 acties · alles staat al goed (alleen `keep`, met de tip om *Show kept
+      rows* aan te zetten) · of er zijn wél rijen maar het filter snijdt ze weg, mét aantal.
+
+**Openstaand:**
+
+- [ ] **Verdict op de restyle.** Bevalt hij, dan verhuist het blok naar `css/style.css`,
+      gaat UI_BLUEPRINT mee en trekken de andere tools bij; bevalt hij niet, dan is het één
+      blok verwijderen. Zolang dit open staat wijkt Bothits zichtbaar af van de rest.
+- [ ] **De actieve tab is brand-paars, niet Semrush-blauw.** Bewuste afwijking: blauw is in
+      dit dashboard nergens een accentkleur en zou als een tweede merk lezen. Eén
+      hex-waarde als Joep het tóch blauw wil.
+- [ ] **Het `url_type`-filter op de URL-tab kost 10,9s** (C-url) tegen 2,0s voor Cat-url.
+      Verder terug te brengen door url_type/facet_depth in `pa.bothits_url_daily` te zetten
+      i.p.v. ze uit `pa.urls` af te leiden — maar dat is een schemawijziging plus een
+      backfill van 20,3 mln rijen, dus alleen doen als het gaat knellen.
+
 
 **Twee dingen om te weten bij het oppakken:** :8003 draait met `--reload`, dus elke `.py`-edit
 herstart de server en breekt een lopende ingest af — draai een regressie-ingest als los
