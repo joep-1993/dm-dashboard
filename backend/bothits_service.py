@@ -102,6 +102,11 @@ URLTYPE_BUCKETS = [
 URLTYPE_ORDER = [name for name, _raw in URLTYPE_BUCKETS]
 # bucket -> ruwe types, en de omgekeerde weg voor het filter
 BUCKET_TO_RAW = {name: raw for name, raw in URLTYPE_BUCKETS}
+# ruw type -> bucket. Eén bron voor beide richtingen, zodat de Type-kolom in de
+# URL-tabel dezelfde woorden gebruikt als het URL-type-filter erboven (Joep,
+# 2026-08-13). Die twee spraken elkaar tegen: het filter bood `C-url` en `PLP` aan
+# terwijl de tabel `category_facet` en `product` toonde — één begrip, twee talen.
+RAW_TO_BUCKET = {raw: name for name, raws in URLTYPE_BUCKETS for raw in raws}
 
 
 def _urltype_case(alias="d"):
@@ -129,8 +134,18 @@ def _expand_urltype(value):
 # Filters shared by every endpoint
 # ---------------------------------------------------------------------------
 def _filters(host=None, bot_class=None, bot_family=None, url_type=None,
-             known=None, alias="d"):
+             known=None, alias="d", has_url_type=True, has_known=True):
     """-> (sql_fragment, params). Applied against the cube or a join onto it.
+
+    ÉÉN bouwer voor alle drie de feitentabellen (fase 4). Er stonden er drie naast
+    elkaar — `_filters` voor de cube, `_unknown_filters` voor unknown_daily en het in
+    fase 3 toegevoegde `_known_filters` voor url_daily — met woordelijk gelijke
+    host/bot_class/bot_family-takken. Zo overleefde de blinde vlek van de URL-tab: een
+    filter toevoegen aan de een deed stilletjes niets in de ander. De verschillen die er
+    echt zijn, zijn nu vlaggen:
+      * `alias`        — `d` voor de cube en url_daily, `w` voor unknown_daily;
+      * `has_url_type` — url_daily draagt geen url_type (die rij is bewust smal);
+      * `has_known`    — alleen de cube heeft is_known_url.
 
     b.is_tracked staat er ALTIJD in (Joep, 2026-08-13). Van de 31 families in de
     logs wil het dashboard er elf zien: de drie Google-bots en de grote
@@ -163,12 +178,12 @@ def _filters(host=None, bot_class=None, bot_family=None, url_type=None,
     if bot_family:
         sql.append("b.bot_family = ANY(%s)")
         params.append([x.strip() for x in bot_family.split(",") if x.strip()])
-    if url_type:
+    if url_type and has_url_type:
         sql.append(f"{alias}.url_type = ANY(%s)")
         params.append(_expand_urltype(url_type))
-    if known == "known":
+    if has_known and known == "known":
         sql.append(f"{alias}.is_known_url")
-    elif known == "unknown":
+    elif has_known and known == "unknown":
         sql.append(f"NOT {alias}.is_known_url")
     # Geen `if sql else ""` meer (audit 2026-08-13): sql begint op ["b.is_tracked"],
     # dus de lege tak was aantoonbaar onbereikbaar en suggereerde een filterloos pad
@@ -418,45 +433,18 @@ SQL_URL_TYPE = """
 
 
 def _known_filters(host=None, bot_class=None, bot_family=None):
-    """Filters voor pa.bothits_url_daily (alias `d`) -> (fragment, params).
-
-    Geen url_type en geen is_known_url: die tabel draagt per definitie alleen URL's die
-    in pa.urls staan, en het type wordt pas ná de aggregatie uit pa.urls afgeleid.
-    """
-    sql, params = ["b.is_tracked"], []
-    if host:
-        sql.append("h.host = ANY(%s)")
-        params.append([x.strip() for x in host.split(",") if x.strip()])
-    if bot_class:
-        sql.append("b.bot_class = ANY(%s)")
-        params.append([x.strip() for x in bot_class.split(",") if x.strip()])
-    if bot_family:
-        sql.append("b.bot_family = ANY(%s)")
-        params.append([x.strip() for x in bot_family.split(",") if x.strip()])
-    return " AND " + " AND ".join(sql), params
+    """Filters voor pa.bothits_url_daily (alias `d`). Geen url_type en geen
+    is_known_url: die tabel draagt per definitie alleen URL's uit pa.urls, en het type
+    wordt pas ná de aggregatie uit pa.urls afgeleid."""
+    return _filters(host, bot_class, bot_family,
+                    has_url_type=False, has_known=False)
 
 
 def _unknown_filters(host=None, bot_class=None, bot_family=None, url_type=None):
-    """Filters voor pa.bothits_unknown_daily (alias `w`) -> (fragment, params).
-
-    Apart van _filters(): die schrijft over de cube-alias `d` en kent is_known_url,
-    wat deze tabel niet heeft. b.is_tracked staat er altijd in, anders tonen de
-    URL-lijst en het paneel bots die de rest van de pagina niet meetelt.
-    """
-    sql, params = ["b.is_tracked"], []
-    if host:
-        sql.append("h.host = ANY(%s)")
-        params.append([x.strip() for x in host.split(",") if x.strip()])
-    if bot_class:
-        sql.append("b.bot_class = ANY(%s)")
-        params.append([x.strip() for x in bot_class.split(",") if x.strip()])
-    if bot_family:
-        sql.append("b.bot_family = ANY(%s)")
-        params.append([x.strip() for x in bot_family.split(",") if x.strip()])
-    if url_type:
-        sql.append("w.url_type = ANY(%s)")
-        params.append(_expand_urltype(url_type))
-    return " AND " + " AND ".join(sql), params
+    """Filters voor pa.bothits_unknown_daily (alias `w`). Die tabel heeft wel een
+    url_type-kolom maar geen is_known_url — alles erin is per definitie onbekend."""
+    return _filters(host, bot_class, bot_family, url_type,
+                    alias="w", has_known=False)
 
 
 def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
@@ -618,6 +606,16 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
         # ingest schrijft een hit óf naar url_daily (in pa.urls) óf naar unknown_daily.
         rows = sorted(known + unknown,
                       key=lambda r: (-int(r["hits"]), r["url"]))[:limit]
+        # Type in dezelfde woorden als het filter erboven (Joep, 2026-08-13). De tabel
+        # toonde het RUWE type (`category_facet`, `product`) terwijl Filters > URL-type
+        # buckets aanbiedt (`C-url`, `PLP`) — één begrip in twee talen, op één scherm.
+        # Het ruwe type blijft als `url_type_raw` meekomen: de frontend beslist daarmee
+        # of een pad een trailing slash krijgt, en dát is een eigenschap van het ruwe
+        # type, niet van de bucket.
+        for r in rows:
+            raw = r["url_type"]
+            r["url_type_raw"] = raw
+            r["url_type"] = RAW_TO_BUCKET.get(raw, "Overige")
         return rows
     return _cached(key, run, force)
 
@@ -668,9 +666,29 @@ def get_url_detail(url, start_date=None, end_date=None, host=None, bot_class=Non
                 {kwhere} GROUP BY 1 ORDER BY 1
             """, kargs)
             if by_bot:
+                # n_2xx..n_5xx hadden tot fase 4 NUL lezers: alleen de DDL en de INSERT
+                # noemden ze. Vier branches per bot-regel over ~500 mln regels en ~450 MB
+                # tabel, voor niets. Ze zijn nuttig genoeg om aan te sluiten in plaats van
+                # te schrappen — een per-URL 4xx-aandeel is precies wat je wil weten van
+                # een pagina die crawlbudget kost.
+                # `overig` is expliciet: de vier tellers zijn een SUBSET van hits, want
+                # status_class() kent ook '0xx' (CloudFront logt sc-status 000 bij een
+                # afgebroken verbinding). Zonder deze regel telt het paneel niet op en
+                # lijkt dat een bug.
+                st = _query(f"""
+                    SELECT sum(d.n_2xx)::bigint AS n_2xx, sum(d.n_3xx)::bigint AS n_3xx,
+                           sum(d.n_4xx)::bigint AS n_4xx, sum(d.n_5xx)::bigint AS n_5xx,
+                           sum(d.hits)::bigint  AS hits
+                    FROM pa.bothits_url_daily d
+                    JOIN pa.bothits_host h ON h.host_id = d.host_id
+                    JOIN pa.bothits_bot  b ON b.bot_id  = d.bot_id
+                    {kwhere}
+                """, kargs)[0]
+                st["overig"] = (st["hits"] or 0) - sum(
+                    st[k] or 0 for k in ("n_2xx", "n_3xx", "n_4xx", "n_5xx"))
                 return {
                     "url": url, "start_date": start, "end_date": end,
-                    "source": "pa.urls",
+                    "source": "pa.urls", "status": st,
                     "hits": sum(r["hits"] for r in by_bot), "days": len(by_day),
                     "days_in_range": _query(
                         "SELECT count(DISTINCT log_date) AS n FROM pa.bothits_daily "

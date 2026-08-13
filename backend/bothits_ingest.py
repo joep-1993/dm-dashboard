@@ -35,6 +35,7 @@ CLI:
 import argparse
 import collections
 import gzip
+import heapq
 import json
 import logging
 import multiprocessing
@@ -302,9 +303,17 @@ KEEP_DOMAINS = tuple(
 )
 
 
+# Voorgekookt uit KEEP_DOMAINS (fase 4). skip_host draait per logregel — ~500 mln per
+# backfill — en bouwde daar elke keer `"." + d` op plus een generator. str.endswith neemt
+# een tuple, dus dit is dezelfde test in C i.p.v. in een genexpr. Gemeten 0,162 -> 0,020
+# µs per aanroep; uitkomst identiek.
+_KEEP_SET = frozenset(KEEP_DOMAINS)
+_KEEP_SUFFIXES = tuple("." + d for d in KEEP_DOMAINS)
+
+
 def skip_host(h):
     """True als deze host niet onder KEEP_DOMAINS valt."""
-    return not any(h == d or h.endswith("." + d) for d in KEEP_DOMAINS)
+    return not (h in _KEEP_SET or h.endswith(_KEEP_SUFFIXES))
 
 
 def status_class(s):
@@ -431,7 +440,7 @@ def process_file(path):
                     # RUW, niet ge-unquote: classify_ua() doet dat achter zijn memo.
                     raw_ua = p[i_ua]
                     host = norm_host(p[i_host])
-                    stem = unquote(p[i_stem]).rstrip("/") or "/"
+                    raw_stem = p[i_stem]
                     st = p[i_st]
                     edge = p[i_edge] or "-"
                     nbytes = p[i_bytes]
@@ -455,6 +464,13 @@ def process_file(path):
                     continue
                 bot_lines += 1
                 tracked = fam not in UNTRACKED_FAMILIES
+
+                # unquote() PAS hier (fase 4). Hij stond boven skip_host en
+                # classify_ua, terwijl 55% van de regels non-bot is (gemeten op 159.887
+                # echte regels) — dat is meer dan de helft van het decodeerwerk voor een
+                # pad dat daarna wordt weggegooid. Verplaatsen kan omdat `stem` tot hier
+                # nergens wordt gebruikt; de uitkomst is byte-voor-byte identiek.
+                stem = unquote(raw_stem).rstrip("/") or "/"
 
                 ut = url_type(stem)
                 depth = facet_depth(stem)
@@ -487,6 +503,14 @@ def process_file(path):
                     k = known[(url_id, host, fam, bot)]
                     k[0] += 1
                     k[1] += nb
+                    # LET OP: deze vier zijn een SUBSET van k[0], geen partitie.
+                    # status_class() geeft ook '0xx' terug — CloudFront logt sc-status
+                    # 000 bij een afgebroken verbinding — en dat valt bewust in geen
+                    # bucket. Gemeten: 31.107 hits in de cube, en 1.984 url_daily-rijen
+                    # waar hits > n_2xx+n_3xx+n_4xx+n_5xx. NIET bij 2xx optellen: een
+                    # afgebroken verbinding is geen geslaagde request. Wie de vier
+                    # kolommen leest moet het verschil als "overig" tonen, en dat doet
+                    # het URL-detailpaneel sinds fase 4.
                     if sc == "2xx":
                         k[2] += 1
                     elif sc == "3xx":
@@ -723,10 +747,13 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24, expected_files=None
     per_family = collections.defaultdict(list)
     for key, hits in unknown.items():
         per_family[key[1]].append((hits, key))
+    # heapq.nlargest i.p.v. een volledige sort (fase 4): de dict is ~1,1 mln entries en
+    # er blijven 500 per familie over, dus een complete sort per familie is werk dat
+    # meteen wordt weggegooid. De uitkomst is identiek — de (hits, key)-tuples zijn
+    # totaal geordend, dus ties breken op dezelfde manier.
     trimmed = []
     for fam, rows in per_family.items():
-        rows.sort(reverse=True)
-        trimmed.extend(rows[:TOP_UNKNOWN_PER_BOT])
+        trimmed.extend(heapq.nlargest(TOP_UNKNOWN_PER_BOT, rows))
 
     hosts = {k[0] for k in cube}
     bots = {(k[1], k[2]) for k in cube}

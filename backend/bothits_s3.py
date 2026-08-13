@@ -54,7 +54,12 @@ WORKERS = int(os.getenv("BOTHITS_S3_WORKERS", "8"))
 # Alleen de distributie-prefixen, niet de export-2022-*-rommel die naast de
 # cloudfront/-map in dezelfde bucket staat.
 DIST_RX = re.compile(r"^E[A-Z0-9]{9,}$")
-FILE_DATE_RX = re.compile(r"\.(\d{4}-\d{2}-\d{2})-(\d{2})\.")
+# Uit de ingest geïmporteerd i.p.v. hier nog eens gedefinieerd (fase 4). Dit is de regel
+# die bepaalt welke logdatum bij een bestand hoort — "vertrouw nooit de mapnaam" — en
+# hij is het contract tussen wat S3 lijst en wat scan_tree groepeert. Twee kopieën die
+# uit elkaar lopen zouden preview en run_drop stil laten verschillen over de vraag welke
+# bestanden bij welke dag horen.
+from backend.bothits_ingest import FILE_DATE_RX  # noqa: E402
 
 _client = None
 _client_lock = threading.Lock()
@@ -104,13 +109,20 @@ def distributions(force=False):
     global _dists
     if _dists is not None and not force:
         return _dists
-    r = client().list_objects_v2(Bucket=BUCKET, Prefix=PREFIX, Delimiter=".")
+    # Gepagineerd (fase 4). Dit was één losse list_objects_v2 die alleen de eerste
+    # pagina las en IsTruncated niet keek. Zes prefixen passen daar ruim in, maar
+    # CommonPrefixes en Contents delen dezelfde 1000-limiet: één sleutel zonder punt
+    # onder `cloudfront/` telt als Contents mee, en genoeg daarvan duwt een distributie
+    # stil van de pagina. Een gemiste distributie betekent dat list_date een zesde van
+    # de dag niet ziet, en dán ingest die dag als "24 uur compleet".
+    pag = client().get_paginator("list_objects_v2")
     found = []
-    for p in r.get("CommonPrefixes", []):
-        # 'cloudfront/E14VW8EO449KG7.' -> 'E14VW8EO449KG7'
-        name = p["Prefix"][len(PREFIX):].rstrip(".")
-        if DIST_RX.match(name):
-            found.append(name)
+    for page in pag.paginate(Bucket=BUCKET, Prefix=PREFIX, Delimiter="."):
+        for p in page.get("CommonPrefixes", []):
+            # 'cloudfront/E14VW8EO449KG7.' -> 'E14VW8EO449KG7'
+            name = p["Prefix"][len(PREFIX):].rstrip(".")
+            if DIST_RX.match(name):
+                found.append(name)
     if not found:
         raise RuntimeError(
             f"geen CloudFront-distributies gevonden onder s3://{BUCKET}/{PREFIX}")
@@ -176,11 +188,26 @@ def preview(days: int = 3):
     Voedt de confirm-dialog, en is de enige plek die eerlijk kan zeggen "S3 heeft
     deze datum niet meer" (retentie) versus "die hebben we al".
     """
+    # force=True (fase 4): _dists werd één keer per proces gevuld, dus de belofte in de
+    # moduledocstring — "komt er een zevende distributie bij, dan pikt de volgende ophaal
+    # hem op zonder codewijziging" — gold pas ná een herstart van uvicorn. Preview is een
+    # handmatige, laagfrequente klik; één extra list-call is daar gratis.
+    distributions(force=True)
     ingested = _ingested_dates()
     out = []
     files = total = 0
+    # Parallel listen (fase 4). Dit was serieel: 6 list-calls per datum, dus 270
+    # round-trips bij days=45 — de reden dat de UI een AbortController van 120s nodig had.
+    # Het loopt op router.executor, een pool van 4 die ALLE leesroutes deelt, dus een
+    # lange preview hield een kwart van de leescapaciteit van het dashboard bezet.
+    # De volgorde blijft die van target_dates: resultaten in een dict, daarna uitlezen.
+    listed = {}
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        for d, res in zip(target_dates(days),
+                          pool.map(list_date, target_dates(days))):
+            listed[d] = res
     for d in target_dates(days):
-        keys, size, hours = list_date(d)
+        keys, size, hours = listed[d]
         if not keys:
             state = "niet_in_s3"          # buiten de retentie, of nog niets geschreven
         elif ingested.get(d):             # aanwezig ÉN compleet

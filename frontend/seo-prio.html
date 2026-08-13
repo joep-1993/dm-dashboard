@@ -262,7 +262,12 @@
                                 <input class="form-check-input" type="checkbox" id="dryRun" onchange="updateApplyBar()">
                                 <label class="form-check-label small" for="dryRun">Dry run</label>
                             </div>
-                            <button class="btn btn-sm btn-success" id="applyBtn" onclick="applySelected()" disabled>
+                            <!-- btn-run i.p.v. btn-success (Joep, 2026-08-13): oranje, en
+                                 meteen de canonieke huisklasse uit UI_BLUEPRINT voor een
+                                 primaire actie. --color-button is #CC5500, dus dit is de
+                                 gevulde oranje — geen losse kleur erbij. Disabled valt
+                                 automatisch terug op grijs outline. -->
+                            <button class="btn btn-sm btn-run" id="applyBtn" onclick="applySelected()" disabled>
                                 Apply to Taxonomy
                             </button>
                         </div>
@@ -915,7 +920,25 @@ function renderResultsPage() {
 
     const body = document.getElementById('resultsBody');
     if (!slice.length) {
-        body.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-3">No rows match the current filter.</td></tr>';
+        // Drie verschillende soorten "leeg", en ze zeiden alle drie hetzelfde
+        // (Joep, 2026-08-13). "No rows match the current filter" leest als "zet je
+        // filter anders", terwijl de meest voorkomende reden is dat de run gewoon
+        // niets te doen vond — dat is een UITKOMST, geen filterprobleem.
+        const showKeep = document.getElementById('showKeep').checked;
+        const keptOnly = _allResults.length > 0 && !showKeep &&
+                         _allResults.every(r => r.action === 'keep');
+        const msg = !_allResults.length
+            ? `<div class="fw-semibold mb-1">Deze run leverde 0 acties op.</div>
+               <div class="small">Er is niets gevonden om aan te passen — geen enkele categorie-facetcombinatie
+               vroeg om een wijziging. Dat is een geldige uitkomst, geen fout.</div>`
+            : keptOnly
+            ? `<div class="fw-semibold mb-1">Deze run leverde 0 wijzigingen op.</div>
+               <div class="small">Alle ${_allResults.length.toLocaleString()} beoordeelde rijen staan al goed
+               (<code>keep</code>). Zet <em>Show kept rows</em> aan om ze te bekijken.</div>`
+            : `<div class="fw-semibold mb-1">Geen rijen binnen het huidige filter.</div>
+               <div class="small">De run leverde wél ${_allResults.length.toLocaleString()} rijen op — pas het
+               filter aan om ze te zien.</div>`;
+        body.innerHTML = `<tr><td colspan="13" class="text-center text-muted py-4">${msg}</td></tr>`;
     } else {
         body.innerHTML = slice.map(row => {
             const key = rowKey(row);

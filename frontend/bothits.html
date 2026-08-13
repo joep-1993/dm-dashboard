@@ -97,12 +97,83 @@
         /* nowrap keeps a long host like d36j60x09x33dn.cloudfront.net on the same
            line as its checkbox instead of wrapping underneath it. */
         .chk-list label { display: block; cursor: pointer; white-space: nowrap; }
-        /* Tabs — de Canonicals-vorm uit UI_BLUEPRINT: donker + bold, niet paars.
-           Stond hier op #5e4a90 met een donkere active-state, waardoor de actieve
-           tab juist het minst opvallend was van de vijf. */
-        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
-        .nav-tabs .nav-link:hover { color: #1a1a1a; }
-        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
+        /* ==== PROEFOPZET (Joep, 2026-08-13) =================================
+           Look & feel naar het voorbeeld uit de screenshot: tabs zonder kader met
+           alleen een onderlijn, lichtere typografie, en filtercontrols als afgeronde
+           pillen op een zachte achtergrond.
+
+           Bewust ALLEEN op deze pagina: dit wijkt af van UI_BLUEPRINT (dat schrijft
+           de Canonicals-tabvorm voor) en van de rest van het dashboard. Bevalt het,
+           dan verhuist dit blok naar css/style.css en gaat het blueprint mee; bevalt
+           het niet, dan is het één blok verwijderen.
+
+           Eén afwijking van de screenshot, bewust: de actieve tab is BRAND-PAARS
+           (#5e4a90) en niet Semrush-blauw. Blauw is in dit dashboard nergens een
+           accentkleur en zou als een tweede merk lezen. Eén hex-waarde omzetten als
+           je het toch blauw wil.
+           ==================================================================== */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                         "Helvetica Neue", Arial, sans-serif;
+            font-size: 14px;
+            color: #1d2129;
+            -webkit-font-smoothing: antialiased;
+        }
+        h5 { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+
+        /* Tabs: tekst op een lijn, onderlijn als enige markering. */
+        .nav-tabs {
+            border-bottom: 1px solid #e3e5e8;
+            gap: 0.35rem;
+        }
+        .nav-tabs .nav-link {
+            color: #3d4348;
+            font-weight: 500;
+            font-size: 0.95rem;
+            border: 0;
+            border-bottom: 2px solid transparent;
+            border-radius: 0;
+            padding: 0.5rem 0.75rem;
+            margin-bottom: -1px;
+            background: none;
+            transition: color .12s, border-color .12s;
+        }
+        .nav-tabs .nav-link:hover { color: #1d2129; border-bottom-color: #c3c7cc; }
+        .nav-tabs .nav-link.active {
+            color: #1d2129;
+            font-weight: 600;
+            border-bottom-color: #5e4a90;
+            background: none;
+        }
+
+        /* Filtercontrols als pillen op een zachte achtergrond. */
+        .filter-shell { background: #f7f7fb; border: 1px solid #ececf3; border-radius: 8px; }
+        .filter-shell .form-control, .filter-shell .form-select, .chk-list {
+            border: 1px solid #dcdee3;
+            border-radius: 6px;
+            background: #fff;
+        }
+        .filter-shell .form-control:focus, .filter-shell .form-select:focus {
+            border-color: #5e4a90;
+            box-shadow: 0 0 0 2px rgba(94, 74, 144, 0.12);
+        }
+        .filter-shell .form-label { font-size: 0.78rem; font-weight: 600; color: #6a7178; }
+
+        /* Datumkiezer: één kader met kalendericoon, zoals rechtsboven in het voorbeeld.
+           De twee losse date-inputs blijven bestaan en blijven de bron van waarheid —
+           params(), boot() en flatpickr lezen ze ongewijzigd. Dit is puur de omlijsting
+           eromheen, dus de restyle kan niet aan de datastroom komen. */
+        .date-box {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            border: 1px solid #dcdee3; border-radius: 6px;
+            background: #fff; padding: 0.25rem 0.6rem;
+        }
+        .date-box svg { flex: 0 0 auto; color: #6a7178; }
+        .date-box input[type="date"], .date-box input.flatpickr-input {
+            border: 0 !important; background: none !important; box-shadow: none !important;
+            padding: 0.15rem 0; width: 8.5rem; font-size: 0.9rem; color: #1d2129;
+        }
+        .date-box .sep { color: #9aa0a6; }
         .muted-note { font-size: 0.82rem; color: #636e72; }
         /* Bootstrap zet .alert-dismissible .btn-close op padding 1.25rem 1rem, gemaakt
            voor een alert met de standaard py-3. Deze balk is py-2, dus daar reikt het
@@ -289,26 +360,37 @@
                 <!-- align-items-start, not -end: the checkbox lists are much taller than
                      the date inputs, so bottom-alignment pushes "Van"/"Tot en met" a full
                      row below the other filter labels. -->
-                <div class="row g-3 align-items-start">
-                    <div class="col-md-2">
-                        <label class="form-label mb-1">Van</label>
-                        <input type="date" class="form-control form-control-sm" id="startDate">
+                <div class="filter-shell p-3">
+                    <!-- Periode op één regel bovenin, zoals rechtsboven in het voorbeeld:
+                         één kader, kalendericoon, de twee datums met een streepje ertussen.
+                         De inputs zelf zijn ongewijzigd (#startDate / #endDate) — alleen de
+                         omlijsting is nieuw, dus flatpickr en params() merken er niets van. -->
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                        <label class="form-label mb-0">Periode</label>
+                        <div class="date-box">
+                            <svg width="15" height="15" viewBox="0 0 16 16" fill="none"
+                                 stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                                <rect x="2" y="3" width="12" height="11" rx="2"/>
+                                <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/>
+                            </svg>
+                            <input type="date" id="startDate" aria-label="Van">
+                            <span class="sep">–</span>
+                            <input type="date" id="endDate" aria-label="Tot en met">
+                        </div>
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label mb-1">Tot en met</label>
-                        <input type="date" class="form-control form-control-sm" id="endDate">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label mb-1">Domein</label>
-                        <div class="chk-list" id="hostFilter"><span class="text-muted">laden…</span></div>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label mb-1">Bot-soort</label>
-                        <div class="chk-list" id="classFilter"><span class="text-muted">laden…</span></div>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label mb-1">URL-type</label>
-                        <div class="chk-list" id="typeFilter"><span class="text-muted">laden…</span></div>
+                    <div class="row g-3 align-items-start">
+                        <div class="col-md-3">
+                            <label class="form-label mb-1">Domein</label>
+                            <div class="chk-list" id="hostFilter"><span class="text-muted">laden…</span></div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label mb-1">Bot-soort</label>
+                            <div class="chk-list" id="classFilter"><span class="text-muted">laden…</span></div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label mb-1">URL-type</label>
+                            <div class="chk-list" id="typeFilter"><span class="text-muted">laden…</span></div>
+                        </div>
                     </div>
                 </div>
                 <!-- Wegklikbaar (Joep, 2026-08-13): het is een waarschuwing die je één
@@ -1727,9 +1809,13 @@
     //
     // `r.url` blijft ongemoeid — die gaat als sleutel naar /api/bothits/url in
     // toggleUrlDetail, en dat is de vorm zoals hij in de tabellen staat.
+    // Op `url_type_raw` en niet op `url_type` (2026-08-13): de Type-kolom toont sinds
+    // vandaag de bucketnaam uit Filters > URL-type (`C-url`, `PLP`), maar of een pad een
+    // trailing slash hoort te krijgen hangt aan het RUWE type. Zonder deze splitsing zou
+    // `SLASH_TYPES` op bucketnamen matchen en dus nooit meer raak zijn.
     const SLASH_TYPES = new Set(['product', 'category', 'category_legacy']);
     const urlPath = r => r.url +
-        (SLASH_TYPES.has(r.url_type) && !r.url.endsWith('/') ? '/' : '');
+        (SLASH_TYPES.has(r.url_type_raw ?? r.url_type) && !r.url.endsWith('/') ? '/' : '');
     const urlHref = r => 'https://www.beslist.nl' + urlPath(r);
 
     function renderUrls() {
@@ -1803,7 +1889,8 @@
         tr.classList.add('is-open');
         const det = document.createElement('tr');
         det.className = 'bot-detail url-detail';
-        det.innerHTML = `<td colspan="6">
+        det.innerHTML = `<td colspan="7">
+            <div id="urlStatus" class="muted-note mb-2"></div>
             <div class="row g-3">
               <div class="col-md-4"><div class="muted-note mb-1">Per bot-familie</div>
                 <div class="donut-wrap chart-framed"><canvas id="urlBotChart"></canvas>
@@ -1828,8 +1915,32 @@
         const lab = document.getElementById('urlDailyLabel');
         if (lab && d.days_in_range && d.days < d.days_in_range) {
             lab.textContent = `Hits per dag — ${d.days} van de ${d.days_in_range} dagen in beeld`;
-            lab.title = 'Op de andere dagen haalde deze URL de dagelijkse top-500 per '
-                      + 'bot-familie niet; dat is niet hetzelfde als niet gecrawld.';
+            // Alleen de onbekende kant kent dat gat: die tabel bewaart per dag de top-500
+            // per familie. De bekende kant is uitputtend, dus daar betekent een ontbrekende
+            // dag echt "niet gecrawld".
+            lab.title = d.source === 'pa.urls'
+                ? 'Deze URL staat in pa.urls en wordt uitputtend geteld; een dag zonder '
+                  + 'staaf is een dag zonder crawl.'
+                : 'Op de andere dagen haalde deze URL de dagelijkse top-500 per '
+                  + 'bot-familie niet; dat is niet hetzelfde als niet gecrawld.';
+        }
+        // Statusverdeling, alleen voor de bekende kant — unknown_daily heeft geen
+        // n_*-kolommen. "Overig" is de 0xx-rest (afgebroken verbindingen), expliciet
+        // benoemd zodat de regel optelt tot het totaal.
+        const sEl = document.getElementById('urlStatus');
+        if (sEl && d.status) {
+            const s = d.status, tot = Number(s.hits) || 1;
+            const pct = n => `${(Number(n || 0) / tot * 100).toFixed(1).replace('.', ',')}%`;
+            const parts = [
+                `<strong>${fmt(s.n_2xx)}</strong> 2xx (${pct(s.n_2xx)})`,
+                `<strong>${fmt(s.n_3xx)}</strong> 3xx (${pct(s.n_3xx)})`,
+                `<strong>${fmt(s.n_4xx)}</strong> 4xx (${pct(s.n_4xx)})`,
+            ];
+            if (Number(s.n_5xx)) parts.push(`<strong>${fmt(s.n_5xx)}</strong> 5xx (${pct(s.n_5xx)})`);
+            if (Number(s.overig)) parts.push(
+                `<strong>${fmt(s.overig)}</strong> overig (${pct(s.overig)})`
+                + `<span title="CloudFront logt sc-status 000 bij een afgebroken verbinding.">*</span>`);
+            sEl.innerHTML = `HTTP-status over ${fmt(s.hits)} hits: ` + parts.join(' · ');
         }
         CHARTS.urlBot = miniDonut('urlBotChart', 'urlBotCenter',
             (d.by_bot || []).map(r => [r.bot_family, Number(r.hits)]), 'bot_family');
