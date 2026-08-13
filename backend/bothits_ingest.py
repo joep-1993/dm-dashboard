@@ -36,6 +36,7 @@ import argparse
 import collections
 import gzip
 import logging
+import multiprocessing
 import os
 import re
 import shutil
@@ -459,7 +460,26 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
     raw_lines = bot_lines = 0
     done = 0
 
-    with ProcessPoolExecutor(max_workers=min(MAX_WORKERS, os.cpu_count() or 4)) as ex:
+    # EXPLICIET forken, en niet op de default vertrouwen (2026-08-13). Dit was de
+    # oorzaak van de kapotte `is_known_url`: `uvicorn --reload` start de app zelf via
+    # een spawn-context, en een child erft die default. Een ProcessPoolExecutor in de
+    # server SPAWNDE dus, waardoor elke worker de module opnieuw importeerde en met een
+    # LEGE URL_IDS en IP_RANGES begon. Beide symptomen kwamen daaruit: known_rows = 0
+    # (elke URL leek onbekend) en verify_state = 'unchecked' voor alles (geen ranges om
+    # tegen te toetsen). Twee globals, één oorzaak.
+    #
+    # Zelfde code buiten de server draaide altijd goed — daar is de default fork — wat
+    # verklaart waarom de backfill uit het archief wél klopt en alleen wat via de knop
+    # is geladen kapot is. `process_file()` was nooit stuk.
+    #
+    # Vandaar de expliciete context: deze ingest deelt ~1M dict-entries met de workers
+    # via copy-on-write en dat is niet optioneel. Zou fork ooit verdwijnen (Python 3.14
+    # zet de default op forkserver, en op macOS is spawn al de default), dan moeten de
+    # opzoektabellen per worker geladen worden via een initializer — niet stilletjes
+    # leeg blijven.
+    mp_ctx = multiprocessing.get_context("fork")
+    with ProcessPoolExecutor(max_workers=min(MAX_WORKERS, os.cpu_count() or 4),
+                             mp_context=mp_ctx) as ex:
         futs = [ex.submit(process_file, f) for f in files]
         for fut in as_completed(futs):
             c, k, u, rl, bl = fut.result()
@@ -550,6 +570,17 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
     logger.info("[%s] done in %ss | raw=%s bot=%s | cube=%s url=%s unknown=%s",
                 log_date, dur, f"{raw_lines:,}", f"{bot_lines:,}",
                 f"{len(cube):,}", f"{len(known):,}", f"{len(trimmed):,}")
+    # Tripwire (2026-08-13). Nul bekende URL's op een dag met miljoenen bot-hits kan
+    # niet: pa.urls heeft ~1M rijen en Googlebot crawlt categoriepagina's. Dit heeft
+    # 30 logdatums stil verpest omdat niemand naar known_rows keek tot een grafiek er
+    # raar uitzag. Een ERROR in het log is de goedkoopste bewaker die er is.
+    if bot_lines > 100_000 and not known:
+        logger.error(
+            "[%s] TRIPWIRE: %s bot-hits en NUL bekende URL's — de pa.urls-lookup heeft "
+            "de workers niet bereikt (URL_IDS=%s in de parent). Controleer of de pool "
+            "forkt; onder een spawn-context begint elke worker met een lege lookup. "
+            "Deze datum moet opnieuw.",
+            log_date, f"{bot_lines:,}", f"{len(URL_IDS):,}")
     return {
         "log_date": str(log_date), "files": len(files), "raw_lines": raw_lines,
         "bot_lines": bot_lines, "known_rows": len(known),
