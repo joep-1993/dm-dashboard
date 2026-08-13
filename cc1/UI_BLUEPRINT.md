@@ -696,6 +696,59 @@ Give the `<title>` an `id` and rewrite its text at runtime to update the hint
 (e.g. GSD Campaigns' "last successful data load"). In use across GSD Campaigns,
 SEO titles / prio / stats, DMA Exclusions, DM Review, Redirect Tool, R-URL Optimizer.
 
+## theme-flat.css — de vlakke restyle (PROEF, 2026-08-13)
+
+> **Alles hieronder in dit document beschrijft de BASISstijl in `css/style.css`. Zolang
+> `css/theme-flat.css` gelinkt staat, overschrijft die de kleuren daarvan.** Lees de twee
+> samen: style.css zegt wat de vorm is, theme-flat zegt hoe hij er nu uitziet.
+
+Op verzoek van Joep naar het voorbeeld `Downloads\claude\2026-08-13 18 11 15.png`
+(Semrush): vlakke kaartkoppen i.p.v. de grijze balk, één knopvorm, lichte randen,
+zachte accentkleur. Gelinkt op alle 35 pagina's, ná `style.css`.
+
+**Terugdraaien is met opzet triviaal** — dat is de reden dat het een aparte file is en
+geen bewerking van `style.css`:
+
+```bash
+sed -i '/theme-flat.css/d' frontend/*.html     # link eruit, alles staat weer als voorheen
+git tag                                        # `ui-voor-flat` = laatste commit ervóór
+```
+
+**Palet, uit de screenshot gemeten met PIL (niet geschat):**
+
+| rol | kleur |
+|---|---|
+| pagina | `#f4f5f5` |
+| paneel / kaartkop | `#f4f5f9` |
+| vlak (input, kaart) | `#ffffff` |
+| rand | `#d6d8d7` (sterker: `#c3c7cc`) |
+| accent — lijnen | `#8796ef` |
+| accent — gevuld | `#5566e0` |
+| chip / hover-vulling | `#eaeef9` |
+| tekst / secundair | `#1a1d19` / `#666a6b` |
+
+**Waarom twee accenten:** wit op `#8796ef` uit de screenshot haalt maar **2,75:1** en
+zakt dus door WCAG AA. Het screenshot-accent is daarom de kleur van *lijnen* (tab-onderlijn,
+chiprand, focusring); gevulde knoppen krijgen `#5566e0`, dat met wit op **4,81:1** uitkomt.
+
+**Waarom `!important` op de kleuren.** Dit is een override-laag. `style.css` zet
+kaartkoppen al met `!important`, en **veertien** pagina's herdefiniëren knoppen in hun
+eigen `<style>` — dat blok laadt ná elke stylesheet en wint dus altijd. Zonder
+`!important` sloeg het thema op die pagina's half aan, en half is erger dan niet. Het
+staat op **kleur** (achtergrond, rand, tekst) en bewust **niet** op maatvoering: padding,
+breedte en `nowrap` blijven van de pagina, zodat bestaande lay-outs heel blijven.
+
+**Twee dingen bewust niet aangeraakt:** de paarse navbar (staat niet op de screenshot,
+en het is het enige element dat het dashboard herkenbaar maakt — één variabele in het
+bestand als je hem toch mee wil), en rood voor destructieve acties (een verwijderknop
+hoort niet in de accentkleur te verdwijnen; alleen platter gemaakt).
+
+**Wat het met de knopvocabulaire doet:** het onderscheid oranje-actie versus paarse-actie
+verdwijnt — dat bestond alleen in kleur en niet in betekenis. Er zijn nu drie groepen:
+gevuld accent (primair/uitvoeren), neutrale outline (al het andere), rood (destructief).
+De eigen knopklassen die pagina's zelf verzonnen (`.btn-purple`, `.btn-hs`, `.btn-preset`,
+`.btn-tool`, `.btn-*-action`, `.btn-bulk-*`) zijn in diezelfde drie groepen ondergebracht.
+
 ## Tabs — multi-section cards (see Canonicals)
 
 When one card holds several parallel rule-sets or modes, use Bootstrap tabs:

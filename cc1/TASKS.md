@@ -231,6 +231,48 @@ Hot loop opnieuw byte-voor-byte identiek getoetst met `scripts/bothits_parse_fin
       schrappen, want een per-URL 4xx-aandeel is precies wat je van een crawlbudget-vreter
       wil weten. Getest: 2xx+3xx+4xx+5xx+overig telt exact op tot `hits`.
 
+### 2026-08-13 — Flat-restyle: theme-flat.css over het hele dashboard (PROEF)
+
+Joep: alle knoppen en stijlelementen (card-header, knopkleuren, dropdowns) naar de stijl
+van `Downloads\claude\2026-08-13 18 11 15.png`, mét een terugweg.
+
+- [x] **`frontend/css/theme-flat.css`**, gelinkt op alle **35** pagina's ná `style.css`.
+      Een aparte override-laag en géén bewerking van `style.css`, precies zodat
+      terugdraaien één commando is: `sed -i '/theme-flat.css/d' frontend/*.html`. Het tag
+      **`ui-voor-flat`** wijst naar de laatste commit ervóór.
+- [x] **Palet uit de screenshot gemeten met PIL**, niet geschat: pagina `#f4f5f5`, paneel
+      `#f4f5f9`, vlak `#ffffff`, rand `#d6d8d7`, accent `#8796ef`, chip `#eaeef9`.
+- [x] **Twee accenten, en dat is een meting geen smaak**: wit op het screenshot-accent
+      `#8796ef` haalt **2,75:1** en zakt door WCAG AA. Dat accent is nu de kleur van
+      lijnen (tab-onderlijn, chiprand, focusring); gevulde knoppen krijgen `#5566e0` →
+      **4,81:1**.
+- [x] **`!important` op kleur, niet op maatvoering.** Veertien pagina's herdefiniëren
+      knoppen in hun eigen `<style>`, en dat blok wint altijd van een stylesheet. Zonder
+      dit sloeg het thema daar half aan. Padding, breedte en `nowrap` blijven van de
+      pagina, dus lay-outs blijven heel.
+- [x] **Knopvocabulaire teruggebracht tot drie groepen**: gevuld accent (primair),
+      neutrale outline (de rest), rood (destructief). Het onderscheid oranje-actie versus
+      paarse-actie verdween — dat bestond alleen in kleur, niet in betekenis. De eigen
+      klassen van pagina's (`.btn-purple`, `.btn-hs`, `.btn-preset`, `.btn-tool`,
+      `.btn-*-action`, `.btn-bulk-*`) zijn in diezelfde drie ondergebracht.
+- [x] Visueel gecontroleerd op bothits, seo-prio, seo-stats, canonical en healthscore.
+
+**Openstaand / bewust niet gedaan:**
+
+- [ ] **De paarse navbar is niet aangeraakt.** Die staat niet op de screenshot en het is
+      het enige element dat het dashboard herkenbaar maakt. Eén variabele in
+      `theme-flat.css` als hij toch mee moet.
+- [ ] **Rood blijft rood** voor destructieve acties, alleen platter. Een verwijderknop
+      hoort niet in de accentkleur te verdwijnen.
+- [ ] **Bestaande bug, niet van deze restyle**: op `healthscore` loopt het label
+      "Dashboard" over de icoonknop rechtsboven heen. `.nav-dashboard-btn` is
+      `width: 2.75rem` zonder `overflow: hidden`, en de lange paginatitel duwt de nav.
+      Geverifieerd door dezelfde pagina zónder het thema te renderen — daar staat het er
+      ook. Eén regel CSS, maar buiten de gevraagde scope gelaten.
+- [ ] **Verdict op de proef.** Bevalt het, dan kan `theme-flat.css` samengevoegd worden
+      met `style.css` en vervalt de `!important`-laag; bevalt het niet, dan is het één
+      `sed`.
+
 ### 2026-08-13 — Vier losse punten van Joep (na de audit)
 
 - [x] **Type-kolom in Top X URL's spreekt nu dezelfde taal als Filters > URL-type.** De
