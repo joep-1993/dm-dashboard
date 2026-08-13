@@ -1,6 +1,31 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een fix die je op één platform valideert kan op een ander niet eens starten (2026-08-13)
+
+Vanmiddag repareerde ik de kapotte `is_known_url` door de worker-pool expliciet te laten
+forken: `mp_context=multiprocessing.get_context("fork")`. Byte-voor-byte geverifieerd,
+125s → 29s, klaar. Een paar uur later kwam de vraag om die ingest 's nachts op een andere,
+altijd-aan machine te laten draaien — een **Windows**-machine. En daar bestaat `fork`
+niet: `multiprocessing.get_all_start_methods()` geeft op Windows alleen `['spawn']`, dus
+mijn fix gooit daar een `ValueError` bij de eerste logdatum.
+
+- **De fix was goed; de aanname "dit draait op Linux" zat er stilzwijgend in.** Ik had die
+  zelfs opgeschreven in het commentaar ("zou fork ooit verdwijnen — Python 3.14 zet de
+  default op forkserver, macOS gebruikt al spawn — dan moeten de lookups per worker via
+  een initializer") en er tóch een harde `get_context("fork")` van gemaakt. Een noot over
+  een risico is geen mitigatie.
+- **Wat robuust zou zijn geweest**: een `initializer` op de pool die in elke worker
+  `load_url_ids()` en `load_ip_ranges()` doet. Dan werkt hij onder fork én spawn, en is er
+  geen platform-aanname meer. Duurder bij het starten (elke worker haalt ~1M rijen op),
+  daarom niet gratis — maar het is het verschil tussen "werkt hier" en "werkt".
+- **Vraag bij een concurrency- of I/O-fix altijd: op welk platform draait dit óók?** Zeker
+  in dit huis, waar WSL, native Windows-taken en Linux-servers door elkaar lopen.
+
+**Les: `get_context("fork")` is een platformkeuze, geen implementatiedetail. Wie op fork
+leunt voor copy-on-write, moet een spawn-pad hebben — of expliciet documenteren dat de
+code Linux-only is, zodat de volgende machine er niet op stukloopt.**
+
 ## De 202 én de 405 in onze eigen crawlerlogs zijn WAF-challenges (2026-08-13)
 
 Dat beslist.nl een AWS-WAF-challenge geeft aan onbekende bots staat al in dit document

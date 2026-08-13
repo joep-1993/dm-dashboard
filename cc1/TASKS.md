@@ -57,6 +57,34 @@ Analysesessie, geen codewijziging. Alles uit de ruwe CloudFront-logs (13–28 ju
       voor Googlebot). Signaal om op te acteren: 'failed' stijgt terwijl 202+405 daalt.
       Let op: rijen van vóór 2026-08-11 staan op `unchecked` en horen niet in de noemer.
 
+### 2026-08-13 — Nachtelijke S3-ingest verhuizen naar een externe machine
+
+Aanleiding: de bucket bewaart ~42 dagen, dus elke dag zonder ophaal kost permanent één
+logdatum. Het gat 06-10 t/m 07-03 (24 dagen) is precies dat, en het groeide tussen 11 en
+13 augustus nog met drie dagen.
+
+- [x] **Uitgezocht waar de bestaande nachtelijke job draait**: een `threading.Timer` in
+      het uvicorn-proces, en `_fire()` gaat **zonder `before=`** dus hij haalt niets uit
+      S3 — alleen de dropfolder. `BOTHITS_AUTO_INGEST` aanzetten beschermt het venster
+      dus niet. (Ik had eerder het tegendeel gezegd; rechtgezet.)
+- [x] **Overdrachtsprompt geschreven** voor de Claude op de externe machine:
+      `Downloads\claude\bothits_nachtelijke_ingest_PROMPT.txt` (301 regels, geen
+      credentials — alleen de sleutelnamen). Bevat de drie valkuilen bovenaan, een
+      kant-en-klaar `scripts/bothits_nightly.py`, de `schtasks`-regel plus de drie
+      instellingen die schtasks niet kan zetten, en wat er teruggekoppeld moet worden.
+- [ ] **Wacht op uitvoering op die machine.** Harde stop als hij `10.1.32.9:5432` niet
+      kan bereiken — dat is een intern IP.
+- [ ] **`scripts/bothits_nightly.py` bestaat nog niet in de repo.** Die Claude commit hem
+      naar `main`; tot die tijd staat de inhoud alleen in de prompt.
+- [ ] **Native-Windows pad, als hij die route neemt**: `ingest_date()` moet dan een
+      spawn-context met `initializer` krijgen (per worker `load_url_ids()` +
+      `load_ip_ranges()`). Nu vraagt hij hard `get_context("fork")` en dat bestaat daar
+      niet.
+- [ ] **Achterstand inlopen** zodra de taak loopt: kijken welke datums nog in S3 staan
+      maar niet in de ledger. Eenmalig een ruimere run (~36 GB) — eerst overleggen.
+- [ ] **Zet `BOTHITS_AUTO_INGEST` op Joeps machine niet aan** zolang de externe machine
+      de ophaler is; twee planners op dezelfde datums is dubbel werk.
+
 ### 2026-08-13 — Audit Bothits: fase A t/m C uitgevoerd
 
 Elf bevindingen over 4.005 regels (`a5ecefa`). Wat er af is:

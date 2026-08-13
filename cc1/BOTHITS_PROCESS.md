@@ -126,6 +126,49 @@ benoemde familie vereist toch al een codewijziging in `CANON_NAMES`.
 
 ---
 
+## Nachtelijke ingest: waar hij hoort te draaien (2026-08-13)
+
+**De S3-retentie is een deadline, niet een eigenschap.** De bucket bewaart ~42 dagen,
+dus elke dag zonder ophaal kost permanent één logdatum. Zo is het gat 06-10 t/m 07-03
+(24 dagen) ontstaan, en zo groeide het tussen 11 en 13 augustus nog met drie dagen
+terwijl er een notitie over lag. Dit is de reden dat ophalen een taak moet zijn en geen
+gewoonte.
+
+**Wat de ingebouwde scheduler wél en niet doet.** `start_scheduler()` wordt vanuit
+`backend/main.py` bij startup gearmeerd en is een `threading.Timer` **in het
+uvicorn-proces**. Twee dingen die je daarvan moet weten:
+
+* `_fire()` roept `start_ingest_async("scheduled", on_done)` aan **zonder `before=`**,
+  dus er wordt **niets uit S3 gehaald** — hij verwerkt alleen de dropfolder. Aanzetten
+  van `BOTHITS_AUTO_INGEST` beschermt het S3-venster dus NIET.
+* Hij draait op Joeps werkmachine, die 's nachts uit kan staan. `threading.Timer` wacht
+  op `CLOCK_MONOTONIC`, die op Linux niet doortikt tijdens suspend, dus na een nacht
+  slapen vuurt hij niet om 04:30 maar zoveel later als de machine weg was — en dat
+  schuift elke nacht verder op.
+
+**Daarom verhuist het ophalen naar een externe machine die altijd aan staat**, met een
+Windows-taak als planner. De volledige overdrachtsprompt staat in
+`Downloads\claude\bothits_nachtelijke_ingest_PROMPT.txt` (bevat geen credentials, alleen
+de namen van de sleutels). Kern:
+
+| | |
+|---|---|
+| planner | Windows-taak om 03:30, "ook als gebruiker niet is aangemeld" + "starten na gemiste start" + 3× retry |
+| uitvoering | `scripts/bothits_nightly.py` (fetch + `run_drop`), exitcode 1 bij nul bekende URL's zodat de taak op "mislukt" gaat |
+| blik | `BOTHITS_NIGHTLY_DAYS=5` — al geladen datums en al gedownloade bestanden worden overgeslagen, dus een gemiste nacht haalt zichzelf in |
+| staging | `BOTHITS_STAGING_RETENTION_DAYS=7`, blijft rond 7 GB |
+| eigendom | die machine is de ENIGE ophaler; bij Joep blijft `BOTHITS_AUTO_INGEST=false` |
+
+**`fork` bestaat niet op Windows.** `ingest_date()` vraagt expliciet
+`multiprocessing.get_context("fork")`; native Windows-Python kent alleen `spawn` en
+gooit daar een `ValueError`. Vandaar dat de aanbevolen route de ingest **in WSL** op die
+machine draait en de Windows-taak alleen `wsl.exe` aanroept — dan is de code identiek.
+Wie het tóch native wil, moet de pool op spawn zetten mét een `initializer` die per
+worker `load_url_ids()` en `load_ip_ranges()` doet; zonder dat is de uitkomst stil
+kapot (zie de is_known_url-bevinding in TASKS).
+
+---
+
 ## Staging, archief en het herstelpad (2026-08-13)
 
 Verwerkte bronbestanden verhuizen naar `<staging>/_processed/<datum>/`. Drie dingen om
