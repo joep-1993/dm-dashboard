@@ -146,32 +146,30 @@
             background: none;
         }
 
-        /* Filtercontrols als pillen op een zachte achtergrond. */
-        .filter-shell { background: #f7f7fb; border: 1px solid #ececf3; border-radius: 8px; }
-        .filter-shell .form-control, .filter-shell .form-select, .chk-list {
-            border: 1px solid #dcdee3;
-            border-radius: 6px;
-            background: #fff;
-        }
-        .filter-shell .form-control:focus, .filter-shell .form-select:focus {
-            border-color: #5e4a90;
-            box-shadow: 0 0 0 2px rgba(94, 74, 144, 0.12);
-        }
-        .filter-shell .form-label { font-size: 0.78rem; font-weight: 600; color: #6a7178; }
+        /* Het .filter-shell-blok (zachte achtergrond + pill-controls over de hele
+           filterkaart) is er op verzoek van Joep weer uit (2026-08-13): de kaart is
+           terug op de gewone dashboardvorm. Alleen het periodekader hieronder is
+           gebleven. Let op bij hergebruik: die shell overschreef ook `.chk-list`
+           (radius 6px, witte achtergrond), dus met het blok verdwijnt die override en
+           geldt de eigen definitie van .chk-list weer — dat is de bedoeling.
 
-        /* Datumkiezer: één kader met kalendericoon, zoals rechtsboven in het voorbeeld.
-           De twee losse date-inputs blijven bestaan en blijven de bron van waarheid —
-           params(), boot() en flatpickr lezen ze ongewijzigd. Dit is puur de omlijsting
-           eromheen, dus de restyle kan niet aan de datastroom komen. */
+           Datumkiezer: één kader met kalendericoon, zoals in het voorbeeld. De twee
+           losse date-inputs blijven bestaan en blijven de bron van waarheid — params(),
+           boot() en flatpickr lezen ze ongewijzigd. Dit is puur de omlijsting eromheen,
+           dus het kan niet aan de datastroom komen.
+
+           Smaller dan de eerste versie (Joep): de inputs van 8,5 naar 6,6rem en minder
+           padding/gap. 6,6rem is de bodem voor `YYYY-MM-DD` in 0,85rem — daaronder kapt
+           Chrome de datum af of duwt hij het kalendericoon van de input eruit. */
         .date-box {
-            display: inline-flex; align-items: center; gap: 0.4rem;
-            border: 1px solid #dcdee3; border-radius: 6px;
-            background: #fff; padding: 0.25rem 0.6rem;
+            display: inline-flex; align-items: center; gap: 0.25rem;
+            border: 1px solid #dee2e6; border-radius: 4px;
+            background: #fff; padding: 0.2rem 0.45rem;
         }
         .date-box svg { flex: 0 0 auto; color: #6a7178; }
         .date-box input[type="date"], .date-box input.flatpickr-input {
             border: 0 !important; background: none !important; box-shadow: none !important;
-            padding: 0.15rem 0; width: 8.5rem; font-size: 0.9rem; color: #1d2129;
+            padding: 0.1rem 0; width: 6.6rem; font-size: 0.85rem; color: #1d2129;
         }
         .date-box .sep { color: #9aa0a6; }
         .muted-note { font-size: 0.82rem; color: #636e72; }
@@ -360,15 +358,17 @@
                 <!-- align-items-start, not -end: the checkbox lists are much taller than
                      the date inputs, so bottom-alignment pushes "Van"/"Tot en met" a full
                      row below the other filter labels. -->
-                <div class="filter-shell p-3">
-                    <!-- Periode op één regel bovenin, zoals rechtsboven in het voorbeeld:
-                         één kader, kalendericoon, de twee datums met een streepje ertussen.
-                         De inputs zelf zijn ongewijzigd (#startDate / #endDate) — alleen de
-                         omlijsting is nieuw, dus flatpickr en params() merken er niets van. -->
-                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                        <label class="form-label mb-0">Periode</label>
+                <div class="row g-3 align-items-start">
+                    <!-- Periode als één kader (Joep, 2026-08-13) i.p.v. twee losse
+                         "Van"/"Tot en met"-kolommen. Dat scheelt een kolom, dus de drie
+                         checkboxlijsten staan weer op hun oorspronkelijke col-md-2 en de
+                         kaart eromheen is de gewone dashboardvorm. De inputs zelf zijn
+                         ongewijzigd (#startDate / #endDate), dus flatpickr en params()
+                         merken hier niets van. -->
+                    <div class="col-md-3">
+                        <label class="form-label mb-1">Periode</label>
                         <div class="date-box">
-                            <svg width="15" height="15" viewBox="0 0 16 16" fill="none"
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"
                                  stroke="currentColor" stroke-width="1.4" aria-hidden="true">
                                 <rect x="2" y="3" width="12" height="11" rx="2"/>
                                 <path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/>
@@ -378,19 +378,17 @@
                             <input type="date" id="endDate" aria-label="Tot en met">
                         </div>
                     </div>
-                    <div class="row g-3 align-items-start">
-                        <div class="col-md-3">
-                            <label class="form-label mb-1">Domein</label>
-                            <div class="chk-list" id="hostFilter"><span class="text-muted">laden…</span></div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label mb-1">Bot-soort</label>
-                            <div class="chk-list" id="classFilter"><span class="text-muted">laden…</span></div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label mb-1">URL-type</label>
-                            <div class="chk-list" id="typeFilter"><span class="text-muted">laden…</span></div>
-                        </div>
+                    <div class="col-md-2">
+                        <label class="form-label mb-1">Domein</label>
+                        <div class="chk-list" id="hostFilter"><span class="text-muted">laden…</span></div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label mb-1">Bot-soort</label>
+                        <div class="chk-list" id="classFilter"><span class="text-muted">laden…</span></div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label mb-1">URL-type</label>
+                        <div class="chk-list" id="typeFilter"><span class="text-muted">laden…</span></div>
                     </div>
                 </div>
                 <!-- Wegklikbaar (Joep, 2026-08-13): het is een waarschuwing die je één
