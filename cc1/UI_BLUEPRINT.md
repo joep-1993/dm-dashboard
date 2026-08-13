@@ -727,9 +727,22 @@ git tag                                        # `ui-voor-flat` = laatste commit
 | chip / hover-vulling | `#eaeef9` |
 | tekst / secundair | `#1a1d19` / `#666a6b` |
 
-**Waarom twee accenten:** wit op `#8796ef` uit de screenshot haalt maar **2,75:1** en
-zakt dus door WCAG AA. Het screenshot-accent is daarom de kleur van *lijnen* (tab-onderlijn,
-chiprand, focusring); gevulde knoppen krijgen `#5566e0`, dat met wit op **4,81:1** uitkomt.
+**Blauw en oranje hebben elk een eigen betekenis** (bijgesteld 2026-08-13, Joep wilde de
+oranje knoppen terug):
+
+| kleur | betekenis | waar |
+|---|---|---|
+| **blauw** `#8796ef` | selectie en interactie | tab-onderlijn, focusring, chips |
+| **oranje** `#CC5500` | actie | gevulde knoppen (`.btn-run` c.s.), hover `#E97451` |
+
+Dat blauw is bewust géén knopkleur: wit erop haalt maar **2,75:1** en zakt door WCAG AA.
+Wie de CTA tóch blauw wil, pakt `--flat-accent-solid` (`#5566e0`, 4,81:1) — die staat er
+nog als gemeten alternatief. Andersom: wit op `#CC5500` is **4,31:1**, genoeg voor
+knoptekst maar net onder de 4,5:1 voor gewone tekst; dat is de bestaande huiswaarde en
+`#B84D00` (5,1:1) is het alternatief als het ooit moet.
+
+De hover van outline-knoppen is neutraal grijs en niet het blauwe accent: met een oranje
+CTA op dezelfde rij zouden dat drie kleuren zijn.
 
 **Waarom `!important` op de kleuren.** Dit is een override-laag. `style.css` zet
 kaartkoppen al met `!important`, en **veertien** pagina's herdefiniëren knoppen in hun
@@ -823,6 +836,12 @@ carries through automatically:
      uitgerekt over het hele veld en transparant gemaakt: het glyph verdwijnt en het
      klikvlak wordt juist groter. Met flatpickr is die regel vanzelf inactief, want die
      vervangt de input door `type=text`.
+  4. **Bij een bereik staat de eerste datum RECHTS uitgelijnd** (`:has(.sep)`). Beide
+     velden zijn 6,6rem maar een datum is maar ~84px breed, dus links uitgelijnd viel
+     alle speling vóór het streepje: gemeten 60px links tegen ~15px rechts, en dan kleeft
+     het streepje aan de tweede datum. Maak de velden hiervoor **niet** smaller — die
+     breedte moet zowel `2026-08-13` (flatpickr) als `13-08-2026` (native) als Chrome's
+     eigen icoon aankunnen. Losse datumvelden blijven links uitgelijnd.
 
   Daarbovenop komt **flatpickr** voor de kalender zelf — dat is wat SEO stats, SEO
   titles, GSD Campaigns, GSD Budgets, Shop-campaigns en Bot Hits renderen, en

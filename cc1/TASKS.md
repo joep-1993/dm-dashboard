@@ -257,6 +257,29 @@ van `Downloads\claude\2026-08-13 18 11 15.png`, mét een terugweg.
       `.btn-*-action`, `.btn-bulk-*`) zijn in diezelfde drie ondergebracht.
 - [x] Visueel gecontroleerd op bothits, seo-prio, seo-stats, canonical en healthscore.
 
+**Bijgesteld na de eerste ronde (Joep, 2026-08-13):**
+
+- [x] **Oranje CTA terug.** De gevulde knoppen stonden op het blauwe accent en zijn terug
+      op `#CC5500` / hover `#E97451` — exact de waarden uit `style.css`, dus geen nieuwe
+      oranje. **Blauw en oranje hebben nu elk een eigen betekenis**: blauw = selectie en
+      interactie (tab-onderlijn, focusring, chips), oranje = actie. De hover van de
+      outline-knoppen ging daarom van blauw naar neutraal grijs; met een oranje CTA
+      ernaast waren dat drie kleuren op één knoppenrij.
+      Twee kanttekeningen: `.btn-purple` en `.btn-hs` wáren paars, niet oranje — ze zitten
+      in de primaire groep omdat het op hun pagina's de hoofdactie is, dus voor die twee is
+      het geen exacte terugzetting. En wit op `#CC5500` is 4,31:1: genoeg voor knoptekst,
+      net onder de 4,5:1 voor gewone tekst. Bestaande huiswaarde, ongewijzigd overgenomen;
+      `#B84D00` geeft 5,1:1 als het ooit moet.
+- [x] **Streepje in de datumkiezer gecentreerd.** Bij een bereik kleefde het aan de tweede
+      datum. Gemeten in de gerenderde pagina: beide inputs zijn 6,6rem maar de datum is
+      ~84px en links uitgelijnd, dus alle speling van veld 1 viel vóór het streepje —
+      **60px links tegen ~15px rechts**. Eerste datum nu rechts uitgelijnd via
+      `:has(.sep)`, zodat de vijf losse datumvelden links blijven. Bewust niet de velden
+      smaller gemaakt: die breedte moet zowel het flatpickr-formaat (`2026-08-13`) als het
+      native (`13-08-2026`) als Chrome's eigen kalendericoon aankunnen.
+- [x] **Bothits:** ondertitel "alleen categorie-URL's …" uit de Facet-diepte-kop. De
+      reikwijdte van de grafiek verandert niet.
+
 **Openstaand / bewust niet gedaan:**
 
 - [ ] **De paarse navbar is niet aangeraakt.** Die staat niet op de screenshot en het is
