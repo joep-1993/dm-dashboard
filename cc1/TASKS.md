@@ -51,9 +51,15 @@ onleesbare `.gz`. Vijf partiële datums staan al in de ledger (03-26, 04-13, 04-
 
 Regressiepoort voor de hot-loop-wijziging: `process_file()` over 24 echte bestanden uit
 6 distributies (13,4 MB, 103.840 regels, 45.174 bot-hits) met md5 over de gesorteerde
-cube-, known- én unknown-items. **Byte-voor-byte identiek** vóór en ná. Harnas staat in
-`scratchpad/bothits_parse_fingerprint.py` — sorteer de steekproef op GROOTTE per
-distributie, want alfabetisch pak je 20 kruimelbestanden van 480 B met nul bots.
+cube-, known- én unknown-items. **Byte-voor-byte identiek** vóór en ná.
+
+Het harnas staat in de repo: **`scripts/bothits_parse_fingerprint.py`** (gebruik in de
+docstring). Gebruik het ook voor fase 2 — elke wijziging in `process_file()` hoort hier
+langs. Twee dingen die het harnas zelf moest leren: sorteer de steekproef op **grootte
+per distributie** (alfabetisch pak je 20 kruimelbestanden van 480 B met nul bot-hits, en
+één distributie mist de hosts die `skip_host` juist moet wegfilteren), en let op de
+staging-retentie van 21 dagen — `BOTHITS_FP_SRC` moet naar een datum wijzen die er nog
+staat.
 
 - [x] **`hours_present` en `is_complete` staan nu in de DDL** én in `SCHEMA_MIGRATE`
       (catalogus-guard, niet `ADD COLUMN IF NOT EXISTS` — die pakt de AccessExclusiveLock
