@@ -309,7 +309,9 @@
                      keer leest, geen filter dat je later nog nodig hebt. `pe-5` en niet
                      `px-3`, want Bootstraps .alert-dismissible reserveert rechts 3rem voor
                      het kruisje en een px-utility zou die met !important terugzetten naar
-                     1rem — dan valt de X over de tekst. -->
+                     1rem — dan valt de X over de tekst.
+                     Inhoud én zichtbaarheid komen uit syncPartialWarn(), die op de gekozen
+                     periode filtert — dus buiten maart-juni staat hier niets. -->
                 <div id="partialWarn" class="alert alert-warning alert-dismissible fade show py-2 ps-3 pe-5 mt-3 mb-0 d-none"
                      style="font-size:0.85rem;" role="alert"></div>
                 <!-- Toepassen ONDER de waarschuwing (Joep, 2026-08-13), niet erboven. De
@@ -823,6 +825,41 @@
         return out;
     }
 
+    // Waarschuwt alleen over onvolledige dagen die in de GEKOZEN periode vallen
+    // (Joep, 2026-08-13). Hij las eerst gewoon `META.partial_days` — de hele ledger —
+    // en stond daarmee altijd op de pagina, ook in de standaardweergave (laatste 30
+    // dagen), waar geen van de vijf datums in zit. Een waarschuwing die je élke keer
+    // ziet lees je niet meer, en de vijf datums zijn niet te repareren: de ontbrekende
+    // uren zijn nooit gedownload en vielen daarna uit de S3-retentie (41 dagen), dus
+    // dit blijft een permanente eigenschap van de historie. Vandaar scopen in plaats
+    // van wegpoetsen: leeg bereik = geen banner, maart t/m juni in beeld = wel.
+    //
+    // Vergelijking op de YYYY-MM-DD-strings, niet op Date: die notatie sorteert
+    // lexicografisch al goed en `new Date('2026-03-26')` is UTC-middernacht, wat in
+    // een CEST-browser een dag terug kan vallen (postgres_utc_timestamps_display).
+    function syncPartialWarn() {
+        const w = document.getElementById('partialWarn');
+        // Bootstrap haalt de banner bij wegklikken uit de DOM; dan is er niets meer
+        // te tonen tot een reload, en dat is precies wat wegklikken hoort te doen.
+        if (!w) return;
+        const s = document.getElementById('startDate').value;
+        const e = document.getElementById('endDate').value;
+        const inRange = (META.partial_days || []).filter(p =>
+            (!s || p.log_date >= s) && (!e || p.log_date <= e));
+        if (!inRange.length) { w.classList.add('d-none'); return; }
+        w.classList.remove('d-none');
+        // Het kruisje zit IN de innerHTML en niet in de statische markup: deze regel
+        // overschrijft de inhoud van de balk, dus een knop uit de HTML zou hier
+        // sneuvelen.
+        w.innerHTML = '<strong>Let op — onvolledige dagen.</strong> ' +
+            (inRange.length === 1 ? 'Deze logdatum heeft' : 'Deze logdatums hebben') +
+            ' niet alle 24 uur in het archief, dus ' +
+            (inRange.length === 1 ? 'het totaal ligt' : 'hun totalen liggen') +
+            ' kunstmatig laag: ' +
+            inRange.map(p => `${p.log_date} (${p.hours_present}/24u)`).join(', ') + '.' +
+            '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Sluiten"></button>';
+    }
+
     function chkbox(container, values, labels) {
         const el = document.getElementById(container);
         el.innerHTML = values.map((v, i) =>
@@ -855,19 +892,6 @@
         chkbox('hostFilter', META.hosts || []);
         chkbox('classFilter', Object.keys(classCounts()));
         chkbox('typeFilter', META.url_types || []);
-        if ((META.partial_days || []).length) {
-            const w = document.getElementById('partialWarn');
-            w.classList.remove('d-none');
-            // Het kruisje zit IN de innerHTML en niet in de statische markup: deze regel
-            // overschrijft de inhoud van de balk, dus een knop uit de HTML zou hier
-            // sneuvelen. Bootstrap haalt de balk bij sluiten uit de DOM; /meta wordt na
-            // boot() niet opnieuw gelezen, dus hij komt terug na een reload en niet
-            // eerder — precies wat je van een wegklikbare melding verwacht.
-            w.innerHTML = '<strong>Let op — onvolledige dagen.</strong> Deze logdatums hebben niet alle 24 uur in het archief, ' +
-                'dus hun totalen liggen kunstmatig laag: ' +
-                META.partial_days.map(p => `${p.log_date} (${p.hours_present}/24u)`).join(', ') + '.' +
-                '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Sluiten"></button>';
-        }
         await refresh();
         // Pikt een run op die op de Ingest-tab of door de nachtelijke timer is
         // gestart — anders staat de ophaalknop hier klikbaar terwijl er al een
@@ -878,6 +902,10 @@
 
     // ---- Overview --------------------------------------------------------
     async function refresh(force = false) {
+        // Vóór de fetches: de banner hoort bij de periode die nu getoond wordt, en
+        // refresh() is het enige punt waar élke ingang samenkomt (Toepassen, de
+        // flatpickr-onChange, groupBy en de boot).
+        syncPartialWarn();
         const gb = document.getElementById('groupBy').value;
         const f = force ? { force: 'true' } : {};
         const [daily, summary] = await Promise.all([
@@ -1267,6 +1295,12 @@
     }
     function renderBotTable(total) {
         total = total || botRows.reduce((a, b) => a + b.hits, 0);
+        // Eerst de charts van een open paneel opruimen (2026-08-13). Deze functie
+        // vervangt de hele tbody, dus na een sorteerklik met een rij open bleven er
+        // Chart.js-instanties achter die naar een losgekoppelde canvas wezen —
+        // inclusief hun resize-listeners. Het herstelde zichzelf bij de volgende klik,
+        // maar tot die tijd is het een lek.
+        closeDetails('#botTable', ['detDaily', 'detType', 'detHost', 'detDepth']);
         document.querySelector('#botTable tbody').innerHTML = botRows.map(b => `
             <tr class="bot-row" data-fam="${escapeHtml(b.bot_family)}">
               <!-- Geen kleurblokje meer voor de familie (Joep, 2026-08-13). De tabel is
@@ -1275,7 +1309,7 @@
                    grafiek een eigen kleur heeft terwijl er daar acht benoemd zijn en de
                    rest in Overig valt. De SOORT houdt zijn kleur wel — dat zijn vier
                    waarden die op elke rij hetzelfde betekenen. -->
-              <td><span class="bot-caret">▸</span>${b.bot_family}</td>
+              <td><span class="bot-caret">▸</span>${escapeHtml(b.bot_family)}</td>
               <td class="col-mid"><span class="lbl" style="color:${colorFor('bot_class', b.bot_class)}">${b.bot_class}</span></td>
               <td class="num">${fmt(b.hits)}</td>
               <td class="num">${pct(b.hits, total)}</td>
@@ -1303,15 +1337,23 @@
     // hier zit geen nieuw endpoint achter. De huidige periode- en domeinfilters
     // gaan mee via params(), zodat het paneel dezelfde selectie toont als de rest
     // van de pagina.
-    async function toggleBotDetail(tr) {
-        const open = tr.classList.contains('is-open');
-        // Altijd eerst sluiten wat open staat, inclusief de charts opruimen.
-        document.querySelectorAll('#botTable tbody tr.bot-detail').forEach(d => d.remove());
-        document.querySelectorAll('#botTable tbody tr.bot-row.is-open')
+    // Sluit het open paneel van een tabel en ruim zijn charts op. Eén plek voor drie
+    // aanroepers (2026-08-13): de twee toggles hebben het nodig vóór ze een nieuwe rij
+    // openen, en de twee render-functies omdat die de hele tbody vervangen — een
+    // sorteerklik met een paneel open liet anders Chart.js-instanties achter die naar
+    // een losgekoppelde canvas wezen. Stond twee keer bijna-identiek in de toggles.
+    function closeDetails(tableSel, chartKeys) {
+        document.querySelectorAll(`${tableSel} tbody tr.bot-detail`).forEach(d => d.remove());
+        document.querySelectorAll(`${tableSel} tbody tr.is-open`)
                 .forEach(r => r.classList.remove('is-open'));
-        ['detDaily', 'detType', 'detHost', 'detDepth'].forEach(k => {
+        chartKeys.forEach(k => {
             if (CHARTS[k]) { CHARTS[k].destroy(); CHARTS[k] = null; }
         });
+    }
+
+    async function toggleBotDetail(tr) {
+        const open = tr.classList.contains('is-open');
+        closeDetails('#botTable', ['detDaily', 'detType', 'detHost', 'detDepth']);
         if (open) return;                       // dit was een klik om te sluiten
 
         const fam = tr.dataset.fam;
@@ -1534,6 +1576,7 @@
         // Zelfde vorm als Per bot-familie: caret vooraan, rij klikbaar, paneel eronder.
         // De Bots-kolom is hierdoor overbodig geworden — een opsomming van twaalf namen
         // in een cel zei niets over de verhouding, en dat is precies wat de donut wel doet.
+        closeDetails('#urlTable', ['urlBot', 'urlDaily']);
         tb.innerHTML = urlRows.map((r, i) => `
             <tr class="url-row" data-i="${i}">
               <td class="url-cell" title="${escapeHtml(r.url)}"><span class="bot-caret">▸</span><a href="https://www.beslist.nl${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a></td>
@@ -1556,12 +1599,7 @@
     // Chart.js-instanties per paneel, en 250 rijen open laten staan is 500 charts.
     async function toggleUrlDetail(tr) {
         const open = tr.classList.contains('is-open');
-        document.querySelectorAll('#urlTable tbody tr.url-detail').forEach(d => d.remove());
-        document.querySelectorAll('#urlTable tbody tr.url-row.is-open')
-                .forEach(r => r.classList.remove('is-open'));
-        ['urlBot', 'urlDaily'].forEach(k => {
-            if (CHARTS[k]) { CHARTS[k].destroy(); CHARTS[k] = null; }
-        });
+        closeDetails('#urlTable', ['urlBot', 'urlDaily']);
         if (open) return;
 
         const row = urlRows[Number(tr.dataset.i)];

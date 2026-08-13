@@ -44,7 +44,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import unquote
 
 from psycopg2.extras import execute_values
@@ -67,6 +67,15 @@ DROP_DIR = os.getenv(
     "/mnt/c/Users/JoepvanSchagen/Downloads/claude/bothits_drop",
 )
 KEEP_SOURCE = os.getenv("BOTHITS_KEEP_SOURCE", "") == "1"
+# Hoe lang verwerkte bronbestanden in `_processed/` blijven staan (2026-08-13). Ze
+# bleven er eeuwig, ~900 MB per logdatum, en op de dag dat dit erin ging stond er 30 GB
+# — puur omdat niets ze ooit opruimde.
+#
+# 21 dagen en niet 7: de S3-bucket bewaart ~42 dagen, dus binnen deze termijn is een
+# datum altijd nog opnieuw te downloaden ÉN nog lokaal te herladen zonder download. Dat
+# tweede is precies waar het herstelpad van run_backfill --date op leunt, en dat wil je
+# niet weggooien zolang een fout nog vers is. 0 = nooit opruimen.
+STAGING_RETENTION_DAYS = int(os.getenv("BOTHITS_STAGING_RETENTION_DAYS", "21"))
 MAX_WORKERS = int(os.getenv("BOTHITS_WORKERS", "12"))
 # Named offenders kept per day per bot family among URLs missing from pa.urls.
 TOP_UNKNOWN_PER_BOT = int(os.getenv("BOTHITS_TOP_UNKNOWN", "500"))
@@ -133,6 +142,11 @@ BOT_FAMILIES = [
 ]
 BOT_RX = [(fam, cls, re.compile(p, re.I)) for fam, cls, p in BOT_FAMILIES]
 BOT_CLASS = {fam: cls for fam, cls, _ in BOT_FAMILIES}
+# Snelle afwijzing: de UNIE van alle patronen, opgebouwd uit dezelfde lijst zodat de
+# twee niet uit elkaar kunnen lopen. Matcht deze niet, dan matcht geen enkel patroon —
+# dus de uitkomst is identiek en we slaan 33 losse searches over. Ongeveer de helft van
+# de logregels is geen bot, en die betaalden tot nu toe de volle rondgang.
+ANY_BOT_RX = re.compile("|".join(f"(?:{p})" for _f, _c, p in BOT_FAMILIES), re.I)
 
 # Longest-first so "Googlebot-Image" wins over "Googlebot" and
 # "Applebot-Extended" over "Applebot".
@@ -158,6 +172,47 @@ NAME_RX = re.compile("(" + "|".join(
 # user-agent, so "DiffBot" and "Diffbot" would become two dimension rows for
 # one crawler. Fold the match back onto our own spelling.
 CANON_BY_LOWER = {n.lower(): n for n in CANON_NAMES}
+
+# ---------------------------------------------------------------------------
+# UA -> (familie, botnaam), gememoïseerd (2026-08-13)
+#
+# Dit was de hot loop van de hele ingest: per LOGREGEL een unquote() plus tot 33
+# regex-searches plus NAME_RX, over 6,9 mln regels per dag. En dat terwijl een
+# logdatum maar een paar honderd unieke user-agents draagt — dezelfde string werd
+# duizenden keren opnieuw ontleed.
+#
+# De memo zit op de RUWE (nog niet ge-unquote) string, want dat is wat zich herhaalt
+# en het spaart de unquote ook uit. Semantiek blijft exact: dezelfde lijstvolgorde,
+# dezelfde eerste-match-wint-regel, dezelfde CANON_BY_LOWER-terugvouwing. Bewust GEEN
+# alternation met named groups als vervanging van de lus: die kiest de LEFTMOST match
+# in de string en niet de eerste in lijstvolgorde, en dan zou een UA met een generieke
+# 'bot\b' vóór een specifieke naam als other-bot eindigen.
+#
+# Grens erop omdat een spoofende client oneindig veel unieke UA's kan sturen; boven de
+# grens blijft het gewoon werken, alleen zonder memo.
+_UA_MEMO = {}
+_UA_MEMO_MAX = int(os.getenv("BOTHITS_UA_MEMO_MAX", "50000"))
+
+
+def classify_ua(raw_ua):
+    """(familie, botnaam) of (None, None) voor de ruwe UA uit het logbestand."""
+    hit = _UA_MEMO.get(raw_ua)
+    if hit is not None:
+        return hit
+    ua = unquote(raw_ua)
+    if not ANY_BOT_RX.search(ua):
+        out = (None, None)
+    else:
+        # De unie matchte, dus één van de patronen doet dat ook: fam wordt gezet.
+        for name, _cls, rx in BOT_RX:
+            if rx.search(ua):
+                m = NAME_RX.search(ua)
+                bot = CANON_BY_LOWER.get(m.group(1).lower(), m.group(1)) if m else name
+                out = (name, bot)
+                break
+    if len(_UA_MEMO) < _UA_MEMO_MAX:
+        _UA_MEMO[raw_ua] = out
+    return out
 
 # Families excluded from the per-URL tables. They still appear in the cube with
 # full hit counts — this only stops an unbounded catch-all from generating URL
@@ -191,7 +246,9 @@ def url_type(u):
         return "category_legacy"
     if u.startswith("/sitemap"):
         return "sitemap"
-    if u == "/" or u == "":
+    # Alleen "/": de aanroeper geeft `stem = unquote(...).rstrip("/") or "/"`, dus een
+    # lege string bereikt deze functie niet. `or u == ""` stond hier als dode helft.
+    if u == "/":
         return "home"
     if u.startswith("/robots.txt"):
         return "robots"
@@ -302,7 +359,8 @@ def process_file(path):
                 raw_lines += 1
                 p = line.rstrip("\n").split("\t")
                 try:
-                    ua = unquote(p[idx["cs(User-Agent)"]])
+                    # RUW, niet ge-unquote: classify_ua() doet dat achter zijn memo.
+                    raw_ua = p[idx["cs(User-Agent)"]]
                     host = norm_host(p[idx["x-host-header"]])
                     stem = unquote(p[idx["cs-uri-stem"]]).rstrip("/") or "/"
                     st = p[idx["sc-status"]]
@@ -319,18 +377,12 @@ def process_file(path):
                 if skip_host(host):
                     continue
 
-                fam = None
-                for name, _cls, rx in BOT_RX:
-                    if rx.search(ua):
-                        fam = name
-                        break
+                fam, bot = classify_ua(raw_ua)
                 if fam is None:
                     continue
                 bot_lines += 1
                 tracked = fam not in UNTRACKED_FAMILIES
 
-                m = NAME_RX.search(ua)
-                bot = CANON_BY_LOWER.get(m.group(1).lower(), m.group(1)) if m else fam
                 ut = url_type(stem)
                 depth = facet_depth(stem)
                 sc = status_class(st)
@@ -591,7 +643,7 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
 # ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
-def scan_tree(root):
+def scan_tree(root, include_archived=False):
     """-> {log_date: [paths]}, {log_date: set(hours)}, {log_date: set(dirs)}.
 
     Two properties of the archive this has to survive:
@@ -607,12 +659,19 @@ def scan_tree(root):
     Files are then deduplicated on basename, because a date spanning two
     folders can list the same CloudFront object twice and it would otherwise be
     counted twice.
+
+    `include_archived` neemt `_processed/` mee (2026-08-13). Normaal blijft die map
+    buiten beeld, anders zou elke run alles wat hij ooit verwerkte opnieuw oppakken.
+    Maar het herstelrecept — ledger-rij weggooien en opnieuw verwerken — vond daardoor
+    NIETS, want de bestanden staan juist daar; op 13 augustus moest ik ze handmatig
+    terugverhuizen om één datum te kunnen herladen. Met deze vlag kan run_backfill met
+    `--date` uit het archief lezen zonder eerst 900 MB per dag opnieuw te downloaden.
     """
     seen = {}
     hours = collections.defaultdict(set)
     dirs = collections.defaultdict(set)
     for dirpath, _dirnames, filenames in os.walk(root):
-        if os.path.basename(dirpath) == "_processed":
+        if not include_archived and "_processed" in dirpath.split(os.sep):
             continue
         for fn in filenames:
             if not fn.endswith(".gz"):
@@ -649,10 +708,16 @@ def run_backfill(src=None, limit=None, redo=False, only=None):
     Unlike the drop folder this does NOT skip partial days: the archive's five
     cut-off dates are all the history there is for them, so they are loaded and
     flagged rather than withheld.
+
+    Met `only` (de `--date`-vlag) leest hij ook uit `_processed/` — dat is het
+    herstelpad voor één datum (2026-08-13). Verwerkte bestanden staan daar, dus
+    zonder die vlag zou een gerichte herlaad ze niet vinden en moest je 900 MB per
+    dag opnieuw uit S3 halen. Alleen bij `only`, want een backfill zonder filter zou
+    anders alles wat hij ooit verwerkte opnieuw oppakken.
     """
     src = src or BACKUP_DIR
     load_url_ids()
-    by_date, hours, dirs = scan_tree(src)
+    by_date, hours, dirs = scan_tree(src, include_archived=bool(only))
     done = set() if redo else already_ingested()
     todo = sorted(d for d in by_date if d not in done)
     if only:
@@ -663,6 +728,13 @@ def run_backfill(src=None, limit=None, redo=False, only=None):
                 len(by_date), len(done & set(by_date)), len(todo))
     results = []
     for i, d in enumerate(todo, 1):
+        # Zelfde annuleergrens als run_drop: tussen twee logdatums (2026-08-13). Dit
+        # is de LANGSTE job van het systeem — 116 datums uit het archief — en hij was
+        # de enige die niet naar de vlag keek, dus een Cancel liet hem doorlopen tot
+        # het eind.
+        if _cancel.is_set():
+            logger.info("backfill: geannuleerd na %s van %s datums", i - 1, len(todo))
+            break
         logger.info("=== %s/%s : %s ===", i, len(todo), d)
         try:
             results.append(ingest_date(date.fromisoformat(d), by_date[d],
@@ -678,6 +750,17 @@ def run_drop(src=None):
     A date is only ingested once all 24 hour-buckets are present, so a folder
     still being copied in doesn't get loaded as a half day and then silently
     left that way.
+
+    Kijkt sinds 2026-08-13 ECHT niet meer in `_processed/`. De skip in scan_tree
+    vergeleek de basename met "_processed" en sloeg daarmee alleen die map zelf over,
+    niet de datum-submappen eronder — dus elke run schuimde het hele archief af
+    (46.097 bestanden op het moment van meten, groeiend met ~2.900 per dag) en
+    "archiveerde" datums die er al stonden nog een keer over zichzelf. Nu scant hij
+    alleen wat nieuw is.
+    Wat dat kost: een datum waarvan je de ledger-rij weggooit wordt niet meer
+    stilzwijgend uit het archief herladen. Dat was per ongeluk het herstelpad; nu is
+    het een expliciete: `python -m backend.bothits_ingest backfill --src <staging>
+    --date 2026-08-12`.
     """
     src = src or DROP_DIR
     if not os.path.isdir(src):
@@ -712,8 +795,46 @@ def run_drop(src=None):
         except Exception as exc:
             logger.error("[%s] FAILED: %s", d, exc, exc_info=True)
             skipped.append({"log_date": d, "reason": f"error: {exc}"})
+    # Ná de datums, niet ertussen: opruimen mag nooit concurreren met een ingest die
+    # nog bestanden aan het lezen is.
+    freed = _prune_archive(src)
     return {"status": "cancelled" if cancelled else "ok", "dir": src,
-            "cancelled": cancelled, "processed": processed, "skipped": skipped}
+            "cancelled": cancelled, "processed": processed, "skipped": skipped,
+            "archive_freed_mb": round(freed / 1e6) if freed else 0}
+
+
+def _prune_archive(src, days=None):
+    """Gooi verwerkte bronbestanden weg die ouder zijn dan de retentie. -> bytes vrij.
+
+    Alleen mappen `_processed/<YYYY-MM-DD>/` waarvan de DATUM ouder is dan de grens —
+    niet op bestandsmtime, want die zegt wanneer we hem downloadden en niet over welke
+    dag hij gaat. Buiten `_processed` blijft alles staan; een half gedownloade dag in de
+    staging-root is werk-in-uitvoering, geen afval.
+    """
+    days = STAGING_RETENTION_DAYS if days is None else days
+    root = os.path.join(src, "_processed")
+    if not days or not os.path.isdir(root):
+        return 0
+    cutoff = date.today() - timedelta(days=days)
+    freed = 0
+    for name in sorted(os.listdir(root)):
+        try:
+            if date.fromisoformat(name) >= cutoff:
+                continue
+        except ValueError:
+            continue                      # geen datummap: laat staan
+        path = os.path.join(root, name)
+        size = sum(os.path.getsize(os.path.join(path, f))
+                   for f in os.listdir(path) if os.path.isfile(os.path.join(path, f)))
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            logger.warning("kon %s niet opruimen: %s", path, exc)
+            continue
+        freed += size
+        logger.info("staging opgeruimd: %s (%s MB, ouder dan %s dagen)",
+                    name, round(size / 1e6), days)
+    return freed
 
 
 def _archive(src, log_date, files):

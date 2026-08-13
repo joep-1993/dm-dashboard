@@ -54,10 +54,19 @@ def _query(sql, params=None):
 
 
 def _range(start_date, end_date):
-    """Default to the last 30 days of data we actually have, not of wall time."""
+    """Default to the last 30 days of data we actually have, not of wall time.
+
+    Uit de CUBE en niet uit pa.bothits_ingest (2026-08-13). Die ledger is een
+    PROCEStabel: hij zegt wat er geladen is, niet wat er te zien is. Het standaard
+    herstelrecept — ledger-rijen weggooien om een herlaad te forceren — verschoof
+    daardoor stil het venster waarop de tool opent. Tijdens de herlaad van 13 augustus
+    stond max(log_date) even op 2026-06-09 en zou de tool op mei/juni zijn geopend
+    zonder dat iets dat uitlegde. De cube is wat de gebruiker ziet, dus die hoort de
+    grens te bepalen; min/max lopen over de primary key en zijn dus goedkoop.
+    """
     if start_date and end_date:
         return start_date, end_date
-    rows = _query("SELECT min(log_date) AS lo, max(log_date) AS hi FROM pa.bothits_ingest")
+    rows = _query("SELECT min(log_date) AS lo, max(log_date) AS hi FROM pa.bothits_daily")
     lo, hi = (rows[0]["lo"], rows[0]["hi"]) if rows else (None, None)
     if not hi:
         today = date.today()
@@ -134,6 +143,12 @@ def _filters(host=None, bot_class=None, bot_family=None, url_type=None,
     tabellen niet te laten ontploffen) en een bot terugzetten is nu één UPDATE in
     pa.bothits_bot in plaats van een deploy. De ingest schrijft hem alleen bij een
     nieuwe bot (ON CONFLICT DO NOTHING), dus handmatige wijzigingen blijven staan.
+
+    LET OP na zo'n UPDATE: de cache hierboven is 5 minuten en weet niets van DB-state,
+    dus de oude cijfers blijven tot zo lang staan. `POST /api/bothits/cache/clear` maakt
+    hem meteen leeg (of de Refresh-knop, die force=True stuurt voor de grafieken). Een
+    vlag-hash in de cachesleutel zou een extra query per verzoek kosten en dat is de
+    remedie erger dan de kwaal — dit hoort in het runbook, niet in de hot path.
 
     Let op: dit filtert de CUBE, en de cube houdt de volledige aantallen. De
     tegels tellen dus 96,6% van de ruwe bot-hits — wat weg is, is bewust weg.
@@ -450,10 +465,13 @@ def get_url_detail(url, start_date=None, end_date=None, host=None, bot_class=Non
             "url": url, "start_date": start, "end_date": end,
             "hits": sum(r["hits"] for r in by_bot),
             "days": len(by_day),
-            # Hoeveel dagen de SELECTIE lang is, zodat de frontend "17 van de 30" kan
-            # zeggen zonder zelf datums te gaan rekenen.
+            # Hoeveel dagen er DATA is in de selectie, zodat de frontend "17 van de 30"
+            # kan zeggen zonder zelf datums te gaan rekenen. Uit de cube en niet uit
+            # pa.bothits_ingest, om dezelfde reden als in _range(): die ledger raakt
+            # rijen kwijt tijdens een herlaad en dan zou dit label liegen — precies in
+            # de situatie waarin je hem het meest nodig hebt.
             "days_in_range": _query(
-                "SELECT count(*) AS n FROM pa.bothits_ingest "
+                "SELECT count(DISTINCT log_date) AS n FROM pa.bothits_daily "
                 "WHERE log_date BETWEEN %s AND %s", (start, end))[0]["n"],
             "by_bot": by_bot, "by_day": by_day,
         }
