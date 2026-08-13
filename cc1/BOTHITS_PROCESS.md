@@ -103,6 +103,27 @@ cube maar krijgen geen URL-rijen — zo kan een catch-all de feitentabel nooit
 stilletjes opblazen. De ingest schrijft dimensierijen met `DO NOTHING`, dus een
 handmatige `is_tracked`-wijziging overleeft een re-ingest.
 
+**Sinds 2026-08-13 heeft die kolom een TWEEDE betekenis: het dashboard filtert er ook
+op.** `_filters()` in `bothits_service.py` zet `b.is_tracked` in élke query, dus wat op
+false staat verdwijnt uit de tegels, de grafieken én de tabel. Joep wil alleen de drie
+Google-bots, Applebot, Bing en de grote AI-crawlers zien; van de 31 families in de logs
+staan er nu **12 aan en 19 uit**. De cijfers gaan daarmee over 91,2 mln in plaats van
+95,1 mln bot-hits (95,9%).
+
+De twaalf: `Googlebot`, `Apple`, `GoogleOther`, `OpenAI`, `ByteDance`, `Perplexity`,
+`Bing`, `DuckAssist`, `Amazon`, `Meta-AI`, `Anthropic`, `Google-AI`.
+
+De zestien extra families staan **alleen in de DB** op false, niet in
+`UNTRACKED_FAMILIES` in de ingest — dat is bewust. Die set bepaalt of er per-URL-rijen
+geschreven worden, en de URL-tabellen mogen hun volle breedte houden: het waren de tabs
+die eruit gingen, niet de data. De DB-vlag is dus ruimer dan de Python-set, en dat is
+het verschil tussen "wat we bewaren" en "wat we tonen". Een familie terugzetten in het
+dashboard is één UPDATE op `pa.bothits_bot`, geen deploy.
+
+Nieuwe bots landen via de ingest op `is_tracked = f not in UNTRACKED_FAMILIES`, dus een
+onbekende crawler valt in de catch-all `other-bot` en blijft onzichtbaar; een nieuw
+benoemde familie vereist toch al een codewijziging in `CANON_NAMES`.
+
 ---
 
 ## Logs uit S3 halen (knop "Nieuwe logs ophalen", 2026-08-11)

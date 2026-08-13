@@ -1,6 +1,102 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Twee uvicorn-instanties op één poort: mijn deploys landden nergens (2026-08-13)
+
+Joep vroeg het dashboard te starten. `ps aux | grep uvicorn` gaf niets en
+`ss -ltnp` gaf niets, dus ik startte `./start.sh` (met `--reload`) en meldde "up na 17s".
+Klopte ook. Wat ik niet zag: één seconde vóór mijn start was er nóg een instantie
+opgekomen — de boot-launcher, met een relatief pad en **zonder** `--reload` — en die had
+de socket. Backend-wijzigingen bleven daarna 45 minuten onzichtbaar: verwijderde endpoints
+antwoordden nog netjes met `200`.
+
+- **Het bewijs zat in `ss -ltnp` en ik had het gelezen zonder te kijken.** De output zei
+  `users:(("uvicorn",pid=3405,...))`, terwijl mijn reloader 3436 was. Ik las "iets luistert
+  op 8003" en niet "wélk proces luistert".
+- **Mijn eigen log loog niet, maar antwoordde ook geen vraag die ik stelde.**
+  `Uvicorn running on http://0.0.0.0:8003` + `Application startup complete` + een reload om
+  10:45 — allemaal waar, en allemaal over een proces dat geen verkeer kreeg.
+- **De frontend maskeerde het volledig.** HTML/JS komt per request van schijf, dus alle
+  UI-wijzigingen waren wél live. Alleen Python was stil. Dat maakt de fout bijzonder
+  makkelijk om 20 edits lang niet te merken.
+- Wat het aan het licht bracht: `curl` op een endpoint dat ik net had **verwijderd**. Dat
+  gaf `200` met `[]`. Een 404 verwachten en een 200 krijgen is een sterker signaal dan
+  welke logregel ook.
+
+**Les: na het starten van een server op een poort die al eens bezet was, controleer de PID
+achter de socket en niet alleen dát er iets luistert. En verifieer een backend-deploy aan
+een verwijderd endpoint (moet 404 geven), niet aan een bestaand endpoint (dat antwoordt ook
+uit oude code).** `pgrep -af uvicorn` toont bovendien de vlaggen: een instantie zonder
+`--reload` naast een mét is het patroon om op te letten (zie [[dm_tools_backend_no_reload]]).
+
+## "Staat niet in het midden" kan een maatprobleem zijn, geen uitlijnprobleem (2026-08-13)
+
+Joep: "de tekst in alle stat-cards staat horizontaal niet in het midden." `.stat-card` had
+al `text-align: center`, dus mijn eerste conclusie was dat hij verticaal centreren bedoelde
+— dat heb ik gebouwd, en het was het niet. Met een screenshot erbij bleek het echte
+mechanisme: de waarde `95.102.955` is op 2rem **165px** breed in een tekstvak van **144px**.
+Een gecentreerde regel die niet past begint links en hangt er rechts uit, dus de inkt lag
+10px rechts van het midden — terwijl label en toelichting op precies 0 stonden.
+
+- **Gemeten, niet gekeken.** Een `Range` over de tekstnode plus `scrollWidth` vs
+  `clientWidth` gaf het antwoord in één call: 21px overloop, offset +10px, en de andere twee
+  regels op 0,0. Dat had ik ook vóór de eerste poging kunnen doen.
+- **"Centreren werkt niet" en "het past niet" zien er identiek uit** en hebben tegengestelde
+  fixes. Als één van de drie regels wél centreert en de andere niet, is het nooit de
+  uitlijning.
+- De fix was dus de maat: `font-size: clamp(1.15rem, 16cqw, 2rem)`. Let op dat `1cqw` 1% van
+  het **tekstvak** is (144px), niet van de kaart (184px) — mijn eerste coëfficiënt viel
+  daardoor 25% te klein uit.
+- Slotsom met een grimas: de tegels zijn een uur later op verzoek helemaal verwijderd. De
+  meetmethode is wat blijft.
+
+**Les: bij "staat niet gecentreerd" eerst meten of de regel in zijn vak past. Vergelijk de
+inkt-breedte met de contentbreedte vóór je aan `text-align`, flexbox of padding gaat
+sleutelen.**
+
+## Vraag niet "hebben we die data?" maar "welke van de twee bronnen leeft nog?" (2026-08-13)
+
+Joep vroeg of de URL's-tab terug kon met een top-X, "of is dat data die we niet hebben op
+URL-niveau?". Het eerlijke antwoord was noch ja noch nee. De tabel die ervoor bedoeld is
+(`pa.bothits_url_daily`) staat stil sinds 9 juni — `known_rows = 0` bij elke ingest daarna —
+dus daaruit zou de tab leeg zijn. De ándere URL-tabel (`pa.bothits_unknown_daily`, de
+dagelijkse top-500 per familie) loopt wél door tot gisteren.
+
+- **En juist het defect maakt die tweede bron bruikbaar**: omdat de match tegen `pa.urls`
+  niets meer oplevert, valt op dit moment praktisch élke gecrawlde URL in de "onbekende"
+  tabel. De verspillingstabel is tijdelijk de complete-crawltabel geworden.
+- Dat is een oplossing met een houdbaarheidsdatum, en die hoort in de code te staan: zodra
+  de match is gerepareerd, moet `get_top_urls()` terug naar `pa.bothits_url_daily`. Staat in
+  de docstring, niet alleen in dit document.
+- **De beperking van de bron is een UI-feit, niet alleen een codefeit.** Een dagelijkse
+  top-500 per familie betekent dat een dag zonder rij "haalde de top-500 niet" betekent en
+  niet "niet gecrawld". Het paneel zegt daarom "17 van de 30 dagen in beeld" zodra dat
+  speelt.
+
+**Les: bij "hebben we die data?" is het antwoord vaak "in twee tabellen, waarvan één stil
+staat". Meet de versheid van élke kandidaat-bron (`max(log_date)` plus een rijtelling per
+dag) voordat je ja of nee zegt.**
+
+## Een percentage in een tooltip is pas informatie als je de noemer erbij zet (2026-08-13)
+
+Bij één reeks had ik het aandeel uit het hover-blok gehaald: het aandeel van het hoverpunt
+in zichzelf is per definitie 100%, en een "Totaal"-regel die het getal erboven herhaalt is
+ruis. Joep vroeg daarna om percentages "zoveel mogelijk, bijv. in de Facet-diepte-grafieken"
+— en dáár is een percentage juist het interessantste getal: "geen facet = 54% van alle
+crawls in deze selectie".
+
+- **De noemer maakt het verschil, niet het percentage.** Bij een stapel is de zinvolle
+  noemer het dagtotaal; bij één reeks de som van álle punten in die reeks. Zelfde tooltip,
+  twee verschillende breuken.
+- Daarom heet de voetregel bij één reeks **"Hele reeks"** en bij een stapel **"Totaal"**.
+  Hetzelfde woord voor twee noemers is precies hoe een tooltip stilletjes gaat liegen.
+- Implementatie is één regel: `dataset.data` sommeren als `dataPoints.length === 1`. De
+  data zat er al; alleen de vraag was verkeerd gesteld.
+
+**Les: "geen percentage" en "een percentage van de verkeerde noemer" zijn beide fout. Kies de
+noemer per grafiekvorm en zet hem als labelregel in het blok, zodat de lezer hem niet hoeft
+te reconstrueren.**
+
 ## Een vraag over een label kan een datafout zijn — toets de premisse vóór je hem inwilligt (2026-08-12)
 
 Joep: "in de grafiek 'Facet-diepte — bekend vs onbekend' staat geen onbekend, moet die

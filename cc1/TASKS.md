@@ -4,6 +4,46 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-13 — Bot Hits opschonen: 12 families, twee tabs, en de URL's-tab herbouwd
+
+Een lange ronde losse verzoeken van Joep (`e6d45cc`), plus twee dingen die onderweg
+boven kwamen drijven.
+
+- [x] **Families van 31 naar 12** via `pa.bothits_bot.is_tracked` (12 aan, 19 uit,
+      gecommit in de DB). Keuze uit drie voorgelegde varianten: Google + grote AI +
+      Applebot, later Bing erbij op verzoek. Totaal gaat van 95,1 naar 91,2 mln
+      bot-hits (95,9%). Die vlag betekent nu twee dingen — zie BOTHITS_PROCESS.
+- [x] **Drie tabs eruit** (URL's, Crawl-verspilling, Categorieën) met `/top-urls`,
+      `/top-waste`, `/categories` en het al ongebruikte `/url`, plus hun
+      service-functies (~220 regels). Ingest ongemoeid: de URL-tabellen worden nog
+      gevuld, dus terugzetten is de endpoints uit git halen.
+- [x] **URL's-tab teruggebracht op `pa.bothits_unknown_daily`.** Top 250 (gemeten,
+      zie LEARNINGS), kop volgt de keuze, rij klapt open met een donut per
+      bot-familie en de dagreeks van die URL. Nieuw endpoint `/url` levert beide.
+- [x] **Palet opnieuw gemeten met de Base-kolom erbij**: acht benoemde families is het
+      plafond (7,7 / 15,8), negen faalt op normaal zicht. Base-only haalt zelfs zes
+      niet. Getallen en de les in UI_BLUEPRINT.
+- [x] **Facet-diepte één reeks in één kleur**, in de grote grafiek en in het paneel; de
+      staart-vouwing zit nu in `foldDepthTail()` en geldt voor beide.
+- [x] **Hover-blokken noemen overal een percentage.** Bij één reeks is de noemer de hele
+      reeks (voetregel heet dan "Hele reeks"), bij een stapel het dagtotaal.
+- [x] **Tegels helemaal weg** — inclusief de cqw-clamp die er net in zat om de waarde
+      te laten passen. Zie LEARNINGS voor waarom dat een maatprobleem was en geen
+      uitlijnprobleem.
+- [x] Kleiner: kruisje op de onvolledige-dagen-banner met Toepassen eronder ·
+      dekkingstekst weg · Bot-familie als standaardsplitsing · kleurblokjes uit de
+      familietabel · donuts in het paneel gekaderd · daglijn altijd lichtblauw ·
+      Logs ophalen + Verwerk dropfolder outline-paars met ↻ · dagen-picker 50px.
+- [ ] **`/summary` levert vier velden die niemand meer leest** (`total_hits`,
+      `product_hits`, `catalog_hits`, `waste_pct`) nu de tegels weg zijn. Laten staan
+      tot duidelijk is of er iets terugkomt dat ze gebruikt; anders opruimen.
+- [ ] **De URL's-tab is een dagelijkse top-500 per familie en dus geen volledige
+      ranglijst.** Zodra `pa.bothits_url_daily` weer vult, kan `get_top_urls()` terug
+      naar die tabel en verdwijnt de beperking. De bron staat in de docstring.
+- [ ] **DuckAssist (0,12%) heeft een eigen kleur en Amazon (0,11%) niet** — dat is de
+      achtste plek op volume, en die grens is arbitrair tussen twee vrijwel gelijke
+      families. Alternatief is zeven benoemen met de schone regel "≥ 0,4%".
+
 ### 2026-08-12 — SEO/GEO brainstormbord uitgelezen naar Excel + CPR/CPC-overzichtsquery
 
 Aanleiding: Joep vroeg (1) waar `create GSD-campaigns.py` het CPC/CPR-onderscheid maakt en
@@ -58,6 +98,10 @@ zijn in die dagen als onbekend geteld.
 - De facet-diepte-grafiek toont maar één kleur.
 - **De tabbladen URL's, Crawl-verspilling en Categorieën geven "geen resultaten"** — die
   lezen `pa.bothits_url_daily`, en die tabel stopt op 2026-06-09.
+  _(2026-08-13: die drie tabs zijn eruit. URL's is teruggekomen op
+  `pa.bothits_unknown_daily`, die wél doorloopt — dat werkt alleen zolang de match kapot
+  is, want dan valt praktisch elke gecrawlde URL in de "onbekende" tabel. Zodra dit
+  gerepareerd is, kan `get_top_urls()` terug naar `pa.bothits_url_daily`.)_
 
 **Wat het NIET is** (nagetrokken, zodat niemand dit opnieuw hoeft te doen):
 - `pa.urls` is niet leeg of veranderd: 1.031.796 rijen, laatste instroom 2026-07-29, dus

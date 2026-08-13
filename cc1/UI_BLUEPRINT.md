@@ -326,6 +326,40 @@ new validated hue. Bot Hits' `bot_family` took the second (Joep's call) — see
 `PAL.terracotta` in `bothits.html`, the only hue in this codebase that exists in one
 tool and not in SEO Stats. **Nine series is not a question to ask**: fold instead.
 
+**Re-measured 2026-08-13, with the Kleursysteem "Base" column in the pool.** Joep asked
+for a hue per bot-family (twelve of them) and pointed at the design-system document, so
+the whole search was redone over Base (the 500-stops: red `#ef4444`, orange `#f97316`,
+yellow `#fdb62b`, green `#22c55e`, teal `#14b8a6`, cyan `#06b6d4`, blue `#3b82f6`,
+violet `#a855f7`, pink `#ec4899`, primary `#1f99c4`, secondary `#be4693`, accent
+`#84cc16`, gray `#6b7280`) plus the darker stops this codebase already uses. With the
+trio fixed:
+
+| named series | best CVD | best normal | verdict |
+|---|---|---|---|
+| 6 | 7,7 | 17,2 | OK |
+| 7 | 7,7 | 16,4 | OK |
+| **8** | **7,7** | **15,8** | **OK — the ceiling** |
+| 9 | 7,7 | 11,3 | FAIL (normal < 15) |
+| 12 | 5,5 | 7,1 | FAIL |
+
+Two things worth keeping:
+
+* **Eight named series is the ceiling, and it is the NORMAL-vision floor that stops
+  you, not CVD.** CVD stays at the trio's 7,7 all the way up; normal-vision separation
+  is what collapses. Secondary encoding does not excuse that one.
+* **A design system's base row is the WRONG place to look for the 7th and 8th hue.**
+  Base-only fails even at six (7,7 / 11,3), because every entry sits at stop 500 and
+  therefore at near-identical lightness — and lightness is what keeps hues apart for
+  full-colour vision. What passes is Base *plus the darker stops of the same families*:
+  turquoise `#107063` ≈ teal-800, bordeaux `#722F37` ≈ red-900, navy `#001F3F` ≈
+  blue-950, yellow `#936305` ≈ yellow-800. Reach for a darker step of a hue you already
+  have before reaching for a new hue.
+
+One value did move to the document's: `PAL.violet` is now `#a855f7` (violet-500) instead
+of seo-stats' `#8459cf`. With the old value the weakest pair of the eight sits at 14,1
+normal; with the document's it makes 15,8. Recorded divergence, no meaning conflict —
+violet carries DuckAssist and facet-depth 4 here, DMA traffic there.
+
 **Count the bands the chart DRAWS, not the entries in the map.** A catch-all "Overig"
 band is a series the moment it renders, and `drawDaily()` always draws one. Validating
 the eight named families while the chart showed nine bands is how the first candidate
