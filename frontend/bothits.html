@@ -461,16 +461,14 @@
                                  De verspilling zelf staat er nog twee keer wél goed: als
                                  tegel ("Facet-verspilling") en als eigen tab
                                  (Crawl-verspilling). Deze grafiek gaat over diepte. -->
-                            <div class="card-header">
-                                <h5 class="mb-0">Facet-diepte</h5>
-                                <!-- De reikwijdte hoort in de kop, niet in een voetnoot: de
-                                     grafiek telt sinds 2026-08-13 alleen category-vormige
-                                     URL's. Daarvoor viel élke URL zonder /c/ in de nul-balk
-                                     (product, home, robots, assets) en was 84% van die balk
-                                     verkeer dat per definitie geen facetten heeft. -->
-                                <div class="muted-note">alleen categorie-URL's — een pagina
-                                    zonder <code>/c/</code> heeft geen facetdiepte</div>
-                            </div>
+                            <!-- De ondertitel die hier stond ("alleen categorie-URL's …") is
+                                 eruit op verzoek van Joep (2026-08-13). De reikwijdte zelf is
+                                 ongewijzigd: de grafiek telt alleen category-vormige URL's,
+                                 want élke URL zonder /c/ viel anders in de nul-balk en dan is
+                                 84% van die balk verkeer dat per definitie geen facetten
+                                 heeft. Dat staat uitgelegd bij by_depth in
+                                 bothits_service.py en in BOTHITS_PROCESS.md. -->
+                            <div class="card-header"><h5 class="mb-0">Facet-diepte</h5></div>
                             <div class="card-body">
                                 <div class="chart-box-sm chart-framed"><canvas id="depthChart"></canvas></div>
                             </div>

@@ -768,6 +768,21 @@ thead.sticky-top {
 }
 .date-box .sep { color: #9aa0a6; }
 
+/* Bij een BEREIK de eerste datum rechts uitlijnen (Joep, 2026-08-13): het streepje
+ * stond niet in het midden. Oorzaak: beide inputs zijn 6,6rem breed maar de datum is
+ * maar ~84px, en links uitgelijnd — dus alle speling van het eerste veld viel vóór het
+ * streepje. Gemeten in de gerenderde pagina: 60px links ervan tegen ~15px rechts.
+ * Rechts uitlijnen laat datum 1 eindigen waar zijn veld eindigt, dus het streepje komt
+ * tussen de twee datums te staan in plaats van tegen de tweede aan.
+ *
+ * Niet de velden smaller maken: de breedte moet ruimte laten voor zowel het
+ * flatpickr-formaat (2026-08-13) als het native formaat (13-08-2026) én voor het
+ * kalendericoon dat Chrome zelf in een `type=date` zet.
+ *
+ * :has() zodat dit alleen geldt als er echt een tweede datum is — bij de vijf losse
+ * datumvelden blijft de tekst gewoon links staan. */
+.date-box:has(.sep) > input:first-of-type { text-align: right; }
+
 /* Het NATIVE kalendericoon van Chrome zit ín het veld, dus op pagina's zonder
  * flatpickr stonden er ineens twee (of drie, bij een bereik): dat van de browser plus
  * het onze. Niet verbergen — dan is de picker alleen nog met typen te bereiken — maar

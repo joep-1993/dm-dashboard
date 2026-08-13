@@ -39,9 +39,19 @@
     --flat-text: #1a1d19;
     --flat-muted: #666a6b;
     --flat-accent: #8796ef;          /* lijnen en accenten — NIET voor witte tekst */
-    --flat-accent-solid: #5566e0;    /* gevulde knop, wit haalt hier 4,81:1 */
+    /* Blauw-gevuld is niet meer in gebruik sinds de CTA terug op oranje ging. Blijft
+     * staan als gemeten alternatief: #8796ef uit de screenshot haalt met wit maar
+     * 2,75:1, deze twee halen 4,81:1 en 5,59:1. Wie de CTA ooit tóch blauw wil, pakt
+     * deze in plaats van de kleur uit de screenshot. */
+    --flat-accent-solid: #5566e0;
     --flat-accent-hover: #4a5bd6;
     --flat-accent-soft: #eaeef9;     /* chip- en actieve vulling */
+    /* De HUISKLEUR voor acties, terug op verzoek van Joep (2026-08-13). Exact de
+     * waarden uit style.css, dus dit is echt "terug zoals het was" en geen nieuwe
+     * oranje. Blauw en oranje staan nu naast elkaar met elk een eigen betekenis:
+     * blauw = selectie/interactie (tab-onderlijn, focus, chips), oranje = actie. */
+    --flat-cta: #CC5500;
+    --flat-cta-hover: #E97451;
     --flat-radius: 6px;
 }
 
@@ -114,19 +124,29 @@ body { background-color: var(--flat-bg); color: var(--flat-text); }
     box-shadow: none;
 }
 
-/* Primair / uitvoeren — was burnt orange (#CC5500) of paars gevuld. */
+/* Primair / uitvoeren — burnt orange, de huiskleur. Stond in de eerste versie van
+ * dit thema op het blauwe accent; Joep wilde de oranje knoppen terug.
+ *
+ * .btn-purple en .btn-hs zaten hier ook in en waren vóór de restyle PAARS, niet
+ * oranje. Ze blijven in deze groep omdat het op hun pagina's de primaire actie is en
+ * één CTA-kleur het hele punt van de drie groepen is — maar het is dus geen exacte
+ * terugzetting voor die twee. Wil je ze paars, dan is dat een eigen regel.
+ *
+ * Contrast: wit op #CC5500 is 4,31:1 — genoeg voor knoptekst (die is groot/bold),
+ * net onder de 4,5:1 voor gewone tekst. Dit is de bestaande huiswaarde, dus
+ * ongewijzigd overgenomen; #B84D00 zou 5,1:1 geven als het ooit moet. */
 .btn-run, .btn-primary, .btn-success, .btn-warning, .btn-info,
 .btn-purple, .btn-hs {
-    background-color: var(--flat-accent-solid) !important;
-    border-color: var(--flat-accent-solid) !important;
+    background-color: var(--flat-cta) !important;
+    border-color: var(--flat-cta) !important;
     color: #fff !important;
 }
 .btn-run:hover:not(:disabled), .btn-primary:hover:not(:disabled),
 .btn-success:hover:not(:disabled), .btn-warning:hover:not(:disabled),
 .btn-info:hover:not(:disabled), .btn-purple:hover:not(:disabled),
 .btn-hs:hover:not(:disabled) {
-    background-color: var(--flat-accent-hover) !important;
-    border-color: var(--flat-accent-hover) !important;
+    background-color: var(--flat-cta-hover) !important;
+    border-color: var(--flat-cta-hover) !important;
     color: #fff !important;
 }
 
@@ -153,8 +173,11 @@ body { background-color: var(--flat-bg); color: var(--flat-text); }
 .btn-purple-outline:hover:not(:disabled), .btn-tool:hover:not(:disabled),
 .btn-hs-outline:hover:not(:disabled), .btn-preset:hover, .btn-preset:focus,
 .btn-bulk-pause:hover:not(:disabled), .btn-bulk-activate:hover:not(:disabled) {
-    background-color: var(--flat-accent-soft) !important;
-    border-color: var(--flat-accent) !important;
+    /* Neutrale hover. Stond op de blauwe accentvulling, maar met een oranje CTA
+     * ernaast gaf dat drie kleuren op één knoppenrij. Een secundaire knop hoort bij
+     * hover te bevestigen dat hij klikbaar is, niet een eigen kleur te claimen. */
+    background-color: #eef0f1 !important;
+    border-color: var(--flat-muted) !important;
     color: var(--flat-text) !important;
 }
 
