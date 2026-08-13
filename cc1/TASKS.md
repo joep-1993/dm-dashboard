@@ -252,14 +252,43 @@ Hot loop opnieuw byte-voor-byte identiek getoetst met `scripts/bothits_parse_fin
       vond. Nu: 0 acties · alles staat al goed (alleen `keep`, met de tip om *Show kept
       rows* aan te zetten) · of er zijn wél rijen maar het filter snijdt ze weg, mét aantal.
 
+**Verdict: aangenomen — dashboardbreed doorgevoerd (2026-08-13)**
+
+- [x] **Tabvorm naar `css/style.css`** en het 3-regelblok van **elf** pagina's weggehaald.
+      Dat blok stond in de page-`<style>` en laadt dus ná de stylesheet: was het blijven
+      staan, dan had de gedeelde regel niets gedaan. Alleen `thema-ads` houdt een lokale
+      override (acht tabs op één regel: `nowrap` + 0,9rem); kleur, gewicht en onderlijn
+      komen daar wél uit de gedeelde regel.
+- [x] **`.date-box` naar `css/style.css`** en doorgevoerd op **alle tien** pagina's met een
+      datumveld: 9 bereiken + 5 losse datums = 14 boxes over 23 inputs. `form-control` is
+      eraf; ids, `value` en `onchange` zijn ongemoeid, dus flatpickr-inits (die op `#id`
+      targeten) en alle `.value`-lezers werken onveranderd.
+- [x] **Drie dingen die onderweg misgingen en zijn opgelost** — staan als waarschuwing in
+      UI_BLUEPRINT zodat niemand ze opnieuw bouwt:
+      1. Chrome's **eigen** kalendericoon zit ín het veld, dus op pagina's zónder flatpickr
+         stonden er ineens twee (bij een bereik drie). Niet verborgen — dan is de picker
+         alleen nog met typen te bereiken — maar uitgerekt over het veld en transparant:
+         glyph weg, klikvlak juist groter.
+      2. `inline-flex` liet het label ernáást staan zodra er ruimte was en eronder als die
+         er niet was — dezelfde pagina, twee uitkomsten, afhankelijk van de kolombreedte.
+         Nu `flex` + `width: fit-content`, dus altijd onder het label zoals een gewone
+         `form-control`.
+      3. Het icoon is een `::before` met een data-URI en geen inline `<svg>`, anders staat
+         datzelfde blok vijftien keer over tien pagina's.
+- [x] **Eén pagina-eigen uitzondering**: `gsd-campaigns` heeft twee losse datums met een
+      uitleg-placeholder ("Leave empty for most recent") die niet in 6,6rem past — daar
+      een lokale `width: 13.5rem` i.p.v. de gedeelde maat oprekken voor alle tien.
+- [x] Visueel gecontroleerd op negen pagina's, zowel flatpickr- als native-varianten
+      (headless Chrome; screenshots in `Downloads\claude\chk*.png`).
+
 **Openstaand:**
 
-- [ ] **Verdict op de restyle.** Bevalt hij, dan verhuist het blok naar `css/style.css`,
-      gaat UI_BLUEPRINT mee en trekken de andere tools bij; bevalt hij niet, dan is het één
-      blok verwijderen. Zolang dit open staat wijkt Bothits zichtbaar af van de rest.
 - [ ] **De actieve tab is brand-paars, niet Semrush-blauw.** Bewuste afwijking: blauw is in
       dit dashboard nergens een accentkleur en zou als een tweede merk lezen. Eén
-      hex-waarde als Joep het tóch blauw wil.
+      hex-waarde in `style.css` als Joep het tóch blauw wil.
+- [ ] **De typografie-proef staat nog alleen op Bothits** (14px systeem-stack, kleinere h5).
+      Die is bewust NIET meegegaan naar `style.css` — Joep vroeg om tabs en datumpicker.
+      Zolang dit open staat, ziet Bothits er iets anders uit dan de rest.
 - [ ] **Het `url_type`-filter op de URL-tab kost 10,9s** (C-url) tegen 2,0s voor Cat-url.
       Verder terug te brengen door url_type/facet_depth in `pa.bothits_url_daily` te zetten
       i.p.v. ze uit `pa.urls` af te leiden — maar dat is een schemawijziging plus een

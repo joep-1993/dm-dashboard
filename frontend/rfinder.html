@@ -15,9 +15,6 @@
         /* Remove-a-filter-row X: .btn-outline-red + .btn-remove-row, both shared
            in css/style.css. btn-outline-red rather than btn-outline-danger
            because style.css themes the latter orange (UI_BLUEPRINT "Buttons"). */
-        .nav-tabs .nav-link { color: #3a3a3a; font-weight: bold; }
-        .nav-tabs .nav-link:hover { color: #1a1a1a; }
-        .nav-tabs .nav-link.active { color: #3a3a3a; font-weight: bold; }
         .stats-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
     </style>
 </head>
@@ -96,10 +93,12 @@
                         <div class="row mb-3">
                             <div class="col-md-6">
                                 <label class="form-label small">Date Range</label>
-                                <div class="input-group input-group-sm">
-                                    <input type="date" class="form-control" id="startDate">
-                                    <span class="input-group-text">to</span>
-                                    <input type="date" class="form-control" id="endDate">
+                                <!-- Was al één control (input-group met "to"); nu de
+                                     gedeelde .date-box uit UI_BLUEPRINT, 2026-08-13. -->
+                                <div class="date-box">
+                                    <input type="date" id="startDate" aria-label="Start date">
+                                    <span class="sep">–</span>
+                                    <input type="date" id="endDate" aria-label="End date">
                                 </div>
                             </div>
                             <div class="col-md-3">

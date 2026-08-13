@@ -175,13 +175,16 @@
                                     <option value="BE">BE</option>
                                 </select>
                             </div>
+                            <!-- Eén .date-box i.p.v. twee losse datumvelden (UI_BLUEPRINT,
+                                 2026-08-13): het is één bereik, dus het hoort één control te zijn.
+                                 De ids en de onchange zijn ongewijzigd. -->
                             <div>
-                                <label for="startDate" class="form-label small mb-1">Start date</label>
-                                <input type="date" class="form-control form-control-sm" id="startDate" style="width: 160px;">
-                            </div>
-                            <div>
-                                <label for="endDate" class="form-label small mb-1">End date</label>
-                                <input type="date" class="form-control form-control-sm" id="endDate" style="width: 160px;">
+                                <label class="form-label small mb-1">Date range</label>
+                                <div class="date-box">
+                                    <input type="date" id="startDate" aria-label="Start date">
+                                    <span class="sep">–</span>
+                                    <input type="date" id="endDate" aria-label="End date">
+                                </div>
                             </div>
                         </div>
 

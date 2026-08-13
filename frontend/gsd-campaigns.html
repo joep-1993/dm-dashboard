@@ -9,6 +9,13 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <style>
+        /* Deze twee datumvelden dragen een uitleg-placeholder ("Leave empty for most
+           recent"), en die past niet in de 6,6rem die .date-box standaard aanhoudt —
+           flatpickr maakt er een type=text van, dus de placeholder is hier echt zichtbaar
+           en werd afgekapt. Pagina-eigen behoefte, dus een lokale override i.p.v. de
+           gedeelde maat oprekken voor alle tien de pagina's (2026-08-13). */
+        #runDate, #llDate { width: 13.5rem; }
+
         /* AUDIT LOW — the .stat-card block that stood here is gone: it styled the tiles
            loadStats() filled, and loadStats was removed in 751399a as a permanent no-op.
            Nothing on this page carries the class any more. Removing it is safe twice over,
@@ -232,7 +239,9 @@
                 <div class="row g-3">
                     <div class="col-md-3">
                         <label for="runDate" class="form-label">Date (optional)</label>
-                        <input type="date" class="form-control" id="runDate" placeholder="Leave empty for most recent">
+                        <div class="date-box">
+                            <input type="date" id="runDate" placeholder="Leave empty for most recent">
+                        </div>
                     </div>
                     <div class="col-md-5">
                         <label for="shopNames" class="form-label">Shop names (optional, one per line)</label>
@@ -344,7 +353,9 @@
                 <div class="row g-3">
                     <div class="col-md-3" id="llDateCol">
                         <label for="llDate" class="form-label">Date (optional)</label>
-                        <input type="date" class="form-control" id="llDate" placeholder="Leave empty for most recent">
+                        <div class="date-box">
+                            <input type="date" id="llDate" placeholder="Leave empty for most recent">
+                        </div>
                         <div class="form-text" id="llDateHint" style="font-size:0.75rem;"></div>
                     </div>
                     <div class="col-md-5">

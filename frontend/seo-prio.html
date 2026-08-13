@@ -144,13 +144,16 @@
                     </div>
                     <div class="card-body">
                         <div class="row g-3">
+                            <!-- Eén .date-box i.p.v. twee kolommen (UI_BLUEPRINT,
+                                 2026-08-13). col-md-3 blijft: de box is smaller dan
+                                 twee losse velden, dus de rij wordt ruimer. -->
                             <div class="col-md-3">
-                                <label class="form-label">Start date</label>
-                                <input type="date" class="form-control" id="startDate">
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">End date</label>
-                                <input type="date" class="form-control" id="endDate">
+                                <label class="form-label">Date range</label>
+                                <div class="date-box">
+                                    <input type="date" id="startDate" aria-label="Start date">
+                                    <span class="sep">–</span>
+                                    <input type="date" id="endDate" aria-label="End date">
+                                </div>
                             </div>
                             <!-- Category scope. Type-ahead via a native <datalist>:
                                  free text + suggestions, no JS library. Deepest is

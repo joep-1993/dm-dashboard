@@ -388,13 +388,16 @@
             </div>
             <div class="card-body">
                 <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
+                    <!-- Eén .date-box i.p.v. twee losse datumvelden (UI_BLUEPRINT,
+                         2026-08-13): het is één bereik, dus het hoort één control te zijn.
+                         De ids en de onchange zijn ongewijzigd. -->
                     <div>
-                        <label for="startDate" class="form-label small mb-1">Start date</label>
-                        <input type="date" class="form-control form-control-sm" id="startDate" style="width: 160px;" onchange="autoLoad()">
-                    </div>
-                    <div>
-                        <label for="endDate" class="form-label small mb-1">End date</label>
-                        <input type="date" class="form-control form-control-sm" id="endDate" style="width: 160px;" onchange="autoLoad()">
+                        <label class="form-label small mb-1">Date range</label>
+                        <div class="date-box">
+                            <input type="date" id="startDate" aria-label="Start date" onchange="autoLoad()">
+                            <span class="sep">–</span>
+                            <input type="date" id="endDate" aria-label="End date" onchange="autoLoad()">
+                        </div>
                     </div>
                     <div class="btn-group btn-group-sm" role="group" aria-label="presets">
                         <button class="btn btn-preset" onclick="setPreset(7)">7d</button>
@@ -467,7 +470,9 @@
                      without dragging the other along. -->
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <label for="catDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Compare day:</label>
-                    <input type="date" class="form-control form-control-sm" id="catDate" style="width:150px;" onchange="loadCatDeltas(false)">
+                    <div class="date-box">
+                        <input type="date" id="catDate" onchange="loadCatDeltas(false)">
+                    </div>
                 </div>
             </div>
             <!-- The toggle is a full-width banner-button UNDER the header rather than
@@ -536,7 +541,9 @@
                 </div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <label for="dashDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Dag:</label>
-                    <input type="date" class="form-control form-control-sm" id="dashDate" style="width:150px;" onchange="loadDashboard(false)">
+                    <div class="date-box">
+                        <input type="date" id="dashDate" onchange="loadDashboard(false)">
+                    </div>
                 </div>
             </div>
             <div class="card-body">
@@ -583,7 +590,9 @@
                 <h5 class="mb-0">Performance standup</h5>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <label for="refDate" class="mb-0" style="font-size:0.8rem; white-space:nowrap;">Compare day:</label>
-                    <input type="date" class="form-control form-control-sm" id="refDate" style="width:150px;" onchange="loadStandupDeltas(false)">
+                    <div class="date-box">
+                        <input type="date" id="refDate" onchange="loadStandupDeltas(false)">
+                    </div>
                     <svg id="deltaInfo" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" style="cursor: help; vertical-align: -2px;">
                         <title id="deltaInfoTitle">Comparison windows</title>
                         <circle cx="8" cy="8" r="7.2" fill="#5e4a90" stroke="#fff" stroke-width="1.2"/>

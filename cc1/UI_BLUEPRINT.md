@@ -698,37 +698,39 @@ SEO titles / prio / stats, DMA Exclusions, DM Review, Redirect Tool, R-URL Optim
 
 ## Tabs — multi-section cards (see Canonicals)
 
-> **PROEF LOOPT (2026-08-13): Bot Hits volgt deze sectie NIET.** Op verzoek van Joep staat
-> daar een Semrush-achtige variant: tabs zonder kader met alleen een onderlijn — grijs bij
-> hover, brand-paars bij selectie — plus lichtere typografie (14px systeem-stack),
-> filtercontrols als afgeronde pillen op een zachte achtergrond (`.filter-shell`) en de
-> periode als één kader met kalendericoon (`.date-box`). Voorbeeld:
-> `Downloads\claude\2026-08-13 18 11 15.png`.
->
-> Het zit bewust in **één blok bovenin `frontend/bothits.html`**, niet in `css/style.css`,
-> zodat het antwoord binair is: bevalt het, dan verhuist het blok hierheen en trekken de
-> andere tools bij; bevalt het niet, dan is het één blok verwijderen. Zolang dit open staat
-> wijkt Bot Hits zichtbaar af van de rest van het dashboard — dat is de prijs van de proef,
-> niet een slordigheid. Eén afwijking van het voorbeeld is bewust: de actieve tab is
-> `#5e4a90` en niet Semrush-blauw, omdat blauw hier nergens accentkleur is.
-
 When one card holds several parallel rule-sets or modes, use Bootstrap tabs:
 `ul.nav.nav-tabs` › `li.nav-item` › `button.nav-link` with
 `data-bs-toggle="tab" data-bs-target="#pane"`; panes are `div.tab-pane.fade`
-(first one also `show active`). Restyle the links **dark + bold** (not default
-blue) with this per-page CSS:
+(first one also `show active`).
 
-```css
-.nav-tabs .nav-link { color:#3a3a3a; font-weight:bold; }
-.nav-tabs .nav-link:hover { color:#1a1a1a; }
-.nav-tabs .nav-link.active { color:#3a3a3a; font-weight:bold; }
-```
+**De vorm staat sinds 2026-08-13 in `css/style.css` — schrijf hem NIET per pagina.**
+Tabs zijn tekst op een lijn; de markering is een **onderlijn**, geen kader:
 
-**Not purple links with a dark active state.** Bot Hits had
-`.nav-link { color:#5e4a90 }` + `.nav-link.active { color:#212529 }`, which inverts
-the emphasis: the four you can click glow brand purple and the one you are on goes
-quiet. Bootstrap's active tab already carries the white pane and the border; the
-label only has to stay dark and bold in all three states (2026-08-11).
+| staat | markering |
+|---|---|
+| rust | `#3d4348`, weight 500, transparante onderlijn |
+| hover | tekst donkerder + **grijze** onderlijn `#c3c7cc` |
+| actief | tekst `#1d2129`, weight 600, **brand-paarse** onderlijn `var(--color-navbar)` |
+
+Dit verving het blok `.nav-link { color:#3a3a3a; font-weight:bold }` dat op **elf**
+pagina's afzonderlijk stond. Let op de cascade: zo'n blok staat in de page-`<style>` en
+laadt dus ná `style.css`. Wie de gedeelde regel aanpast en een pagina-blok laat staan,
+ziet op die pagina niets veranderen — daarom zijn ze alle elf weggehaald.
+
+Alleen echte pagina-eigen behoeften blijven lokaal. `thema-ads.html` is het enige
+voorbeeld: acht tabs op één regel, dus `flex-wrap: nowrap` + `white-space: nowrap` +
+`font-size: 0.9rem`. Kleur, gewicht en onderlijn komen daar wél uit de gedeelde regel.
+
+**Niet paarse links met een donkere active-state.** Bot Hits had
+`.nav-link { color:#5e4a90 }` + `.nav-link.active { color:#212529 }`, wat de nadruk
+omdraait: de tabs die je kunt aanklikken lichten op en die waar je op staat wordt stil.
+Dezelfde regel geldt voor de onderlijn-variant — de tab waar je **op** staat hoort de
+opvallendste te zijn (2026-08-11, herbevestigd 2026-08-13).
+
+Eén bewuste afwijking van het voorbeeld waar dit vandaan komt
+(`Downloads\claude\2026-08-13 18 11 15.png`, Semrush): de actieve onderlijn is
+brand-paars en niet blauw. Blauw is in dit dashboard nergens een accentkleur en zou als
+een tweede merk lezen.
 
 ## Form controls — inputs, date pickers, checkboxes, radios, selects
 
@@ -737,12 +739,41 @@ carries through automatically:
 
 - **Text / number inputs & selects**: `form-control` / `form-select`. Add `-sm`
   inside dense toolbars; set an explicit inline `width` when it shouldn't stretch.
-- **Date pickers**: markup is always a native
-  `<input type="date" class="form-control">` (or `form-control-sm`, ~160px wide),
-  with **flatpickr layered on top** for the calendar itself — that is what SEO
-  stats, SEO titles, GSD Campaigns, GSD Budgets, Shop-campaigns and Bot Hits all
-  render, and
-  it is the canonical look (purple month/weekday headers, purple selected day).
+- **Date pickers**: sinds 2026-08-13 zit elke datumkiezer in een **`.date-box`** —
+  één omlijsting met een kalendericoon ervoor. Een periode is één ding, dus het hoort
+  één control te zijn; twee losse `form-control`-velden met elk een eigen label lazen
+  als twee onafhankelijke filters. Doorgevoerd op alle tien de pagina's die een
+  datumveld hebben.
+
+  ```html
+  <label class="form-label">Date range</label>
+  <div class="date-box">
+      <input type="date" id="startDate" aria-label="Start date">
+      <span class="sep">–</span>
+      <input type="date" id="endDate" aria-label="End date">
+  </div>
+  ```
+
+  Eén datum: dezelfde box met één input, zonder `.sep`. De inputs houden hun eigen
+  `id`, `value` en `onchange`, en **`form-control` gaat eraf** — `.date-box` zet de
+  rand, de breedte en het lettertype. Bestaande JS (`.value`, flatpickr-init op `#id`)
+  hoeft niet mee te veranderen.
+
+  Drie dingen die in de CSS zijn opgelost en die je niet zelf moet overdoen:
+  1. **Het icoon is een `::before` met een data-URI**, geen inline `<svg>`. Anders staat
+     hetzelfde SVG-blok vijftien keer over tien pagina's.
+  2. **`display:flex` + `width:fit-content`**, niet `inline-flex`. Met inline-flex ging
+     het label ernaast staan zodra er ruimte was en eronder als die er niet was —
+     dezelfde pagina, twee uitkomsten, afhankelijk van de kolombreedte.
+  3. **Chrome's eigen kalendericoon** zit ín het veld, dus op pagina's zonder flatpickr
+     stonden er ineens twee (bij een bereik drie). Het is niet verborgen maar
+     uitgerekt over het hele veld en transparant gemaakt: het glyph verdwijnt en het
+     klikvlak wordt juist groter. Met flatpickr is die regel vanzelf inactief, want die
+     vervangt de input door `type=text`.
+
+  Daarbovenop komt **flatpickr** voor de kalender zelf — dat is wat SEO stats, SEO
+  titles, GSD Campaigns, GSD Budgets, Shop-campaigns en Bot Hits renderen, en
+  het is de canonieke look (purple month/weekday headers, purple selected day).
   This doc previously said "no JS date library anywhere", which was already untrue
   when item 18 asked for GSD Budgets' pickers to "match the blueprint" — what was
   meant was the purple calendar, not the bare OS one. To add it to a page:

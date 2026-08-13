@@ -92,13 +92,16 @@
                     (visits: end vs end-7d; omzet: end-1 vs end-8d).
                 </p>
                 <div class="row g-3 align-items-end">
-                    <div class="col-md-5">
-                        <label for="startDate" class="form-label">Start date</label>
-                        <input type="date" id="startDate" class="form-control">
-                    </div>
-                    <div class="col-md-5">
-                        <label for="endDate" class="form-label">End date</label>
-                        <input type="date" id="endDate" class="form-control">
+                    <!-- Eén .date-box i.p.v. twee kolommen (UI_BLUEPRINT, 2026-08-13).
+                         Scheelt een kolom, dus col-md-5 + col-md-5 wordt col-md-10 en de
+                         knop houdt zijn col-md-2. -->
+                    <div class="col-md-10">
+                        <label class="form-label">Date range</label>
+                        <div class="date-box">
+                            <input type="date" id="startDate" aria-label="Start date">
+                            <span class="sep">–</span>
+                            <input type="date" id="endDate" aria-label="End date">
+                        </div>
                     </div>
                     <div class="col-md-2">
                         <button id="runBtn" class="btn w-100" style="background:#CC5500;color:white;border:none;"

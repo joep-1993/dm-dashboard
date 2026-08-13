@@ -239,13 +239,15 @@
                             <label class="form-label">Top X URLs (by SEO visits)</label>
                             <input type="number" class="form-control" id="topN" value="100" min="1" max="1000000">
                         </div>
+                        <!-- Eén .date-box i.p.v. twee kolommen (UI_BLUEPRINT, 2026-08-13).
+                             De default-waarde op dateFrom blijft staan. -->
                         <div class="col-md-3">
-                            <label class="form-label">Visits from</label>
-                            <input type="date" class="form-control" id="dateFrom" value="2025-01-01">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Visits to</label>
-                            <input type="date" class="form-control" id="dateTo">
+                            <label class="form-label">Visits from–to</label>
+                            <div class="date-box">
+                                <input type="date" id="dateFrom" value="2025-01-01" aria-label="Visits from">
+                                <span class="sep">–</span>
+                                <input type="date" id="dateTo" aria-label="Visits to">
+                            </div>
                         </div>
                         <div class="col-md-3 d-flex gap-2 justify-content-end">
                             <button class="btn btn-sm btn-outline-danger" id="btnStop" onclick="stopRun()" disabled>Stop</button>

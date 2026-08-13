@@ -675,3 +675,116 @@ thead.sticky-top {
 .results-table thead.sticky-top {
     top: 0 !important;
 }
+
+/* ------------------------------------------------------------------ *
+ * Tabs — onderlijn i.p.v. Bootstrap-kaders. Zie cc1/UI_BLUEPRINT.md.
+ *
+ * Vervangt het 3-regelblok dat op elf pagina's afzonderlijk stond
+ * (color #3a3a3a + bold). Dat blok stond in de page-<style>, dus ná deze
+ * stylesheet in de cascade: wie hier iets wijzigt en de pagina-blokken
+ * laat staan, ziet niets veranderen. Ze zijn daarom weggehaald.
+ *
+ * De markering is de onderlijn, niet de kleur: grijs bij hover, brand-paars
+ * bij de actieve tab. Zo is de tab waar je OP staat het opvallendst — de
+ * val waar Bot Hits eerder in zat, met paarse links en een donkere active.
+ * ------------------------------------------------------------------ */
+.nav-tabs {
+    border-bottom: 1px solid #e3e5e8;
+    gap: 0.35rem;
+}
+.nav-tabs .nav-link {
+    color: #3d4348;
+    font-weight: 500;
+    font-size: 0.95rem;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: -1px;
+    background: none;
+    transition: color .12s, border-color .12s;
+}
+.nav-tabs .nav-link:hover {
+    color: #1d2129;
+    border-bottom-color: #c3c7cc;
+}
+.nav-tabs .nav-link.active {
+    color: #1d2129;
+    font-weight: 600;
+    border-bottom-color: var(--color-navbar);
+    background: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * Datumkiezer — één kader om de periode. Zie cc1/UI_BLUEPRINT.md.
+ *
+ * Twee losse `form-control`-datumvelden met elk een eigen label lezen als
+ * twee onafhankelijke filters, terwijl het één bereik is. Dit zet ze in één
+ * omlijsting met een kalendericoon ervoor en een streepje ertussen, en dat
+ * scheelt ook een kolom in de filterrij.
+ *
+ * De inputs zelf blijven gewone `input type="date"` met hun eigen id, dus
+ * bestaande JS (`.value`, `onchange`, flatpickr-init) hoeft niet mee te
+ * veranderen. Werkt ook met één input — dan gewoon icoon + veld.
+ *
+ * 6,6rem is de bodem voor YYYY-MM-DD op 0,85rem: met flatpickr zou minder
+ * kunnen, maar zodra de CDN wegvalt rendert de NATIVE date-input met zijn
+ * eigen kalendericoon erin en dan kapt een smaller veld die af.
+ * ------------------------------------------------------------------ */
+/* flex + fit-content, niet inline-flex: een `.form-control` is block-level, dus het
+ * label stond altijd erboven. Met inline-flex ging dat label ernaast zodra er ruimte
+ * was en eronder als die er niet was — dezelfde pagina, twee uitkomsten, afhankelijk
+ * van de kolombreedte. fit-content houdt de box wel zo smal als zijn inhoud. */
+.date-box {
+    display: flex;
+    width: fit-content;
+    align-items: center;
+    gap: 0.25rem;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    background: #fff;
+    padding: 0.2rem 0.45rem;
+}
+/* Het kalendericoon als ::before met een data-URI, niet als inline <svg> in de
+ * markup: anders staat datzelfde SVG-blok vijftien keer over tien pagina's, en dan
+ * is "het icoon aanpassen" weer een zoek-en-vervangactie. */
+.date-box::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    margin-right: 0.1rem;
+    background: no-repeat center/14px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%236a7178' stroke-width='1.4'%3E%3Crect x='2' y='3' width='12' height='11' rx='2'/%3E%3Cpath d='M2 6.5h12M5.5 1.5v3M10.5 1.5v3'/%3E%3C/svg%3E");
+}
+.date-box input[type="date"],
+.date-box input.flatpickr-input {
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+    padding: 0.1rem 0;
+    width: 6.6rem;
+    font-size: 0.85rem;
+    color: #1d2129;
+}
+.date-box .sep { color: #9aa0a6; }
+
+/* Het NATIVE kalendericoon van Chrome zit ín het veld, dus op pagina's zonder
+ * flatpickr stonden er ineens twee (of drie, bij een bereik): dat van de browser plus
+ * het onze. Niet verbergen — dan is de picker alleen nog met typen te bereiken — maar
+ * uitrekken over het hele veld en transparant maken. Het glyph verdwijnt, het klikvlak
+ * wordt juist groter: klikken waar dan ook in het veld opent de picker.
+ *
+ * Op pagina's mét flatpickr bestaat deze pseudo-element niet: die vervangt de input
+ * door type=text, waardoor input[type="date"] niet meer matcht. Deze regel is daar
+ * dus vanzelf inactief. */
+.date-box input[type="date"] { position: relative; }
+.date-box input[type="date"]::-webkit-calendar-picker-indicator {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    cursor: pointer;
+}
