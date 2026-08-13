@@ -377,7 +377,7 @@ def _unknown_filters(host=None, bot_class=None, bot_family=None, url_type=None):
 
 
 def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
-                 bot_family=None, url_type=None, limit=250, force=False):
+                 bot_family=None, url_type=None, limit=250, force=False, q=None):
     """De meest gecrawlde URL's in de selectie.
 
     BRON: pa.bothits_unknown_daily, en dat is een keuze uit nood (2026-08-13).
@@ -401,13 +401,38 @@ def get_top_urls(start_date=None, end_date=None, host=None, bot_class=None,
     De top 50 draagt daarvan 53%, de top 250 62%, de top 1000 74% — de knik zit dus heel
     vroeg. Vandaar 250 als standaard: ruim voorbij de knik, rij #250 heeft nog 701 hits
     (~23 per dag) en een tabel van 250 rijen is nog te scannen en te sorteren.
+
+    `q` is de zoekbox (Joep, 2026-08-13) en filtert in SQL, niet in de browser. Dat
+    onderscheid is het hele punt: dit is een top-N van de selectie, dus een filter over
+    de al geladen 250 rijen zou een URL die op plek 800 staat stilzwijgend verzwijgen.
+    Nu is het "de top N van wat matcht".
+
+    Twee keuzes in dat filter:
+      * Substring via strpos(), geen LIKE. Bij ILIKE '%...%' zijn `%` en `_` wildcards
+        die je dan moet escapen, en URL's zitten er vol mee — percent-encoding (%20)
+        en underscores in facetwaarden zouden als "alles" gaan matchen. strpos() kent
+        geen metatekens, dus wat je typt is wat je zoekt.
+      * Meerdere woorden = AND, in willekeurige volgorde. Een pad als
+        /c/wasmachines/siemens/ vind je zo met "wasmachines siemens"; bij een platte
+        substring zou die spatie niets opleveren. Gemaximeerd op 6 termen, zodat een
+        plakkerige zoekopdracht geen 50 strpos-en per rij wordt.
+
+    Geen index om op te leunen (geen trigram op w.url), maar dat kost hier niets: de
+    datumfilter snijdt eerst en ILIKE '%x%' had net zo goed geen index kunnen gebruiken.
     """
     start, end = _range(start_date, end_date)
     limit = max(1, min(int(limit or 250), 1000))
-    key = ("topurls", start, end, host, bot_class, bot_family, url_type, limit)
+    terms = [t.lower() for t in (q or "").split()][:6]
+    # Genormaliseerd in de cachesleutel, niet de ruwe string: "  Siemens" en "siemens"
+    # zijn dezelfde query en horen dezelfde cache-entry te delen.
+    key = ("topurls", start, end, host, bot_class, bot_family, url_type, limit,
+           tuple(terms))
 
     def run():
         frag, params = _unknown_filters(host, bot_class, bot_family, url_type)
+        if terms:
+            frag += "".join(" AND strpos(lower(w.url), %s) > 0" for _ in terms)
+            params = params + terms
         # Geen string_agg van de bot-families meer (Joep, 2026-08-13): die kolom is uit
         # de tabel en het uitklappaneel toont de verdeling nu als donut. Scheelt ook een
         # sort per groep in de query.

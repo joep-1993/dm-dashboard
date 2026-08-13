@@ -48,9 +48,14 @@
         .tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
         .tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
         .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-        /* Lange URL's in de URL's-tab: één regel, monospace, met ellipsis. De volledige
-           URL zit in de title en de link opent hem. */
-        .url-cell { max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
+        /* Lange URL's in de URL's-tab: één regel met ellipsis. De volledige URL zit in
+           de title en de link opent hem.
+           Font en font-size stonden hier apart (monospace, 0.82rem) en zijn eruit op
+           verzoek van Joep (2026-08-13): de cel erft nu de 0.9rem van .tool-table, zoals
+           de andere kolommen. Bij een proportioneel font past er iets minder in dezelfde
+           620px, dus de ellipsis valt een paar tekens eerder — de title en de link
+           houden de volledige URL. */
+        .url-cell { max-width: 620px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
         .col-mid { text-align: center; }
         /* Uitklapbare rij: de rij zelf klikbaar, het paneel eronder als één cel over de
@@ -69,9 +74,10 @@
            uitzetten is genoeg; de eigen achtergrond blijft staan. */
         .tool-table tbody tr.bot-detail:hover > td { background: #fbfbfd !important; }
         .tool-table tbody tr.bot-detail > td { --bs-table-bg-state: transparent; }
-        /* Een open URL-rij houdt zijn monospace-cel, maar niet de vetgedrukte
-           font-weight van de regel hierboven op de link zelf — die verspringt dan in
-           breedte en de ellipsis schuift mee. */
+        /* Een open URL-rij krijgt niet de vetgedrukte font-weight van de regel hierboven:
+           de tekst verspringt dan in breedte en de ellipsis schuift mee. Dat weegt sinds
+           het proportionele font (2026-08-13) zwaarder, want daar scheelt bold méér
+           breedte dan bij monospace. */
         .tool-table tbody tr.url-row.is-open > td.url-cell { font-weight: 400; }
         /* Kadertje om een grafiek, zoals .tool-table-wrap om een tabel. In de kaarten
            van het overzicht zit hij alleen om de staafgrafiek: een donut heeft zijn eigen
@@ -474,6 +480,15 @@
                              hem bij. -->
                         <h5 class="mb-0" id="urlHeading">Top 250 URL's</h5>
                         <div class="d-flex gap-2 align-items-center">
+                            <!-- Zoekbox (Joep, 2026-08-13). Hij stuurt `q` naar /top-urls en
+                                 filtert dus in SQL: dit is een top-N, en filteren in de al
+                                 geladen rijen zou een match op plek 800 verzwijgen. Plain
+                                 Bootstrap met een inline width, zoals UI_BLUEPRINT voor een
+                                 dichte toolbar voorschrijft. type=search geeft het native
+                                 kruisje, en dat vuurt ook `input`, dus wissen herlaadt. -->
+                            <input type="search" class="form-control form-control-sm" id="urlQ"
+                                   style="width: 230px;" placeholder="Zoek in URL's…"
+                                   title="Zoekt op een deel van de URL. Meerdere woorden: alle woorden moeten erin voorkomen, volgorde maakt niet uit.">
                             <label class="muted-note mb-0" for="urlLimit">Top</label>
                             <select class="form-select form-select-sm" id="urlLimit" style="width:auto;">
                                 <option>50</option><option>100</option>
@@ -1547,14 +1562,29 @@
     // Laadt bij het openen van de tab en verder alleen op Refresh of een wissel van
     // de Top-keuze — niet mee met refresh() van het Overzicht, want dit is een
     // aparte, zwaardere query en de tab staat meestal dicht.
-    let urlRows = [];
+    // urlQLast hoort hier en niet bij de event-binding onderaan: loadUrls() schrijft
+    // hem, en een `let` daar zou betekenen dat deze functie een variabele aanraakt die
+    // in de temporal dead zone staat tot dat blok is uitgevoerd.
+    let urlRows = [], urlQuery = '', urlQLast = '';
     async function loadUrls() {
         const tb = document.querySelector('#urlTable tbody');
         const limit = document.getElementById('urlLimit').value;
+        // Eén bron van waarheid voor de zoektekst: de box wordt hier gelezen en het
+        // resultaat onthouden, zodat de kop, de lege-staat en de volgende debounce
+        // allemaal over dezelfde term praten als de rijen die je ziet.
+        urlQuery = document.getElementById('urlQ').value.trim();
+        urlQLast = urlQuery;
         document.getElementById('urlHeading').textContent = `Top ${fmt(limit)} URL's`;
-        tb.innerHTML = '<tr><td colspan="7" class="p-3 text-muted">laden…</td></tr>';
+        tb.innerHTML = '<tr><td colspan="6" class="p-3 text-muted">laden…</td></tr>';
         try {
-            urlRows = await (await fetch(API + '/top-urls?' + params({ limit }))).json();
+            // De kolom toont sinds 2026-08-13 de vorm MÉT trailing slash (zie urlPath),
+            // maar de tabellen bewaren hem zonder. Een URL uit de kolom kopiëren en hier
+            // plakken zou dus nul treffers geven. Per term de trailing slash eraf, en
+            // alleen voor wat we verstúren: `urlQuery` blijft wat je typte, want de kop en
+            // de lege-staat horen jouw term terug te geven.
+            const qSend = urlQuery.split(/\s+/).map(t => t.replace(/\/+$/, ''))
+                .filter(Boolean).join(' ');
+            urlRows = await (await fetch(API + '/top-urls?' + params({ limit, q: qSend || null }))).json();
         } catch (e) {
             tb.innerHTML = `<tr><td colspan="7" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
             return;
@@ -1567,10 +1597,56 @@
         });
         renderUrls();
     }
+    // De ingest slaat elk pad zonder trailing slash op (`.rstrip("/")` in
+    // bothits_ingest.py, zodat log en pa.urls op één vorm matchen). Voor de weergave en
+    // de groepering is dat prima, maar de LINK moet naar de vorm die de site echt
+    // serveert — anders klik je op een 301.
+    //
+    // Welke soorten een slash horen te krijgen is gemeten op de ruwe logs van
+    // 2026-07-20 (300 bestanden, alleen bot-hits), niet aangenomen:
+    //   product         /p/…            99,9% mét slash  (254.308 tegen 182)
+    //   category        /products/…      98,7% mét slash  (14.799 tegen 197)
+    //   category_legacy /categories/…   100%   mét slash  (213 tegen 0)
+    //   category_facet  …/c/…             0,0% mét slash  (62 tegen 181.808)
+    //   other/robots/list/product_legacy  ~0%             assets, /data/graphql, .html
+    // Vandaar deze drie en niet "alles behalve /c/": /favicon.ico en /data/graphql
+    // zouden dan een slash krijgen die de site niet kent. sitemap (61%) en info (53%)
+    // zijn gemengd met een handvol hits — die laat ik met rust in plaats van te gokken.
+    // Sinds 2026-08-13 stuurt dit ook de WEERGAVE (Joep): de kolom toonde de slashloze
+    // opslagvorm terwijl de link al naar de vorm mét slash ging, en dan staat er iets
+    // anders dan waar je op klikt. Eén functie voor beide, zodat ze niet kunnen gaan
+    // divergeren.
+    //
+    // `r.url` blijft ongemoeid — die gaat als sleutel naar /api/bothits/url in
+    // toggleUrlDetail, en dat is de vorm zoals hij in de tabellen staat.
+    const SLASH_TYPES = new Set(['product', 'category', 'category_legacy']);
+    const urlPath = r => r.url +
+        (SLASH_TYPES.has(r.url_type) && !r.url.endsWith('/') ? '/' : '');
+    const urlHref = r => 'https://www.beslist.nl' + urlPath(r);
+
     function renderUrls() {
         const tb = document.querySelector('#urlTable tbody');
+        // De kop noemt de zoekterm én het aantal treffers. Dat aantal is nodig omdat
+        // "Top 250" met een filter erop bijna altijd minder dan 250 rijen oplevert, en
+        // zonder getal lijkt de tabel dan afgekapt. textContent, geen innerHTML: de
+        // term komt van de gebruiker.
+        const lim = document.getElementById('urlLimit').value;
+        document.getElementById('urlHeading').textContent = urlQuery
+            ? `Top ${fmt(lim)} URL's — "${urlQuery}" (${fmt(urlRows.length)} ${urlRows.length === 1 ? 'rij' : 'rijen'})`
+            : `Top ${fmt(lim)} URL's`;
         if (!urlRows.length) {
-            tb.innerHTML = '<tr><td colspan="6" class="p-3 text-muted">Geen resultaten in deze selectie.</td></tr>';
+            // Bij een zoekterm is "geen resultaten" makkelijk te lezen als "deze URL
+            // wordt niet gecrawld", en dat staat er niet: de bron is de dagelijkse
+            // top-500 per bot-familie (zie get_top_urls), dus een URL die die grens
+            // nooit haalde ontbreekt ook als hij wél hits heeft. Dat hoort erbij te
+            // staan, anders trek je een conclusie die de data niet dekt.
+            tb.innerHTML = urlQuery
+                ? `<tr><td colspan="6" class="p-3 text-muted">Geen URL in deze selectie bevat
+                     <strong>${escapeHtml(urlQuery)}</strong>. Let op: deze lijst komt uit de dagelijkse
+                     top-500 per bot-familie, dus een URL die die grens nooit haalde staat er niet in —
+                     ook niet als hij wel gecrawld is. Een ruimere periode of een kortere zoekterm
+                     vergroot de kans.</td></tr>`
+                : '<tr><td colspan="6" class="p-3 text-muted">Geen resultaten in deze selectie.</td></tr>';
             return;
         }
         // Zelfde vorm als Per bot-familie: caret vooraan, rij klikbaar, paneel eronder.
@@ -1579,7 +1655,7 @@
         closeDetails('#urlTable', ['urlBot', 'urlDaily']);
         tb.innerHTML = urlRows.map((r, i) => `
             <tr class="url-row" data-i="${i}">
-              <td class="url-cell" title="${escapeHtml(r.url)}"><span class="bot-caret">▸</span><a href="https://www.beslist.nl${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a></td>
+              <td class="url-cell" title="${escapeHtml(urlPath(r))}"><span class="bot-caret">▸</span><a href="${escapeHtml(urlHref(r))}" target="_blank" rel="noopener">${escapeHtml(urlPath(r))}</a></td>
               <td>${escapeHtml(r.url_type || '')}</td>
               <td class="num">${r.facet_depth}</td>
               <td class="num">${fmt(r.hits)}</td>
@@ -1853,6 +1929,27 @@
     document.querySelector('[data-bs-target="#tab-urls"]').addEventListener('shown.bs.tab', loadUrls);
     document.getElementById('urlLoad').onclick = loadUrls;
     document.getElementById('urlLimit').onchange = loadUrls;
+
+    // Zoekbox: debounce van 350 ms, want elke toetsaanslag is een query over de
+    // dagreeks en niet over een lijstje in het geheugen. De vergelijking met
+    // urlQLast is er tegen een herhaalde fetch voor dezelfde tekst — pijltjes,
+    // Ctrl+A of een spatie erbij die na trim() niets verandert vuren ook `input`.
+    // Enter kort de wachttijd af, en het native kruisje van type=search vuurt
+    // `input` met een lege waarde, dus wissen laadt de ongefilterde top opnieuw.
+    let urlQTimer = null;
+    const urlQ = document.getElementById('urlQ');
+    urlQ.addEventListener('input', () => {
+        clearTimeout(urlQTimer);
+        urlQTimer = setTimeout(() => {
+            if (urlQ.value.trim() === urlQLast) return;
+            loadUrls();
+        }, 350);
+    });
+    urlQ.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        clearTimeout(urlQTimer);
+        if (urlQ.value.trim() !== urlQLast) loadUrls();
+    });
 
     makeSortable('botTable', () => botRows, () => renderBotTable());
     makeSortable('urlTable', () => urlRows, renderUrls);

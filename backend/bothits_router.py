@@ -115,13 +115,20 @@ async def top_urls(
     url_type: Optional[str] = Query(None),
     limit: int = Query(250, ge=1, le=1000),
     force: bool = Query(False),
+    q: Optional[str] = Query(None, max_length=200,
+                             description="zoektekst; meerdere woorden = alle woorden"),
 ):
-    """De meest gecrawlde URL's in de selectie — zie get_top_urls voor de bron."""
+    """De meest gecrawlde URL's in de selectie — zie get_top_urls voor de bron.
+
+    `q` filtert in de query en niet in de browser, dus je krijgt de top N van wat
+    matcht in plaats van een filter over de al getoonde rijen. max_length houdt de
+    zoektekst kort; de service kapt daarna op 6 termen.
+    """
     _check_date(start_date, "start_date")
     _check_date(end_date, "end_date")
     try:
         return await _run(get_top_urls, start_date, end_date, host, bot_class,
-                          bot_family, url_type, limit, force)
+                          bot_family, url_type, limit, force, q)
     except Exception as e:
         logger.error("bothits top-urls failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
