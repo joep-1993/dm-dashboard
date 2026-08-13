@@ -319,6 +319,38 @@ pagina's. De tegel **Facet-verspilling** rekent daarom alleen over
 
 ---
 
+## Metriek-valkuil: `status_class = '2xx'` bevat de WAF-challenge (2026-08-13)
+
+AWS WAF antwoordt onbekende bots met een **202 of een 405**, en die 202 landt in de cube
+als `status_class = '2xx'`. Dat leest als "pagina bestaat" en dat is het niet.
+
+Zo herken je ze in de ruwe log: `x-edge-result-type = 'Error'`, afgehandeld in
+0,001–0,003 s, vaste bodygrootte (~2,45 KB / 590 B / 3.016 B) — de origin is nooit geraakt.
+Site-breed is dit 1,90% van alle bot-hits; per bot loopt het van 0% (AdsBot-Google) tot
+96,7% (SemrushBot).
+
+**De cube bewaart alleen de statusKLASSE, dus dit is er niet uit te filteren.** Elke
+conclusie over levende versus dode URL's moet uit de ruwe logs komen (`sc-status` +
+`x-edge-result-type`). Concreet voorbeeld van hoe het misgaat: de cube meldt 28,7% 2xx op
+`product_legacy`, maar van 224.242 legacy product-URL's gaf er **niet één ooit een echte
+200**.
+
+## Wat de tabellen NIET kunnen: de lange staart (2026-08-13)
+
+`pa.bothits_unknown_daily` houdt **top-500 per dag per bot-familie**. Die 500 plekken gaan
+naar de luidruchtige assets, dus een platte verdeling valt er volledig buiten. Gemeten:
+nul rijen met `url_type = 'product_legacy'`, terwijl de cube 3,0 mln legacy-hits telt —
+want dat zijn 224.242 URL's met gemiddeld 1,14 hit.
+
+Terugvalpad is de ruwe log, en dat is betrouwbaar: parsen met `classify_ua`, `url_type`,
+`norm_host` en `skip_host` uit `bothits_ingest.py` gaf op 2026-08-12 exact de cube-cijfers
+(12.939 legacy-hits, 12.711 4xx). Valideer altijd eerst op één dag tegen de cube.
+
+**Let op de klok**: S3-retentie is ~42 dagen. Referer- en statusniveau-vragen ("wie linkt
+hiernaar") kun je alleen stellen zolang de logs er nog zijn.
+
+---
+
 ## IP-verificatie (2026-08-11)
 
 `backend/bothits_verify.py` toetst elk bot-IP aan de **officieel gepubliceerde

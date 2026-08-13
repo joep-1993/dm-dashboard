@@ -4,6 +4,59 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-13 — Bot-analyse: ByteDance, legacy product-URL's en de WAF-challenge
+
+Analysesessie, geen codewijziging. Alles uit de ruwe CloudFront-logs (13–28 juli +
+12 augustus) en `pa.bothits_*`; lessen staan in LEARNINGS.
+
+- [x] **"Moet ik de ByteDance-bot blokkeren?" — advies: nee.** Piek was mei (155.992
+      hits/dag, 5,25% van alle bot-hits); laatste 7 beschikbare dagen 14.193/dag = 0,48%,
+      0,2% van de category-crawl, 19,5 min origin-tijd op 12-08. Wat hij op de piekdag
+      trok was voor 61% geen content (SVG-sprite 90.428×, `/jserrors`, `/data/graphql`) en
+      voor 31% dode legacy product-URL's. Bovendien wordt **40,8% van Bytespider al door
+      de WAF gechallenged**, dus er ligt al een rem op. `verify_state` is
+      `unverifiable` (ByteDance publiceert geen IP-lijst), dus echt-vs-nep is daar niet te
+      bepalen en een UA-blokkade raakt alleen het nette deel.
+- [x] **Legacy product-URL's uitgezocht.** 224.242 unieke URL's / 256.506 hits over 17
+      dagen; 3,0 mln hits over 147 dagen in de cube. **Nooit een echte 200** — 201.395
+      URL's gaven alleen 404, 7.884 hebben een 3xx. Bots: Apple 131.926, Googlebot 63.302,
+      ByteDance 34.903, OpenAI 11.074. Herkomst: 89% zonder referer (crawler-inventaris),
+      en GSC geeft **nul impressies** op `/d\d{6,}/` — ze staan volledig uit de index.
+- [x] **Nep-Googlebot gequantificeerd.** 3,35% van alle Googlebot-UA-requests (77.068 van
+      2,3 mln) komt van IP's die falen op Google's gepubliceerde ranges. Daarvan 40,1% een
+      202, 55,8% een 405, en **106 een echte 200 (0,14%)**. 67 /24-blokken van ~250 IP's
+      elk, top-20 dekt 98,5%. **Echte Googlebot wordt niet geraakt** (2,22 mln verified
+      requests, 0 challenges) — dus geen SEO-risico.
+- [x] Opgeleverd in `Downloads\claude`: `waf_bot_bevindingen_20260813.txt` (actielijst),
+      `nep_googlebot_ip_blokken.csv` (67 blokken met status-split),
+      `legacy_product_urls_bothits_volledig.csv` (224.242 rijen).
+
+**Openstaand — dit ligt bij wie de WAF beheert, niet bij ons:**
+
+- [ ] **`/robots.txt` uitzonderen van élke WAF-regel** (path-exclusion `^/robots\.txt$`
+      bovenaan de rule group). PRIORITEIT: nu komt 50% van de bots niet bij het bestand en
+      concluderen die "geen crawlregels" — zie LEARNINGS. Dit blokkeert ook de
+      Disallow-maatregel hieronder. Nameting: verwachting >99% status 200, 0× 202/403.
+- [ ] **Uitvragen welke twee WAF-regels de 202/405-mix maken** en er één consistente
+      response van maken (voorkeur 403 — een 202 is een succescode en een 405 op een GET is
+      semantisch onjuist).
+- [ ] **De 686 https-301's op `/robots.txt`** — waar 301't dat naartoe? Robots.txt hoort
+      zonder hop geserveerd te worden.
+- [ ] **403's heroverwegen**: YandexBot 486, ClaudeBot 91, facebookexternalhit 72. Dat
+      laatste is de WhatsApp/FB-linkpreview; gedeelde beslist-links krijgen zo geen preview.
+      Vermoedelijk onbedoeld.
+- [ ] **`/sitemap*` meenemen in de bot-regel** — daar gaan die 106 doorgelaten 200's naartoe.
+- [ ] **Pas ná de robots.txt-fix**: `Disallow` op `/jserrors`, `/data/graphql`,
+      `/shoppingcart/header`, `/js/routing`, `/assets/beslist-frontend/svg/` + de sprite
+      hard cachen aan de edge (90.428 origin-hits op één SVG op de piekdag).
+- [ ] **Eigen URL-hygiëne**: de legacy `/…/dNNNNNN/`-URL's zijn 100% dood maar worden nog
+      3,0 mln keer per 147 dagen gecrawld. Niets aan te doen aan de crawler-inventaris,
+      maar wél uitzoeken waarom `boeken.beslist.nl` en `fok.beslist.nl` nog als referer
+      opduiken.
+- [ ] **Tripwire op `verify_state = 'failed'`** per bot-familie in het dashboard (nu 3,35%
+      voor Googlebot). Signaal om op te acteren: 'failed' stijgt terwijl 202+405 daalt.
+      Let op: rijen van vóór 2026-08-11 staan op `unchecked` en horen niet in de noemer.
+
 ### 2026-08-13 — Audit Bothits: fase A t/m C uitgevoerd
 
 Elf bevindingen over 4.005 regels (`a5ecefa`). Wat er af is:

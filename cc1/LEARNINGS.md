@@ -1,6 +1,101 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De 202 én de 405 in onze eigen crawlerlogs zijn WAF-challenges (2026-08-13)
+
+Dat beslist.nl een AWS-WAF-challenge geeft aan onbekende bots staat al in dit document
+(zie "Beslist.nl AWS WAF Challenge"). Wat er niet stond: hoe die challenge terugkomt in
+`pa.bothits_daily`, en dat hij zich voordoet als een **succescode**.
+
+Kenmerken, gemeten over 20.501 challenges op legacy-URL's en 123.450 site-breed:
+- **`x-edge-result-type = 'Error'` in 100% van de gevallen**, 99,8% afgehandeld in
+  0,001–0,003 s, en een vaste bodygrootte (~2,45 KB / 590 B / 3.016 B). Die requests
+  hebben de origin nooit gezien.
+- Het is **202 én 405**. Dezelfde spoof-pool krijgt op het ene /24 consequent een 202 en
+  op het andere een 405 — twee regels die elkaar niet kennen.
+
+- **Gevolg: `status_class = '2xx'` in de cube is vervuild.** Ik las "28,7% 2xx op
+  `product_legacy`" als "een deel van die oude productpagina's leeft nog". Over 224.242
+  legacy-URL's blijkt er **niet één ooit een echte 200** te geven; elke 2xx daar was de
+  challenge. De cube bewaart alleen de statusKLASSE, dus dit is er niet uit te filteren —
+  daarvoor moet je de ruwe logs in (`sc-status` + `x-edge-result-type`).
+
+**Les: een 2xx in deze dataset betekent niet "pagina bestaat". Voor elke conclusie over
+levende/dode URL's op statusklasse: eerst de ruwe status ophalen.**
+
+## "Alles wat niet geblokkeerd is" is geen bevinding tot je het uitsplitst (2026-08-13)
+
+Ik rapporteerde aan Joep: "van de nep-Googlebot wordt 60% gewoon van een echte pagina
+bediend, dáár zit werk." Dat was fout, en het was een restbucket-fout: ik had geteld hoe
+veel requests géén 202 kregen en die groep impliciet "bediend" genoemd.
+
+Uitgesplitst op statuscode: van die 46.160 waren er **43.018 een 405-challenge** (dezelfde
+blokkade, andere code) en 2.948 een 3xx. Echte 200's: **106 van 77.068 nep-requests =
+0,14%**, en vrijwel allemaal op `/sitemap*`. De WAF hield 99,86% tegen. Mijn "punt 2" was
+daarmee geen brandje maar opruimwerk, en dat heb ik in het opgeleverde stuk vooraan als
+correctie moeten zetten.
+
+- **Een negatie is geen categorie.** "Niet-X" bevat alles wat je nog niet hebt bekeken,
+  inclusief drie andere vormen van X.
+- Het kostte één extra `group by status` om te vinden. Doe die splitsing vóór je een
+  percentage uitspreekt, niet erna.
+
+**Les: voordat je een restgroep als bevinding presenteert, breek hem af tot op de code.**
+
+## Bots concluderen "geen crawlregels" als robots.txt niet bereikbaar is (2026-08-13)
+
+Gemeten over twee volledige logdagen, 5.861 requests op `/robots.txt` (host beslist.nl):
+
+| status | aantal | aandeel |
+|---|---|---|
+| 200 | 876 | 14,9% |
+| **202 (WAF-challenge)** | **2.178** | **37,2%** |
+| 301 (waarvan 1.171 http→https) | 1.857 | 31,7% |
+| **403** | **755** | **12,9%** |
+| 304 / 206 / 405 | 45 | 0,8% |
+
+De helft van de bots komt dus niet bij het bestand. En beide faalcodes hebben hetzelfde
+gevolg, om verschillende redenen: bij een **202** moet de crawler per RFC 9309 de body
+parsen als robots.txt, en dat is een challengepagina zonder één geldige `Disallow:`-regel
+→ "geen regels". Bij een **403** schrijft de RFC letterlijk "no restrictions" voor. Een
+403 op robots.txt is dus rúimer dan een 200, niet strenger.
+
+- Geraakt door de 202: other-bot 1.142 (Amzn-SearchBot, CorsairBot), SemrushBot 141,
+  Bytespider 18, DuckAssistBot 13. Door de 403: YandexBot 486, ClaudeBot 91,
+  **facebookexternalhit 72** — dat laatste is de WhatsApp/FB-linkpreview, geen crawler.
+- **Praktisch gevolg voor onze eigen plannen:** de Disallow-regels die we wilden zetten op
+  `/jserrors`, `/data/graphql`, `/shoppingcart/header` en de catlist-sprite bereiken
+  precies de bots waar ze voor bedoeld zijn níet. `/robots.txt` uitzonderen van elke
+  WAF-regel is dus een voorwaarde, geen los verbeterpuntje.
+- Alleen een **5xx** laat een crawler alles als disallowed behandelen — en dat is precies
+  de crawl-stop die je niet wilt. Blokkeren doe je in de regels, niet op het kanaal
+  waarlangs je ze communiceert.
+
+## `bothits_unknown_daily` mist de lange staart, en de ruwe logs hebben een klok (2026-08-13)
+
+Joep vroeg om de legacy `/…/dNNNNNN/`-product-URL's met de meeste bothits. Uit de tabellen
+was dat niet te geven: **nul rijen** met `url_type = 'product_legacy'` in
+`pa.bothits_unknown_daily`, terwijl de cube 3,0 mln legacy-hits over 147 dagen telt.
+
+Oorzaak: die tabel houdt top-500 per dag per bot-familie, en die 500 plekken worden
+opgevuld door de luidruchtige assets (`/data/graphql`, `/jserrors`, de SVG-sprite). Legacy
+product-URL's zijn juist het tegenovergestelde: **224.242 unieke URL's op 256.506 hits =
+1,14 hit per URL**, de drukste haalde 32 hits in 17 dagen. Een top-N-cut is per definitie
+blind voor een platte verdeling.
+
+- Terugvalpad is de ruwe log, en dat werkt: parsen met de bestaande functies uit
+  `bothits_ingest.py` (`classify_ua`, `url_type`, `norm_host`, `skip_host`) gaf op
+  2026-08-12 **exact** de cube-cijfers terug (12.939 legacy-hits, 12.711 4xx). Validatie
+  vooraf op één dag is hier goedkoop en maakt de rest van de analyse verdedigbaar.
+- **Maar die logs verdwijnen**: S3-retentie is ~42 dagen. De mei-piek (1,4 mln legacy-hits,
+  waarvan 912k van Bytespider) is niet meer op referer- of statusniveau te analyseren.
+  Vraag "wie linkt hiernaar" dus zolang de logs er nog zijn, niet als de cube je een
+  interessant aggregaat laat zien.
+- Wat het opleverde en niet uit de cube kon komen: **89% van de legacy-hits heeft geen
+  referer** (crawler-inventaris, geen link), en de grootste benoemde bron is
+  `https://urlabc.nl` met 10.689 hits — **uitsluitend GPTBot**, vanaf 2 IP's, elke URL
+  precies één keer, 100% 404.
+
 ## Een worker-pool erft de start-methode van hoe de app zélf gestart is (2026-08-13)
 
 De oorzaak van 30 verpeste logdatums. `uvicorn --reload` start de applicatie via een
