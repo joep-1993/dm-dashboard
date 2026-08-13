@@ -1823,10 +1823,24 @@
                 `<tr><td colspan="8" class="p-3 text-danger">Laden mislukt: ${escapeHtml(e.message)}</td></tr>`;
             return;
         }
+        // Sinds fase 2 kan is_complete false zijn terwijl er wél 24 uur staat — een
+        // onleesbaar bestand of minder bestanden dan S3 had. "24/24" in een
+        // waarschuwingsbadge zou dan onzin lezen, dus de cel noemt de reden.
+        const completeCell = r => {
+            if (r.is_complete) return '24';
+            const why = r.hours_present != null && r.hours_present < 24
+                ? `${r.hours_present}/24 uur`
+                : r.failed_files > 0
+                    ? `${fmt(r.failed_files)} onleesbaar`
+                    : (r.expected_files && r.files < r.expected_files
+                        ? `${fmt(r.files)}/${fmt(r.expected_files)} bestanden`
+                        : 'incompleet');
+            return `<span class="badge bg-warning text-dark">${escapeHtml(why)}</span>`;
+        };
         document.querySelector('#ingestTable tbody').innerHTML = log.map(r => `
             <tr>
               <td>${r.log_date}</td>
-              <td class="num">${r.is_complete ? '24' : `<span class="badge bg-warning text-dark">${r.hours_present}/24</span>`}</td>
+              <td class="num">${completeCell(r)}</td>
               <td class="num">${fmt(r.files)}</td>
               <td class="num">${fmt(r.raw_lines)}</td>
               <td class="num">${fmt(r.bot_lines)}</td>

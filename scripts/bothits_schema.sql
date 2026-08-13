@@ -123,6 +123,13 @@ CREATE TABLE IF NOT EXISTS pa.bothits_ingest (
     source_dirs   text,
     duration_s    integer,
     hours_present smallint,
+    -- Bestanden die niet volledig te lezen waren (afgebroken gzip). > 0 => niet compleet.
+    failed_files  integer NOT NULL DEFAULT 0,
+    -- Hoeveel keys S3 voor deze datum had, uit het manifest dat bothits_s3.fetch()
+    -- achterlaat. NULL bij een backfill uit het lokale archief: daar is geen autoriteit
+    -- om tegen te toetsen. Dit is de enige HARDE volledigheidsmaat — het bestandsaantal
+    -- zelf zegt niets (complete dagen lopen van 1.591 tot 4.969 bestanden).
+    expected_files integer,
     is_complete   boolean NOT NULL DEFAULT true,
     ingested_at   timestamp NOT NULL DEFAULT now()
 );

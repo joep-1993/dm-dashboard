@@ -358,6 +358,35 @@ download-batch zijn: 2026-03-26 (17/24), 04-13 (8/24), 04-21 (8/24), 05-01 (9/24
 waarschuwt erover — een halve dag naast hele dagen leest anders als een
 verkeersinstorting die nooit gebeurd is.
 
+### Wat "compleet" sinds 2026-08-13 betekent
+
+`is_complete` hing alleen aan `hours_present >= 24`. Nu aan drie dingen:
+
+1. **alle 24 uurbuckets** — vangt een dropfolder die nog volloopt;
+2. **`failed_files = 0`** — een afgebroken gzip leverde eerder stil een te korte dag op,
+   want `process_file` gaf de regels terug die het vóór de fout had gelezen;
+3. **`files >= expected_files`** — wat S3 zei te hebben, uit
+   `<staging>/_manifest/<datum>.json` dat `fetch()` achterlaat. `NULL` bij een backfill
+   uit het lokale archief; dan gelden alleen 1 en 2.
+
+**Dit is de enige harde maat.** Het bestandsaantal op zichzelf zegt niets: complete dagen
+lopen legitiem van 1.591 tot 4.969 bestanden. `raw_lines` is wél stabiel (5,6–7,9 mln per
+dag) maar dat weet je pas ná het parsen.
+
+**Een distributie met minder dan 24 uur is GEEN bewijs van verlies** — en die verleiding
+is echt, dus hier de meting. Drie van de 21 staging-datums hebben er een: 07-31 (22 uur),
+08-10 (23), 08-11 (23), en het is elke keer `E14VW8EO449KG7`, de kleinste distributie met
+139 bestanden per dag (≈5,8 per uur). De missende uren zijn 00, 02 en 19. Een uur zonder
+één request levert geen logbestand op. Zou je dit tot eis maken, dan valt 14% van de
+datums om als "incompleet" en pakt `run_drop` ze daarna nooit meer op. Het staat er als
+waarschuwing in (`_warn_thin_distributions`), bewust niet als poort.
+
+**Gevolg voor het opruimen, en dit is de belangrijkste regel:** bronbestanden worden
+alleen gearchiveerd ná een compleet geladen datum, en `_prune_archive` wist nooit een
+datummap die niet als compleet in de ledger staat. Kan de DB niet gelezen worden, dan
+ruimt hij niets op. Opruimen is nooit dringend genoeg om te doen zonder te weten wat er
+al veilig binnen is — buiten het S3-venster van ~42 dagen is er geen tweede kopie.
+
 ---
 
 ## Metriek-valkuil: "verspilling" moet je over `/c/` meten

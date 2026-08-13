@@ -61,10 +61,12 @@ def fingerprint(out_path, n_files=12):
     raw_total = bot_total = 0
     per_file = []
 
+    failed_total = 0
     for fn in files:
-        cube, known, unknown, raw, bot = process_file(os.path.join(SRC, fn))
+        cube, known, unknown, raw, bot, failed = process_file(os.path.join(SRC, fn))
         raw_total += raw
         bot_total += bot
+        failed_total += failed
         per_file.append({"file": fn, "raw": raw, "bot": bot,
                          "cube": len(cube), "known": len(known),
                          "unknown": len(unknown)})
@@ -89,6 +91,7 @@ def fingerprint(out_path, n_files=12):
         "files": len(files),
         "raw_lines": raw_total,
         "bot_lines": bot_total,
+        "failed_files": failed_total,
         "cube_rows": len(tot_cube),
         "known_rows": len(tot_known),
         "unknown_rows": len(tot_unknown),

@@ -529,6 +529,7 @@ def get_ingest_log(limit=200, force=False):
         return _query("""
             SELECT log_date::text AS log_date, files, raw_lines, bot_lines,
                    known_rows, hours_present, is_complete, duration_s,
+                   failed_files, expected_files,
                    source_dirs, ingested_at::text AS ingested_at
             FROM pa.bothits_ingest ORDER BY log_date DESC LIMIT %s
         """, (limit,))

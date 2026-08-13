@@ -4,7 +4,7 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
-### 2026-08-13 — Audit Bothits, ronde 2: fase 0 + 1 uitgevoerd, fases 2–4 open
+### 2026-08-13 — Audit Bothits, ronde 2: fase 0 t/m 2 uitgevoerd, fases 3–4 open
 
 Tweede audit over 5.020 regels (vijf parallelle reviewers, daarna nagerekend tegen de live
 DB en het echte archief). De elf bevindingen van de eerste ronde staan verderop; dit zijn
@@ -106,22 +106,53 @@ staat.
       re-entry-guard en een `clearTimeout` op `hidden.bs.tab` (elk tabbezoek tijdens een
       run startte een extra keten).
 
-**Fase 2 — het volledigheidscontract (gedragswijzigend, moet gated):**
+**Fase 2 — het volledigheidscontract — GEDAAN (gedragswijzigend):**
 
-- [ ] **Onleesbare/afgebroken `.gz` levert partiële tellingen** die als volledig doorgaan; de
-      dag wordt tóch `is_complete=true`. `failed_files` teruggeven, tellen, in de ledger.
-- [ ] **Ledger-aanwezigheid ≠ compleet** → bronbestanden van een half geladen datum worden
-      gearchiveerd en later gewist; S3 meldt zo'n datum eeuwig `al_geingest`.
-      `already_ingested()` moet `{datum: is_complete}` teruggeven.
-- [ ] **Known-URL-tripwire vuurt ná `conn.commit()`** — de kapotte datum staat er dan al in
-      en zijn bestanden gaan op de archiefstapel. Vóór de write en `raise`, zoals de
-      nul-regels-tripwire het al doet.
-- [ ] **Volledigheid = 24 uurstempels én `(distributie, uur)` én `failed_files` én het
-      verwachte S3-bestandsaantal.** Let op: bestandsaantal is géén detector — complete dagen
-      lopen legitiem van 1.591 tot 4.969 bestanden. `raw_lines` (5,6–7,9 mln/dag) is stabiel.
-- **Regressiepoort**: herverwerk 2026-08-12 uit `~/bothits_s3/_processed/2026-08-12/`
-  (2.905 bestanden, staat er nog) en vergelijk met de ledgerregel `files=2905,
-  raw_lines=6.946.608, bot_lines=3.550.758, known_rows=142.054` + md5 over de cube-rijen.
+- [x] **`is_complete` komt uit drie voorwaarden** i.p.v. alleen `n_hours >= 24`: alle 24
+      uurbuckets, **geen onleesbaar bestand** (`failed_files`), en **minstens zoveel
+      bestanden als S3 zei te hebben** (`expected_files`). Beide nieuw in de ledger, met
+      catalogus-guard in `SCHEMA_MIGRATE`; bestaande rijen krijgen `0` en `NULL` — "onbekend"
+      is eerlijker dan een nul die als bewijs van volledigheid leest.
+- [x] **`expected_files` komt uit een manifest** dat `bothits_s3.fetch()` per datum
+      achterlaat in `<staging>/_manifest/<datum>.json`. Een sidecar en geen returnwaarde
+      omdat download en ingest twee fases zijn met alleen de staging-map als koppeling — zo
+      overleeft het aantal ook een crash ertussen. `None` bij een backfill uit het archief:
+      daar is geen autoriteit, dan blijft het bij uren + leesbare bestanden.
+- [x] **Ledger-aanwezigheid ≠ compleet.** `already_ingested(with_completeness=True)` geeft
+      `{datum: is_complete}`; `run_drop` verwerkt een incomplete datum opnieuw i.p.v. hem
+      over te slaan, en `bothits_s3` meldt hem als `herstel (incompleet geladen)` i.p.v.
+      `al_geingest`. Er stonden er vijf: 03-26, 04-13, 04-21, 05-01, 06-09.
+- [x] **Archiveren en prunen zijn gegated op volledigheid.** `_archive()` draait alleen na
+      een compleet geladen datum, en `_prune_archive` weigert elke datummap die niet als
+      compleet in de ledger staat (en ruimt niets op als de DB onbereikbaar is). Dit is het
+      laatste punt waarop een bronbestand nog te redden is — buiten het S3-venster van ~42
+      dagen is er geen tweede kopie. Getest: compleet+oud wordt gewist, incompleet blijft.
+- [x] **Known-URL-tripwire staat vóór de commit en gooit** in plaats van te loggen. Hij
+      stond eronder, dus juist op de dag dat hij nodig is stond de kapotte datum al in de
+      ledger als volledig en was `_archive()` de eerstvolgende stap.
+
+**Regressiepoort — uitgevoerd, en de oude baseline was ZELF verkeerd.** Herverwerking van
+2026-08-12 uit `~/bothits_s3/_processed/2026-08-12/` gaf `files=2905`,
+`raw_lines=6.946.608`, `bot_lines=3.550.758`, 1.450 cube-rijen en een **byte-identieke**
+`bothits_unknown_daily` — maar `known_rows` ging van 142.054 naar **142.057**.
+
+Uitgezocht in plaats van weggewuifd, en het is geen regressie: de %-alias-fix uit
+`53fcea2` (auditbevinding 8) gold nog niet toen 08-12 oorspronkelijk werd geladen — die
+run was de meting van de parser-versnelling, vóór dat commit. Bewezen door de dag twee
+keer te parsen met en zonder aliassen: **zonder = 142.054, met = 142.057**, exact het
+verschil. Dat is precies wat die fix belooft ("geldt alleen voor datums die je daarna
+verwerkt"). **De juiste baseline is dus 142.057**; de andere datums (08-09 t/m 08-11,
+geladen ná 12:33 UTC) hadden de aliassen al.
+
+**Wat NIET is gedaan, en waarom — dit is een correctie op de audit zelf.** De audit stelde
+voor om te eisen dat élke distributie 24 uur heeft. Gemeten op de 21 staging-datums: drie
+datums hebben een distributie met minder (07-31: 22, 08-10: 23, 08-11: 23) en het is elke
+keer `E14VW8EO449KG7` — de kleinste distributie, 139 bestanden/dag ≈ 5,8 per uur — met de
+missende uren 00, 02 en 19. Dat is geen verloren data maar een uur zonder één request;
+CloudFront schrijft dan geen bestand. Als poort zou 14% van de datums omvallen als
+"incompleet" en zou `run_drop` ze daarna nooit meer oppakken. Het zit er nu in als
+**waarschuwing** (`_warn_thin_distributions`), niet als eis. Het bestandsAANTAL is om
+dezelfde reden geen maat: complete dagen lopen legitiem van 1.591 tot 4.969 bestanden.
 
 **Fase 3 — metriekcorrecties (cijfers op het scherm veranderen):**
 

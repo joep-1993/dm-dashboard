@@ -31,12 +31,13 @@ WSL-reads liet vastlopen (memory `onedrive_wsl_file_hang`), en de dropfolder moe
 juist een Windows-pad blijven voor het handmatige pad. `run_drop(src=…)` neemt de map
 al als argument, dus beide bestaan naast elkaar.
 """
+import json
 import logging
 import os
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from backend.database import get_db_connection, return_db_connection
 
@@ -140,11 +141,18 @@ def list_date(log_date: str):
 
 
 def _ingested_dates():
+    """-> {log_date: is_complete}.
+
+    Was een set van "staat in de ledger" (fase 2 van de audit). Daardoor gold een datum
+    die maar half geladen was voor altijd als `al_geingest`: preview en fetch sloegen
+    hem over, en er was geen weg via de UI om hem alsnog compleet te krijgen — terwijl
+    hij binnen het S3-venster van ~42 dagen gewoon opnieuw te halen was.
+    """
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT log_date FROM pa.bothits_ingest")
-        out = {str(r["log_date"]) for r in cur.fetchall()}
+        cur.execute("SELECT log_date, is_complete FROM pa.bothits_ingest")
+        out = {str(r["log_date"]): bool(r["is_complete"]) for r in cur.fetchall()}
         cur.close()
         return out
     finally:
@@ -175,8 +183,13 @@ def preview(days: int = 3):
         keys, size, hours = list_date(d)
         if not keys:
             state = "niet_in_s3"          # buiten de retentie, of nog niets geschreven
-        elif d in ingested:
+        elif ingested.get(d):             # aanwezig ÉN compleet
             state = "al_geingest"
+        elif d in ingested:
+            # Wel geladen, niet compleet: dit is juist een datum die je WEL wil halen.
+            state = "herstel (incompleet geladen)"
+            files += len(keys)
+            total += size
         elif len(hours) < 24:
             state = f"incompleet ({len(hours)}/24 uur)"
         else:
@@ -225,11 +238,16 @@ def fetch(days: int = 3, dest: str = None, progress=None, should_cancel=None):
         if not keys:
             stats["dates"].append({"log_date": d, "state": "niet_in_s3"})
             continue
-        if d in ingested:
+        if ingested.get(d):                    # aanwezig ÉN compleet
             stats["dates"].append({"log_date": d, "state": "al_geingest",
                                    "files": len(keys)})
             continue
-        if len(hours) < 24:
+        if d in ingested:
+            # Incompleet geladen: ophalen is juist de bedoeling. `_read_manifest` laat
+            # ingest_date daarna zien hoeveel bestanden S3 had, dus deze poging kan
+            # zichzelf als compleet of nog steeds te kort boeken.
+            logger.info("bothits s3: %s staat incompleet in de ledger — opnieuw ophalen", d)
+        elif len(hours) < 24:
             stats["dates"].append({"log_date": d, "files": len(keys),
                                    "state": f"incompleet ({len(hours)}/24 uur)"})
             continue
@@ -303,6 +321,25 @@ def fetch(days: int = 3, dest: str = None, progress=None, should_cancel=None):
                            log_date=d, date_index=idx, date_total=len(plan))
         if aborted:
             cancelled = True
+        # Manifest naast de bestanden (fase 2). Dit is het ENIGE gezaghebbende antwoord
+        # op "hebben we alles?": S3 weet hoeveel keys er voor deze datum zijn, en na de
+        # download weet niemand dat meer. Zonder dit werd een datum waarvan 50 van de
+        # 2.905 bestanden niet binnenkwamen alsnog als volledige 24-uursdag geboekt,
+        # want de uren waren er wel — de mislukking stond alleen in een poller-tekst
+        # die bij de volgende run verdween. `written_at` alleen als spoor voor wie het
+        # bestandje later tegenkomt.
+        try:
+            mdir = os.path.join(dest, "_manifest")
+            os.makedirs(mdir, exist_ok=True)
+            with open(os.path.join(mdir, f"{d}.json"), "w", encoding="utf-8") as f:
+                json.dump({"log_date": d, "expected_files": len(keys),
+                           "downloaded": got, "skipped": skip, "failed": fail,
+                           "cancelled": bool(aborted),
+                           "written_at": datetime.now().isoformat(timespec="seconds")}, f)
+        except OSError as exc:
+            # Geen manifest is geen ramp: ingest_date valt dan terug op uren +
+            # leesbare bestanden. Wel melden, want de harde check vervalt.
+            logger.warning("bothits s3: manifest voor %s niet te schrijven: %s", d, exc)
         stats["dates"].append({"log_date": d, "files": len(keys), "hours": len(hours),
                                "downloaded": got, "skipped": skip, "failed": fail,
                                "state": "geannuleerd" if aborted

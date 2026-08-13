@@ -35,6 +35,7 @@ CLI:
 import argparse
 import collections
 import gzip
+import json
 import logging
 import multiprocessing
 import os
@@ -374,7 +375,7 @@ REQUIRED_FIELDS = (
 def process_file(path):
     """Parse one .gz log file.
 
-    Returns (cube, known, unknown, raw_lines, bot_lines) where
+    Returns (cube, known, unknown, raw_lines, bot_lines, failed) where
       cube    : (host, family, name, url_type, depth, is_known, status, edge,
                  verify_state)
                 -> [hits, bytes, time_ms]
@@ -382,6 +383,9 @@ def process_file(path):
       unknown : (host, family, name, url_type, depth, url) -> hits
                 (product pages excluded — they are near-unique per hit, so a
                  top-N over them is meaningless noise; the cube still counts them)
+      failed  : 1 als het bestand niet volledig te lezen was, anders 0. ingest_date
+                telt ze op en weigert de logdatum dan compleet te noemen — een
+                afgebroken gzip gaf hiervoor stil een te korte dag (fase 2).
     """
     cube = collections.defaultdict(lambda: [0, 0, 0])
     known = collections.defaultdict(lambda: [0, 0, 0, 0, 0, 0])
@@ -389,6 +393,7 @@ def process_file(path):
     raw_lines = 0
     bot_lines = 0
     bad_lines = 0
+    failed = 0
     cols = None
     try:
         with gzip.open(path, "rt", encoding="utf-8", errors="replace") as f:
@@ -493,12 +498,14 @@ def process_file(path):
                 elif ut not in PRODUCTISH:
                     unknown[(host, fam, bot, ut, depth, stem)] += 1
     except (EOFError, OSError, gzip.BadGzipFile) as exc:
-        # LET OP: dit houdt de regels die vóór de fout zijn gelezen. De tellers gaan
-        # dus SHORT mee naar de ledger en de dag blijft is_complete=true. Dat is
-        # bevinding 5 van de audit en staat als fase 2 in cc1/TASKS.md — hier alleen
-        # nog een luidere logregel, geen gedragswijziging.
+        # Een afgebroken gzip-stream levert de regels op die er vóór de fout uit kwamen,
+        # en die gingen SHORT mee naar de ledger terwijl de dag is_complete=true bleef.
+        # Nu wordt het bestand als mislukt teruggegeven en weigert ingest_date de dag
+        # compleet te noemen (fase 2). gzip.BadGzipFile is een subklasse van OSError en
+        # staat er alleen voor de leesbaarheid bij.
         logger.warning("skipping unreadable %s (na %s regels): %s",
                        os.path.basename(path), f"{raw_lines:,}", exc)
+        failed = 1
     # Twee dingen die hiervóór volledig stil waren.
     if cols is None:
         logger.warning("%s: geen #Fields:-header gevonden, 0 regels gelezen",
@@ -506,7 +513,7 @@ def process_file(path):
     elif bad_lines:
         logger.warning("%s: %s van %s regels te kort om te parsen",
                        os.path.basename(path), f"{bad_lines:,}", f"{raw_lines:,}")
-    return dict(cube), dict(known), unknown, raw_lines, bot_lines
+    return dict(cube), dict(known), unknown, raw_lines, bot_lines, failed
 
 
 # ---------------------------------------------------------------------------
@@ -562,6 +569,27 @@ BEGIN
         ALTER TABLE pa.bothits_ingest
             ADD COLUMN is_complete boolean NOT NULL DEFAULT true;
     END IF;
+
+    -- failed_files / expected_files (fase 2 van de audit 2026-08-13). Bestaande rijen
+    -- krijgen 0 en NULL: we weten van die runs niet hoeveel bestanden onleesbaar waren
+    -- of wat S3 had, en dat eerlijk als "onbekend" laten staan is beter dan een nul die
+    -- als bewijs van volledigheid gelezen kan worden.
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'pa' AND table_name = 'bothits_ingest'
+           AND column_name = 'failed_files'
+    ) THEN
+        ALTER TABLE pa.bothits_ingest
+            ADD COLUMN failed_files integer NOT NULL DEFAULT 0;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'pa' AND table_name = 'bothits_ingest'
+           AND column_name = 'expected_files'
+    ) THEN
+        ALTER TABLE pa.bothits_ingest ADD COLUMN expected_files integer;
+    END IF;
 END $$;
 """
 
@@ -611,16 +639,28 @@ def _worker_init():
 # ---------------------------------------------------------------------------
 # Ingest one log date
 # ---------------------------------------------------------------------------
-def ingest_date(log_date, files, source_dirs="", n_hours=24):
+def ingest_date(log_date, files, source_dirs="", n_hours=24, expected_files=None,
+                dist_hours=None):
     """Parse every file for one log date and replace that date in the DB.
 
     n_hours is how many of the 24 hourly buckets the archive actually holds for
     this date. Five dates in the backfill are cut off mid-day (the last day of
     each download batch), and a partial day plotted next to full ones reads as
     a traffic collapse that never happened — so it is recorded, not smoothed.
+
+    `expected_files` is wat S3 zei te hebben voor deze datum (uit het manifest dat
+    bothits_s3.fetch() achterlaat) en is de ENIGE harde volledigheidsmaat die we hebben.
+    None bij een backfill uit het lokale archief: daar is geen autoriteit om tegen te
+    toetsen, dus dan valt de check terug op uren + leesbare bestanden.
+
+    Waarom het bestandsAANTAL zelf geen maat is: complete dagen lopen legitiem van
+    1.591 tot 4.969 bestanden (gemeten over 151 datums), dus een drempel daarop zegt
+    niets. `raw_lines` is wél stabiel (5,6–7,9 mln/dag) maar dat weet je pas ná het
+    parsen. Vandaar de vergelijking met S3's eigen key-listing.
     """
     t0 = time.time()
     logger.info("[%s] %s files (%s/24 hours)", log_date, f"{len(files):,}", n_hours)
+    _warn_thin_distributions(log_date, dist_hours)
 
     # In de PARENT, vóór het forken — net als load_url_ids(). De workers erven de
     # opzoektabel dan via fork in plaats van de lijsten twaalf keer op te halen.
@@ -631,6 +671,7 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
     known = collections.defaultdict(lambda: [0, 0, 0, 0, 0, 0])
     unknown = collections.Counter()
     raw_lines = bot_lines = 0
+    failed_files = 0
     done = 0
 
     # EXPLICIET forken, en niet op de default vertrouwen (2026-08-13). Dit was de
@@ -660,7 +701,7 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
                              **pool_kwargs) as ex:
         futs = [ex.submit(process_file, f) for f in files]
         for fut in as_completed(futs):
-            c, k, u, rl, bl = fut.result()
+            c, k, u, rl, bl, ff = fut.result()
             for key, v in c.items():
                 t = cube[key]
                 t[0] += v[0]; t[1] += v[1]; t[2] += v[2]
@@ -671,6 +712,7 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
             unknown.update(u)
             raw_lines += rl
             bot_lines += bl
+            failed_files += ff
             done += 1
             if done % 500 == 0:
                 logger.info("[%s]   %s/%s files | cube=%s known=%s unknown=%s",
@@ -707,6 +749,43 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
             f"vermoedelijk een kapotte worker-pool. Niets weggeschreven; "
             f"draai deze datum opnieuw."
         )
+
+    # Deze tripwire stond tot 2026-08-13 ONDER de commit en was alleen een logregel
+    # (fase 2). Dat is te laat op precies de dag dat hij nodig is: de datum staat dan al
+    # in de ledger als volledig, en in run_drop is de eerstvolgende stap `_archive()` —
+    # dus het bewijsmateriaal verhuist naar de stapel die _prune_archive later opruimt.
+    # Nul bekende URL's op miljoenen bot-hits kan niet: pa.urls heeft ~1M rijen en
+    # Googlebot crawlt categoriepagina's. Dit heeft 30 logdatums stil verpest omdat
+    # niemand naar known_rows keek tot een grafiek er raar uitzag.
+    if bot_lines > 100_000 and not known:
+        raise RuntimeError(
+            f"[{log_date}] TRIPWIRE: {bot_lines:,} bot-hits en NUL bekende URL's — de "
+            f"pa.urls-lookup heeft de workers niet bereikt (URL_IDS={len(URL_IDS):,} in "
+            f"de parent). Controleer of de pool forkt; onder een spawn-context begint "
+            f"elke worker met een lege lookup. Niets weggeschreven; draai deze datum "
+            f"opnieuw."
+        )
+
+    # Volledigheid uit DRIE voorwaarden (fase 2), waar het tot 2026-08-13 alleen
+    # `n_hours >= 24` was:
+    #   1. alle 24 uurbuckets aanwezig — vangt een halve dag in de dropfolder;
+    #   2. geen onleesbaar bestand — een afgebroken gzip gaf hiervoor stil een te
+    #      korte dag die als volledig in de ledger belandde;
+    #   3. minstens zoveel bestanden als S3 zei te hebben — de enige harde maat, en
+    #      alleen beschikbaar als er een fetch-manifest ligt (None bij een backfill
+    #      uit het lokale archief; dan blijft het bij 1 en 2).
+    # Expliciet NIET meegenomen: "elke distributie heeft 24 uur". Zie
+    # _warn_thin_distributions() — dat is gemeten en levert valse negatieven op.
+    short = expected_files is not None and len(files) < expected_files
+    complete = bool(n_hours >= 24 and not failed_files and not short)
+    if failed_files:
+        logger.error("[%s] %s van %s bestanden waren niet volledig te lezen — de datum "
+                     "wordt als INCOMPLEET geboekt en kan opnieuw", log_date,
+                     failed_files, len(files))
+    if short:
+        logger.error("[%s] %s bestanden verwerkt maar S3 had er %s — de datum wordt als "
+                     "INCOMPLEET geboekt en kan opnieuw", log_date, len(files),
+                     expected_files)
 
     conn = get_db_connection()
     try:
@@ -746,16 +825,20 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
         cur.execute("""
             INSERT INTO pa.bothits_ingest
               (log_date, files, raw_lines, bot_lines, known_rows, source_dirs,
-               duration_s, hours_present, is_complete, ingested_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+               duration_s, hours_present, failed_files, expected_files,
+               is_complete, ingested_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
             ON CONFLICT (log_date) DO UPDATE SET
               files=EXCLUDED.files, raw_lines=EXCLUDED.raw_lines,
               bot_lines=EXCLUDED.bot_lines, known_rows=EXCLUDED.known_rows,
               source_dirs=EXCLUDED.source_dirs, duration_s=EXCLUDED.duration_s,
               hours_present=EXCLUDED.hours_present,
+              failed_files=EXCLUDED.failed_files,
+              expected_files=EXCLUDED.expected_files,
               is_complete=EXCLUDED.is_complete, ingested_at=now()
         """, (log_date, len(files), raw_lines, bot_lines, len(known),
-              source_dirs[:500], dur, n_hours, n_hours >= 24))
+              source_dirs[:500], dur, n_hours, failed_files, expected_files,
+              complete))
         conn.commit()
         cur.close()
     except Exception:
@@ -764,24 +847,18 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
     finally:
         return_db_connection(conn)
 
-    logger.info("[%s] done in %ss | raw=%s bot=%s | cube=%s url=%s unknown=%s",
+    logger.info("[%s] done in %ss | raw=%s bot=%s | cube=%s url=%s unknown=%s%s",
                 log_date, dur, f"{raw_lines:,}", f"{bot_lines:,}",
-                f"{len(cube):,}", f"{len(known):,}", f"{len(trimmed):,}")
-    # Tripwire (2026-08-13). Nul bekende URL's op een dag met miljoenen bot-hits kan
-    # niet: pa.urls heeft ~1M rijen en Googlebot crawlt categoriepagina's. Dit heeft
-    # 30 logdatums stil verpest omdat niemand naar known_rows keek tot een grafiek er
-    # raar uitzag. Een ERROR in het log is de goedkoopste bewaker die er is.
-    if bot_lines > 100_000 and not known:
-        logger.error(
-            "[%s] TRIPWIRE: %s bot-hits en NUL bekende URL's — de pa.urls-lookup heeft "
-            "de workers niet bereikt (URL_IDS=%s in de parent). Controleer of de pool "
-            "forkt; onder een spawn-context begint elke worker met een lege lookup. "
-            "Deze datum moet opnieuw.",
-            log_date, f"{bot_lines:,}", f"{len(URL_IDS):,}")
+                f"{len(cube):,}", f"{len(known):,}", f"{len(trimmed):,}",
+                "" if complete else "  [INCOMPLEET]")
+    # De known-URL-tripwire stond hier, ná de commit, en alleen als logregel. Hij staat
+    # nu vóór de write en gooit — zie daar.
     return {
         "log_date": str(log_date), "files": len(files), "raw_lines": raw_lines,
         "bot_lines": bot_lines, "known_rows": len(known),
         "unknown_rows": len(trimmed), "cube_rows": len(cube), "duration_s": dur,
+        "failed_files": failed_files, "expected_files": expected_files,
+        "is_complete": complete,
     }
 
 
@@ -789,7 +866,8 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
 # Discovery
 # ---------------------------------------------------------------------------
 def scan_tree(root, include_archived=False):
-    """-> {log_date: [paths]}, {log_date: set(hours)}, {log_date: set(dirs)}.
+    """-> {log_date: [paths]}, {log_date: set(hours)}, {log_date: set(dirs)},
+          {log_date: {dist: set(hours)}}.
 
     Two properties of the archive this has to survive:
 
@@ -815,6 +893,9 @@ def scan_tree(root, include_archived=False):
     seen = {}
     hours = collections.defaultdict(set)
     dirs = collections.defaultdict(set)
+    # Uren PER DISTRIBUTIE, als diagnose en niet als poort — zie de meting in
+    # _warn_thin_distributions() voor waarom dat onderscheid belangrijk is.
+    dist_hours = collections.defaultdict(lambda: collections.defaultdict(set))
     for dirpath, _dirnames, filenames in os.walk(root):
         if not include_archived and "_processed" in dirpath.split(os.sep):
             continue
@@ -828,21 +909,80 @@ def scan_tree(root, include_archived=False):
             if fn not in seen:
                 seen[fn] = (d, os.path.join(dirpath, fn))
                 hours[d].add(m.group(2))
+                # De distributie is het deel vóór de eerste punt:
+                # 'E3QQH7GDBASLV1.2026-08-12-19.17a7c0f4.gz'
+                dist_hours[d][fn.split(".", 1)[0]].add(m.group(2))
             dirs[d].add(os.path.basename(dirpath))
     by_date = collections.defaultdict(list)
     for d, path in seen.values():
         by_date[d].append(path)
-    return by_date, hours, dirs
+    return by_date, hours, dirs, dist_hours
 
 
-def already_ingested():
+# Sidecar dat bothits_s3.fetch() per datum achterlaat: hoeveel keys S3 had en hoeveel
+# downloads faalden. Een bestandje en geen returnwaarde omdat download en ingest twee
+# fases zijn met de staging-map als enige koppeling — zo overleeft het aantal ook een
+# crash tussen de twee, en weet een backfill uit het archief gewoon dat er niets ligt.
+MANIFEST_DIR = "_manifest"
+
+
+def _read_manifest(src, log_date):
+    """-> (expected_files, download_failed) of (None, 0) als er geen manifest is."""
+    p = os.path.join(src, MANIFEST_DIR, f"{log_date}.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            m = json.load(f)
+        return m.get("expected_files"), int(m.get("failed") or 0)
+    except (OSError, ValueError):
+        return None, 0
+
+
+def _warn_thin_distributions(log_date, dist_hours):
+    """Waarschuw als een distributie minder dan 24 uurbestanden heeft. GEEN poort.
+
+    Dit was in de audit als harde eis voorgesteld — "een dag is pas compleet als élke
+    distributie 24 uur heeft" — en de meting zegt dat dat fout is. Gemeten op de 21
+    datums in de staging (2026-08-13): DRIE datums hebben een distributie met minder
+    dan 24 uur (07-31: 22, 08-10: 23, 08-11: 23), en het is elke keer
+    E14VW8EO449KG7 — de kleinste distributie, 139 bestanden per dag, dus ~5,8 per uur.
+    De missende uren zijn 00, 02 en 19. Dat is geen verloren data maar een uur zonder
+    één request: CloudFront schrijft dan geen bestand.
+
+    Zou dit een poort zijn, dan viel 14% van de datums om als "incompleet" en zou
+    run_drop ze daarna nooit meer oppakken — een verzonnen probleem met echte schade.
+    De ENIGE betrouwbare volledigheidsmaat is wat S3 zelf zegt te hebben; die komt via
+    expected_files uit het manifest van bothits_s3.fetch(). Dit hier is de zachte
+    tegenhanger: het valt op in het log als er iets echt scheef staat.
+    """
+    thin = {d: sorted(hs) for d, hs in (dist_hours or {}).items() if len(hs) < 24}
+    if not thin:
+        return
+    for dist, hs in sorted(thin.items()):
+        missing = sorted({f"{h:02d}" for h in range(24)} - set(hs))
+        logger.warning("[%s] distributie %s heeft %s/24 uur (mist %s) — normaal bij een "
+                       "distributie met weinig verkeer, verdacht bij een grote",
+                       log_date, dist, len(hs), ",".join(missing))
+
+
+def already_ingested(with_completeness=False):
+    """-> set(datums), of met `with_completeness` een {datum: is_complete}-dict.
+
+    Die tweede vorm bestaat omdat "staat in de ledger" tot 2026-08-13 gelezen werd als
+    "is klaar" (fase 2 van de audit). Dat is niet hetzelfde: run_backfill laadt partiële
+    datums bewust wél, en er stonden er vijf in (03-26 17/24, 04-13 8/24, 04-21 8/24,
+    05-01 9/24, 06-09 9/24). run_drop zag zo'n datum als klaar, archiveerde de
+    bronbestanden en _prune_archive wiste ze na de retentie — en buiten het S3-venster
+    van ~42 dagen is dat definitief. Nu mag een incomplete datum opnieuw.
+    """
     conn = get_db_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT log_date FROM pa.bothits_ingest")
-        out = {str(r["log_date"]) for r in cur.fetchall()}
+        cur.execute("SELECT log_date, is_complete FROM pa.bothits_ingest")
+        rows = cur.fetchall()
         cur.close()
-        return out
+        if with_completeness:
+            return {str(r["log_date"]): bool(r["is_complete"]) for r in rows}
+        return {str(r["log_date"]) for r in rows}
     finally:
         return_db_connection(conn)
 
@@ -862,7 +1002,7 @@ def run_backfill(src=None, limit=None, redo=False, only=None):
     """
     src = src or BACKUP_DIR
     load_url_ids()
-    by_date, hours, dirs = scan_tree(src, include_archived=bool(only))
+    by_date, hours, dirs, dist_hours = scan_tree(src, include_archived=bool(only))
     done = set() if redo else already_ingested()
     todo = sorted(d for d in by_date if d not in done)
     if only:
@@ -897,8 +1037,10 @@ def run_backfill(src=None, limit=None, redo=False, only=None):
             break
         logger.info("=== %s/%s : %s ===", i, len(todo), d)
         try:
+            exp, _dl_failed = _read_manifest(src, d)
             results.append(ingest_date(date.fromisoformat(d), by_date[d],
-                                       ",".join(sorted(dirs[d])), len(hours[d])))
+                                       ",".join(sorted(dirs[d])), len(hours[d]),
+                                       expected_files=exp, dist_hours=dist_hours[d]))
         except Exception as exc:
             # Gefaalde datums werden alleen gelogd en verdwenen daarna volledig: ze
             # kwamen niet in `results`, dus de aanroeper kon "mislukt" niet van
@@ -954,8 +1096,11 @@ def run_drop(src=None):
                 "processed": [], "skipped": [], "failed": [],
                 "archive_freed_mb": 0}
     load_url_ids()
-    by_date, hours, dirs = scan_tree(src)
-    done = already_ingested()
+    by_date, hours, dirs, dist_hours = scan_tree(src)
+    # Mét volledigheid (fase 2): een datum die er wél staat maar incompleet is, mag
+    # opnieuw. Dat is precies het geval waarin de oude code de bronbestanden opruimde
+    # zonder ze ooit volledig gelezen te hebben.
+    done = already_ingested(with_completeness=True)
 
     processed, skipped, failed = [], [], []
     cancelled = False
@@ -970,16 +1115,27 @@ def run_drop(src=None):
         if len(hours[d]) < 24:
             skipped.append({"log_date": d, "reason": f"incomplete ({len(hours[d])}/24 hours)"})
             continue
-        if d in done:
+        if done.get(d):                       # aanwezig ÉN compleet
             skipped.append({"log_date": d, "reason": "already ingested"})
             if not KEEP_SOURCE:
                 _archive(src, d, by_date[d])
             continue
+        if d in done:
+            logger.info("[%s] staat in de ledger maar is INCOMPLEET — opnieuw verwerken", d)
         try:
-            processed.append(ingest_date(date.fromisoformat(d), by_date[d],
-                                         ",".join(sorted(dirs[d])), len(hours[d])))
-            if not KEEP_SOURCE:
+            exp, _dl_failed = _read_manifest(src, d)
+            res = ingest_date(date.fromisoformat(d), by_date[d],
+                              ",".join(sorted(dirs[d])), len(hours[d]),
+                              expected_files=exp, dist_hours=dist_hours[d])
+            processed.append(res)
+            # Alleen archiveren als de datum ook echt compleet is binnengekomen.
+            # Archiveren is de opmaat naar _prune_archive, en dat wist definitief:
+            # buiten het S3-venster van ~42 dagen is er geen tweede kopie.
+            if not KEEP_SOURCE and res.get("is_complete"):
                 _archive(src, d, by_date[d])
+            elif not res.get("is_complete"):
+                logger.warning("[%s] incompleet geladen — bronbestanden blijven in %s "
+                               "staan zodat een volgende run ze kan aanvullen", d, src)
         except Exception as exc:
             # Naar `failed` en niet naar `skipped` (audit 2026-08-13). Een fout stond
             # hiervoor tussen "al geïngest" en "incomplete" in dezelfde lijst, en de
@@ -1017,10 +1173,22 @@ def _prune_archive(src, days=None):
     niet op bestandsmtime, want die zegt wanneer we hem downloadden en niet over welke
     dag hij gaat. Buiten `_processed` blijft alles staan; een half gedownloade dag in de
     staging-root is werk-in-uitvoering, geen afval.
+
+    En sinds fase 2: NOOIT een datum wissen die niet als compleet in de ledger staat.
+    Dit is het laatste punt waarop een bronbestand nog te redden is — daarna is er
+    buiten het S3-venster van ~42 dagen geen tweede kopie meer. Een datum die incompleet
+    is geladen hoort te blijven liggen tot hij is aangevuld, ook al is hij oud.
     """
     days = STAGING_RETENTION_DAYS if days is None else days
     root = os.path.join(src, "_processed")
     if not days or not os.path.isdir(root):
+        return 0
+    try:
+        complete = already_ingested(with_completeness=True)
+    except Exception as exc:
+        # Geen DB? Dan niets wissen. Opruimen is nooit dringend genoeg om te doen
+        # zonder te weten wat er al veilig binnen is.
+        logger.warning("staging niet opgeruimd, ledger niet te lezen: %s", exc)
         return 0
     cutoff = date.today() - timedelta(days=days)
     freed = 0
@@ -1030,6 +1198,11 @@ def _prune_archive(src, days=None):
                 continue
         except ValueError:
             continue                      # geen datummap: laat staan
+        if not complete.get(name):
+            logger.warning("staging %s NIET opgeruimd: staat niet als compleet in de "
+                           "ledger (%s)", name,
+                           "incompleet geladen" if name in complete else "niet geladen")
+            continue
         path = os.path.join(root, name)
         # os.walk en niet listdir (audit 2026-08-13): rmtree wist de hele boom, maar de
         # oude som keek alleen naar bestanden in de bovenste laag. Een submap werd dus
