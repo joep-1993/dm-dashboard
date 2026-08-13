@@ -55,6 +55,18 @@
         .btn-outline-red {
             color: #c0392b; border-color: #c0392b; background: transparent;
         }
+        /* Apply bar + selection column */
+        .apply-bar { border-bottom: 1px solid #eee; background: #fbfbfc; }
+        #resultsTable th.col-check, #resultsTable td.col-check { width: 36px; padding: 6px 8px; }
+        #resultsTable td.col-check .form-check-input { cursor: pointer; }
+        #resultsTable tbody tr.row-selected { background: #f3f0fa; }
+        #resultsTable tbody tr.row-applied td { color: #6c757d; }
+        .prio-arrow { color: #adb5bd; margin: 0 3px; }
+        .apply-result { padding: 0.6rem 1rem; font-size: 0.85rem; border-bottom: 1px solid #eee; }
+        .apply-result.ok   { background: #eafaf3; color: #1e7a55; }
+        .apply-result.warn { background: #fff8e6; color: #8a6d1f; }
+        .apply-result.bad  { background: #fdecea; color: #a4271b; }
+        .apply-result ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
         .btn-outline-red:hover {
             color: #fff; background: #c0392b; border-color: #c0392b;
         }
@@ -239,10 +251,27 @@
                         </div>
                     </div>
                     <div class="card-body p-0">
+                        <!-- Apply bar. Sits above the table (UI_BLUEPRINT "filter row"),
+                             not in the card header, so the selection count and the
+                             write button share one baseline with the table. -->
+                        <div class="apply-bar d-flex flex-wrap align-items-center gap-2 px-3 py-2">
+                            <span class="small text-muted"><strong id="selCount">0</strong> selected</span>
+                            <button class="btn btn-sm btn-outline-purple" onclick="selectAllActionable()">Select all actionable</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="clearSelection()">Clear</button>
+                            <div class="form-check form-switch mb-0 ms-auto">
+                                <input class="form-check-input" type="checkbox" id="dryRun" onchange="updateApplyBar()">
+                                <label class="form-check-label small" for="dryRun">Dry run</label>
+                            </div>
+                            <button class="btn btn-sm btn-success" id="applyBtn" onclick="applySelected()" disabled>
+                                Apply to Taxonomy
+                            </button>
+                        </div>
+                        <div id="applyResult" class="apply-result d-none"></div>
                         <div class="table-responsive" style="max-height: 520px; overflow: auto;">
                             <table class="table table-sm table-bordered mb-0" id="resultsTable">
                                 <thead style="position: sticky; top: 0; z-index: 1;">
                                     <tr>
+                                        <th class="col-check"><input class="form-check-input mt-0" type="checkbox" id="selAllPage" onchange="togglePageSelection(this.checked)" title="Select every writable row on this page"></th>
                                         <th class="sortable" data-sort="main_cat_name">Main cat<span class="sort-arrow">↕</span></th>
                                         <th class="sortable" data-sort="deepest_cat_name">Deepest cat<span class="sort-arrow">↕</span></th>
                                         <th class="sortable" data-sort="facet_name">Facet<span class="sort-arrow">↕</span></th>
@@ -251,12 +280,14 @@
                                         <th class="sortable" data-sort="url_count">URLs<span class="sort-arrow">↕</span></th>
                                         <th class="sortable" data-sort="pct_visits_in_cat">% v<span class="sort-arrow">↕</span></th>
                                         <th class="sortable" data-sort="pct_revenue_in_cat">% r<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="current_seo_prio">seoPriority<span class="sort-arrow">↕</span></th>
                                         <th class="sortable" data-sort="action">Action<span class="sort-arrow">↕</span></th>
+                                        <th class="sortable" data-sort="applied_status">Applied<span class="sort-arrow">↕</span></th>
                                         <th>Reason</th>
                                     </tr>
                                 </thead>
                                 <tbody id="resultsBody">
-                                    <tr><td colspan="10" class="text-center text-muted py-3">No data</td></tr>
+                                    <tr><td colspan="13" class="text-center text-muted py-3">No data</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -536,6 +567,12 @@ async function pollStatus() {
             dl.classList.remove('d-none');
             document.getElementById('stopBtn').classList.add('d-none');
             loadSummary(_activeRunId);
+            // Show the table without being asked. A finished run used to offer
+            // nothing but "Download Excel", which hid the fact that the results
+            // are right here and can be pushed to the taxonomy from this page.
+            if (document.getElementById('resultsCard').classList.contains('d-none')) {
+                loadResults(_activeRunId);
+            }
             loadRuns();
             return;
         }
@@ -611,7 +648,8 @@ async function loadRuns() {
             <td class="small">${dateRange}${scopeHtml}</td>
             <td>
                 ${run.status === 'completed'
-                    ? `<a class="btn btn-sm btn-outline-purple me-1" href="/api/seo-prio/export/${run.run_id}">Export</a>`
+                    ? `<button class="btn btn-sm btn-outline-purple me-1" onclick="resumeWatch('${run.run_id}')">Results</button>
+                       <a class="btn btn-sm btn-outline-purple me-1" href="/api/seo-prio/export/${run.run_id}">Export</a>`
                     : ''}
                 <button class="btn btn-sm btn-outline-red" onclick="removeRun('${run.run_id}')">Remove</button>
             </td>`;
@@ -685,6 +723,187 @@ function getFilteredSorted() {
     return rows;
 }
 
+// ---- Selection + apply -----------------------------------------------------
+// A row is identified by the run's own aggregation key (deepest cat + facet
+// slug), the same pair the backend looks the row up by — so the selection
+// survives sorting, filtering and paging, and the client never gets to invent
+// the value that will be written.
+const _selected = new Set();
+
+function rowKey(row) { return `${row.deepest_cat_id}||${row.facet_slug}`; }
+
+// Only rows with a real proposal AND a facet the taxonomy has linked to this
+// category can be written. Already-applied rows drop out so a second apply
+// cannot re-send them.
+function isWritable(row) {
+    return !!row.facet_id && row.action !== 'keep' && row.applied_status !== 'applied';
+}
+
+function prioLabel(v) {
+    return v === '1' ? 'ON' : v === '0' ? 'OFF' : (v || 'inherit');
+}
+
+function prioCell(row) {
+    const cur = row.current_seo_prio || 'inherit';
+    if (row.action === 'keep') return `<span class="text-muted">${escapeAttr(cur)}</span>`;
+    return `${escapeAttr(cur)}<span class="prio-arrow">→</span><strong>${escapeAttr(prioLabel(row.proposed_seo_prio))}</strong>`;
+}
+
+function appliedCell(row) {
+    if (row.applied_status === 'applied') {
+        const when = row.applied_at ? new Date(row.applied_at + 'Z').toLocaleString() : '';
+        return `<span class="badge bg-success" title="${escapeAttr(when)}">applied ${escapeAttr(row.applied_value || '')}</span>`;
+    }
+    if (row.applied_status === 'failed') {
+        return `<span class="badge bg-danger" title="${escapeAttr(row.applied_error || '')}">failed</span>`;
+    }
+    return '<span class="text-muted">—</span>';
+}
+
+function toggleRow(key, checked) {
+    if (checked) _selected.add(key); else _selected.delete(key);
+    const tr = document.querySelector(`#resultsBody tr[data-key="${CSS.escape(key)}"]`);
+    if (tr) tr.classList.toggle('row-selected', checked);
+    updateApplyBar();
+}
+
+function togglePageSelection(checked) {
+    document.querySelectorAll('#resultsBody input.row-check:not(:disabled)').forEach(cb => {
+        cb.checked = checked;
+        toggleRow(cb.dataset.key, checked);
+    });
+}
+
+// "All actionable" means the whole current filter, not just this page — the
+// point of the button is to avoid paging through 12 pages of ticking.
+function selectAllActionable() {
+    getFilteredSorted().filter(isWritable).forEach(r => _selected.add(rowKey(r)));
+    renderResultsPage();
+}
+
+function clearSelection() {
+    _selected.clear();
+    renderResultsPage();
+}
+
+function updateApplyBar() {
+    const n = _selected.size;
+    document.getElementById('selCount').textContent = n.toLocaleString();
+    const btn = document.getElementById('applyBtn');
+    const dry = document.getElementById('dryRun').checked;
+    btn.disabled = n === 0;
+    // The label carries the mode: a dry run that looks like a live push is how
+    // you end up believing a change landed when nothing was written.
+    btn.textContent = dry
+        ? `Preview ${n || ''}`.trim() + ' (dry run)'
+        : `Apply ${n || ''}`.trim() + ' to Taxonomy';
+    btn.classList.toggle('btn-success', !dry);
+    btn.classList.toggle('btn-outline-purple', dry);
+    // Header checkbox reflects the page, not the whole selection.
+    const pageBoxes = [...document.querySelectorAll('#resultsBody input.row-check:not(:disabled)')];
+    const all = document.getElementById('selAllPage');
+    all.checked = pageBoxes.length > 0 && pageBoxes.every(cb => cb.checked);
+    all.indeterminate = !all.checked && pageBoxes.some(cb => cb.checked);
+}
+
+// Server-side cap on one apply request (seo_prio_service.APPLY_MAX_ROWS).
+const APPLY_MAX = 300;
+
+function showApplyResult(cls, html) {
+    const el = document.getElementById('applyResult');
+    el.className = 'apply-result ' + cls;
+    el.innerHTML = html;
+    el.classList.remove('d-none');
+}
+
+function hideApplyResult() {
+    document.getElementById('applyResult').classList.add('d-none');
+}
+
+function renderApplyResult(data) {
+    const bad = (data.results || []).filter(r => r.status === 'failed');
+    const skipped = (data.results || []).filter(r => r.status === 'skipped');
+    const name = r => `${escapeAttr(r.facet_name || r.facet_slug)} @ ${escapeAttr(r.deepest_cat_name || r.deepest_cat_id)}`;
+    let head, cls;
+    if (data.dry_run) {
+        cls = 'warn';
+        head = `<strong>Dry run — nothing was written.</strong> ` +
+               `${data.dry_run_rows} would be written, ${skipped.length} skipped, ${bad.length} would fail.`;
+    } else {
+        cls = bad.length ? (data.applied ? 'warn' : 'bad') : 'ok';
+        head = `<strong>${data.applied} applied</strong> · ${skipped.length} skipped · ${bad.length} failed.`;
+    }
+    const list = (arr, label) => arr.length
+        ? `<div class="mt-1">${label}<ul>` +
+          arr.slice(0, 10).map(r => `<li>${name(r)} — ${escapeAttr(r.error || '')}</li>`).join('') +
+          (arr.length > 10 ? `<li>… and ${arr.length - 10} more</li>` : '') + '</ul></div>'
+        : '';
+    showApplyResult(cls, head + list(bad, 'Failed:') + list(skipped, 'Skipped:'));
+}
+
+async function applySelected() {
+    if (!_activeRunId || !_selected.size) return;
+    const dry = document.getElementById('dryRun').checked;
+    const byKey = new Map(_allResults.map(r => [rowKey(r), r]));
+    const sel = [..._selected].map(k => byKey.get(k)).filter(Boolean);
+    if (sel.length > APPLY_MAX) {
+        showApplyResult('bad', `${sel.length} rows selected — the maximum per apply is ${APPLY_MAX}. ` +
+                               `Narrow the selection and run it in batches.`);
+        return;
+    }
+    const on  = sel.filter(r => r.proposed_seo_prio === '1').length;
+    const off = sel.filter(r => r.proposed_seo_prio === '0').length;
+    if (!dry && !confirm(
+            `Write to the LIVE taxonomy API?\n\n` +
+            `${on} facet(s) → seoPriority ON\n` +
+            `${off} facet(s) → seoPriority OFF\n\n` +
+            `Existing displayOrder / isHidden values are preserved, but this does ` +
+            `change how these facet pages are prioritised for indexing.`)) {
+        return;
+    }
+
+    const btn = document.getElementById('applyBtn');
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = dry ? 'Previewing…' : 'Writing…';
+    showApplyResult('warn', `${dry ? 'Previewing' : 'Writing'} ${sel.length} facet(s) — ` +
+                            `each one is read, merged and verified, so this takes a moment…`);
+    try {
+        const r = await fetch(`/api/seo-prio/apply/${_activeRunId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                dry_run: dry,
+                selections: sel.map(x => ({
+                    deepest_cat_id: x.deepest_cat_id,
+                    facet_slug: x.facet_slug,
+                })),
+            }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            showApplyResult('bad', escapeAttr(data.detail || `Apply failed (HTTP ${r.status})`));
+            return;
+        }
+        renderApplyResult(data);
+        if (!dry) {
+            // Reload so the applied badges and the now-current seoPriority come
+            // from the database, not from what the client assumed happened.
+            _selected.clear();
+            const page = resultsPage;
+            await loadResults(_activeRunId, {keepBanner: true, keepSort: true});
+            resultsPage = page;
+            renderResultsPage();
+        }
+    } catch (e) {
+        showApplyResult('bad', 'Apply failed: ' + escapeAttr(e.message));
+    } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+        updateApplyBar();
+    }
+}
+
 function renderResultsPage() {
     const rows = getFilteredSorted();
     const perPage = parseInt(document.getElementById('perPage').value, 10);
@@ -696,23 +915,40 @@ function renderResultsPage() {
 
     const body = document.getElementById('resultsBody');
     if (!slice.length) {
-        body.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No rows match the current filter.</td></tr>';
+        body.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-3">No rows match the current filter.</td></tr>';
     } else {
-        body.innerHTML = slice.map(row => `
-            <tr>
-                <td class="text-start">${row.main_cat_name || ''}</td>
-                <td class="text-start">${row.deepest_cat_name || ''}</td>
-                <td class="text-start">${row.facet_name || row.facet_slug || ''}</td>
+        body.innerHTML = slice.map(row => {
+            const key = rowKey(row);
+            const writable = isWritable(row);
+            const checked = _selected.has(key);
+            const why = !row.facet_id
+                ? 'This facet is not linked to the category in the taxonomy — nothing to write'
+                : row.applied_status === 'applied' ? 'Already applied'
+                : row.action === 'keep' ? 'No flip proposed for this row' : 'Select for apply';
+            return `
+            <tr data-key="${escapeAttr(key)}" class="${checked ? 'row-selected' : ''}${row.applied_status === 'applied' ? ' row-applied' : ''}">
+                <td class="col-check">
+                    <input class="form-check-input mt-0 row-check" type="checkbox"
+                           data-key="${escapeAttr(key)}" title="${escapeAttr(why)}"
+                           ${writable ? '' : 'disabled'} ${checked ? 'checked' : ''}
+                           onchange="toggleRow(this.dataset.key, this.checked)">
+                </td>
+                <td class="text-start">${escapeAttr(row.main_cat_name || '')}</td>
+                <td class="text-start">${escapeAttr(row.deepest_cat_name || '')}</td>
+                <td class="text-start" title="${escapeAttr(row.facet_slug || '')}">${escapeAttr(row.facet_name || row.facet_slug || '')}</td>
                 <td>${fmtNum(row.total_visits)}</td>
                 <td>${fmtMoney(row.total_revenue)}</td>
                 <td>${fmtNum(row.url_count)}</td>
                 <td>${fmtPct(row.pct_visits_in_cat)}</td>
                 <td>${fmtPct(row.pct_revenue_in_cat)}</td>
+                <td class="small">${prioCell(row)}</td>
                 <td>${actionBadge(row.action)}</td>
-                <td class="reason-cell small text-muted">${row.reason || ''}</td>
-            </tr>
-        `).join('');
+                <td>${appliedCell(row)}</td>
+                <td class="reason-cell small text-muted text-start">${escapeAttr(row.reason || '')}</td>
+            </tr>`;
+        }).join('');
     }
+    updateApplyBar();
 
     document.getElementById('resPageInfo').textContent = `Page ${resultsPage} / ${totalPages}`;
     document.getElementById('resPrevBtn').disabled = resultsPage <= 1;
@@ -762,27 +998,33 @@ function setupSortHandlers() {
 }
 setupSortHandlers();
 
-async function loadResults(runId) {
+async function loadResults(runId, opts = {}) {
     const card = document.getElementById('resultsCard');
     document.getElementById('resultsRunId').textContent = runId;
     document.getElementById('resultsCount').textContent = 'loading…';
     card.classList.remove('d-none');
-    document.getElementById('resultsBody').innerHTML = skeletonRows(10);
+    if (!opts.keepBanner) hideApplyResult();
+    document.getElementById('resultsBody').innerHTML = skeletonRows(13);
     try {
         const r = await fetch(`/api/seo-prio/results/${runId}?limit=0`);
         if (!r.ok) throw new Error('results');
         const data = await r.json();
         _allResults = data.rows || [];
         _resultsTotalRows = data.total || _allResults.length;
+        // A selection made against the previous load can't be trusted after new
+        // rows land (a row may now be applied, or gone).
+        if (!opts.keepSelection) _selected.clear();
         resultsPage = 1;
-        _sortKey = 'total_visits';
-        _sortDir = 'desc';
+        if (!opts.keepSort) {
+            _sortKey = 'total_visits';
+            _sortDir = 'desc';
+        }
         renderResultsPage();
     } catch (e) {
         document.getElementById('resultsCount').textContent = 'failed to load';
         // Must replace the skeleton, or a failed load shimmers forever.
         document.getElementById('resultsBody').innerHTML =
-            '<tr><td colspan="10" class="text-center text-danger py-3">Failed to load results.</td></tr>';
+            '<tr><td colspan="13" class="text-center text-danger py-3">Failed to load results.</td></tr>';
         console.error(e);
     }
 }

@@ -9,6 +9,7 @@ Pipeline:
      (cached per category).
   4. Apply ON/OFF thresholds → propose action + reason per row.
   5. Persist to pa.seo_prio_runs / pa.seo_prio_results, expose Excel export.
+  6. Push a hand-picked subset back to taxv2 (CategoryFacetSettings.seoPriority).
 
 Long-running. Started in a background thread; status polled by the frontend.
 """
@@ -19,6 +20,7 @@ import re
 import threading
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
@@ -72,7 +74,8 @@ def init_seo_prio_tables() -> None:
                 run_id              VARCHAR(64) NOT NULL,
                 main_cat_name       TEXT,
                 deepest_cat_name    TEXT,
-                deepest_cat_id      VARCHAR(32),
+                deepest_cat_id      TEXT,
+                deepest_cat_slug    TEXT,
                 facet_slug          VARCHAR(255),
                 facet_id            VARCHAR(32),
                 facet_name          TEXT,
@@ -89,6 +92,40 @@ def init_seo_prio_tables() -> None:
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS seo_prio_results_run_idx ON pa.seo_prio_results (run_id)")
+        # Columns added after the table shipped — hence ALTERs. deepest_cat_id
+        # holds "slug:<urlslug>" when a URL has no taxv2 category, which does
+        # not fit the original VARCHAR(32).
+        for ddl in (
+            "ALTER TABLE pa.seo_prio_results ALTER COLUMN deepest_cat_id TYPE TEXT",
+            "ALTER TABLE pa.seo_prio_results ADD COLUMN IF NOT EXISTS deepest_cat_slug TEXT",
+            "ALTER TABLE pa.seo_prio_results ADD COLUMN IF NOT EXISTS applied_status VARCHAR(16)",
+            "ALTER TABLE pa.seo_prio_results ADD COLUMN IF NOT EXISTS applied_value  VARCHAR(16)",
+            "ALTER TABLE pa.seo_prio_results ADD COLUMN IF NOT EXISTS applied_at     TIMESTAMP",
+            "ALTER TABLE pa.seo_prio_results ADD COLUMN IF NOT EXISTS applied_error  TEXT",
+        ):
+            cur.execute(ddl)
+        # Audit trail of every push to taxv2. Survives a run being deleted, which
+        # is the point: "what did I change in the taxonomy, and when" must not
+        # disappear with the analysis that suggested it.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pa.seo_prio_apply_log (
+                id            BIGSERIAL PRIMARY KEY,
+                run_id        VARCHAR(64),
+                category_id   VARCHAR(32),
+                category_name TEXT,
+                facet_id      VARCHAR(32),
+                facet_slug    VARCHAR(255),
+                facet_name    TEXT,
+                old_value     VARCHAR(16),
+                new_value     VARCHAR(16),
+                status        VARCHAR(16),
+                error         TEXT,
+                dry_run       BOOLEAN DEFAULT FALSE,
+                applied_by    VARCHAR(64),
+                applied_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS seo_prio_apply_log_run_idx ON pa.seo_prio_apply_log (run_id)")
         conn.commit()
         print("[SEO_PRIO] Tables initialized")
     finally:
@@ -98,15 +135,19 @@ def init_seo_prio_tables() -> None:
 
 # ───────────────────────────── URL parsing ─────────────────────────────
 
-# Subcat slug like "klussen_486172_574375" → deepest id is the LAST numeric chunk
-_SLUG_ID_RE = re.compile(r"_(\d+)(?=_|$)")
-
-
 def parse_url(url: str) -> Optional[Tuple[str, List[Tuple[str, str]]]]:
     """
-    Returns (deepest_cat_id, [(facet_slug, facet_value_id), ...]) or None.
+    Returns (deepest_cat_slug, [(facet_slug, facet_value_id), ...]) or None.
 
-    /products/<root>/<slug>_<...>_<deepest_cat_id>/c/<f1>~<v1>~~<f2>~<v2>...
+    /products/<root>/<subcat-slug>/c/<f1>~<v1>~~<f2>~<v2>...
+
+    The WHOLE subcat slug is the key, not the number at the end of it. That
+    trailing number ("tuin_accessoires_504077_5335060" → 5335060) is a legacy
+    PDM id which taxv2 does not know: `GET /api/Categories/5335060` 404s, so
+    every facet lookup keyed on it came back empty and every row got a NULL
+    facet_id and a fake "inherit". The taxv2 id for that slug is a different
+    number entirely, and the only mapping between the two is the category's own
+    nl-NL urlSlug — see _cat_id_for_slug().
     """
     try:
         path = url.split("beslist.nl", 1)[1] if "beslist.nl" in url else url
@@ -124,11 +165,9 @@ def parse_url(url: str) -> Optional[Tuple[str, List[Tuple[str, str]]]]:
     parts = [p for p in head.split("/") if p]
     if len(parts) < 3:
         return None
-    subcat_slug = parts[-1]
-    ids = _SLUG_ID_RE.findall(subcat_slug)
-    if not ids:
+    subcat_slug = parts[-1].strip().lower()
+    if not subcat_slug:
         return None
-    deepest_cat_id = ids[-1]
 
     facets: List[Tuple[str, str]] = []
     for chunk in facet_part.split("~~"):
@@ -141,7 +180,32 @@ def parse_url(url: str) -> Optional[Tuple[str, List[Tuple[str, str]]]]:
 
     if not facets:
         return None
-    return deepest_cat_id, facets
+    return subcat_slug, facets
+
+
+# ────────────────── URL slug → taxv2 category id ──────────────────
+# cat_urls.csv is written by category_lookup.py's taxonomy walk (slug, cat_id
+# straight off each category's nl-NL label), so this is a cache of the API and
+# not a hand-made list. Loaded per run: 3.5k rows is nothing, and a run that
+# starts after a walk should see the walk's output.
+
+_CAT_URLS_CSV = os.path.join(os.path.dirname(__file__), "data", "cat_urls.csv")
+
+
+def load_cat_id_map() -> Dict[str, str]:
+    """{url slug -> taxv2 category id}. Empty dict if the file is unreadable."""
+    import csv
+    out: Dict[str, str] = {}
+    try:
+        with open(_CAT_URLS_CSV, encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f, delimiter=";"):
+                slug = (row.get("url_name") or "").strip().strip("/").lower()
+                cid = (row.get("cat_id") or "").strip()
+                if slug and cid.isdigit():
+                    out[slug] = cid
+    except Exception as e:
+        print(f"[SEO_PRIO] could not read {_CAT_URLS_CSV}: {e}")
+    return out
 
 
 # ───────────────────────────── Taxv2 helpers ─────────────────────────────
@@ -156,6 +220,8 @@ class TaxonomyClient:
         self._cat_facets: Dict[str, Dict[str, Dict]] = {}
         # cat_id -> {facet_id -> seoPriority(bool|None)}  (explicit settings)
         self._cat_facet_settings: Dict[str, Dict[str, Optional[bool]]] = {}
+        # facet slug -> [{id, name}, ...]  (global search, for hidden facets)
+        self._slug_search: Dict[str, List[Dict]] = {}
 
     def _get_cat_facets(self, cat_id: str) -> Dict[str, Dict]:
         if cat_id in self._cat_facets:
@@ -173,13 +239,27 @@ class TaxonomyClient:
             mapping: Dict[str, Dict] = {}
             for cf in data if isinstance(data, list) else data.get("items", []):
                 facet = cf.get("facet") or cf
-                slug = (facet.get("urlSlug") or "").lower()
-                fid = facet.get("id")
+                fid = cf.get("facetId", facet.get("id"))
+                # urlSlug is NOT a top-level facet field — it lives per locale
+                # inside labels[]. Reading facet["urlSlug"] returned None for
+                # every facet, which is how the whole mapping came out empty.
                 labels = facet.get("labels") or []
                 nl = next((l for l in labels if l.get("locale") == "nl-NL"), {})
-                name = nl.get("name") or facet.get("name") or slug
+                slug = (nl.get("urlSlug") or "").strip().lower()
+                name = nl.get("name") or ""
+                if not slug:
+                    # A facet without an nl-NL label still has an id worth
+                    # finding; take the first locale that carries a slug.
+                    alt = next((l for l in labels if l.get("urlSlug")), {})
+                    slug = (alt.get("urlSlug") or "").strip().lower()
+                    name = name or alt.get("name") or slug
                 if slug and fid is not None:
-                    mapping[slug] = {"id": str(fid), "name": name}
+                    # isEnabled is the MASTER kill switch on the facet itself.
+                    # It rides along in this payload for free — carry it, so
+                    # resolve() never has to make a second call to find out the
+                    # facet is dead everywhere.
+                    mapping[slug] = {"id": str(fid), "name": name or slug,
+                                     "enabled": facet.get("isEnabled") is not False}
             self._cat_facets[cat_id] = mapping
             return mapping
         except Exception as e:
@@ -214,15 +294,70 @@ class TaxonomyClient:
             self._cat_facet_settings[cat_id] = {}
             return {}
 
-    def resolve(self, cat_id: str, facet_slug: str) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
-        """Return (facet_id, facet_name, current_seoPriority)."""
-        facets = self._get_cat_facets(cat_id)
-        info = facets.get(facet_slug.lower())
-        if not info:
-            return None, None, None
-        fid = info["id"]
-        prio = self._get_cat_facet_settings(cat_id).get(fid)
-        return fid, info["name"], prio
+    def _global_facets_by_slug(self, slug: str) -> List[Dict]:
+        """Facets anywhere in taxv2 whose nl-NL urlSlug is exactly `slug`."""
+        if slug in self._slug_search:
+            return self._slug_search[slug]
+        out: List[Dict] = []
+        try:
+            r = self._session.get(
+                f"{TAXV2_BASE}/api/Facets",
+                params={"searchTerm": slug, "locale": "nl-NL"}, timeout=20,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                for f in (data if isinstance(data, list) else data.get("items", [])):
+                    nl = next((l for l in (f.get("labels") or [])
+                               if l.get("locale") == "nl-NL"), {})
+                    if (nl.get("urlSlug") or "").strip().lower() == slug and f.get("id") is not None:
+                        out.append({"id": str(f["id"]), "name": nl.get("name") or slug,
+                                    "enabled": f.get("isEnabled") is not False})
+        except Exception as e:
+            print(f"[SEO_PRIO] facet search failed for {slug!r}: {e}")
+        self._slug_search[slug] = out
+        return out
+
+    def resolve(self, cat_id: str, facet_slug: str
+                ) -> Tuple[Optional[str], Optional[str], Optional[bool], Optional[str]]:
+        """Return (facet_id, facet_name, current_seoPriority, blocked_reason).
+
+        blocked_reason is None when the facet is a legitimate seoPriority
+        target. When it is set, the caller must NOT propose a flip: the facet
+        resolved to a real id, but writing seoPriority on it cannot change
+        anything a visitor sees.
+        """
+        slug = facet_slug.lower()
+        settings = self._get_cat_facet_settings(cat_id)
+        info = self._get_cat_facets(cat_id).get(slug)
+        if info:
+            return (info["id"], info["name"], settings.get(info["id"]),
+                    None if info.get("enabled", True)
+                    else f"facet '{slug}' has isEnabled=false in taxv2 "
+                         f"(disabled globally) — seoPriority has no effect")
+
+        # A HIDDEN facet is left out of /api/CategoryFacets but keeps its
+        # settings row — s_dierenhuis on Insectenhotel is hidden there and still
+        # carries seoPriority=true, so "not linked" would have been a lie. Fall
+        # back to a global slug search, and only accept a candidate that this
+        # category already has a settings row for: that row is the proof it is
+        # the right facet for this category, which a bare slug match is not
+        # (duplicate slugs across facets are a known trap).
+        candidates = [c for c in self._global_facets_by_slug(slug) if c["id"] in settings]
+        if len(candidates) == 1:
+            c = candidates[0]
+            # ...but a settings row is NOT proof the facet is alive. `winkel` on
+            # Insectenhotel (9003879) has settings row 40901 left over from the
+            # 2026-03-16 bulk seed while all 31 `winkel` facets are
+            # isEnabled=false and linked to zero categories. Without this check
+            # the fallback promotes that corpse to a writable candidate, and any
+            # category where winkel URLs clear the ON thresholds proposes
+            # turn_on for a facet that can never render.
+            blocked = None if c.get("enabled", True) else (
+                f"facet '{slug}' has isEnabled=false in taxv2 (disabled "
+                f"globally, not linked to any category) — settings row is a "
+                f"leftover, seoPriority has no effect")
+            return c["id"], c["name"], settings.get(c["id"]), blocked
+        return None, None, None, None
 
 
 # ───────────────────────────── Run management ─────────────────────────────
@@ -332,7 +467,7 @@ def get_run_status(run_id: str) -> Optional[Dict]:
 
 def get_run_results(run_id: str, limit: int = 0, offset: int = 0) -> Dict:
     """All results for a run (limit=0 = no cap). Sort/filter/paginate happens client-side."""
-    cols = [c for c, _ in EXCEL_COLUMNS]
+    cols = RESULT_COLUMNS
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -585,10 +720,16 @@ def get_categories(force: bool = False) -> Dict:
     }
 
 
-def _decide(row: Dict, t: Dict) -> Tuple[str, str, str]:
-    """Return (proposed_seo_prio, action, reason)."""
-    cur_raw = row["current_seo_prio"]  # bool|None
-    cur_on = bool(cur_raw) is True
+def _decide(row: Dict, t: Dict, cur_raw: Optional[bool]) -> Tuple[str, str, str]:
+    """Return (proposed_seo_prio, action, reason).
+
+    cur_raw is the RAW taxv2 value (True / False / None-for-inherit), passed in
+    separately on purpose: row["current_seo_prio"] holds the display label, and
+    the old `bool(cur_raw) is True` on that string made "inherit" and "OFF"
+    both read as currently-ON — so no row could ever propose turn_on, and every
+    quiet facet proposed turning OFF something that was never on.
+    """
+    cur_on = cur_raw is True
     visits_pct = row["pct_visits_in_cat"]
     revenue_pct = row["pct_revenue_in_cat"]
     visits = row["total_visits"]
@@ -646,11 +787,20 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
             return
         _set_status(run_id, progress_msg=f"parsing {len(rows):,} URL rows", progress_total=len(rows))
 
+        cat_ids = load_cat_id_map()
+        if not cat_ids:
+            print("[SEO_PRIO] cat_urls.csv gave no slug→id mapping — "
+                  "every row will come out unwritable")
+
         # ── Parse + fan-out aggregate ──────────────────────────────────────
-        # key = (deepest_cat_id, facet_slug)
+        # key = (cat_key, facet_slug), where cat_key is the taxv2 category id
+        # when the URL slug resolves and "slug:<urlslug>" when it does not.
+        # Aggregating on the taxv2 id (not the slug) keeps two slugs that point
+        # at one category from splitting into two half-counted rows.
         agg: Dict[Tuple[str, str], Dict] = {}
         # For % within category: cat totals across URLs (counted ONCE per URL).
         cat_totals: Dict[str, Dict] = {}
+        unresolved_slugs = set()
 
         for i, r in enumerate(rows):
             if i % 5000 == 0 and _should_stop(run_id):
@@ -662,9 +812,13 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
             parsed = parse_url(url)
             if not parsed:
                 continue
-            cat_id, facets = parsed
+            cat_slug, facets = parsed
+            cat_id = cat_ids.get(cat_slug)
+            if not cat_id:
+                unresolved_slugs.add(cat_slug)
+            cat_key = cat_id or f"slug:{cat_slug}"
 
-            ct = cat_totals.setdefault(cat_id, {
+            ct = cat_totals.setdefault(cat_key, {
                 "main_cat_name": r["main_cat_name"],
                 "deepest_cat_name": r["deepest_subcat_name"],
                 "visits": 0, "revenue": 0.0, "urls": 0,
@@ -679,11 +833,12 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
                 if slug_l in seen_slugs:
                     continue  # don't double-count if URL has the slug twice
                 seen_slugs.add(slug_l)
-                key = (cat_id, slug_l)
+                key = (cat_key, slug_l)
                 a = agg.setdefault(key, {
                     "main_cat_name": r["main_cat_name"],
                     "deepest_cat_name": r["deepest_subcat_name"],
                     "deepest_cat_id": cat_id,
+                    "deepest_cat_slug": cat_slug,
                     "facet_slug": slug_l,
                     "visits": 0, "revenue": 0.0, "url_count": 0,
                     "facet_url_example": url,
@@ -694,6 +849,10 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
             if i % 1000 == 0:
                 _set_status(run_id, progress=i)
 
+        if unresolved_slugs:
+            print(f"[SEO_PRIO] {len(unresolved_slugs)} URL slug(s) have no taxv2 "
+                  f"category id: {sorted(unresolved_slugs)[:5]}")
+
         _set_status(run_id, progress=0,
                     progress_msg=f"resolving taxv2 for {len(agg):,} combos",
                     progress_total=len(agg))
@@ -701,15 +860,22 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
         # ── taxv2 lookup + decision ────────────────────────────────────────
         tax = TaxonomyClient()
         out_rows: List[Dict] = []
-        for i, ((cat_id, slug), a) in enumerate(agg.items()):
+        for i, ((cat_key, slug), a) in enumerate(agg.items()):
             if i % 200 == 0:
                 if _should_stop(run_id):
                     _set_status(run_id, status="stopped", progress_msg="stopped during taxv2")
                     return
                 _set_status(run_id, progress=i)
 
-            fid, fname, cur_prio = tax.resolve(cat_id, slug)
-            ct = cat_totals.get(cat_id, {"visits": 0, "revenue": 0.0})
+            cat_id = a["deepest_cat_id"]
+            if cat_id:
+                fid, fname, cur_prio, blocked = tax.resolve(cat_id, slug)
+            else:
+                # No taxv2 id for this URL slug → nothing to read and nothing
+                # that could be written. Say so in the row instead of dressing
+                # an unknown up as "inherit".
+                fid, fname, cur_prio, blocked = None, None, None, None
+            ct = cat_totals.get(cat_key, {"visits": 0, "revenue": 0.0})
             v_total = ct["visits"] or 0
             r_total = ct["revenue"] or 0.0
             pct_v = (a["visits"] / v_total * 100.0) if v_total else 0.0
@@ -718,7 +884,8 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
             row = {
                 "main_cat_name": a["main_cat_name"],
                 "deepest_cat_name": a["deepest_cat_name"],
-                "deepest_cat_id": cat_id,
+                "deepest_cat_id": cat_key,
+                "deepest_cat_slug": a["deepest_cat_slug"],
                 "facet_slug": slug,
                 "facet_id": fid,
                 "facet_name": fname or slug,
@@ -731,13 +898,31 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
                 "current_seo_prio": (
                     "ON" if cur_prio is True else
                     "OFF" if cur_prio is False else
+                    "unknown" if not cat_id else
                     "inherit"
                 ),
             }
-            proposed, action, reason = _decide(row, thresholds)
+            proposed, action, reason = _decide(row, thresholds, cur_prio)
             row["proposed_seo_prio"] = proposed
             row["action"] = action
             row["reason"] = reason
+            if not cat_id:
+                row["action"] = "keep"
+                row["proposed_seo_prio"] = "unknown"
+                row["reason"] = (f"no taxv2 category for URL slug "
+                                 f"'{a['deepest_cat_slug']}' — cannot read or write seoPriority")
+            elif fid is None:
+                row["action"] = "keep"
+                row["proposed_seo_prio"] = "unknown"
+                row["reason"] = (f"facet '{slug}' is not linked to category {cat_id} "
+                                 f"in taxv2 — cannot write seoPriority")
+            elif blocked:
+                # The facet resolved, but it is dead in taxv2. Flipping
+                # seoPriority on it would be a no-op the run would still report
+                # as an applied change, so refuse to propose one.
+                row["action"] = "keep"
+                row["proposed_seo_prio"] = "disabled"
+                row["reason"] = blocked
             out_rows.append(row)
 
         # ── Persist ───────────────────────────────────────────────────────
@@ -750,14 +935,14 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
                 cur.execute(
                     """INSERT INTO pa.seo_prio_results
                        (run_id, main_cat_name, deepest_cat_name, deepest_cat_id,
-                        facet_slug, facet_id, facet_name, facet_url_example,
-                        total_visits, total_revenue, url_count,
+                        deepest_cat_slug, facet_slug, facet_id, facet_name,
+                        facet_url_example, total_visits, total_revenue, url_count,
                         pct_visits_in_cat, pct_revenue_in_cat,
                         current_seo_prio, proposed_seo_prio, action, reason)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (run_id, r["main_cat_name"], r["deepest_cat_name"], r["deepest_cat_id"],
-                     r["facet_slug"], r["facet_id"], r["facet_name"], r["facet_url_example"],
-                     r["total_visits"], r["total_revenue"], r["url_count"],
+                     r["deepest_cat_slug"], r["facet_slug"], r["facet_id"], r["facet_name"],
+                     r["facet_url_example"], r["total_visits"], r["total_revenue"], r["url_count"],
                      r["pct_visits_in_cat"], r["pct_revenue_in_cat"],
                      r["current_seo_prio"], r["proposed_seo_prio"], r["action"], r["reason"]),
                 )
@@ -777,12 +962,378 @@ def _run_pipeline(run_id: str, params: Dict) -> None:
                     finished_at=datetime.utcnow())
 
 
+# ────────────────── Apply back to taxv2 (CategoryFacetSettings) ──────────────────
+#
+# The write is `PUT /api/CategoryFacetSettings` — an upsert whose omitted fields
+# are stored as null, i.e. "inherit". Sending only {categoryId, facetId,
+# seoPriority} therefore WIPES displayOrder / isHidden / businessRelevance /
+# describesVariance / describesCommon on any facet that had them. So every write
+# here is read-merge-write: GET the category's settings, carry every existing
+# field over, change seoPriority only. Same trap as the facet-value PUT.
+#
+# Nothing is ever written for a row the run did not propose a flip for, and the
+# result is read back and compared before it is reported as applied.
+
+APPLY_MAX_ROWS = 300          # one request; beyond this the HTTP call gets silly
+APPLY_CATEGORY_WORKERS = 4    # parallel across categories, sequential within one
+APPLY_USER = TAXV2_HEADERS["X-User-Name"]
+
+# Everything the settings row can hold besides seoPriority. unitAmount is live
+# in the API but absent from scripts/swagger_taxv2.json, so it is sent and the
+# write retried without it if the server rejects the field — better than
+# silently nulling a value the spec has not caught up with.
+_SETTING_CARRY_FIELDS = (
+    "isHidden", "displayOrder", "businessRelevance",
+    "describesVariance", "describesCommon", "unitAmount",
+)
+_OPTIONAL_CARRY_FIELDS = ("unitAmount",)
+
+
+def _prio_label(v: Optional[bool]) -> str:
+    return "ON" if v is True else "OFF" if v is False else "inherit"
+
+
+# facet_id -> isEnabled. Process-wide: the master flag is a property of the
+# facet, not of a run, and Apply re-reads it for every selected row.
+_FACET_ENABLED_CACHE: Dict[str, Optional[bool]] = {}
+_FACET_ENABLED_LOCK = threading.Lock()
+
+
+def _facet_is_enabled(session: requests.Session, facet_id: str) -> Optional[bool]:
+    """Master isEnabled for a facet. None when taxv2 could not be asked —
+    the caller treats that as 'do not block', so an API blip cannot silently
+    turn Apply into a no-op."""
+    fid = str(facet_id)
+    with _FACET_ENABLED_LOCK:
+        if fid in _FACET_ENABLED_CACHE:
+            return _FACET_ENABLED_CACHE[fid]
+    val: Optional[bool] = None
+    try:
+        r = session.get(f"{TAXV2_BASE}/api/Facets/{fid}", timeout=20)
+        if r.status_code == 200:
+            val = (r.json() or {}).get("isEnabled") is not False
+        elif r.status_code == 404:
+            val = False  # facet does not exist — writing to it is meaningless
+    except Exception as e:
+        print(f"[SEO_PRIO] isEnabled lookup failed for facet {fid}: {e}")
+    with _FACET_ENABLED_LOCK:
+        _FACET_ENABLED_CACHE[fid] = val
+    return val
+
+
+def _parse_target(value) -> Optional[bool]:
+    """'1'/'ON'/True → True, '0'/'OFF'/False → False, anything else → None."""
+    if isinstance(value, bool):
+        return value
+    s = str(value or "").strip().lower()
+    if s in ("1", "on", "true", "yes"):
+        return True
+    if s in ("0", "off", "false", "no"):
+        return False
+    return None
+
+
+def _settings_for_category(session: requests.Session, cat_id: str) -> Dict[str, Dict]:
+    """{facet_id -> full settings row} for one category. Raises on a bad response,
+    because writing without knowing the current values is the wipe scenario."""
+    r = session.get(
+        f"{TAXV2_BASE}/api/CategoryFacetSettings",
+        params={"categoryId": cat_id}, timeout=30,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"GET CategoryFacetSettings {cat_id} → HTTP {r.status_code}")
+    data = r.json()
+    items = data if isinstance(data, list) else data.get("items", [])
+    out: Dict[str, Dict] = {}
+    for s in items:
+        fid = s.get("facetId", s.get("FacetId"))
+        if fid is not None:
+            out[str(fid)] = s
+    return out
+
+
+def _read_back(session: requests.Session, cat_id: str, facet_id: str) -> Optional[bool]:
+    """seoPriority as taxv2 has it now. Returns None both for 'inherit' and for a
+    response we could not read — the caller only trusts a True/False match."""
+    try:
+        r = session.get(
+            f"{TAXV2_BASE}/api/CategoryFacetSettings/{cat_id}/{facet_id}", timeout=20,
+        )
+        if r.status_code != 200:
+            return None
+        return (r.json() or {}).get("seoPriority")
+    except Exception:
+        # "No setting found…" comes back as plain text, not JSON.
+        return None
+
+
+def _apply_one(session: requests.Session, settings: Dict[str, Dict],
+               row: Dict, target: bool, dry_run: bool) -> Dict:
+    """Write one facet's seoPriority. Returns a result dict; never raises."""
+    cat_id = str(row["deepest_cat_id"])
+    facet_id = str(row["facet_id"])
+    existing = settings.get(facet_id) or {}
+    old = existing.get("seoPriority")
+
+    res = {
+        "deepest_cat_id": cat_id,
+        "facet_slug": row["facet_slug"],
+        "facet_id": facet_id,
+        "facet_name": row.get("facet_name"),
+        "deepest_cat_name": row.get("deepest_cat_name"),
+        "old_value": _prio_label(old),
+        "new_value": _prio_label(target),
+        "status": "failed",
+        "error": None,
+    }
+
+    if old is target:
+        res.update(status="skipped", error="already " + _prio_label(target) + " in taxv2")
+        return res
+
+    # Last line of defence, independent of what the run proposed. Rows persisted
+    # before the resolve() guard existed still carry proposed_seo_prio='1' for
+    # globally-disabled facets (every `winkel` facet, for one), and re-opening
+    # such a run and hitting Apply must not write to them.
+    if _facet_is_enabled(session, facet_id) is False:
+        res.update(status="skipped",
+                   error=f"facet {facet_id} has isEnabled=false in taxv2 — "
+                         f"disabled globally, seoPriority would have no effect")
+        return res
+
+    try:
+        body = {"categoryId": int(cat_id), "facetId": int(facet_id), "seoPriority": target}
+    except (TypeError, ValueError):
+        res["error"] = f"non-numeric ids (category {cat_id!r}, facet {facet_id!r})"
+        return res
+    # Carry every field the settings row already has, or the PUT nulls it.
+    for f in _SETTING_CARRY_FIELDS:
+        if existing.get(f) is not None:
+            body[f] = existing[f]
+
+    if dry_run:
+        res.update(status="dry_run", error=None)
+        res["body"] = body
+        return res
+
+    try:
+        r = session.put(f"{TAXV2_BASE}/api/CategoryFacetSettings", json=body, timeout=30)
+        if r.status_code == 400 and any(f in body for f in _OPTIONAL_CARRY_FIELDS):
+            slim = {k: v for k, v in body.items() if k not in _OPTIONAL_CARRY_FIELDS}
+            r = session.put(f"{TAXV2_BASE}/api/CategoryFacetSettings", json=slim, timeout=30)
+        if r.status_code not in (200, 201, 204):
+            res["error"] = f"PUT → HTTP {r.status_code}: {r.text[:200]}"
+            return res
+        confirmed = _read_back(session, cat_id, facet_id)
+        if confirmed is not target:
+            res["error"] = (f"PUT accepted but read-back says "
+                            f"{_prio_label(confirmed)}, expected {_prio_label(target)}")
+            return res
+        res["status"] = "applied"
+        return res
+    except Exception as e:
+        res["error"] = str(e)[:300]
+        return res
+
+
+def apply_to_taxonomy(run_id: str, selections: List[Dict], dry_run: bool = False) -> Dict:
+    """Push the selected rows' proposed seoPriority to taxv2.
+
+    selections: [{"deepest_cat_id": ..., "facet_slug": ..., "value": optional}].
+    The value written comes from the stored row (or an explicit per-row override),
+    never from a client-supplied "current" — the run's own proposal is the contract.
+    """
+    if not selections:
+        return {"applied": 0, "failed": 0, "skipped": 0, "dry_run": dry_run, "results": []}
+    if len(selections) > APPLY_MAX_ROWS:
+        raise ValueError(f"Too many rows in one apply ({len(selections)}); "
+                         f"max is {APPLY_MAX_ROWS}")
+
+    # Dedupe on the run's own aggregation key, so the same facet cannot be
+    # written twice in one call.
+    wanted: Dict[Tuple[str, str], Optional[bool]] = {}
+    for s in selections:
+        cat = str(s.get("deepest_cat_id") or "").strip()
+        slug = str(s.get("facet_slug") or "").strip().lower()
+        if not cat or not slug:
+            continue
+        wanted[(cat, slug)] = _parse_target(s.get("value")) if s.get("value") is not None else None
+    if not wanted:
+        raise ValueError("No usable selections")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """SELECT deepest_cat_id, facet_slug, facet_id, facet_name,
+                      deepest_cat_name, main_cat_name, current_seo_prio,
+                      proposed_seo_prio, action, applied_status
+                 FROM pa.seo_prio_results
+                WHERE run_id = %s
+                  AND (deepest_cat_id, facet_slug) IN %s""",
+            (run_id, tuple(wanted.keys())),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+    found = {(str(r["deepest_cat_id"]), str(r["facet_slug"])) for r in rows}
+
+    results: List[Dict] = []
+    # Rows the client asked for but this run does not have.
+    for cat, slug in wanted:
+        if (cat, slug) not in found:
+            results.append({
+                "deepest_cat_id": cat, "facet_slug": slug, "facet_id": None,
+                "facet_name": slug, "deepest_cat_name": None,
+                "old_value": None, "new_value": None,
+                "status": "skipped", "error": "not in this run",
+            })
+
+    # Group the writable rows per category: one settings GET per category, and
+    # sequential writes within it so two facets of the same category never race.
+    by_cat: Dict[str, List[Tuple[Dict, bool]]] = {}
+    for r in rows:
+        key = (str(r["deepest_cat_id"]), str(r["facet_slug"]))
+        target = wanted.get(key)
+        if target is None:
+            target = _parse_target(r["proposed_seo_prio"])
+        if target is None:
+            results.append({**_stub(r), "status": "skipped",
+                            "error": f"nothing to write (proposed = {r['proposed_seo_prio']})"})
+            continue
+        if not r.get("facet_id"):
+            results.append({**_stub(r), "status": "skipped",
+                            "error": "facet is not linked to this category in taxv2"})
+            continue
+        by_cat.setdefault(str(r["deepest_cat_id"]), []).append((r, target))
+
+    def _do_category(cat_id: str, items: List[Tuple[Dict, bool]]) -> List[Dict]:
+        session = requests.Session()
+        session.headers.update(TAXV2_HEADERS)
+        session.headers["Content-Type"] = "application/json"
+        try:
+            settings = _settings_for_category(session, cat_id)
+        except Exception as e:
+            # Could not read the current values → refuse to write, or we would be
+            # guessing at the fields we are supposed to be preserving.
+            return [{**_stub(r), "status": "failed",
+                     "error": f"could not read current settings: {e}"} for r, _ in items]
+        return [_apply_one(session, settings, r, target, dry_run) for r, target in items]
+
+    if by_cat:
+        with ThreadPoolExecutor(max_workers=APPLY_CATEGORY_WORKERS) as pool:
+            for chunk in pool.map(lambda kv: _do_category(*kv), list(by_cat.items())):
+                results.extend(chunk)
+
+    _persist_apply_results(run_id, results, dry_run)
+
+    counts = {"applied": 0, "failed": 0, "skipped": 0, "dry_run_rows": 0}
+    for r in results:
+        if r["status"] == "applied":
+            counts["applied"] += 1
+        elif r["status"] == "failed":
+            counts["failed"] += 1
+        elif r["status"] == "dry_run":
+            counts["dry_run_rows"] += 1
+        else:
+            counts["skipped"] += 1
+    return {**counts, "dry_run": dry_run, "results": results}
+
+
+def _stub(row: Dict) -> Dict:
+    return {
+        "deepest_cat_id": str(row["deepest_cat_id"]),
+        "facet_slug": row["facet_slug"],
+        "facet_id": row.get("facet_id"),
+        "facet_name": row.get("facet_name"),
+        "deepest_cat_name": row.get("deepest_cat_name"),
+        "old_value": row.get("current_seo_prio"),
+        "new_value": ("ON" if row.get("proposed_seo_prio") == "1"
+                      else "OFF" if row.get("proposed_seo_prio") == "0" else "inherit"),
+        "error": None,
+    }
+
+
+def _persist_apply_results(run_id: str, results: List[Dict], dry_run: bool) -> None:
+    """Stamp the result rows and append to the audit log. A dry run only logs."""
+    if not results:
+        return
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        for r in results:
+            cur.execute(
+                """INSERT INTO pa.seo_prio_apply_log
+                   (run_id, category_id, category_name, facet_id, facet_slug,
+                    facet_name, old_value, new_value, status, error, dry_run, applied_by)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (run_id, r.get("deepest_cat_id"), r.get("deepest_cat_name"),
+                 r.get("facet_id"), r.get("facet_slug"), r.get("facet_name"),
+                 r.get("old_value"), r.get("new_value"), r.get("status"),
+                 r.get("error"), dry_run, APPLY_USER),
+            )
+            if dry_run or r["status"] not in ("applied", "failed"):
+                continue
+            # A successful write makes the run's "current" stale — update it, so a
+            # reload does not keep offering a flip that already happened.
+            if r["status"] == "applied":
+                cur.execute(
+                    """UPDATE pa.seo_prio_results
+                          SET applied_status = 'applied', applied_value = %s,
+                              applied_at = CURRENT_TIMESTAMP, applied_error = NULL,
+                              current_seo_prio = %s
+                        WHERE run_id = %s AND deepest_cat_id = %s AND facet_slug = %s""",
+                    (r["new_value"], r["new_value"], run_id,
+                     r["deepest_cat_id"], r["facet_slug"]),
+                )
+            else:
+                cur.execute(
+                    """UPDATE pa.seo_prio_results
+                          SET applied_status = 'failed', applied_value = %s,
+                              applied_at = CURRENT_TIMESTAMP, applied_error = %s
+                        WHERE run_id = %s AND deepest_cat_id = %s AND facet_slug = %s""",
+                    (r.get("new_value"), r.get("error"), run_id,
+                     r["deepest_cat_id"], r["facet_slug"]),
+                )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"[SEO_PRIO] could not persist apply results: {e}")
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
+def get_apply_log(run_id: Optional[str] = None, limit: int = 200) -> List[Dict]:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        sql = """SELECT run_id, category_id, category_name, facet_id, facet_slug,
+                        facet_name, old_value, new_value, status, error,
+                        dry_run, applied_at
+                   FROM pa.seo_prio_apply_log"""
+        params: List = []
+        if run_id:
+            sql += " WHERE run_id = %s"
+            params.append(run_id)
+        sql += " ORDER BY applied_at DESC, id DESC LIMIT %s"
+        params.append(limit)
+        cur.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+
 # ───────────────────────────── Excel export ─────────────────────────────
 
 EXCEL_COLUMNS = [
     ("main_cat_name",       "Main category"),
     ("deepest_cat_name",    "Deepest category"),
     ("deepest_cat_id",      "Cat ID"),
+    ("deepest_cat_slug",    "Cat URL slug"),
     ("facet_slug",          "Facet slug"),
     ("facet_id",            "Facet ID"),
     ("facet_name",          "Facet name"),
@@ -796,7 +1347,13 @@ EXCEL_COLUMNS = [
     ("proposed_seo_prio",   "Proposed seoPriority"),
     ("action",              "Action"),
     ("reason",              "Reason"),
+    ("applied_status",      "Applied"),
+    ("applied_at",          "Applied at"),
 ]
+
+# What the results API hands the table: the export columns plus the two fields
+# only the UI needs (the value written, and why a write failed).
+RESULT_COLUMNS = [c for c, _ in EXCEL_COLUMNS] + ["applied_value", "applied_error"]
 
 
 def export_excel(run_id: str) -> bytes:

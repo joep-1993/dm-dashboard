@@ -3393,6 +3393,28 @@ async def seo_prio_results(run_id: str, limit: int = 1000, offset: int = 0):
     return seo_prio_service.get_run_results(run_id, limit=limit, offset=offset)
 
 
+@app.post("/api/seo-prio/apply/{run_id}")
+def seo_prio_apply(run_id: str, payload: dict):
+    """Push selected rows' proposed seoPriority to taxv2.
+
+    Deliberately a blocking, non-async endpoint: it does dozens of sequential
+    HTTP round-trips to the taxonomy API, so FastAPI runs it in its threadpool
+    instead of parking them on the event loop. `dry_run` reports exactly what
+    would be sent without writing.
+    """
+    selections = payload.get("selections") or []
+    dry_run = bool(payload.get("dry_run"))
+    try:
+        return seo_prio_service.apply_to_taxonomy(run_id, selections, dry_run=dry_run)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/seo-prio/apply-log")
+def seo_prio_apply_log(run_id: str = None, limit: int = 200):
+    return {"entries": seo_prio_service.get_apply_log(run_id=run_id, limit=limit)}
+
+
 @app.delete("/api/seo-prio/runs/{run_id}")
 async def seo_prio_delete(run_id: str):
     ok = seo_prio_service.delete_run(run_id)

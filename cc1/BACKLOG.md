@@ -8,6 +8,17 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### SEO Priority: "revert deze push" op basis van de apply-log (logged 2026-08-13)
+- [ ] `pa.seo_prio_apply_log` legt per write de oude én nieuwe waarde vast
+  (`old_value` → `new_value`, met `status='applied'`). Daarmee is een terugdraai-knop een
+  kleine stap: selecteer een reeks logregels en schrijf `old_value` terug via hetzelfde
+  read-merge-write-pad. Waarom het nog niet gebouwd is: `inherit` terugzetten vraagt een
+  PUT met `seoPriority: null` (kan, veld is `nullable`) en dat is een ander code-pad dan de
+  bool-write die er nu staat; en er moet nagedacht worden over wat er gebeurt als iemand
+  ná jouw push handmatig iets anders heeft gezet — blind terugzetten overschrijft dat dan.
+  Minimaal: bij het terugdraaien de huidige waarde teruglezen en alleen herstellen als die
+  nog gelijk is aan wat jij erin hebt gezet.
+
 ### SEO/GEO brainstorm: 50 onderwerpen wachten op prioritering (logged 2026-08-12)
 - [ ] **Bepaal per onderwerp of het nieuw is of een uitbreiding van iets dat er al staat.**
   Het brainstormbord is op 2026-08-12 uitgelezen naar **50 post-its in 7 thema's** —

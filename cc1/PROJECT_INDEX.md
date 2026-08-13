@@ -54,6 +54,16 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── redshift_upload_service.py # Redshift Upload: upload xlsx/pasted data to pa.* tables
 │   ├── url_validator_router.py  # URL Validator APIRouter
 │   ├── url_validator_service.py # URL Validator: validates category/facet URLs against Taxonomy API v2
+│   ├── seo_prio_service.py      # SEO Priority: Redshift /c/ visits+revenue -> per (category, facet)
+│   │                            #   share, current seoPriority from taxv2, ON/OFF proposal,
+│   │                            #   AND the write-back (PUT /api/CategoryFacetSettings).
+│   │   # DRIE VALKUILEN DIE HIER INZITTEN — zie LEARNINGS 2026-08-13:
+│   │   #   1. Het getal achteraan de URL-slug is een LEGACY PDM-id, niet het taxv2 category-id.
+│   │   #      Map de HELE slug via backend/data/cat_urls.csv (load_cat_id_map()).
+│   │   #   2. facet urlSlug staat in facet.labels[] per locale, niet op het facet zelf.
+│   │   #   3. _decide() krijgt de RAUWE bool (True/False/None), nooit het label —
+│   │   #      bool("inherit") is True en maakte elk facet "staat al aan".
+│   │   # Schrijven = read-merge-write + read-back; nooit alleen seoPriority PUT'en.
 │   ├── seo_rulings_router.py    # SEO Rulings APIRouter (run / last / health)
 │   ├── seo_rulings_service.py   # SEO Rulings: live sanity checks against beslist.nl
 │   │                            #   (no-script categories, no-script facet-links,
@@ -96,6 +106,8 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── redshift-upload.html # Redshift Upload (xlsx upload or paste data to pa.* tables)
 │   ├── url-checker.html   # URL Checker (status, title, description, H1, product count)
 │   ├── url-validator.html # URL Validator (validate URLs against Taxonomy API v2)
+│   ├── seo-prio.html      # SEO Priority (run config, results table with row checkboxes,
+│   │                      #   dry-run switch + "Apply to Taxonomy" write-back, run history)
 │   ├── seo-rulings.html   # SEO Rulings (live 4-check sanity sweep of beslist.nl
 │   │                      #   with Slack DM + per-check tables, run-history hydrated
 │   │                      #   from GET /api/seo-rulings/last on page load)
@@ -238,6 +250,8 @@ All data lives in the local PostgreSQL container. See LEARNINGS.md for connectio
 
 **Primary tables (schema `pa`)**:
 - `pa.seo_rulings_runs` - One row per SEO Rulings run (run_id, started_at, finished_at, passed_count, failed_count, result JSONB). Created on startup via `seo_rulings_service.init_seo_rulings_tables()`. `GET /api/seo-rulings/last` returns the most-recent row for page-load rehydration.
+- `pa.seo_prio_runs` / `pa.seo_prio_results` - One row per SEO Priority run / one row per (category, facet) combo. `deepest_cat_id` is the **taxv2** id, or `slug:<urlslug>` when the URL slug has no taxv2 category (column is TEXT for that reason); `deepest_cat_slug` keeps the URL slug. `applied_status` / `applied_value` / `applied_at` / `applied_error` record the write-back per row. Created + migrated on startup via `seo_prio_service.init_seo_prio_tables()`.
+- `pa.seo_prio_apply_log` - Audit trail of every taxv2 write attempt (run_id, category, facet, old→new, status, error, `dry_run`, `applied_by`, `applied_at`). Deliberately NOT deleted with the run: "what did I change in the taxonomy, and when" must outlive the analysis that suggested it.
 - `pa.jvs_seo_werkvoorraad` - URL work queue (~243K URLs, kopteksten: 0=pending, 1=has content)
 - `pa.jvs_seo_werkvoorraad_kopteksten_check` - Processing status tracking (success/skipped/failed)
 - `pa.content_urls_joep` - Generated SEO content (~152K entries)
@@ -497,6 +511,18 @@ gotchas are in `backend/faq_v2_publisher.py`'s docstring.
 - `POST /api/url-validator/download` - Download validation results as Excel
 - `GET /api/url-validator/cache-status` - Taxonomy cache stats
 - `POST /api/url-validator/cache-refresh` - Force cache reload
+
+### SEO Priority
+- `GET /api/seo-prio/defaults` - Default date range (2y back) + `DEFAULT_THRESHOLDS`
+- `GET /api/seo-prio/categories?force=false` - (maincat, deepest-cat) pairs for the two type-ahead inputs. Answers instantly; `loading:true` while the ~23s Redshift DISTINCT runs on a daemon thread. Cached in-process + `backend/data/seo_prio_categories.json` (gitignored), 7-day TTL.
+- `POST /api/seo-prio/start` - Start a run (`start_date`, `end_date`, `maincat`, `deepest_cat`, `thresholds`) → `{run_id}`. Background thread.
+- `GET /api/seo-prio/status/{run_id}` / `POST /api/seo-prio/stop/{run_id}` - Progress polling / cooperative stop
+- `GET /api/seo-prio/runs` - Run history; `DELETE /api/seo-prio/runs/{run_id}` - delete run + results (409 while active)
+- `GET /api/seo-prio/summary/{run_id}` - Counts per action (total / turn_on / turn_off / keep)
+- `GET /api/seo-prio/results/{run_id}?limit=0` - All rows (limit=0 = no cap); the frontend sorts/filters/paginates client-side
+- `GET /api/seo-prio/export/{run_id}` - Excel export
+- `POST /api/seo-prio/apply/{run_id}` - **Write-back to taxv2.** Body `{"dry_run": bool, "selections": [{"deepest_cat_id", "facet_slug", "value"?}]}`. Max 300 rows per call (`APPLY_MAX_ROWS`); grouped per category, 4 categories in parallel, facets within a category sequentially. The value written comes from the stored row's `proposed_seo_prio` unless an explicit `value` overrides it — never from a client-supplied "current". Each write is GET-merge-PUT (`displayOrder` / `isHidden` / `businessRelevance` / `describesVariance` / `describesCommon` / `unitAmount` carried over) followed by a read-back that must match, else the row is reported `failed`. A row already at the target value is `skipped`, not written. Deliberately a **non-async** endpoint so FastAPI runs it in the threadpool.
+- `GET /api/seo-prio/apply-log?run_id=&limit=200` - Audit trail from `pa.seo_prio_apply_log` (dry runs included, flagged)
 
 ### SEO Rulings
 - `GET /api/seo-rulings/health` - Health check

@@ -549,6 +549,27 @@ grey on screen the whole time. Consequences:
   loads after `style.css`, so a bare background override silently wins on hover too and
   can leave white text on a white fill. Re-assert the hover in the same breath.
 
+**A button whose mode changes must say so in its own label** (added 2026-08-13, SEO
+Priority's "Apply to Taxonomy"). Where the same button either previews or writes to a
+live external API depending on a nearby switch, the switch alone is not enough signal —
+someone flips it, scrolls, and clicks the same green button believing it pushed. Rewrite
+the label from the mode: `Apply 12 to Taxonomy` (green, `btn-success`) versus
+`Preview 12 (dry run)` (purple outline). Same rule the GSD Tag Toppers run-history
+learned the expensive way: a dry run that looks like a real run gets remembered as a real
+run. Put the selection count in the label too, and confirm the live path with the actual
+numbers (`12 facets → ON, 3 → OFF`), not a generic "are you sure".
+
+**Bulk-select bar goes above the table, not in the card header.** Same reasoning as the
+filter row: `.apply-bar` (`d-flex flex-wrap align-items-center gap-2 px-3 py-2`,
+`border-bottom:1px solid #eee`, `background:#fbfbfc`) directly under `.card-body.p-0`,
+holding the selection count on the left and the mode switch + action button pushed right
+(`ms-auto`). A 36px `th.col-check`/`td.col-check` first column carries the checkboxes,
+selected rows get a tinted `tr.row-selected`. **Disable a checkbox rather than hiding
+it**, and put the reason in its `title` ("facet is not linked to the category", "already
+applied") — a row you cannot act on still tells you something, an absent checkbox is just
+a hole. Keep the selection keyed on the row's own identity (the same key the backend
+looks the row up by), not on its page index, or it scrambles the moment someone sorts.
+
 **Unavailable always wins over colour.** A `disabled` button must render **grey
 outline** (`#6c757d`) regardless of its available-state colour — this includes
 red / destructive buttons (Stop, Remove, Cancel). Red is only shown when the
