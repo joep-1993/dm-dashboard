@@ -286,9 +286,13 @@ Hot loop opnieuw byte-voor-byte identiek getoetst met `scripts/bothits_parse_fin
 - [ ] **De actieve tab is brand-paars, niet Semrush-blauw.** Bewuste afwijking: blauw is in
       dit dashboard nergens een accentkleur en zou als een tweede merk lezen. Eén
       hex-waarde in `style.css` als Joep het tóch blauw wil.
-- [ ] **De typografie-proef staat nog alleen op Bothits** (14px systeem-stack, kleinere h5).
-      Die is bewust NIET meegegaan naar `style.css` — Joep vroeg om tabs en datumpicker.
-      Zolang dit open staat, ziet Bothits er iets anders uit dan de rest.
+- [x] **Typografie-proef teruggedraaid** (Joep, 2026-08-13). Bothits volgt weer gewoon
+      Bootstrap. Wat die eigen font-stack betreft was het een schijnwijziging: Bootstrap 5.3
+      gebruikt zelf al `system-ui, -apple-system, "Segoe UI", …`, dus op Windows kwam er
+      **precies hetzelfde lettertype** uit — het zichtbare verschil zat in de grootte
+      (16 → 14px) en in kleinere kaartkoppen (h5 1,25rem → 1rem). Wie het voorbeeld écht
+      wil benaderen heeft een webfont nodig (Inter ligt het dichtst bij), en dat is een
+      externe afhankelijkheid plus een font-flits bij het laden — aparte keuze, niet gedaan.
 - [ ] **Het `url_type`-filter op de URL-tab kost 10,9s** (C-url) tegen 2,0s voor Cat-url.
       Verder terug te brengen door url_type/facet_depth in `pa.bothits_url_daily` te zetten
       i.p.v. ze uit `pa.urls` af te leiden — maar dat is een schemawijziging plus een

@@ -98,22 +98,17 @@
            line as its checkbox instead of wrapping underneath it. */
         .chk-list label { display: block; cursor: pointer; white-space: nowrap; }
         /* De tabvorm met onderlijn en de .date-box staan sinds 2026-08-13 in
-           css/style.css — Joep heeft de proef aangenomen, dus ze gelden dashboardbreed
-           en zijn hier weggehaald. Wat hieronder blijft is de typografie, en die is
-           NOG een proef: alleen deze pagina, niet in het blueprint.
+           css/style.css — die proef is aangenomen en geldt dashboardbreed, dus hier
+           staat er niets meer van.
 
-           Eén afwijking van de oorspronkelijke screenshot is bewust en verhuisd naar
-           style.css: de actieve tab is brand-paars (var(--color-navbar)) en niet
-           Semrush-blauw. Blauw is in dit dashboard nergens een accentkleur en zou als
-           een tweede merk lezen. */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                         "Helvetica Neue", Arial, sans-serif;
-            font-size: 14px;
-            color: #1d2129;
-            -webkit-font-smoothing: antialiased;
-        }
-        h5 { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+           De typografie-proef die hier ook stond is TERUGGEDRAAID op verzoek van Joep:
+           body op 14px met een eigen font-stack en h5 op 1rem/600. Wat die stack betreft
+           was het overigens een schijnwijziging — Bootstrap 5.3 gebruikt zelf al
+           system-ui/-apple-system/Segoe UI, dus op Windows kwam er precies hetzelfde
+           lettertype uit. Het zichtbare verschil zat in de GROOTTE (16 → 14px) en in de
+           kleinere kaartkoppen. Deze pagina volgt nu weer gewoon Bootstrap, net als de
+           rest van het dashboard. Wil je het voorbeeld écht benaderen, dan is er een
+           webfont nodig (Inter) — dat is een externe afhankelijkheid en een aparte keuze. */
 
         /* Het .filter-shell-blok (zachte achtergrond + pill-controls over de hele
            filterkaart) is er op verzoek van Joep weer uit (2026-08-13): de kaart is
