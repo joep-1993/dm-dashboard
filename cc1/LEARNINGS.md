@@ -1,6 +1,61 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een UI-patroon dashboardbreed uitrollen: vier dingen die je niet in de code ziet (2026-08-13)
+
+De tabvorm en de datumkiezer van Bot Hits naar alle pagina's brengen. Drie van de vier
+problemen hieronder heb ik gevonden door de pagina's **headless te renderen en er naar te
+kijken**, niet door de diff te lezen — bij CSS is "het compileert" geen bewijs van iets.
+
+```bash
+"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu \
+  --hide-scrollbars --window-size=1500,600 --virtual-time-budget=6000 \
+  --screenshot="C:\Users\JoepvanSchagen\Downloads\claude\chk.png" \
+  "http://localhost:8003/static/<pagina>.html"
+```
+
+**1. Een page-`<style>` laadt ná `style.css`, dus een gedeelde regel doet niets zolang de
+lokale kopie blijft staan.** Het blok `.nav-tabs .nav-link { color:#3a3a3a; font-weight:bold }`
+stond op **elf** pagina's afzonderlijk. Die weghalen was geen opruimwerk maar de
+voorwaarde: was er één blijven staan, dan had die pagina er ongewijzigd uitgezien en had
+ik lang gezocht in de verkeerde CSS. Regel: bij het centraliseren van een patroon is het
+verwijderen van de kopieën stap 1, niet stap 2.
+
+**2. Chrome's date-input heeft zijn eigen kalendericoon ín het veld.** Zet je er een
+decoratief icoon voor, dan staan er op pagina's zónder flatpickr ineens twee — bij een
+van/tot-bereik drie. Verbergen is de verkeerde fix (dan is de picker alleen nog met typen
+te bereiken). Wél goed: het native icoon uitrekken over het hele veld en transparant
+maken — glyph weg, klikvlak juist groter.
+```css
+input[type="date"] { position: relative; }
+input[type="date"]::-webkit-calendar-picker-indicator {
+    position: absolute; inset: 0; width: auto; height: auto; opacity: 0; cursor: pointer;
+}
+```
+Op pagina's mét flatpickr is die regel vanzelf inactief: die vervangt de input door
+`type=text`, waardoor `input[type="date"]` niet meer matcht.
+
+**3. `inline-flex` als vervanger van een `form-control` laat het label springen.** Een
+`.form-control` is block-level, dus het label stond altijd erboven. Met een `inline-flex`
+vervanger gaat het label **ernaast** zodra er ruimte is en **eronder** als die er niet is:
+dezelfde pagina, twee uitkomsten, afhankelijk van de kolombreedte. `display: flex` +
+`width: fit-content` geeft het block-gedrag terug zonder de breedte op te blazen.
+
+**4. Een font-family wijzigen die niets verandert.** Ik zette
+`-apple-system, BlinkMacSystemFont, "Segoe UI", …` als "nieuw" lettertype. Bootstrap 5.3
+zet `--bs-font-sans-serif` al op `system-ui, -apple-system, "Segoe UI", Roboto, …` en
+`style.css` zet nergens een `font-family` — dus op Windows loste mijn stack op naar
+**exact hetzelfde Segoe UI**. Wat het verschil maakte was de GROOTTE (16 → 14px) en
+kleinere kaartkoppen. Les: controleer wat het framework al zet vóór je een font-stack
+"vervangt", anders schrijf je een wijziging op die alleen in de diff bestaat. Een echt
+ander lettertype vraagt een webfont, en dat is een externe afhankelijkheid plus een
+font-flits — een aparte keuze.
+
+**Wat wél lokaal mag blijven:** een echte pagina-eigen behoefte. `thema-ads` houdt
+`nowrap` + 0,9rem omdat het acht tabs op één regel moet passen, en `gsd-campaigns` houdt
+een bredere datuminput omdat daar een uitleg-placeholder in staat. Beide halen kleur,
+rand en vorm wél uit de gedeelde regel — de override is zo klein mogelijk.
+
 ## Audit Bothits ronde 2: vier keer sprak de meting de bevinding tegen (2026-08-13)
 
 Vijf fases over 5.020 regels. De code-bevindingen staan in TASKS; dit gaat over het
