@@ -314,17 +314,39 @@ URL_IDS = {}
 
 
 def load_url_ids():
-    """url (no trailing slash) -> url_id for every row in pa.urls."""
+    """url (no trailing slash) -> url_id for every row in pa.urls.
+
+    Percent-ge-encodeerde rijen krijgen hun GEDECODEERDE vorm als extra sleutel
+    (2026-08-13). De parser doet `unquote()` op het logpad, dus een pa.urls-rij die
+    `%20` of `%C3%AB` in zijn url heeft kon nooit matchen: de lookup had de encoded
+    vorm, de logregel de decoded. Gemeten 160 van 1.031.796 rijen (0,015%), dus het
+    volume is klein — maar het is een gat dat je nooit ziet, want zulke URL's belanden
+    stil in de onbekende bak.
+
+    De letterlijke sleutel wint altijd: de alias komt er alleen bij als hij nog niet
+    bestaat, zodat twee rijen die naar dezelfde string decoderen elkaar niet
+    overschrijven en de exacte match onaangetast blijft.
+    """
     global URL_IDS
     conn = get_db_connection()
     try:
         cur = conn.cursor()
         cur.execute("SELECT url_id, url FROM pa.urls")
-        URL_IDS = {r["url"].rstrip("/"): r["url_id"] for r in cur.fetchall()}
+        rows = cur.fetchall()
         cur.close()
     finally:
         return_db_connection(conn)
-    logger.info("pa.urls lookup loaded: %s urls", f"{len(URL_IDS):,}")
+    URL_IDS = {r["url"].rstrip("/"): r["url_id"] for r in rows}
+    exact = len(URL_IDS)
+    for r in rows:
+        u = r["url"].rstrip("/")
+        if "%" not in u:
+            continue
+        dec = unquote(u).rstrip("/")
+        if dec != u and dec not in URL_IDS:
+            URL_IDS[dec] = r["url_id"]
+    logger.info("pa.urls lookup loaded: %s urls (+%s gedecodeerde aliassen)",
+                f"{exact:,}", f"{len(URL_IDS) - exact:,}")
     return URL_IDS
 
 
