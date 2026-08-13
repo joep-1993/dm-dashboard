@@ -510,6 +510,17 @@ def _dim_ids(conn, hosts, bots):
 
 
 # ---------------------------------------------------------------------------
+# Worker initializer for spawn-context (Windows). Loads the lookup tables
+# that fork would have inherited via copy-on-write. Each of the N workers
+# calls this once at startup, so it's N database queries instead of 1 —
+# the price of not having fork.
+# ---------------------------------------------------------------------------
+def _worker_init():
+    load_url_ids()
+    load_ip_ranges()
+
+
+# ---------------------------------------------------------------------------
 # Ingest one log date
 # ---------------------------------------------------------------------------
 def ingest_date(log_date, files, source_dirs="", n_hours=24):
@@ -547,13 +558,18 @@ def ingest_date(log_date, files, source_dirs="", n_hours=24):
     # is geladen kapot is. `process_file()` was nooit stuk.
     #
     # Vandaar de expliciete context: deze ingest deelt ~1M dict-entries met de workers
-    # via copy-on-write en dat is niet optioneel. Zou fork ooit verdwijnen (Python 3.14
-    # zet de default op forkserver, en op macOS is spawn al de default), dan moeten de
-    # opzoektabellen per worker geladen worden via een initializer — niet stilletjes
-    # leeg blijven.
-    mp_ctx = multiprocessing.get_context("fork")
+    # via copy-on-write en dat is niet optioneel. Op Windows bestaat fork niet —
+    # daar gebruiken we spawn met een initializer die de opzoektabellen in elke
+    # worker laadt. Duurder (12× DB-query), maar correct en onvermijdelijk.
+    _can_fork = "fork" in multiprocessing.get_all_start_methods()
+    if _can_fork:
+        mp_ctx = multiprocessing.get_context("fork")
+        pool_kwargs = dict(mp_context=mp_ctx)
+    else:
+        mp_ctx = multiprocessing.get_context("spawn")
+        pool_kwargs = dict(mp_context=mp_ctx, initializer=_worker_init)
     with ProcessPoolExecutor(max_workers=min(MAX_WORKERS, os.cpu_count() or 4),
-                             mp_context=mp_ctx) as ex:
+                             **pool_kwargs) as ex:
         futs = [ex.submit(process_file, f) for f in files]
         for fut in as_completed(futs):
             c, k, u, rl, bl = fut.result()
