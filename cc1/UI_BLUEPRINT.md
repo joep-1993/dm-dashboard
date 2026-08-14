@@ -140,6 +140,13 @@ other tool uses the grey default. New tools follow the grey default.
   the panel and the page agree about the period. After the await, check the canvas
   still exists: the row may have been closed or re-rendered while the request was in
   flight.
+- **Het uitklappaneel is een eigen vlak, niet een rij die langer werd** (Joep, 2026-08-14).
+  Twee dingen die het verschil maken: **verticale padding van ~1,6rem** op de detail-`<td>`
+  (met 0,9rem plakte de eerste grafiek tegen de rij waar je net op klikte), en de
+  **grafiektitels in `font-weight: 600`** — in een paneel met vier grafieken moet je kunnen
+  zien welke je leest. Zet dat gewicht niet op de bijschriftklasse (`.muted-note` in Bot Hits
+  zit óók op veldlabels en statusregels) maar op een eigen `.chart-title`: zelfde maat en
+  kleur, alleen zwaarder.
 - **A category column of labels is centred** (`text-align: center`) — an outlined
   `.lbl` is a block with its own edges, so left-aligning it against a numeric
   column's right-aligned digits leaves a ragged gutter between them.
