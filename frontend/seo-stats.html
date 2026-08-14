@@ -133,10 +133,12 @@
         /* Preset group (7d/14d/30d/90d) shaped like the date inputs next to it: same
            border colour, same 10px radius on the outer corners, same soft shadow. The
            purple text stays, so it still reads as an action rather than a field. */
-        .btn-preset { border: 1px solid #d9d4e8; color: #5e4a90; background: #fff;
-                      padding: 0.35rem 0.7rem; }
-        .btn-preset:hover, .btn-preset:focus { background: #5e4a90; color: #fff; border-color: #5e4a90; }
-        .btn-group .btn-preset:not(:first-child) { border-left: 1px solid #d9d4e8; }
+        .btn-preset { padding: 0.35rem 0.7rem; }
+        /* Alleen breedte en stijl: de KLEUR van deze scheidingslijn komt van de
+           knopgroep in style.css (2026-08-14). Stond hier op #d9d4e8, wat tot de
+           opruiming door het !important van het thema werd overschreven — dus dit is
+           geen kleurwijziging maar het vastleggen van wat je al zag. */
+        .btn-group .btn-preset:not(:first-child) { border-left-width: 1px; border-left-style: solid; }
         .btn-group:has(.btn-preset) {
             border-radius: 10px;
             box-shadow: 0 1px 3px rgba(45,42,58,0.06);

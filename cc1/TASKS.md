@@ -169,12 +169,32 @@ knoppen op de canonieke klassen.
 
 **Openstaand:**
 
-- [ ] **De 77 knopregels in zeventien page-`<style>`-blokken opruimen.** Dat is de enige
-      reden dat het `!important` op de knopkleuren nog nodig is. Puur deleten waar de regel
-      alleen kleur zet (die verliest nu toch al van het thema, dus visueel een no-op);
-      oppassen waar er maatvoering in dezelfde regel staat (`.btn-preset` heeft padding,
-      `.btn-red-outline` een font-size). Met de meetopstelling uit deze sessie is dat
-      verifieerbaar: de computed styles moeten vóór en na identiek zijn.
+- [x] **De knopregels in de page-`<style>`-blokken zijn opgeruimd en het `!important` is van
+      de knopgroepen af** (2026-08-14). 42 regels over twaalf pagina's plus zes id-selectors:
+      kleur eruit, maatvoering behouden (padding, font-size, de 1,5px rand van `.btn-tool`, de
+      scheidingslijn van een segmented control). 38 keer `!important` weg uit style.css; wat
+      blijft staan (51×) hoort bij de kaartkop, de chips en het formulierblok, waar Bootstrap's
+      utilities hun kleur zelf met die vlag zetten.
+
+      **Drie dingen die de meting eruit haalde, en die het waard zijn om te weten:**
+      1. **Een `border-left` is geen `border-color`.** De scheidingslijn tussen de presets
+         (`.btn-group .btn-preset:not(:first-child) { border-left: 1px solid #d9d4e8 }`) viel
+         buiten mijn kleurfilter en won daarna op specificiteit — de lijn sprong van `#c3c7cc`
+         naar `#d9d4e8`. Nu `border-left-width/style` zonder kleur.
+      2. **Index Checker's actieve filter was niet te zien.** Die knoppen zijn
+         `btn btn-outline-secondary active`, en Bootstrap maakt van `.active` een gevulde
+         `#6c757d`-knop; ons `!important` overschreef dat, dus actief zag eruit als inactief.
+         Het vocabulaire heeft nu een eigen aan-staat (paarse tint `#f3f0fa`, paarse rand en
+         label, weight 600 — dezelfde taal als `.metric-toggle.on`). Bij url-validator wordt
+         het label van de actieve filter daardoor 600 in plaats van 500; de oranje vulling
+         daar komt uit zijn eigen `!important`-regel en blijft.
+      3. **Healthscore's `.btn-hs` had `border: none`** en is nu 2px hoger en breder, want het
+         thema geeft elke CTA een 1px rand — in dezelfde kleur als de vulling, dus onzichtbaar.
+         Daarmee is die knop even groot als elke andere hoofdactie.
+
+      Verificatie: computed styles vóór/na over 35 pagina's, base én forced `:hover`, met de
+      ruisvloer van twee identieke runs eraf getrokken (66 ruis, 96 totaal). Wat overbleef zijn
+      exact de drie punten hierboven plus één mid-transitie-meting op een hover.
 - [ ] **De acht varianten van het `.tool-table`-blok over elf pagina's samenvoegen.** De
       canonieke basis staat nu in `style.css`, de pagina-blokken staan er nog naast.
 - [ ] **DMA+ slaat tijdstempels naïef-lokaal op** (`datetime.now().isoformat()` in

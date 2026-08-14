@@ -57,15 +57,18 @@
         .done-text details summary { cursor: pointer; }
         #previewSelCount { display: inline-block; min-width: 82px; text-align: right; }  /* stable width as the count changes */
         /* theme makes .btn-outline-danger orange; force the Remove button truly red */
-        #btnRemove { color:#dc3545; border-color:#dc3545; background-color:transparent; }
-        #btnRemove:hover, #btnRemove:focus { background-color:#dc3545; border-color:#dc3545; color:#fff; }
         /* grey out the Generate button while a run is going on (like FAQ's) */
         /* Unavailable (disabled) buttons are ALWAYS outlined grey, never red — see cc1/UI_BLUEPRINT.md */
-        #btnGenerate:disabled, #btnStop:disabled, #btnRemove:disabled, #btnPublish:disabled { color:#6c757d; border-color:#6c757d; background-color:transparent; opacity:1; }
         /* flatpickr styling — same purple theme as SEO stats */
         /* De paarse flatpickr-kalender staat sinds 2026-08-14 in css/style.css: dit
            blok van negen regels stond op zes pagina's byte-identiek. Hier iets wijzigen
            doet dus niets meer — pas het daar aan. */
+        /* Eigen kleurregels per id zijn hier weg (2026-08-14). Deze knoppen dragen een
+           themed klasse (btn-primary / btn-outline-danger), dus style.css bezit hun kleur in elke staat —
+           inclusief uitgeschakeld, want `.btn:disabled` geldt voor élke knopklasse. Een
+           id-selector wint van een klasseregel, dus zolang deze regels er stonden was het
+           `!important` in style.css het enige dat het thema overeind hield. UI_BLUEPRINT
+           "Buttons": alleen het disabled-attribuut omzetten, nooit met de hand herstylen. */
     </style>
 </head>
 <body>

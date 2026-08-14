@@ -8,7 +8,6 @@
     <link href="/static/css/style.css" rel="stylesheet">
     <style>
         /* grey out the Upload button while it's processing URLs (like SEO titles) */
-        #btnPreview:disabled { color:#6c757d; border-color:#6c757d; background-color:transparent; opacity:1; }
         .stat-box { text-align: center; padding: 12px; border-radius: 8px; background: #f8f9fa; border: 1px solid #e9ecef; }
         .stat-box .num { font-size: 1.6rem; font-weight: 700; line-height: 1; }
         .stat-box .label { font-size: 0.75rem; text-transform: uppercase; color: #6c757d; margin-top: 4px; }
@@ -46,14 +45,9 @@
         .check-result .pair { font-family: monospace; font-size: 0.85rem; }
 
         .history-row { font-size: 0.85rem; }
-        .btn-purple-outline { border: 1px solid #5e4a90; color: #5e4a90; background: transparent; }
-        .btn-purple-outline:hover { background: #5e4a90; color: #fff; }
-        .btn-red-outline { border: 1px solid #d63031; color: #d63031; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; }
-        .btn-red-outline:hover { background: #d63031; color: #fff; }
-        .btn-purple-action { border: 1px solid #5e4a90; color: #5e4a90; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; }
-        .btn-purple-action:hover { background: #5e4a90; color: #fff; }
-        .btn-orange-action { border: 1px solid #CC5500; color: #CC5500; background: transparent; font-size: 0.75rem; padding: 0.15rem 0.5rem; }
-        .btn-orange-action:hover { background: #CC5500; color: #fff; }
+        .btn-red-outline { font-size: 0.75rem; padding: 0.15rem 0.5rem; }
+        .btn-purple-action { font-size: 0.75rem; padding: 0.15rem 0.5rem; }
+        .btn-orange-action { font-size: 0.75rem; padding: 0.15rem 0.5rem; }
         /* Pagination — matches gsd-check / other dm-tools tables.
            btn-outline-secondary is restyled to burnt-orange in css/style.css. */
         .pagination-controls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0; margin-top: 0.5rem; font-size: 0.85rem; }
@@ -63,6 +57,12 @@
 
         .small-muted { font-size: 0.8rem; color: #6c757d; }
         .badge-flatten { background-color: #ffc107; color: #000; }
+        /* Eigen kleurregels per id zijn hier weg (2026-08-14). Deze knoppen dragen een
+           themed klasse (btn-primary), dus style.css bezit hun kleur in elke staat —
+           inclusief uitgeschakeld, want `.btn:disabled` geldt voor élke knopklasse. Een
+           id-selector wint van een klasseregel, dus zolang deze regels er stonden was het
+           `!important` in style.css het enige dat het thema overeind hield. UI_BLUEPRINT
+           "Buttons": alleen het disabled-attribuut omzetten, nooit met de hand herstylen. */
     </style>
 </head>
 <body>

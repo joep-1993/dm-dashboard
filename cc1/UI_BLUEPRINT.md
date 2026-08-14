@@ -588,6 +588,19 @@ Wil je betekenis, pak dan `btn-run` (uitvoeren), `btn-outline-purple` (secundair
 `btn-outline-orange` (toevoegen/exporteren). Dit is de reden dat DMA Exclusions' Preview van
 `btn-outline-primary` naar `btn-outline-purple` ging (2026-08-14).
 
+**De AAN-staat van een outline-knop is `.active`** (2026-08-14), en die ziet er huisstijl uit:
+paarse tint `#f3f0fa`, paarse rand en paars label, weight 600 — dezelfde taal als
+`.metric-toggle.on` in SEO Stats, zodat twee toggles op twee pagina's hetzelfde "aan" zeggen.
+Staat in `style.css`, dus je hoeft er niets voor te doen.
+
+Dit repareerde een bug die het oude `!important` verstopte: Index Checker heeft filterknoppen
+`btn btn-outline-secondary active`, en Bootstrap maakt van die `.active` een gevulde
+`#6c757d`-knop. Zolang onze kleuren `!important` waren overschreven wij dat, waardoor de
+**actieve** filter er precies zo uitzag als de inactieve — je kon niet zien welke aan stond.
+Gebruikt een pagina radio's in plaats van een `.active`-klasse
+(`.btn-check:checked + .btn`), dan geldt deze regel niet: die combinatie is Bootstrap's eigen
+selector en de pagina regelt hem zelf (SEO Stats' segmented control doet dat).
+
 **Verzin geen nieuwe knopklasse.** De aliassen die pagina's zelf hebben bedacht
 (`.btn-purple-outline`, `.btn-purple-action`, `.btn-hs-outline`, `.btn-tool` → paars;
 `.btn-orange-action` → oranje; `.btn-preset`, `.btn-bulk-*` → grijs) zijn in `style.css` aan
@@ -851,16 +864,22 @@ paars-versus-oranje alleen kleur was en geen betekenis. Dat is op 2026-08-14 ter
 pagina een naamloos knopje. Neutraal grijs is nu alleen nog voor knopklassen die niets
 zeggen — de Bootstrap-kleurnamen (`.btn-outline-secondary` c.s.) en de segmented controls.
 
-**Waarom er nog `!important` op kleuren staat.** Niet meer omdat dit een laag is — die is
-opgeheven. Er zijn twee echte redenen, en ze staan per blok in `style.css` in het
-commentaar:
+**Waarom er nog `!important` op kleuren staat — en op de KNOPPEN niet meer.** Er is één
+reden over: **Bootstrap's eigen utilities** (`.bg-info`, `.bg-secondary`, `.text-white`)
+zetten hun kleur zelf met die vlag, dus zonder het onze valt een `card-header bg-primary`
+terug op Bootstrap-blauw. Dat geldt voor de kaartkop, de chips en het formulierblok.
 
-1. **Bootstrap's eigen utilities** (`.bg-info`, `.bg-secondary`, `.text-white`) zetten hun
-   kleur mét `!important`. Zonder het onze valt een `card-header bg-primary` terug op
-   Bootstrap-blauw.
-2. **Zeventien pagina's** definiëren knopklassen in hun eigen `<style>`, en dat blok laadt
-   ná elke stylesheet. Op gelijke specificiteit wint het dus altijd. Het gaat om 77 regels;
-   die opruimen staat als open taak in `cc1/TASKS.md`, en daarna kan reden 2 vervallen.
+Op de knopgroepen staat het **niet** meer (2026-08-14). Het stond er omdat twaalf pagina's
+knopklassen in hun eigen `<style>` opnieuw definieerden — dat blok laadt ná elke stylesheet
+en wint dus op gelijke specificiteit — plus zes id-selectors, die een klasseregel altijd
+verslaan. Die regels zijn opgeruimd: kleur eruit, maatvoering behouden (padding, font-size,
+een 1,5px randbreedte, de scheidingslijn van een segmented control).
+
+**Wat dat voor jou betekent:** zet een pagina opnieuw een eigen
+`.btn-outline-purple { color: … }` in zijn `<style>`, dan wint die nu wél. Dat is met opzet.
+Zo is zichtbaar dat die pagina afwijkt, in plaats van dat het thema het stil overschrijft en
+de regel als dode code blijft staan — precies de situatie waarin deze opruiming nodig werd.
+Nieuwe kleur nodig? Zet de klasse in `style.css` in de juiste groep.
 
 Het staat op **kleur** en bewust **niet** op maatvoering: padding, breedte en `nowrap`
 blijven van de pagina, zodat bestaande lay-outs heel blijven.

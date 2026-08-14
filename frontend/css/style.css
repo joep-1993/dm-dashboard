@@ -8,13 +8,11 @@
  *     paarse outline-knoppen, knopschaduw) zijn WEG, niet overschreven.
  *   - Terugdraaien is geen `sed` meer maar het git-tag `ui-voor-flat`, dat naar de
  *     laatste commit vóór de restyle wijst.
- *   - `!important` staat nog op een deel van de kleuren, maar niet meer omdát dit een
- *     laag was. Er zijn twee echte redenen, en die staan per blok erbij: (1) Bootstrap's
- *     eigen utilities (`.bg-info`, `.bg-secondary`, `.text-white`) zetten hun kleur mét
- *     !important, dus zonder valt de kop terug op Bootstrap-blauw; (2) zeventien
- *     pagina's definiëren knopklassen in hun eigen `<style>`, en dat blok laadt ná elke
- *     stylesheet en wint dus altijd op gelijke specificiteit. Zie cc1/TASKS.md voor de
- *     openstaande opruiming van die 77 pagina-regels; daarna kan reden (2) vervallen.
+ *   - `!important` staat nog op de kaartkop, de chips en het formulierblok, en daar is
+ *     één reden voor: Bootstrap's eigen utilities (`.bg-info`, `.bg-secondary`,
+ *     `.text-white`) zetten hun kleur zelf met die vlag, dus zonder valt de kop terug op
+ *     Bootstrap-blauw. Op de KNOPPEN staat het niet meer: de pagina-regels die het nodig
+ *     maakten zijn op 2026-08-14 opgeruimd.
  *
  * KLEUREN ZIJN UIT DE SCREENSHOT VAN JOEP GEMETEN (PIL, pixelsample), niet geschat:
  * Downloads\claude\2026-08-13 18 11 15.png.
@@ -435,13 +433,21 @@ body {
  * drie. Nieuwe pagina's gebruiken .btn-run / .btn-outline-purple / .btn-outline-red
  * en verzinnen er geen vierde bij.
  *
- * OVER HET !important: het is er NIET omdat dit een override-laag is (die is op
- * 2026-08-14 opgeheven), maar omdat zeventien pagina's deze klassen in hun eigen
- * `<style>` opnieuw definiëren — en dat blok laadt ná elke stylesheet, dus het wint
- * op gelijke specificiteit. Zolang die 77 regels er staan is dit de enige manier om
- * het thema hél te laten aanslaan in plaats van half. Het staat daarom op KLEUR en
- * bewust niet op maatvoering: padding, breedte en font-size blijven van de pagina,
- * zodat lay-outs heel blijven. cc1/TASKS.md heeft de opruiming als open taak.
+ * GEEN !important MEER, en dat is het sluitstuk van de merge (2026-08-14). Het stond hier
+ * omdat twaalf pagina's deze klassen in hun eigen `<style>` opnieuw definieerden — dat blok
+ * laadt ná elke stylesheet en wint dus op gelijke specificiteit — plus zes id-selectors, die
+ * een klasseregel altijd verslaan. Die regels zijn nu weg (kleur eruit, maatvoering
+ * behouden), dus deze groepen winnen op eigen kracht.
+ *
+ * WAT DAT BETEKENT ALS JE HIER IETS WIJZIGT: een pagina die opnieuw een eigen
+ * `.btn-outline-purple { color: ... }` in zijn `<style>` zet, wint nu wél. Dat is met opzet:
+ * dan is het zichtbaar dat die pagina afwijkt, in plaats van dat het thema het stil
+ * overschrijft en zo'n regel als dode code laat staan. Verzin dus geen kleurregel per
+ * pagina — zet de klasse hier in de juiste groep.
+ *
+ * Waar het WEL blijft staan, met elk zijn eigen reden in het commentaar: de kaartkop, de
+ * chips en het formulierblok. Daar gaat het om Bootstrap's eigen utilities (`.bg-info`,
+ * `.text-white`), en die zetten hun kleur zélf met de important-vlag.
  * ------------------------------------------------------------------ */
 
 /* 1. PRIMAIR / uitvoeren — burnt orange, de huiskleur.
@@ -450,18 +456,18 @@ body {
  * dus geen exacte terugzetting van vóór de restyle. */
 .btn-run, .btn-primary, .btn-success, .btn-warning, .btn-info,
 .btn-purple, .btn-hs {
-    background-color: var(--color-button) !important;
-    border-color: var(--color-button) !important;
-    color: #fff !important;
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: #fff;
     transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 .btn-run:hover:not(:disabled), .btn-primary:hover:not(:disabled),
 .btn-success:hover:not(:disabled), .btn-warning:hover:not(:disabled),
 .btn-info:hover:not(:disabled), .btn-purple:hover:not(:disabled),
 .btn-hs:hover:not(:disabled) {
-    background-color: var(--color-button-hover) !important;
-    border-color: var(--color-button-hover) !important;
-    color: #fff !important;
+    background-color: var(--color-button-hover);
+    border-color: var(--color-button-hover);
+    color: #fff;
 }
 
 /* 2a. SECUNDAIR PAARS — "elke andere actie", en de vaste vorm van Refresh.
@@ -486,32 +492,32 @@ body {
  * de tool waar hij bij hoort. Vandaar neutraal grijs, in de groep hieronder. */
 .btn-outline-purple, .btn-purple-outline, .btn-purple-action,
 .btn-hs-outline {
-    background-color: var(--flat-surface) !important;
-    border-color: var(--color-navbar) !important;
+    background-color: var(--flat-surface);
+    border-color: var(--color-navbar);
     border-width: 1px;
     border-style: solid;
-    color: var(--color-navbar) !important;
+    color: var(--color-navbar);
 }
 .btn-outline-purple:hover:not(:disabled), .btn-purple-outline:hover:not(:disabled),
 .btn-purple-action:hover:not(:disabled), .btn-hs-outline:hover:not(:disabled) {
-    background-color: var(--color-navbar) !important;
-    border-color: var(--color-navbar) !important;
-    color: #fff !important;
+    background-color: var(--color-navbar);
+    border-color: var(--color-navbar);
+    color: #fff;
 }
 
 /* 2b. ORANJE OUTLINE — een oranje actie die niets uitvoert: "+ Add rule", Export.
  * Zelfde vorm als paars, andere betekenis: dit hoort bij de CTA op de rij, paars niet. */
 .btn-outline-orange, .btn-orange-action {
-    background-color: var(--flat-surface) !important;
-    border-color: var(--color-button) !important;
+    background-color: var(--flat-surface);
+    border-color: var(--color-button);
     border-width: 1px;
     border-style: solid;
-    color: var(--color-button) !important;
+    color: var(--color-button);
 }
 .btn-outline-orange:hover:not(:disabled), .btn-orange-action:hover:not(:disabled) {
-    background-color: var(--color-button) !important;
-    border-color: var(--color-button) !important;
-    color: #fff !important;
+    background-color: var(--color-button);
+    border-color: var(--color-button);
+    color: #fff;
 }
 
 /* 2c. NEUTRAAL GRIJS — wat géén eigen betekenis heeft: de Bootstrap-kleurnamen die
@@ -520,20 +526,20 @@ body {
 .btn-outline-secondary, .btn-outline-primary, .btn-outline-info,
 .btn-outline-success, .btn-outline-warning, .btn-secondary,
 .btn-preset, .btn-bulk-pause, .btn-bulk-activate, .btn-tool {
-    background-color: var(--flat-surface) !important;
-    border-color: var(--flat-border-strong) !important;
+    background-color: var(--flat-surface);
+    border-color: var(--flat-border-strong);
     border-width: 1px;
     border-style: solid;
-    color: var(--flat-text) !important;
+    color: var(--flat-text);
 }
 .btn-outline-secondary:hover:not(:disabled), .btn-outline-primary:hover:not(:disabled),
 .btn-outline-info:hover:not(:disabled), .btn-outline-success:hover:not(:disabled),
 .btn-outline-warning:hover:not(:disabled), .btn-secondary:hover:not(:disabled),
 .btn-preset:hover, .btn-preset:focus, .btn-tool:hover:not(:disabled),
 .btn-bulk-pause:hover:not(:disabled), .btn-bulk-activate:hover:not(:disabled) {
-    background-color: #eef0f1 !important;
-    border-color: var(--flat-muted) !important;
-    color: var(--flat-text) !important;
+    background-color: #eef0f1;
+    border-color: var(--flat-muted);
+    color: var(--flat-text);
 }
 
 /* De `-on-dark`-varianten die url-validator had, staan hier niet — ze bestaan niet meer.
@@ -543,42 +549,67 @@ body {
  * zijn weg en de knoppen dragen nu btn-outline-purple / btn-outline-orange. Verzin dus
  * geen "op donker"-variant zonder eerst de gerénderde kopkleur te meten. */
 
+/* AAN/UIT op een outline-knop — `.active` (2026-08-14, en dit repareert een bug die het
+ * !important verstopte). Index Checker heeft filterknoppen `btn btn-outline-secondary active`;
+ * Bootstrap maakt van die `.active` een gevulde #6c757d-knop, en zolang onze kleuren
+ * !important waren, overschreven wij dat — waardoor de ACTIEVE filter er precies zo uitzag
+ * als de inactieve. Je kon dus niet zien welke filter aan stond. Gemeten toen het !important
+ * eraf ging: de knop sloeg om naar Bootstrap-grijs.
+ *
+ * De aan-staat hoort niet Bootstrap-grijs te zijn maar huisstijl. #f3f0fa is dezelfde paarse
+ * tint als `.metric-toggle.on` in SEO Stats, dus twee toggles op twee pagina's zeggen "aan"
+ * op dezelfde manier. Specificiteit 0,2,0 = gelijk aan Bootstrap's `.btn-outline-*.active`,
+ * en style.css laadt later, dus dit wint.
+ *
+ * Gebruikt een pagina radio's in plaats van een `.active`-klasse (`.btn-check:checked + .btn`),
+ * dan geldt deze regel niet — SEO Stats' segmented control doet dat en heeft zijn eigen
+ * paarse aan-staat in de pagina. */
+.btn-outline-purple.active, .btn-purple-outline.active, .btn-purple-action.active,
+.btn-hs-outline.active, .btn-outline-orange.active, .btn-orange-action.active,
+.btn-outline-secondary.active, .btn-outline-primary.active, .btn-outline-info.active,
+.btn-outline-success.active, .btn-outline-warning.active, .btn-preset.active {
+    background-color: #f3f0fa;
+    border-color: var(--color-navbar);
+    color: var(--color-navbar);
+    font-weight: 600;
+}
+
 /* 3. DESTRUCTIEF blijft rood, alleen platter — een verwijderknop hoort niet in de
  * accentkleur te verdwijnen. Let op de richting: outline in rust, gevuld bij hover.
  * .btn-danger-invert (gevuld in rust) is precies het omgekeerde en is daarom weg;
  * niet opnieuw introduceren. */
 .btn-danger, .btn-danger-invert {
-    background-color: #d64545 !important;
-    border-color: #d64545 !important;
-    color: #fff !important;
+    background-color: #d64545;
+    border-color: #d64545;
+    color: #fff;
 }
 .btn-danger:hover:not(:disabled) {
-    background-color: #c03b3b !important;
-    border-color: #c03b3b !important;
+    background-color: #c03b3b;
+    border-color: #c03b3b;
 }
 .btn-outline-danger, .btn-outline-red, .btn-remove, .btn-remove-row,
 .btn-red-outline, .btn-bulk-remove {
-    background-color: var(--flat-surface) !important;
-    border-color: #e3b3b3 !important;
+    background-color: var(--flat-surface);
+    border-color: #e3b3b3;
     border-width: 1px;
     border-style: solid;
-    color: #c03b3b !important;
+    color: #c03b3b;
 }
 .btn-outline-danger:hover:not(:disabled), .btn-outline-red:hover:not(:disabled),
 .btn-remove:hover:not(:disabled), .btn-remove-row:hover:not(:disabled),
 .btn-red-outline:hover:not(:disabled), .btn-bulk-remove:hover:not(:disabled) {
-    background-color: #fdf0f0 !important;
-    border-color: #d64545 !important;
-    color: #c03b3b !important;
+    background-color: #fdf0f0;
+    border-color: #d64545;
+    color: #c03b3b;
 }
 
 /* NIET-KLIKBAAR: één grijs, ongeacht welke knopklasse eronder zit. Dit verving vier
  * losse disabled-regels (.btn-run/.btn-outline-orange/.btn-outline-purple/.btn-outline-red
  * plus #processBtn en #processAllBtn) die elk hun eigen grijs hadden. */
 .btn:disabled, .btn.disabled {
-    background-color: var(--flat-panel) !important;
-    border-color: var(--flat-border) !important;
-    color: #9aa0a6 !important;
+    background-color: var(--flat-panel);
+    border-color: var(--flat-border);
+    color: #9aa0a6;
     opacity: 1;
     cursor: not-allowed;
 }

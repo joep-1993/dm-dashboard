@@ -19,7 +19,6 @@
         .badge-action-subdivide { background-color: #b8860b; }
         .badge-action-append { background-color: #00867d; }
         .badge-action-skip { background-color: #6c757d; }
-        #applyBtn:disabled { background-color: #6c757d; border-color: #6c757d; opacity: 1; }
         /* inverted outline buttons: filled by default, outline on hover */
         .btn-fill-primary { background-color: #CC5500; border: 1px solid #CC5500; color: #fff; }
         .btn-fill-primary:hover { background-color: #E97451; border-color: #E97451; color: #fff; }
@@ -46,6 +45,12 @@
            Headline badge / PLP link / Shop name from spilling past their cell. */
         #oosTable tbody td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #oosTable tbody td .badge { max-width: 100%; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+        /* Eigen kleurregels per id zijn hier weg (2026-08-14). Deze knoppen dragen een
+           themed klasse (btn-primary), dus style.css bezit hun kleur in elke staat —
+           inclusief uitgeschakeld, want `.btn:disabled` geldt voor élke knopklasse. Een
+           id-selector wint van een klasseregel, dus zolang deze regels er stonden was het
+           `!important` in style.css het enige dat het thema overeind hield. UI_BLUEPRINT
+           "Buttons": alleen het disabled-attribuut omzetten, nooit met de hand herstylen. */
     </style>
 </head>
 <body>
