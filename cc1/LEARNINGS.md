@@ -1,6 +1,48 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een laadstaat verifiëren: hij duurt 100ms en dan concludeer je dat hij niet werkt (2026-08-14)
+
+Bij het toevoegen van een shimmer over de grafiek in SEO Stats. Drie keer op rij trok ik de
+verkeerde conclusie uit mijn eigen test, en alle drie de fouten zaten in de meting.
+
+**1. Een transiënte staat SAMPLE je niet, die POLL je.** Eerste test: klikken op 90d, 350ms
+wachten, staat uitlezen → alles uit, dus "de loader werkt niet". Fout: de server-cache was
+warm, dus de fetch was in ~100ms klaar en de staat was al voorbij. Met een interval van 40ms
+over 2,5s bleek hij netjes 11 samples aan te staan. Recept:
+
+```python
+pg.evaluate("""()=>{window.__s=[]; const w=document.getElementById('chartWrap');
+    window.__iv=setInterval(()=>window.__s.push(w.classList.contains('is-loading')?1:0), 40);}""")
+pg.click("button.btn-preset:has-text('90d')")
+pg.wait_for_timeout(2500)
+s = pg.evaluate('()=>{clearInterval(window.__iv); return window.__s;}')
+assert 1 in s and s[-1] == 0        # gezien én daarna weer uit
+```
+
+**2. Een blokkerende `sleep` in een Playwright-route-handler verstoort je timing.** Om de
+laadstaat te kunnen fotograferen wilde ik het antwoord vertragen met `time.sleep(1.8)` in de
+handler. In de sync-API loopt die handler op dezelfde thread als de driver, dus je blokkeert
+de message pump: de statusuitlezing zei "aan het laden" maar de screenshot landde ná het
+laden. Wil je alleen het BEELD: zet de staat rechtstreeks aan (`pg.evaluate('()=>chartLoading(true)')`),
+maak de foto, en bewijs het gedrag apart met de poll hierboven.
+
+**3. Een overlay die dekkend is, maakt de `opacity` eronder een dode regel — en mijn
+commentaar beweerde het tegendeel.** Ik zette de canvas op `opacity: 0.12` "zodat de oude
+lijn er nog doorheen schemert", met de shimmer als `inset: 0`-blok erbovenop. Die shimmer had
+een volledig dekkend gradient, dus er schemerde niets: de regel deed niets en het commentaar
+loog. Pas met alpha in de gradientstops (0,86) én de canvas op 0,32 werd het waar. Regel:
+als je schrijft dat iets doorheen schemert, kijk dan naar de gerenderde pixels — een
+computed-style-uitlezing van `opacity: 0.12` bevestigt alleen dat de regel is toegepast, niet
+dat je hem kunt zien.
+
+**En één maat die het waard is om te onthouden: reken een tegelrij na.** Acht tegels in SEO
+Stats pasten net niet op één rij, en "net niet" was exact vier pixels per tegel: rijbreedte
+1076 − 7 × 8px gap = 1020, gedeeld door 8 = 127,5px, tegen een gedeelde `min-width: 130px`.
+Zulke rijen gok je niet; het is één deling. En de oplossing hoort op de RIJ (`#statsRow
+.stat-card`), niet op de gedeelde klasse — dezelfde `.stat-card` draagt op die pagina ook een
+rij van vijf en een rij van zes die prima passen.
+
 ## Een override-laag opheffen: vijf dingen die de cascade dan met je doet (2026-08-14)
 
 `theme-flat.css` was één dag een laag bovenop `style.css`; na goedkeuring zijn ze

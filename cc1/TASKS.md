@@ -4,6 +4,42 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-14 — Drie kleinere punten: tegelrij, uitklappaneel, grafiekloader
+
+- [x] **SEO Stats: de acht tegels bovenin op één rij.** Ze pasten vier pixels per tegel te
+      krap: de rij is 1076px en `gap-2` kost 7 × 8px, dus (1076 − 56) / 8 = 127,5px, terwijl
+      de gedeelde `.stat-card` `min-width: 130px` aanhoudt. Met "vs prev 7d" ónder het
+      percentage in plaats van ernaast kan de tegel smaller (127px, één rij bij 1920 én
+      1500px). Dat loste ook iets op wat er al stond: bij GSAAS revenue wikkelde die caption
+      al binnen de tegel ("VS PREV" / "7D"). Gescoped op `#statsRow`, dus Dagoverzicht (5
+      tegels, 202px) en de standup (6, 167px) houden hun bredere vorm. Onder ~1400px wikkelt
+      de rij alsnog naar 4+4, en dat hoort ook — daar is 107px per tegel te smal voor
+      "434.456".
+- [x] **Bot Hits: het uitklappaneel per bot-familie.** Verticale padding van 0,9 naar 1,6rem
+      (met 0,9 plakte de eerste grafiek tegen de rij waar je net op klikte), en de vier
+      grafiektitels op `font-weight: 600` via een nieuwe `.chart-title`. Bewust niet
+      `.muted-note` verzwaren: die zit op deze pagina ook op veldlabels ("Dagen ophalen",
+      "Splitsen op", "Top") en op twee statusregels. De twee titels in het URL-uitklappaneel
+      zijn meegegaan.
+- [x] **SEO Stats: de grafiek toont nu dat hij laadt.** De tabel shimmerde al, maar de grafiek
+      bleef de vorige range tonen. Nu een `.chart-skel` met dezelfde `skelShimmer`-keyframes
+      als de tabelrijen, `aria-busy` erbij, en één `chartLoading()` die op **elke** uitgang van
+      `load()` wordt aangeroepen — ook in de catch, want een shimmer die na een mislukte fetch
+      blijft draaien leest als "nog bezig".
+
+      Twee correcties onderweg, allebei uit de meting: over 420px is het grijs van `.skel-bar`
+      een muur (lichtere stops), en de canvas-opacity eronder deed niets omdat de shimmer er
+      dekkend bovenop lag — terwijl mijn commentaar beweerde dat de oude lijn erdoor schemerde.
+      Nu heeft de shimmer alpha en staat de canvas op 0,32.
+
+**Openstaand:**
+
+- [ ] **De tegels boven de grafiek in SEO Stats houden tijdens het laden de cijfers van de
+      vorige range.** Zelfde oorzaak als de grafiek had. Niet meegenomen omdat die tegels
+      tegelijk de metric-toggles van de grafiek zijn: skeletonnen betekent dat je ze een halve
+      seconde niet kunt klikken en dat hun aan/uit-staat opnieuw gezet moet worden. Joep weet
+      het; wachten op zijn woord.
+
 ### 2026-08-14 — Negen lay-outpunten, ronde 2
 
 - [x] **GSD Tag Toppers' preview-knop** was al `btn-outline-purple`, dus die werd paars zodra
