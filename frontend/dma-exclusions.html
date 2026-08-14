@@ -149,7 +149,10 @@
                         <div class="mt-4 d-flex gap-2 justify-content-end align-items-center">
                             <span id="busy" class="text-muted me-auto" style="display:none;">
                                 <span class="spinner-border spinner-border-sm"></span> working…</span>
-                            <button id="previewBtn" class="btn btn-sm btn-outline-primary" onclick="runPreview()">Preview</button>
+                            <!-- btn-outline-purple, niet -primary: paars is de canonieke
+                                 secundaire actie; -primary is een Bootstrap-kleurnaam die
+                                 niets zegt en neutraal grijs rendert (Joep, 2026-08-14). -->
+                            <button id="previewBtn" class="btn btn-sm btn-outline-purple" onclick="runPreview()">Preview</button>
                         </div>
 
                         <!-- Preview / result -->

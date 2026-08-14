@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GSD Campaigns</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="/static/css/style.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+    <link href="/static/css/style.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <style>
         /* Deze twee datumvelden dragen een uitleg-placeholder ("Leave empty for most
@@ -106,15 +106,6 @@
         #runDate, #llDate {
             accent-color: #5e4a90; color-scheme: light;
         }
-        .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
-        .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
-        .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
-        .flatpickr-month, .flatpickr-current-month, .flatpickr-weekday { color: #5e4a90 !important; fill: #5e4a90 !important; }
-        .flatpickr-monthDropdown-months, .numInput { color: #5e4a90 !important; font-weight: 600; }
-        .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #5e4a90 !important; }
-        .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
-        .flatpickr-day.today { border-color: #5e4a90; }
-        .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
         .activity-log { font-size: 0.82rem; }
         /* AUDIT LOW — .log-entry / .log-time / .log-action removed: they styled a div-based
            log that is now a <table>, so nothing emits those names. .log-success and
@@ -163,6 +154,9 @@
 
         /* Loading skeleton rows — keep the Campaigns table at full height while
            campaigns load so the layout below doesn't shift on first paint. */
+        /* De paarse flatpickr-kalender staat sinds 2026-08-14 in css/style.css: dit
+           blok van negen regels stond op zes pagina's byte-identiek. Hier iets wijzigen
+           doet dus niets meer — pas het daar aan. */
     </style>
 </head>
 <body>
@@ -291,8 +285,12 @@
                         <option value="PAUSED">Paused</option>
                     </select>
                     <input type="text" class="form-control form-control-sm" id="filterCampaignName" placeholder="Search campaign name..." oninput="applyFilters()" style="max-width: 250px;">
-                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="newCampaignIds.clear(); loadCampaigns();">↻ Refresh</button>
-                    <button class="btn btn-sm" id="copyForExcelBtn" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyForExcel()">Copy</button>
+                    <!-- Canonieke klassen i.p.v. inline hexes met onmouseover-JS (2026-08-14):
+                         de blueprint schrijft `btn btn-outline-purple` + ↻ voor als Refresh, en
+                         hand-gestyled paars naast een canonieke paarse knop is precies wat die
+                         regel moet voorkomen. De hover zit nu in style.css. -->
+                    <button class="btn btn-sm btn-outline-purple ms-auto" onclick="newCampaignIds.clear(); loadCampaigns();">↻ Refresh</button>
+                    <button class="btn btn-sm btn-outline-purple" id="copyForExcelBtn" onclick="copyForExcel()">Copy</button>
                     <button class="btn btn-sm btn-bulk-pause" id="bulkPauseBtn" onclick="bulkAction('pause')" disabled>Pause</button>
                     <button class="btn btn-sm btn-bulk-activate" id="bulkActivateBtn" onclick="bulkAction('enable')" disabled>Activate</button>
                     <button class="btn btn-sm btn-bulk-remove" id="bulkRemoveBtn" onclick="bulkAction('remove')" disabled>Remove</button>
@@ -412,9 +410,11 @@
                         <option value="Paused">Paused</option>
                     </select>
                     <input type="text" class="form-control form-control-sm" id="llFilter" placeholder="Search shop or campaign..." oninput="applyLLFilter()" style="max-width: 250px;">
-                    <button class="btn btn-sm ms-auto" style="border: 1px solid #5e4a90; color: #5e4a90;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="loadLLHistory()">↻ Refresh</button>
-                    <button class="btn btn-sm" style="border: 1px solid #5e4a90; color: #5e4a90; background: transparent;" onmouseover="this.style.background='#5e4a90';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#5e4a90'" onclick="copyLLForExcel()">Copy</button>
-                    <button class="btn btn-sm" style="border: 1px solid #CC5500; color: #CC5500; background: transparent;" onmouseover="this.style.background='#CC5500';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='#CC5500'" onclick="exportLLShopCycles()" title="Per-shop count of paused vs re-enabled instances">Export history</button>
+                    <!-- Idem: canonieke klassen. Export history is oranje-outline, want een
+                         export is de "oranje niet-uitvoerende actie" uit de blueprint. -->
+                    <button class="btn btn-sm btn-outline-purple ms-auto" onclick="loadLLHistory()">↻ Refresh</button>
+                    <button class="btn btn-sm btn-outline-purple" onclick="copyLLForExcel()">Copy</button>
+                    <button class="btn btn-sm btn-outline-orange" onclick="exportLLShopCycles()" title="Per-shop count of paused vs re-enabled instances">Export history</button>
                 </div>
                 <div class="table-responsive gsd-table-wrap">
                     <table class="table table-sm table-hover ll-history-table mb-0">

@@ -66,10 +66,13 @@
         /* Outline buttons that sit on the green results card-header. Brand purple
            is too dark to read there, so this is the lighter #8b7bb5 the URL
            Checker already used on that same header. */
-        .btn-outline-purple-on-dark { border-color: #8b7bb5; color: #fff; background: transparent; }
-        .btn-outline-purple-on-dark:hover, .btn-outline-purple-on-dark:focus { background-color: #8b7bb5; border-color: #8b7bb5; color: #fff; }
-        .btn-outline-orange-on-dark { border-color: #CC5500; color: #fff; background: transparent; }
-        .btn-outline-orange-on-dark:hover, .btn-outline-orange-on-dark:focus { background-color: #CC5500; border-color: #CC5500; color: #fff; }
+        /* De vier regels voor de "op donker"-knopvarianten zijn hier weg (2026-08-14).
+           Ze bestonden voor een donkerpaarse kaartkop, en die is er niet meer: sinds het
+           vlakke thema rendert ELKE .card-header op #f4f5f9 (licht), ook een
+           `bg-success text-white`. Witte knoptekst op dat vlak is onleesbaar — dat viel
+           alleen niet op omdat het thema de knoppen een tijdje naar wit-vlak-met-donkere-
+           tekst dwong. De knoppen dragen nu de canonieke klassen: Copy = btn-outline-purple,
+           Download = btn-outline-orange. */
 
         /* The Validator's own results table now gets the Checker's treatment:
            fixed columns inside a scroll box, hover to expand a truncated cell. */
@@ -208,8 +211,8 @@
                         <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
                             <h5 class="mb-0">Results</h5>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-outline-purple-on-dark" onclick="copyForExcel()">Copy for Excel</button>
-                                <button class="btn btn-sm btn-outline-orange-on-dark" onclick="downloadResults()">Download Excel</button>
+                                <button class="btn btn-sm btn-outline-purple" onclick="copyForExcel()">Copy for Excel</button>
+                                <button class="btn btn-sm btn-outline-orange" onclick="downloadResults()">Download Excel</button>
                             </div>
                         </div>
                         <div class="card-body">
@@ -332,8 +335,8 @@
                         <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
                             <h5 class="mb-0">Results</h5>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-outline-purple-on-dark" id="chkCopyBtn">Copy for Excel</button>
-                                <button class="btn btn-sm btn-outline-orange-on-dark" id="chkDownloadBtn">Download Excel</button>
+                                <button class="btn btn-sm btn-outline-purple" id="chkCopyBtn">Copy for Excel</button>
+                                <button class="btn btn-sm btn-outline-orange" id="chkDownloadBtn">Download Excel</button>
                             </div>
                         </div>
                         <div class="card-body">

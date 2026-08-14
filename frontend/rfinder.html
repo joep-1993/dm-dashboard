@@ -5,7 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>R-Finder</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
     <link href="/static/css/style.css" rel="stylesheet">
+    <!-- flatpickr = de canonieke paarse kalender (UI_BLUEPRINT "Form controls"). Hiervoor
+         opende de .date-box de kale OS-kalender van de browser (Joep, 2026-08-14). Alleen
+         de library hier; het paarse thema staat in style.css. -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <style>
         .results-table { max-height: 600px; overflow-y: auto; }
         .url-cell { word-break: break-all; font-family: monospace; font-size: 0.85rem; }
@@ -197,11 +202,22 @@
         // textarea, which no longer exists.
         let lastTsv = '';
 
+        // De flatpickr-instanties, want resetFilters() moet de datums via setDate() zetten:
+        // een directe `.value =` laat flatpickr's eigen state achter op de oude datum.
+        let fpStart = null, fpEnd = null;
+
         // Initialize date range (2015-01-01 to today)
         document.addEventListener('DOMContentLoaded', () => {
             const today = new Date();
             document.getElementById('endDate').value = today.toISOString().split('T')[0];
             document.getElementById('startDate').value = '2015-01-01';
+            // flatpickr NA het zetten van de waarden: hij neemt de huidige value over.
+            if (window.flatpickr) {
+                const fpOpts = { dateFormat: 'Y-m-d', allowInput: true, disableMobile: true,
+                                 locale: { firstDayOfWeek: 1 } };
+                fpStart = flatpickr('#startDate', fpOpts);
+                fpEnd = flatpickr('#endDate', fpOpts);
+            }
             renderFilterRows();
         });
 
@@ -421,10 +437,18 @@
             document.getElementById('minVisits').value = '0';
             document.getElementById('limit').value = '4000';
 
-            // Reset dates (2015-01-01 to today)
+            // Reset dates (2015-01-01 to today). Via setDate zolang flatpickr er is: dan
+            // volgt zowel het veld als de kalender. Het tweede argument is `false` =
+            // geen onChange afvuren, want deze reset triggert zelf al niets.
             const today = new Date();
-            document.getElementById('endDate').value = today.toISOString().split('T')[0];
-            document.getElementById('startDate').value = '2015-01-01';
+            const endYmd = today.toISOString().split('T')[0];
+            if (fpStart && fpEnd) {
+                fpStart.setDate('2015-01-01', false);
+                fpEnd.setDate(endYmd, false);
+            } else {
+                document.getElementById('endDate').value = endYmd;
+                document.getElementById('startDate').value = '2015-01-01';
+            }
         }
 
         function downloadResults() {

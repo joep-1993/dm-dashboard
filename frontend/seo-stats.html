@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SEO stats</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
     <link href="/static/css/style.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
     <style>
         .stat-card {
@@ -121,15 +121,6 @@
         #startDate, #endDate, #refDate, #catDate, #dashDate {
             accent-color: #5e4a90; color-scheme: light;
         }
-        .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
-        .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
-        .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
-        .flatpickr-month, .flatpickr-current-month, .flatpickr-weekday { color: #5e4a90 !important; fill: #5e4a90 !important; }
-        .flatpickr-monthDropdown-months, .numInput { color: #5e4a90 !important; font-weight: 600; }
-        .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #5e4a90 !important; }
-        .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
-        .flatpickr-day.today { border-color: #5e4a90; }
-        .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
         /* NO .card-header .btn-outline-purple override here, on purpose (Joep,
            2026-07-31: "the Refresh button should be transparent, is now white").
            The `style="background:#5e4a90"` on the card headers below is DEAD CSS —
@@ -302,6 +293,9 @@
            class only sets geometry. */
         .cat-banner-btn { width: 100%; max-width: 460px; padding: 0.65rem 1.5rem;
                           font-size: 1rem; font-weight: 600; }
+        /* De paarse flatpickr-kalender staat sinds 2026-08-14 in css/style.css: dit
+           blok van negen regels stond op zes pagina's byte-identiek. Hier iets wijzigen
+           doet dus niets meer — pas het daar aan. */
     </style>
 </head>
 <body>

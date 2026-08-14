@@ -463,35 +463,80 @@ body {
     color: #fff !important;
 }
 
-/* 2. SECUNDAIR — outline in neutraal grijs. Dit verving de oranje ÉN de paarse
- * outline-knoppen; dat onderscheid bestond alleen in kleur en niet in betekenis. */
-.btn-outline-purple, .btn-outline-orange, .btn-outline-secondary,
-.btn-outline-primary, .btn-outline-info, .btn-outline-success,
-.btn-outline-warning, .btn-secondary,
-.btn-purple-action, .btn-orange-action, .btn-purple-outline, .btn-tool,
-.btn-hs-outline, .btn-preset, .btn-bulk-pause, .btn-bulk-activate,
-.btn-outline-purple-on-dark, .btn-outline-orange-on-dark {
+/* 2a. SECUNDAIR PAARS — "elke andere actie", en de vaste vorm van Refresh.
+ *
+ * De eerste versie van het vlakke thema maakte alle outline-knoppen neutraal grijs, op
+ * het argument dat paars-versus-oranje alleen kleur was en geen betekenis. Dat is op
+ * 2026-08-14 teruggedraaid op verzoek van Joep: paars ís de betekenis "secundaire
+ * actie", en de blueprint schreef `btn btn-outline-purple` + `↻` al voor als de
+ * canonieke Refresh. Grijs maakte van elke Refresh op elke pagina een naamloos knopje.
+ *
+ * Contrast: #5e4a90 op wit haalt 7,35:1, en wit op #5e4a90 bij hover ook — ruim boven
+ * AA. Dit is dus, anders dan het blauwe accent, wél een kleur die tekst mag zijn.
+ *
+ * De alias-klassen die pagina's zelf verzonnen (.btn-purple-outline in Redirect-tool,
+ * .btn-purple-action, .btn-hs-outline in Healthscore, .btn-tool op het dashboard) staan
+ * erbij omdat ze op hun pagina's al paars-outline waren: anders staat een grijze
+ * .btn-purple-action naast een paarse .btn-outline-purple in dezelfde knoppenrij. */
+.btn-outline-purple, .btn-purple-outline, .btn-purple-action,
+.btn-hs-outline, .btn-tool {
+    background-color: var(--flat-surface) !important;
+    border-color: var(--color-navbar) !important;
+    border-width: 1px;
+    border-style: solid;
+    color: var(--color-navbar) !important;
+}
+.btn-outline-purple:hover:not(:disabled), .btn-purple-outline:hover:not(:disabled),
+.btn-purple-action:hover:not(:disabled), .btn-hs-outline:hover:not(:disabled),
+.btn-tool:hover:not(:disabled) {
+    background-color: var(--color-navbar) !important;
+    border-color: var(--color-navbar) !important;
+    color: #fff !important;
+}
+
+/* 2b. ORANJE OUTLINE — een oranje actie die niets uitvoert: "+ Add rule", Export.
+ * Zelfde vorm als paars, andere betekenis: dit hoort bij de CTA op de rij, paars niet. */
+.btn-outline-orange, .btn-orange-action {
+    background-color: var(--flat-surface) !important;
+    border-color: var(--color-button) !important;
+    border-width: 1px;
+    border-style: solid;
+    color: var(--color-button) !important;
+}
+.btn-outline-orange:hover:not(:disabled), .btn-orange-action:hover:not(:disabled) {
+    background-color: var(--color-button) !important;
+    border-color: var(--color-button) !important;
+    color: #fff !important;
+}
+
+/* 2c. NEUTRAAL GRIJS — wat géén eigen betekenis heeft: de Bootstrap-kleurnamen die
+ * alleen maar "een knop" zeggen, en de segmented controls. Hover bevestigt alleen dat
+ * hij klikbaar is en claimt geen kleur. */
+.btn-outline-secondary, .btn-outline-primary, .btn-outline-info,
+.btn-outline-success, .btn-outline-warning, .btn-secondary,
+.btn-preset, .btn-bulk-pause, .btn-bulk-activate {
     background-color: var(--flat-surface) !important;
     border-color: var(--flat-border-strong) !important;
     border-width: 1px;
     border-style: solid;
     color: var(--flat-text) !important;
 }
-.btn-outline-purple:hover:not(:disabled), .btn-outline-orange:hover:not(:disabled),
 .btn-outline-secondary:hover:not(:disabled), .btn-outline-primary:hover:not(:disabled),
 .btn-outline-info:hover:not(:disabled), .btn-outline-success:hover:not(:disabled),
 .btn-outline-warning:hover:not(:disabled), .btn-secondary:hover:not(:disabled),
-.btn-purple-action:hover:not(:disabled), .btn-orange-action:hover:not(:disabled),
-.btn-purple-outline:hover:not(:disabled), .btn-tool:hover:not(:disabled),
-.btn-hs-outline:hover:not(:disabled), .btn-preset:hover, .btn-preset:focus,
+.btn-preset:hover, .btn-preset:focus,
 .btn-bulk-pause:hover:not(:disabled), .btn-bulk-activate:hover:not(:disabled) {
-    /* Neutrale hover, geen eigen kleur: met een oranje CTA op dezelfde rij zouden dat
-     * drie kleuren zijn. Een secundaire knop hoeft bij hover alleen te bevestigen dat
-     * hij klikbaar is. */
     background-color: #eef0f1 !important;
     border-color: var(--flat-muted) !important;
     color: var(--flat-text) !important;
 }
+
+/* De `-on-dark`-varianten die url-validator had, staan hier niet — ze bestaan niet meer.
+ * Ze waren wit-op-transparant voor een donkerpaarse kaartkop, en die is er sinds het
+ * vlakke thema niet: elke .card-header rendert op --flat-panel, ook een `bg-success
+ * text-white`. Gemeten op 2026-08-14: witte knoptekst op #f4f5f9. De vier pagina-regels
+ * zijn weg en de knoppen dragen nu btn-outline-purple / btn-outline-orange. Verzin dus
+ * geen "op donker"-variant zonder eerst de gerénderde kopkleur te meten. */
 
 /* 3. DESTRUCTIEF blijft rood, alleen platter — een verwijderknop hoort niet in de
  * accentkleur te verdwijnen. Let op de richting: outline in rust, gevuld bij hover.
@@ -658,6 +703,17 @@ thead.sticky-top {
 .form-control::placeholder { color: #9aa0a6; }
 .form-label { color: var(--flat-muted); font-weight: 500; }
 
+/* BESTANDSUPLOAD — 32rem (512px) en niet de volle kaartbreedte (Joep, 2026-08-14: de
+ * upload in Kopteksten en Unique titles mocht smaller, "die van Auto-Redirects is prima").
+ * Gemeten: Auto-Redirects staat in een col-md-6 en komt daardoor op 513px uit, Kopteksten
+ * op 939px en Unique titles op 1042px. Een file-input is geen tekstveld: de inhoud is één
+ * knop plus een bestandsnaam, dus meerekken met de kaart geeft alleen leegte.
+ *
+ * Als gedeelde regel en niet als inline breedte per pagina, want er zijn elf van deze
+ * velden over negen pagina's en de volgende krijgt hem dan gratis. Een pagina die om een
+ * eigen reden breder moet, zet zelf een `max-width` — die wint van deze regel. */
+input[type="file"].form-control { max-width: 32rem; }
+
 /* ------------------------------------------------------------------ *
  * Tabellen — vlakke kop op paneelkleur, lichte rijscheiding, accentzachte hover.
  * ------------------------------------------------------------------ */
@@ -669,6 +725,41 @@ thead.sticky-top {
     border-bottom: 1px solid var(--flat-border);
 }
 .table-hover > tbody > tr:hover > * { background-color: var(--flat-accent-soft); }
+
+/* DE BLUEPRINT-TABEL, canoniek (2026-08-14). Markup:
+ *   <div class="tool-table-wrap">
+ *     <table class="table table-sm table-hover tool-table"><thead class="table-light">…
+ *
+ * Deze basis stond alleen in page-<style>-blokken, in acht varianten over elf pagina's.
+ * Hij staat nu hier, zodat een nieuwe tabel de opmaak gratis heeft; de elf bestaande
+ * blokken blijven staan en winnen waar ze afwijken (page-<style> laadt later), dus dit is
+ * additief en verandert geen bestaande pagina. Het samenvoegen van die acht varianten is
+ * een aparte klus — zie cc1/TASKS.md.
+ *
+ * De kopkleur staat er BEWUST niet in: `.table thead th` hierboven is specifieker
+ * (0,1,2 tegen 0,1,1) en wint toch, zelfs vanuit een page-<style>. Een `background` hier
+ * zou een regel zijn die nooit iets doet. Hier dus alleen maatvoering, plakken en de
+ * sorteerglyphs. */
+.tool-table-wrap { border: 1px solid #eee; border-radius: 4px; overflow: auto; }
+.tool-table { font-size: 0.9rem; margin-bottom: 0; }
+.tool-table th {
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 6px 14px;
+    font-size: 1rem;
+}
+.tool-table td { vertical-align: middle; }
+/* Nooit `position: relative` op th.sortable: dat verslaat de `sticky` hierboven en dan
+ * plakken alleen de niet-sorteerbare kolommen. `sticky` is zelf al een positioned
+ * ancestor, dus de ::after heeft het niet nodig (UI_BLUEPRINT "Tables"). */
+.tool-table th.sortable { cursor: pointer; user-select: none; padding-right: 1.2rem; }
+.tool-table th.sortable:hover { background: #e9ecef; }
+.tool-table th.sortable::after { content: '⇅'; position: absolute; right: 0.3rem; opacity: 0.4; font-size: 0.7rem; }
+.tool-table th.sort-asc::after  { content: '▲'; opacity: 0.9; }
+.tool-table th.sort-desc::after { content: '▼'; opacity: 0.9; }
+.tool-table .col-center { text-align: center; }
 
 /* Alerts: zelfde radius als de rest, en een rand van 1px i.p.v. Bootstrap's dikkere. */
 .alert { border-radius: var(--flat-radius); border-width: 1px; }
@@ -761,24 +852,55 @@ thead.sticky-top {
     background: none !important;
     box-shadow: none !important;
     padding: 0.1rem 0;
-    width: 6.6rem;
     font-size: 0.85rem;
     color: #1d2129;
 }
+
+/* DE VELDBREEDTE HANGT AF VAN WAT ER IN HET VELD STAAT, niet van de pagina (2026-08-14).
+ * Eerst stond hier één 6,6rem voor allebei, met 26px lucht per veld — dat zag Joep.
+ *   - flatpickr: het veld is een `type=text` met altijd exact `YYYY-MM-DD`. Gemeten:
+ *     79,0px bij 13,6px system-ui, dus 5,3rem (84,8px) laat ~6px over.
+ *   - native: Chrome zet zijn eigen kalendericoon ÍN het veld en toont `13-08-2026`.
+ *     Daar is 6,6rem de bodem; smaller kapt het icoon af.
+ * Een veld matcht altijd precies één van de twee, want flatpickr zet de input op
+ * `type=text` — dus dit kan niet per ongeluk een native veld afknijpen. */
+.date-box input[type="date"] { width: 6.6rem; }
+.date-box input.flatpickr-input { width: 5.3rem; }
 .date-box .sep { color: #9aa0a6; }
 
-/* SMALLE VARIANT — `<div class="date-box date-box-tight">` (Joep, 2026-08-14: de picker in
- * Retrieve URL data mocht iets minder breed).
+/* De smalle variant die hier eerst als `.date-box-tight` stond, is per 2026-08-14 de
+ * DEFAULT voor elk flatpickr-veld (zie de breedteregels hierboven) — Joep wilde die maat
+ * dashboardbreed, niet als uitzondering per pagina. De modifier is daarom weg. */
+
+/* ------------------------------------------------------------------ *
+ * DE PAARSE KALENDER — het flatpickr-thema, één keer.
  *
- * 5,3rem = 84,8px. Gemeten: `2025-01-01` is 79,0px bij 13,6px system-ui, dus er blijft
- * ~6px lucht. De standaard 6,6rem heeft 26px lucht, en dat zag je.
+ * Dit blok van negen regels stond op zes pagina's afzonderlijk (bothits, gsd-budgets,
+ * gsd-campaigns, seo-stats, seo-titles, shop-campaigns) en was daar byte-identiek —
+ * gecontroleerd met een md5 over de genormaliseerde regels vóór het verplaatsen. Hier
+ * staat het één keer, zodat een zevende pagina de kalender gratis goed heeft in plaats
+ * van via kopiëren-en-hopen (Joep, 2026-08-14: R-Finder had de kale OS-kalender).
  *
- * De selector eindigt op `input.flatpickr-input` en dat is de hele beveiliging: valt de
- * flatpickr-CDN weg, dan blijft het veld een `type="date"`, krijgt het die klasse nooit,
- * en staat de volle 6,6rem er weer — precies de breedte die Chrome's eigen kalendericoon
- * plus `13-08-2026` nodig heeft. Deze variant kan dus niet "stiekem" een native veld
- * afkappen, en daarom hoeft de pagina er verder niets van te weten. */
-.date-box.date-box-tight input.flatpickr-input { width: 5.3rem; }
+ * Het kost niets op een pagina zonder flatpickr: die selectors matchen dan niets. En de
+ * pagina's blijven zelf de CDN-regels + de `flatpickr(...)`-init dragen — zonder die twee
+ * is er geen kalender om te thematiseren. Zie cc1/UI_BLUEPRINT.md "Form controls".
+ *
+ * LET OP DE LINKVOLGORDE: `flatpickr.min.css` moet VÓÓR style.css staan. Toen dit blok nog
+ * in een page-`<style>` stond kon dat niet misgaan (dat is altijd het laatste woord), maar
+ * hier verliest het van flatpickr's eigen `.flatpickr-calendar { border-radius: 5px }` als
+ * die stylesheet later laadt. Gemeten: op alle acht pagina's stond de kalender daardoor
+ * even op 5px in plaats van 12px. De links zijn daarom rechtgezet naar bootstrap →
+ * flatpickr → style.css: onze stylesheet is de override-laag, dus die komt als laatste.
+ * ------------------------------------------------------------------ */
+.flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
+.flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
+.flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+.flatpickr-month, .flatpickr-current-month, .flatpickr-weekday { color: #5e4a90 !important; fill: #5e4a90 !important; }
+.flatpickr-monthDropdown-months, .numInput { color: #5e4a90 !important; font-weight: 600; }
+.flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #5e4a90 !important; }
+.flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
+.flatpickr-day.today { border-color: #5e4a90; }
+.flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
 
 /* Focus hoort om de BOX, niet om een veld: de inputs hierin hebben border 0 en
  * box-shadow none, dus een focusstijl op de input is letterlijk onzichtbaar. Dat was

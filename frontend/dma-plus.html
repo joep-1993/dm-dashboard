@@ -255,20 +255,27 @@
                     <div class="card-header">
                         <h5 class="mb-0">Run History</h5>
                     </div>
+                    <!-- Blueprint-tabel (2026-08-14): .tool-table-wrap + table-sm/-hover/
+                         tool-table, en thead.table-light i.p.v. een eigen grijze <tr> met
+                         inline padding per <th>. table-bordered is eruit: de blueprint-tabel
+                         scheidt rijen met één lijn, geen rasterkader. De opmaak komt nu uit
+                         style.css, dus er staat hier geen maatvoering meer. -->
                     <div class="card-body p-0">
-                        <table class="table table-sm table-bordered mb-0" id="historyTable">
-                            <thead>
-                                <tr style="background:#f0f0f0; border-bottom: 2px solid #dee2e6;">
-                                    <th style="padding: 8px 12px;">Time</th>
-                                    <th style="padding: 8px 12px;">Operation</th>
-                                    <th style="padding: 8px 12px;">Country</th>
-                                    <th style="padding: 8px 12px;">Status</th>
-                                    <th style="padding: 8px 12px;">Summary</th>
-                                    <th style="padding: 8px 12px; width: 70px;">Export</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyBody"><tr><td colspan="6" class="text-muted text-center">No history yet</td></tr></tbody>
-                        </table>
+                        <div class="tool-table-wrap">
+                            <table class="table table-sm table-hover tool-table" id="historyTable">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Operation</th>
+                                        <th>Country</th>
+                                        <th>Status</th>
+                                        <th>Summary</th>
+                                        <th style="width: 70px;">Export</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="historyBody"><tr><td colspan="6" class="text-muted text-center">No history yet</td></tr></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -613,7 +620,21 @@
                 return;
             }
             tbody.innerHTML = historyData.map((h, idx) => {
-                const time = h.completed_at ? new Date(h.completed_at).toLocaleString('nl-NL') : '-';
+                // `YYYY-MM-DD HH:MM` uit UI_BLUEPRINT i.p.v. "30-6-2026, 21:15:48" — kort,
+                // sorteerbaar en het wikkelt niet in de kolom.
+                //
+                // LET OP: NIET de fmtTs uit dma-exclusions kopiëren. Die plakt een "Z" achter
+                // een offset-loze string omdat de waarde daar uit Postgres komt (Etc/UTC).
+                // Hier schrijft de backend `datetime.now().isoformat()` (dma_plus_service.py),
+                // dus dit is al Amsterdamse wandkloktijd zonder offset — met die Z zou de
+                // historie er twee uur later uit gaan zien dan hij is. Daarom geen timeZone en
+                // geen Z: alleen het formaat overgenomen. (Dat de backend naïef-lokaal opslaat
+                // in plaats van UTC is een echt maar apart punt; zie cc1/TASKS.md.)
+                const time = h.completed_at
+                    ? new Date(h.completed_at).toLocaleString('sv-SE',
+                        { year: 'numeric', month: '2-digit', day: '2-digit',
+                          hour: '2-digit', minute: '2-digit' })
+                    : '-';
                 const statusBadge = h.status === 'completed'
                     ? '<span class="badge" style="border: 1px solid #00b894; color: #00b894; background: transparent;">completed</span>'
                     : '<span class="badge" style="border: 1px solid #d63031; color: #d63031; background: transparent;">failed</span>';

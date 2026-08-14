@@ -20,8 +20,9 @@
         .changed { background-color: #d4edda !important; }
         .tab-content { padding-top: 1rem; }
         pre { background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; overflow-x: auto; }
-        .btn-purple { background-color: #5e4a90; border-color: #5e4a90; color: #fff; }
-        .btn-purple:hover { background-color: #4a3a73; border-color: #4a3a73; color: #fff; }
+        /* De lokale gevuld-paarse knopklasse is hier weg (2026-08-14): de zes
+           "+ Add Rule"-knoppen dragen nu btn-outline-orange, dus deze twee regels
+           hadden geen gebruiker meer. Kleuren staan in style.css, niet per pagina. */
         #canonPushBtn:disabled { opacity: 0.65; cursor: not-allowed; }
     </style>
 </head>
@@ -126,7 +127,7 @@
                                     </div>
                                     <!-- Rules will be added here -->
                                 </div>
-                                <button class="btn btn-sm btn-purple" onclick="addCatCatRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-outline-orange" onclick="addCatCatRule()">+ Add Rule</button>
                             </div>
 
                             <!-- FACET-FACET: Replace facet with another -->
@@ -139,7 +140,7 @@
                                         <div class="col-3"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-purple" onclick="addFacetFacetRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-outline-orange" onclick="addFacetFacetRule()">+ Add Rule</button>
                             </div>
 
                             <!-- CAT+FACET (keep): Change category for faceted URLs (keep facet) -->
@@ -152,7 +153,7 @@
                                         <div class="col-3"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-purple" onclick="addCatFacetRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-outline-orange" onclick="addCatFacetRule()">+ Add Rule</button>
                             </div>
 
                             <!-- CAT+FACET (remove): Change category and remove facet -->
@@ -165,7 +166,7 @@
                                         <div class="col-3"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-purple" onclick="addCatFacetRemoveRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-outline-orange" onclick="addCatFacetRemoveRule()">+ Add Rule</button>
                             </div>
 
                             <!-- BUCKET: Replace or remove bucket -->
@@ -178,7 +179,7 @@
                                         <div class="col-5"><small class="text-muted">New Bucket</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-purple mb-3" onclick="addBucketBucketRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-outline-orange mb-3" onclick="addBucketBucketRule()">+ Add Rule</button>
 
                                 <h6>Remove Bucket</h6>
                                 <div class="rule-section" id="removeBucketRules">
@@ -187,7 +188,7 @@
                                         <div class="col-5"><small class="text-muted">Category (opt)</small></div>
                                     </div>
                                 </div>
-                                <button class="btn btn-sm btn-purple" onclick="addRemoveBucketRule()">+ Add Rule</button>
+                                <button class="btn btn-sm btn-outline-orange" onclick="addRemoveBucketRule()">+ Add Rule</button>
                             </div>
                         </div>
 
@@ -202,7 +203,7 @@
                         <!-- Actions -->
                         <div class="d-flex gap-2 justify-content-end">
                             <button class="btn btn-outline-purple btn-sm" onclick="previewUrls()">Preview URLs</button>
-                            <button class="btn btn-secondary btn-sm" onclick="generateCanonicals()">Generate</button>
+                            <button class="btn btn-run btn-sm" onclick="generateCanonicals()">Generate</button>
                         </div>
                     </div>
                 </div>
@@ -801,30 +802,37 @@
                     container.innerHTML = '<p class="text-muted text-center mb-0">No results yet. Generate canonicals to create one.</p>';
                     return;
                 }
+                // Blueprint-tabel (2026-08-14): .tool-table-wrap + table-sm/-hover/tool-table
+                // met thead.table-light. Weg: table-striped (de blueprint markeert met hover,
+                // niet met zebra), zes keer 16,66% (zes gelijke kolommen voor #, datum, label
+                // en twee getallen is geen kolombreedte maar een deling), en text-center over
+                // de hele tabel — tekstkolommen links, getallen en acties gecentreerd via
+                // .col-center. De Delete-knop is de canonieke btn-outline-red i.p.v. een
+                // inline rode rand met twee onmouseover-handlers.
                 container.innerHTML = `
-                    <div class="results-table">
-                        <table class="table table-sm table-striped mb-0 text-center" style="table-layout: fixed;">
-                            <thead>
+                    <div class="tool-table-wrap results-table">
+                        <table class="table table-sm table-hover tool-table" style="table-layout: fixed;">
+                            <thead class="table-light">
                                 <tr>
-                                    <th style="width: 16.66%">#</th>
-                                    <th style="width: 16.66%">Date</th>
-                                    <th style="width: 16.66%">Label</th>
-                                    <th style="width: 16.66%">Changed</th>
-                                    <th style="width: 16.66%">Total</th>
-                                    <th style="width: 16.66%"></th>
+                                    <th class="col-center" style="width: 70px">#</th>
+                                    <th style="width: 150px" title="Europe/Amsterdam (opgeslagen als UTC)">Date</th>
+                                    <th>Label</th>
+                                    <th class="col-center" style="width: 100px">Changed</th>
+                                    <th class="col-center" style="width: 90px">Total</th>
+                                    <th class="col-center" style="width: 165px"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${runs.map(r => `
                                     <tr>
-                                        <td>${escapeHtml(String(r.id))}</td>
-                                        <td>${escapeHtml(formatRunDate(r.created_at))}</td>
+                                        <td class="col-center">${escapeHtml(String(r.id))}</td>
+                                        <td title="${escapeHtml(String(r.created_at || ''))} UTC (opgeslagen waarde)">${escapeHtml(formatRunDate(r.created_at))}</td>
                                         <td>${escapeHtml(r.label || '—')}</td>
-                                        <td>${escapeHtml(String(r.changed))}</td>
-                                        <td>${escapeHtml(String(r.total))}</td>
-                                        <td>
+                                        <td class="col-center">${escapeHtml(String(r.changed))}</td>
+                                        <td class="col-center">${escapeHtml(String(r.total))}</td>
+                                        <td class="col-center">
                                             <button class="btn btn-sm btn-outline-purple" onclick="loadCanonicalRun(${Number(r.id) || 0})">Load</button>
-                                            <button class="btn btn-sm" style="border: 1px solid #dc3545; color: #dc3545;" onmouseover="this.style.backgroundColor='#dc3545';this.style.color='#fff'" onmouseout="this.style.backgroundColor='transparent';this.style.color='#dc3545'" onclick="deleteCanonicalRun(${Number(r.id) || 0})">Delete</button>
+                                            <button class="btn btn-sm btn-outline-red" onclick="deleteCanonicalRun(${Number(r.id) || 0})">Delete</button>
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -837,10 +845,25 @@
             }
         }
 
+        // Europe/Amsterdam, `YYYY-MM-DD HH:MM` — de fmtTs uit dma-exclusions.html, want de
+        // blueprint schrijft die letterlijk voor (UI_BLUEPRINT "Tables" → Timestamp columns).
+        // Wat het hier oplevert:
+        //  1. `toLocaleString()` zonder locale gaf "8/10/2026, 11:55:43 AM" en dat wikkelde
+        //     over twee regels in de kolom. Dit is 16 tekens en past.
+        //  2. De zone is nu expliciet Amsterdam i.p.v. die van de kijker.
+        // De "Z"-tak is hier een no-op en staat er als vangnet: /api/canonical/runs levert
+        // `…+00:00` mee (nagekeken), dus de regex matcht en er wordt niets toegevoegd. Bij een
+        // endpoint dat de offset WEGLAAT — de shared Postgres staat op Etc/UTC en
+        // `.isoformat()` schrijft dan zonder offset — parseert JS de string als LOKAAL en is
+        // die tak wél nodig. Niet weghalen omdat hij "niets doet".
         function formatRunDate(iso) {
             if (!iso) return '';
-            const d = new Date(iso);
-            return isNaN(d) ? iso : d.toLocaleString();
+            const d = new Date(/(Z|[+-]\d\d:?\d\d)$/.test(iso) ? iso : iso + 'Z');
+            return isNaN(d)
+                ? String(iso).replace('T', ' ').slice(0, 16)
+                : d.toLocaleString('sv-SE', { timeZone: 'Europe/Amsterdam',
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit' });
         }
 
         async function loadCanonicalRun(runId) {
