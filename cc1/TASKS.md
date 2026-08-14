@@ -4,6 +4,53 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-14 — Negen lay-outpunten, ronde 2
+
+- [x] **GSD Tag Toppers' preview-knop** was al `btn-outline-purple`, dus die werd paars zodra
+      het vocabulaire terug was. Geen wijziging nodig.
+- [x] **`.btn-tool` weer neutraal grijs.** Dat zijn de "Open tool"-knoppen op de startpagina:
+      vijftien naast elkaar in een tegelgrid, en in paars is de knop dan het opvallendste
+      element op de pagina in plaats van de tool waar hij bij hoort.
+- [x] **MC ID Finder:** kop naar "Search Merchant Center id's".
+- [x] **Thema Ads:** `.more-info-btn` naar de vlakke stijl (dezelfde rand, radius en
+      tekstkleur als een neutrale outline-knop, i.p.v. `#6c757d` met radius 4px), en
+      "Reset Labels" van `btn-warning` naar `btn-outline-purple` — `btn-warning` is in het
+      vlakke thema de gevulde oranje CTA, en dit is een secundaire actie.
+- [x] **SEO Stats:** de "Show categories"-banner van paars naar grijs. Hij is 460px breed en
+      klapt alleen een sectie open; in paars was hij het opvallendste op de pagina.
+- [x] **Canonicals-tabs:** de vorm was al goed (onderlijn, geen kaders) — de actieve lijn
+      stond op het **blauwe** accent terwijl UI_BLUEPRINT §Tabs brand-paars voorschrijft, met
+      de reden erbij ("blauw zou als een tweede merk lezen"). Het thema had die regel
+      overschreven; nu weer paars, dashboardbreed.
+- [x] **Canonicals' Preview/Generate/"+ Add Rule"** zat al in de vorige commit.
+- [x] **Paginabreedte gelijkgetrokken, en dat heft een besluit van 2026-07-30 op.** De
+      blueprint had twee toegestane breedtes: standaard `col-md-10` (1076px) en een
+      *data-dense uitzondering* `col-lg-11` (1186px) voor precies vijf pagina's. Alle vijf
+      omgezet: **Bot Hits, SEO Stats, SEO titles, DMA Exclusions, Healthscore**. Een meting
+      over alle 35 pagina's bevestigde dat er geen zesde was. Twee bijvangsten: `url-checker`
+      en `seo-titles` hadden hun kolom **zonder** `.row`, wat 1080px geeft in plaats van
+      1076 — dat mist de negatieve marges van het grid. Eén pagina wijkt met opzet af:
+      `dashboard.html`, want de tegelgrid van de startpagina hoort niet in een 1076px-kolom.
+- [x] **SEO Stats: drie tegels erbij in Performance standup** — SEO CTR, OPB en Bounce, met
+      hetzelfde lijntje en dezelfde Δ%-kop als hun drie buren. Bounce is de enige waar omhoog
+      slecht is, dus die kleurt omgekeerd (`pctText(..., invert)`).
+
+      **Backend:** `/deltas` gaf alleen bezoeken en omzet, dus er is een `seo_rates`-blok bij
+      gekomen met waarden én deltas. De dagkeuze is daarin het echte werk: CTR en Bounce
+      hangen aan de **bezoekdagen** (ref vs ref-7), OPB aan de **omzetdagen** (ref-1 vs
+      ref-8), zodat teller en noemer van OPB dezelfde dag zijn. Zou OPB de omzet van ref-1
+      delen door de bezoeken van ref, dan meet de tegel vooral het verschil tussen twee
+      dagen. Voor CTR en Bounce staat de puntverandering er ook bij, want een Δ% op een
+      percentage is een percentage van een percentage.
+
+      **En een bug in een gedeelde helper, die deze tegels aan het licht brachten:**
+      `_fetch_daily` haalt bezoeken met een `IN`-lijst maar omzet met
+      `WHERE tac.date BETWEEN dates[0] AND dates[-1]`. Dat maakte de **sortering** van
+      `dates` een stille voorwaarde: mijn ongesorteerde `[vis_p1, vis_p2, rev_p1, rev_p2]`
+      gaf bezoeken voor alle vier de dagen maar omzet 0,0 voor de twee buiten de range
+      (gemeten: 05-08 en 13-08 op nul, 06-08 en 12-08 niet). Opgelost met `min()`/`max()` in
+      de helper zelf in plaats van bij de beller, zodat de volgende beller er niet in trapt.
+
 ### 2026-08-14 — theme-flat samengevoegd met style.css, en negen lay-outpunten
 
 Joep keurde de flat-proef goed. Eén stylesheet dus, en daarna een reeks punten die op het

@@ -31,20 +31,31 @@ hexes inline, use the token or the class that references it:
   vs the native toggles' `normal` makes that unreliable). The apps button is
   deliberately **excluded from the responsive `@media` padding/font rules** (fixed
   `2.75rem`-wide box at every breakpoint). Icon markup is hand-duplicated per page.
-- **Fixed width wrapper — two sanctioned widths, decided 2026-07-30:**
-  - **Default: `container mt-5 pb-5` › `row` › `col-md-10 mx-auto`** (~950px at a
-    1200-1399px window, ~1074px at ≥1400px). Every tool uses this unless it is on
-    the list below.
-  - **Data-dense exception: `col-lg-11 mx-auto`** (~1045px / ~1184px) for the five
-    pages whose content genuinely needs it: **SEO stats, Healthscore, SEO titles,
-    DMA Exclusions, Bot Hits**. Bot Hits joined on 2026-08-12 (Joep: "gelijktrekken
-    aan SEO stats") — it was the last page still on `container-fluid` with a hand-set
-    `max-width: 1500px`, and six tiles on one row plus eight-column tables put it in
-    the same bracket as SEO stats. Watch the trap that cost a round here: swapping
-    `container-fluid` for a **bare** container centres the page but leaves it wider
-    than every other tool, and it *looks* fixed. The width only matches once the
-    `row` › `col-lg-11` wrapper is there too — verify by measuring the rendered
-    edges at two window sizes, not by comparing the class names.
+- **Fixed width wrapper — ÉÉN breedte, en dat is sinds 2026-08-14 zonder uitzondering:**
+  `container mt-5 pb-5` › `row` › `col-md-10 mx-auto` (~950px bij een 1200-1399px venster,
+  **1076px** bij ≥1400px). Elke tool, geen lijst met uitzonderingen.
+
+  **De "data-dense" uitzondering `col-lg-11` is opgeheven** (Joep, 2026-08-14: "in Bothits
+  en SEO Stats dezelfde standaard paginabreedte aanhouden als in Kopteksten"). Die was op
+  2026-07-30 ingevoerd voor vijf pagina's — SEO stats, Healthscore, SEO titles, DMA
+  Exclusions en Bot Hits — en gaf 1186px tegen 1076px. Precies die vijf zijn omgezet; een
+  meting over alle 35 pagina's bevestigde dat er geen zesde was. Het argument voor de
+  uitzondering (zes tegels op één rij, tabellen met acht kolommen) weegt niet op tegen wat
+  het kostte: bij elke wijziging moest je eerst uitzoeken of een pagina in de lijst stond, en
+  twee pagina's naast elkaar in twee tabs lezen als twee verschillende apps. De brede
+  tabellen hebben hun eigen `overflow` via `.tool-table-wrap`, dus smaller worden kost daar
+  niets — dat stond al in de code van Bot Hits.
+
+  **De val die hier eerder een ronde kostte, geldt nog steeds:** `container-fluid` inwisselen
+  voor een **blote** container centreert de pagina maar laat hem breder dan de rest, en het
+  *lijkt* opgelost. De breedte klopt pas met de `row` › `col-md-10`-wrapper erbij. En let op
+  een kolom **zonder** `row`: die mist de negatieve marges van het grid en wordt 1080 in
+  plaats van 1076px — `url-checker` en `seo-titles` hadden dat, en het valt met het oog niet
+  op. Meet de gerenderde randen, vergelijk geen klassenamen.
+
+  **Eén pagina wijkt met opzet af:** `dashboard.html`, de startpagina. Dat is geen tool maar
+  een overzicht, en de tegelgrid gebruikt de volle `container` (1320px) met `row g-4`. Die
+  hoort niet in de 1076px-kolom.
     SEO stats and Healthscore ran on a *bare* container (~1140px /
     ~1320px) until this date, which is why they read visibly wider than the rest of
     the app; `col-lg-11` brings them into a sanctioned width without squeezing
@@ -767,7 +778,7 @@ commit vóór de restyle wijst. Dat is met opzet zo gelaten in de merge-commit v
 | rand | `--flat-border` | `#d6d8d7` |
 | rand van een outline-knop | `--flat-border-strong` | `#c3c7cc` |
 | tekst / secundair | `--flat-text` / `--flat-muted` | `#1a1d19` / `#666a6b` |
-| accent — alleen LIJNEN | `--flat-accent` | `#8796ef` |
+| accent — alleen LIJNEN (focus, chiprand) | `--flat-accent` | `#8796ef` |
 | chip- en hovervulling | `--flat-accent-soft` | `#eaeef9` |
 | actie (CTA) | `--color-button` | `#CC5500`, hover `#E97451` |
 | secundaire actie | `--color-navbar` | `#5e4a90` |
@@ -779,7 +790,7 @@ commit vóór de restyle wijst. Dat is met opzet zo gelaten in de merge-commit v
 |---|---|---|
 | **oranje** `#CC5500` | actie | gevulde CTA (`.btn-run` c.s.), en oranje-outline voor "+ Add rule" / Export |
 | **paars** `#5e4a90` | secundaire actie | `.btn-outline-purple` (Refresh, Preview, "andere actie"), navbar |
-| **blauw** `#8796ef` | selectie en interactie | tab-onderlijn, focusring, chiprand — **nooit een vulling met tekst erop** |
+| **blauw** `#8796ef` | selectie en interactie | focusring, chiprand, rijhover — **nooit een vulling met tekst erop**, en sinds 2026-08-14 ook niet de tab-onderlijn (die is brand-paars, zie §Tabs) |
 
 Contrastmetingen, want die stuurden het ontwerp:
 
