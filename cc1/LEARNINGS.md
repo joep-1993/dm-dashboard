@@ -1,6 +1,77 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een override-laag opheffen: vijf dingen die de cascade dan met je doet (2026-08-14)
+
+`theme-flat.css` was één dag een laag bovenop `style.css`; na goedkeuring zijn ze
+samengevoegd. Vier van de vijf problemen hieronder zijn gevonden met een **meting**, niet met
+de diff, en het vijfde had ik zonder meting juist geïntroduceerd.
+
+**1. Gelijke specificiteit + `!important` wordt beslist door bestandsvolgorde, en die klapt
+bij een merge om.** `.bg-primary:not(.navbar)` heeft door de `:not()` specificiteit **0,2,0**
+— precies gelijk aan `.card-header.bg-primary` — en beide hadden `!important`. Met twee
+bestanden won de kopbalk omdat het thema later laadde; in één bestand won de andere regel, en
+een `card-header bg-primary` kleurde weer ouderwets grijs. Fix met `:not(.card-header)` erbij
+en **niet** door de blokken in de juiste volgorde te zetten: dat breekt zodra iemand een blok
+verplaatst. Zoek bij zo'n merge dus actief naar `:not()`, `:is()` en `:where()` in
+selectors — die verschuiven de specificiteit zonder dat het eruitziet als specificiteit.
+
+**2. Vraag per `!important` wát hij verslaat, en verwacht drie antwoorden.** Het commentaar
+zei "dit is een override-laag", dus je zou denken dat alles weg kan. Fout: van de kleuren met
+`!important` bleek (a) een deel Bootstrap's eigen utilities te verslaan (`.bg-info`,
+`.text-white` zetten hun kleur zelf met `!important`), (b) een deel 77 knopregels in
+zeventien page-`<style>`-blokken (die laden ná elke stylesheet en winnen dus altijd op
+gelijke specificiteit), en (c) alleen een klein deel de laag zelf. Alleen (c) kon weg.
+
+**3. Een blok dat vanuit een page-`<style>` altijd won, kan vanuit een stylesheet verliezen.**
+Het paarse flatpickr-thema stond byte-identiek op zes pagina's en verhuisde naar `style.css`.
+Daarmee verloor het van flatpickr's eigen `.flatpickr-calendar { border-radius: 5px }`, want
+die CDN-stylesheet stond ná `style.css` gelinkt. Een page-`<style>` is altijd het laatste
+woord; een stylesheet niet. Volgorde rechtgezet naar **bootstrap → library → style.css**.
+Gemeten: op alle acht pagina's stond de kalender op 5px in plaats van 12px.
+
+**4. Een regel die stil overschreven wordt, kan een échte bug verstoppen.** URL Validator had
+`.btn-outline-purple-on-dark`: wit label, transparante vulling, gemaakt voor een donkerpaarse
+kaartkop. Sinds het vlakke thema rendert élke `.card-header` licht (`#f4f5f9`) — maar dat viel
+niet op, omdat het thema die knoppen naar wit-vlak-met-donkere-tekst dwong. Toen ik ze aan hun
+eigen pagina teruggaf (want "de pagina weet het beter voor een donker paneel") stonden er
+witte labels op een lichte kop. De les: een klassenaam die een omgeving beschrijft
+(`-on-dark`, `-on-purple`) veroudert zodra die omgeving verandert, en het `!important` dat hem
+overschreef was het enige dat de fout onzichtbaar hield. Meet de gerénderde achtergrond.
+
+**5. Verifieer met computed styles, niet met screenshots — en bepaal eerst je ruisvloer.**
+De opstelling die dit allemaal opleverde: 74 selectors × 20 properties, base **én** forced
+`:hover` via CDP, over 35 pagina's, in JSON, vóór en na.
+
+```python
+cdp = ctx.new_cdp_session(pg); cdp.send('DOM.enable'); cdp.send('CSS.enable')
+root = cdp.send('DOM.getDocument')['root']['nodeId']
+nid = cdp.send('DOM.querySelector', {'nodeId': root, 'selector': sel})['nodeId']
+cdp.send('CSS.forcePseudoState', {'nodeId': nid, 'forcedPseudoClasses': ['hover']})
+# ... getComputedStyle uitlezen ...
+cdp.send('CSS.forcePseudoState', {'nodeId': nid, 'forcedPseudoClasses': []})
+```
+
+Twee dingen die het bruikbaar maken:
+- **Draai de meting twee keer ná elkaar en diff die twee.** Dat is je ruisvloer: hier 52
+  verschillen, allemaal pagina's die niet elke load dezelfde DOM opleveren (`shop-campaigns`
+  heeft knoppen die disabled zijn tot data er is) plus een `.btn-tool` die midden in een
+  0,15s-transitie gemeten wordt. Zonder die vergelijking ga je die 52 als regressies
+  onderzoeken.
+- **Bij twijfel: A/B op dezelfde live data.** Eén tabelbreedte week af (1250,61 → 1200px) en
+  het kon data zijn. Antwoord in twee minuten: de oude CSS uit git halen en injecteren in
+  dezelfde sessie.
+  ```python
+  OLD = subprocess.run(['git','show','HEAD:frontend/css/style.css'], capture_output=True, text=True).stdout
+  pg.route('**/css/style.css', lambda r: r.fulfill(status=200, content_type='text/css', body=OLD))
+  ```
+  Beide kanten gaven exact 1200px, dus het was data.
+
+**En één procesding.** Twee keer liep een `assert 'x' not in s` in een patch-script vast op
+mijn **eigen commentaartekst**: ik verwijderde `.btn-purple` en zette er een comment neer die
+`.btn-purple` letterlijk noemde. Assert op het weggehaalde blok, niet op een losse
+klassenaam — of check pas ná het strippen van comments.
+
 ## Twee bugrapporten over code die hier al weg was: `/static` stuurde geen `Cache-Control` (2026-08-14)
 
 Joep meldde dubbele kaders om de datumkiezer in SEO Stats, en een half uur later velden die

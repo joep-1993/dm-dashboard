@@ -132,7 +132,17 @@ other tool uses the grey default. New tools follow the grey default.
 - **A category column of labels is centred** (`text-align: center`) — an outlined
   `.lbl` is a block with its own edges, so left-aligning it against a numeric
   column's right-aligned digits leaves a ragged gutter between them.
-- All of this CSS is in the template's `<style>` block — keep it as-is.
+- **De basis-CSS staat sinds 2026-08-14 in `css/style.css`**: `.tool-table-wrap`,
+  `.tool-table`, de sticky grijze kop (`padding: 6px 14px`, `font-size: 1rem`) en de
+  `th.sortable`-glyphs. Een nieuwe tabel heeft de opmaak dus gratis — geen blok kopiëren.
+  De elf pagina's die hun eigen `.tool-table`-blok hebben (in acht licht afwijkende
+  varianten) houden dat voorlopig: een page-`<style>` laadt later en wint, dus de gedeelde
+  basis is puur additief en verandert geen bestaande pagina. Die varianten samenvoegen staat
+  als open taak in `cc1/TASKS.md`. Kolombreedtes en pagina-eigen kolomregels blijven per
+  pagina — die horen bij de data.
+  De **kopkleur** komt niet uit `.tool-table th` maar uit `.table thead th` (het vlakke
+  paneel): die is specifieker (0,1,2 tegen 0,1,1) en wint ook vanuit een page-`<style>`. Zet
+  er dus geen `background` op — dat is een regel die nooit iets doet.
 - **Loading state = skeleton rows, not a spinner.** While a table fetches, draw
   shimmering placeholder rows so it reads as "the table is being drawn". The point
   is **layout stability**: a skeleton row is the same height as a loaded row, so
@@ -511,12 +521,26 @@ inline the hexes.
 
 | Purpose | Class | Look | Placement |
 |---------|-------|------|-----------|
-| Run / execute (primary CTA) | `btn btn-run` | **full orange**, hover coral | **far right** of the section (`d-flex justify-content-end`) |
-| Orange non-run action (e.g. Export) | `btn btn-outline-orange` | orange outline, fills on hover | — |
-| Any other action | `btn btn-outline-purple` | purple outline, fills on hover | — |
-| Refresh | `btn btn-outline-purple` + `↻` glyph | purple outline **with arrow icon**, fills purple with white text on hover | usually right (`ms-auto`) |
+| Run / execute (primary CTA) | `btn btn-run` | **full orange** `#CC5500`, hover coral | **far right** of the section (`d-flex justify-content-end`) |
+| Orange non-run action (Export, **"+ Add rule"**) | `btn btn-outline-orange` | orange outline, fills orange on hover | bij de rij die hij aanvult |
+| Any other action, **Refresh**, **Preview** | `btn btn-outline-purple` | **purple outline** `#5e4a90`, fills purple with white text on hover | usually right (`ms-auto`) |
+| Refresh specifiek | `btn btn-outline-purple` + `↻` glyph | idem, mét het pijltje ervoor | card-header of filterrij, rechts |
 | Destructive (Stop / Remove / Cancel) | `btn btn-outline-red` | **red outline**, fills red on hover — *only while available* | — |
-| Not clickable / unavailable | add `disabled` | **grey outline** (`#6c757d`) — always, even for red buttons | — |
+| Geen eigen betekenis | `btn btn-outline-secondary` / `-primary` / `-info` / `-success` / `-warning`, `btn-secondary`, `btn-preset` | **neutraal grijze outline**, grijze hover | — |
+| Not clickable / unavailable | add `disabled` | **vlak grijs**: paneelvulling `#f4f5f9`, rand `#d6d8d7`, tekst `#9aa0a6` — altijd, ook voor rode knoppen | — |
+
+**De Bootstrap-kleurnamen zijn geen keuze.** `btn-outline-primary` / `-info` / `-success` /
+`-warning` zeggen niets over wat de knop doet, dus ze rénderen ook niets: neutraal grijs.
+Wil je betekenis, pak dan `btn-run` (uitvoeren), `btn-outline-purple` (secundair) of
+`btn-outline-orange` (toevoegen/exporteren). Dit is de reden dat DMA Exclusions' Preview van
+`btn-outline-primary` naar `btn-outline-purple` ging (2026-08-14).
+
+**Verzin geen nieuwe knopklasse.** De aliassen die pagina's zelf hebben bedacht
+(`.btn-purple-outline`, `.btn-purple-action`, `.btn-hs-outline`, `.btn-tool` → paars;
+`.btn-orange-action` → oranje; `.btn-preset`, `.btn-bulk-*` → grijs) zijn in `style.css` aan
+de drie groepen gekoppeld zodat ze niet uit de toon vallen, maar dat is opruimwerk en geen
+uitbreiding. Ook niet doen: een knop met inline hexes plus `onmouseover`-JS — dat stond op
+GSD Campaigns (vijf stuks) en Canonicals (de Delete-knop) en is weg.
 
 **In a filter card the buttons go under the filters, bottom-right** — not in a
 column beside them (Bot Hits, 2026-08-11). A filter row is a set of equal columns;
@@ -526,16 +550,25 @@ sit above it. `<div class="d-flex justify-content-end gap-2 mt-3">` after the
 `.row`, secondary left of primary.
 
 **Refresh in a card header needs NO override — an inline `background:#5e4a90` on a
-`.card-header` is dead CSS (2026-07-31).** `style.css` has
+`.card-header` is dead CSS (2026-07-31).** `style.css` has (waarden bijgewerkt na de merge
+van 2026-08-14; de kleur is niet langer `--color-section` maar het vlakke paneel):
 
 ```css
-.card-header { background-color: var(--color-section) !important; color: #333 !important; }
+.card-header,
+.card-header.bg-info, .card-header.bg-success, .card-header.bg-primary,
+.card-header.bg-secondary, .card-header.bg-warning, .card-header.bg-dark {
+    background-color: var(--flat-panel) !important;   /* #f4f5f9 */
+    color: var(--flat-text) !important;
+    border-bottom: 1px solid var(--flat-border);
+}
 ```
 
 and a stylesheet `!important` **beats an inline declaration**. So every `card-header`
-renders in the standard light grey no matter what `style="background:#5e4a90; color:#fff"`
-says next to it — including SEO stats', which looked purple in the markup for weeks and
-grey on screen the whole time. Consequences:
+renders in the standard light panel colour no matter what `style="background:#5e4a90;
+color:#fff"` says next to it — including SEO stats', which looked purple in the markup for
+weeks and grey on screen the whole time. Hetzelfde geldt voor een klasse die het probeert:
+Healthscore's `.card-header.hs-head { background: #5e4a90 }` verliest van het `!important`
+hierboven. Consequences:
 
 * Leave the Refresh button exactly canonical: `btn btn-sm btn-outline-purple` + `↻`,
   transparent background, purple outline and label, fills purple on hover. Any white base
@@ -544,6 +577,11 @@ grey on screen the whole time. Consequences:
   *"the Refresh button in Performance per day should be transparent (is now white)"*).
 * Before styling anything **against** a header colour, check the rendered colour in the
   browser (or a headless screenshot), not the inline style in the HTML.
+* **Een knopvariant "voor op donker" is per definitie verdacht.** URL Validator had
+  `.btn-outline-purple-on-dark` / `-orange-on-dark`: wit label, transparante vulling, voor
+  een donkerpaarse kop. Die kop bestaat niet — de knoppen stonden met wit label op `#f4f5f9`
+  (gemeten 2026-08-14). Ze zijn vervangen door de canonieke paarse en oranje outline. Als je
+  zo'n variant nodig denkt te hebben: meet eerst de gerénderde achtergrond.
 * Corollary for any override you do add: `.card-header .btn-outline-purple` (two classes)
   has the **same specificity** as `.btn-outline-purple:hover`, and a page's `<style>` block
   loads after `style.css`, so a bare background override silently wins on hover too and
@@ -570,16 +608,24 @@ applied") — a row you cannot act on still tells you something, an absent check
 a hole. Keep the selection keyed on the row's own identity (the same key the backend
 looks the row up by), not on its page index, or it scrambles the moment someone sorts.
 
-**Unavailable always wins over colour.** A `disabled` button must render **grey
-outline** (`#6c757d`) regardless of its available-state colour — this includes
-red / destructive buttons (Stop, Remove, Cancel). Red is only shown when the
-action is actually available. The canonical `.btn-run` / `.btn-outline-orange` /
-`.btn-outline-purple` classes already do this via their `:disabled` rule in
-style.css — just toggle the `disabled` attribute, don't restyle by hand. A
-`btn-outline-danger` or hand-styled red button does **not** get it for free, so
-add an explicit `#id:disabled { color:#6c757d; border-color:#6c757d;
-background:transparent; opacity:1; }` (see seo-titles.html `#btnStop` /
-`#btnRemove`) so red never shows in the unavailable state.
+**Unavailable always wins over colour.** A `disabled` button rendert **vlak grijs**
+(paneelvulling `#f4f5f9`, rand `#d6d8d7`, tekst `#9aa0a6`) ongeacht zijn beschikbare
+kleur — inclusief rode/destructieve knoppen (Stop, Remove, Cancel). Rood is alleen te zien
+als de actie er echt is.
+
+Sinds 2026-08-14 geldt dat voor **elke** knopklasse via één regel in `style.css`:
+
+```css
+.btn:disabled, .btn.disabled { background-color: var(--flat-panel) !important; … }
+```
+
+`.btn:disabled` is specifieker (0,2,0) dan elke knopkleurklasse (0,1,0), dus dit hoeft
+niet per klasse herhaald te worden. Dat verving vier losse disabled-regels met elk hun
+eigen grijs (`.btn-run`/`.btn-outline-orange`/`.btn-outline-purple`/`.btn-outline-red`,
+plus `#processBtn` en `#processAllBtn`). **Dus: alleen het `disabled`-attribuut omzetten,
+nooit met de hand herstylen** — en de oude raad om per id een eigen `:disabled` toe te
+voegen is niet meer nodig. Een pagina-eigen `#id:disabled` in een `<style>`-blok wint nog
+wél (later in de cascade), dus wie zo'n regel tegenkomt kan hem opruimen.
 
 ## Icon-only buttons — never a text glyph
 
@@ -696,71 +742,87 @@ Give the `<title>` an `id` and rewrite its text at runtime to update the hint
 (e.g. GSD Campaigns' "last successful data load"). In use across GSD Campaigns,
 SEO titles / prio / stats, DMA Exclusions, DM Review, Redirect Tool, R-URL Optimizer.
 
-## theme-flat.css — de vlakke restyle (PROEF, 2026-08-13)
+## Het vlakke thema — sinds 2026-08-14 gewoon `style.css`
 
-> **Alles hieronder in dit document beschrijft de BASISstijl in `css/style.css`. Zolang
-> `css/theme-flat.css` gelinkt staat, overschrijft die de kleuren daarvan.** Lees de twee
-> samen: style.css zegt wat de vorm is, theme-flat zegt hoe hij er nu uitziet.
+> **Er is één stylesheet.** `theme-flat.css` was van 13 t/m 14 augustus 2026 een
+> override-laag bovenop `style.css`; Joep keurde de proef goed en de twee zijn
+> samengevoegd. Dat bestand bestaat niet meer, en de `<link>` is uit alle 35 pagina's.
+> De rest van dit document beschrijft dus gewoon wat er in `css/style.css` staat — er is
+> geen tweede bestand meer dat het overschrijft.
 
-Op verzoek van Joep naar het voorbeeld `Downloads\claude\2026-08-13 18 11 15.png`
-(Semrush): vlakke kaartkoppen i.p.v. de grijze balk, één knopvorm, lichte randen,
-zachte accentkleur. Gelinkt op alle 35 pagina's, ná `style.css`.
+Naar het voorbeeld `Downloads\claude\2026-08-13 18 11 15.png` (Semrush): vlakke
+kaartkoppen i.p.v. de grijze balk, één knopvorm, lichte randen, zachte accentkleur.
 
-**Terugdraaien is met opzet triviaal** — dat is de reden dat het een aparte file is en
-geen bewerking van `style.css`:
+**Terugdraaien** is geen `sed` meer maar het git-tag **`ui-voor-flat`**, dat naar de laatste
+commit vóór de restyle wijst. Dat is met opzet zo gelaten in de merge-commit vastgelegd.
 
-```bash
-sed -i '/theme-flat.css/d' frontend/*.html     # link eruit, alles staat weer als voorheen
-git tag                                        # `ui-voor-flat` = laatste commit ervóór
-```
+**Palet, uit de screenshot gemeten met PIL (niet geschat).** De variabelen staan in
+`:root` in `style.css`; gebruik ze, schrijf de hex niet uit.
 
-**Palet, uit de screenshot gemeten met PIL (niet geschat):**
+| rol | variabele | kleur |
+|---|---|---|
+| pagina | `--flat-bg` | `#f4f5f5` |
+| paneel / kaartkop / thead / disabled | `--flat-panel` | `#f4f5f9` |
+| vlak (kaart, input, outline-knop) | `--flat-surface` | `#ffffff` |
+| rand | `--flat-border` | `#d6d8d7` |
+| rand van een outline-knop | `--flat-border-strong` | `#c3c7cc` |
+| tekst / secundair | `--flat-text` / `--flat-muted` | `#1a1d19` / `#666a6b` |
+| accent — alleen LIJNEN | `--flat-accent` | `#8796ef` |
+| chip- en hovervulling | `--flat-accent-soft` | `#eaeef9` |
+| actie (CTA) | `--color-button` | `#CC5500`, hover `#E97451` |
+| secundaire actie | `--color-navbar` | `#5e4a90` |
+| radius | `--flat-radius` | `6px` |
 
-| rol | kleur |
-|---|---|
-| pagina | `#f4f5f5` |
-| paneel / kaartkop | `#f4f5f9` |
-| vlak (input, kaart) | `#ffffff` |
-| rand | `#d6d8d7` (sterker: `#c3c7cc`) |
-| accent — lijnen | `#8796ef` |
-| accent — gevuld | `#5566e0` |
-| chip / hover-vulling | `#eaeef9` |
-| tekst / secundair | `#1a1d19` / `#666a6b` |
-
-**Blauw en oranje hebben elk een eigen betekenis** (bijgesteld 2026-08-13, Joep wilde de
-oranje knoppen terug):
+**Drie kleuren met elk één betekenis:**
 
 | kleur | betekenis | waar |
 |---|---|---|
-| **blauw** `#8796ef` | selectie en interactie | tab-onderlijn, focusring, chips |
-| **oranje** `#CC5500` | actie | gevulde knoppen (`.btn-run` c.s.), hover `#E97451` |
+| **oranje** `#CC5500` | actie | gevulde CTA (`.btn-run` c.s.), en oranje-outline voor "+ Add rule" / Export |
+| **paars** `#5e4a90` | secundaire actie | `.btn-outline-purple` (Refresh, Preview, "andere actie"), navbar |
+| **blauw** `#8796ef` | selectie en interactie | tab-onderlijn, focusring, chiprand — **nooit een vulling met tekst erop** |
 
-Dat blauw is bewust géén knopkleur: wit erop haalt maar **2,75:1** en zakt door WCAG AA.
-Wie de CTA tóch blauw wil, pakt `--flat-accent-solid` (`#5566e0`, 4,81:1) — die staat er
-nog als gemeten alternatief. Andersom: wit op `#CC5500` is **4,31:1**, genoeg voor
-knoptekst maar net onder de 4,5:1 voor gewone tekst; dat is de bestaande huiswaarde en
-`#B84D00` (5,1:1) is het alternatief als het ooit moet.
+Contrastmetingen, want die stuurden het ontwerp:
 
-De hover van outline-knoppen is neutraal grijs en niet het blauwe accent: met een oranje
-CTA op dezelfde rij zouden dat drie kleuren zijn.
+* wit op blauw `#8796ef` = **2,75:1** → zakt door AA. Daarom is blauw de kleur van LIJNEN
+  en niet van gevulde knoppen. `--flat-accent-solid` (`#5566e0`, 4,81:1) staat er nog als
+  gemeten alternatief voor wie de CTA ooit tóch blauw wil.
+* wit op oranje `#CC5500` = **4,31:1** → genoeg voor knoptekst (groot/bold), net onder de
+  4,5:1 voor gewone tekst. Bestaande huiswaarde; `#B84D00` geeft 5,1:1 als het ooit moet.
+* paars `#5e4a90` op wit = **7,35:1**, en wit op paars idem. Dit is dus wél een kleur die
+  tekst mag zijn — vandaar dat de secundaire knop zijn label in paars draagt.
 
-**Waarom `!important` op de kleuren.** Dit is een override-laag. `style.css` zet
-kaartkoppen al met `!important`, en **veertien** pagina's herdefiniëren knoppen in hun
-eigen `<style>` — dat blok laadt ná elke stylesheet en wint dus altijd. Zonder
-`!important` sloeg het thema op die pagina's half aan, en half is erger dan niet. Het
-staat op **kleur** (achtergrond, rand, tekst) en bewust **niet** op maatvoering: padding,
-breedte en `nowrap` blijven van de pagina, zodat bestaande lay-outs heel blijven.
+**Eén ronde die is teruggedraaid, zodat je hem niet opnieuw voorstelt.** De eerste versie
+van het thema maakte álle outline-knoppen neutraal grijs, op het argument dat
+paars-versus-oranje alleen kleur was en geen betekenis. Dat is op 2026-08-14 teruggedraaid
+(Joep): paars ís de betekenis "secundaire actie", en grijs maakte van elke Refresh op elke
+pagina een naamloos knopje. Neutraal grijs is nu alleen nog voor knopklassen die niets
+zeggen — de Bootstrap-kleurnamen (`.btn-outline-secondary` c.s.) en de segmented controls.
 
-**Twee dingen bewust niet aangeraakt:** de paarse navbar (staat niet op de screenshot,
-en het is het enige element dat het dashboard herkenbaar maakt — één variabele in het
-bestand als je hem toch mee wil), en rood voor destructieve acties (een verwijderknop
-hoort niet in de accentkleur te verdwijnen; alleen platter gemaakt).
+**Waarom er nog `!important` op kleuren staat.** Niet meer omdat dit een laag is — die is
+opgeheven. Er zijn twee echte redenen, en ze staan per blok in `style.css` in het
+commentaar:
 
-**Wat het met de knopvocabulaire doet:** het onderscheid oranje-actie versus paarse-actie
-verdwijnt — dat bestond alleen in kleur en niet in betekenis. Er zijn nu drie groepen:
-gevuld accent (primair/uitvoeren), neutrale outline (al het andere), rood (destructief).
-De eigen knopklassen die pagina's zelf verzonnen (`.btn-purple`, `.btn-hs`, `.btn-preset`,
-`.btn-tool`, `.btn-*-action`, `.btn-bulk-*`) zijn in diezelfde drie groepen ondergebracht.
+1. **Bootstrap's eigen utilities** (`.bg-info`, `.bg-secondary`, `.text-white`) zetten hun
+   kleur mét `!important`. Zonder het onze valt een `card-header bg-primary` terug op
+   Bootstrap-blauw.
+2. **Zeventien pagina's** definiëren knopklassen in hun eigen `<style>`, en dat blok laadt
+   ná elke stylesheet. Op gelijke specificiteit wint het dus altijd. Het gaat om 77 regels;
+   die opruimen staat als open taak in `cc1/TASKS.md`, en daarna kan reden 2 vervallen.
+
+Het staat op **kleur** en bewust **niet** op maatvoering: padding, breedte en `nowrap`
+blijven van de pagina, zodat bestaande lay-outs heel blijven.
+
+**Twee dingen bewust niet aangeraakt:** de paarse navbar (staat niet op de screenshot en is
+het enige element dat het dashboard herkenbaar maakt), en rood voor destructieve acties
+(alleen platter gemaakt — een verwijderknop hoort niet in de accentkleur te verdwijnen).
+
+**Eén cascadeval die je bij het samenvoegen tegenkomt, en die alleen met een meting
+zichtbaar is.** `.bg-primary:not(.navbar)` heeft door de `:not()` specificiteit **0,2,0** —
+precies gelijk aan `.card-header.bg-primary` — en ze hebben beide `!important`. Met twee
+bestanden won de kopbalk op bestandsvolgorde; in één bestand won `.bg-primary`, en dan
+kleurt een `card-header bg-primary` weer ouderwets grijs (gemeten op SEO titles). Opgelost
+met `:not(.card-header)` erbij, niet door de blokken te herordenen: volgorde-afhankelijkheid
+breekt zodra iemand een blok verplaatst.
 
 ## Tabs — multi-section cards (see Canonicals)
 
@@ -805,6 +867,14 @@ carries through automatically:
 
 - **Text / number inputs & selects**: `form-control` / `form-select`. Add `-sm`
   inside dense toolbars; set an explicit inline `width` when it shouldn't stretch.
+- **Bestandsupload**: `<input type="file" class="form-control">` — en die is **32rem
+  (512px) breed**, niet de volle kaartbreedte. Staat als gedeelde regel in `style.css`
+  (`input[type="file"].form-control { max-width: 32rem; }`), dus zet er geen eigen breedte
+  op. Reden (Joep, 2026-08-14: "die van Auto-Redirects is prima"): een file-input bevat één
+  knop plus een bestandsnaam, dus meerekken met de kaart geeft alleen leegte. Gemeten vóór
+  de regel: Auto-Redirects 513px (het stond in een `col-md-6`), Kopteksten 939px, Unique
+  titles 1042px. Een pagina die om een eigen reden breder moet, zet zelf een `max-width` —
+  die wint.
 - **Date pickers**: sinds 2026-08-13 zit elke datumkiezer in een **`.date-box`** —
   één omlijsting met een kalendericoon ervoor. Een periode is één ding, dus het hoort
   één control te zijn; twee losse `form-control`-velden met elk een eigen label lazen
@@ -862,18 +932,39 @@ carries through automatically:
      de border-box van de input en valt dat als een strak zwart kadertje **midden in** de
      box. Die twee horen bij elkaar — alleen de outline weghalen maakt focus onzichtbaar.
 
-  Daarbovenop komt **flatpickr** voor de kalender zelf — dat is wat SEO stats, SEO
-  titles, GSD Campaigns, GSD Budgets, Shop-campaigns en Bot Hits renderen, en
-  het is de canonieke look (purple month/weekday headers, purple selected day).
-  This doc previously said "no JS date library anywhere", which was already untrue
-  when item 18 asked for GSD Budgets' pickers to "match the blueprint" — what was
-  meant was the purple calendar, not the bare OS one. To add it to a page:
-  1. In `<head>`, after `style.css`:
+  **VELDBREEDTE — hij hangt af van wat er in het veld staat, niet van de pagina**
+  (2026-08-14, Joep: de picker in Retrieve URL data mocht smaller). Twee regels in
+  `style.css`, en een veld matcht altijd precies één ervan omdat flatpickr de input op
+  `type=text` zet:
+
+  | veld | breedte | waarom |
+  |---|---|---|
+  | `.date-box input.flatpickr-input` | **5,3rem** (84,8px) | er staat altijd exact `YYYY-MM-DD`; gemeten 79,0px bij 13,6px system-ui, dus ~6px lucht |
+  | `.date-box input[type="date"]` | **6,6rem** (105,6px) | native: Chrome zet zijn eigen kalendericoon ÍN het veld en toont `13-08-2026` — smaller kapt dat af |
+
+  Dit was eerst één 6,6rem voor allebei, met 26px lucht per veld. Zet er **geen** eigen
+  breedte per pagina op; de enige uitzondering is GSD Campaigns, waar de velden een
+  uitleg-placeholder dragen ("Leave empty for most recent") en daarom 13,5rem zijn.
+
+  Daarbovenop komt **flatpickr** voor de kalender zelf, en dat is de canonieke look
+  (paarse maand-/weekdagkop, paarse geselecteerde dag). This doc previously said "no JS
+  date library anywhere", which was already untrue when item 18 asked for GSD Budgets'
+  pickers to "match the blueprint" — what was meant was the purple calendar, not the bare
+  OS one. To add it to a page:
+  1. In `<head>`, **vóór** `style.css`:
      ```html
      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+     <link href="/static/css/style.css" rel="stylesheet">
      <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13"></script>
      ```
-  2. Copy the `.flatpickr-*` purple block from `gsd-budgets.html` / `seo-stats.html`.
+     **De volgorde is niet vrij**: bootstrap → flatpickr → `style.css`. Ons paarse thema
+     staat sinds 2026-08-14 in `style.css`, en flatpickr's eigen
+     `.flatpickr-calendar { border-radius: 5px }` verslaat het als die stylesheet later
+     laadt. Gemeten: op alle acht pagina's stond de kalender daardoor even op 5px in plaats
+     van 12px. `style.css` is de override-laag, dus die komt als laatste.
+  2. **Niets kopiëren.** Het `.flatpickr-*`-blok stond op zes pagina's byte-identiek en
+     staat nu één keer in `style.css`. Wie hier iets aan de kalender wil wijzigen, doet dat
+     daar.
   3. Init inside `DOMContentLoaded`, **guarded** so an unreachable CDN degrades to
      the working native input rather than breaking the page:
      ```js
@@ -885,9 +976,18 @@ carries through automatically:
      ```
   Set any default `.value` **before** the `flatpickr()` call — it adopts the
   input's current value, and flatpickr swaps the field to `type="text"`, so
-  assigning a `YYYY-MM-DD` string afterwards is not equivalent.
-  Still-native (no flatpickr): DMA Bidding, SEO Priority, Performance Standup,
-  R-Finder.
+  assigning a `YYYY-MM-DD` string afterwards is not equivalent. Twee dingen die daarbij
+  horen en die je op een native veld niet ziet:
+  - **Een `max`/`min`-attribuut op de input doet niets meer.** Dat geldt alleen voor
+    `type=date`. Geef de grens mee als optie (`maxDate: 'today'`), anders staat de kalender
+    stilzwijgend datums in de toekomst toe (DMA Bidding, 2026-08-14).
+  - **Reset via `fp.setDate(waarde, false)`, niet via `.value =`.** Een directe `.value`
+    verzet het veld maar niet flatpickr's eigen state, dus de kalender opent daarna nog op
+    de oude datum. Het tweede argument `false` onderdrukt `onChange` (R-Finder's
+    Reset-knop).
+
+  Still-native (no flatpickr): SEO Priority, Performance Standup. R-Finder en DMA Bidding
+  hadden de kale OS-kalender en hebben sinds 2026-08-14 de paarse.
 - **A date range loads on change — there is no Load button.** SEO stats and
   Shop-campaigns both put the range INSIDE the chart card (it scopes the page, but
   that is where you look at it) with Refresh on the card's title row, and load on

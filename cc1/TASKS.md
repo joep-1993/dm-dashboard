@@ -4,6 +4,101 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-14 — theme-flat samengevoegd met style.css, en negen lay-outpunten
+
+Joep keurde de flat-proef goed. Eén stylesheet dus, en daarna een reeks punten die op het
+thema voortbouwen.
+
+**De merge (commit `8a455bb`):**
+
+- [x] **`theme-flat.css` bestaat niet meer**, de `<link>` is uit alle 35 pagina's, en de
+      oude waarden zijn UIT `style.css` weg in plaats van overschreven: de grijze kopbalk,
+      de knopschaduw, de oranje `.btn-secondary`, vijf per-Bootstrap-kleurnaam gesorteerde
+      knopregels die allemaal dezelfde oranje zetten, de paarse `.btn-outline-purple`, de
+      oranje `.btn-outline-danger`, vier losse disabled-regels (incl. `#processBtn`) en de
+      dubbele rand op `.date-box`. Terugdraaien = tag **`ui-voor-flat`**, geen `sed` meer.
+- [x] **Eén cascadebug, en die kwam alleen uit de meting.** `.bg-primary:not(.navbar)` heeft
+      door de `:not()` specificiteit 0,2,0 — gelijk aan `.card-header.bg-primary` — en beide
+      hebben `!important`. Met twee bestanden won de kopbalk op bestandsvolgorde; in één
+      bestand won `.bg-primary`, en dan kleurde een `card-header bg-primary` weer ouderwets
+      grijs (gemeten op SEO titles). Opgelost met `:not(.card-header)`.
+- [x] **Verificatie:** computed styles van 74 selectors × 20 properties, base én forced
+      `:hover` (CDP `CSS.forcePseudoState`), op alle 35 pagina's, vóór en na. Twee identieke
+      runs geven een ruisvloer van 52 verschillen (shop-campaigns laadt niet elke keer
+      dezelfde DOM; `dashboard`'s `.btn-tool` wordt midden in een transitie gemeten). Eén
+      verdachte tabelbreedte op seo-rulings uitgesloten met een A/B op dezelfde live data:
+      oude CSS uit git geïnjecteerd geeft exact dezelfde 1200px.
+
+**De negen punten van Joep:**
+
+- [x] **Paars en oranje outline terug in het vocabulaire.** De eerste themaversie maakte alle
+      outline-knoppen neutraal grijs; dat is teruggedraaid. `.btn-outline-purple` is weer
+      paars (7,35:1 op wit) = "andere actie", en dat is precies wat de blueprint al
+      voorschreef voor **Refresh**. `.btn-outline-orange` is weer oranje = "+ Add rule" /
+      Export. Neutraal grijs blijft voor klassen die niets zeggen (de Bootstrap-kleurnamen,
+      `.btn-preset`, `.btn-bulk-*`).
+- [x] **Alle Refresh-knoppen outlined paars.** De meeste gebruikten al `btn-outline-purple`;
+      drie afwijkers rechtgetrokken (GSD Campaigns had er twee met inline hexes plus
+      `onmouseover`-JS, Redirect-tool gebruikte de pagina-eigen `.btn-purple-outline`). De
+      Copy- en Export-knoppen in diezelfde toolbars gingen mee, want hand-gestyled paars
+      naast een canonieke paarse knop is precies wat de blueprintregel moet voorkomen.
+- [x] **Canonicals — Transformation Rules:** Preview URLs is paars (volgde uit het
+      vocabulaire), Generate is de oranje CTA (`btn-run` i.p.v. `btn-secondary`), en de zes
+      "+ Add Rule"-knoppen zijn oranje-outline. De lokale gevuld-paarse knopklasse is weg.
+- [x] **Canonicals — Recent results en DMA+ — Run History naar de blueprint-tabel.**
+      `.tool-table-wrap` + `table-sm/-hover/tool-table` + `thead.table-light`; weg: zebra,
+      `table-bordered`, inline padding per `<th>`, zes keer 16,66% kolombreedte en
+      `text-center` over de hele tabel. De Delete-knop in Canonicals is de canonieke
+      `btn-outline-red` i.p.v. een inline rode rand met twee `onmouseover`-handlers.
+      Tijdstempels in het blueprintformaat `YYYY-MM-DD HH:MM` (de en-US-notatie wikkelde over
+      twee regels). **Let op het verschil tussen die twee pagina's:** Canonicals krijgt
+      `…+00:00` uit de API, DMA+ schrijft `datetime.now().isoformat()` (naïef lokaal). Bij
+      DMA+ is de "Z"-truc uit `fmtTs` dus verkeerd — die zou de historie twee uur later
+      tonen. Alleen het formaat overgenomen, niet de conversie.
+- [x] **Bestandsupload 32rem.** Kopteksten stond op 939px en Unique titles op 1042px; de
+      referentie (Auto-Redirects, in een `col-md-6`) was 513px. Als gedeelde regel
+      `input[type="file"].form-control { max-width: 32rem }` i.p.v. per pagina, want er zijn
+      elf van die velden over negen pagina's.
+- [x] **Datumpickerbreedte hangt nu aan het VELDTYPE.** flatpickr → 5,3rem (er staat altijd
+      exact `YYYY-MM-DD`, gemeten 79,0px tekst), native → 6,6rem (Chrome zet zijn eigen
+      icoon ín het veld). Eerst was dat één 6,6rem met 26px lucht. De picker in SEO titles
+      ging daarmee van 263px naar 221px, en DMA Bidding volgt automatisch.
+- [x] **R-Finder en DMA Bidding krijgen de paarse kalender.** Beide hadden de kale
+      OS-kalender. Het `.flatpickr-*`-themablok stond byte-identiek op zes pagina's (md5
+      gecontroleerd) en staat nu één keer in `style.css`. **Daarbij één les:** in een
+      page-`<style>` kon dat blok niet verliezen, maar vanuit `style.css` wél — flatpickr's
+      eigen `border-radius: 5px` won op alle acht pagina's totdat de linkvolgorde
+      rechtgezet was naar bootstrap → flatpickr → style.css.
+- [x] **Redirect Generator** had zijn "+ Add … Rule"-knoppen al op `btn-outline-purple`
+      (dus geen wijziging nodig), **DMA Exclusions'** Preview ging van `btn-outline-primary`
+      naar `btn-outline-purple`.
+- [x] **UI_BLUEPRINT herschreven:** §theme-flat is nu §"Het vlakke thema" en beschrijft geen
+      proeflaag meer; knoptabel bijgewerkt (paars/oranje/grijs, nieuwe disabled-look);
+      datumpicker- en uploadbreedtes vastgelegd; de gedeelde tabelbasis en de linkvolgorde
+      gedocumenteerd; de kaartkop-quote bijgewerkt naar de vlakke waarden.
+
+**Bonusvondst uit de meting, en het is een echte bug die het thema verborg:** URL Validator
+had `.btn-outline-purple-on-dark` / `-orange-on-dark` — wit label voor een donkerpaarse
+kaartkop. Die kop bestaat niet meer: sinds het vlakke thema rendert élke `.card-header` op
+`#f4f5f9`. Zolang het thema die knoppen naar wit-vlak dwong viel het niet op; toen ik ze aan
+hun eigen pagina teruggaf stonden er witte labels op een lichte kop. Vier pagina-regels weg,
+knoppen op de canonieke klassen.
+
+**Openstaand:**
+
+- [ ] **De 77 knopregels in zeventien page-`<style>`-blokken opruimen.** Dat is de enige
+      reden dat het `!important` op de knopkleuren nog nodig is. Puur deleten waar de regel
+      alleen kleur zet (die verliest nu toch al van het thema, dus visueel een no-op);
+      oppassen waar er maatvoering in dezelfde regel staat (`.btn-preset` heeft padding,
+      `.btn-red-outline` een font-size). Met de meetopstelling uit deze sessie is dat
+      verifieerbaar: de computed styles moeten vóór en na identiek zijn.
+- [ ] **De acht varianten van het `.tool-table`-blok over elf pagina's samenvoegen.** De
+      canonieke basis staat nu in `style.css`, de pagina-blokken staan er nog naast.
+- [ ] **DMA+ slaat tijdstempels naïef-lokaal op** (`datetime.now().isoformat()` in
+      `dma_plus_service.py`, zes plekken). Dat werkt zolang de server op Europe/Amsterdam
+      staat en is een valstrik zodra iemand die waarden met UTC-kolommen vergelijkt. Migreren
+      betekent bestaande opgeslagen waarden meenemen, dus apart oppakken.
+
 ### 2026-08-14 — Datumkiezer: dubbel kader weg, en `/static` revalideert weer
 
 Twee meldingen van Joep (screenshots `2026-08-14 09 26 35.png` en `09 49 55.png`) met
@@ -333,9 +428,11 @@ van `Downloads\claude\2026-08-13 18 11 15.png`, mét een terugweg.
       `width: 2.75rem` zonder `overflow: hidden`, en de lange paginatitel duwt de nav.
       Geverifieerd door dezelfde pagina zónder het thema te renderen — daar staat het er
       ook. Eén regel CSS, maar buiten de gevraagde scope gelaten.
-- [ ] **Verdict op de proef.** Bevalt het, dan kan `theme-flat.css` samengevoegd worden
-      met `style.css` en vervalt de `!important`-laag; bevalt het niet, dan is het één
-      `sed`.
+- [x] **Verdict op de proef: BEVALT** (Joep, 2026-08-14) → `theme-flat.css` is samengevoegd
+      met `style.css` en bestaat niet meer. Zie de sectie van 2026-08-14 hieronder. De
+      `!important`-laag vervalt daarmee **niet helemaal**: hij compenseerde niet alleen de
+      laag maar ook Bootstrap's eigen utilities én de 77 knopregels in zeventien
+      page-`<style>`-blokken. Dat laatste is nu de openstaande opruiming.
 
 ### 2026-08-13 — Vier losse punten van Joep (na de audit)
 
