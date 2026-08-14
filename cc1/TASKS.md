@@ -4,6 +4,38 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-14 — Bot Hits: R-urls werden als Cat-url geteld
+
+Joep zag R-url op 0,0% in de URL-type-donut en vroeg of dat kon kloppen.
+
+- [x] **Oorzaak.** `url_type()` in `backend/bothits_ingest.py` checkte `/r/` met een
+      `startswith` ná `/products/`, terwijl beslist's R-urls `/products/<cat>/r/<term>` heten.
+      Alleen de kale `/r/<term>`-vorm werd goed geclassificeerd (604 URLs op 177.000).
+      `seo_stats_service._urltype_case()` deed het al goed met `LIKE '%/r/%'` als eerste arm —
+      de twee tools spraken elkaar tegen, terwijl het commentaar bij `URLTYPE_BUCKETS` beweerde
+      dat ze het eens waren.
+- [x] **Gefikst:** `/r/` bovenaan als containment-check. 13 gevallen in een unit-test.
+      Nagekeken dat geen ander type ooit `/r/` in de URL heeft, dus de nieuwe eerste regel
+      kaapt niets weg.
+- [x] **Her-ingest van het hele S3-venster** (`scripts/bothits_reingest_urltype.py`, per datum):
+      40 bruikbare datums 2026-07-05 t/m 08-13, 94 minuten, 37,7 GB, 0 mislukt. 2026-07-03 zit
+      niet in S3 en 07-04 heeft één uur — die weigert de ingest terecht.
+- [x] **Resultaat in de donut** (venster 07-15..08-13): R-url van 180 hits (0,00%) naar
+      7.113.183 (7,90%); Cat-url van 7.637.929 (8,49%) naar 1.314.723 (1,46%); C-url van
+      45,74% naar 44,86%. Het totaal bleef exact 90.009.315 hits en de winst van R-url komt
+      precies uit die drie — dus niets bijgekomen, niets verdwenen.
+
+**Openstaand / bewust zo gelaten:**
+
+- [ ] **Alles vóór 2026-07-05 houdt de oude indeling.** `pa.bothits_daily` bewaart het ruwe type
+      zonder URL-tekst en de logs zijn na ~42 dagen uit S3 verdwenen, dus dit is niet meer te
+      repareren. De tool gaat terug tot 2026-02-14, dus een periode die over 07-05 heen loopt
+      mengt twee definities. Staat als gedateerde noot op de URL-type-kaart; **die noot kan weg
+      zodra 2026-07-05 uit de standaardvensters is gerold** (~oktober 2026).
+- [ ] **Mijn eerste impactschatting was een factor 60 te laag** (0,13% i.p.v. 7,9%), omdat ik hem
+      op `bothits_unknown_daily` had gemeten — die tabel houdt alleen de staart van onbekende
+      URLs. Zie LEARNINGS; geen actie, wel een valkuil om te onthouden bij de volgende sizing.
+
 ### 2026-08-14 — Projectroot opgeruimd (niets weggegooid)
 
 Joep: "alles netjes in mapjes, ongebruikte bestanden weggooien (bij twijfel niet weggooien)",

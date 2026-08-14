@@ -1,6 +1,60 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een 0,0% in een donut was een classificatiefout van 7,9% (2026-08-14)
+
+Joep zag R-url op 0,0% in de URL-type-donut van Bot Hits en vroeg of dat kon kloppen. Nee: het
+waren 180 hits waar 7.113.183 hadden moeten staan. Vier dingen uit het uitzoeken en repareren.
+
+**1. `startswith` op een URL-pad is bijna altijd fout.** De ingest deed:
+
+```python
+if u.startswith("/products/"):
+    return "category_facet" if "/c/" in u else "category"
+...
+if u.startswith("/r/"):          # ← wordt nooit bereikt
+    return "search"
+```
+
+De R-urls van beslist heten `/products/<cat>/r/<term>`, dus ze werden opgevangen door de regel
+erboven. Alleen de kale `/r/<term>`-vorm kwam ooit bij de /r/-regel — 604 URLs op 177.000. Waar
+je op moet letten: een pad-classificatie met `startswith` in een reeks `if`s is impliciet ook
+een PRIORITEITSlijst, en die staat nergens opgeschreven. `seo_stats_service._urltype_case()`
+deed het al goed met `LIKE '%%/r/%%'` als eerste arm; de twee tools spraken elkaar dus tegen.
+
+**2. Het commentaar beweerde dat het goed was.** Bij `URLTYPE_BUCKETS` in bothits_service.py
+stond letterlijk dat de prioriteit gelijk is aan die van SEO Stats "zodat een URL met zowel /r/
+als /c/ in beide tools een R-url is". Dat was nooit waar. Een comment dat een invariant claimt
+is geen bewijs dat hij geldt — en het is precies het soort claim dat een controle overslaat.
+
+**3. Size de impact op de tabel die het antwoord bevat, niet op de handigste.** Mijn eerste
+schatting was 118.140 hits (0,13%), gemeten op `pa.bothits_unknown_daily` omdat die de URL-tekst
+bewaart. Die tabel houdt alleen de staart van onbekende URLs (~1,2% van alle hits), dus dat was
+een bodem en geen totaal. De echte cijfers kwamen pas uit één datum écht opnieuw ingesten en
+vóór/ná vergelijken: `search` van 5 naar 261.604 hits op die dag. Ik had Joep dus eerst een
+factor 60 te laag gerapporteerd. Les: als je alleen een SAMPLE-tabel kunt bevragen, noem het een
+ondergrens, of meet het op één echte eenheid.
+
+**4. De optelsom is de sterkste controle bij een her-ingest.** Na 40 datums opnieuw verwerken
+was het totaal exact gelijk (90.009.315 hits) en kwam de winst van R-url (+7.113.003) precies uit
+Cat-url (−6.323.206), C-url (−789.720) en Overige (−77). Dat sluit in één oogopslag twee dingen
+uit: dat er data is bijgekomen (dubbel geïngest) en dat er iets is verdwenen. Reken die balans
+uit voordat je zegt dat een her-ingest goed ging.
+
+**Her-ingest per datum, niet per venster.** 40 datums × ~950 MB = 37,7 GB. Downloaden,
+ingesten, bronbestanden weggooien — piek ~1 GB in plaats van 40, en elke afgeronde datum is al
+winst als de run afbreekt. Dat kan omdat de ingest delete-then-insert per `log_date` is. Twee
+patches zaten in het herstelscript en niet in de module: `fetch()` slaat datums over die al in de
+ledger staan (precies je doeldatums) en neemt een aantal dagen in plaats van een datum. Duur:
+94 minuten voor 39 datums. En let op de log: onder `nohup` is stdout block-buffered, dus de
+voortgang leest je beter in de DB dan in het logbestand.
+
+**Wat niet te repareren was, en dus gedocumenteerd moest worden.** `pa.bothits_daily` bewaart het
+ruwe type zonder de URL-tekst, dus alleen datums binnen het S3-venster (~42 dagen) waren te
+herstellen. De tool gaat terug tot 2026-02-14; alles vóór 2026-07-05 houdt de oude indeling. Een
+periode die over die datum heen loopt mengt twee definities. Dat staat nu in het commentaar én
+als gedateerde noot op de kaart in de UI — met erbij wanneer die noot weg kan.
+
 ## Opruimen: een grep op de bestandsnaam mist precies de bestanden die je niet mag verplaatsen (2026-08-14)
 
 Bij het opbergen van losse bestanden in de projectroot. Vier dingen, en het eerste had een
