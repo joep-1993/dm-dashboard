@@ -184,6 +184,30 @@
            vervangen" in plaats van "is weg", en je houdt een anker voor waar de as straks
            weer staat. */
         .chart-wrap.is-loading canvas { opacity: 0.32; }
+
+        /* LAADSTAAT VAN DE TEGELS, zelfde probleem als de grafiek had (2026-08-14): tijdens
+           het laden stonden hier nog de cijfers van de vorige range, met hun WoW-badge erbij.
+
+           Waarom dit met een KLASSE op de rij gaat en niet met skeleton-tegels zoals in
+           Dagoverzicht en de standup: deze tegels zijn tegelijk de metric-toggles van de
+           grafiek. Ze vervangen betekent dat je ze een halve seconde niet kunt aanklikken en
+           dat hun aan/uit-rand opnieuw gezet moet worden. Zo blijft de DOM staan — label,
+           rand en klikvlak intact — en verdwijnt alleen wat niet meer waar is.
+
+           De h3 wordt zijn eigen skeletonbalk: tekst transparant, shimmer als achtergrond.
+           Dezelfde keyframes als de tabelrijen, en omdat het element blijft staan verandert er
+           geen hoogte. De badge gaat op `visibility: hidden` en niet op `display: none`, want
+           dan zou de tegel inzakken. */
+        #statsRow.is-loading .stat-card h3 {
+            color: transparent;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #ececec 25%, #f6f6f6 37%, #ececec 63%);
+            background-size: 400% 100%;
+            animation: skelShimmer 1.4s ease infinite;
+        }
+        #statsRow.is-loading .stat-card .stat-delta { visibility: hidden; }
+        /* De vorige lijn dimmen in plaats van verbergen — zelfde keuze als bij de grafiek. */
+        #statsRow.is-loading .stat-card .tile-spark { opacity: 0.25; }
         /* Dark hover card (#242628, Joep's pick). Everything inside had to be
            re-toned for a dark ground, not just the background swapped:
            the old label grey #6a6a78 lands at ~1.9:1 here, which is unreadable. */
@@ -1940,14 +1964,21 @@
             return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
         }
 
-        // Aan/uit voor de shimmer over de grafiek. Eén plek, want hij moet op ELKE
-        // uitgang van load() weer uit — een skeleton die na een mislukte fetch blijft
-        // shimmeren leest als "nog aan het laden" voor een request die al dood is.
-        function chartLoading(on) {
-            const w = document.getElementById('chartWrap');
-            if (!w) return;
-            w.classList.toggle('is-loading', !!on);
-            w.setAttribute('aria-busy', on ? 'true' : 'false');
+        // Aan/uit voor de laadstaat van de grafiek ÉN de tegels erboven. Eén plek, want hij
+        // moet op ELKE uitgang van load() weer uit — een skeleton die na een mislukte fetch
+        // blijft shimmeren leest als "nog aan het laden" voor een request die al dood is.
+        //
+        // Op de eerste load is #statsRow nog leeg (renderStats vult hem pas ná de fetch), dus
+        // daar doet de tegelhelft niets en dragen de grafiek en de tabellen het signaal.
+        function loadingState(on) {
+            [['chartWrap', true], ['statsRow', false]].forEach(([id, busy]) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.toggle('is-loading', !!on);
+                // aria-busy alleen op de grafiek: de tegels houden hun label en hun
+                // toggle-functie, dus ze zijn niet "bezig", alleen hun waarde is dat.
+                if (busy) el.setAttribute('aria-busy', on ? 'true' : 'false');
+            });
         }
 
         async function load(force) {
@@ -1966,7 +1997,7 @@
             const perDayCols = document.getElementById('tableHead').querySelectorAll('th').length
                 || (2 + TABLE_COLS.length + 1);
             document.getElementById('tableBody').innerHTML = skeletonRows(perDayCols);
-            chartLoading(true);
+            loadingState(true);
             // The Top-categories and Performance-standup tables are filled by
             // loadDeltas(), which only starts after the /daily fetch below
             // resolves — so skeleton them here as well, or they sit blank for
@@ -1991,7 +2022,7 @@
                 tileDeltas = null;
                 renderStats();
                 renderChart();
-                chartLoading(false);
+                loadingState(false);
                 initTable();
                 renderMeta();
                 document.getElementById('exportBtn').disabled = false;
@@ -2014,7 +2045,7 @@
                 // De shimmer moet hier ook uit: de grafiek is net gesloopt, dus er komt
                 // niets meer dat hem vervangt. Wat overblijft is een leeg vlak onder de
                 // "Failed to load"-regel, en dat is de eerlijke staat.
-                chartLoading(false);
+                loadingState(false);
                 document.getElementById('exportBtn').disabled = true;
                 lastData = null;
             }
