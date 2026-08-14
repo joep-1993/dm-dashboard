@@ -81,15 +81,14 @@
         .pagination-controls .page-info { color: #636e72; }
         .pagination-controls .btn-page { padding: 0.25rem 0.5rem; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
         .neg { color: #d63031; }
+        /* Rand, schaduw en het picker-icoon zijn hier weg (2026-08-14, zie
+           seo-stats.html): het kader komt van .date-box om het hele bereik, deze regels
+           zetten er een tweede binnenin, en de id-selector op ::-webkit-calendar-picker-
+           indicator won van style.css — dan staan er op het native pad twee kalender-
+           icoontjes. accent-color/color-scheme blijven voor die native picker. */
         #startDate, #endDate {
-            border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
-            box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
-            transition: border-color .15s ease, box-shadow .15s ease;
+            accent-color: #5e4a90; color-scheme: light;
         }
-        #startDate:hover, #endDate:hover { border-color: #b9b0d8; }
-        #startDate:focus, #endDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
-        #startDate::-webkit-calendar-picker-indicator, #endDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
-        #startDate:hover::-webkit-calendar-picker-indicator, #endDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
         /* flatpickr calendar dropdown — modern themed look */
         .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
         .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }

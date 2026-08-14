@@ -105,15 +105,25 @@
            class: the only `neg` on the page is a JS variable holding a worst_by_* key.
            Negative values are coloured by .delta-badge.down and by inline styles in the
            table cells, not by this rule. */
+        /* GEEN eigen rand/schaduw op de datumvelden (Joep, 2026-08-14: "dubbele
+           lijnen/kaders"). Deze regels komen uit de tijd dat elk datumveld een losse
+           control was; sinds .date-box (style.css, 2026-08-13) zit het kader om het HELE
+           bereik en tekenden ze een tweede kader binnenin — gemeten in de screenshot:
+           buitenlijn #d6d8d7 (de box), 1px daarnaast #d9d4e8 (deze regel).
+           Ze bleven onzichtbaar zolang style.css' `border: 0 !important` meekwam, dus
+           met een oudere gecachte style.css kwam het dubbele kader meteen terug — de
+           regels weghalen is de enige fix die niet van de cache afhangt.
+
+           Wat blijft staan: accent-color en color-scheme. Die raken de NATIVE picker,
+           en die is er weer zodra de flatpickr-CDN wegvalt.
+
+           De ::-webkit-calendar-picker-indicator-regels gaan om dezelfde reden weg: een
+           id-selector wint van style.css, dus die zetten het browsericoon terug op
+           opacity .55 en dan stonden er op het native pad twee kalendericoontjes — dat
+           van Chrome én de ::before van .date-box. */
         #startDate, #endDate, #refDate, #catDate, #dashDate {
-            border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
-            box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
-            transition: border-color .15s ease, box-shadow .15s ease;
+            accent-color: #5e4a90; color-scheme: light;
         }
-        #startDate:hover, #endDate:hover, #refDate:hover, #catDate:hover, #dashDate:hover { border-color: #b9b0d8; }
-        #startDate:focus, #endDate:focus, #refDate:focus, #catDate:focus, #dashDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
-        #startDate::-webkit-calendar-picker-indicator, #endDate::-webkit-calendar-picker-indicator, #refDate::-webkit-calendar-picker-indicator, #catDate::-webkit-calendar-picker-indicator, #dashDate::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .55; transition: opacity .15s ease; }
-        #startDate:hover::-webkit-calendar-picker-indicator, #endDate:hover::-webkit-calendar-picker-indicator, #refDate:hover::-webkit-calendar-picker-indicator, #catDate:hover::-webkit-calendar-picker-indicator, #dashDate:hover::-webkit-calendar-picker-indicator { opacity: 1; }
         .flatpickr-calendar { border-radius: 12px; box-shadow: 0 8px 28px rgba(45,42,58,0.18); border: 1px solid #e3e3ea; }
         .flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after { border-bottom-color: #f7f6fb; }
         .flatpickr-months, .flatpickr-weekdays { background: #f7f6fb; border-top-left-radius: 12px; border-top-right-radius: 12px; }

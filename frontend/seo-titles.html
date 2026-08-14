@@ -252,7 +252,11 @@
                                 <input type="date" id="dateTo" aria-label="Visits to">
                             </div>
                         </div>
-                        <div class="col-md-3 d-flex gap-2 justify-content-end">
+                        <!-- ms-auto, want justify-content-end alleen lijnt de knoppen af
+                             binnen deze kolom, en drie keer col-md-3 vult maar 9 van de 12
+                             kolommen — dan staan ze middenin de rij (Joep, 2026-08-14).
+                             ms-auto duwt de kolom zelf naar de rechterkant van de .row. -->
+                        <div class="col-md-3 ms-auto d-flex gap-2 justify-content-end">
                             <button class="btn btn-sm btn-outline-danger" id="btnStop" onclick="stopRun()" disabled>Stop</button>
                             <button class="btn btn-sm btn-primary" id="btnGenerate" onclick="startRun()">Generate</button>
                         </div>

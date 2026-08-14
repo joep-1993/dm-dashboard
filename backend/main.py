@@ -318,7 +318,24 @@ app.add_middleware(
 )
 
 # Serve frontend static files
-app.mount("/static", StaticFiles(directory="frontend"), name="static")
+#
+# NoCacheStatic i.p.v. StaticFiles (2026-08-14): zonder Cache-Control mag een browser
+# zelf een bewaartermijn verzinnen (heuristic caching), en dat deed Chrome ook — Joep
+# keek op SEO Stats en SEO titles naar een style.css van vóór het .date-box-blok, dus
+# naar een lay-out die op de server allang niet meer bestond. Dat kost elke UI-wijziging
+# een "doe eens Ctrl+Shift+R" en, erger, het levert bugrapporten op over code die al weg
+# is.
+#
+# `no-cache` is niet `no-store`: de browser mag het bestand houden, maar moet elke keer
+# navragen of het nog geldig is. StaticFiles zet zelf al een ETag en Last-Modified, dus
+# dat wordt een 304 zonder body — bij tien gebruikers op een LAN is dat gratis.
+class NoCacheStatic(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+app.mount("/static", NoCacheStatic(directory="frontend"), name="static")
 
 def retry_on_redshift_serialization_error(max_retries=3, initial_delay=0.1):
     """

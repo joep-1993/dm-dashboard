@@ -196,14 +196,12 @@
         .flatpickr-day:hover, .flatpickr-day.prevMonthDay:hover, .flatpickr-day.nextMonthDay:hover { background: #f1edfa; border-color: #f1edfa; }
         .flatpickr-day.today { border-color: #5e4a90; }
         .flatpickr-day.selected, .flatpickr-day.selected:hover { background: #5e4a90; border-color: #5e4a90; color: #fff; box-shadow: none; }
-        /* Zelfde vorm als de datumvelden ernaast, zoals in SEO Stats. */
+        /* Rand en schaduw zijn hier weg (2026-08-14, zie seo-stats.html): het kader komt
+           van .date-box om het hele bereik, deze regels zetten er een tweede binnenin.
+           accent-color/color-scheme blijven voor de native picker zonder flatpickr. */
         #startDate, #endDate {
-            border: 1px solid #d9d4e8; border-radius: 10px; padding: 0.35rem 0.6rem;
-            box-shadow: 0 1px 3px rgba(45,42,58,0.06); accent-color: #5e4a90; color-scheme: light;
-            transition: border-color .15s ease, box-shadow .15s ease;
+            accent-color: #5e4a90; color-scheme: light;
         }
-        #startDate:hover, #endDate:hover { border-color: #b9b0d8; }
-        #startDate:focus, #endDate:focus { border-color: #5e4a90; box-shadow: 0 0 0 3px rgba(94,74,144,0.15); outline: none; }
     </style>
 </head>
 <body>

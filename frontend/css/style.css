@@ -768,6 +768,22 @@ thead.sticky-top {
 }
 .date-box .sep { color: #9aa0a6; }
 
+/* Focus hoort om de BOX, niet om een veld: de inputs hierin hebben border 0 en
+ * box-shadow none, dus een focusstijl op de input is letterlijk onzichtbaar. Dat was
+ * ook de reden dat de per-pagina `#startDate:focus`-regels konden verdwijnen zonder
+ * dat er iets wegviel — ze deden al niets. :focus-within pakt zowel de native
+ * date-input als de flatpickr-input, en bij een bereik licht de hele control op,
+ * wat klopt: het IS één control. */
+.date-box:focus-within {
+    border-color: #5e4a90;
+    box-shadow: 0 0 0 3px rgba(94, 74, 144, 0.15);
+}
+/* En dan de standaard-focusring van de browser weg: die tekent om de border-box van de
+ * input, en met border 0 valt dat als een strak zwart kadertje midden ín de box. Mag
+ * hier, want de ring hierboven neemt zijn functie over — zonder die regel zou dit
+ * focus onzichtbaar maken. */
+.date-box input:focus { outline: none; }
+
 /* Bij een BEREIK de eerste datum rechts uitlijnen (Joep, 2026-08-13): het streepje
  * stond niet in het midden. Oorzaak: beide inputs zijn 6,6rem breed maar de datum is
  * maar ~84px, en links uitgelijnd — dus alle speling van het eerste veld viel vóór het

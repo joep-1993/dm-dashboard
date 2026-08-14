@@ -106,6 +106,13 @@ body { background-color: var(--flat-bg); color: var(--flat-text); }
     border-color: var(--flat-accent) !important;
     box-shadow: 0 0 0 3px rgba(135, 150, 239, 0.25);
 }
+/* .date-box is één control met border 0 op de velden erin, dus de focusring gaat om de
+ * box. !important op de border-color omdat de .date-box-regel hierboven de border met
+ * !important zet — zonder wint die van de focuskleur. */
+.date-box:focus-within {
+    border-color: var(--flat-accent) !important;
+    box-shadow: 0 0 0 3px rgba(135, 150, 239, 0.25);
+}
 .form-control::placeholder { color: #9aa0a6; }
 .form-label { color: var(--flat-muted); font-weight: 500; }
 
