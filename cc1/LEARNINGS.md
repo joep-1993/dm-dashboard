@@ -1,6 +1,85 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Twee bugrapporten over code die hier al weg was: `/static` stuurde geen `Cache-Control` (2026-08-14)
+
+Joep meldde dubbele kaders om de datumkiezer in SEO Stats, en een half uur later velden die
+in SEO titles onder elkaar vielen. Beide pagina's renderden hier **goed**. De oorzaak zat
+niet in de pagina's maar in de headers: `StaticFiles` stuurt van zichzelf geen
+`Cache-Control`, en dan mag een browser zelf een bewaartermijn verzinnen (heuristic
+caching). Joep keek naar een `style.css` van vóór het `.date-box`-blok.
+
+**1. Een screenshot dateert de CSS, als je op drie dingen tegelijk let.** Niet één afwijking
+maar het hele blok ontbrak: geen `::before`-kalendericoon, geen `padding: 0.2rem 0.45rem`
+(de binnenrand plakte op ~2px tegen de buitenrand), en velden veel breder dan de `6,6rem`
+die de regel oplegt. Drie ontbrekende eigenschappen uit één CSS-blok = dat blok was er niet.
+Dat is een harde conclusie; "het lijkt oud" is dat niet.
+
+**2. Meet de kléur van een lijn om te weten welke regel hem tekende.** Sneller dan DevTools
+op een machine waar je niet achter zit, en het werkt op een screenshot uit een chat:
+
+```python
+from PIL import Image
+im = Image.open('…/2026-08-14 09 26 35.png').convert('RGB'); px = im.load()
+for y in range(im.height):                     # rijen met veel niet-witte pixels = randen
+    if sum(1 for x in range(im.width) if px[x,y][0] < 247) > 50: print(y, px[30,y])
+# 39 (212,213,213) -> #d6d8d7  = --flat-border, de .date-box zelf
+# 40 (217,212,232) -> #d9d4e8  = de pagina-eigen #startDate-regel  <- de dader
+```
+
+**3. `!important` verstopt dode code, en dode code wordt bij de eerste cachehiccup weer
+levend.** Die `#startDate, #endDate { border: 1px solid #d9d4e8; … }` stond nog op **vijf**
+pagina's en was onzichtbaar zolang `style.css`' `border: 0 !important` meekwam. Zodra dat
+bestand veroudert, tekent hij weer. Dit is dezelfde regel als les 1 van 2026-08-13 (bij het
+centraliseren van een patroon is het verwijderen van de kopieën **stap 1**), nu met de
+reden erbij: laat je ze staan omdat "de gedeelde regel wint toch", dan is de cascade je
+enige bescherming en die is niet stabiel over tijd.
+
+**4. Een dode focusregel weghalen is niet gratis.** De verwijderde `#startDate:focus`-regels
+deden al niets (velden hebben `border: 0`, `box-shadow: none`) — maar hun `outline: none`
+deed wél iets. Zonder dat tekent Chrome zijn eigen focusring om de border-box van de input,
+en met border 0 valt die als een strak zwart kadertje midden in de box. Zichtbaar op de
+headless screenshot, niet in de diff. Vervangen door `.date-box:focus-within` (in style.css
+én theme-flat.css) plus `outline: none` op de velden.
+
+**5. De fix is `no-cache`, niet `no-store`.** `no-store` gooit het bestand elke keer weg;
+`no-cache` mag het bewaren maar moet het navragen, en `StaticFiles` zet zelf al een etag —
+dus dat wordt een 304 zonder body (gemeten: 0 bytes).
+
+```python
+class NoCacheStatic(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+app.mount("/static", NoCacheStatic(directory="frontend"), name="static")
+```
+
+Dit is een **backend**-wijziging op een uvicorn zonder `--reload`, dus herstart nodig. Eerst
+checken dat er niets in-process loopt: `ps --ppid <pid>` voor subprocessen plus de
+statusendpoints (`/api/seo-titles/status` → `idle`, `/api/ai-titles/status` →
+`is_running: false`). Opstarten duurt ~20s omdat `gsd_ll_service` drie keer op een Windows
+Excel-pad wacht — `curl --retry 15 --retry-delay 1` is dus te kort, dat geeft een valse
+"hij komt niet op".
+
+**6. Playwright in WSL werkt zónder sudo, met de libs uit een lokale map.** Voor het
+verifiëren van CSS is headless renderen het enige echte bewijs, maar
+`playwright install-deps` wil root. Dit hoeft niet:
+
+```bash
+apt-get download libnspr4 libnss3 libasound2t64 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+  libatspi2.0-0t64 libcups2t64 libdrm2 libgbm1 libpango-1.0-0 libcairo2 libxcomposite1 \
+  libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 libxext6 libxi6 libxtst6 libxcursor1 \
+  libxrender1 libxss1 libwayland-client0
+for f in *.deb; do dpkg-deb -x "$f" root; done
+LD_LIBRARY_PATH=$PWD/root/usr/lib/x86_64-linux-gnu python3 render.py
+```
+
+Voordeel boven de `chrome.exe --headless`-truc van 2026-08-13: je kunt `getComputedStyle`
+uitlezen. `#startDate` gaf `border: 0px none` en `.date-box` één `1px solid rgb(214,216,215)`
+— dat is het verschil tussen "ik denk dat de regel wint" en weten dat hij wint.
+
 ## Een UI-patroon dashboardbreed uitrollen: vier dingen die je niet in de code ziet (2026-08-13)
 
 De tabvorm en de datumkiezer van Bot Hits naar alle pagina's brengen. Drie van de vier

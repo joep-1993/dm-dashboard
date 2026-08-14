@@ -434,7 +434,9 @@ python-dotenv==1.0.0      # Environment variable management
 - `GET /` - System status
 - `GET /api/health` - Health check
 - `POST /api/generate` - AI text generation
-- `GET /static/*` - Frontend files
+- `GET /static/*` - Frontend files (via `NoCacheStatic`, een `StaticFiles`-subclass die
+  `Cache-Control: no-cache` meestuurt sinds 2026-08-14 — browsers revalideren dus elke load
+  en krijgen een 304 zonder body i.p.v. uren-oude CSS/JS)
 
 ### SEO Workflow
 - `POST /api/process-urls?batch_size=10&parallel_workers=3&conservative_mode=false` - Process URLs with parallel workers (synchronous processing - optimized for database connection pooling, batch_size: min 1 no max, parallel_workers: 1-20, conservative_mode forces 1 worker with 0.5-0.7s delay)

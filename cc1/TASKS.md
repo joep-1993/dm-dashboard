@@ -4,6 +4,47 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-14 — Datumkiezer: dubbel kader weg, en `/static` revalideert weer
+
+Twee meldingen van Joep (screenshots `2026-08-14 09 26 35.png` en `09 49 55.png`) met
+dezelfde oorzaak eronder: hij keek naar een oudere `style.css` dan de server had.
+
+- [x] **Dubbel kader om de datumkiezer weg.** Vijf pagina's hadden nog een eigen
+      `#startDate, #endDate { border: 1px solid #d9d4e8; border-radius: 10px; padding: … }`
+      uit de tijd van losse datumvelden; sinds `.date-box` zit het kader om het HELE bereik,
+      dus dat tekende er een tweede binnenin. Nagemeten in de screenshot: buitenlijn
+      `#d4d5d5` (de box), 1px daarnaast `#d9d4e8` (de pagina-regel). Weg in **seo-stats,
+      bothits, shop-campaigns en gsd-campaigns**; `accent-color`/`color-scheme` blijven voor
+      de native picker, en de `width`-override in gsd-campaigns blijft voor de placeholder.
+      Óók weg: de `#id::-webkit-calendar-picker-indicator`-regels — een id-selector wint van
+      `style.css` en zette Chrome's glyph weer aan naast onze `::before`.
+- [x] **Focus verhuisd naar de box.** De oude `#startDate:focus`-regels waren dode code (de
+      velden hebben `border: 0`, `box-shadow: none`). Nu `.date-box:focus-within` in
+      `style.css` én `theme-flat.css`, plus `outline: none` op de velden — zonder dat laatste
+      tekent Chrome zijn eigen ring om de border-box en valt die als een zwart kadertje
+      midden in de box.
+- [x] **`/static` stuurt `Cache-Control: no-cache`.** `main.py` mount nu via een
+      `NoCacheStatic(StaticFiles)` die de header in `file_response` zet. Bewaren mag,
+      navragen moet; `StaticFiles` zet zelf al een etag, dus het is een 304 zonder body
+      (gemeten: 0 bytes). **Dit was de eigenlijke oorzaak van beide meldingen** — SEO titles
+      had zelf niets: die twee kale native date-inputs vielen onder elkaar in hun `col-md-3`
+      omdat het `.date-box`-blok in de gecachte CSS ontbrak. Backend zonder `--reload`, dus
+      herstart uitgevoerd (alle runs stonden idle: `seo-titles: idle`,
+      `ai-titles: is_running false`, geen subprocessen).
+- [x] **SEO titles: Stop en Generate naar rechts.** `justify-content-end` lijnt alleen af
+      binnen de kolom, en drie keer `col-md-3` vult 9 van de 12 kolommen — `ms-auto` duwt de
+      kolom zelf naar de rechterkant van de `.row`.
+- [x] Gecontroleerd door de vier pagina's headless te renderen (Playwright in WSL, libs uit
+      een lokale map — recept in `LEARNINGS.md`), inclusief `getComputedStyle`: `#startDate`
+      `border: 0px none`, `.date-box` één `1px solid rgb(214,216,215)`. Plus een scan over
+      alle twaalf `.date-box`-pagina's: nul resterende rand-regels op datumvelden.
+
+**Openstaand:**
+
+- [ ] **Eenmalig `Ctrl+Shift+R` bij Joep.** Wat de browser vóór deze fix heeft opgeslagen,
+      is opgeslagen zonder die header; daarna revalideert alles vanzelf.
+- [ ] **Het verdict op de flat-proef staat nog open** — zie de sectie van 2026-08-13.
+
 ### 2026-08-13 — Audit Bothits, ronde 2: alle vijf fases uitgevoerd
 
 Tweede audit over 5.020 regels (vijf parallelle reviewers, daarna nagerekend tegen de live

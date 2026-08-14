@@ -825,7 +825,7 @@ carries through automatically:
   rand, de breedte en het lettertype. Bestaande JS (`.value`, flatpickr-init op `#id`)
   hoeft niet mee te veranderen.
 
-  Drie dingen die in de CSS zijn opgelost en die je niet zelf moet overdoen:
+  Zes dingen die in de CSS zijn opgelost en die je niet zelf moet overdoen:
   1. **Het icoon is een `::before` met een data-URI**, geen inline `<svg>`. Anders staat
      hetzelfde SVG-blok vijftien keer over tien pagina's.
   2. **`display:flex` + `width:fit-content`**, niet `inline-flex`. Met inline-flex ging
@@ -842,6 +842,25 @@ carries through automatically:
      het streepje aan de tweede datum. Maak de velden hiervoor **niet** smaller — die
      breedte moet zowel `2026-08-13` (flatpickr) als `13-08-2026` (native) als Chrome's
      eigen icoon aankunnen. Losse datumvelden blijven links uitgelijnd.
+  5. **Geen eigen rand, radius of schaduw op de velden — ook niet met een `#id`**
+     (2026-08-14). Vijf pagina's hadden nog `#startDate, #endDate { border: 1px solid
+     #d9d4e8; border-radius: 10px; padding: … }` uit de tijd van losse datumvelden. Het
+     kader zit nu om het HELE bereik, dus dat tekent er een **tweede binnenin**: nagemeten
+     in een screenshot van Joep staat de buitenlijn op `#d4d5d5` (de box) en 1px daarnaast
+     `#d9d4e8` (de pagina-regel). Ze waren onzichtbaar zolang `style.css`' `border: 0
+     !important` meekwam — precies daarom weghalen en niet laten staan: een regel die
+     vandaag niets doet is morgen een bug. Weg in seo-stats, bothits, shop-campaigns en
+     gsd-campaigns; `accent-color`/`color-scheme` mogen blijven (die gelden voor de native
+     picker). Óók weghalen: `#id::-webkit-calendar-picker-indicator`-regels, want een
+     id-selector wint van `style.css` en zet Chrome's glyph weer aan naast onze `::before`.
+  6. **Focus hoort om de BOX, niet om een veld** (2026-08-14). De velden hebben `border: 0`
+     en `box-shadow: none`, dus een `#startDate:focus`-regel is per definitie onzichtbaar —
+     die stonden er wel, en deden al niets. Het staat nu als `.date-box:focus-within` in
+     `style.css` (paars) én in `theme-flat.css` (blauw accent, met `!important` op de
+     border-color omdat de `.date-box`-regel daar ook `!important` is). Plus
+     `.date-box input:focus { outline: none }`: zonder dat tekent Chrome zijn eigen ring om
+     de border-box van de input en valt dat als een strak zwart kadertje **midden in** de
+     box. Die twee horen bij elkaar — alleen de outline weghalen maakt focus onzichtbaar.
 
   Daarbovenop komt **flatpickr** voor de kalender zelf — dat is wat SEO stats, SEO
   titles, GSD Campaigns, GSD Budgets, Shop-campaigns en Bot Hits renderen, en
