@@ -243,7 +243,27 @@ LEGACY_PRODUCT_RX = re.compile(r"^/[a-z0-9_-]+/d\d{6,}/")
 
 
 def url_type(u):
-    """Bucket a request path into the site's URL shapes."""
+    """Bucket a request path into the site's URL shapes.
+
+    /r/ STAAT BOVENAAN EN IS EEN CONTAINMENT-CHECK (Joep, 2026-08-14). Dit was fout, en
+    het was met een `startswith` niet te zien: de R-urls van beslist hebben de vorm
+    `/products/<cat>/r/<term>`, dus ze werden opgevangen door de `/products/`-regel
+    hieronder en kwamen nooit bij `/r/` aan. Alleen de kale `/r/<term>`-vorm werd goed
+    geclassificeerd — 604 URLs op 177.000.
+
+    Gemeten in het venster 2026-07-15..08-13 vóór de fix: 118.140 hits op URLs met /r/
+    erin stonden als Cat-url (106.662) en C-url (11.478), en de donut toonde R-url op
+    180 hits (0,0%). Cat-url was daarmee 1,4% te groot en het URL-type-filter op R-url
+    leverde vrijwel niets op.
+
+    Deze volgorde is nu gelijk aan `seo_stats_service._urltype_case()`, dat al
+    `LIKE '%%/r/%%'` als eerste arm had: /r/ vóór /c/ vóór /p/ vóór /products/. Dat is
+    ook wat het commentaar bij URLTYPE_BUCKETS in bothits_service.py altijd al beweerde.
+    Nagekeken dat geen enkel ander type met /r/ in de URL bestaat (list, sitemap, robots
+    en info kwamen er niet in voor), dus deze regel kaapt niets anders weg.
+    """
+    if "/r/" in u:
+        return "search"
     if u.startswith("/p/"):
         return "product"
     if u.startswith("/products/"):
@@ -260,8 +280,8 @@ def url_type(u):
         return "robots"
     if u.startswith("/info/") or u.startswith("/klantenservice"):
         return "info"
-    if u.startswith("/r/"):
-        return "search"
+    # De oude `startswith("/r/")` stond hier; die is naar boven verhuisd als
+    # containment-check. Zie de docstring — hij ving alleen de kale /r/<term>-vorm.
     if u.startswith("/l/"):
         return "list"
     if LEGACY_PRODUCT_RX.match(u):

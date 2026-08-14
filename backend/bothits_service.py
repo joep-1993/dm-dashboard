@@ -85,6 +85,20 @@ def _range(start_date, end_date):
 # vóór /c/ vóór /p/ vóór /products/ — zodat een URL met zowel /r/ als /c/ in beide
 # tools een R-url is.
 #
+# DAT WAS TOT 2026-08-14 NIET WAAR, en deze regels beweerden het wel. De parser checkte
+# `/r/` met een `startswith` ná `/products/`, terwijl de R-urls van beslist
+# `/products/<cat>/r/<term>` heten — die kwamen dus nooit bij de /r/-regel en werden
+# Cat-url of C-url. Gemeten op 13-08 vóór en na de fix: `search` ging van 5 hits naar
+# 261.604 (8,4% van de dag) en `category` van 222.744 naar 29.445.
+#
+# LET OP DE BREUK IN DE HISTORIE. `pa.bothits_daily` bewaart het RUWE type zonder de
+# URL-tekst, dus de fix werkt alleen voor wat daarna is verwerkt. De datums binnen het
+# S3-venster (2026-07-05 t/m 08-13) zijn opnieuw geïngest; ALLES DAARVOOR — de tool gaat
+# terug tot 2026-02-14 — heeft nog de oude indeling, met R-url op bijna nul en Cat-url te
+# hoog. Een venster dat over 2026-07-05 heen loopt, mengt dus twee definities. Zie
+# scripts/bothits_reingest_urltype.py; de logbestanden van vóór die datum zijn uit S3
+# verdwenen (~42 dagen retentie), dus dit is niet meer te repareren.
+#
 # Bewust een mapping in de QUERYLAAG en niet in de parser: het ruwe type blijft in
 # de cube staan, de 24 geladen logdatums hoeven niet opnieuw ingest, en de indeling
 # is een presentatiekeuze die je later kunt bijstellen zonder de data aan te raken.
