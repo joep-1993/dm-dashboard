@@ -1,31 +1,87 @@
-/* Simple custom styles - no preprocessing needed! */
+/* Simple custom styles - no preprocessing needed! *
+ *
+ * HET VLAKKE THEMA STAAT SINDS 2026-08-14 IN DIT BESTAND. `theme-flat.css` was een
+ * override-laag bovenop deze file (proef van 2026-08-13); Joep heeft de proef
+ * goedgekeurd, dus de twee zijn samengevoegd en dat tweede bestand bestaat niet meer.
+ * Wat dat concreet betekent voor wie hier iets wijzigt:
+ *   - Eén bron per kleur. De oude waarden (grijze kopbalk, oranje .btn-secondary,
+ *     paarse outline-knoppen, knopschaduw) zijn WEG, niet overschreven.
+ *   - Terugdraaien is geen `sed` meer maar het git-tag `ui-voor-flat`, dat naar de
+ *     laatste commit vóór de restyle wijst.
+ *   - `!important` staat nog op een deel van de kleuren, maar niet meer omdát dit een
+ *     laag was. Er zijn twee echte redenen, en die staan per blok erbij: (1) Bootstrap's
+ *     eigen utilities (`.bg-info`, `.bg-secondary`, `.text-white`) zetten hun kleur mét
+ *     !important, dus zonder valt de kop terug op Bootstrap-blauw; (2) zeventien
+ *     pagina's definiëren knopklassen in hun eigen `<style>`, en dat blok laadt ná elke
+ *     stylesheet en wint dus altijd op gelijke specificiteit. Zie cc1/TASKS.md voor de
+ *     openstaande opruiming van die 77 pagina-regels; daarna kan reden (2) vervallen.
+ *
+ * KLEUREN ZIJN UIT DE SCREENSHOT VAN JOEP GEMETEN (PIL, pixelsample), niet geschat:
+ * Downloads\claude\2026-08-13 18 11 15.png.
+ */
 
 /* Custom Color Scheme */
 :root {
     --color-navbar: #5e4a90;    /* Purple - for top navbar only */
-    --color-section: #E8E9EB;   /* Light grey - for section headers */
-    --color-button: #CC5500;    /* Burnt orange - for buttons */
+    --color-section: #E8E9EB;   /* Light grey - for .bg-* utilities and alerts */
+    --color-button: #CC5500;    /* Burnt orange - the CTA, ook in het vlakke thema */
     --color-button-hover: #E97451;  /* Coral orange - for button hover */
+
+    /* Het vlakke palet. Gemeten uit de screenshot; `--flat-*` omdat cc1 en de
+     * commitgeschiedenis die namen gebruiken. */
+    --flat-bg: #f4f5f5;              /* pagina */
+    --flat-panel: #f4f5f9;           /* kopbalk, thead, uitgeschakeld */
+    --flat-surface: #ffffff;         /* vlak: kaart, veld, outline-knop */
+    --flat-border: #d6d8d7;
+    --flat-border-strong: #c3c7cc;   /* rand van een outline-knop */
+    --flat-text: #1a1d19;
+    --flat-muted: #666a6b;
+    --flat-accent: #8796ef;          /* LIJNEN: tab-onderlijn, chiprand, focusring */
+    --flat-accent-soft: #eaeef9;     /* chipvulling, rijhover */
+    --flat-radius: 6px;
+
+    /* Eén meting die het hele ontwerp stuurde: wit op --flat-accent haalt maar 2,75:1
+     * en zakt door WCAG AA. Daarom is het accent de kleur van lijnen en niet van
+     * gevulde knoppen; de CTA blijft --color-button (4,31:1 met wit — genoeg voor
+     * knoptekst, net onder de 4,5:1 voor gewone tekst; #B84D00 geeft 5,1:1 als het
+     * ooit moet). Deze twee staan er als gemeten alternatief voor wie de CTA tóch
+     * blauw wil: 4,81:1 en 5,59:1. Nu niet in gebruik. */
+    --flat-accent-solid: #5566e0;
+    --flat-accent-hover: #4a5bd6;
 }
 
 /* Match section header size with topbar menu items */
 .card-header h5 {
     font-size: 1.1rem;
+    font-weight: 600;
 }
 
 body {
-    background-color: #f8f9fa;
+    background-color: var(--flat-bg);
+    color: var(--flat-text);
 }
 
+/* Vlakke kaart: een rand doet het werk, geen schaduw. */
 .card {
-    box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+    border: 1px solid var(--flat-border);
+    border-radius: var(--flat-radius);
 }
 
-/* All card/section headers are light grey */
-.card-header {
-    background-color: var(--color-section) !important;
-    color: #333 !important;
+/* Kopbalk: vlak paneelvlak met alleen een scheidingslijn, i.p.v. de grijze balk
+ * (--color-section) van vóór de restyle. De bg-*-varianten staan erbij omdat
+ * Bootstrap die utilities mét !important zet — vandaar het !important hier, niet
+ * omdat dit ooit een override-laag was. */
+.card-header,
+.card-header.bg-info, .card-header.bg-success, .card-header.bg-primary,
+.card-header.bg-secondary, .card-header.bg-warning, .card-header.bg-dark {
+    background-color: var(--flat-panel) !important;
+    color: var(--flat-text) !important;
+    border-bottom: 1px solid var(--flat-border);
+    font-weight: 600;
 }
+/* .text-white zit als utility op sommige koppen en heeft !important; deze selector is
+ * specifieker, dus de tekst blijft leesbaar op het lichte vlak. */
+.card-header.text-white, .card-header.text-white h5 { color: var(--flat-text) !important; }
 
 #result {
     padding: 1rem;
@@ -62,9 +118,13 @@ body {
     font-weight: 700;
 }
 
-/* Subtle shadow on all buttons throughout the frontend */
+/* Eén knopvorm voor het hele dashboard: zelfde radius, geen schaduw. Het onderscheid
+ * zit in vulling (primair) versus rand (de rest) — zie de drie groepen verderop. De
+ * schaduw die hier stond (0 2px 4px rgba(0,0,0,.2)) is bij de restyle weggehaald.
+ * De navbarknoppen houden hun eigen schaduw: die staat in .nav-dropdown-toggle. */
 .btn {
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    border-radius: var(--flat-radius);
+    font-weight: 500;
 }
 
 /* Navbar dropdown menu system */
@@ -189,79 +249,36 @@ body {
     background-color: var(--color-navbar) !important;
 }
 
-/* Other bg-primary elements use section color */
-.bg-primary:not(.navbar) {
+/* Other bg-primary elements use section color.
+ *
+ * `:not(.card-header)` is er sinds de merge van 2026-08-14 en is geen smaak maar een
+ * cascadefix: door de `:not()` heeft deze selector specificiteit 0,2,0 — precies gelijk
+ * aan `.card-header.bg-primary` in het kopbalkblok — en ze hebben BEIDE !important. Toen
+ * het thema nog een tweede bestand was, won de kopbalk op bestandsvolgorde; in één
+ * bestand won deze regel, en dan kleurt een `card-header bg-primary` weer ouderwets grijs
+ * (gemeten op seo-titles). Uitsluiten is stabieler dan de blokken in de juiste volgorde
+ * zetten: dat laatste breekt zodra iemand een blok verplaatst. */
+.bg-primary:not(.navbar):not(.card-header) {
     background-color: var(--color-section) !important;
 }
 
-/* All buttons are orange */
-.btn-primary {
-    background-color: var(--color-button);
-    border-color: var(--color-button);
-    color: white;
-}
-
-.btn-primary:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
-}
-
-.btn-outline-primary {
-    color: var(--color-button);
-    border-color: var(--color-button);
-}
-
-.btn-outline-primary:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
-}
+/* De knopregels die hier stonden (.btn-primary / -info / -success / -secondary /
+ * -warning apart, elk met dezelfde oranje, plus vijf paarse of oranje outline-varianten)
+ * zijn samengevoegd in de DRIE GROEPEN verderop in dit bestand. Ze stonden hier per
+ * Bootstrap-kleurnaam gesorteerd, wat suggereert dat de kleurnaam iets betekent — en dat
+ * deed hij niet: alles was oranje. Zoek dus niet per kleurnaam maar per groep. */
 
 .text-primary {
     color: var(--color-navbar) !important;
 }
 
-.badge.bg-primary {
-    background-color: var(--color-navbar) !important;
-}
-
-/* Info Color - Grey for headers, Orange for buttons */
-.bg-info,
-.card-header.bg-info {
+/* Info Color - grey for the .bg-* utilities; de kopbalkvariant staat bij .card-header */
+.bg-info {
     background-color: var(--color-section) !important;
-}
-
-.btn-info {
-    background-color: var(--color-button);
-    border-color: var(--color-button);
-    color: white;
-}
-
-.btn-info:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
-}
-
-.btn-outline-info {
-    color: var(--color-button);
-    border-color: var(--color-button);
-    background-color: transparent;
-}
-
-.btn-outline-info:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
 }
 
 .text-info {
     color: #666 !important;
-}
-
-.badge.bg-info {
-    background-color: var(--color-section) !important;
 }
 
 .alert-info {
@@ -270,33 +287,9 @@ body {
     color: #333;
 }
 
-/* Success Color - Grey for headers, Orange for buttons */
-.bg-success,
-.card-header.bg-success {
+/* Success Color - grey for the .bg-* utilities; de kopbalkvariant staat bij .card-header */
+.bg-success {
     background-color: var(--color-section) !important;
-}
-
-.btn-success {
-    background-color: var(--color-button);
-    border-color: var(--color-button);
-    color: white;
-}
-
-.btn-success:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
-}
-
-.btn-outline-success {
-    color: var(--color-button);
-    border-color: var(--color-button);
-}
-
-.btn-outline-success:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
 }
 
 .text-success {
@@ -329,12 +322,19 @@ body {
    nor grows when data lands. Shared from here so all tools shimmer identically;
    each page still needs its own skeletonRows(cols, n) helper because the column
    count differs and there is no shared JS bundle. */
-/* Brand-purple badge. Bootstrap's .bg-secondary is barely visible against a
- * card (see cc1/UI_BLUEPRINT.md "Don't use grey as a label colour"), so a mode
- * or status chip uses this instead. */
-.badge-purple {
-    background-color: #5e4a90;
-    color: #fff;
+/* CHIPS. De vorm uit de screenshot: zachte accentvulling, accentrand, donkere tekst.
+ * Vervangt zowel de brand-paarse .badge-purple als de grijs-op-grijs Bootstrap-badges
+ * waar UI_BLUEPRINT al voor waarschuwde ("nooit grijs als labelkleur").
+ * !important omdat Bootstrap's .bg-* utilities hun kleur zelf met !important zetten. */
+.badge.bg-info, .badge.bg-primary, .badge-purple {
+    background-color: var(--flat-accent-soft) !important;
+    color: #35408a !important;
+    border: 1px solid var(--flat-accent);
+    font-weight: 600;
+}
+.badge.bg-secondary {
+    background-color: var(--flat-panel) !important;
+    color: var(--flat-muted) !important;
 }
 
 /* ------------------------------------------------------------------ *
@@ -418,122 +418,117 @@ body {
     background-color: #00b894;
 }
 
-/* Secondary Color - Grey for headers, Orange for buttons */
-.bg-secondary,
-.card-header.bg-secondary {
+/* Secondary Color - grey for the .bg-* utilities; de kopbalkvariant staat bij .card-header */
+.bg-secondary {
     background-color: var(--color-section) !important;
 }
 
-.btn-secondary {
-    background-color: var(--color-button);
-    border-color: var(--color-button);
-    color: white;
-}
-
-.btn-secondary:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
-}
-
-.btn-outline-secondary {
-    color: var(--color-button);
-    border-color: var(--color-button);
-}
-
-.btn-outline-secondary:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
-}
-
-/* Disabled Process URLs / Process All URLs buttons: identical neutral grey outline */
-#processBtn:disabled,
-#processBtn.btn-outline-secondary,
-#processBtn.btn-outline-secondary:hover,
-#processAllBtn:disabled {
-    color: #6c757d;
-    border-color: #6c757d;
-    background-color: transparent;
-    opacity: 1;
-}
-
-/* Warning buttons - also orange */
-.btn-warning {
-    background-color: var(--color-button);
-    border-color: var(--color-button);
-    color: white;
-}
-
-.btn-warning:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
-}
-
-.btn-outline-warning {
-    color: var(--color-button);
-    border-color: var(--color-button);
-    background-color: transparent;
-}
-
-.btn-outline-warning:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
-}
-
-.btn-outline-purple {
-    color: #5e4a90;
-    border: 1px solid #5e4a90;
-    background-color: transparent;
-}
-
-.btn-outline-purple:hover {
-    background-color: #5e4a90;
-    border-color: #5e4a90;
-    color: white;
-}
-
 /* ------------------------------------------------------------------ *
- * Canonical tool button vocabulary — see cc1/UI_BLUEPRINT.md.
- * Additive + opt-in: only markup that uses these class names is
- * affected, so existing tools are untouched until migrated.
- *   - Run / execute (primary CTA, far right):  btn btn-run
- *   - Orange, non-run action:                  btn btn-outline-orange
- *   - Any other action / Refresh:              btn btn-outline-purple
- *   - Not clickable: add `disabled` -> grey outline automatically.
+ * HET KNOPVOCABULAIRE — drie groepen, zie cc1/UI_BLUEPRINT.md.
+ *
+ * Vorm en radius komen van `.btn` bovenaan; hier alleen de kleur. Er zijn precies
+ * drie betekenissen, en de lijsten zijn lang omdat ze naast het canonieke
+ * vocabulaire ook de klassen bevatten die pagina's zelf hebben verzonnen
+ * (.btn-purple, .btn-hs, .btn-preset, .btn-tool, .btn-*-action, .btn-bulk-*).
+ * Die waren allemaal een variant op gevuld-of-outline, dus ze vallen in dezelfde
+ * drie. Nieuwe pagina's gebruiken .btn-run / .btn-outline-purple / .btn-outline-red
+ * en verzinnen er geen vierde bij.
+ *
+ * OVER HET !important: het is er NIET omdat dit een override-laag is (die is op
+ * 2026-08-14 opgeheven), maar omdat zeventien pagina's deze klassen in hun eigen
+ * `<style>` opnieuw definiëren — en dat blok laadt ná elke stylesheet, dus het wint
+ * op gelijke specificiteit. Zolang die 77 regels er staan is dit de enige manier om
+ * het thema hél te laten aanslaan in plaats van half. Het staat daarom op KLEUR en
+ * bewust niet op maatvoering: padding, breedte en font-size blijven van de pagina,
+ * zodat lay-outs heel blijven. cc1/TASKS.md heeft de opruiming als open taak.
  * ------------------------------------------------------------------ */
-.btn-run {
-    background-color: var(--color-button);
-    border: 1px solid var(--color-button);
-    color: #fff;
+
+/* 1. PRIMAIR / uitvoeren — burnt orange, de huiskleur.
+ * .btn-purple en .btn-hs wáren paars en zitten hier omdat het op hún pagina's de
+ * hoofdactie is; één CTA-kleur is het punt van de drie groepen. Voor die twee is dit
+ * dus geen exacte terugzetting van vóór de restyle. */
+.btn-run, .btn-primary, .btn-success, .btn-warning, .btn-info,
+.btn-purple, .btn-hs {
+    background-color: var(--color-button) !important;
+    border-color: var(--color-button) !important;
+    color: #fff !important;
     transition: background-color 0.2s ease, border-color 0.2s ease;
 }
-.btn-run:hover:not(:disabled) {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: #fff;
+.btn-run:hover:not(:disabled), .btn-primary:hover:not(:disabled),
+.btn-success:hover:not(:disabled), .btn-warning:hover:not(:disabled),
+.btn-info:hover:not(:disabled), .btn-purple:hover:not(:disabled),
+.btn-hs:hover:not(:disabled) {
+    background-color: var(--color-button-hover) !important;
+    border-color: var(--color-button-hover) !important;
+    color: #fff !important;
 }
 
-.btn-outline-orange {
-    color: var(--color-button);
-    border: 1px solid var(--color-button);
-    background-color: transparent;
+/* 2. SECUNDAIR — outline in neutraal grijs. Dit verving de oranje ÉN de paarse
+ * outline-knoppen; dat onderscheid bestond alleen in kleur en niet in betekenis. */
+.btn-outline-purple, .btn-outline-orange, .btn-outline-secondary,
+.btn-outline-primary, .btn-outline-info, .btn-outline-success,
+.btn-outline-warning, .btn-secondary,
+.btn-purple-action, .btn-orange-action, .btn-purple-outline, .btn-tool,
+.btn-hs-outline, .btn-preset, .btn-bulk-pause, .btn-bulk-activate,
+.btn-outline-purple-on-dark, .btn-outline-orange-on-dark {
+    background-color: var(--flat-surface) !important;
+    border-color: var(--flat-border-strong) !important;
+    border-width: 1px;
+    border-style: solid;
+    color: var(--flat-text) !important;
 }
-.btn-outline-orange:hover:not(:disabled) {
-    background-color: var(--color-button);
-    border-color: var(--color-button);
-    color: #fff;
+.btn-outline-purple:hover:not(:disabled), .btn-outline-orange:hover:not(:disabled),
+.btn-outline-secondary:hover:not(:disabled), .btn-outline-primary:hover:not(:disabled),
+.btn-outline-info:hover:not(:disabled), .btn-outline-success:hover:not(:disabled),
+.btn-outline-warning:hover:not(:disabled), .btn-secondary:hover:not(:disabled),
+.btn-purple-action:hover:not(:disabled), .btn-orange-action:hover:not(:disabled),
+.btn-purple-outline:hover:not(:disabled), .btn-tool:hover:not(:disabled),
+.btn-hs-outline:hover:not(:disabled), .btn-preset:hover, .btn-preset:focus,
+.btn-bulk-pause:hover:not(:disabled), .btn-bulk-activate:hover:not(:disabled) {
+    /* Neutrale hover, geen eigen kleur: met een oranje CTA op dezelfde rij zouden dat
+     * drie kleuren zijn. Een secundaire knop hoeft bij hover alleen te bevestigen dat
+     * hij klikbaar is. */
+    background-color: #eef0f1 !important;
+    border-color: var(--flat-muted) !important;
+    color: var(--flat-text) !important;
 }
 
-/* Non-clickable buttons in the canonical vocabulary read as grey outline. */
-.btn-run:disabled,
-.btn-outline-orange:disabled,
-.btn-outline-purple:disabled {
-    color: #6c757d;
-    border-color: #6c757d;
-    background-color: transparent;
+/* 3. DESTRUCTIEF blijft rood, alleen platter — een verwijderknop hoort niet in de
+ * accentkleur te verdwijnen. Let op de richting: outline in rust, gevuld bij hover.
+ * .btn-danger-invert (gevuld in rust) is precies het omgekeerde en is daarom weg;
+ * niet opnieuw introduceren. */
+.btn-danger, .btn-danger-invert {
+    background-color: #d64545 !important;
+    border-color: #d64545 !important;
+    color: #fff !important;
+}
+.btn-danger:hover:not(:disabled) {
+    background-color: #c03b3b !important;
+    border-color: #c03b3b !important;
+}
+.btn-outline-danger, .btn-outline-red, .btn-remove, .btn-remove-row,
+.btn-red-outline, .btn-bulk-remove {
+    background-color: var(--flat-surface) !important;
+    border-color: #e3b3b3 !important;
+    border-width: 1px;
+    border-style: solid;
+    color: #c03b3b !important;
+}
+.btn-outline-danger:hover:not(:disabled), .btn-outline-red:hover:not(:disabled),
+.btn-remove:hover:not(:disabled), .btn-remove-row:hover:not(:disabled),
+.btn-red-outline:hover:not(:disabled), .btn-bulk-remove:hover:not(:disabled) {
+    background-color: #fdf0f0 !important;
+    border-color: #d64545 !important;
+    color: #c03b3b !important;
+}
+
+/* NIET-KLIKBAAR: één grijs, ongeacht welke knopklasse eronder zit. Dit verving vier
+ * losse disabled-regels (.btn-run/.btn-outline-orange/.btn-outline-purple/.btn-outline-red
+ * plus #processBtn en #processAllBtn) die elk hun eigen grijs hadden. */
+.btn:disabled, .btn.disabled {
+    background-color: var(--flat-panel) !important;
+    border-color: var(--flat-border) !important;
+    color: #9aa0a6 !important;
     opacity: 1;
     cursor: not-allowed;
 }
@@ -543,31 +538,9 @@ body {
    × controls behaved oppositely per page. Everything now uses .btn-outline-red:
    outline at rest, fills solid red on hover. Don't reintroduce the inverse. */
 
-/* Danger buttons - keep red for destructive actions */
-.btn-danger {
-    background-color: #dc3545;
-    border-color: #dc3545;
-    color: white;
-}
-
-.btn-danger:hover {
-    background-color: #c82333;
-    border-color: #bd2130;
-    color: white;
-}
-
-/* Outline danger buttons - orange like other outline buttons */
-.btn-outline-danger {
-    color: var(--color-button);
-    border-color: var(--color-button);
-    background-color: transparent;
-}
-
-.btn-outline-danger:hover {
-    background-color: var(--color-button-hover);
-    border-color: var(--color-button-hover);
-    color: white;
-}
+/* De kleuren van .btn-danger en .btn-outline-danger staan in groep 3 hierboven.
+ * .btn-outline-danger was hier oranje ("orange like other outline buttons") — dat is bij
+ * de restyle rood geworden, want een outline-danger die oranje is, is geen danger. */
 
 /* Reset Validation (Kopteksten + FAQ's) used to force red here, overriding the
    orange .btn-outline-danger theme above. It now wears the canonical
@@ -593,29 +566,9 @@ body {
     font-size: 0.88rem;
 }
 
-/* Red outline that fills solid red on hover — for genuinely destructive
-   per-row controls (the × in Recent Results). Note the direction: outline at
-   rest, solid on hover. .btn-danger-invert is the opposite (solid at rest) and
-   is still used by the 301-generator rule rows. */
-.btn-outline-red {
-    color: #dc3545;
-    border: 1px solid #dc3545;
-    background-color: transparent;
-}
-
-.btn-outline-red:hover,
-.btn-outline-red:focus {
-    background-color: #dc3545;
-    border-color: #dc3545;
-    color: #fff;
-}
-
-.btn-outline-red:disabled {
-    color: #6c757d;
-    border-color: #6c757d;
-    background-color: transparent;
-    opacity: 1;
-}
+/* .btn-outline-red is de canonieke destructieve knop — outline in rust, gevuld bij
+ * hover. Zijn kleuren staan in groep 3 hierboven; de disabled-staat komt van de
+ * gedeelde .btn:disabled. Hieronder alleen nog de GEOMETRIE van de remove-×. */
 
 /* ------------------------------------------------------------------ *
  * The canonical remove-× . GEOMETRY ONLY — pair it with a colour:
@@ -677,6 +630,50 @@ thead.sticky-top {
 }
 
 /* ------------------------------------------------------------------ *
+ * Formuliercontrols — één rand, één radius, wit vlak.
+ *
+ * !important op de rand omdat pagina's hun eigen veldklassen definiëren (bothits
+ * geeft .chk-list een eigen `border: 1px solid #dee2e6`), en een page-<style> wint
+ * op gelijke specificiteit. Alleen op de rand: maten blijven van de pagina.
+ * ------------------------------------------------------------------ */
+.form-control,
+.form-select,
+.chk-list,
+.date-box {
+    border: 1px solid var(--flat-border) !important;
+    border-radius: var(--flat-radius);
+    background-color: var(--flat-surface);
+    color: var(--flat-text);
+}
+.input-group-text {
+    background-color: var(--flat-panel);
+    border: 1px solid var(--flat-border);
+    color: var(--flat-muted);
+}
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--flat-accent) !important;
+    box-shadow: 0 0 0 3px rgba(135, 150, 239, 0.25);
+}
+.form-control::placeholder { color: #9aa0a6; }
+.form-label { color: var(--flat-muted); font-weight: 500; }
+
+/* ------------------------------------------------------------------ *
+ * Tabellen — vlakke kop op paneelkleur, lichte rijscheiding, accentzachte hover.
+ * ------------------------------------------------------------------ */
+.table > :not(caption) > * > * { border-color: #e9eaec; }
+.table thead th {
+    background-color: var(--flat-panel);
+    color: var(--flat-muted);
+    font-weight: 600;
+    border-bottom: 1px solid var(--flat-border);
+}
+.table-hover > tbody > tr:hover > * { background-color: var(--flat-accent-soft); }
+
+/* Alerts: zelfde radius als de rest, en een rand van 1px i.p.v. Bootstrap's dikkere. */
+.alert { border-radius: var(--flat-radius); border-width: 1px; }
+
+/* ------------------------------------------------------------------ *
  * Tabs — onderlijn i.p.v. Bootstrap-kaders. Zie cc1/UI_BLUEPRINT.md.
  *
  * Vervangt het 3-regelblok dat op elf pagina's afzonderlijk stond
@@ -711,7 +708,9 @@ thead.sticky-top {
 .nav-tabs .nav-link.active {
     color: #1d2129;
     font-weight: 600;
-    border-bottom-color: var(--color-navbar);
+    /* Het blauwe accent, niet brand-paars: in het vlakke thema is dit dé kleur voor
+     * selectie en interactie. Als lijn mag het, als vulling niet (2,75:1 met wit). */
+    border-bottom-color: var(--flat-accent);
     background: none;
 }
 
@@ -735,14 +734,14 @@ thead.sticky-top {
  * label stond altijd erboven. Met inline-flex ging dat label ernaast zodra er ruimte
  * was en eronder als die er niet was — dezelfde pagina, twee uitkomsten, afhankelijk
  * van de kolombreedte. fit-content houdt de box wel zo smal als zijn inhoud. */
+/* Rand, radius en vlak komen van het gedeelde formulierblok hierboven (.form-control,
+ * .form-select, .chk-list, .date-box) — hier alleen de lay-out, anders staat de rand van
+ * hetzelfde element op twee plaatsen. */
 .date-box {
     display: flex;
     width: fit-content;
     align-items: center;
     gap: 0.25rem;
-    border: 1px solid #dee2e6;
-    border-radius: 4px;
-    background: #fff;
     padding: 0.2rem 0.45rem;
 }
 /* Het kalendericoon als ::before met een data-URI, niet als inline <svg> in de
@@ -768,15 +767,31 @@ thead.sticky-top {
 }
 .date-box .sep { color: #9aa0a6; }
 
+/* SMALLE VARIANT — `<div class="date-box date-box-tight">` (Joep, 2026-08-14: de picker in
+ * Retrieve URL data mocht iets minder breed).
+ *
+ * 5,3rem = 84,8px. Gemeten: `2025-01-01` is 79,0px bij 13,6px system-ui, dus er blijft
+ * ~6px lucht. De standaard 6,6rem heeft 26px lucht, en dat zag je.
+ *
+ * De selector eindigt op `input.flatpickr-input` en dat is de hele beveiliging: valt de
+ * flatpickr-CDN weg, dan blijft het veld een `type="date"`, krijgt het die klasse nooit,
+ * en staat de volle 6,6rem er weer — precies de breedte die Chrome's eigen kalendericoon
+ * plus `13-08-2026` nodig heeft. Deze variant kan dus niet "stiekem" een native veld
+ * afkappen, en daarom hoeft de pagina er verder niets van te weten. */
+.date-box.date-box-tight input.flatpickr-input { width: 5.3rem; }
+
 /* Focus hoort om de BOX, niet om een veld: de inputs hierin hebben border 0 en
  * box-shadow none, dus een focusstijl op de input is letterlijk onzichtbaar. Dat was
  * ook de reden dat de per-pagina `#startDate:focus`-regels konden verdwijnen zonder
  * dat er iets wegviel — ze deden al niets. :focus-within pakt zowel de native
  * date-input als de flatpickr-input, en bij een bereik licht de hele control op,
  * wat klopt: het IS één control. */
+/* Accentblauw, gelijk aan .form-control:focus — het is één control, dus hij hoort een
+ * focusring te krijgen die er net zo uitziet als die van een gewoon veld. !important op
+ * de border-color omdat het formulierblok hierboven de border met !important zet. */
 .date-box:focus-within {
-    border-color: #5e4a90;
-    box-shadow: 0 0 0 3px rgba(94, 74, 144, 0.15);
+    border-color: var(--flat-accent) !important;
+    box-shadow: 0 0 0 3px rgba(135, 150, 239, 0.25);
 }
 /* En dan de standaard-focusring van de browser weg: die tekent om de border-box van de
  * input, en met border 0 valt dat als een strak zwart kadertje midden ín de box. Mag
