@@ -360,13 +360,17 @@
     </nav>
 
     <!-- Page width: the blueprint's fixed wrapper (container > row >
-         col-lg-11 mx-auto, ~950px), so this page matches every other tool. It used
-         to be a bare container (~1140px), which is why SEO Stats read wider than
-         the rest of the app. To go back to full width, drop the row/col wrapper
-         (and its two closing divs at the bottom of the container). -->
+         col-md-10 mx-auto), so this page matches every other tool. It used to be a bare
+         container (~1140px), which is why SEO Stats read wider than the rest of the app;
+         daarna stond het op de bredere col-lg-11, en die uitzondering is op 2026-08-14
+         opgeheven (Joep: gelijk aan Kopteksten). To go back to full width, drop the
+         row/col wrapper (and its two closing divs at the bottom of the container). -->
     <div class="container mt-5 pb-5">
       <div class="row">
-        <div class="col-lg-11 mx-auto">
+        <!-- col-md-10 = de standaardbreedte van het dashboard (Joep, 2026-08-14). Deze pagina
+             hield een bredere kolom aan (1186px kaartbreedte tegen 1076px op de 29 andere).
+             Gemeten over alle 35 pagina's; vijf weken af. -->
+        <div class="col-md-10 mx-auto">
         <div id="metaLine" class="text-muted text-end mb-2" style="font-size:0.82rem;"></div>
 
         <!-- Summary cards -->
@@ -487,7 +491,10 @@
                  Top-N controls moved into the collapse body, since a collapsed card
                  should not carry controls for content that isn't on screen. -->
             <div class="card-body py-3 text-center">
-                <button class="btn btn-outline-purple cat-banner-btn" id="catToggleBtn" type="button"
+                <!-- Grijs, niet paars (Joep, 2026-08-14): deze banner is 460px breed en beslaat de
+                     volle kaart, dus in paars is hij het opvallendste element op de pagina terwijl
+                     hij alleen een sectie open- en dichtklapt. btn-outline-secondary = neutraal. -->
+                <button class="btn btn-outline-secondary cat-banner-btn" id="catToggleBtn" type="button"
                         data-bs-toggle="collapse" data-bs-target="#catCollapse"
                         aria-expanded="false" aria-controls="catCollapse">Show categories</button>
             </div>
@@ -820,9 +827,15 @@
             return `<span class="delta-badge ${cls}">${sign}${pct.toLocaleString('nl-NL', { maximumFractionDigits: digits })}%</span>`;
         }
 
-        function pctText(pct, digits = 0) {
+        // `invert` voor een metric waar omhoog slecht is (Bounce). Het TEKEN en het getal
+        // blijven staan zoals ze zijn — alleen de kleur draait. Een bounce die stijgt is
+        // "+1%" in rood, niet "-1%": het cijfer liegen om de kleur te laten kloppen is
+        // erger dan geen kleur. Zelfde afspraak als pctBadge(..., invert).
+        function pctText(pct, digits = 0, invert = false) {
             if (pct === null || pct === undefined) return '<span class="text-muted">n/a</span>';
-            const color = pct > 0 ? '#00854c' : (pct < 0 ? '#c0392b' : '#888');
+            const good = invert ? pct < 0 : pct > 0;
+            const bad = invert ? pct > 0 : pct < 0;
+            const color = good ? '#00854c' : (bad ? '#c0392b' : '#888');
             const sign = pct > 0 ? '+' : '';
             return `<span style="color:${color}">${sign}${pct.toLocaleString('nl-NL', { maximumFractionDigits: digits })}%</span>`;
         }
@@ -1674,12 +1687,52 @@
             // #d63384 by request (Joep, 2026-07-31) rather than METRICS.dma_visits violet.
             const STANDUP_SPARK_COLORS = { dma: '#d63384' };
             destroySparks('stand_');
-            document.getElementById('standupTiles').innerHTML = ['seo', 'dma', 'gsaas'].map(k => {
-                const ch = byKey(k);
-                return `<div class="stat-card"><h3>${pctText(ch.visits_pct)}</h3>` +
-                       `<div class="label">${ch.label || k} visits Δ</div>` +
-                       `<div class="tile-spark"><canvas id="stand_${k}"></canvas></div></div>`;
-            }).join('');
+
+            // Naast de drie kanaaltegels ook de drie SEO-ratio's: CTR, OPB en Bounce
+            // (Joep, 2026-08-14). Zelfde vorm als hun buren — de Δ% is de kop, want daar
+            // gaat deze kaart over — maar mét de twee onderliggende waarden in de tooltip.
+            // Dat is hier geen luxe: een Δ% op een percentage is een percentage van een
+            // percentage, dus "-2%" op een CTR van 69,4% betekent 67,9% en niet 67,4%. Voor
+            // CTR en Bounce staat de puntverandering er ook bij, want dat is de lezing die
+            // de meeste mensen bedoelen.
+            //
+            // De cijfers komen uit /deltas (seo_rates), dus ze volgen de vergelijkdag van
+            // DEZE kaart. Let op de dagkeuze aan de serverkant: CTR en Bounce hangen aan de
+            // bezoekdagen, OPB aan de omzetdagen (omzet komt een dag later binnen), zodat
+            // teller en noemer van OPB dezelfde dag zijn.
+            const R = lastDeltas.seo_rates || {};
+            const pctVal = (v, d = 1) => v === null || v === undefined
+                ? '–' : v.toLocaleString('nl-NL', { minimumFractionDigits: d, maximumFractionDigits: d }) + '%';
+            const eurVal = v => v === null || v === undefined
+                ? '–' : '€' + v.toLocaleString('nl-NL', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+            const ppVal = v => v === null || v === undefined
+                ? '' : ` · ${v > 0 ? '+' : ''}${v.toLocaleString('nl-NL', { maximumFractionDigits: 1 })}pp`;
+            const RATE_TILES = [
+                { id: 'ctr',    label: 'SEO CTR Δ',    pct: R.ctr_pct,    invert: false,
+                  tip: `${pctVal(R.ctr_p2)} vs ${pctVal(R.ctr_p1)}${ppVal(R.ctr_pp)}`,
+                  color: METRICS.seo_ctr.color },
+                { id: 'opb',    label: 'SEO OPB Δ',    pct: R.opb_pct,    invert: false,
+                  tip: `${eurVal(R.opb_p2)} vs ${eurVal(R.opb_p1)} per bezoek`,
+                  color: '#936305' },
+                // Bounce is de enige waar omhoog slecht is, dus invert (zie pctText).
+                { id: 'bounce', label: 'SEO Bounce Δ', pct: R.bounce_pct, invert: true,
+                  tip: `${pctVal(R.bounce_p2)} vs ${pctVal(R.bounce_p1)}${ppVal(R.bounce_pp)}`,
+                  color: METRICS.seo_bounce.color },
+            ];
+
+            document.getElementById('standupTiles').innerHTML =
+                ['seo', 'dma', 'gsaas'].map(k => {
+                    const ch = byKey(k);
+                    return `<div class="stat-card"><h3>${pctText(ch.visits_pct)}</h3>` +
+                           `<div class="label">${ch.label || k} visits Δ</div>` +
+                           `<div class="tile-spark"><canvas id="stand_${k}"></canvas></div></div>`;
+                }).join('') +
+                RATE_TILES.map(t =>
+                    `<div class="stat-card" title="${escapeHtml(t.tip)}">` +
+                    `<h3>${pctText(t.pct, 1, t.invert)}</h3>` +
+                    `<div class="label">${t.label}</div>` +
+                    `<div class="tile-spark"><canvas id="stand_${t.id}"></canvas></div></div>`).join('');
+
             if (lastData && lastData.daily) {
                 const dates = lastData.daily.map(r => r.date);
                 ['seo', 'dma', 'gsaas'].forEach(k => {
@@ -1688,6 +1741,21 @@
                                 STANDUP_SPARK_COLORS[k] || METRICS[key].color,
                                 v => fmt(key, v));
                 });
+                // De lijntjes van de ratio-tegels. seo_ctr en seo_bounce staan al per rij
+                // (deriveRatios), OPB is geen grafiekmetric en wordt hier per dag berekend —
+                // nooit als gemiddelde van dagratio's, en een dag zonder bezoeken wordt null
+                // zodat de lijn een gat krijgt in plaats van naar nul te duiken.
+                const pctFmt = v => Number(v).toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + '%';
+                renderSpark('stand_ctr', dates, lastData.daily.map(r => r.seo_ctr),
+                            METRICS.seo_ctr.color, pctFmt);
+                renderSpark('stand_bounce', dates, lastData.daily.map(r => r.seo_bounce),
+                            METRICS.seo_bounce.color, pctFmt);
+                renderSpark('stand_opb', dates,
+                            lastData.daily.map(r => {
+                                const v = Number(r.seo_visits) || 0;
+                                return v ? (Number(r.seo_omzet) || 0) / v : null;
+                            }), '#936305',
+                            v => '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 3, maximumFractionDigits: 3 }));
             }
 
             // Skip "-" / maincat-level visits and the "Beslist.nl" catch-all.
@@ -1717,7 +1785,11 @@
         // The channel labels are the ones /deltas sends back (CHANNEL_LABELS in
         // seo_stats_service.py); only the numbers shimmer, because the labels are
         // known before the fetch and a placeholder for them would be noise.
-        const STANDUP_CHANNELS = ['SEO', 'DMA Organic', 'GSAAS'];
+        // Zes tegels: drie kanalen + de drie SEO-ratio's (2026-08-14). De skeleton moet ze
+        // allemaal tonen, anders springt de kaarthoogte zodra de data landt — dat is precies
+        // wat een skeleton hoort te voorkomen.
+        const STANDUP_CHANNELS = ['SEO visits Δ', 'DMA Organic visits Δ', 'GSAAS visits Δ',
+                                  'SEO CTR Δ', 'SEO OPB Δ', 'SEO Bounce Δ'];
         // 3 rows: both lists slice(0, 3), so the skeleton holds the loaded height.
         function standupSkeletonTable(n = 3) {
             return `<table class="table table-sm table-hover perf-table standup-table fixed-cols mb-0">
@@ -1730,7 +1802,7 @@
             destroySparks('stand_');
             document.getElementById('standupTiles').innerHTML = STANDUP_CHANNELS.map(label =>
                 `<div class="stat-card"><h3><span class="skel-bar" style="width:60%; margin:0 auto;"></span></h3>` +
-                `<div class="label">${label} visits Δ</div></div>`).join('');
+                `<div class="label">${label}</div></div>`).join('');
             ['standupVisitsList', 'standupRevenueList'].forEach(id => {
                 document.getElementById(id).innerHTML = standupSkeletonTable();
             });

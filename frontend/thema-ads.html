@@ -18,19 +18,24 @@
            themes" used to piggyback on this via .themes-btn; it is a real action
            next to the CTA, so it now uses btn btn-outline-purple instead — same
            height as the CTA, and one less bespoke button style.) */
+        /* Flat-stijl (Joep, 2026-08-14): dezelfde rand, radius en tekstkleur als een
+           neutrale outline-knop uit style.css, i.p.v. het oude #6c757d met radius 4px.
+           Het blijft een <a> met een eigen klasse omdat het een disclosure is en geen
+           actie — maar hij hoort er niet uit te vallen naast de knoppen ernaast. */
         .more-info-btn {
             font-size: 0.85rem;
             padding: 0.2rem 0.6rem;
-            border: 1px solid #6c757d;
-            color: #6c757d;
-            background: transparent;
-            border-radius: 4px;
+            border: 1px solid var(--flat-border-strong);
+            color: var(--flat-text);
+            background: var(--flat-surface);
+            border-radius: var(--flat-radius);
             text-decoration: none;
             transition: all 0.2s ease;
         }
         .more-info-btn:hover {
-            background: #6c757d;
-            color: white !important;
+            background: #eef0f1;
+            border-color: var(--flat-muted);
+            color: var(--flat-text) !important;
         }
         .more-info-content {
             font-size: 0.85rem;
@@ -259,7 +264,10 @@
                                      together with no gap — hence the two reading as one
                                      control. Plain right-aligned flex row with gap-2. -->
                                 <div class="d-flex justify-content-end gap-2 mb-3">
-                                    <button class="btn btn-warning" onclick="removeCheckupLabels()" id="removeLabelsBtn">Reset Labels</button>
+                                    <!-- btn-outline-purple i.p.v. btn-warning (Joep, 2026-08-14): btn-warning is in het
+                                         vlakke thema de gevulde oranje CTA, en Reset Labels is een secundaire
+                                         actie naast de hoofdactie van dit tabblad. -->
+                                    <button class="btn btn-outline-purple" onclick="removeCheckupLabels()" id="removeLabelsBtn">Reset Labels</button>
                                     <button class="btn btn-run" onclick="runCheckup()" id="checkupBtn">Run Check-up</button>
                                 </div>
                                 <div id="checkupResult" class="mt-3"></div>

@@ -36,7 +36,8 @@
     --flat-border-strong: #c3c7cc;   /* rand van een outline-knop */
     --flat-text: #1a1d19;
     --flat-muted: #666a6b;
-    --flat-accent: #8796ef;          /* LIJNEN: tab-onderlijn, chiprand, focusring */
+    --flat-accent: #8796ef;          /* LIJNEN: focusring en chiprand. NIET de tab-onderlijn:
+                                        die is brand-paars, zie .nav-tabs verderop. */
     --flat-accent-soft: #eaeef9;     /* chipvulling, rijhover */
     --flat-radius: 6px;
 
@@ -475,11 +476,16 @@ body {
  * AA. Dit is dus, anders dan het blauwe accent, wél een kleur die tekst mag zijn.
  *
  * De alias-klassen die pagina's zelf verzonnen (.btn-purple-outline in Redirect-tool,
- * .btn-purple-action, .btn-hs-outline in Healthscore, .btn-tool op het dashboard) staan
- * erbij omdat ze op hun pagina's al paars-outline waren: anders staat een grijze
- * .btn-purple-action naast een paarse .btn-outline-purple in dezelfde knoppenrij. */
+ * .btn-purple-action, .btn-hs-outline in Healthscore) staan erbij omdat ze op hun pagina's
+ * al paars-outline waren: anders staat een grijze .btn-purple-action naast een paarse
+ * .btn-outline-purple in dezelfde knoppenrij.
+ *
+ * .btn-tool hoort er BEWUST niet bij (Joep, 2026-08-14). Dat zijn de "Open tool"-knoppen op
+ * de startpagina, en die staan er vijftien naast elkaar in een grid van kaarten: als die
+ * allemaal paars omlijnd zijn, is de knop de opvallendste vorm op de pagina in plaats van
+ * de tool waar hij bij hoort. Vandaar neutraal grijs, in de groep hieronder. */
 .btn-outline-purple, .btn-purple-outline, .btn-purple-action,
-.btn-hs-outline, .btn-tool {
+.btn-hs-outline {
     background-color: var(--flat-surface) !important;
     border-color: var(--color-navbar) !important;
     border-width: 1px;
@@ -487,8 +493,7 @@ body {
     color: var(--color-navbar) !important;
 }
 .btn-outline-purple:hover:not(:disabled), .btn-purple-outline:hover:not(:disabled),
-.btn-purple-action:hover:not(:disabled), .btn-hs-outline:hover:not(:disabled),
-.btn-tool:hover:not(:disabled) {
+.btn-purple-action:hover:not(:disabled), .btn-hs-outline:hover:not(:disabled) {
     background-color: var(--color-navbar) !important;
     border-color: var(--color-navbar) !important;
     color: #fff !important;
@@ -514,7 +519,7 @@ body {
  * hij klikbaar is en claimt geen kleur. */
 .btn-outline-secondary, .btn-outline-primary, .btn-outline-info,
 .btn-outline-success, .btn-outline-warning, .btn-secondary,
-.btn-preset, .btn-bulk-pause, .btn-bulk-activate {
+.btn-preset, .btn-bulk-pause, .btn-bulk-activate, .btn-tool {
     background-color: var(--flat-surface) !important;
     border-color: var(--flat-border-strong) !important;
     border-width: 1px;
@@ -524,7 +529,7 @@ body {
 .btn-outline-secondary:hover:not(:disabled), .btn-outline-primary:hover:not(:disabled),
 .btn-outline-info:hover:not(:disabled), .btn-outline-success:hover:not(:disabled),
 .btn-outline-warning:hover:not(:disabled), .btn-secondary:hover:not(:disabled),
-.btn-preset:hover, .btn-preset:focus,
+.btn-preset:hover, .btn-preset:focus, .btn-tool:hover:not(:disabled),
 .btn-bulk-pause:hover:not(:disabled), .btn-bulk-activate:hover:not(:disabled) {
     background-color: #eef0f1 !important;
     border-color: var(--flat-muted) !important;
@@ -799,9 +804,11 @@ input[type="file"].form-control { max-width: 32rem; }
 .nav-tabs .nav-link.active {
     color: #1d2129;
     font-weight: 600;
-    /* Het blauwe accent, niet brand-paars: in het vlakke thema is dit dé kleur voor
-     * selectie en interactie. Als lijn mag het, als vulling niet (2,75:1 met wit). */
-    border-bottom-color: var(--flat-accent);
+    /* BRAND-PAARS, en dat is een bewuste afwijking van de screenshot waar het vlakke thema
+     * vandaan komt (Joep, 2026-08-14). De eerste themaversie zette deze lijn op het blauwe
+     * accent; blauw is in dit dashboard nergens anders een accentkleur en leest daardoor
+     * als een tweede merk. UI_BLUEPRINT §Tabs schreef paars al voor — de CSS liep achter. */
+    border-bottom-color: var(--color-navbar);
     background: none;
 }
 

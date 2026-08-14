@@ -130,7 +130,12 @@
     </nav>
 
     <div class="container mt-5 pb-5">
-        <div class="col-lg-11 mx-auto">
+        <!-- col-md-10 = de standaardbreedte van het dashboard (Joep, 2026-08-14). Deze pagina
+             hield een bredere kolom aan (1186px kaartbreedte tegen 1076px op de 29 andere).
+             Gemeten over alle 35 pagina's; vijf weken af. De `row` eromheen hoort erbij: een
+             kolom zonder rij mist de negatieve marges van het grid en wordt 1080px. -->
+        <div class="row">
+        <div class="col-md-10 mx-auto">
 
             <!-- Stats (click a tile to show its rows in Built titles below) -->
             <div class="row g-3 mb-4" id="statsRow">
@@ -305,6 +310,7 @@
                 </div>
             </div>
 
+        </div>
         </div>
     </div>
 

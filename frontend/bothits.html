@@ -257,18 +257,20 @@
     </nav>
 
     <!-- Paginabreedte: het vaste skelet uit UI_BLUEPRINT (container > row >
-         col-lg-11 mx-auto), gelijk aan SEO Stats. Dit was `container-fluid` met een
-         eigen max-width van 1500px, en die vorm noemt de blueprint expliciet als de
-         ene die nooit mag ("never container-fluid or a bare container") — een blote
-         container dus ook niet, want dan is de pagina wél gecentreerd maar nog steeds
-         breder dan elke andere tool.
-         `col-lg-11` en niet de standaard `col-md-10`, omdat dit net als SEO Stats een
-         data-dense pagina is: zes tegels op één rij en tabellen met acht kolommen.
-         De brede tabellen hebben hun eigen overflow (.tool-table-wrap), dus smaller
-         worden kost hier niets. -->
+         col-md-10 mx-auto), gelijk aan elke andere tool. Dit was `container-fluid` met
+         een eigen max-width van 1500px, en die vorm noemt de blueprint expliciet als de
+         ene die nooit mag — een blote container ook niet, want dan is de pagina wél
+         gecentreerd maar nog steeds breder dan de rest.
+         Sinds 2026-08-14 is er geen bredere "data-dense" variant meer (Joep): die gaf
+         1186px tegen 1076px en dwong je bij elke wijziging eerst uit te zoeken of deze
+         pagina in de uitzonderingslijst stond. De brede tabellen hier hebben hun eigen
+         overflow (.tool-table-wrap), dus smaller worden kost niets — dat stond hier al. -->
     <div class="container mt-4 pb-5">
       <div class="row">
-        <div class="col-lg-11 mx-auto">
+        <!-- col-md-10 = de standaardbreedte van het dashboard (Joep, 2026-08-14). Deze pagina
+             hield een bredere kolom aan (1186px kaartbreedte tegen 1076px op de 29 andere).
+             Gemeten over alle 35 pagina's; vijf weken af. -->
+        <div class="col-md-10 mx-auto">
 
         <!-- ============================ FILTERS ============================ -->
         <div class="card mb-3">
@@ -594,7 +596,7 @@
                 </div>
             </div>
         </div>
-        </div><!-- /col-lg-11 -->
+        </div><!-- /col-md-10 -->
       </div><!-- /row -->
     </div>
 

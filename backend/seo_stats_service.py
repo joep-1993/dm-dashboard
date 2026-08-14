@@ -173,7 +173,14 @@ def _fetch_daily(conn, dates: List[date]) -> Dict[date, Dict]:
     with conn.cursor() as cur:
         cur.execute(vis_sql, keys + list(CHANNELS.keys()))
         vis_rows = cur.fetchall()
-        cur.execute(rev_sql, [dates[0], dates[-1]] + list(CHANNELS.keys()))
+        # min/max en niet dates[0]/dates[-1] (2026-08-14). De omzetquery is een BETWEEN over
+        # een RANGE terwijl de bezoekquery een IN-lijst gebruikt, en dat maakte de sortering
+        # van `dates` een stille voorwaarde: een ongesorteerde lijst leverde bezoeken voor
+        # elke dag maar omzet 0,0 voor alles buiten [eerste, laatste]. Gemeten toen
+        # get_deltas [vis_p1, vis_p2, rev_p1, rev_p2] doorgaf: 05-08 en 13-08 kwamen op nul,
+        # 06-08 en 12-08 niet. De range mag ruimer zijn dan de gevraagde dagen — rijen voor
+        # een datum die niet in `out` staat vallen er hieronder toch uit.
+        cur.execute(rev_sql, [min(dates), max(dates)] + list(CHANNELS.keys()))
         rev_rows = cur.fetchall()
 
     # Seed every date with zeros so the chart has a continuous series.
@@ -531,8 +538,25 @@ def get_deltas(ref_date: Optional[str] = None, force: bool = False) -> Dict:
         # loadCatDeltas and loadStandupDeltas each fetch /deltas with different anchors and
         # therefore miss each other's cache.
         deepestcats = _fetch_cat_deltas(conn, "deepest", vis_p1, vis_p2, rev_p1, rev_p2)
+        # SEO-only ratio's voor de standup-tegels CTR, Bounce en OPB (Joep, 2026-08-14).
+        # Één extra _fetch_daily over de VIER vergelijkdagen, want dat is de query die
+        # seo_clicks en seo_noprod per dag al oplevert — dezelfde bron als Dagoverzicht en
+        # als de grafiek, dus deze cijfers kunnen niet met die twee gaan verschillen.
+        rate_daily = _fetch_daily(conn, sorted({vis_p1, vis_p2, rev_p1, rev_p2}))
     finally:
         return_redshift_connection(conn)
+
+    # WELKE DAG BIJ WELKE METRIC, en dat is hier geen detail. Deze endpoint vergelijkt
+    # bezoeken op ref vs ref-7 en omzet op ref-1 vs ref-8, omdat omzet laat binnenkomt.
+    #   - CTR en Bounce zijn bezoekgebaseerd -> de BEZOEKdagen.
+    #   - OPB is omzet/bezoeken -> de OMZETdagen, met de bezoeken van diezelfde dag.
+    # Zou OPB de omzet van ref-1 delen door de bezoeken van ref, dan is de teller een
+    # andere dag dan de noemer en meet de tegel vooral het verschil tussen twee dagen.
+    v_p1, v_p2 = rate_daily.get(vis_p1, {}), rate_daily.get(vis_p2, {})
+    r_p1, r_p2 = rate_daily.get(rev_p1, {}), rate_daily.get(rev_p2, {})
+    ctr_p1, ctr_p2 = _ratio(v_p1, "seo_clicks"), _ratio(v_p2, "seo_clicks")
+    bnc_p1, bnc_p2 = _ratio(v_p1, "seo_noprod"), _ratio(v_p2, "seo_noprod")
+    opb_p1, opb_p2 = _opb(r_p1), _opb(r_p2)
 
     result = {
         "comparison": {
@@ -540,6 +564,23 @@ def get_deltas(ref_date: Optional[str] = None, force: bool = False) -> Dict:
             "revenue_p1": rev_p1.isoformat(), "revenue_p2": rev_p2.isoformat(),
         },
         "channels": channels,
+        # Zowel de waarden als de deltas, want een Δ% op een percentage is zonder de twee
+        # onderliggende waarden niet te lezen: "-4%" op een CTR is een percentage van een
+        # percentage. Daarom staat de puntverandering (`_pp`) er voor CTR en Bounce ook bij,
+        # net als in Dagoverzicht.
+        "seo_rates": {
+            "ctr_p1": None if ctr_p1 is None else round(ctr_p1, 1),
+            "ctr_p2": None if ctr_p2 is None else round(ctr_p2, 1),
+            "ctr_pct": _pct_delta(ctr_p1, ctr_p2),
+            "ctr_pp": _pp_delta(ctr_p1, ctr_p2),
+            "bounce_p1": None if bnc_p1 is None else round(bnc_p1, 1),
+            "bounce_p2": None if bnc_p2 is None else round(bnc_p2, 1),
+            "bounce_pct": _pct_delta(bnc_p1, bnc_p2),
+            "bounce_pp": _pp_delta(bnc_p1, bnc_p2),
+            "opb_p1": None if opb_p1 is None else round(opb_p1, 3),
+            "opb_p2": None if opb_p2 is None else round(opb_p2, 3),
+            "opb_pct": _pct_delta(opb_p1, opb_p2),
+        },
         "maincats": maincats,
         "deepestcats": deepestcats,
         "generated_at": datetime.now().isoformat(),
