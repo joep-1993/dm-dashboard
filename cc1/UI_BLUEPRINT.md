@@ -225,6 +225,20 @@ other tool uses the grey default. New tools follow the grey default.
     is. Zet er `aria-busy` op hetzelfde element bij, dan hoort een schermlezer wat de shimmer
     laat zien.
 
+  **EEN TEGEL DIE OOK EEN KNOP IS, SKELETON JE MET CSS EN NIET DOOR HEM TE VERVANGEN**
+  (2026-08-14). De tegels boven de grafiek in SEO Stats zijn tegelijk de metric-toggles van
+  die grafiek. Ze tijdens het laden opnieuw opbouwen — zoals Dagoverzicht en de standup doen —
+  betekent dat je ze een halve seconde niet kunt aanklikken en dat hun aan/uit-rand opnieuw
+  gezet moet worden. Zet in plaats daarvan één klasse op de RIJ en laat de DOM staan:
+  ```css
+  #statsRow.is-loading .stat-card h3 { color: transparent; background: <shimmer>; }
+  #statsRow.is-loading .stat-card .stat-delta { visibility: hidden; }   /* niet display:none */
+  #statsRow.is-loading .stat-card .tile-spark { opacity: 0.25; }
+  ```
+  Label, rand en klikvlak blijven intact, alleen wat niet meer waar is verdwijnt. `visibility`
+  en niet `display`, anders zakt de tegel in en springt de rij. Nagemeten: de toggle werkt nog
+  tijdens de laadstaat (`metric-on` → `metric-off` op een klik).
+
   **When a progress bar is right instead.** Skeletons say "data is arriving now",
   so they only fit a single fetch that returns promptly. Long multi-item runs that
   already report real progress keep their bar — URL Checker, URL Validator, Index

@@ -34,11 +34,13 @@ _Active tasks for immediate work_
 
 **Openstaand:**
 
-- [ ] **De tegels boven de grafiek in SEO Stats houden tijdens het laden de cijfers van de
-      vorige range.** Zelfde oorzaak als de grafiek had. Niet meegenomen omdat die tegels
-      tegelijk de metric-toggles van de grafiek zijn: skeletonnen betekent dat je ze een halve
-      seconde niet kunt klikken en dat hun aan/uit-staat opnieuw gezet moet worden. Joep weet
-      het; wachten op zijn woord.
+- [x] **De tegels boven de grafiek laden nu ook** (2026-08-14). Opgelost zonder ze te
+      vervangen: één klasse op de rij, en met CSS wordt de waarde een shimmerbalk (tekst
+      transparant + shimmer als achtergrond), gaat de WoW-badge op `visibility: hidden` (niet
+      `display: none`, anders zakt de tegel in) en dimt het lijntje naar 0,25. Label, rand en
+      klikvlak blijven staan, dus de metric-toggle werkt nog tijdens het laden — nagemeten:
+      `metric-on` → `metric-off` op een klik. Op de eerste load is de rij nog leeg, dus daar
+      dragen de grafiek en de tabellen het signaal.
 
 ### 2026-08-14 — Negen lay-outpunten, ronde 2
 
