@@ -206,6 +206,25 @@ other tool uses the grey default. New tools follow the grey default.
     Match the skeleton row count to what actually renders (both standup lists
     `slice(0, 3)`, so 3 rows), or the height still jumps on load.
 
+  **EEN GRAFIEK NAAST EEN TABEL HEEFT ZIJN EIGEN LAADSTAAT NODIG** (Joep, 2026-08-14: "als
+  ik op 90d klik en de tabel visueel laadt, zie ik in de grafiek niks gebeuren"). De tabel
+  shimmerde al, maar de grafiek bleef de VORIGE range tonen — een lijn die er actueel uitziet
+  en dat niet is. Recept, en het is bewust géén spinner: het patroon is "het wordt getekend".
+  - Een absoluut gepositioneerd `.chart-skel` in de `.chart-wrap` (die staat al op
+    `position: relative`), met **dezelfde `skelShimmer`-keyframes** als de tabelrijen, zodat
+    grafiek en rijen in hetzelfde ritme pulseren in plaats van elk hun eigen laadtaal.
+  - **Lichtere gradientstops dan `.skel-bar`** (`#f2f2f4`/`#fafafb` in plaats van
+    `#ececec`/`#f6f6f6`): die bar is 1,45rem hoog en mag contrast hebben, maar over 420px
+    wordt datzelfde grijs een muur die zwaarder weegt dan de grafiek.
+  - **Met alpha, en de canvas op ~0,32 opacity eronder.** De shimmer ligt bovenóp de canvas,
+    dus zonder doorzichtigheid doet die opacity niets en verdwijnt de oude lijn helemaal.
+    Met beide schemeren de assen en de vorige lijn door: dat leest als "wordt vervangen".
+  - **Eén functie die hem aan- en uitzet**, en die op ELKE uitgang van de loader wordt
+    aangeroepen — ook in de `catch`. Zelfde regel als bij de skeleton-rijen: een laadstaat die
+    na een mislukte fetch blijft draaien, leest als "nog bezig" voor een request die al dood
+    is. Zet er `aria-busy` op hetzelfde element bij, dan hoort een schermlezer wat de shimmer
+    laat zien.
+
   **When a progress bar is right instead.** Skeletons say "data is arriving now",
   so they only fit a single fetch that returns promptly. Long multi-item runs that
   already report real progress keep their bar — URL Checker, URL Validator, Index

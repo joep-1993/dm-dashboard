@@ -145,6 +145,43 @@
         .btn-group .btn-preset:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
         .btn-group .btn-preset:last-child { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
         .chart-wrap { position: relative; height: 420px; }
+        /* LAADSTAAT VAN DE GRAFIEK (Joep, 2026-08-14: "als ik op 90d klik en de tabel
+           visueel laadt, zie ik in de grafiek niks gebeuren").
+           De tabel eronder tekende al skeleton-rijen, maar de grafiek bleef de VORIGE range
+           tonen — een lijn die er actueel uitziet en het niet is, precies waar de catch van
+           load() al voor waarschuwt.
+
+           Dit is dezelfde shimmer als de tabelrijen: het gradient en de `skelShimmer`
+           keyframes komen uit css/style.css, dus de grafiek en de rijen eronder pulseren in
+           hetzelfde ritme in plaats van elk hun eigen laadtaal te spreken. Geen spinner en
+           geen grijze overlay met een tekstje: het patroon is "het wordt getekend", niet
+           "er is iets geblokkeerd" (UI_BLUEPRINT "Tables" → Loading state).
+
+           De canvas blijft er met een lage opacity onder liggen: dan zie je nog vaag de vorm
+           van de vorige lijn, wat het als "wordt vervangen" laat lezen, en de hoogte van
+           420px verandert niet — dus er springt niets. */
+        .chart-wrap .chart-skel { display: none; }
+        .chart-wrap.is-loading .chart-skel {
+            display: block;
+            position: absolute;
+            inset: 0;
+            border-radius: 8px;
+            /* Lichtere stops dan de gedeelde .skel-bar (#ececec/#f6f6f6). Die bar is
+               1,45rem hoog en mag contrast hebben; over 420px werd datzelfde grijs een muur
+               die zwaarder weegt dan de grafiek zelf. Zelfde beweging, minder gewicht.
+               En met alpha, niet dekkend: de shimmer ligt bovenóp de canvas, dus zonder
+               doorzichtigheid is de opacity-regel hieronder een regel die niets doet — de
+               oude lijn zou er dan gewoon achter verdwijnen. */
+            background: linear-gradient(90deg, rgba(242,242,244,0.86) 25%,
+                                              rgba(250,250,251,0.86) 37%,
+                                              rgba(242,242,244,0.86) 63%);
+            background-size: 400% 100%;
+            animation: skelShimmer 1.4s ease infinite;
+        }
+        /* De vorige lijn en de assen schemeren er nog doorheen: dat leest als "wordt
+           vervangen" in plaats van "is weg", en je houdt een anker voor waar de as straks
+           weer staat. */
+        .chart-wrap.is-loading canvas { opacity: 0.32; }
         /* Dark hover card (#242628, Joep's pick). Everything inside had to be
            re-toned for a dark ground, not just the background swapped:
            the old label grey #6a6a78 lands at ~1.9:1 here, which is unreadable. */
@@ -439,7 +476,10 @@
                 <!-- The revenue-definition paragraph lived here too; it is the same
                      text as the #revInfo "i" tooltip in this card's header. -->
                 <div class="d-flex flex-wrap gap-2 mb-3" id="metricToggles"></div>
-                <div class="chart-wrap"><canvas id="chart"></canvas></div>
+                <!-- aria-busy zet load() mee om, zodat een schermlezer hetzelfde te horen
+                     krijgt als wat de shimmer laat zien. -->
+                <div class="chart-wrap" id="chartWrap"><canvas id="chart"></canvas>
+                     <div class="chart-skel"></div></div>
             </div>
         </div>
 
@@ -1898,6 +1938,16 @@
             return ('<tr class="skel-row">' + cell.repeat(Math.max(cols, 1)) + '</tr>').repeat(n);
         }
 
+        // Aan/uit voor de shimmer over de grafiek. Eén plek, want hij moet op ELKE
+        // uitgang van load() weer uit — een skeleton die na een mislukte fetch blijft
+        // shimmeren leest als "nog aan het laden" voor een request die al dood is.
+        function chartLoading(on) {
+            const w = document.getElementById('chartWrap');
+            if (!w) return;
+            w.classList.toggle('is-loading', !!on);
+            w.setAttribute('aria-busy', on ? 'true' : 'false');
+        }
+
         async function load(force) {
             const myToken = ++loadToken;
             const start = document.getElementById('startDate').value;
@@ -1914,6 +1964,7 @@
             const perDayCols = document.getElementById('tableHead').querySelectorAll('th').length
                 || (2 + TABLE_COLS.length + 1);
             document.getElementById('tableBody').innerHTML = skeletonRows(perDayCols);
+            chartLoading(true);
             // The Top-categories and Performance-standup tables are filled by
             // loadDeltas(), which only starts after the /daily fetch below
             // resolves — so skeleton them here as well, or they sit blank for
@@ -1938,6 +1989,7 @@
                 tileDeltas = null;
                 renderStats();
                 renderChart();
+                chartLoading(false);
                 initTable();
                 renderMeta();
                 document.getElementById('exportBtn').disabled = false;
@@ -1957,6 +2009,10 @@
                     '<div class="text-muted small py-2">No data for this range.</div>';
                 document.getElementById('tableFoot').innerHTML = '';
                 if (chart) { chart.destroy(); chart = null; }
+                // De shimmer moet hier ook uit: de grafiek is net gesloopt, dus er komt
+                // niets meer dat hem vervangt. Wat overblijft is een leeg vlak onder de
+                // "Failed to load"-regel, en dat is de eerlijke staat.
+                chartLoading(false);
                 document.getElementById('exportBtn').disabled = true;
                 lastData = null;
             }
