@@ -4,6 +4,46 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-14 — Projectroot opgeruimd (niets weggegooid)
+
+Joep: "alles netjes in mapjes, ongebruikte bestanden weggooien (bij twijfel niet weggooien)",
+daarna aangescherpt naar **niet weggooien maar opbergen**. Aanpak staat nu als `/cleanup` in
+`~/.claude/commands/cleanup.md`.
+
+- [x] **Opgeborgen in `attic/`** (met `git mv`, dus als rename in de historie): `Dockerfile` +
+      `docker-compose.yml` → `attic/docker/`, en `start.sh` + `run_local.sh` +
+      `start-dm-tools.bat` → `attic/start-scripts/`. `attic/README.md` legt per map uit waarom
+      het daar staat, wat er niet meer werkt vanaf die plek (docker-compose mount relatieve
+      paden) en hoe je het terugzet.
+- [x] **Verplaatst zonder archief:** de losse `query.txt` uit de root →
+      `notes/query-visits-per-deepest-subcat.txt` (blijft untracked, zoals hij was).
+- [x] **Verwijderd (herbouwbaar):** `__pycache__` op root en in `scripts/`, plus
+      `.pytest_cache`. Drie verouderde logs uit de root naar `logs/archive/`.
+- [x] **Docs bijgewerkt** waar ze naar de verhuisde bestanden wezen: een verwijzing bovenaan de
+      Docker-secties van `README.md` en `docs/START_HERE.md`, de boomweergave in START_HERE, en
+      de "two modes"-regel in `docs/ARCHITECTURE.md`.
+- [x] **Gecontroleerd:** API, een pagina en `/api/thema-ads/themes` alle drie 200, `from themes
+      import` werkt nog, geen nieuwe fouten in het log, en nul verwijzingen naar de oude paden.
+
+**Bijna misgegaan, en het staat als les in LEARNINGS:** `themes.py` leek dood (grep op de
+bestandsnaam gaf nul treffers) maar wordt op tien plekken geïmporteerd als
+`from themes import …`. Grep op de modulenaam, niet op de bestandsnaam.
+
+**Openstaand — jouw beslissing:**
+
+- [ ] **`backend/__pycache__` (960 KB, `root:root`, feb–apr).** Er heeft ooit iets de backend
+      als root gedraaid. Verplaatsen lukt niet zonder sudo, want de kernel eist schrijfrecht op
+      de map die verhuist: `sudo mv backend/__pycache__ attic/pycache-root-owned` — of
+      `sudo rm -rf backend/__pycache__`, want dit is het enige in deze lijst dat volledig
+      herbouwbaar is. Zolang het er staat compileert Python die modules bij elke start opnieuw
+      in het geheugen.
+- [ ] **De twee optimizer-caches, samen 756 MB.** `rurl_optimizer_v2/data/cache` (438 MB,
+      nieuwste 8 juli) is van de versie die je gebruikt; `rurl_optimizer/data/cache` (318 MB,
+      nieuwste 24 april) is van v1. Opbergen heeft geen zin — dat kost hetzelfde als weggooien
+      (de volgende run fetcht opnieuw uit Redshift) maar houdt de ruimte bezet.
+- [ ] **`README.md` beschrijft Docker nog als deploypad**, in tegenspraak met `CLAUDE.md`. Dat
+      was al zo vóór deze opruiming. Herschrijven is een eigen klusje.
+
 ### 2026-08-14 — Drie kleinere punten: tegelrij, uitklappaneel, grafiekloader
 
 - [x] **SEO Stats: de acht tegels bovenin op één rij.** Ze pasten vier pixels per tegel te

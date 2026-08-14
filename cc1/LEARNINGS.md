@@ -1,6 +1,60 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Opruimen: een grep op de bestandsnaam mist precies de bestanden die je niet mag verplaatsen (2026-08-14)
+
+Bij het opbergen van losse bestanden in de projectroot. Vier dingen, en het eerste had een
+werkende tool kunnen breken.
+
+**1. Python importeert een MODULE, geen bestandsnaam.** `themes.py` stond los in de root en
+niets leek ernaar te verwijzen — mijn inventarisatie grepte op `themes.py` en vond nul
+treffers buiten het bestand zelf. Het staat op **tien** plekken in
+`backend/thema_ads_service.py` en `thema_ads_router.py`, als:
+
+```python
+from themes import SUPPORTED_THEMES, get_theme_label
+```
+
+Verplaatsen had Thema Ads meteen gebroken. Grep dus **altijd op de modulenaam zonder
+extensie**, in de import-vormen, voordat je een los `.py`-bestand aanraakt:
+
+```bash
+grep -rn "from <naam> import\|import <naam>\b" --exclude-dir=venv .
+```
+
+Hetzelfde geldt voor een JS-bestand dat via `<script src>` wordt geladen, of een CSS-bestand
+in een `<link>`: het pad staat er zonder extensie of met een `/static/`-prefix, dus zoek op
+allebei. De les in één regel: zoek op hoe iets wordt **aangeroepen**, niet op hoe het heet.
+
+**2. Een map verplaatsen vraagt schrijfrecht op die map zélf.** `backend/__pycache__` was
+`root:root` (mode 755) terwijl alle `.py`-bronnen van `joepvanschagen` zijn — er heeft ooit
+iets de backend als root gedraaid. `mv` gaf EACCES, ook al is de bovenliggende map van mij, en
+dat is geen bug: het verplaatsen van een map werkt haar `..`-verwijzing bij, dus de kernel
+eist schrijfrecht op de map die verhuist. Vandaar dat dit sudo nodig heeft en niet aan mij is.
+Praktisch gevolg zolang het er staat: Python kan die `.pyc` niet verversen, dus de bytecode
+wordt bij elke start opnieuw in het geheugen gecompileerd.
+
+**3. Iets dat alleen door DOCUMENTATIE wordt genoemd, is een documentatiebeslissing.**
+`Dockerfile` en `docker-compose.yml`: geen enkele coderegel verwijst ernaar, `CLAUDE.md` zegt
+zelfs expliciet dat dit project zonder Docker draait — maar `README.md` en
+`docs/START_HERE.md` beschrijven Docker in ~20 regels als hét deploypad. Verplaatsen maakt die
+twee documenten dus fout. Opgelost met één verwijzing bovenaan de betreffende secties in
+plaats van twintig commando's te herschrijven, en de tegenspraak (README versus CLAUDE.md)
+gerapporteerd in plaats van stil gerepareerd.
+
+**4. Een cache "netjes opbergen" bestaat niet.** De twee optimizer-caches zijn samen 756 MB.
+Verplaatsen kost precies hetzelfde als weggooien — de volgende run haalt alles opnieuw uit
+Redshift — maar houdt de schijfruimte wél bezet. Dus: laten staan waar ze horen
+(`data/cache/`), of bewust opruimen. Geen derde optie, en niet iets om zelf te beslissen als
+het herbouwen een uur Redshift is.
+
+**En de vangrail die dit alles droeg:** eerst een read-only inventarisatie met vier vragen per
+item — hoe oud, hoe groot, tracked/ignored/untracked, en wie verwijst ernaar — en pas daarna
+iets aanraken. Die vier samen bepalen wat mag; één ervan is nooit genoeg. Staat nu als
+`/cleanup` in `~/.claude/commands/cleanup.md`, inclusief de nooit-aanraken-lijst (secrets,
+venv, de map waar een draaiend proces naar schrijft) en de verplichte eindcontrole dat de app
+nog antwoordt.
+
 ## Een laadstaat verifiëren: hij duurt 100ms en dan concludeer je dat hij niet werkt (2026-08-14)
 
 Bij het toevoegen van een shimmer over de grafiek in SEO Stats. Drie keer op rij trok ik de
