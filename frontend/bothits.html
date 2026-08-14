@@ -67,7 +67,10 @@
         .tool-table tbody tr.url-row:hover > td { background: #f5f4f9; }
         .tool-table tbody tr.bot-row.is-open > td,
         .tool-table tbody tr.url-row.is-open > td { background: #f1edfa; font-weight: 600; }
-        .bot-detail > td { background: #fbfbfd !important; padding: 0.9rem 1rem !important; }
+        /* Verticale padding 1,6rem i.p.v. 0,9 (Joep, 2026-08-14): het paneel staat tussen twee
+           tabelrijen in, en met te weinig lucht plakt de eerste grafiek tegen de rij waar je
+           net op klikte. Horizontaal blijft 1rem — daar lijnt het paneel op de cellen. */
+        .bot-detail > td { background: #fbfbfd !important; padding: 1.6rem 1rem !important; }
         /* Bootstraps .table-hover pakt élke tbody-rij, dus ook het uitklappaneel —
            dan werd de hele detailrij grijs zodra je erover ging, terwijl er niets
            klikbaars in zit (Joep, 2026-08-11). De hover-achtergrond van de tabel
@@ -120,6 +123,11 @@
            dashboardbreed, dus een kopie hier zou de gedeelde regel overschrijven zonder
            dat iemand dat doorheeft (page-<style> laadt ná de stylesheet). */
         .muted-note { font-size: 0.82rem; color: #636e72; }
+        /* Een grafiektitel in een uitklappaneel is een KOP, geen bijschrift (Joep,
+           2026-08-14). In een paneel met vier grafieken moet je kunnen zien welke je leest,
+           en .muted-note staat daar ook op veldlabels en statusregels — dus een eigen klasse
+           in plaats van die verzwaren. Zelfde maat en kleur, alleen het gewicht erbij. */
+        .chart-title { font-size: 0.82rem; color: #636e72; font-weight: 600; }
         /* Bootstrap zet .alert-dismissible .btn-close op padding 1.25rem 1rem, gemaakt
            voor een alert met de standaard py-3. Deze balk is py-2, dus daar reikt het
            kruisje buiten de balk; kleiner gezet zit hij netjes in de hoek. */
@@ -1497,17 +1505,17 @@
         det.innerHTML = `<td colspan="12">
             <div class="row g-3">
               <div class="col-12">
-                <div class="muted-note mb-1">Hits per dag — ${escapeHtml(fam)}</div>
+                <div class="chart-title mb-1">Hits per dag — ${escapeHtml(fam)}</div>
                 <div class="chart-box-sm chart-framed"><canvas id="detDailyChart"></canvas></div></div>
             </div>
             <div class="row g-3 mt-1">
-              <div class="col-md-4"><div class="muted-note mb-1">URL-type</div>
+              <div class="col-md-4"><div class="chart-title mb-1">URL-type</div>
                 <div class="donut-wrap chart-framed"><canvas id="detTypeChart"></canvas>
                      <div class="donut-center" id="detTypeCenter"></div></div></div>
-              <div class="col-md-4"><div class="muted-note mb-1">Domein</div>
+              <div class="col-md-4"><div class="chart-title mb-1">Domein</div>
                 <div class="donut-wrap chart-framed"><canvas id="detHostChart"></canvas>
                      <div class="donut-center" id="detHostCenter"></div></div></div>
-              <div class="col-md-4"><div class="muted-note mb-1">Facet-diepte</div>
+              <div class="col-md-4"><div class="chart-title mb-1">Facet-diepte</div>
                 <div class="chart-box-sm chart-framed"><canvas id="detDepthChart"></canvas></div></div>
             </div></td>`;
         tr.after(det);
@@ -1824,10 +1832,10 @@
         det.innerHTML = `<td colspan="7">
             <div id="urlStatus" class="muted-note mb-2"></div>
             <div class="row g-3">
-              <div class="col-md-4"><div class="muted-note mb-1">Per bot-familie</div>
+              <div class="col-md-4"><div class="chart-title mb-1">Per bot-familie</div>
                 <div class="donut-wrap chart-framed"><canvas id="urlBotChart"></canvas>
                      <div class="donut-center" id="urlBotCenter"></div></div></div>
-              <div class="col-md-8"><div class="muted-note mb-1" id="urlDailyLabel">Hits per dag</div>
+              <div class="col-md-8"><div class="chart-title mb-1" id="urlDailyLabel">Hits per dag</div>
                 <div class="chart-box-sm chart-framed"><canvas id="urlDailyChart"></canvas></div></div>
             </div></td>`;
         tr.after(det);
