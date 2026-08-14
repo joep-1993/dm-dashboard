@@ -402,6 +402,22 @@ Record the measured numbers next to `METRICS` so the next change has a baseline.
 
 ### Stat tiles — the GSD Budgets card
 
+**Een rij tegels hoort op ÉÉN rij te passen — reken het na, gok het niet.** Een tegel die
+als enige naar een tweede rij valt leest als een andere soort tegel. Het rekensommetje:
+rijbreedte − (n−1) × gap, gedeeld door n. SEO Stats' bovenste rij is 1076px met `gap-2`
+(8px), dus acht tegels krijgen (1076 − 56) / 8 = **127,5px**, en de gedeelde `min-width:
+130px` was daarmee vier pixels te veel (Joep, 2026-08-14). Twee dingen die dan helpen, in
+deze volgorde:
+1. **Zet de "vs prev 7d"-caption op een eigen regel** (`.stat-delta-cap { display: block }`).
+   De tegel wordt hoger in plaats van breder, en bij een lange labeltekst wikkelde die
+   caption tóch al binnen de tegel ("VS PREV" / "7D") — dus hij paste daar niet naast.
+2. **Scope de smallere maat op de rij, niet op `.stat-card`.** Andere rijen op dezelfde
+   pagina (Dagoverzicht heeft er vijf, Performance standup zes) passen prima en houden hun
+   bredere vorm: `#statsRow .stat-card { flex: 1 1 116px; min-width: 116px; max-width: 127px }`.
+
+Onder ~1400px venster wikkelt zo'n rij van acht alsnog, en dat moet ook — daar is de kolom
+~916px en dan is 107px per tegel te smal voor het getal.
+
 The canonical KPI tile is `.stat-card` as defined in `gsd-budgets.html`, and it is
 **value-first**: the number on top in brand purple, the label under it, an optional
 `.detail` line under that. No border — a 12px radius plus a soft purple shadow

@@ -280,6 +280,27 @@
         #statsRow .stat-card.metric-tile:hover { border-color: #b9b0d8; }
         #statsRow .stat-card.metric-on { border-color: #5e4a90; box-shadow: 0 0 0 2px rgba(94,74,144,0.10) inset; }
         #statsRow .stat-card .tile-spark { cursor: default; }
+        /* ACHT TEGELS OP ÉÉN RIJ (Joep, 2026-08-14). Ze pasten net niet: de rij is 1076px,
+           `gap-2` kost 7 × 8px, dus er is (1076 - 56) / 8 = 127,5px per tegel — en de
+           gedeelde .stat-card houdt `min-width: 130px` aan. Vier pixels te veel per tegel,
+           en dan valt SEO Bounce alleen op een tweede rij.
+
+           Smaller mag, want de tegel wordt hoger: "vs prev 7d" gaat onder het percentage
+           in plaats van ernaast. Dat lost ook een tweede probleem op — bij GSAAS revenue
+           wikkelde die caption al binnen de tegel ("VS PREV" / "7D"), dus hij paste daar
+           feitelijk toch niet naast de badge.
+
+           Alleen voor #statsRow: Dagoverzicht (5 tegels) en de standup (6) passen prima en
+           houden hun bredere vorm. Onder ~1400px vensterbreedte wikkelt deze rij nog steeds,
+           en dat is goed — dan is er echt geen ruimte. */
+        #statsRow .stat-card {
+            flex: 1 1 116px;
+            min-width: 116px;
+            max-width: 127px;
+            padding-left: 0.35rem;
+            padding-right: 0.35rem;
+        }
+        #statsRow .stat-card .stat-delta-cap { display: block; margin-left: 0; margin-top: 2px; }
         #dashTiles .stat-card, #statsRow .stat-card, #standupTiles .stat-card { display: flex; flex-direction: column; }
         /* Marker on a still-maturing figure (see revenue_settling). Amber, not red:
            the number is not wrong, only incomplete. */
