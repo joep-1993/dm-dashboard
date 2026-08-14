@@ -15,6 +15,12 @@ Open your browser and go to:
 ### ⚙️ How to Start/Stop
 
 **Start everything:**
+> **Docker is niet het deploypad van dit project** (zie `CLAUDE.md`): het draait als
+> FastAPI + uvicorn op :8003, gestart door de Windows-launcher. `Dockerfile` en
+> `docker-compose.yml` staan sinds 2026-08-14 in `attic/docker/` — de commando's
+> hieronder werken pas weer als je die twee terugzet in de projectroot. Zie
+> `attic/README.md`.
+
 ```bash
 docker-compose up -d
 ```
@@ -77,7 +83,7 @@ You should see:
 │   ├── thema-ads.html   # Thema Ads UI
 │   └── js/thema-ads.js  # Frontend logic
 ├── thema_ads_project/    # Google Ads engine (mounted)
-└── docker-compose.yml    # Docker configuration
+└── attic/docker/         # Dockerfile + docker-compose.yml (niet in gebruik)
 ```
 
 ### ⚡ Features

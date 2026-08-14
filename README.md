@@ -14,6 +14,13 @@ AI_MODEL=gpt-4o-mini
 
 ### 2. Start Docker Containers
 
+> **Docker is niet het deploypad van dit project** (zie `CLAUDE.md`): het draait als
+> FastAPI + uvicorn op :8003, gestart door de Windows-launcher. `Dockerfile` en
+> `docker-compose.yml` staan sinds 2026-08-14 in `attic/docker/` — de commando's
+> hieronder werken pas weer als je die twee terugzet in de projectroot. Zie
+> `attic/README.md`.
+
+
 ```bash
 docker-compose up --build
 ```

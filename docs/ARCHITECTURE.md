@@ -59,7 +59,9 @@
 
 ### Deployment Model
 - **Single codebase, two deploys**: one FastAPI app runs both on the developer laptop (localhost:8003) and on the networked box (`win-htz-006.colo.beslist.net:3003`). Behavioral differences are env-driven — see "Environment-Gated Features" below
-- **Two modes**: Docker (`docker-compose up`) or Docker-free (`run_local.sh` / venv + uvicorn). Docker-free is the standard path now
+- **Eén modus**: Docker-free (venv + uvicorn), gestart door de Windows-launcher. De
+  Docker-bestanden en `run_local.sh` zijn op 2026-08-14 naar `attic/` verhuisd omdat niets
+  in de code ernaar verwijst; zie `attic/README.md` om ze terug te zetten
 - **No build tools** - direct HTML/CSS/JS editing with auto-reload
 - **Single-machine deployment** - designed for 1-10 users
 - **Database**: Remote PostgreSQL at 10.1.32.9 (primary for both modes)
