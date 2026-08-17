@@ -1,6 +1,40 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Knip je een dag uit de reeks, knip dan ook het vergelijkvenster (2026-08-18)
+
+Joep: de nieuwste dag staat nog op nul (ETL heeft niet gedraaid) en dat leest in de grafiek
+als een instorting — laat hem weg. Op zichzelf tien regels: aan de staart knippen, leeg =
+elke telbare metriek op nul, en niets knippen als álles leeg is (een leeg bereik hoort leeg
+te blijven mét zijn melding). Drie dingen die er wél aan vastzaten.
+
+**1. Knip op één plek, vóór alles wat tekent.** Grafiek, per-dag-tabel, tegels, totalen en
+de Excel-export lezen allemaal `lastData.daily`. Trimmen direct na de fetch betekent dat ze
+het per definitie eens zijn; trimmen in de renderers was vijf plekken geweest die uit elkaar
+groeien.
+
+**2. Een afgeleid vergelijkvenster moet je aan de DATA meten, niet aan de invoer.**
+`loadTileDeltas` deed `n = rangeLenDays(start, end)` uit de datumkiezers, maar de huidige
+totalen uit `lastData.daily`. Knip er een dag af en de tegel vergelijkt zes dagen met een
+baseline van zeven — een systematische −14% die je voor trend aanziet. Het venster komt nu
+uit de laatste datum die echt in de data zit, wat meteen het geval dekt dat de API sowieso al
+minder dagen teruggaf dan gevraagd. De vuistregel: staat er ergens een berekening die een
+lengte uit de UI haalt terwijl de teller uit de dataset komt, dan is dat een bug die wacht op
+de eerste keer dat de twee niet meer gelijk zijn.
+
+**3. Een rij die verdwijnt, moet ergens genoemd worden.** Het bereik in de datumkiezer is nu
+niet het bereik in de grafiek. Dat verschil staat in de metaregel (`— 2026-08-18 nog geen
+data, niet getoond`). Zonder die regel is dit geen opgeruimde grafiek maar een grafiek die
+liegt, en dat verschil merk je pas als iemand de tabel naast Qlik legt.
+
+**En een scope-les uit dezelfde ronde:** mijn datumklik klapte Top categories óók open, met
+als redenering "anders zie je de gemarkeerde dag niet". Joep: alleen laden, niet openklappen —
+en stond hij al open, dan open laten. Terecht. De kaart zit achter een "Show categories"-
+banner omdat hij een drill-down is; een klik in een ándere kaart hoort die keuze niet voor je
+te maken. Het signaal dat er iets veranderde is de flits, niet het uitvouwen. Algemener: een
+interactie mag een andere sectie van data voorzien, maar niet van een toestand die de gebruiker
+zelf heeft gekozen.
+
 ## Een UI-wijziging in een echte render controleren, ook zonder headless Chromium (2026-08-17)
 
 Vier UI-punten in SEO stats en GSD Campaigns, waarvan er drie pas iets waard zijn als je ze

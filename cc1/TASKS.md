@@ -13,9 +13,23 @@ Vier losse wensen van Joep, drie in SEO stats en een in GSD Campaigns. Commit `f
       er komt geen derde waarheid bij. Aangeklikte rij blijft paars (`#e6dff5`, dezelfde tint
       als het actieve weekdagfilter ernaast), en die markering wordt in de rij-renderer gezet
       zodat sorteren en doorbladeren hem niet wegpoetsen. Alleen de sectie die echt van dag
-      verandert haalt opnieuw op; flatpickr krijgt `setDate(iso, false)`; Top categories
-      klapt open vóór het scrollen, met `{toggle:false}` (zie LEARNINGS); beide kaarten
+      verandert haalt opnieuw op; flatpickr krijgt `setDate(iso, false)`; beide kaarten
       knipperen één keer, achter een `prefers-reduced-motion`-guard.
+- [x] **Top categories wordt geladen maar NIET opengeklapt** (Joep, 2026-08-18 — eerst
+      klapte hij open). Dichtgeklapt blijft dicht achter de "Show categories"-banner, met
+      de nieuwe dag er al achter; stond hij open, dan blijft hij open en ververst hij in
+      beeld. De klik zegt dus "laad deze dag", niet "vouw deze sectie uit".
+- [x] **Performance standup laadt mee op de datumklik** (Joep, 2026-08-18). Was de enige
+      van de drie dagsecties met een losstaande `#refDate`. Zelfde patroon als de andere
+      twee: kiezer schrijven, alleen ophalen als de dag echt verschuift, kaart flitst mee.
+- [x] **Een nog lege nieuwste dag valt uit de grafiek en de Per-day overview** (Joep,
+      2026-08-18). `trimEmptyTail()` knipt hem weg direct na de fetch, dus grafiek, tabel,
+      tegels, totalen en export lezen dezelfde reeks. Alleen aan de staart, in meervoud
+      (lag is soms twee dagen), leeg = elke telbare metriek op nul, en niets knippen als
+      álles leeg is. De weggelaten dagen staan in de metaregel. **Hing eraan vast:**
+      `loadTileDeltas` mat het venster aan de datumkiezer en de totalen aan de data — met
+      een weggeknipte dag werd dat zes dagen tegen een baseline van zeven (~14% scheef).
+      Het venster komt nu uit de laatste datum die echt in de data zit. Commit `cc2d654`.
 - [x] **Zoekveld per subtabel in Top categories** (Top maincats en Top deepest cats apart —
       één gedeeld veld filtert ook de tabel waar je niet naar kijkt). Zoekregel van Bot Hits:
       `type=search`, meerdere woorden = AND op substrings, over alle tekstkolommen, `oninput`.
