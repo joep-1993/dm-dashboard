@@ -4,6 +4,64 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-17 — GSD: prijsbucket-structuur voor nieuwe CPC-shops + Model-kolom
+
+Joep leverde `Downloads\claude\create GSD-campaigns CPR CPC split.py` aan: "kijk of en hoe we
+dit veilig kunnen integreren, en of het script nog andere afwijkingen heeft."
+
+- [x] **Gediffed tegen het origineel** (`scripts_def/create GSD-campaigns.py`), niet tegen onze
+      port. 174 regels verschil, **exact één feature**: de CPC-bucketstructuur. De
+      modelafleiding en de CPC/CPR-mailkolom zaten al in het origineel én al bij ons. Het
+      script zelf kan niet draaien — `for campagne_data in redshiftdata1:` is een NameError die
+      ook in het origineel staat, dus de CPC-tak heeft nooit gedraaid.
+- [x] **Overgenomen:** 1 campagne per shop met 14 adgroups (één per `custom_label_4`-bucket),
+      elk eigen max CPC, tree serveert alleen de eigen bucket, "overig" uitgesloten. Geen
+      a/b/c-split — een CPC-shop deelt geen conversiedata. Bods 1-op-1 uit het script (0,09–0,35).
+- [x] **Alleen voor NIEUWE CPC-shops** (Joeps keuze). `_labels_for_shop()` beslist het, uit de
+      kandidatenlijst die de create-kant toch al ophaalt; een shop die het legacy paar
+      (`[label:a,b]` / `[label:c,no_data,no_ean]`) al draagt houdt dat, dus nooit twee
+      structuren naast elkaar.
+- [x] **Drie dingen bewust anders dan het script:** `[label:cpc]` in de naam i.p.v.
+      `[new cpc structure]` (zonder `[label:]`-token is de campagne onzichtbaar voor de
+      pause-fallback, `_match_existing_campaign` én de labelkolom — het Emob.nl-patroon); onze
+      helpers i.p.v. kale `mutate_*` (retries, `feed_label`, `contains_eu_political_advertising`
+      hard, `_name_contains_regexp` i.p.v. GAQL `LIKE '%…]%'`); en merk-negatives + BRANDED-label
+      krijgt de bucketcampagne wél.
+- [x] **Idempotent per onderdeel.** Het script hangt de tree achter `if is_created:` — een run
+      die halverwege sterft laat een adgroup zonder tree achter die nooit meer wordt aangevuld.
+      `_build_bucket_structure()` checkt adgroup/product-ad/tree apart en is meteen het
+      reparatiepad. `_repair_campaign` en `_check_campaign_structure` hebben een bucket-tak
+      gekregen: die keken naar `ags[0]` en zouden 14 adgroups beoordelen op de eerste.
+- [x] **`_sheet_type_from_label` gefikst:** testte op een komma in het label, dus `[label:cpc]`
+      zou als CPR in de run-log zijn beland.
+- [x] **Model-kolom** tussen Shop en Country in Campaigns created (filter, sortering,
+      Copy-export) en in de preview-tabel. Geen extra API-call: afgeleid uit het
+      `[label:X]`-token dat we toch al parsen. **Twee waarden, CPC en CPR** — de kolom gaat over
+      het model, niet over de structuur; het verschil tussen de twee CPC-structuren blijft in de
+      campagnenaam leesbaar.
+- [x] Getest: 30 assertions (labeltokens, modelafleiding, de `c`/`cpc`-botsing, pause-dekking
+      voor alle drie de campagnesoorten, structuurkeuze, sheet-kolom, naamopbouw), JS-syntax,
+      kolomtellingen. Commit `81f20d9`.
+
+**Openstaand:**
+
+- [ ] **NIET getest tegen de Google Ads API** — er is geen campagne aangemaakt. Voor livegang:
+      backend herstarten (draait zonder `--reload`, dus `fuser -k 8003/tcp` + opnieuw starten),
+      dan de **preview** op een datum waarop een CPC-shop aanging en controleren dat de
+      Model-kolom klopt, dan pas één echte run via de include-filter. Let op: in 60 dagen ging
+      er **1** nieuwe CPC-shop aan tegen 65 CPR, dus die datum moet je opzoeken.
+- [ ] **Twee live bugs in het LEGACY CPC-pad, bewust niet meegefixt** (Joep: alleen nieuwe
+      shops). Geverifieerd tegen `dra.gmc_products_issues` (~40M rijen): (a) `PRICE_BUCKETS`
+      eindigt op `1597-2584` / `2584-Onbeperkt`, maar de feed heeft `1597-2594` / `2594+` — die
+      twee buckets matchen nul producten; (b) `add_sub_cpc` partitioneert op **INDEX0** (waar de
+      score A/B/C/No data/No EAN in zit) i.p.v. INDEX4, dus geen enkele bucket-node matcht en
+      alles valt in de "overig"-node — die bij ons biddable is. Netto draaien de legacy
+      CPC-campagnes op één vlak bod zonder prijsdifferentiatie, en serveren de a/b- en de
+      c-campagne allebei de hele catalogus. Staat als waarschuwing bij de constanten zodat
+      niemand de twee bucketlijsten "gelijktrekt". Omvang: 514 live CPC shop-landcombinaties,
+      maar vrijwel alles is door `GSD-CPC.py` gebouwd (dat de juiste INDEX4 gebruikt maar
+      dezelfde twee foute bucketnamen heeft), dus de INDEX0-variant raakt een handvol campagnes.
+
 ### 2026-08-14 — Bot Hits: R-urls werden als Cat-url geteld
 
 Joep zag R-url op 0,0% in de URL-type-donut en vroeg of dat kon kloppen.
@@ -30,8 +88,13 @@ Joep zag R-url op 0,0% in de URL-type-donut en vroeg of dat kon kloppen.
 - [ ] **Alles vóór 2026-07-05 houdt de oude indeling.** `pa.bothits_daily` bewaart het ruwe type
       zonder URL-tekst en de logs zijn na ~42 dagen uit S3 verdwenen, dus dit is niet meer te
       repareren. De tool gaat terug tot 2026-02-14, dus een periode die over 07-05 heen loopt
-      mengt twee definities. Staat als gedateerde noot op de URL-type-kaart; **die noot kan weg
-      zodra 2026-07-05 uit de standaardvensters is gerold** (~oktober 2026).
+      mengt twee definities. **De UI-noot is op 2026-08-17 weggehaald** op verzoek van Joep
+      (commit `fee6f6c`); het standaardvenster is de laatste 30 dagen vanaf de laatst gedekte
+      dag, dus 07-05 valt daar inmiddels buiten — de eerdere schatting "~oktober 2026" ging uit
+      van het volledige bereik en niet van het standaardvenster. Het commentaar bij
+      `URLTYPE_BUCKETS` in `bothits_service.py` blijft staan: de breuk in de historie is nog
+      steeds waar, ook nu hij niet meer op het scherm staat. Deze regel blijft open zolang de
+      tool tot 2026-02-14 terugkijkt.
 - [ ] **Mijn eerste impactschatting was een factor 60 te laag** (0,13% i.p.v. 7,9%), omdat ik hem
       op `bothits_unknown_daily` had gemeten — die tabel houdt alleen de staart van onbekende
       URLs. Zie LEARNINGS; geen actie, wel een valkuil om te onthouden bij de volgende sizing.

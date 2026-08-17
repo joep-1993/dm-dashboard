@@ -8,6 +8,25 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### GSD: twee bugs in het LEGACY CPC-pad, bewust uitgesteld (logged 2026-08-17)
+- [ ] Bij het integreren van de prijsbucket-structuur voor nieuwe CPC-shops zijn twee
+  live defects in het bestaande CPC-pad gevonden en geverifieerd tegen de feed
+  (`dra.gmc_products_issues`, ~40M rijen). **Volledige beschrijving en cijfers staan in
+  TASKS.md bij de sprint-entry van 2026-08-17** — hier alleen de kern, zodat het niet
+  onder een afgevinkte taak verdwijnt:
+  - `PRICE_BUCKETS` eindigt op `1597-2584` / `2584-Onbeperkt`; de feed heeft `1597-2594` /
+    `2594+`. Die twee buckets matchen nul producten. Geldt óók voor de campagnes die door
+    `scripts_def/GSD-CPC.py` zijn gebouwd, want die heeft dezelfde spelling.
+  - `add_sub_cpc` partitioneert op INDEX0 (de score) in plaats van INDEX4 (de prijs), dus
+    alles valt in de biddable "overig"-node: geen prijsdifferentiatie en beide campagnes
+    serveren de hele catalogus. Raakt alleen de campagnes die het dashboard zelf heeft
+    gebouwd — een handvol, want in 60 dagen ging er 1 nieuwe CPC-shop aan.
+
+  Uitgesteld omdat Joep op 2026-08-17 koos voor "alleen nieuwe CPC-shops": repareren raakt
+  514 live shop-landcombinaties en is een eigen besluit met een eigen dry-run. Er staat een
+  waarschuwing bij de constanten in `gsd_campaigns_service.py` zodat niemand de twee
+  bucketlijsten per ongeluk "gelijktrekt".
+
 ### SEO Priority: "revert deze push" op basis van de apply-log (logged 2026-08-13)
 - [ ] `pa.seo_prio_apply_log` legt per write de oude én nieuwe waarde vast
   (`old_value` → `new_value`, met `status='applied'`). Daarmee is een terugdraai-knop een

@@ -1,6 +1,61 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Diff een aangeleverd script tegen zijn origineel, niet tegen jouw port (2026-08-17)
+
+Joep leverde `create GSD-campaigns CPR CPC split.py` aan (1.990 regels) met de vraag wat erin
+zit en of het veilig kan. Vijf dingen uit het integreren.
+
+**1. Zoek het origineel waarvan het een kopie is.** Mijn eerste neiging was het script te
+vergelijken met `backend/gsd_campaigns_service.py` — 1.990 regels tegen 4.500, twee andere
+architecturen, dat wordt een leesoefening van een uur met een onbetrouwbare uitkomst. Het
+script is echter een fork van `scripts_def/create GSD-campaigns.py`, het standalone origineel
+waar onze versie ooit van is geport. `diff` daartegen: **174 regels, exact één feature.** Alles
+wat ik anders voor "nieuw" had aangezien (modelafleiding uit `is_wecantrack_shop`/
+`is_pixel_shop`, de CPC/CPR-kolom in de mail) stond al in het origineel én al bij ons. Bij een
+aangeleverd script is de eerste vraag dus niet "wat doet dit" maar "waar komt dit vandaan" —
+`ls` in de map van het origineel kost tien seconden en maakt de rest van het werk exact.
+
+**2. Controleer magic strings tegen de bron, niet tegen een ander script.** Het script bood 14
+prijsbuckets aan met de opmerking "labels EXACT zoals in de feed". Onze `PRICE_BUCKETS` had
+dezelfde 14 met twee andere spellingen, overgenomen uit `GSD-CPC.py`. In plaats van te kiezen
+op gezag: `SELECT custom_label_4, COUNT(*) FROM dra.gmc_products_issues GROUP BY 1`. Het
+aangeleverde script had gelijk (`1597-2594`, `2594+`); onze twee bovenste buckets
+(`1597-2584`, `2584-Onbeperkt`) matchen **nul** producten. Diezelfde query liet meteen zien dat
+`custom_label_0` de score bevat (A/B/C/No data/No EAN) en `custom_label_4` de prijs — waarmee
+onze `add_sub_cpc` door de mand viel: die zet prijsbucket-waarden op INDEX0, dus geen enkele
+node matcht en álles valt in de "overig"-node, die bij ons biddable is. Twee live bugs
+gevonden door één GROUP BY op de tabel waar het antwoord echt in staat.
+
+**3. Een token in een campagnenaam is een API.** Het script noemt zijn campagne
+`… [new cpc structure]` en laat `[label:X]` weg. Onschuldig, tot je telt wat er op dat token
+draait: de pause-fallback (`find_pausable_campaigns` bron b), `_match_existing_campaign`, en de
+labelkolom in de UI. Alle drie zien de campagne niet — precies het Emob.nl-patroon waarbij een
+shop na vertrek uit GSD vijf ENABLED campagnes hield. Naamconventies die door drie subsystemen
+worden geparsed zijn geen cosmetiek; wijk je ervan af, dan moet je alle drie langs. Bijkomend
+puntje: `[label:cpc]` botst níet met het bestaande `[label:c]` omdat overal mét sluithaak wordt
+gematcht — dat is het soort ding dat je test in plaats van beredeneert.
+
+**4. Idempotent per ONDERDEEL, niet per ouder.** Het script bouwt 14 adgroups en hangt de
+listing tree achter `if is_created:`. Een run die sterft tussen adgroup en tree laat dus een
+adgroup achter die bij elke volgende run wordt overgeslagen — een stil, permanent gat, want
+"de adgroup bestaat al" is waar. De regel: controleer en vul elk onderdeel apart aan (adgroup,
+product-ad, tree). Bijvangst: die functie ís dan meteen het reparatiepad, dus create en repair
+zijn één stuk code in plaats van twee die uit elkaar groeien.
+
+**5. Reparatie- en verificatiecode die één kind aanneemt, breekt bij veel kinderen.**
+`_repair_campaign` en `_check_campaign_structure` pakken `ags[0]` — prima bij één adgroup per
+campagne, maar bij een structuur van veertien noemen ze de campagne compleet op grond van de
+eerste. Als je een nieuwe vorm toevoegt aan een bestaande tool, loop dan niet alleen het
+create-pad na maar ook alles dat achteraf iets over die vorm bewéért.
+
+**En een ontwerpvraag die ik verkeerd had:** ik gaf de nieuwe structuur een eigen model
+(`CPC-buckets`) in de UI. Joep corrigeerde: het moeten er twee zijn, CPC en CPR. Terecht — de
+kolom beantwoordt "welk commercieel model", niet "welke structuur". Intern moet het onderscheid
+wél bestaan (anders weet de repair niet of hij één of veertien adgroups checkt), maar dat is
+routering en geen presentatie. Een intern onderscheid is geen reden voor een extra waarde op
+het scherm.
+
 ## Een 0,0% in een donut was een classificatiefout van 7,9% (2026-08-14)
 
 Joep zag R-url op 0,0% in de URL-type-donut van Bot Hits en vroeg of dat kon kloppen. Nee: het
