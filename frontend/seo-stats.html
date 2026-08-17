@@ -718,7 +718,7 @@
         </div>
 
         <!-- Performance standup -->
-        <div class="card mb-4">
+        <div class="card mb-4" id="standupCard">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
                 <h5 class="mb-0">Performance standup</h5>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -1268,7 +1268,15 @@
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
             if (!lastData || !start || !end) { renderStats(); return; }
-            const n = rangeLenDays(start, end);
+            // Meet het venster aan de dagen die er ECHT zijn, niet aan de datumkiezer.
+            // trimEmptyTail() kan de laatste dag(en) hebben weggelaten, en dan telt
+            // computeTotals() zes dagen terwijl de baseline er zeven zou pakken — een
+            // verschil van ~14% dat niets met de trend te maken heeft. Lezen uit de
+            // data i.p.v. uit `emptyTailDays.length` dekt meteen het geval dat de API
+            // sowieso al minder dagen teruggaf dan het bereik.
+            const effEnd = (lastData.daily || [])
+                .reduce((m, r) => (!m || String(r.date) > m) ? String(r.date) : m, null) || end;
+            const n = rangeLenDays(start, effEnd);
             const prevEnd = shiftDays(start, -1);
             const prevStart = shiftDays(start, -n);
             // Reuse wowBase when it already covers exactly the prior period (n === 7).
@@ -1326,7 +1334,7 @@
             const table = head.closest('table');
             if (table) table.classList.toggle('with-deltas', showDeltas);
             head.innerHTML = '<th class="sortable" data-sort="date" onclick="sortBy(\'date\')"'
-                + ' title="Sorteer op datum — klik een datum in de kolom om Top categories en Dagoverzicht op die dag te zetten">Date</th>' +
+                + ' title="Sorteer op datum — klik een datum in de kolom om Top categories, Dagoverzicht en Performance standup op die dag te zetten">Date</th>' +
                 `<th class="text-col col-weekday${weekdayFilter ? ' wd-active' : ''}"`
                 + ` title="${weekdayFilter ? `Filtered to ${weekdayFilter} — click a Day value to clear` : 'Click a Day value to filter on that weekday'}">`
                 + `Day${weekdayFilter ? ` · ${weekdayFilter}` : ''}</th>` +
@@ -1481,13 +1489,13 @@
             }
         }
 
-        // Clicking a value in the Date column pins that day: Top categories and
-        // Dagoverzicht both jump to it and reload. Those two sections keep their
-        // own pickers on purpose (they answer "which day", the range above answers
-        // "which period"), so this is a shortcut that WRITES both pickers rather
-        // than a third source of truth — moving either picker by hand afterwards
-        // still wins, it only leaves the row highlighted on a day one of them no
-        // longer shows.
+        // Clicking a value in the Date column pins that day: Top categories,
+        // Dagoverzicht and Performance standup all jump to it and reload. Those three
+        // sections keep their own pickers on purpose (they answer "which day", the
+        // range above answers "which period"), so this is a shortcut that WRITES all
+        // three pickers rather than a fourth source of truth — moving any picker by
+        // hand afterwards still wins, it only leaves the row highlighted on a day one
+        // of them no longer shows.
         let selectedDay = null;
         function setDayPicker(fp, id, iso) {
             // triggerChange=false: flatpickr would fire the input's own onchange
@@ -1513,25 +1521,26 @@
             // Only refetch the section whose day actually moves: re-clicking the
             // pinned date (or one section already sitting on it) then costs no
             // Redshift round-trip and no skeleton flicker.
-            // `!lastCatDeltas` covers the one case where the day is already right but
-            // there is nothing to highlight: the page-load fetch failed.
+            // `!lastCatDeltas` / `!lastDeltas` cover the one case where the day is
+            // already right but there is nothing to show: the page-load fetch failed.
             const catNeeds = document.getElementById('catDate').value !== iso || !lastCatDeltas;
             const dashNeeds = document.getElementById('dashDate').value !== iso;
+            const standupNeeds = document.getElementById('refDate').value !== iso || !lastDeltas;
             setDayPicker(fpCat, 'catDate', iso);
             setDayPicker(fpDash, 'dashDate', iso);
-            // Top categories is collapsed on load, so highlighting a day inside a
-            // closed card would be invisible — open it before scrolling there.
-            // `{toggle:false}` is not optional: Collapse's default config is
-            // toggle:true, and the constructor ACTS on it, so getOrCreateInstance()
-            // on a pane no one has clicked yet would toggle it shut on the way in.
-            const pane = document.getElementById('catCollapse');
-            if (pane && window.bootstrap && !pane.classList.contains('show')) {
-                bootstrap.Collapse.getOrCreateInstance(pane, { toggle: false }).show();
-            }
+            setDayPicker(fpRef, 'refDate', iso);
+            // The collapse state is deliberately NOT touched (Joep, 2026-08-18): a date
+            // click LOADS Top categories, it does not open it. Collapsed stays collapsed
+            // behind its "Show categories" banner — the section is a drill-down, and a
+            // click in a different card should not unfold two screens of table you did
+            // not ask for. Open stays open, so it just refreshes under your eyes. The
+            // load runs either way, so the data is already there when you do open it.
             if (catNeeds) loadCatDeltas(false);
             if (dashNeeds) loadDashboard(false);
+            if (standupNeeds) loadStandupDeltas(false);
             flashCard('catCard');
             flashCard('dashCard');
+            flashCard('standupCard');
             // Top categories is the nearer of the two and sits directly under this
             // table, so scrolling to it keeps Dagoverzicht one short scroll away
             // instead of jumping past the section you just changed.
@@ -1663,7 +1672,7 @@
                 // The pin is re-applied on every redraw (sort, page, column
                 // toggle), so the highlighted row survives all of them.
                 const dateCell = `<td class="date-cell" onclick="focusDay('${r.date}')"`
-                    + ` title="Toon ${r.date} in Top categories en Dagoverzicht">${r.date}</td>`;
+                    + ` title="Toon ${r.date} in Top categories, Dagoverzicht en Performance standup">${r.date}</td>`;
                 // data-date is the scroll anchor for the weekday filter and the
                 // key focusDay() marks the pinned row by.
                 return `<tr data-date="${r.date}"${r.date === selectedDay ? ' class="day-selected"' : ''}>`
@@ -1683,8 +1692,14 @@
 
         function renderMeta() {
             const d = lastData;
+            // Weggelaten dagen worden hier benoemd (zie trimEmptyTail): het bereik dat
+            // je in de datumkiezer ziet is dan niet het bereik dat de grafiek toont, en
+            // dat verschil moet ergens staan.
+            const trimmed = emptyTailDays.length
+                ? ` — ${emptyTailDays.join(', ')} nog geen data, niet getoond`
+                : '';
             document.getElementById('metaLine').textContent =
-                `last updated ${new Date(d.generated_at).toLocaleDateString('nl-NL')}`;
+                `last updated ${new Date(d.generated_at).toLocaleDateString('nl-NL')}${trimmed}`;
             const note = document.getElementById('infoNote');
             const hasData = d.daily.some(r => r.seo_visits || r.dma_visits || r.gsaas_visits);
             note.style.display = hasData ? 'none' : 'block';
@@ -2116,6 +2131,41 @@
             });
         }
 
+        // De nieuwste dag van een bereik is vaak nog leeg — de ETL van die dag is nog
+        // niet gedraaid — en een dag die als 0 in de grafiek en de per-dag-tabel staat
+        // leest als een instorting in plaats van als "nog niet geleverd" (Joep,
+        // 2026-08-18). Die dag gaat er hier uit, vóór alles wat hem zou tekenen of
+        // meetellen: grafiek, tabel, tegels, totalen en export lezen allemaal
+        // lastData.daily, dus dit is de enige plek waar het hoeft.
+        //
+        // Drie dingen die de regel veilig houden:
+        //  * alleen aan de STAART, en meervoud — de lag is soms twee dagen, en één
+        //    lege dag laten staan omdat er twee zijn is precies het artefact terug;
+        //  * leeg = elke telbare metriek op nul (SUM_KEYS: alle bezoeken én alle
+        //    omzet), niet "seo_visits is nul". Een echte nuldag bestaat hier niet;
+        //    de laagste dag in de reeks zit ruim boven de 50k bezoeken;
+        //  * is ALLES leeg, dan knippen we niets. Een bereik zonder data hoort leeg
+        //    te blijven met de "No visits recorded"-melding eronder, niet stilletjes
+        //    tot een tabel van nul rijen te verdampen.
+        // Welke dagen zijn weggelaten staat in de metaregel — een dag die zonder een
+        // woord uit een grafiek verdwijnt is een grafiek die liegt.
+        let emptyTailDays = [];
+        function isEmptyDay(r) { return SUM_KEYS.every(k => !Number(r[k])); }
+        function trimEmptyTail() {
+            emptyTailDays = [];
+            const rows = lastData.daily || [];
+            const byDate = rows.slice().sort((a, b) => String(a.date) < String(b.date) ? -1 : 1);
+            for (let i = byDate.length - 1; i >= 0 && isEmptyDay(byDate[i]); i--) {
+                emptyTailDays.unshift(byDate[i].date);
+            }
+            if (!emptyTailDays.length || emptyTailDays.length === rows.length) {
+                emptyTailDays = [];
+                return;
+            }
+            const drop = new Set(emptyTailDays);
+            lastData.daily = rows.filter(r => !drop.has(r.date));
+        }
+
         async function load(force) {
             const myToken = ++loadToken;
             const start = document.getElementById('startDate').value;
@@ -2150,6 +2200,7 @@
                 const payload = await res.json();
                 if (myToken !== loadToken) return;   // a newer load started; drop this one
                 lastData = payload;
+                trimEmptyTail();
                 deriveRatios(lastData.daily);
                 deriveTotals(lastData.daily);
                 await loadNotes(lastData.start_date, lastData.end_date);

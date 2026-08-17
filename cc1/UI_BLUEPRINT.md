@@ -164,12 +164,16 @@ other tool uses the grey default. New tools follow the grey default.
   3. **Only refetch what actually moved** (compare the picker's current value), and
      with flatpickr pass `setDate(iso, false)` so it doesn't fire the input's own
      `onchange` on top of your call.
-  4. **A collapsed target gets opened, and both flash once.** Highlighting a day
-     inside a closed card is invisible; a section two screens down that changes
-     silently is missed. `bootstrap.Collapse.getOrCreateInstance(pane, {toggle:false})`
-     — the default config is `toggle:true` and the **constructor acts on it**, so the
-     bare call would toggle a never-clicked pane shut. Flash = a 0.9s box-shadow
-     keyframe on the card (twice), behind a `prefers-reduced-motion` guard.
+  4. **Load a collapsed target, do not open it** (Joep, 2026-08-18). Top categories
+     is a drill-down behind a "Show categories" banner; a click in a *different* card
+     must not unfold two screens of table you did not ask for. So the click loads it
+     and leaves the collapse exactly as it found it — collapsed stays collapsed with
+     fresh data waiting behind the banner, open stays open and refreshes in place.
+     The signal that something changed is the flash, not the unfolding: a 0.9s
+     box-shadow keyframe on the card (twice), behind a `prefers-reduced-motion` guard.
+     If you ever DO need to open one: `bootstrap.Collapse.getOrCreateInstance(pane,
+     {toggle: false}).show()` — the default config is `toggle:true` and the
+     **constructor acts on it**, so the bare call toggles a never-clicked pane shut.
 - **A category column of labels is centred** (`text-align: center`) — an outlined
   `.lbl` is a block with its own edges, so left-aligning it against a numeric
   column's right-aligned digits leaves a ragged gutter between them.
