@@ -41,6 +41,14 @@
         .campaign-table td { vertical-align: middle; }
         .campaign-table .col-country { text-align: center; }
         .campaign-table .col-status { text-align: center; }
+        .campaign-table .col-model { text-align: center; }
+        /* Model chips — two values, CPC and CPR. Read off the campaign's own label
+           token, not the shop's current Redshift flag, so a shop that flipped model
+           still shows what its campaigns are. Chip shape per UI_BLUEPRINT (soft fill,
+           accent border, dark text). No grey — a model is never a "nothing to see here"
+           value (UI_BLUEPRINT: nooit grijs als labelkleur). */
+        .badge-model-cpr { background: var(--flat-accent-soft); color: #35408a; border: 1px solid var(--flat-accent); font-weight: 600; }
+        .badge-model-cpc { background: #e8f6f2; color: #0a7d63; border: 1px solid #00b894; font-weight: 600; }
 
         /* AUDIT LOW — .btn-action / .btn-pause / .btn-activate removed (and .btn-remove
            further down). They styled the per-row Pause/Activate/Remove buttons whose
@@ -68,8 +76,9 @@
         /* Run-result table: show full campaign names on one line; the wrapper's
            overflow:auto then provides horizontal scroll instead of truncating. */
         .gsd-run-table td.col-name { max-width: none; overflow: visible; text-overflow: clip; white-space: nowrap; }
-        /* Preview & run tables: center the Country and Action columns. */
+        /* Preview & run tables: center the Model, Country and Action columns. */
         .gsd-preview-table th[data-sort="country"], .gsd-preview-table td.col-country,
+        .gsd-preview-table th[data-sort="model"], .gsd-preview-table td.col-model,
         .gsd-preview-table th[data-sort="action"], .gsd-preview-table td.col-action { text-align: center; }
         /* Run-result table: keep the Detail cell on a single line (wrap scrolls). */
         .gsd-run-table td.col-detail { white-space: nowrap; }
@@ -273,6 +282,11 @@
                         <option value="BE">BE</option>
                         <option value="DE">DE</option>
                     </select>
+                    <select class="form-select form-select-sm" id="filterModel" style="max-width: 130px;" onchange="applyFilters()">
+                        <option value="">All Models</option>
+                        <option value="CPR">CPR</option>
+                        <option value="CPC">CPC</option>
+                    </select>
                     <select class="form-select form-select-sm" id="filterStatus" style="max-width: 120px;" onchange="applyFilters()">
                         <option value="">All Statuses</option>
                         <option value="ENABLED">Active</option>
@@ -300,6 +314,7 @@
                                 <th style="width:36px; text-align:center;"><input type="checkbox" id="selectAllCampaigns" onclick="toggleSelectAllCampaigns(this)" title="Select all on this page"></th>
                                 <th class="sortable" data-sort="created_date" onclick="sortBy('created_date')">Date</th>
                                 <th class="sortable" data-sort="shop_name" onclick="sortBy('shop_name')">Shop</th>
+                                <th class="col-model sortable" data-sort="model" onclick="sortBy('model')">Model</th>
                                 <th class="col-country sortable" data-sort="country" onclick="sortBy('country')">Country</th>
                                 <th class="col-status sortable" data-sort="status" onclick="sortBy('status')">Status</th>
                                 <th class="sortable" data-sort="campaign_name" onclick="sortBy('campaign_name')">Campaign</th>
@@ -309,13 +324,15 @@
                     </table>
                 </div>
                 <script>
-                    // Render N placeholder rows (5 cells each) so the Campaigns
-                    // table holds its height while data loads — prevents the
-                    // layout below from jumping when campaigns arrive. Defined
+                    // Render N placeholder rows (one cell per column) so the
+                    // Campaigns table holds its height while data loads — prevents
+                    // the layout below from jumping when campaigns arrive. Defined
                     // here so it paints during parse; reused by loadCampaigns().
+                    // Keep the count in step with the <thead> above and with the
+                    // empty-state colspan in renderTable().
                     function campaignSkeletonRows(n = 10) {
                         const cell = '<td><span class="skel-bar"></span></td>';
-                        return ('<tr class="skel-row">' + cell.repeat(6) + '</tr>').repeat(n);
+                        return ('<tr class="skel-row">' + cell.repeat(7) + '</tr>').repeat(n);
                     }
                     document.getElementById('campaignTableBody').innerHTML = campaignSkeletonRows();
                 </script>
@@ -686,12 +703,13 @@
             } catch (err) {
                 console.error('Failed to load campaigns:', err);
                 document.getElementById('campaignTableBody').innerHTML =
-                    '<tr><td colspan="6" class="text-center text-danger py-4">Failed to load campaigns.</td></tr>';
+                    '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load campaigns.</td></tr>';
             }
         }
 
         function applyFilters() {
             const country = document.getElementById('filterCountry').value;
+            const model = document.getElementById('filterModel').value;
             const status = document.getElementById('filterStatus').value;
             const campaignSearch = document.getElementById('filterCampaignName').value.toLowerCase();
 
@@ -699,6 +717,7 @@
             // alias would scramble the allCampaigns master order (and exports).
             filteredCampaigns = allCampaigns.slice();
             if (country) filteredCampaigns = filteredCampaigns.filter(c => (c.country || '').toUpperCase() === country);
+            if (model) filteredCampaigns = filteredCampaigns.filter(c => (c.model || '') === model);
             if (status) filteredCampaigns = filteredCampaigns.filter(c => (c.status || '').toUpperCase() === status);
             if (campaignSearch) filteredCampaigns = filteredCampaigns.filter(c =>
                 (c.campaign_name || '').toLowerCase().includes(campaignSearch) ||
@@ -783,10 +802,19 @@
             renderPage();
         }
 
+        // The backend derives `model` from the campaign's [label:X] token, so a campaign
+        // built by another flow (promo, tag_toppers) or with a mangled name has none —
+        // that renders as a plain dash, not as a chip claiming a model we did not read.
+        function modelBadge(model) {
+            const cls = { 'CPR': 'badge-model-cpr', 'CPC': 'badge-model-cpc' }[model];
+            if (!cls) return '<span class="text-muted">-</span>';
+            return `<span class="badge ${cls}">${escapeHtml(model)}</span>`;
+        }
+
         function renderTable(campaigns) {
             const tbody = document.getElementById('campaignTableBody');
             if (!campaigns.length) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No campaigns found.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No campaigns found.</td></tr>';
                 return;
             }
 
@@ -804,6 +832,7 @@
                     <td><input type="checkbox" class="camp-check"${selectedCampaigns.has(campKey(c)) ? ' checked' : ''} data-cid="${c.customer_id}" data-campid="${c.campaign_id}" data-name="${escapeHtml(c.campaign_name || '')}" data-status="${(c.status || '').toUpperCase()}" onclick="toggleCampaignSelection(this)"></td>
                     <td>${c.created_date || '-'}</td>
                     <td title="${escapeHtml(c.shop_name || '')}">${escapeHtml(c.shop_name || '-')}</td>
+                    <td class="col-model">${modelBadge(c.model)}</td>
                     <td class="col-country">${c.country || '-'}</td>
                     <td class="col-status">${statusBadge}</td>
                     <td title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '-')}${newBadge}</td>
@@ -826,6 +855,7 @@
                 .map(c => ({
                     Date: c.created_date || '',
                     Shop: c.shop_name || '',
+                    Model: c.model || '',
                     Country: c.country || '',
                     Status: c.status || '',
                     Campaign: c.campaign_name || '',
@@ -1984,6 +2014,7 @@
                         <thead class="table-light">
                             <tr>
                                 ${th('shop_name', 'Shop', '160px')}
+                                ${th('model', 'Model', '110px')}
                                 ${th('campaign_name', 'Campaign name')}
                                 ${th('country', 'Country', '80px')}
                                 ${th('action', 'Action', '90px')}
@@ -1992,10 +2023,11 @@
                         <tbody>
                             ${rows.length ? rows.map(c => `<tr>
                                 <td>${escapeHtml(c.shop_name || '')}</td>
+                                <td class="col-model">${modelBadge(c.model)}</td>
                                 <td class="col-name" title="${escapeHtml(c.campaign_name || '')}">${escapeHtml(c.campaign_name || '')}</td>
                                 <td class="col-country">${escapeHtml(c.country || '')}</td>
                                 <td class="col-action">${previewActionLabel(c.action)}</td>
-                            </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No matching campaigns.</td></tr>'}
+                            </tr>`).join('') : '<tr><td colspan="5" class="text-center text-muted py-2">No matching campaigns.</td></tr>'}
                         </tbody>
                     </table>
                 </div>
@@ -2011,7 +2043,7 @@
         function onPreviewFilter(v) { previewFilterText = v; renderPreviewCampaignsTable(); }
 
         function previewViewRows() {
-            return getPreviewView().map(c => ({ Shop: c.shop_name, Campaign: c.campaign_name, Country: c.country, Action: c.action }));
+            return getPreviewView().map(c => ({ Shop: c.shop_name, Model: c.model || '', Campaign: c.campaign_name, Country: c.country, Action: c.action }));
         }
 
         function exportGsdPreviewXlsx() {

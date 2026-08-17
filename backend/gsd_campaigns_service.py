@@ -106,6 +106,60 @@ CAMPAIGN_CREATED_TABLE = "pa.jvs_gsd_campaign_created"
 LABELS_CPR = ["a", "b", "c", "no_data", "no_ean"]
 LABELS_CPC = ["a,b", "c,no_data,no_ean"]
 
+# --- CPC price-bucket structure (newly connected CPC shops) -----------------
+# From "create GSD-campaigns CPR CPC split.py" (Joep, 2026-08-17). ONE campaign per
+# shop holding 14 ad groups — one per custom_label_4 price bucket, each with its own
+# max CPC and a listing tree that serves only its own bucket. Deliberately no a/b/c
+# score split: a CPC shop shares no conversion data, so there is no score to split on.
+#
+# Adopted for NEW CPC shops only (Joep, 2026-08-17). A CPC shop that already carries
+# the legacy LABELS_CPC pair keeps it — see _labels_for_shop().
+#
+# The bucket VALUES are the ones that actually exist in the feed, verified 2026-08-17
+# against dra.gmc_products_issues (~40M rows): all 14 present, and the top two are
+# spelled '1597-2594' and '2594+'. PRICE_BUCKETS below ends in '1597-2584' /
+# '2584-Onbeperkt', which match NO product at all — the two lists disagree on purpose,
+# do not "align" them. (PRICE_BUCKETS is wrong and inherited from GSD-CPC.py; fixing it
+# touches the live legacy CPC estate and is a separate decision.)
+CPC_BUCKET_BIDS = [
+    ("0-8", 0.09), ("8-13", 0.10), ("13-21", 0.12), ("21-34", 0.14),
+    ("34-55", 0.16), ("55-89", 0.17), ("89-144", 0.20), ("144-233", 0.22),
+    ("233-377", 0.26), ("377-610", 0.30), ("610-987", 0.34), ("987-1597", 0.35),
+    ("1597-2594", 0.16), ("2594+", 0.11),
+]
+
+# The source script names this campaign '… [new cpc structure]', carrying no [label:]
+# token at all. Every identity test in this module keys on that token: the pause
+# fallback (find_pausable_campaigns source b), _match_existing_campaign, and the label
+# shown in Campaigns created. A campaign without one is invisible to all three — the
+# way Emob.nl kept five ENABLED campaigns after leaving GSD. So it gets a real token.
+#
+# '[label:cpc]' (Joep, 2026-08-17). It cannot collide with any other token in
+# PAUSE_LABELS: the tokens are matched WITH their closing bracket, so '[label:c]' is not
+# a substring of '[label:cpc]' (after '[label:c' comes 'p', not ']') and vice versa.
+CPC_BUCKETS_LABEL = "cpc"
+LABELS_CPC_BUCKETS = [CPC_BUCKETS_LABEL]
+
+# The listing tree partitions on custom_label_4, NOT custom_label_0. custom_label_0
+# holds the score (A/B/C/No data/No EAN); custom_label_4 holds the price bucket.
+CPC_BUCKET_ATTRIBUTE_INDEX = "INDEX4"
+
+# The MODEL a campaign belongs to, read off its [label:X] token — the Model column in
+# the UI. Two values only, CPC and CPR (Joep, 2026-08-17): the column answers "which
+# commercial model is this shop on", not "which structure was built". Both CPC
+# structures therefore map to plain "CPC"; the campaign NAME still tells them apart
+# ('[label:a,b]' / '[label:c,no_data,no_ean]' for the legacy pair, '[label:cpc]' for the
+# price-bucket campaign), and _labels_for_shop() is what decides between them.
+#
+# Read off the campaign rather than the shop's current Redshift flag, so a shop whose
+# model flipped still shows what its campaigns actually are. promo/tag_toppers campaigns
+# come from other flows and have no GSD model; they map to None and render as '-'.
+_MODEL_BY_LABEL: Dict[str, str] = {
+    **{lbl: "CPR" for lbl in LABELS_CPR},
+    **{lbl: "CPC" for lbl in LABELS_CPC},
+    CPC_BUCKETS_LABEL: "CPC",
+}
+
 # Campaigns a switched-off shop must ALSO lose, though the create path never makes them.
 # promo and tag_toppers campaigns are GSD campaigns by identity ([shop:N] [shop_id:N]
 # [channel:directshopping]) but are built by other flows, so they carry neither a create
@@ -121,7 +175,7 @@ PAUSE_EXTRA_LABELS = ["promo", "tag_toppers"]
 # [label:a…no_ean] campaigns because the run derived CPC and therefore looked only for
 # [label:a,b] and [label:c,no_data,no_ean]. Over-matching here is safe — identity is
 # already pinned by account + [shop_id:N] + shop-name variant + SHOPPING channel.
-PAUSE_LABELS = LABELS_CPR + LABELS_CPC + PAUSE_EXTRA_LABELS
+PAUSE_LABELS = LABELS_CPR + LABELS_CPC + LABELS_CPC_BUCKETS + PAUSE_EXTRA_LABELS
 
 # A Redshift shop-change row is per-country: `kolom` is the GSD flag that flipped,
 # so it names the ONE country to act on. A shop flagged for NL only must not
@@ -887,12 +941,18 @@ def _get_mc_service():
 
 
 def _parse_campaign_name(name: str) -> Dict[str, Optional[str]]:
-    """Extract shop_name, shop_id, label, and country from a campaign name."""
+    """Extract shop_name, shop_id, label, country and model from a campaign name.
+
+    ``model`` is derived from the label token via _MODEL_BY_LABEL — no extra API call,
+    and it describes the campaign's own structure rather than the shop's current
+    Redshift flag. None for a campaign whose label is missing or not one of ours.
+    """
     result: Dict[str, Optional[str]] = {
         "shop_name": None,
         "shop_id": None,
         "label": None,
         "country": "NL",
+        "model": None,
     }
     # Field by field: a missing/mangled shop tag must not cost us the shop_id.
     for key, rx in (("shop_name", SHOP_NAME_REGEX), ("shop_id", SHOP_ID_REGEX),
@@ -903,6 +963,7 @@ def _parse_campaign_name(name: str) -> Dict[str, Optional[str]]:
     cm = COUNTRY_REGEX.search(name)
     if cm:
         result["country"] = cm.group(1).upper()
+    result["model"] = _MODEL_BY_LABEL.get((result["label"] or "").strip().lower())
     return result
 
 
@@ -1214,6 +1275,7 @@ def get_gsd_campaigns(customer_id: str, client: Optional[GoogleAdsClient] = None
                     "shop_id": parsed["shop_id"],
                     "shop_name": parsed["shop_name"],
                     "label": parsed["label"],
+                    "model": parsed["model"],
                     "country": parsed["country"],
                     "customer_id": customer_id,
                     "impressions": 0,
@@ -2475,6 +2537,214 @@ def add_sub_cpc(
         return False
 
 
+def add_sub_cpc_bucket(
+    client: GoogleAdsClient,
+    customer_id: str,
+    ad_group_resource_name: str,
+    bucket_label: str,
+    cpc_bid_micros: int,
+    shop_name: str = "",
+) -> bool:
+    """Listing tree for ONE price-bucket ad group: a SUBDIVISION root partitioning on
+    custom_label_4, a biddable UNIT for this ad group's own bucket, and an EXCLUDED
+    catch-all so the ad group serves nothing else.
+
+    The exclusion is what makes the 14 ad groups a partition instead of 14 copies of the
+    whole catalogue — note add_sub_cpc (the legacy CPC tree) leaves its catch-all
+    biddable, which is why every product there serves at one flat bid.
+    """
+    ad_group_criterion_service = client.get_service("AdGroupCriterionService")
+    idx = getattr(
+        client.enums.ProductCustomAttributeIndexEnum, CPC_BUCKET_ATTRIBUTE_INDEX
+    )
+
+    def _dim(value: Optional[str]):
+        d = client.get_type("ListingDimensionInfo")
+        d.product_custom_attribute.index = idx
+        if value is not None:
+            d.product_custom_attribute.value = value
+        return d
+
+    reset_temp_ids()
+    ops = []
+    root_op, root_resource = create_listing_group_subdivision(
+        client, customer_id, ad_group_resource_name,
+        parent_resource_name=None, dimension=None, temp_id=next_id(),
+    )
+    ops.append(root_op)
+    ops.append(create_listing_group_unit_biddable(
+        client, customer_id, ad_group_resource_name,
+        parent_resource_name=root_resource, dimension=_dim(bucket_label),
+        cpc_bid_micros=cpc_bid_micros,
+    ))
+    # "Everything else" — same dimension type with the index set and no value, or the
+    # API rejects the whole atomic mutate (see the note in add_sub_cpc).
+    ops.append(create_listing_group_unit_biddable(
+        client, customer_id, ad_group_resource_name,
+        parent_resource_name=root_resource, dimension=_dim(None), negative=True,
+    ))
+
+    try:
+        _create_child_with_retry(
+            "CPC bucket listing group tree",
+            lambda: ad_group_criterion_service.mutate_ad_group_criteria(
+                customer_id=customer_id, operations=ops
+            ),
+        )
+        logger.info("Created CPC bucket tree (%s) for %s", bucket_label, ad_group_resource_name)
+        return True
+    except GoogleAdsException as ex:
+        logger.error("Failed to create CPC bucket tree '%s' (shop: %s): %s",
+                     bucket_label, shop_name, ex)
+        _last_gads_error["msg"] = _gads_err(ex)
+        return False
+
+
+def _bucket_tree_ok(crits: List[Any], bucket_label: str) -> bool:
+    """True when this ad group's criteria are a bucket tree targeting `bucket_label`:
+    a SUBDIVISION root plus a biddable UNIT keyed on custom_label_4 == the bucket."""
+    if not crits:
+        return False
+    if not any(
+        c.listing_group.type_.name == "SUBDIVISION"
+        and not c.listing_group.parent_ad_group_criterion
+        for c in crits
+    ):
+        return False
+    return any(
+        c.listing_group.type_.name == "UNIT"
+        and not c.negative
+        and c.listing_group.case_value.product_custom_attribute.index.name
+        == CPC_BUCKET_ATTRIBUTE_INDEX
+        and c.listing_group.case_value.product_custom_attribute.value == bucket_label
+        for c in crits
+    )
+
+
+def _build_bucket_structure(
+    client: GoogleAdsClient,
+    customer_id: str,
+    campaign_resource: str,
+    shop_name: str = "",
+) -> Dict[str, Any]:
+    """Create every missing piece of the 14 price-bucket ad groups under one campaign.
+
+    Idempotent PER PIECE, not per ad group. The source script guards the listing tree
+    behind `if is_created:`, so an ad group created by a run that died before its tree
+    would never get one — a silent, permanent hole. Here each of ad group / product ad /
+    listing tree is checked and completed independently, which also makes this function
+    the repair path (_repair_campaign delegates to it).
+
+    Returns {"ok": bool, "created": int, "reason": str|None, "error": str|None}, where
+    ``created`` counts the pieces actually mutated (0 == nothing needed doing).
+    """
+    ga = client.get_service("GoogleAdsService")
+    campaign_id = campaign_resource.rstrip("/").split("/")[-1]
+
+    # Three campaign-wide reads instead of 3 per bucket. Children are keyed by ad group
+    # id and only LIVE ad groups are consulted, so a REMOVED sibling's still-active
+    # children cannot mask a hole (the trap _repair_campaign documents).
+    ad_groups: Dict[str, str] = {}
+    for row in ga.search(customer_id=customer_id, query=(
+            f"SELECT ad_group.id, ad_group.name, ad_group.resource_name FROM ad_group "
+            f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED'")):
+        ad_groups[row.ad_group.name] = row.ad_group.resource_name
+
+    # Keyed by ad group id, so an ad belonging to a REMOVED ad group is never credited
+    # to the live one that replaced it (same name, different id).
+    ads_by_ag: set = set()
+    for row in ga.search(customer_id=customer_id, query=(
+            f"SELECT ad_group.id FROM ad_group_ad WHERE campaign.id = {campaign_id} "
+            f"AND ad_group_ad.status != 'REMOVED'")):
+        ads_by_ag.add(str(row.ad_group.id))
+
+    crits_by_ag: Dict[str, list] = {}
+    for row in ga.search(customer_id=customer_id, query=(
+            "SELECT ad_group.id, ad_group_criterion.listing_group.type, "
+            "ad_group_criterion.listing_group.parent_ad_group_criterion, "
+            "ad_group_criterion.negative, "
+            "ad_group_criterion.listing_group.case_value.product_custom_attribute.index, "
+            "ad_group_criterion.listing_group.case_value.product_custom_attribute.value "
+            f"FROM ad_group_criterion WHERE campaign.id = {campaign_id} "
+            "AND ad_group_criterion.type = 'LISTING_GROUP' "
+            "AND ad_group_criterion.status != 'REMOVED'")):
+        crits_by_ag.setdefault(str(row.ad_group.id), []).append(row.ad_group_criterion)
+
+    created = 0
+    for bucket_label, cpc_euro in CPC_BUCKET_BIDS:
+        if _run_cancel["cancel"]:
+            return {"ok": False, "created": created, "reason": "cancelled", "error": None}
+        cpc_micros = int(round(cpc_euro * 1_000_000))
+        _last_gads_error["msg"] = None
+
+        ad_group_resource = ad_groups.get(bucket_label)
+        if ad_group_resource is None:
+            ad_group_resource = add_shopping_ad_group(
+                client, customer_id, campaign_resource, bucket_label,
+                cpc_bid_micros=cpc_micros, shop_name=shop_name,
+            )
+            if ad_group_resource is None:
+                return {"ok": False, "created": created, "reason": "ad_group_creation_failed",
+                        "error": _last_gads_error["msg"] or "ad group creation failed"}
+            created += 1
+            ad_group_id = ad_group_resource.rstrip("/").split("/")[-1]
+        else:
+            ad_group_id = ad_group_resource.rstrip("/").split("/")[-1]
+
+        if ad_group_id not in ads_by_ag:
+            if add_shopping_product_ad_group_ad(
+                    client, customer_id, ad_group_resource, shop_name=shop_name) is None:
+                return {"ok": False, "created": created, "reason": "product_ad_creation_failed",
+                        "error": _last_gads_error["msg"] or "product ad creation failed"}
+            created += 1
+
+        crits = crits_by_ag.get(ad_group_id, [])
+        if crits and not _bucket_tree_ok(crits, bucket_label):
+            # A tree that exists but targets the wrong thing (e.g. built on INDEX0, or
+            # left over from the legacy structure) is removed so the correct one can be
+            # built — the same retree the CPR/CPC repair path performs.
+            try:
+                _remove_listing_tree(client, customer_id, ad_group_id)
+            except GoogleAdsException as ex:
+                logger.error("Failed to remove wrong bucket tree '%s' (shop: %s): %s",
+                             bucket_label, shop_name, ex)
+                return {"ok": False, "created": created, "reason": "repair_retree_failed",
+                        "error": _gads_err(ex)}
+            crits = []
+        if not crits:
+            if not add_sub_cpc_bucket(client, customer_id, ad_group_resource,
+                                      bucket_label, cpc_micros, shop_name=shop_name):
+                return {"ok": False, "created": created, "reason": "listing_group_creation_failed",
+                        "error": _last_gads_error["msg"] or "listing group creation failed"}
+            created += 1
+
+    return {"ok": True, "created": created, "reason": None, "error": None}
+
+
+def _labels_for_shop(
+    campaign_type: str,
+    candidates: List[Dict[str, Any]],
+    country: str,
+    shop_name: str,
+    shop_id: Any,
+) -> List[str]:
+    """The label vocabulary this shop gets in this account — the ONE place that decides
+    which CPC structure applies, called by both the run and the preview so they cannot
+    disagree about what a run will build.
+
+    Joep, 2026-08-17: the price-bucket structure is for NEWLY connected CPC shops. A CPC
+    shop that already carries the legacy two-campaign pair keeps it, so an existing shop
+    can never end up with both structures side by side (which would double its coverage
+    and its spend).
+    """
+    if campaign_type != "CPC":
+        return LABELS_CPR
+    if any(_match_existing_campaign(candidates, country, shop_name, shop_id, lbl)
+           for lbl in LABELS_CPC):
+        return LABELS_CPC
+    return LABELS_CPC_BUCKETS
+
+
 # ---------------------------------------------------------------------------
 # Main GSD script flow
 # ---------------------------------------------------------------------------
@@ -2652,6 +2922,28 @@ def _repair_campaign(client, customer_id, campaign_resource, campaign_name,
     ga = client.get_service("GoogleAdsService")
     campaign_id = campaign_resource.rstrip("/").split("/")[-1]
 
+    # The bucket campaign holds 14 ad groups, so the single-ad-group logic below —
+    # which inspects ags[0] and would call a campaign complete on the strength of one
+    # bucket — does not apply. _build_bucket_structure is itself the repair: it
+    # completes every missing piece of every bucket and no-ops when all 14 are sound.
+    if label == CPC_BUCKETS_LABEL:
+        res = _build_bucket_structure(client, customer_id, campaign_resource, shop_name=shop_name)
+        if not res["ok"]:
+            _last_gads_error["msg"] = res["error"]
+            # "cancelled" is the user stopping the run, not a broken campaign — see the
+            # matching note in _create_campaigns_for_shop.
+            return {"campaign_name": campaign_name,
+                    "action": "skipped" if res["reason"] == "cancelled" else "error",
+                    "reason": res["reason"],
+                    "error": res["error"], "campaign_resource": campaign_resource}
+        if res["created"] == 0:
+            return {"campaign_name": campaign_name, "action": "skipped", "reason": "already_exists",
+                    "campaign_resource": campaign_resource}
+        logger.info("Repaired bucket campaign '%s' — completed %d missing piece(s)",
+                    campaign_name, res["created"])
+        return {"campaign_name": campaign_name, "action": "created", "reason": "repaired",
+                "campaign_resource": campaign_resource}
+
     ags = list(ga.search(customer_id=customer_id, query=(
         f"SELECT ad_group.resource_name FROM ad_group "
         # ORDER BY so repair and verify always pick the SAME ad group: an unordered
@@ -2743,7 +3035,6 @@ def _create_campaigns_for_shop(
     added for non-branded shops (branded == 0), matching the original
     create GSD-campaigns.py.
     """
-    labels = LABELS_CPR if campaign_type == "CPR" else LABELS_CPC
     tracking_template = TRACKING_TEMPLATES.get(country.upper(), TRACKING_TEMPLATES["NL"])
     results = []
 
@@ -2752,6 +3043,10 @@ def _create_campaigns_for_shop(
     # A lookup failure must NOT read as "nothing exists" — that is how duplicate sets
     # get created — so the exception propagates to run_gsd_script's per-shop handler.
     candidates = _fetch_shop_campaign_candidates(client, customer_id, shop_id)
+
+    # Which CPC structure this shop gets is decided from those same candidates, so a
+    # shop already on the legacy pair is never given a bucket campaign as well.
+    labels = _labels_for_shop(campaign_type, candidates, country, shop_name, shop_id)
 
     for label in labels:
         if _run_cancel["cancel"]:
@@ -2871,49 +3166,71 @@ def _create_campaigns_for_shop(
         # Apply the BRANDED_0 / BRANDED_1 label matching the shop's branded flag.
         _apply_branded_label(client, customer_id, campaign_resource, branded)
 
-        # Create ad group
-        ad_group_name = label  # ad group is named after the label (a/b/c/no_data/no_ean), matching the original script
-        ad_group_resource = add_shopping_ad_group(
-            client, customer_id, campaign_resource, ad_group_name,
-            shop_name=shop_name,
-        )
-        if ad_group_resource is None:
-            results.append({
-                "campaign_name": campaign_name,
-                "action": "error",
-                "reason": "ad_group_creation_failed",
-                "error": _last_gads_error["msg"] or "ad group creation failed",
-            })
-            continue
-
-        # Create product ad. The campaign was created PAUSED, so a failure here
-        # leaves a paused (non-spending) shell we report as an error rather than
-        # a live campaign with no product ad.
-        product_ad = add_shopping_product_ad_group_ad(client, customer_id, ad_group_resource, shop_name=shop_name)
-        if product_ad is None:
-            results.append({
-                "campaign_name": campaign_name,
-                "action": "error",
-                "reason": "product_ad_creation_failed",
-                "error": _last_gads_error["msg"] or "product ad creation failed",
-                "campaign_resource": campaign_resource,
-            })
-            continue
-
-        # Create listing group tree
-        if campaign_type == "CPR":
-            tree_ok = add_sub_cpr(client, customer_id, ad_group_resource, label, shop_name=shop_name)
+        if label == CPC_BUCKETS_LABEL:
+            # Price-bucket structure: 14 ad groups, each with its own product ad and a
+            # listing tree serving only its own custom_label_4 bucket. Built by the same
+            # function the repair path uses, so a run that dies partway is completed by
+            # the next one rather than leaving buckets permanently half-built.
+            struct = _build_bucket_structure(
+                client, customer_id, campaign_resource, shop_name=shop_name)
+            if not struct["ok"]:
+                # A cancel is not a failure: the loop above already stops a run at the
+                # next campaign boundary without filing an error, and reporting one here
+                # would make "I pressed cancel" look like "the run broke". The campaign
+                # is PAUSED and _build_bucket_structure is idempotent, so a rerun
+                # completes the remaining buckets.
+                results.append({
+                    "campaign_name": campaign_name,
+                    "action": "skipped" if struct["reason"] == "cancelled" else "error",
+                    "reason": struct["reason"],
+                    "error": struct["error"],
+                    "campaign_resource": campaign_resource,
+                })
+                continue
         else:
-            tree_ok = add_sub_cpc(client, customer_id, ad_group_resource, label, shop_name=shop_name)
-        if not tree_ok:
-            results.append({
-                "campaign_name": campaign_name,
-                "action": "error",
-                "reason": "listing_group_creation_failed",
-                "error": _last_gads_error["msg"] or "listing group creation failed",
-                "campaign_resource": campaign_resource,
-            })
-            continue
+            # Create ad group
+            ad_group_name = label  # ad group is named after the label (a/b/c/no_data/no_ean), matching the original script
+            ad_group_resource = add_shopping_ad_group(
+                client, customer_id, campaign_resource, ad_group_name,
+                shop_name=shop_name,
+            )
+            if ad_group_resource is None:
+                results.append({
+                    "campaign_name": campaign_name,
+                    "action": "error",
+                    "reason": "ad_group_creation_failed",
+                    "error": _last_gads_error["msg"] or "ad group creation failed",
+                })
+                continue
+
+            # Create product ad. The campaign was created PAUSED, so a failure here
+            # leaves a paused (non-spending) shell we report as an error rather than
+            # a live campaign with no product ad.
+            product_ad = add_shopping_product_ad_group_ad(client, customer_id, ad_group_resource, shop_name=shop_name)
+            if product_ad is None:
+                results.append({
+                    "campaign_name": campaign_name,
+                    "action": "error",
+                    "reason": "product_ad_creation_failed",
+                    "error": _last_gads_error["msg"] or "product ad creation failed",
+                    "campaign_resource": campaign_resource,
+                })
+                continue
+
+            # Create listing group tree
+            if campaign_type == "CPR":
+                tree_ok = add_sub_cpr(client, customer_id, ad_group_resource, label, shop_name=shop_name)
+            else:
+                tree_ok = add_sub_cpc(client, customer_id, ad_group_resource, label, shop_name=shop_name)
+            if not tree_ok:
+                results.append({
+                    "campaign_name": campaign_name,
+                    "action": "error",
+                    "reason": "listing_group_creation_failed",
+                    "error": _last_gads_error["msg"] or "listing group creation failed",
+                    "campaign_resource": campaign_resource,
+                })
+                continue
 
         # Add negative keywords (best-effort) — ONLY for non-branded shops
         # (branded == 0), matching the original create GSD-campaigns.py. NULL/1
@@ -3187,7 +3504,9 @@ def preview_gsd_script(
         # GSD flag flipped (from the feed's `kolom`), NOT every model country.
         country = KOLOM_COUNTRY.get(change.get("kolom"))
         countries = [country] if country else []
-        labels = LABELS_CPR if campaign_type == "CPR" else LABELS_CPC
+        # `labels` is NOT decided here any more: which CPC structure a shop gets depends
+        # on what it already has in the account, so it is resolved per country from the
+        # candidate list below — by the same _labels_for_shop() the run calls.
 
         shop_row: Dict[str, Any] = {
             "shop_name": shop_name,
@@ -3237,6 +3556,8 @@ def preview_gsd_script(
                 # custom label) — matches _create_campaigns_for_shop. Reports the name
                 # that really exists, so the table shows what will be adopted.
                 ll_rn = _lookup_label_resource(client, customer_id, LL_PAUSED_LABEL)
+                labels = _labels_for_shop(
+                    campaign_type, candidates, country, shop_name, shop_id)
                 for label in labels:
                     campaign_name = _build_campaign_name(country, shop_name, shop_id, label)
                     match = _match_existing_campaign(candidates, country, shop_name, shop_id, label)
@@ -3270,6 +3591,12 @@ def preview_gsd_script(
                         "shop_name": shop_name,
                         "country": country,
                         "type": campaign_type,
+                        # Read off the label this row will be built with. On the create
+                        # side that agrees with `type` by construction; it is carried
+                        # anyway so every previewed row — create and pause alike — has
+                        # the field, and the pause rows below are where it earns its
+                        # keep (there it can legitimately differ from `type`).
+                        "model": _MODEL_BY_LABEL.get(label),
                     })
             elif actie == "uit":
                 # AUDIT H6, Phase 2 — the preview now asks the SAME function the run uses,
@@ -3313,6 +3640,10 @@ def preview_gsd_script(
                             "shop_name": shop_name,
                             "country": country,
                             "type": campaign_type,
+                            # Read off the campaign that EXISTS, not off the shop's
+                            # current model — a shop's model can flip on the very day it
+                            # goes off, and what gets paused is whatever was built.
+                            "model": _parse_campaign_name(info["campaign_name"]).get("model"),
                             "customer_id": sweep_cid,
                             "detail": "" if info["labelled"] else "matched by name (no GSD_SCRIPT label)",
                         })
@@ -3340,6 +3671,49 @@ def preview_gsd_script(
 # ---------------------------------------------------------------------------
 
 
+def _check_bucket_campaign_structure(ga, customer_id: str, campaign_id: str) -> List[str]:
+    """Structural issues for a price-bucket campaign, one entry per broken bucket
+    (e.g. 'no_ad_group:2594+'). Empty list == all 14 buckets complete."""
+    ad_groups: Dict[str, str] = {}
+    for row in ga.search(customer_id=customer_id, query=(
+            f"SELECT ad_group.id, ad_group.name FROM ad_group "
+            f"WHERE campaign.id = {campaign_id} AND ad_group.status != 'REMOVED'")):
+        ad_groups[row.ad_group.name] = str(row.ad_group.id)
+
+    ads: set = set()
+    for row in ga.search(customer_id=customer_id, query=(
+            f"SELECT ad_group.id FROM ad_group_ad WHERE campaign.id = {campaign_id} "
+            f"AND ad_group_ad.status != 'REMOVED'")):
+        ads.add(str(row.ad_group.id))
+
+    crits_by_ag: Dict[str, list] = {}
+    for row in ga.search(customer_id=customer_id, query=(
+            "SELECT ad_group.id, ad_group_criterion.listing_group.type, "
+            "ad_group_criterion.listing_group.parent_ad_group_criterion, "
+            "ad_group_criterion.negative, "
+            "ad_group_criterion.listing_group.case_value.product_custom_attribute.index, "
+            "ad_group_criterion.listing_group.case_value.product_custom_attribute.value "
+            f"FROM ad_group_criterion WHERE campaign.id = {campaign_id} "
+            "AND ad_group_criterion.type = 'LISTING_GROUP' "
+            "AND ad_group_criterion.status != 'REMOVED'")):
+        crits_by_ag.setdefault(str(row.ad_group.id), []).append(row.ad_group_criterion)
+
+    issues: List[str] = []
+    for bucket_label, _bid in CPC_BUCKET_BIDS:
+        ad_group_id = ad_groups.get(bucket_label)
+        if ad_group_id is None:
+            issues.append(f"no_ad_group:{bucket_label}")
+            continue
+        if ad_group_id not in ads:
+            issues.append(f"no_product_ad:{bucket_label}")
+        crits = crits_by_ag.get(ad_group_id, [])
+        if not crits:
+            issues.append(f"no_listing_group:{bucket_label}")
+        elif not _bucket_tree_ok(crits, bucket_label):
+            issues.append(f"wrong_listing_tree:{bucket_label}")
+    return issues
+
+
 def _check_campaign_structure(
     ga, customer_id: str, campaign_id: str, campaign_name: str, campaign_type: str
 ) -> List[str]:
@@ -3350,6 +3724,13 @@ def _check_campaign_structure(
     with "a rerun would repair it".
     """
     issues: List[str] = []
+    # The bucket campaign is 14 ad groups; checking only ags[0] would call it complete
+    # on the strength of one bucket. Verify every bucket has an ad group, a product ad
+    # and a tree targeting its OWN custom_label_4 value, and name the buckets that fail
+    # so the warning says which ones a rerun will repair.
+    if _parse_campaign_name(campaign_name).get("label") == CPC_BUCKETS_LABEL:
+        return _check_bucket_campaign_structure(ga, customer_id, campaign_id)
+
     # Scope the ad-group-child checks to the LIVE ad group, mirroring
     # _repair_campaign — a REMOVED sibling ad group's ads/criteria stay
     # non-REMOVED and would otherwise mask a broken live ad group.
@@ -3998,8 +4379,13 @@ def backfill_recent_mc_ids_to_redshift(
 
 
 def _sheet_type_from_label(label: Optional[str]) -> str:
-    """CPC labels are comma-joined ('a,b'), CPR labels are single tokens ('a')."""
-    return "CPC" if label and "," in label else "CPR"
+    """The sheet's CPC/CPR column — the same two-value model _MODEL_BY_LABEL yields.
+
+    Derived from that map rather than the old "does the label contain a comma" test:
+    that test read '[label:cpc]' (no comma) as CPR and would have logged every
+    price-bucket campaign under the wrong model. Unknown labels stay CPR, as before.
+    """
+    return _MODEL_BY_LABEL.get((label or "").strip().lower()) or "CPR"
 
 
 def _norm_sheet_date(value: Any) -> Optional[str]:
