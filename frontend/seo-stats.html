@@ -55,6 +55,24 @@
         .perf-table td.weekday-cell:hover { background: #f1edfa; }
         .perf-table td.weekday-cell.wd-active,
         .perf-table th.col-weekday.wd-active { background: #e6dff5; font-weight: 700; }
+        /* Date column doubles as "pin this day": clicking a value sets Top
+           categories AND Dagoverzicht to it. Same affordance as the Day column —
+           pointer + hover tint — so the two clickable text columns read alike.
+           The pinned row keeps the brand tint across sorting and paging, which is
+           what tells you which day the two sections below are showing. */
+        .perf-table td.date-cell { cursor: pointer; user-select: none; }
+        .perf-table td.date-cell:hover { background: #f1edfa; }
+        .perf-table tr.day-selected td.date-cell { background: #e6dff5; font-weight: 700; }
+        /* Both target cards are far enough down the page that a silently swapped
+           date would be missed, so they flash their border once on arrival. The
+           animation is on the card, not the header, so it reads as "this section
+           changed" rather than "this title changed". */
+        @keyframes day-flash {
+            0%   { box-shadow: 0 0 0 0 rgba(94,74,144,0.55); }
+            100% { box-shadow: 0 0 0 10px rgba(94,74,144,0); }
+        }
+        .card.day-flash { animation: day-flash 0.9s ease-out 2; }
+        @media (prefers-reduced-motion: reduce) { .card.day-flash { animation: none; } }
         .perf-fixed th.col-notes { width: 20%; }
         /* "Show deltas" adds a WoW column per metric — up to 6 more on a
            table-layout:fixed grid, which squeezes every number. Notes gives some
@@ -549,7 +567,7 @@
         </div>
 
         <!-- Top categories -->
-        <div class="card mb-4">
+        <div class="card mb-4" id="catCard">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
                 <div class="d-flex align-items-center gap-2">
                     <h5 class="mb-0">Top categories</h5>
@@ -603,15 +621,32 @@
                 </div>
                 <!-- Both sub-headings get breathing room above and below. The
                      tables carry mb-2 rather than mb-4 so the next heading's mt-4
-                     isn't stacked on top of a big bottom margin. -->
-                <h6 class="text-muted mt-2 mb-3">Top maincats</h6>
+                     isn't stacked on top of a big bottom margin.
+                     Each sub-table gets its OWN search box on its heading row
+                     (UI_BLUEPRINT §Zoekveld, "sub-table variant"): two tables share
+                     this card, so one shared filter would silently narrow the table
+                     you were not looking at. type=search for the native clear ×,
+                     which fires `input` and so restores the full list. -->
+                <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mt-2 mb-3">
+                    <h6 class="text-muted mb-0">Top maincats</h6>
+                    <input type="search" class="form-control form-control-sm" id="mainCatQ"
+                           style="width: 230px;" placeholder="Zoek maincat&hellip;"
+                           oninput="setCatFilter('main', this.value)"
+                           title="Zoekt op een deel van de maincat-naam. Meerdere woorden: alle woorden moeten erin voorkomen, volgorde maakt niet uit. Filtert vóór de Top-N, dus een match buiten de Top 10 komt gewoon boven.">
+                </div>
                 <div class="table-responsive mb-2">
                     <table class="table table-hover perf-table mb-0">
                         <thead><tr id="mainCatHead"></tr></thead>
                         <tbody id="mainCatBody"></tbody>
                     </table>
                 </div>
-                <h6 class="text-muted mt-4 mb-3">Top deepest cats</h6>
+                <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mt-4 mb-3">
+                    <h6 class="text-muted mb-0">Top deepest cats</h6>
+                    <input type="search" class="form-control form-control-sm" id="subCatQ"
+                           style="width: 230px;" placeholder="Zoek maincat of deepest cat&hellip;"
+                           oninput="setCatFilter('sub', this.value)"
+                           title="Zoekt in beide tekstkolommen tegelijk, dus een maincat-naam levert al zijn deepest cats op. Meerdere woorden: alle woorden moeten erin voorkomen, volgorde maakt niet uit. Filtert vóór de Top-N.">
+                </div>
                 <div class="table-responsive mb-2">
                     <table class="table table-hover perf-table mb-0">
                         <thead><tr id="subCatHead"></tr></thead>
@@ -626,7 +661,7 @@
              Own date picker, defaulting to yesterday, independent of the chart
              range above: this section answers "how was yesterday", not "how was
              the period". -->
-        <div class="card mb-4">
+        <div class="card mb-4" id="dashCard">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2" style="background:#5e4a90; color:#fff;">
                 <div class="d-flex align-items-center gap-2">
                     <h5 class="mb-0">Dagoverzicht</h5>
@@ -1290,7 +1325,8 @@
             // column switch) lands on the right width — it can't drift out of sync.
             const table = head.closest('table');
             if (table) table.classList.toggle('with-deltas', showDeltas);
-            head.innerHTML = '<th class="sortable" data-sort="date" onclick="sortBy(\'date\')">Date</th>' +
+            head.innerHTML = '<th class="sortable" data-sort="date" onclick="sortBy(\'date\')"'
+                + ' title="Sorteer op datum — klik een datum in de kolom om Top categories en Dagoverzicht op die dag te zetten">Date</th>' +
                 `<th class="text-col col-weekday${weekdayFilter ? ' wd-active' : ''}"`
                 + ` title="${weekdayFilter ? `Filtered to ${weekdayFilter} — click a Day value to clear` : 'Click a Day value to filter on that weekday'}">`
                 + `Day${weekdayFilter ? ` · ${weekdayFilter}` : ''}</th>` +
@@ -1445,6 +1481,64 @@
             }
         }
 
+        // Clicking a value in the Date column pins that day: Top categories and
+        // Dagoverzicht both jump to it and reload. Those two sections keep their
+        // own pickers on purpose (they answer "which day", the range above answers
+        // "which period"), so this is a shortcut that WRITES both pickers rather
+        // than a third source of truth — moving either picker by hand afterwards
+        // still wins, it only leaves the row highlighted on a day one of them no
+        // longer shows.
+        let selectedDay = null;
+        function setDayPicker(fp, id, iso) {
+            // triggerChange=false: flatpickr would fire the input's own onchange
+            // (loadDashboard / loadCatDeltas) and we decide below which of the two
+            // actually needs a refetch.
+            if (fp) fp.setDate(iso, false);
+            else document.getElementById(id).value = iso;
+        }
+        function flashCard(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.remove('day-flash');
+            void el.offsetWidth;            // restart the animation on a repeat click
+            el.classList.add('day-flash');
+            setTimeout(() => el.classList.remove('day-flash'), 2000);
+        }
+        function focusDay(iso) {
+            if (!iso) return;
+            selectedDay = iso;
+            document.querySelectorAll('#tableBody tr').forEach(tr => {
+                tr.classList.toggle('day-selected', tr.dataset.date === iso);
+            });
+            // Only refetch the section whose day actually moves: re-clicking the
+            // pinned date (or one section already sitting on it) then costs no
+            // Redshift round-trip and no skeleton flicker.
+            // `!lastCatDeltas` covers the one case where the day is already right but
+            // there is nothing to highlight: the page-load fetch failed.
+            const catNeeds = document.getElementById('catDate').value !== iso || !lastCatDeltas;
+            const dashNeeds = document.getElementById('dashDate').value !== iso;
+            setDayPicker(fpCat, 'catDate', iso);
+            setDayPicker(fpDash, 'dashDate', iso);
+            // Top categories is collapsed on load, so highlighting a day inside a
+            // closed card would be invisible — open it before scrolling there.
+            // `{toggle:false}` is not optional: Collapse's default config is
+            // toggle:true, and the constructor ACTS on it, so getOrCreateInstance()
+            // on a pane no one has clicked yet would toggle it shut on the way in.
+            const pane = document.getElementById('catCollapse');
+            if (pane && window.bootstrap && !pane.classList.contains('show')) {
+                bootstrap.Collapse.getOrCreateInstance(pane, { toggle: false }).show();
+            }
+            if (catNeeds) loadCatDeltas(false);
+            if (dashNeeds) loadDashboard(false);
+            flashCard('catCard');
+            flashCard('dashCard');
+            // Top categories is the nearer of the two and sits directly under this
+            // table, so scrolling to it keeps Dagoverzicht one short scroll away
+            // instead of jumping past the section you just changed.
+            const target = document.getElementById('catCard');
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
         function renderPage() {
             const perPage = getPerPage();
             const rows = visibleRows();
@@ -1566,8 +1660,14 @@
                 const wdCell = `<td class="text-col weekday-cell${weekdayFilter === wd ? ' wd-active' : ''}"`
                     + ` onclick="toggleWeekdayFilter('${wd}', this)"`
                     + ` title="${weekdayFilter === wd ? 'Clear the weekday filter' : `Show only ${wd}`}">${wd}</td>`;
-                // data-date is the scroll anchor for the weekday filter.
-                return `<tr data-date="${r.date}"><td>${r.date}</td>${wdCell}${cells}${noteCell}</tr>`;
+                // The pin is re-applied on every redraw (sort, page, column
+                // toggle), so the highlighted row survives all of them.
+                const dateCell = `<td class="date-cell" onclick="focusDay('${r.date}')"`
+                    + ` title="Toon ${r.date} in Top categories en Dagoverzicht">${r.date}</td>`;
+                // data-date is the scroll anchor for the weekday filter and the
+                // key focusDay() marks the pinned row by.
+                return `<tr data-date="${r.date}"${r.date === selectedDay ? ' class="day-selected"' : ''}>`
+                    + `${dateCell}${wdCell}${cells}${noteCell}</tr>`;
             }).join('');
         }
 
@@ -1649,6 +1749,27 @@
             renderCats();
         }
 
+        // Per-table free-text filter over the text columns. Independent per table
+        // (see the markup): the two tables answer different questions and one shared
+        // box would filter the one you are not looking at.
+        const catFilter = { main: '', sub: '' };
+        function setCatFilter(which, q) {
+            catFilter[which] = q;
+            // Only the one table redraws — retyping in the maincat box must not
+            // reset the deepest-cats table's scroll position or sort indicator.
+            if (lastCatDeltas) renderCatTable(which, catSourceRows(which));
+        }
+        // Multi-word AND on a case-insensitive substring, matched over every text
+        // column of the row — same rule as Bot Hits' URL search, so "zoeken" means
+        // one thing on this dashboard. For deepest cats that means a maincat name
+        // brings up all its children, which is the way you actually look one up.
+        function catMatches(r, q) {
+            const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+            if (!terms.length) return true;
+            const hay = `${r.maincat || ''} ${r.subcat || ''}`.toLowerCase();
+            return terms.every(t => hay.includes(t));
+        }
+
         function renderCatTable(which, src) {
             const t = CAT_TABLES[which];
             const s = catSort[which];
@@ -1664,6 +1785,15 @@
             let rows = buildCatRows(src, t.withSub);
             // Drop "-" subcats — those are visits that landed on the maincat itself.
             if (t.withSub) rows = rows.filter(r => r.subcat && r.subcat !== '-');
+            // Filter BEFORE the Top-N slice below, or searching a category that sits
+            // at rank 40 would return nothing while "Top 10" is selected — the box
+            // would then look broken on exactly the lookup it exists for. Caveat that
+            // no client-side filter can fix: the backend already truncates each list
+            // to its most-positive and most-negative deltas, so a category in neither
+            // tail is not in the page at all. That is what the Compare-day and metric
+            // controls are for.
+            const q = (catFilter[which] || '').trim();
+            if (q) rows = rows.filter(r => catMatches(r, q));
             rows.sort((a, b) => {
                 let va = a[s.col], vb = b[s.col];
                 if (s.col === 'maincat' || s.col === 'subcat') {
@@ -1680,7 +1810,12 @@
 
             const body = document.getElementById(t.bodyId);
             if (!rows.length) {
-                body.innerHTML = `<tr><td colspan="${cols.length}" class="text-center text-muted py-3">No data.</td></tr>`;
+                // "No data." would read as a failed or empty load; say which of the
+                // two it is, so a typo in the search box is recognisable as a typo.
+                const msg = q
+                    ? `Geen categorie gevonden voor "${escapeHtml(q)}".`
+                    : 'No data.';
+                body.innerHTML = `<tr><td colspan="${cols.length}" class="text-center text-muted py-3">${msg}</td></tr>`;
                 return;
             }
             body.innerHTML = rows.map(r => '<tr>' + cols.map(c => {

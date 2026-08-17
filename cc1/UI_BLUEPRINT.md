@@ -111,6 +111,8 @@ other tool uses the grey default. New tools follow the grey default.
   on the left and the action buttons pushed right (`ms-auto` on the first right item),
   so filter and buttons share a single baseline height. Sort arrows use the
   `th.sortable::after` `⇅`/`▲`/`▼` glyph pattern (see "Campaigns created" in GSD Campaigns).
+  Het zoekveld zelf (type, breedte, zoekregel, lege-uitkomst) staat onder
+  §Form controls → *Zoekveld boven een tabel*.
   - **Exception — a table with NO filter puts its export actions in the card header,**
     far right, next to the title (`card-header d-flex justify-content-between
     align-items-center`). Joep, 2026-08-04, on GSD Check and MC ID Finder: a
@@ -147,6 +149,27 @@ other tool uses the grey default. New tools follow the grey default.
   zien welke je leest. Zet dat gewicht niet op de bijschriftklasse (`.muted-note` in Bot Hits
   zit óók op veldlabels en statusregels) maar op een eigen `.chart-title`: zelfde maat en
   kleur, alleen zwaarder.
+- **A cell that drives another section: pointer + hover tint + a pinned row**
+  (SEO Stats' Per-day overview, 2026-08-17). Two text columns there are clickable —
+  Day filters the table on that weekday, Date sets the Top categories and
+  Dagoverzicht cards to that day — so both wear the same affordance
+  (`cursor: pointer`, `:hover { background: #f1edfa }`) and the active/pinned value
+  keeps the brand tint `#e6dff5`. Four things that make it work:
+  1. **Re-apply the pin inside the row renderer**, not once after a click, or sorting
+     or paging drops the highlight while the section below still shows that day.
+  2. **Write the target's own control, don't add a second source of truth.** Both
+     cards keep their date picker; the click sets it. Moving the picker by hand
+     afterwards still wins — it only leaves the row pinned on a day that section no
+     longer shows, which is honest.
+  3. **Only refetch what actually moved** (compare the picker's current value), and
+     with flatpickr pass `setDate(iso, false)` so it doesn't fire the input's own
+     `onchange` on top of your call.
+  4. **A collapsed target gets opened, and both flash once.** Highlighting a day
+     inside a closed card is invisible; a section two screens down that changes
+     silently is missed. `bootstrap.Collapse.getOrCreateInstance(pane, {toggle:false})`
+     — the default config is `toggle:true` and the **constructor acts on it**, so the
+     bare call would toggle a never-clicked pane shut. Flash = a 0.9s box-shadow
+     keyframe on the card (twice), behind a `prefers-reduced-motion` guard.
 - **A category column of labels is centred** (`text-align: center`) — an outlined
   `.lbl` is a block with its own edges, so left-aligning it against a numeric
   column's right-aligned digits leaves a ragged gutter between them.
@@ -667,6 +690,21 @@ hierboven. Consequences:
   loads after `style.css`, so a bare background override silently wins on hover too and
   can leave white text on a white fill. Re-assert the hover in the same breath.
 
+**Een knoplabel is nooit het element dat mag krimpen** (Joep, 2026-08-17, GSD Campaigns).
+De filterrij van "Campaigns created" is één flexregel met drie selects, een zoekveld en
+vijf knoppen; flex verkleint álles evenredig, dus de ruimte raakte óp binnen `↻ Refresh`
+en het label brak achter zijn pijltje af — een knop van twee regels naast vier van één.
+De ↻ is niet de schuldige en hoeft er niet uit. De regel:
+
+```css
+.filter-row .btn, .filter-row select { white-space: nowrap; flex-shrink: 0; }
+#filterCampaignName { flex: 1 1 auto; min-width: 9rem; }   /* max-width: 190px inline */
+```
+
+Knoppen en selects houden hun intrinsieke breedte, en **het zoekveld is het enige
+element dat meegeeft** — een smaller tekstveld typt even goed, een afgebroken knoplabel
+is stuk. Wordt de rij dan nog te vol, haal er een knop uit; rek niet de kaart op.
+
 **A button whose mode changes must say so in its own label** (added 2026-08-13, SEO
 Priority's "Apply to Taxonomy"). Where the same button either previews or writes to a
 live external API depending on a nearby switch, the switch alone is not enough signal —
@@ -806,6 +844,15 @@ unreadable. So a chart hue that doubles as a label needs to be mid-to-dark. That
 constraint replaced a luminance-based `textOn()` helper in Bot Hits: picking the
 readable text colour per background works, but keeping the label palette dark is one
 rule instead of a function.
+
+**Twee labelkolommen in één tabel verschillen in KLEUR, niet in vorm** (Joep,
+2026-08-17, GSD Campaigns). Model stond er zacht gevuld (soft fill + accentrand)
+naast een Status-chip die transparant met rand-en-label in dezelfde tint was: twee
+silhouetten in één rij lezen als twee soorten dingen, terwijl het allebei gewoon
+"een waarde uit een kleine set" is. Model draagt nu dezelfde outline-vorm als Status,
+met de hues uit §Charts: **CPR lichtblauw `#1f99c4`, CPC roze `#be4693`** — het
+brandpaar dat elders op dit dashboard al "twee helften van één splitsing" betekent.
+Kies de vorm dus per tabel, niet per kolom, en laat het onderscheid van de tint komen.
 
 ## Info tooltips — the "i" button
 
@@ -1113,6 +1160,48 @@ carries through automatically:
   in a `.form-check` with a `.form-check-label`. Keep the default Bootstrap accent —
   don't recolour. (Canonicals' bulk-select adds a `canon-select` class alongside
   `form-check-input`; that's a local extension, not the shared default.)
+
+### Zoekveld boven een tabel
+
+Geen aparte component — plain Bootstrap in de `.filter-row` (zie §Tables). Wat wél
+vastligt, omdat het over acht tools heen was uitgewaaierd (Bot Hits, GSD Campaigns,
+GSD Tag Toppers, `_tool-template`, SEO Stats, 2026-08-17):
+
+```html
+<input type="search" class="form-control form-control-sm" id="urlQ"
+       style="width: 230px;" placeholder="Zoek in URL's&hellip;"
+       oninput="renderTable()"
+       title="Zoekt op een deel van de URL. Meerdere woorden: alle woorden moeten
+              erin voorkomen, volgorde maakt niet uit.">
+```
+
+- **`type="search"`, niet `type="text"`.** Dat geeft het native kruisje om te wissen,
+  en dat kruisje vuurt zélf `input` — dus wissen herlaadt zonder eigen knop. Een
+  handgemaakte `×` in een input-group is alleen nodig waar dat kruisje niet volstaat.
+- **Vaste `width`, geen `max-width`, in een dichte toolbar.** ~230px past een
+  gemiddelde zoekterm; `max-width` laat flex het veld alsnog uitrekken.
+  Uitzondering: is het veld het krimpelement van een volle rij, dan juist
+  `flex: 1 1 auto; min-width: 9rem` mét `max-width` — zie §Buttons, "↻ Refresh".
+- **`oninput`, niet `onchange`.** Filteren gebeurt terwijl je typt; `onchange`
+  wacht op blur en leest als een kapot veld.
+- **Meerdere woorden = AND op losse substrings**, hoofdletter-ongevoelig, over
+  álle tekstkolommen van de rij tegelijk. Eén regel voor het hele dashboard, zodat
+  "zoeken" overal hetzelfde betekent. Zet die regel in de `title` — hij is niet te
+  raden uit een leeg veld.
+- **Filter vóór de Top-N-slice, niet erna.** Staat er een "Top 10 / 50 / 100 / All"
+  naast, dan moet het zoekveld op de hele set matchen: anders geeft zoeken op een
+  categorie op plek 40 niets terwijl Top 10 aanstaat — precies de opzoeking waarvoor
+  het veld bestaat. Wordt de lijst al op de server afgekapt (Bot Hits' top-N in SQL),
+  dan hóórt het zoeken ook op de server (`/top-urls?q=`), met een `maxlength` die de
+  `Query(max_length=…)` van het endpoint spiegelt.
+- **Nul resultaten door een filter zegt dát**, niet "No data." — `Geen X gevonden voor
+  "<term>"`. Anders leest een typefout als een mislukte load.
+- **Twee tabellen in één kaart krijgen twee zoekvelden**, elk op de kopregel van zijn
+  eigen tabel (`d-flex justify-content-between align-items-center`: `h6` links, veld
+  rechts). Eén gedeeld veld filtert ook de tabel waar je niet naar kijkt. Doorgevoerd
+  op SEO Stats → Top categories (Top maincats + Top deepest cats, 2026-08-17); daar
+  hertekent het veld alléén zijn eigen tabel, zodat typen links de sortering en de
+  scrollpositie rechts niet aanraakt.
 
 ## Status / progress bar
 

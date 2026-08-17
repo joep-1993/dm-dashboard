@@ -23,6 +23,17 @@
 
         .filter-row { background: #ffffff; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
         .filter-row select, .filter-row input { font-size: 0.9rem; }
+        /* Campaigns created has the fullest filter row on the dashboard: three
+           selects, a search box and five buttons on ONE flex line. Flex shrinks
+           every item proportionally, so the row ran out of width inside "↻ Refresh"
+           and broke the label off behind its glyph — a two-line button next to
+           four one-line ones (Joep, 2026-08-17).
+           A control's LABEL is never the thing that should give way: the buttons
+           and selects hold their intrinsic width (nowrap + no shrink) and the
+           search box is the single element that absorbs the squeeze — it degrades
+           gracefully, since a narrower text field still takes the same typing. */
+        .filter-row .btn, .filter-row select { white-space: nowrap; flex-shrink: 0; }
+        #filterCampaignName { flex: 1 1 auto; min-width: 9rem; }
 
         /* Columns match the Enabled/Paused history table: cells stay on one line
            so each column takes its natural width; the .gsd-table-wrap scrolls
@@ -44,11 +55,17 @@
         .campaign-table .col-model { text-align: center; }
         /* Model chips — two values, CPC and CPR. Read off the campaign's own label
            token, not the shop's current Redshift flag, so a shop that flipped model
-           still shows what its campaigns are. Chip shape per UI_BLUEPRINT (soft fill,
-           accent border, dark text). No grey — a model is never a "nothing to see here"
-           value (UI_BLUEPRINT: nooit grijs als labelkleur). */
-        .badge-model-cpr { background: var(--flat-accent-soft); color: #35408a; border: 1px solid var(--flat-accent); font-weight: 600; }
-        .badge-model-cpc { background: #e8f6f2; color: #0a7d63; border: 1px solid #00b894; font-weight: 600; }
+           still shows what its campaigns are. No grey — a model is never a "nothing to
+           see here" value (UI_BLUEPRINT: nooit grijs als labelkleur).
+           Shape = the Status chips in this same table (Joep, 2026-08-17): transparent
+           fill, 1px border and label in the same hue. Two chips side by side in one row
+           should differ in HUE, not in silhouette — the soft-filled version read as a
+           different KIND of thing than the outline Status chip next to it. Hues are the
+           brand pair from UI_BLUEPRINT §Kleuren: CPR lichtblauw #1f99c4, CPC roze
+           #be4693 — the same two that already mean "two halves of one split" in every
+           chart on this dashboard. */
+        .badge-model-cpr { background: transparent; border: 1px solid #1f99c4; color: #1f99c4; font-weight: 600; }
+        .badge-model-cpc { background: transparent; border: 1px solid #be4693; color: #be4693; font-weight: 600; }
 
         /* AUDIT LOW — .btn-action / .btn-pause / .btn-activate removed (and .btn-remove
            further down). They styled the per-row Pause/Activate/Remove buttons whose
@@ -292,7 +309,10 @@
                         <option value="ENABLED">Active</option>
                         <option value="PAUSED">Paused</option>
                     </select>
-                    <input type="text" class="form-control form-control-sm" id="filterCampaignName" placeholder="Search campaign name..." oninput="applyFilters()" style="max-width: 250px;">
+                    <!-- 250px → 190px: dit veld is het krimpelement van de rij (zie
+                         .filter-row hierboven), en op een normaal venster paste de rij
+                         precies niet. De placeholder past nog binnen 190px. -->
+                    <input type="text" class="form-control form-control-sm" id="filterCampaignName" placeholder="Search campaign name..." oninput="applyFilters()" style="max-width: 190px;">
                     <!-- Canonieke klassen i.p.v. inline hexes met onmouseover-JS (2026-08-14):
                          de blueprint schrijft `btn btn-outline-purple` + ↻ voor als Refresh, en
                          hand-gestyled paars naast een canonieke paarse knop is precies wat die
