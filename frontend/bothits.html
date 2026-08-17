@@ -441,20 +441,6 @@
                         <div class="card h-100">
                             <div class="card-header"><h5 class="mb-0">URL-type</h5></div>
                             <div class="card-body">
-                                <!-- Tijdelijke noot (2026-08-14). De ingest classificeerde
-                                     R-urls fout: `/r/` werd met een startswith ná `/products/`
-                                     gecheckt, terwijl beslist's R-urls `/products/<cat>/r/<term>`
-                                     heten — ze stonden dus als Cat-url. Gefikst en her-ingest
-                                     voor het hele S3-venster (2026-07-05 t/m 08-13), maar de
-                                     logs van vóór 07-05 zijn uit S3 verdwenen, dus daar is het
-                                     niet meer te herstellen. Deze noot kan weg zodra 2026-07-05
-                                     uit de standaardvensters is gerold. -->
-                                <div class="info-note mb-3" style="font-size: 0.8rem;">
-                                    R-url is pas vanaf <strong>2026-07-05</strong> juist
-                                    geclassificeerd. Loopt je periode daarvóór, dan zijn die
-                                    R-urls als Cat-url geteld — de logs om dat te herstellen
-                                    zijn uit S3 verdwenen.
-                                </div>
                                 <div class="donut-wrap">
                                     <canvas id="typeChart"></canvas>
                                     <div class="donut-center" id="typeCenter"></div>
