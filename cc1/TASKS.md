@@ -4,6 +4,40 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-17 — Vier UI-punten: klikbare datum, zoekvelden, Model-chips, filterrij
+
+Vier losse wensen van Joep, drie in SEO stats en een in GSD Campaigns. Commit `f665863`.
+
+- [x] **Datum in Per-day overview is klikbaar** → zet Top categories én Dagoverzicht op die
+      dag en herlaadt ze. Beide kaarten houden hun eigen datumkiezer; de klik schríjft die,
+      er komt geen derde waarheid bij. Aangeklikte rij blijft paars (`#e6dff5`, dezelfde tint
+      als het actieve weekdagfilter ernaast), en die markering wordt in de rij-renderer gezet
+      zodat sorteren en doorbladeren hem niet wegpoetsen. Alleen de sectie die echt van dag
+      verandert haalt opnieuw op; flatpickr krijgt `setDate(iso, false)`; Top categories
+      klapt open vóór het scrollen, met `{toggle:false}` (zie LEARNINGS); beide kaarten
+      knipperen één keer, achter een `prefers-reduced-motion`-guard.
+- [x] **Zoekveld per subtabel in Top categories** (Top maincats en Top deepest cats apart —
+      één gedeeld veld filtert ook de tabel waar je niet naar kijkt). Zoekregel van Bot Hits:
+      `type=search`, meerdere woorden = AND op substrings, over alle tekstkolommen, `oninput`.
+      Filtert vóór de Top-N-slice. Nul treffers zegt `Geen categorie gevonden voor "…"` i.p.v.
+      "No data.". Typen links hertekent alleen de linkertabel.
+- [x] **Model-chips in Campaigns created** naar de vorm van de Status-chips ernaast
+      (transparant, 1px rand, label in dezelfde tint), CPR lichtblauw `#1f99c4`, CPC roze
+      `#be4693`. Raakt ook de preview-tabel via de gedeelde `modelBadge()` — met opzet.
+- [x] **`↻ Refresh` viel over twee regels** in de filterrij. Knoppen en selects houden hun
+      breedte (`nowrap` + `flex-shrink: 0`), het zoekveld is het krimpelement (250 → 190px).
+- [x] **Alle vier in een echte render gecontroleerd** (Windows Chrome headless tegen :8003,
+      met een tijdelijke zelfklikkende kopie van de pagina — recept in LEARNINGS).
+- [x] **UI_BLUEPRINT bijgewerkt** met drie regels die hieruit volgen: *Zoekveld boven een
+      tabel* (nieuw kopje onder Form controls), *een cel die een andere sectie stuurt* (onder
+      Tables) en *een knoplabel is nooit het krimpelement* (onder Buttons). Plus een noot bij
+      Labels/badges dat twee labelkolommen in één rij in KLEUR verschillen, niet in vorm.
+
+**Opgemerkt en niet opgelost (hoort bij de sprint hieronder):** de Model-kolom staat op álle
+2.905 rijen op `-`. Niet de chips — `/api/gsd-campaigns/campaigns` levert het veld `model`
+niet, want de draaiende uvicorn (gestart 08:58) is ouder dan commit `81f20d9`. Wordt vanzelf
+opgelost door de herstart die hieronder al als openstaand punt staat.
+
 ### 2026-08-17 — GSD: prijsbucket-structuur voor nieuwe CPC-shops + Model-kolom
 
 Joep leverde `Downloads\claude\create GSD-campaigns CPR CPC split.py` aan: "kijk of en hoe we

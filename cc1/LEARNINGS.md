@@ -1,6 +1,65 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een UI-wijziging in een echte render controleren, ook zonder headless Chromium (2026-08-17)
+
+Vier UI-punten in SEO stats en GSD Campaigns, waarvan er drie pas iets waard zijn als je ze
+ziet: klapt de kaart open, staat de knop weer op één regel, filtert het zoekveld de goede
+tabel. `node --check` op de inline scripts vangt syntax, verder niets. Vijf dingen.
+
+**1. Playwright's chromium start niet in deze WSL** — `libnspr4.so: cannot open shared object
+file`. Die libs installeren vraagt `sudo apt`, en dat is niets voor een UI-checkje.
+
+**2. Windows Chrome kan het wél, vanuit WSL, zonder installatie.**
+`/mnt/c/Program Files/Google/Chrome/Application/chrome.exe --headless=new --disable-gpu
+--window-size=W,H --virtual-time-budget=30000 --screenshot="C:\...\out.png" URL`, en dat
+`out.png` lees je terug via `/mnt/c/...`. Twee dingen die het laten werken: Windows bereikt de
+uvicorn op WSL gewoon via `http://localhost:8003` (WSL2 forwardt localhost), en
+`--virtual-time-budget` wacht op de fetches in plaats van op een vaste sleep.
+
+**3. CDP over de WSL-gateway werkt NIET** — `--remote-debugging-address=0.0.0.0` plus
+`curl http://$(ip route show default | awk '{print $3}'):9222/json/version` loopt dood op de
+Windows-firewall. Niet verder proberen; dat is een half uur voor niets.
+
+**4. Interactie test je dan met een tijdelijke kopie van de pagina.** `--screenshot` klikt
+niet, maar de pagina mag zichzelf klikken: schrijf `frontend/_tmp_click_test.html` = de echte
+pagina met één `<script>` erachter dat wacht tot de tabel er staat, `cell.click()` doet, en na
+afloop alles buiten de kaart die je wil zien uit de DOM sloopt (`[...cont.children].forEach(el
+=> el !== keep && el.remove())`) — dan vult die kaart de hele screenshot in plaats van dat je
+naar een scrollpositie moet mikken. Daarna `rm`. Dit gaf het bewijs dat het commit-bericht kon
+claimen: Compare day én Dag sprongen naar 2026-08-10, met 67.664 bezoeken in de tegel én in de
+tabelrij.
+
+**5. Wat de render liet zien en de code niet:** de Model-kolom stond leeg (`-`) op álle rijen.
+Geen bug in de nieuwe chips — `/api/gsd-campaigns/campaigns` levert het veld `model` helemaal
+niet, omdat de draaiende uvicorn (gestart 08:58) ouder is dan commit `81f20d9`. Dat is precies
+het punt uit `dm_tools_backend_no_reload`: deze backend draait zonder `--reload`, dus
+Python-wijzigingen zijn pas live na kill + relaunch. Een frontend die "-" toont is hier dus
+eerst een deploy-vraag en pas daarna een codevraag.
+
+## Drie UI-regels uit dezelfde sessie (2026-08-17)
+
+Alle drie staan ze nu in `UI_BLUEPRINT.md`; hier het waarom in het kort.
+
+**Een clientfilter draait vóór de Top-N-slice.** Top categories heeft "Top 10 / 50 / 100 /
+All". Filter je ná die slice, dan geeft zoeken op een categorie op plek 40 niets terwijl Top 10
+aanstaat — precies de opzoeking waarvoor het veld bestaat, en het voelt als een kapot veld.
+Wat een clientfilter niet kan repareren: de backend kapt elke lijst al af op de sterkste
+plussen en minnen, dus een categorie in geen van beide staarten zit niet in de pagina. Dat hoort
+in het commentaar, niet in een zoekveld dat stilletjes minder kan dan het suggereert.
+
+**Bootstrap's `Collapse.getOrCreateInstance(pane)` klapt je paneel dicht.** De default config is
+`{toggle: true}` en de **constructor voert dat uit**, dus op een paneel waar nog nooit iemand op
+geklikt heeft, toggelt de kale aanroep het als bijwerking van het aanmaken. Altijd
+`getOrCreateInstance(pane, {toggle: false}).show()`. Bestaat de instance al (data-api heeft hem
+gemaakt bij een eerdere klik), dan wordt de config genegeerd en is `.show()` idempotent.
+
+**Een knoplabel is nooit het krimpelement van een flexregel.** `↻ Refresh` viel over twee
+regels in de filterrij van Campaigns created — drie selects, een zoekveld en vijf knoppen op één
+regel, en flex verkleint alles evenredig tot de ruimte binnen het label opraakt. De ↻ was niet
+de schuldige. `.filter-row .btn, .filter-row select { white-space: nowrap; flex-shrink: 0 }` en
+het zoekveld als enige dat meegeeft; een smaller tekstveld typt even goed.
+
 ## Diff een aangeleverd script tegen zijn origineel, niet tegen jouw port (2026-08-17)
 
 Joep leverde `create GSD-campaigns CPR CPC split.py` aan (1.990 regels) met de vraag wat erin
