@@ -4,6 +4,27 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-18 — Titels die een zustercategorie noemen: 4.503 opgeruimd
+
+Joep's Teenslippers/Gezondheidsslippers-melding. Oorzaak in de titelgenerator, niet in
+kopteksten; volledige analyse in LEARNINGS.md.
+
+- [x] **Oorzaak gevonden en afgebakend** — `fetch_products_api` valt bij een gemiste
+      CSV-lookup terug op de categorie van het eerste product. Code is sinds `bc68056`
+      (2026-07-21) correct; de fout zat in data van jan–mei 2026.
+- [x] **`scripts/analysis/scan_titel_zustercategorie.py`** — detector met stamtest, zodat
+      "Koekenpannenset" op een Pannensets-pagina niet meetelt. 6.504 van 1.022.042 titels.
+- [x] **Proef op 46 Slippers-URLs** — 45 opgelost, 1 `api_failed`
+      (`schoenen_430879_430974/c/merk~480833`, verouderde facetwaarde op een dode URL).
+- [x] **Volledige hergeneratie 6.504** — 6.391 success / 113 failed in 551s; scan daarna
+      6.504 → 2.001, nul nieuwe treffers. Backups in `Downloads\claude\`
+      (`titel_backup_alle_2026-08-18.json`, `titel_backup_slippers_2026-08-18.json`).
+- [x] **Resterende 2.001 verklaard** — `is_type_facet`-override, correct gedrag. Niet
+      hergenereren.
+- [ ] **OPEN — de 6.391 nieuwe titels moeten nog live.** `unique_titles_content` is de
+      werkvoorraad, niet de productie. Vraag van Joep 2026-08-18: kan dat vanuit het
+      dashboard.
+
 ### 2026-08-18 — Kopteksten strakker op het onderwerp + DMA Exclusions-knoppen
 
 Aanleiding: padelrackets genoemd én gelinkt in de koptekst van de Tennisrackets-pagina.

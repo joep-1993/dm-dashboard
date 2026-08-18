@@ -19,8 +19,15 @@ _What are we building and why?_
   Dit is een inconsistentie op de pagina zelf: de H1/title zegt het ene, de koptekst het
   andere. Het vertekende ook de driftmeting van 2026-08-18 — driekwart van de 881
   "onderwerpdrift" was in werkelijkheid dit naamverschil, niet een foute koptekst.
-  Verdient een eigen ronde: welke van de twee is leidend, waar loopt het uiteen, en moet
-  de generator op `h1_title` draaien in plaats van op `product_subject`.
+  **GEDEELTELIJK OPGELOST 2026-08-18.** Voor de klasse waarin de titel een ZUSTERCATEGORIE
+  noemt (Teenslippers vs Gezondheidsslippers) is uitgezocht wie er gelijk had: de
+  kopteksten-kant. `product_subject` was correct, `h1_title` was verouderde data van vóór de
+  `cat_urls.csv`-reparatie (`bc68056`, 2026-07-21). 6.504 titels gedetecteerd, 4.503
+  opgelost door hergeneratie — zie LEARNINGS.md en TASKS.md van 2026-08-18.
+
+  Wat NIET is uitgezocht: de rest van de 73%, waar de twee verschillen in woordvolgorde of
+  synoniem (`'Falke Blauwe sportsokken'` vs `'Blauwe Falke Enkelsokken'`). Daar is de vraag
+  nog steeds welke van de twee leidend hoort te zijn.
 
 ### Facetwaarden die elkaar uitsluiten staan samen op één product (logged 2026-08-18)
 - [ ] 296 producten in categorie 9001062 `Rackets` dragen zowel `Sporten: Tennis` (484337)

@@ -1,6 +1,47 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De titel noemde de zustercategorie, en dat was verouderde data (2026-08-18)
+
+Vervolg op de padeltekst hierboven. Joep: `h1_title 'Speedo Gezondheidsslippers'` staat op
+`/products/schoenen/schoenen_430879_430974/c/merk~1435006`, en dat is een **Teenslippers**-URL.
+Teenslippers, Gezondheidsslippers, Badslippers en Orthopedische slippers zijn alle vier
+children van Slippers (430879) en horen elkaars pagina's niet te benoemen.
+
+**Niet de kopteksten.** Voor die URL geeft `lookup_category` correct `('Schoenen',
+'Teenslippers')` en is `product_subject` `'Speedo Teenslippers'`. De fout zat uitsluitend in
+`pa.unique_titles_content.h1_title`. Dat corrigeert ook de BACKLOG-vraag "welke van de twee
+is leidend": in deze klasse had de kopteksten-kant gelijk.
+
+**Mechanisme.** `fetch_products_api` (bron voor titels én FAQ) leidt de categorienaam af uit
+`cat_urls.csv` en valt bij een misser terug op de categorie van het **eerste product**:
+`data["products"][0]["categories"][url_depth or -1]`. Op een pagina waarvan de producten over
+meerdere zustercategorieen verdeeld zijn — op één Notre-V-pagina zag ik Gezondheids-, Teen-
+én Badslippers naast elkaar — bepaalt dus het bovenste product de naam. Willekeurig en
+instabiel.
+
+**Al gerepareerd, de data niet.** `bc68056` (2026-07-21) repareerde de mojibake in
+`cat_urls.csv` en de category-read-path. Vandaag getoetst: Teenslippers,
+Gezondheidsslippers én Badslippers leveren nu alle drie de juiste `category_name`. De
+Slippers-titels in de DB dateerden van jan–mei 2026, allemaal van vóór die fix. **Les: als
+een generator een terugval-pad heeft, is een reparatie in de code geen reparatie van de
+data — zoek altijd hoeveel rijen er onder het oude gedrag zijn weggeschreven.**
+
+**Meting en resultaat.** Nieuwe scan `scripts/analysis/scan_titel_zustercategorie.py`: de
+eigen categorienaam (of stam) staat NIET in de titel, maar de naam van een zuster wél. De
+stamtest is essentieel — zonder haalt "Koekenpannenset" op een Pannensets-pagina de lijst,
+en dat is een terechte samenstelling. Over 1.022.042 titels: 6.504 treffers (0,64%).
+Hergenereerd met `ai_titles_service.process_single_url(url, True)` (15 workers, 551s):
+6.391 success, 113 failed, daarna **6.504 → 2.001**, dus 4.503 opgelost en nul nieuwe.
+
+**Wat overblijft is ontwerp, niet schade.** De grootste posten stonden ná de run op exact
+hetzelfde aantal als ervoor (Voerbakken→Voer 163, Elektrische fietsen→Stadsfietsen 161,
+Tuintafels→Eettafels 140). Die regenereren naar dezelfde naam omdat de `is_type_facet`-
+override doet wat hij moet doen: een `Type`-facetwaarde VERVANGT het categoriewoord.
+`Elektrische fietsen` + `Type e-bike = Elektrische stadsfietsen` → h1 "Elektrische
+stadsfietsen" is correct. Een detector op categorienamen kan dat niet onderscheiden van een
+echte verwisseling; wie dit getal opnieuw meet moet de type-facetten eruit filteren.
+
 ## ean2pim is de verkeerde meetlat, en het onderwerp zat de padeltekst dwars (2026-08-18)
 
 Joep zag in de koptekst van de Tennisrackets-pagina
