@@ -19,9 +19,9 @@
         .badge-action-subdivide { background-color: #b8860b; }
         .badge-action-append { background-color: #00867d; }
         .badge-action-skip { background-color: #6c757d; }
-        /* inverted outline buttons: filled by default, outline on hover */
-        .btn-fill-primary { background-color: #CC5500; border: 1px solid #CC5500; color: #fff; }
-        .btn-fill-primary:hover { background-color: #E97451; border-color: #E97451; color: #fff; }
+        /* Gevulde CTA (Scan OOS, Enable selected) = de gedeelde .btn-run uit style.css.
+           Hier stond een eigen .btn-fill-primary met dezelfde vulling en hover; die is weg,
+           want de blueprint wil geen pagina-eigen knopklasse naast de drie groepen. */
         .badge-excluded { background-color: #d63031 !important; }
         .badge-enabled { background-color: #00b894 !important; }
         .badge-partial { background-color: #e17055 !important; }
@@ -214,7 +214,7 @@
                         <div id="oosSummary" class="text-muted mb-2">Click <strong>Scan OOS</strong> to pull the out-of-stock list and see which products are live in DMA.</div>
                         <div class="d-flex justify-content-end gap-2 mb-2">
                             <button id="reenableBtn" class="btn btn-sm btn-outline-primary" onclick="reenableRecovered()" title="Re-enable OOS exclusions whose product is back in stock">Re-enable recovered</button>
-                            <button class="btn btn-sm btn-fill-primary" onclick="hideOosDone(); scanOos()">Scan OOS</button>
+                            <button class="btn btn-sm btn-run" onclick="hideOosDone(); scanOos()">Scan OOS</button>
                         </div>
                         <div id="oosControls" class="d-flex gap-2 align-items-center mb-2 flex-wrap" style="display:none !important;">
                             <input id="oosFilter" class="form-control form-control-sm" style="width:220px;" placeholder="filter EAN / category / headline offer…" oninput="renderOos()">
@@ -288,7 +288,7 @@
                             <span id="savedSelCount" class="small text-muted">0 selected</span>
                             <button id="savedEnableBtn" class="btn btn-sm btn-outline-secondary" onclick="enableSelected()" disabled>Enable selected</button>
                             <button class="btn btn-sm btn-outline-purple" onclick="exportExcel()">Export Excel</button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="cleanEnabled()" title="Remove resolved (enabled) rows — history cleanup, no Google Ads change">Clean enabled</button>
+                            <button class="btn btn-sm btn-outline-orange" onclick="cleanEnabled()" title="Remove resolved (enabled) rows — history cleanup, no Google Ads change">Clean enabled</button>
                         </div>
                     </div>
                     <div class="card-body p-0">
@@ -671,7 +671,7 @@
             document.getElementById("savedSelCount").textContent = `${savedSelected.size} selected`;
             const btn = document.getElementById("savedEnableBtn");
             btn.disabled = !has;
-            btn.classList.toggle("btn-fill-primary", has);       // orange (like Scan OOS) when clickable
+            btn.classList.toggle("btn-run", has);                // orange (like Scan OOS) when clickable
             btn.classList.toggle("btn-outline-secondary", !has); // grey when disabled
         }
 
