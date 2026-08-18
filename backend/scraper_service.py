@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 from typing import List, Dict, Optional, Tuple
 import re
+from urllib.parse import unquote
 import time
 import random
 from urllib.parse import urlencode
@@ -338,9 +339,21 @@ def parse_beslist_url(url: str) -> Tuple[Optional[str], Optional[str], Dict[str,
         category = match.group(2)  # May be None for top-level categories
         filters_str = match.group(3)
 
-        # Parse filters: facet1~value1~~facet2~value2 or facet1~value1~~facet1~value2
+        # Parse filters: facet1~value1~~facet2~value2 of facet1~value1~~facet1~value2
+        #
+        # Percent-decoden is nodig: een deel van pa.urls draagt de scheidingstekens
+        # encoded ("merk%7E9991226%7E%7Eo_lamp%7E23578805"). Zonder unquote levert
+        # dat NUL filters op, waarna build_product_subject terugvalt op de kale
+        # categorienaam en de koptekst over een veel breder onderwerp gaat dan de
+        # pagina. Geverifieerd 2026-08-18 op
+        # /products/schoenen/c/populaire_serie%7E10891432%7E%7Etype_productlijn%7E10923109:
+        # encoded -> filters={} en subject "Hardloopschoenen"; gedecodeerd ->
+        # 2 facetten en subject "Solo Adidas Terrex Trailrunningschoenen".
+        # Alleen de filterstring wordt gedecodeerd, niet het hele pad, zodat
+        # categorienamen met bijzondere tekens onaangeroerd blijven.
         filters: Dict[str, List[str]] = {}
         if filters_str:
+            filters_str = unquote(filters_str)
             # Split by ~~ to get individual filter pairs
             filter_pairs = filters_str.split("~~")
             for pair in filter_pairs:
@@ -621,7 +634,7 @@ def scrape_product_page_api(url: str) -> Optional[Dict]:
         # Use product_subject as h1_title when facets are present, otherwise use category
         h1_title = product_subject if product_subject else (deepest_category_name if deepest_category_name else main_category)
 
-        return {
+        result = {
             "url": clean,
             "h1_title": h1_title,
             "product_subject": product_subject,
@@ -629,6 +642,20 @@ def scrape_product_page_api(url: str) -> Optional[Dict]:
             "is_grouped": len(filters) > 0,
             "selected_facets": selected_facets
         }
+
+        # Staat er wel een facet in de URL maar herkent de API er geen enkele, dan
+        # is product_subject teruggevallen op de kale categorienaam. Dat leest als
+        # een geldig onderwerp maar is het niet: op /c/sporten~Tennis levert de
+        # categorie "Rackets" op, en dan schrijft het model correct-maar-te-breed
+        # over tennis EN padel. Zo'n tekst is niet te onderscheiden van een goede,
+        # dus markeren we het als fout in plaats van hem stil weg te schrijven.
+        # De vlag gaat OP het normale dict (niet als kaal {"error": ...}) zodat
+        # bestaande aanroepers die meteen op "products" indexeren blijven werken.
+        if filters and not selected_facets:
+            print(f"[API] Facetten niet herkend ({len(filters)} in de URL, 0 uit de API): {clean}")
+            result["error"] = "facets_not_resolved"
+
+        return result
 
     except requests.RequestException as e:
         print(f"[API] Request error for {url}: {str(e)}")

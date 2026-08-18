@@ -459,6 +459,16 @@ def process_single_url(url: str, conservative_mode: bool = False):
             result["reason"] = "rate_limited_503"
             # DO NOT mark as processed in Redshift - keep in pending for retry
             # 503 errors should stop the batch to avoid further rate limiting
+        elif scraped_data and scraped_data.get('error') == 'facets_not_resolved':
+            # De URL is facet-vernauwd maar de API gaf geen enkele geselecteerde
+            # facet terug, dus het onderwerp zou de kale categorienaam worden en
+            # de tekst veel breder dan de pagina. Niet genereren: als 'failed'
+            # wegschrijven houdt de URL in pending voor een nieuwe poging, en
+            # last_error maakt zichtbaar hoe vaak dit speelt (was voorheen stil).
+            final_status = 'failed'
+            final_reason = 'facets_not_resolved'
+            result["status"] = "failed"
+            result["reason"] = "facets_not_resolved"
         elif not scraped_data:
             final_status = 'failed'
             final_reason = 'api_failed'

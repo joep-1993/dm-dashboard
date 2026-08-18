@@ -252,8 +252,14 @@ def _prepare_url_data(url: str, batch_type: str) -> Optional[Dict]:
     try:
         if batch_type == "faq":
             return fetch_products_api(url)
-        else:
-            return scrape_product_page_api(url)
+        page_data = scrape_product_page_api(url)
+        # Zelfde guard als in main.py::process_single_url: zonder herkende facetten
+        # valt het onderwerp terug op de kale categorienaam en wordt de koptekst te
+        # breed. None betekent hier "geen data" en de URL wordt overgeslagen.
+        if page_data and page_data.get("error") == "facets_not_resolved":
+            print(f"[BATCH] Facetten niet herkend, overgeslagen: {url}")
+            return None
+        return page_data
     except Exception as e:
         print(f"[BATCH] Error fetching data for {url}: {e}")
         return None

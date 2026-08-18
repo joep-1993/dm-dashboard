@@ -33,7 +33,20 @@ from backend.gpt_service import MODEL, fix_truncated_urls
 def create_product_recommendation_prompt_v3(h1_title: str, products: List[Dict]) -> str:
     """User-prompt voor v3: identieke productlijst/linkregels als v1, maar
     zonder de 'één alinea'- en 150-woorden-limiet (die botsen met de koopgids-vorm).
-    De inhoudelijke sturing zit in de per-maincat system message."""
+    De inhoudelijke sturing zit in de per-maincat system message.
+
+    De ONDERWERP-regel is bewust de eerste en hardste instructie. Reden (2026-08-18):
+    op de Tennisrackets-pagina (facet Sporten=Tennis) stonden 2 padelrackets tussen de
+    30 aangeleverde producten, omdat die producten in de brondata zowel de facetwaarde
+    Tennis als Padel dragen (296 zulke dubbeltags in categorie Rackets alleen). Het model
+    verbreedde daarop het hele onderwerp naar "Tennis- en padelrackets" en linkte twee
+    echte padelrackets. Dat was geen hallucinatie: h1_title stond er alleen als losse
+    contextregel ("Zoekwoord in Google"), zonder enige instructie om binnen dat onderwerp
+    te blijven. Twee foute producten op 30 kantelden dus de hele tekst. Deze regel maakt
+    het onderwerp bindend en draagt het model op afwijkende producten te negeren, zodat
+    één vervuild product de tekst niet meer meesleept — ook als de brondata fout blijft.
+    Een breed h1_title (een hoofdcategorie, of een /c/-loze categoriepagina) blijft
+    gewoon breed: de regel bakent af op h1_title zelf, niet op een vaste smalheid."""
     limited_products = products[:30]
     products_text = "\n".join(
         f"Product {i + 1}\nTitle: {p['title']}\nUrl: {p['url']}\nContent: {p['listviewContent'][:200]}\n"
@@ -41,6 +54,7 @@ def create_product_recommendation_prompt_v3(h1_title: str, products: List[Dict])
     )
     return f"""Opdracht
 Een prijsbewuste consument landt op deze categoriepagina na het zoeken in Google. Op de pagina staan veel producten waaruit hij moet kiezen (zie de 30 populairste hieronder). Schrijf de introductietekst als een korte, informatieve mini-koopgids die de bezoeker helpt de juiste keuze te maken.
+- ONDERWERP (deze regel gaat voor op alle andere): het onderwerp van deze pagina is exact "{h1_title}". Schrijf UITSLUITEND over "{h1_title}". Verbreed het onderwerp NOOIT naar aanverwante of naastgelegen productgroepen, ook niet als de productlijst hieronder zulke producten bevat. Valt een product uit de lijst niet onder "{h1_title}", negeer het dan volledig: niet beschrijven, niet noemen en niet linken. Zet in de openingszin geen tweede productgroep naast "{h1_title}".
 - Schrijf 2 tot 4 korte alinea's, gescheiden door een witregel (dus NIET één doorlopende alinea). Geen opsommingstekens.
 - Volg de lengte- en inhoudsrichtlijnen uit de system message (koopvragen, meetbare keuzecriteria, vakjargon).
 - Vermijd het noemen van prijzen.
@@ -48,9 +62,10 @@ Een prijsbewuste consument landt op deze categoriepagina na het zoeken in Google
 - VERBODEN LINKTEKSTEN (gebruik deze NOOIT als anchor text): "klik hier", "hier klikken", "hier", "deze link", "deze pagina", "deze gids", "deze", "lees meer", "meer info", "kijk hier", "bekijk hier", "via deze link". Linktekst MOET de productnaam of een logische, beschrijvende zoekterm zijn; past dat niet natuurlijk, maak dan GEEN link.
 
 Hieronder de context:
-Zoekwoord in Google: {h1_title}
+Onderwerp van deze pagina (en het zoekwoord in Google): {h1_title}
 
-De 30 populairste producten met titel en de bijbehorende link:
+De 30 populairste producten met titel en de bijbehorende link. Deze lijst komt uit de
+productfeed en kan producten bevatten die NIET onder "{h1_title}" vallen; die sla je over:
 {products_text}
 """
 
