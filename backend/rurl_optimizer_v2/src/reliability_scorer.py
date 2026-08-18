@@ -531,17 +531,20 @@ COUNT_PENALTY_BANDS = (
     (100, -12),
     (0, -15),      # a handful of products — share is meaningless
 )
-# Faceted targets are intentionally narrow, so most small counts are fine — only
-# a near-empty page (<50 products) is a churn/quality risk. Milder than the
-# bare-category bands, and tops out so a faceted row never nukes straight to D
-# (a thin faceted page lands in review-tier C). NB: count alone can't tell a
-# legit thin brand page (ici paris, 4) from a churny one (gardena toys, 3) —
-# that's a facet-SELECTION call; scoring just flags both for review.
-FACETED_COUNT_PENALTY_BANDS = (
-    (50, 0),
-    (20, -5),
-    (0, -10),
-)
+# V56 (2026-08-18, Joeps besluit): RETIRED — a faceted destination is no longer
+# docked for holding few products. The bands stayed in place for two versions on
+# the reasoning that a near-empty page is a churn/quality risk, but that judges
+# the CATALOGUE, not the redirect: a query whose intent the page names exactly is
+# answered correctly even when the taxonomy has yet to fill it, and filling it is
+# another team's work. The old note conceded the point itself — "count alone can't
+# tell a legit thin brand page (ici paris, 4) from a churny one" — so the bands
+# were penalising both to flag one.
+#
+# Kept as an empty table rather than deleted so the retirement is legible next to
+# COUNT_PENALTY_BANDS, which is NOT the same judgement and stays: there the count
+# measures how much a dom_share can be TRUSTED (share 1.0 over 116 products is
+# noise that routes motorhelm -> bare Videocamera's), not how full a page is.
+FACETED_COUNT_PENALTY_BANDS = ()
 # Below this AND-match count a high dom_share is not trustworthy enough to earn
 # its dominance bonus (the bonus is zeroed; the count penalty still applies).
 DOMINANCE_MIN_COUNT = 300
@@ -586,7 +589,8 @@ def score_search_derived(
             redirects, where a thin dominant cat is noise (motorhelm → bare
             Videocamera's, 116 products). A faceted page is INTENTIONALLY narrow
             (ici paris → merk~Ici Paris, 4 products is normal), so the count
-            penalty AND the count-based bonus suppression are skipped for it.
+            penalty AND the count-based bonus suppression are skipped for it —
+            since V56 the faceted count penalty is skipped unconditionally.
 
     Returns:
         int 0-100. Conservative: the count band only ever subtracts, and this
@@ -621,12 +625,13 @@ def score_search_derived(
             and match_coverage is not None and match_coverage < 60):
         dom_adj = 0
     score += dom_adj
-    # Count penalty: full bands for bare-category redirects (thin dominant cat =
-    # noise); milder bands for faceted targets (narrow by design — only a
-    # near-empty page is penalised).
-    score += _band(dom_count,
-                   FACETED_COUNT_PENALTY_BANDS if target_is_faceted
-                   else COUNT_PENALTY_BANDS)
+    # Count penalty for BARE-category redirects only: a dom_share resting on a
+    # thin set is noise, so the count limits how far dominance may carry the
+    # score. A faceted target is exempt (V56) — there the count would be judging
+    # how full the destination is, which is a taxonomy matter and not this
+    # score's business.
+    if not target_is_faceted:
+        score += _band(dom_count, COUNT_PENALTY_BANDS)
     return max(0, min(100, int(round(score))))
 
 
@@ -823,21 +828,16 @@ H1_OVERLAP_LIFT_FLOOR = 90
 H1_OVERLAP_RECALL_FLOOR = 90   # the query must be near-fully represented
 H1_OVERLAP_LIFT = 10
 H1_OVERLAP_LIFT_CEILING = 89   # H1 alone never manufactures a Tier A
-# A near-empty destination gets no lift, however well its H1 reads. Set to the
-# top FACETED_COUNT_PENALTY_BANDS threshold on purpose: below 50 products V45
-# already docks the row for thinness, and a +10 H1 bonus would cancel exactly
-# that penalty. Found by testing "ketoconazol shampoo" -> Shampoo
-# /c/ingr_shamp~23982436: H1 overlap 100 (the page names precisely what the
-# searcher typed) over a destination holding ONE product — 79 - 10 + 10 = 89,
-# i.e. promoted into the production tier by cancelling the thin-page signal.
-# The two signals are independent: "the page is about the right thing" and
-# "there is nothing on it" can both be true, and the second one wins.
-H1_OVERLAP_MIN_DEST_COUNT = 50
+# V56 (2026-08-18, Joeps besluit): how many products sit behind the destination
+# no longer bears on the redirect's score. A sparse facet page is a taxonomy
+# problem for another team; it does not make the redirect the wrong answer for
+# the query. "ketoconazol shampoo" -> Shampoo /c/ingr_shamp~23982436 is the right
+# destination whether that page holds one product or six hundred. The earlier
+# H1_OVERLAP_MIN_DEST_COUNT gate (and the dest_count argument it read) is gone.
 
 
 def apply_h1_overlap_lift(score: int, overlap: Optional[int],
-                          query_coverage: Optional[int],
-                          dest_count: Optional[int] = None) -> int:
+                          query_coverage: Optional[int]) -> int:
     """V55: raise a score whose redirect H1 genuinely echoes the R-URL H1.
 
     A near-identical H1 pair means the destination page names the same product
@@ -853,22 +853,17 @@ def apply_h1_overlap_lift(score: int, overlap: Optional[int],
         scores fine today;
       * gated on query_coverage as well as overlap, so a redirect that dropped
         a query token can't buy the bonus with a tidy target side;
-      * gated on dest_count, so it can never cancel V45's thin-page penalty —
-        see H1_OVERLAP_MIN_DEST_COUNT;
       * capped at H1_OVERLAP_LIFT_CEILING, so H1 alone can't promote a row into
         the Tier A production set;
       * a score of 0 (hard-rejected by V27/V38/V39 or a probe guard) stays 0.
 
-    dest_count is the AND-match product count behind the destination (V28's
-    dom_cat_count). None means "no search signal for this row" — unknown, not
-    zero, so the lift still applies; there is no counter-evidence to weigh.
+    It is deliberately blind to how many products the destination holds — see
+    the V56 note above H1_OVERLAP_LIFT_FLOOR.
     """
     if not score or overlap is None:
         return score
     if overlap < H1_OVERLAP_LIFT_FLOOR:
         return score
     if (query_coverage or 0) < H1_OVERLAP_RECALL_FLOOR:
-        return score
-    if dest_count is not None and dest_count < H1_OVERLAP_MIN_DEST_COUNT:
         return score
     return max(score, min(score + H1_OVERLAP_LIFT, H1_OVERLAP_LIFT_CEILING))

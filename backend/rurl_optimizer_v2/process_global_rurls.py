@@ -499,8 +499,6 @@ def process_global_url(args):
     if r.success:
         h1_overlap, h1_query_coverage, _ = h1_overlap_parts(
             keyword, redirect_cat_name, r.facet_value_names)
-        # the global path carries no search-derived count, so dest_count is
-        # left None (unknown, not zero) — see apply_h1_overlap_lift.
         _v55_lifted = apply_h1_overlap_lift(reliability_score, h1_overlap,
                                             h1_query_coverage)
         if _v55_lifted != reliability_score:
