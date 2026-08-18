@@ -1,6 +1,125 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## Een guard die begint met "is er wel gematcht?" keurt alles goed wat nooit matchte (2026-08-18)
+
+Joep vroeg bij regel 102 van `redirects_global_f4383643` hoe die redirect tot stand komt:
+`/gezond_mooi/gezond_mooi_560588/r/honden_katten/` — dat is **Oordoppen** — ging naar
+**Make-up accessoires** `/c/merk~23800900`, merk **'Generic'**. Omdat 83% van de
+zoekresultaten dat merk droeg.
+
+Er stond een guard voor precies dit. `matcher.brand_match_is_spurious` opent met:
+
+```python
+covered = any(self._tokens_equal_modulo_morphology(k, b) for k in kt for b in bt)
+if not covered:
+    return False        # <- "niet spurious"
+```
+
+Die functie beantwoordt de vraag *"het merk matchte — was dat echt of toevallig?"* (`wc papier`
+-> merk 'Paper Dreams': "papier" fuzz-hit "Paper" en noemt het product). Maar de V29-facetprobe
+zet een merk neer op **dekking van de resultatenset**, zonder enige lexicale claim. Dan is
+`covered` False, zegt de guard "in orde", en geldt: **hoe minder de query met het merk te maken
+heeft, hoe zekerder de guard dat het goed zit.**
+
+| query | merkwaarde | oude guard | query noemt het merk? |
+|---|---|---|---|
+| honden katten | Generic | houden | nee |
+| honden katten | Testjezelf | houden | nee |
+| wc papier | Paper Dreams | weg | nee |
+| philips | Philips | houden | ja |
+
+De probe legt het benodigde feit zélf vast: `keyword_match: false` staat in de payload, op drie
+plekken geschreven en **nergens gelezen**. En één van de drie append-plekken deed het al goed
+(`_keyword_bridges_value` in de V31-leftover-consumer, met de comment "probe value relates to
+nothing in the query — drop it"); de twee V28-plekken riepen de omgekeerde guard aan.
+
+Opgelost door de vraag positief te stellen (`brand_mention_is_distinctive`, losgetrokken uit de
+bestaande lus zodat V39's pad bit-identiek blijft). 4 doelen veranderd op 497, nul echte
+merkredirects geraakt.
+
+**Les die breder geldt:** een guard heeft een vooronderstelling, en op een nieuw codepad kan die
+omslaan. Als een guard opent met "geldt X niet? dan is er niets aan de hand", check dan of het
+nieuwe pad X kan overslaan — dan is dat vroege `return False` geen veiligheid maar een
+doorlaatpoort. Zoek ook naar velden die de waarheid al vastleggen maar niemand leest.
+
+## `token_set_ratio` geeft 100 op een deelverzameling, en dat maakte de H1-check blind (2026-08-18)
+
+Joeps idee bij regel 110: vergelijk de H1 van de R-url met die van de C-url, want bij hoge
+overlap is de redirect vermoedelijk goed. Dat signaal zát er al in (V26,
+`compute_h1_similarity`) en kon het onderscheid niet uitdrukken:
+
+```
+"ketoconazol shampoo"  vs  "Shampoo"              -> token_set_ratio 100
+"ketoconazol shampoo"  vs  "Shampoo Ketoconazol"  -> token_set_ratio 100
+```
+
+`token_set_ratio` neemt het maximum over (intersectie, intersectie+rest-a, intersectie+rest-b) —
+dus zodra de ene tokenverzameling een **deelverzameling** van de andere is, is het 100. Elke kale
+categorie waarvan de naam in de query voorkomt haalde een perfecte score, en dat zijn precies de
+rijen die een H1-check moet wegen. De comment bij V27 beweerde dat "Mini" vs "mini gps tracker"
+op ~50 uitkwam; dat is ook 100.
+
+Vervangen door een symmetrische maat (F1 over de dekking van beide kanten). Bijkomend bleek de
+vergeleken H1 de verkéérde: `out_facet_value_names` werd alleen bijgewerkt door de tak die hem
+zette, dus elke latere herschrijving in de cascade die een facet aanhangt (RC4, RC4-source, V53)
+leverde `/c/...` uit terwijl het veld "geen facet" rapporteerde — 32 van 497 rijen, en de reden
+dat de `h1`-kolom in de xlsx een kale "Shampoo" las. `h1_similarity` werd bovendien één keer
+berekend vóór de cascade, dus op elke herschreven rij beschreef het een url die niet meer de
+output was.
+
+**Les die breder geldt:** een fuzzy-ratio uit een bibliotheek heeft een vorm-aanname, en
+`token_set_ratio` is expliciet asymmetrie-tolerant. Wil je "even veel én niets extra", neem dan
+F1/Jaccard over tokens. En: als een cascade zijn doel meerdere keren herschrijft, hoort elk
+afgeleid veld ná de cascade opnieuw berekend te worden — anders beschrijft je rapportage een
+tussenstand.
+
+## Een A/B is niets waard als de dataset onder je verschuift (2026-08-18)
+
+Ik mat een driegelige guard en zag **52 van 496 rijen** van doel veranderen, met echte
+regressies erbij (`ferrero rocher` 95 A -> 34 D). Dat kon die guard niet zijn. `monster energy`
+sprong van `merk~7916677` naar `merk~23863970` — een ander ID voor hetzelfde merk, wat geen
+codewijziging doet.
+
+`stat` op de cache gaf het antwoord: **`facets.csv` was om 17:56 verse data geworden** (stond
+nog op de april-snapshot; de service ververst automatisch boven `FACETS_MAX_AGE_DAYS = 7`), en
+`/tmp/r_url_optimizer_cache.pkl` was om 17:57 opnieuw opgebouwd. Mijn controlerun stond om
+17:48, de meting om 18:05 — de refresh viel er precies tussen. Op dezelfde verse data mat de
+guard 4 rijen, exact de voorspelde.
+
+**Recept dat werkt:** run de oude code in een `git worktree` op de commit vóór de wijziging, met
+`data/cache` als **symlink** naar dezelfde snapshot, en `--reuse-data-cache` zodat beide runs
+dezelfde pickle lezen. Vergelijk daarna per `original_url`. En let op: een herhaling is géén
+reproductie van een ouder bestand — de cascade kiest een andere route zodra de V28/probe-caches
+zijn verschoven (regel 110 liep 14 augustus via RC4 en nu via V28, zelfde doel, 70 vs 79).
+
+**Les die breder geldt:** noteer de mtime van elke cache/snapshot die je meting voedt, vóór en
+na. Als de uitkomst groter is dan je wijziging plausibel kan verklaren, is het bijna altijd de
+data en niet de code.
+
+## "0% querydekking" is niet één probleem maar twee (2026-08-18)
+
+93 van de 373 geslaagde redirects hadden 0% querydekking én 0 H1-overlap. Dat leek een familie;
+het splitste bij de vraag *blijft de redirect in de eigen (sub)categorie of springt hij?*
+
+- **83 blijven staan** — en dat is correct. De query is pure filler: "beste koop
+  consumentenbond" (9x, naar 9 verschillende categorieën), "sale", "de goedkoopste", "beste
+  getest". Terugvallen op de eigen subcategoriepagina is precies goed; de dekking is 0 omdat de
+  query geen productintentie heeft, niet omdat de bestemming fout is.
+- **9 springen** naar een andere categorie. Daarvan zijn er maar 4 echt fout (`anwb` ->
+  Fietssloten, `purdey outlet` -> Motorbroeken, `halve maan` -> Trapmatten, `torso sex` ->
+  Sexpoppen) en die staan alle vier al op 34 in tier D. De andere 5 zijn een **meetfout**:
+  `pull up bar` -> Optrekstangen is de juiste Nederlandse term maar deelt geen token, en
+  `cavia kooi` -> Kooien valt door de 4-tekensdrempel van de tokenbrug (`kooi` is 4, `koi` na
+  normalisatie 3).
+
+Een blanket-regel "0% dekking -> onderdrukken" had die 5 dus gesloopt om 4 rijen te pakken die
+de bestaande V45-banden al afkeuren.
+
+**Les die breder geldt:** voordat je een drempel op een metriek zet, splits de populatie op de
+dimensie die het gedrag verklaart — hier "eigen categorie vs sprong". Een 0 kan "geen bewijs"
+betekenen én "bewijs dat de meting niet ziet", en die twee verdienen niet dezelfde regel.
+
 ## De Keywords API kapt urls stil af op 255 tekens (2026-08-18)
 
 Bij de read-back van de HS2.0-re-run kwamen 11 van de 12 buckets byte-identiek terug en

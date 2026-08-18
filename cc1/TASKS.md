@@ -4,6 +4,51 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-18 — Auto-Redirects V55-V58: H1-vergelijking, producttelling eruit, merkfacet-guard
+
+Joeps review van `Downloads\redirects_global_f4383643_20260814_112614.xlsx`. Vier commits op
+`main` (`9f7463f` + `0a23aa5`), 89 tests groen.
+
+- [x] **V55 — H1 van de C-url tegen die van de R-url** (Joeps idee bij regel 110). Het bestaande
+      V26-signaal kon het niet uitdrukken: `token_set_ratio` geeft 100 op een deelverzameling,
+      dus "Shampoo" en "Shampoo Ketoconazol" scoorden beide 100 tegen "ketoconazol shampoo". Zie
+      LEARNINGS. Vervangen door `compute_h1_overlap` (symmetrisch, F1 over beide dekkingen), met
+      een lift van +10 bij overlap >= 90 én querydekking >= 90 — alleen omhoog, gemaximeerd op 89
+      zodat H1 alleen nooit een tier A maakt, en nooit op een afgekeurde rij.
+- [x] **V55 — twee staleness-bugs die daaruit rolden.** `out_facet_value_names` werd alleen
+      bijgewerkt door de tak die hem zette, dus RC4/RC4-source/V53 leverden `/c/...` uit terwijl
+      het veld "geen facet" rapporteerde (32 van 497 rijen — de kale "Shampoo" in de h1-kolom).
+      En `h1_similarity` werd vóór de cascade berekend. Beide nu ná de cascade opnieuw.
+- [x] **V56 — de producttelling op de bestemming raakt de score niet meer** (Joeps besluit).
+      Een dunne facetpagina is een taxonomieprobleem voor een ander team en zegt niets over de
+      vraag of dit het juiste antwoord op de query is. `FACETED_COUNT_PENALTY_BANDS` ingetrokken
+      (staat als lege tuple, niet verwijderd). **`COUNT_PENALTY_BANDS` op een KALE categorie
+      blijft** — daar meet de telling niet hoe vol de pagina is maar hoe ver een `dom_share` te
+      vertrouwen is; een test zet de twee naast elkaar zodat een opruiming ze niet samenvouwt.
+      73 rijen omhoog, 0 omlaag, 0 doelen verlegd; A+B 93 -> 105.
+- [x] **De V28-redenregel overdreef het bewijs met ordes van grootte.** Hij printte `total`,
+      dat in OR-fallback de héle maincategorie is: "865778 products dominantly in 'Shampoo'
+      (100%)" ging over een aandeel gemeten over TWEE producten. Noemt nu de AND-treffers en zegt
+      het erbij als de modus fallback was. Alleen tekst, geen score verandert.
+- [x] **V57 — merkfacet dat de query nooit noemde** (Joeps regel 102: Oordoppen -> Make-up
+      accessoires `/c/merk~'Generic'`). De guard stelde de omgekeerde vraag; zie LEARNINGS.
+      4 doelen veranderd, nul echte merkredirects geraakt, A+B blijft 105.
+- [x] **V58 — de search-derived url vertrouwde een ongecontroleerde categorie-slug.** Drie rijen
+      wezen naar een niet-bestaand segment (`/products/gezond_mooi/gezond_mooi/` voor "anwb",
+      idem voor "a.h" en "optidee bestellen"). De fallback-tak van `_classify` leest per product
+      `categories[-1]`, en dat IS de maincat als het product niet dieper is ingeschaald; die tak
+      kan naam en slug uit verschillende niveaus geven ('Woonaccessoires' met slug `huis_tuin`).
+      Nu een vormcontrole: `<maincat>_<cijfers>` of geen url. Dubbele-slug-urls 3 -> 0.
+- [x] **Nagemeten met een echte A/B** (oude code in een worktree, `data/cache` als symlink,
+      `--reuse-data-cache`). Let op: `facets.csv` ververste vandaag om 17:56 en verplaatste
+      ~50 doelen — een meting van vóór en ná die refresh is geen A/B. Zie LEARNINGS.
+- [x] Voor/na per rij: `Downloads\claude\redirects_f4383643_herrun_18aug.xlsx`, met
+      `url_14aug`, `doel_gewijzigd`, `query_dekking`, `h1_match` en `target_products`.
+- [x] **xlsx-export uitgebreid** met `h1_match` en `target_products` naast de bestaande `h1`.
+
+**Openstaand, wacht op Joeps keuze** (zie BACKLOG): de 4 kale sprongen met 0% querydekking
+zichtbaar maken via `flag_for_review`, of ze echt onderdrukken.
+
 ### 2026-08-18 — HS2.0 opnieuw gedraaid en live op alle 12, tool terug in de nav
 
 - [x] **Live-check na 13 dagen: 11 van de 12 buckets stonden nog exact op onze selectie**

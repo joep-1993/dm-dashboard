@@ -8,6 +8,30 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### V28 kiest een categorie op een handvol producten zonder dat de query er iets van noemt (logged 2026-08-18)
+- [ ] Na V57/V58 blijven er **4 rijen** over die naar een KALE categorie springen terwijl 0% van
+  de query in de bestemming terugkomt: `anwb` -> Fietssloten (8 producten), `purdey outlet` ->
+  Motorbroeken (7), `torso sex` -> Sexpoppen (7), `halve maan` -> Trapmatten (29). Ze staan alle
+  vier op **34, tier D**, dus de bestaande V45-banden keuren ze al af — maar ze dragen nog wel
+  `success=True` met een url, en alleen een cijfer om zich te verklaren.
+
+  Twee opties, Joeps keuze:
+  1. **Zichtbaar maken.** Een regel in `flag_for_review` ("sprong naar een andere categorie
+     zonder dat de query er iets van noemt"). Kost geen score, maakt het bestand
+     zelfverklarend. Klein en veilig.
+  2. **Onderdrukken.** Alleen bij `match_type == 'search_derived_subcat'` (kale sprong) én
+     `match_coverage == 0` én een andere subcat dan de bron. Raakt op dit corpus precies die
+     vier en nooit een facetrij, dus `pull up bar` -> Optrekstangen en `cavia kooi` -> Kooien
+     blijven veilig. Gedragswijziging, geen bugfix.
+
+  **Niet doen: een blanket-regel op 0% dekking.** Van de 93 rijen met 0% dekking blijven er 83
+  terecht in hun eigen (sub)categorie (fillerqueries als "beste koop consumentenbond"), en van
+  de 9 sprongen zijn 5 een meetfout in plaats van een redirectfout. Zie LEARNINGS.
+
+  Een laag dieper: de tokenbrug in `compute_h1_overlap`/de dekkingsmeting mist `kooi` -> `Kooien`
+  (na normalisatie 3 tekens, onder de 4-tekensdrempel) en vertalingen als `pull up bar` ->
+  `Optrekstangen`. Dat verklaart een deel van de valse nullen.
+
 ### Twee systemen noemen dezelfde pagina anders: h1_title vs product_subject (logged 2026-08-18)
 - [ ] `unique_titles_content.h1_title` en het facet-afgeleide `product_subject` zijn het op
   een groot deel van de facetpagina's ONEENS. Steekproef van 150 uit de 881 gemarkeerde
