@@ -2334,6 +2334,12 @@ def process_url_v2(args):
     # coverage that credits the appended facet (fixes false 0%-coverage demotions
     # of brand redirects like "bang en olufsen" → merk~Bang & Olufsen).
     appended_value_names = []
+    # V55: product count behind a facet the cascade bolted onto a BARE category
+    # (RC4 / RC4-source). V28's dom_cat_count doesn't describe those pages — the
+    # enrichment happens after it — so the H1 lift's thin-page gate would have no
+    # counter-evidence on exactly the route that scores them. See
+    # apply_h1_overlap_lift's dest_count.
+    appended_dest_count = None
     search_derived_total = None
     search_derived_dom_cat = ''
     search_derived_dom_share = None
@@ -3432,6 +3438,9 @@ def process_url_v2(args):
                 final_redirect_url = (f"https://www.beslist.nl/products/"
                                       f"{parsed.main_category}/{parsed.subcategory_name}"
                                       f"/c/" + "~~".join(_ps_frags))
+                _v55_c = [p.get('count') for p in _ps_picks if p.get('count') is not None]
+                if _v55_c:  # thinnest facet on the page bounds it (RC4-source)
+                    appended_dest_count = min(_v55_c)
                 appended_value_names.extend(p['value_name'] for p in _ps_picks
                                             if p.get('value_name'))
                 final_redirect_cat_name = category_lookup.get(
@@ -3477,6 +3486,9 @@ def process_url_v2(args):
                 _r4_frags = [f"{p['facet_name']}~{p['value_id']}" for p in _r4_picks]
                 final_redirect_url = (final_redirect_url.rstrip('/')
                                       + "/c/" + "~~".join(_r4_frags))
+                _v55_c = [p.get('count') for p in _r4_picks if p.get('count') is not None]
+                if _v55_c:  # thinnest facet on the page bounds it (RC4)
+                    appended_dest_count = min(_v55_c)
                 appended_value_names.extend(p['value_name'] for p in _r4_picks
                                             if p.get('value_name'))
                 final_match_type = 'search_derived_samecat_faceted'
@@ -3825,8 +3837,11 @@ def process_url_v2(args):
     if final_redirect_url:
         h1_overlap, h1_query_coverage, _h1_target_coverage = h1_overlap_parts(
             r.keyword, final_redirect_cat_name, out_facet_value_names)
+        _v55_dest = (appended_dest_count if appended_dest_count is not None
+                     else search_derived_dom_count)
         _v55_lifted = apply_h1_overlap_lift(final_score, h1_overlap,
-                                            h1_query_coverage)
+                                            h1_query_coverage,
+                                            dest_count=_v55_dest)
         if _v55_lifted != final_score:
             final_reason = ((final_reason or '')
                             + f"; [V55] H1 overlap {h1_overlap} "

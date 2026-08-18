@@ -823,10 +823,21 @@ H1_OVERLAP_LIFT_FLOOR = 90
 H1_OVERLAP_RECALL_FLOOR = 90   # the query must be near-fully represented
 H1_OVERLAP_LIFT = 10
 H1_OVERLAP_LIFT_CEILING = 89   # H1 alone never manufactures a Tier A
+# A near-empty destination gets no lift, however well its H1 reads. Set to the
+# top FACETED_COUNT_PENALTY_BANDS threshold on purpose: below 50 products V45
+# already docks the row for thinness, and a +10 H1 bonus would cancel exactly
+# that penalty. Found by testing "ketoconazol shampoo" -> Shampoo
+# /c/ingr_shamp~23982436: H1 overlap 100 (the page names precisely what the
+# searcher typed) over a destination holding ONE product — 79 - 10 + 10 = 89,
+# i.e. promoted into the production tier by cancelling the thin-page signal.
+# The two signals are independent: "the page is about the right thing" and
+# "there is nothing on it" can both be true, and the second one wins.
+H1_OVERLAP_MIN_DEST_COUNT = 50
 
 
 def apply_h1_overlap_lift(score: int, overlap: Optional[int],
-                          query_coverage: Optional[int]) -> int:
+                          query_coverage: Optional[int],
+                          dest_count: Optional[int] = None) -> int:
     """V55: raise a score whose redirect H1 genuinely echoes the R-URL H1.
 
     A near-identical H1 pair means the destination page names the same product
@@ -842,14 +853,22 @@ def apply_h1_overlap_lift(score: int, overlap: Optional[int],
         scores fine today;
       * gated on query_coverage as well as overlap, so a redirect that dropped
         a query token can't buy the bonus with a tidy target side;
+      * gated on dest_count, so it can never cancel V45's thin-page penalty —
+        see H1_OVERLAP_MIN_DEST_COUNT;
       * capped at H1_OVERLAP_LIFT_CEILING, so H1 alone can't promote a row into
         the Tier A production set;
       * a score of 0 (hard-rejected by V27/V38/V39 or a probe guard) stays 0.
+
+    dest_count is the AND-match product count behind the destination (V28's
+    dom_cat_count). None means "no search signal for this row" — unknown, not
+    zero, so the lift still applies; there is no counter-evidence to weigh.
     """
     if not score or overlap is None:
         return score
     if overlap < H1_OVERLAP_LIFT_FLOOR:
         return score
     if (query_coverage or 0) < H1_OVERLAP_RECALL_FLOOR:
+        return score
+    if dest_count is not None and dest_count < H1_OVERLAP_MIN_DEST_COUNT:
         return score
     return max(score, min(score + H1_OVERLAP_LIFT, H1_OVERLAP_LIFT_CEILING))

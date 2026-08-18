@@ -361,7 +361,7 @@ def _write_xlsx_output(df, csv_path: Path) -> Path:
 
     Output schema (per 2.0 changes):
       old url | new url | score | main_category | deepest_category | h1 |
-      h1_match | visits | revenue | reason
+      h1_match | target_products | visits | revenue | reason
     """
     import pandas as pd
 
@@ -386,6 +386,11 @@ def _write_xlsx_output(df, csv_path: Path) -> Path:
     # Ketoconazol" (qualifier kept) — see reliability_scorer.h1_overlap_parts.
     # >= 90 is what earns the score lift; the reason column names it when it did.
     out["h1_match"] = df.get("h1_overlap", pd.Series(dtype="Int64"))
+    # V55: products behind the destination (V28's AND-match count for the chosen
+    # category). Sits next to h1_match on purpose — together they say whether the
+    # page is about the right thing AND whether anything is on it. Under 50 the
+    # h1_match no longer earns a score lift; see H1_OVERLAP_MIN_DEST_COUNT.
+    out["target_products"] = df.get("search_derived_dom_count", pd.Series(dtype="Int64"))
     out["visits"] = df.get("visits", pd.Series(dtype=object))
     out["revenue"] = df.get("visit_rev", pd.Series(dtype=object))
     out["reason"] = df.get("reason", pd.Series(dtype=object))
@@ -408,7 +413,7 @@ def _write_xlsx_output(df, csv_path: Path) -> Path:
         ws = wb.active
         center = Alignment(horizontal="center", vertical="center")
         col_idx = {name: i + 1 for i, name in enumerate(out.columns)}
-        for name in ("score", "h1_match", "visits", "revenue"):
+        for name in ("score", "h1_match", "target_products", "visits", "revenue"):
             ci = col_idx.get(name)
             if not ci:
                 continue

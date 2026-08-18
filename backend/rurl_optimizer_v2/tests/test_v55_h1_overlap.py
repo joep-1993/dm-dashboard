@@ -83,10 +83,15 @@ def test_short_tokens_do_not_bridge_into_longer_words():
 
 # --- the lift is narrow, one-way and capped --------------------------------
 
-def test_row_110_gets_the_lift():
-    """RC4 flat-sets 70 for an enriched bare category; the H1s are twins."""
+def test_rc4_route_lifts_when_the_destination_is_healthy():
+    """RC4 flat-sets 70 for an enriched bare category regardless of how well
+    that enriched page actually matches. With twin H1s AND real inventory behind
+    the facet, that 70 becomes 80 — scoring the answer instead of the branch.
+
+    Row 110 itself does not reach here: its facet holds one product, see
+    test_row_110_gets_no_lift_because_its_destination_holds_one_product."""
     ov, q_cov, _ = h1_overlap_parts('ketoconazol shampoo', 'Shampoo', 'Ketoconazol')
-    lifted = apply_h1_overlap_lift(70, ov, q_cov)
+    lifted = apply_h1_overlap_lift(70, ov, q_cov, dest_count=600)
     assert lifted == 80, lifted
     assert get_reliability_tier(lifted) == 'B'
 
@@ -131,16 +136,21 @@ def test_compound_head_containment_is_a_known_false_positive():
     difference is search-derived dominance, not the H1.
 
     Pinned rather than papered over, because the CONSEQUENCE is bounded and that
-    is what makes the lift safe: on the 497-row f4383643 corpus this row went
-    54 -> 64 and stayed in tier C, where a human reviews it. Tighten this only
-    together with a dominance guard — the precision-side variants that kill it
-    also killed 8 correct lifts.
+    is what makes the lift safe. Tighten the METRIC only together with a
+    dominance guard — the precision-side variants that kill this row also killed
+    8 correct lifts.
+
+    On the f4383643 corpus the dest_count gate happens to catch this one anyway
+    (39 products behind Voetbaltafels), which is luck, not design: the metric
+    still reads 100. Both facts are asserted so a future change to either the
+    metric or the gate has to face them.
     """
     ov, q_cov, _ = h1_overlap_parts('inklapbare tafel', 'Voetbaltafels', 'Inklapbaar')
-    assert ov >= 90 and q_cov >= 90          # the false positive, recorded
-    lifted = apply_h1_overlap_lift(54, ov, q_cov)
+    assert ov >= 90 and q_cov >= 90          # the metric's false positive, recorded
+    assert apply_h1_overlap_lift(54, ov, q_cov, dest_count=39) == 54   # gate catches it
+    lifted = apply_h1_overlap_lift(54, ov, q_cov, dest_count=800)      # if it had not
     assert lifted == 64
-    assert get_reliability_tier(lifted) == 'C'   # never reaches production
+    assert get_reliability_tier(lifted) == 'C'   # still never reaches production
 
 
 def test_generic_prefix_containment_is_the_case_worth_keeping():
@@ -157,3 +167,41 @@ def test_nan_fields_read_back_from_the_output_csv_do_not_crash():
     as a float NaN when a run's csv is read back for analysis."""
     assert compute_h1_overlap('shampoo', float('nan'), float('nan')) == 0
     assert compute_h1_overlap('shampoo', 'Shampoo', float('nan')) == 100
+
+
+# --- a perfect H1 over an empty page earns nothing --------------------------
+
+def test_row_110_gets_no_lift_because_its_destination_holds_one_product():
+    """The test Joep asked for, and the reason the answer is "no".
+
+    "ketoconazol shampoo" -> Shampoo /c/ingr_shamp~23982436 has a flawless H1:
+    the page names exactly what the searcher typed, overlap 100. But the
+    destination holds ONE product. Verified against the live Search API on
+    2026-08-18: filters[ingr_shamp][0]=23982436 on gezond_mooi_560593 returns
+    total 1, and 23982436 is not among the 24 ingr_shamp values the category
+    surfaces at all (a limit>1 call returns 17.584 — the OR-fallback total, the
+    `total` lies that pa-memory warns about; hold out with limit=1).
+
+    V45 had already docked exactly -10 for that thinness via
+    FACETED_COUNT_PENALTY_BANDS. Without the dest_count gate the +10 H1 bonus
+    cancels it and lands the row on 89 — inside the production tier — on the
+    strength of an H1 alone. "The page is about the right thing" and "there is
+    nothing on it" are independent, and the second one wins.
+    """
+    ov, q_cov, _ = h1_overlap_parts('ketoconazol shampoo', 'Shampoo', 'Ketoconazol')
+    assert ov == 100 and q_cov == 100
+    assert apply_h1_overlap_lift(79, ov, q_cov, dest_count=2) == 79      # gated
+    assert apply_h1_overlap_lift(79, ov, q_cov, dest_count=None) == 89   # unknown -> lift
+    assert apply_h1_overlap_lift(79, ov, q_cov, dest_count=1084) == 89   # healthy -> lift
+
+
+def test_thin_destination_gate_uses_the_v45_faceted_threshold():
+    """Anything V45 penalises for thinness must not be liftable, or the bonus
+    just cancels the penalty."""
+    from src.reliability_scorer import (FACETED_COUNT_PENALTY_BANDS,
+                                        H1_OVERLAP_MIN_DEST_COUNT)
+    assert H1_OVERLAP_MIN_DEST_COUNT == FACETED_COUNT_PENALTY_BANDS[0][0]
+    for cnt in (0, 1, 2, 19, 49):
+        assert apply_h1_overlap_lift(70, 100, 100, dest_count=cnt) == 70
+    for cnt in (50, 200, 5000):
+        assert apply_h1_overlap_lift(70, 100, 100, dest_count=cnt) == 80
