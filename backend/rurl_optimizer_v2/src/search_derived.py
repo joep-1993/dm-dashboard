@@ -401,6 +401,24 @@ def _build_redirect_url(maincat: str, classified: dict) -> Optional[str]:
     sem_score = classified.get("dom_cat_semantic_score") or 0
     if share < DOMINANCE_THRESHOLD and sem_score < 2:
         return None
+    # V58 (2026-08-18): the slug went into the url unchecked, and the fallback
+    # sampling path above can hand back the MAIN category's own slug (it takes
+    # each product's categories[-1], which is the maincat when the product isn't
+    # filed deeper). That produced /products/gezond_mooi/gezond_mooi/ for "anwb",
+    # /products/eten_drinken/eten_drinken/ for "a.h" and
+    # /products/huis_tuin/huis_tuin/ for "optidee bestellen" — a subcategory
+    # segment that doesn't exist in the taxonomy. The same path can also return a
+    # name and a slug from different levels ('Woonaccessoires' with slug
+    # 'huis_tuin'), so the slug simply can't be trusted without a shape check.
+    # Every real Beslist subcategory slug is <maincat>_<digits>[_<digits>]; no
+    # numeric segment means this is not one. Bail out rather than emit a url we
+    # know is wrong — base_redirect for the faceted append paths is built from
+    # this same value, so the check covers those too.
+    if slug == maincat or not any(part.isdigit()
+                                  for part in str(slug).split('_')):
+        logger.debug(f"V58: refusing search-derived url for ({maincat}, "
+                     f"slug={slug!r}) — not a subcategory slug")
+        return None
     return f"https://www.beslist.nl/products/{maincat}/{slug}/"
 
 
