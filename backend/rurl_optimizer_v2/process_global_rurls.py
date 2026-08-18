@@ -102,7 +102,9 @@ def process_global_url(args):
 
     url, keyword = args
 
-    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity, _v27_reject_reason
+    from src.reliability_scorer import (calculate_reliability_score, get_reliability_tier,
+                                       compute_h1_similarity, _v27_reject_reason,
+                                       h1_overlap_parts, apply_h1_overlap_lift)
     from src.validation_rules import (
         STOPWORDS, SHOP_NAMES, SUBCATEGORY_MATCH_THRESHOLD
     )
@@ -488,6 +490,20 @@ def process_global_url(args):
             unmatched_keywords=unmatched_keywords,
         )
         reliability_tier = get_reliability_tier(reliability_score)
+
+    # V55: symmetric H1-overlap lift. No cascade runs on the global path, so
+    # r.facet_value_names already describes the emitted url — only the lift is
+    # needed here, not main_parallel_v2's post-cascade refresh. Lift-only and
+    # capped below Tier A; see apply_h1_overlap_lift.
+    h1_overlap, h1_query_coverage = 0, 0
+    if r.success:
+        h1_overlap, h1_query_coverage, _ = h1_overlap_parts(
+            keyword, redirect_cat_name, r.facet_value_names)
+        _v55_lifted = apply_h1_overlap_lift(reliability_score, h1_overlap,
+                                            h1_query_coverage)
+        if _v55_lifted != reliability_score:
+            reliability_score = _v55_lifted
+            reliability_tier = get_reliability_tier(reliability_score)
     # V27: only surface the reason when the scorer actually rejected
     # (score=0). V32: subcategory-name matches now run V27 in the scorer too,
     # so this surfaces their long-unmatched rejections; the score==0 gate
@@ -514,6 +530,8 @@ def process_global_url(args):
         'reliability_score': reliability_score,
         'reliability_tier': reliability_tier,
         'h1_similarity': h1_similarity,  # V26: synthetic H1 overlap (0-100)
+        'h1_overlap': h1_overlap,  # V55: symmetric H1 overlap (0-100)
+        'h1_query_coverage': h1_query_coverage,  # V55: % of query tokens the H1 names
         'reject_reason': reject_reason,  # V27: why the row was hard-rejected
         'matched_keywords': ', '.join(matched_keywords),
         'unmatched_keywords': ', '.join(unmatched_keywords),

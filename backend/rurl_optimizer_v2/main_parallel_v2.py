@@ -92,6 +92,33 @@ def load_data_cache(cache_file):
 # Global for worker processes
 _worker_data = None
 
+# V55: facet_value_id -> facet_value_name, memoized per worker process. Used to
+# re-derive the value names of the SETTLED redirect url (the cascade's later
+# append paths don't refresh out_facet_value_names). Ids are keyed as strings so
+# they can be looked up straight from the url fragment.
+_FACET_VALUE_NAME_LOOKUP = None
+
+
+def _facet_value_name_lookup(facet_filter):
+    global _FACET_VALUE_NAME_LOOKUP
+    if _FACET_VALUE_NAME_LOOKUP is None:
+        try:
+            _fdf = facet_filter.facets_df
+            _FACET_VALUE_NAME_LOOKUP = {}
+            for _k, _v in zip(_fdf['facet_value_id'], _fdf['facet_value_name']):
+                if _v is None or str(_v) == 'nan':
+                    continue  # 13 values in the snapshot carry no label
+                # a NaN anywhere in the column would make it float dtype, and
+                # str(23982436.0) would never match the url fragment's '23982436'
+                try:
+                    _key = str(int(_k))
+                except (TypeError, ValueError):
+                    _key = str(_k)
+                _FACET_VALUE_NAME_LOOKUP[_key] = _v
+        except Exception:
+            _FACET_VALUE_NAME_LOOKUP = {}
+    return _FACET_VALUE_NAME_LOOKUP
+
 
 # V34: when True, the multi-facet rescue appends an explicit query size
 # (XL, 122-128) onto the assembled /c/ URL. ON by default (2026-06-06) — the
@@ -1269,7 +1296,9 @@ def process_url_v2(args):
     _relax_depth = args[2] if len(args) > 2 else 0  # V50: over-specific relaxation
 
     import re  # Nodig voor DIMENSION_PATTERN + V30 coverage check (moet vóór gebruik staan)
-    from src.reliability_scorer import calculate_reliability_score, get_reliability_tier, compute_h1_similarity, _v27_reject_reason
+    from src.reliability_scorer import (calculate_reliability_score, get_reliability_tier,
+                                       compute_h1_similarity, _v27_reject_reason,
+                                       h1_overlap_parts, apply_h1_overlap_lift)
     from src.search_derived import derive_redirect as derive_search_redirect
     from src.facet_probe import derive_facet as derive_search_facet
     from src.validation_rules import STOPWORDS, SHOP_NAMES
@@ -1387,6 +1416,8 @@ def process_url_v2(args):
             'reliability_score': 60,  # C tier: stopwords-only query has nothing to match — clean-category redirect is safe but always needs a review
             'reliability_tier': 'C',
             'h1_similarity': 0,
+            'h1_overlap': 0,
+            'h1_query_coverage': 0,
             'reject_reason': '',
             'matched_keywords': '',
             'unmatched_keywords': ', '.join(_kw_tokens),
@@ -1442,6 +1473,8 @@ def process_url_v2(args):
                 'reliability_score': 80,
                 'reliability_tier': 'B',
                 'h1_similarity': 0,
+                'h1_overlap': 0,
+                'h1_query_coverage': 0,
                 'reject_reason': '',
                 'matched_keywords': '',
                 'unmatched_keywords': ', '.join(_non_stop_non_shop),
@@ -2583,6 +2616,8 @@ def process_url_v2(args):
                         'reliability_score': _xfb['reliability_score'],
                         'reliability_tier': _xfb['reliability_tier'],
                         'h1_similarity': 0,
+                        'h1_overlap': 0,
+                        'h1_query_coverage': 0,
                         'reject_reason': '',
                         'flag_for_review': '',
                         'search_derived_total': search_derived_total,
@@ -2620,6 +2655,8 @@ def process_url_v2(args):
                     'reliability_score': 0,
                     'reliability_tier': 'D',
                     'h1_similarity': 0,
+                    'h1_overlap': 0,
+                    'h1_query_coverage': 0,
                     'reject_reason': reject_reason,
                     'flag_for_review': '',
                     'search_derived_total': search_derived_total,
@@ -3735,6 +3772,70 @@ def process_url_v2(args):
                 out_facet_value_names = ''
                 out_facet_count = 0
 
+    # V55 (2026-08-18): describe the FINAL url, then score its H1 against the
+    # R-URL's. Two things were stale here.
+    #
+    # (a) The out_facet_* fields were only refreshed by the branches that set
+    #     them. Every LATER cascade rewrite that appends a facet — RC4's
+    #     in-subcat enrichment, RC4-source, V53's subcat alignment — left them
+    #     behind, so a row could ship /c/ingr_shamp~23982436 while reporting no
+    #     facet at all. That is why the xlsx `h1` column read a bare "Shampoo"
+    #     for "ketoconazol shampoo" even though the redirect carries the
+    #     Ketoconazol facet. Rebuild all four from the settled url.
+    # (b) h1_similarity was computed once, before the cascade, from the ORIGINAL
+    #     matcher result — so on every rewritten row it described a url that is
+    #     no longer the output. Recompute it here.
+    #
+    # Resolution order for the value names: the facets.csv snapshot first (the
+    # service keeps it under FACETS_MAX_AGE_DAYS, so it holds the ids the live
+    # probe returns), then the names the cascade itself appended, for the case
+    # where a just-created facet value isn't in the snapshot yet.
+    if final_redirect_url and '/c/' in final_redirect_url:
+        _v55_frag = final_redirect_url.split('/c/', 1)[1].rstrip('/')
+        _v55_axes = [p for p in _v55_frag.split('~~') if '~' in p]
+        if _v55_axes:
+            out_facet_fragment = _v55_frag
+            out_facet_names = ', '.join(p.split('~', 1)[0] for p in _v55_axes)
+            out_facet_count = len(_v55_axes)
+            _v55_names = []
+            _v55_lookup = _facet_value_name_lookup(facet_filter)
+            for _p in _v55_axes:
+                _vid = _p.split('~', 1)[1]
+                _nm = _v55_lookup.get(_vid)
+                if _nm and _nm not in _v55_names:
+                    _v55_names.append(_nm)
+            for _nm in appended_value_names:
+                if _nm and _nm not in _v55_names:
+                    _v55_names.append(_nm)
+            if _v55_names:
+                out_facet_value_names = ', '.join(_v55_names)
+        h1_similarity = compute_h1_similarity(
+            keyword=r.keyword,
+            original_cat_name=original_cat_name,
+            redirect_cat_name=final_redirect_cat_name,
+            facet_value_names=out_facet_value_names,
+        )
+
+    # V55: symmetric H1 overlap + its lift. Judges the ANSWER (does the
+    # destination page name what the searcher named?) instead of the branch that
+    # found it, which is what makes it worth adding: the cascade reaches one
+    # target down several routes whose flat constants disagree about it.
+    # Lift-only and capped — see apply_h1_overlap_lift.
+    h1_overlap, h1_query_coverage, _h1_target_coverage = (0, 0, 0)
+    if final_redirect_url:
+        h1_overlap, h1_query_coverage, _h1_target_coverage = h1_overlap_parts(
+            r.keyword, final_redirect_cat_name, out_facet_value_names)
+        _v55_lifted = apply_h1_overlap_lift(final_score, h1_overlap,
+                                            h1_query_coverage)
+        if _v55_lifted != final_score:
+            final_reason = ((final_reason or '')
+                            + f"; [V55] H1 overlap {h1_overlap} "
+                            + f"({final_redirect_cat_name or ''}"
+                            + (f" {out_facet_value_names}" if out_facet_value_names else '')
+                            + f" vs '{r.keyword}'): {final_score} -> {_v55_lifted}")
+            final_score = _v55_lifted
+            final_tier = get_reliability_tier(final_score)
+
     return {
         'original_url': r.original_url,
         'main_category': r.main_category,
@@ -3752,6 +3853,8 @@ def process_url_v2(args):
         'reliability_score': final_score,
         'reliability_tier': final_tier,
         'h1_similarity': h1_similarity,  # V26: synthetic H1 overlap (0-100)
+        'h1_overlap': h1_overlap,  # V55: symmetric H1 overlap (0-100)
+        'h1_query_coverage': h1_query_coverage,  # V55: % of query tokens the H1 names
         'reject_reason': reject_reason,  # V27: why the row was hard-rejected
         'flag_for_review': flag_for_review,  # V28: legacy-confident but search disagrees
         'search_derived_total': search_derived_total,

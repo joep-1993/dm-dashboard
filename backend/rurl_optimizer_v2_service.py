@@ -360,7 +360,8 @@ def _write_xlsx_output(df, csv_path: Path) -> Path:
     """Project to the user-facing columns and write as .xlsx.
 
     Output schema (per 2.0 changes):
-      old url | new url | score | main_category | deepest_category | visits | revenue | reason
+      old url | new url | score | main_category | deepest_category | h1 |
+      h1_match | visits | revenue | reason
     """
     import pandas as pd
 
@@ -380,6 +381,11 @@ def _write_xlsx_output(df, csv_path: Path) -> Path:
     out["h1"] = (
         redirect_cat.str.strip() + " " + facet_vals.str.replace(",", " ", regex=False).str.strip()
     ).str.replace(r"\s+", " ", regex=True).str.strip()
+    # V55: how well that H1 matches the R-URL's own H1 (the keyword), 0-100.
+    # Symmetric, so it separates "Shampoo" (qualifier dropped) from "Shampoo
+    # Ketoconazol" (qualifier kept) — see reliability_scorer.h1_overlap_parts.
+    # >= 90 is what earns the score lift; the reason column names it when it did.
+    out["h1_match"] = df.get("h1_overlap", pd.Series(dtype="Int64"))
     out["visits"] = df.get("visits", pd.Series(dtype=object))
     out["revenue"] = df.get("visit_rev", pd.Series(dtype=object))
     out["reason"] = df.get("reason", pd.Series(dtype=object))
@@ -402,7 +408,7 @@ def _write_xlsx_output(df, csv_path: Path) -> Path:
         ws = wb.active
         center = Alignment(horizontal="center", vertical="center")
         col_idx = {name: i + 1 for i, name in enumerate(out.columns)}
-        for name in ("score", "visits", "revenue"):
+        for name in ("score", "h1_match", "visits", "revenue"):
             ci = col_idx.get(name)
             if not ci:
                 continue

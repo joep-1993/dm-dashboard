@@ -656,3 +656,200 @@ def get_reliability_description(tier: str) -> str:
         'D': 'Onbetrouwbaar - niet gebruiken'
     }
     return descriptions.get(tier, 'Onbekend')
+
+
+# ==========================================================================
+# V55: SYMMETRIC H1 OVERLAP
+# ==========================================================================
+# compute_h1_similarity (V26) uses fuzz.token_set_ratio, which returns 100
+# whenever one side's token set is a SUBSET of the other's. That makes it blind
+# to exactly the distinction an H1 comparison is wanted for. For the query
+# "ketoconazol shampoo":
+#     redirect H1 "Shampoo"             -> token_set_ratio 100
+#     redirect H1 "Shampoo Ketoconazol" -> token_set_ratio 100
+# The first dropped the qualifier the searcher typed, the second kept it, and
+# the metric cannot tell them apart. Every bare-category redirect whose category
+# name appears in the query scores a perfect 100, so the signal says nothing
+# there — and those are precisely the rows an H1 check should judge.
+#
+# compute_h1_overlap is symmetric. It penalises BOTH a query token the redirect
+# H1 doesn't represent (the dropped 'ketoconazol') AND a redirect-H1 token the
+# query never asked for (a facet value or an alien category noun bolted on top
+# of the intent). The score is the F1 of the two per-side coverage rates, so 100
+# means the two H1s name the same things and nothing else.
+# ==========================================================================
+
+# Commercial/quality tail that carries no product intent. Dropped from BOTH
+# sides so it can neither earn nor cost overlap. Mirrors _COV_FILLER in
+# main_parallel_v2's V45 coverage recompute, plus the query-side buy words.
+_H1_FILLER = {
+    'kopen', 'koop', 'goedkoop', 'goedkope', 'goedkoopste', 'beste',
+    'aanbieding', 'aanbiedingen', 'sale', 'outlet', 'online', 'prijs', 'prijzen',
+    'review', 'reviews', 'mooi', 'mooie', 'mooiste', 'leuk', 'leuke', 'handig',
+    'handige', 'simpel', 'simpele', 'praktisch', 'praktische',
+    # Dutch function words. Kept local rather than importing STOPWORDS: that set
+    # is tuned for match rejection and also holds size/colour words we DO want
+    # to weigh here ("zwart" in the query vs "Zwart" on the target is signal).
+    'de', 'het', 'een', 'en', 'of', 'met', 'zonder', 'voor', 'van', 'in', 'op',
+    'aan', 'bij', 'te', 'tot', 'per', 'als', 'om', 'die', 'dat', 'is', 'zijn',
+}
+
+_H1_TOKEN_RE = re.compile(r'[a-z0-9]+')
+
+
+def _h1_str(v) -> str:
+    """Coerce a field to text. Category/value names arrive as '' from the
+    optimizer but as a float NaN when a row is read back from the output csv.
+    """
+    if v is None or isinstance(v, float):
+        return ''
+    return v if isinstance(v, str) else str(v)
+
+
+def _h1_fold(text) -> str:
+    """Strip diacritics so 'geisoleerd' matches 'Geïsoleerd'. Mirrors
+    facet_probe._fold. Applied to the whole string BEFORE tokenising — folding
+    per token would be too late, since the [a-z0-9]+ tokeniser splits
+    'geïsoleerd' into 'ge' + 'soleerd' at the accented letter.
+    """
+    import unicodedata as _ud
+    return "".join(c for c in _ud.normalize("NFKD", _h1_str(text).lower())
+                   if not _ud.combining(c))
+
+
+def _h1_norm(tok: str) -> str:
+    """Strip a Dutch plural/-e suffix, then collapse doubled vowels.
+
+    Mirrors facet_probe._stem + KeywordMatcher._collapse_double_vowels, so
+    'panelen'/'paneel' and 'grote'/'groot' land on the same key. Kept local
+    instead of importing those modules — this scorer is imported by the export
+    pipeline too and shouldn't drag pandas/requests along.
+    """
+    if len(tok) > 3 and tok.endswith('s'):
+        tok = tok[:-1]
+    if len(tok) > 3 and tok.endswith('e'):
+        tok = tok[:-1]
+    return re.sub(r'([aeou])\1+', r'\1', tok)
+
+
+def _h1_tokens(text: str) -> list:
+    """Normalised, de-duplicated, filler-free tokens of one H1."""
+    out = []
+    for raw in _H1_TOKEN_RE.findall(_h1_fold(text)):
+        if raw in _H1_FILLER:
+            continue
+        tok = _h1_norm(raw)
+        if not tok or tok in _H1_FILLER or tok in out:
+            continue
+        out.append(tok)
+    return out
+
+
+def _h1_bridges(a: str, b: str) -> bool:
+    """Two normalised tokens name the same thing.
+
+    Equal, or one contains the other with both >= 4 chars ('mand' in 'kastmand',
+    'shampoo' in 'antiroosshampoo'). The length floor keeps short fragments
+    ('tv', 'led') from bridging into unrelated longer words — the same rule the
+    V45 coverage recompute uses.
+    """
+    if a == b:
+        return True
+    return len(a) >= 4 and len(b) >= 4 and (a in b or b in a)
+
+
+def h1_overlap_parts(
+    keyword: str,
+    redirect_cat_name: Optional[str],
+    facet_value_names: Optional[str],
+) -> tuple:
+    """V55: (overlap, query_coverage, target_coverage), each 0-100.
+
+    R-URL H1    ≈ the keyword (what the searcher typed).
+    Redirect H1 ≈ "<deepest category> <facet value(s)>" — how Beslist renders a
+    /c/ facet page, and the same construction the xlsx `h1` column shows.
+
+    The ORIGINAL category is deliberately not folded into the query side (unlike
+    compute_h1_similarity): a maincat label the searcher never typed
+    ('Drogisterij') is not part of the intent and only dilutes the denominator.
+
+    The redirect category name IS counted against target coverage. It damps the
+    overlap when the destination's subject noun is alien to the query, which is
+    the "right facet values, wrong category" failure ("rubberen tegels" ->
+    Zwembadgrondzeilen /c/materiaal~Rubber~~t_zwembadgrondzeil~Tegels: both
+    values echo the query, the category does not).
+
+    overlap is the F1 of the two coverages — symmetric, and 100 only when both
+    sides name the same things. All three are 0 when either side is empty.
+
+    Known limitation: the >= 4-char containment bridge cannot tell a Dutch
+    hyponym compound from an inflection. 'tafel' is inside 'voetbaltafel' just
+    as 'kast' is inside 'opbergkast', so "inklapbare tafel" -> Voetbaltafels
+    scores 100 (wrong) with the same rule that earns "kasten 30 cm diep" ->
+    Opbergkasten its 100 (right). That is semantics, not tokens — the signal
+    that knows the difference is search-derived dominance. Both cases are pinned
+    in tests/test_v55_h1_overlap.py; the lift stays small and capped precisely
+    because of this.
+    """
+    q = _h1_tokens(keyword)
+    t = _h1_tokens(_h1_str(redirect_cat_name) + ' '
+                   + _h1_str(facet_value_names).replace(',', ' '))
+    if not q or not t:
+        return 0, 0, 0
+    recall = sum(1 for a in q if any(_h1_bridges(a, b) for b in t)) / len(q)
+    precision = sum(1 for b in t if any(_h1_bridges(a, b) for a in q)) / len(t)
+    if recall + precision == 0:
+        return 0, 0, 0
+    f1 = 100 * 2 * recall * precision / (recall + precision)
+    return int(round(f1)), int(round(100 * recall)), int(round(100 * precision))
+
+
+def compute_h1_overlap(
+    keyword: str,
+    redirect_cat_name: Optional[str],
+    facet_value_names: Optional[str],
+) -> int:
+    """V55: symmetric H1 overlap (0-100). See h1_overlap_parts."""
+    return h1_overlap_parts(keyword, redirect_cat_name, facet_value_names)[0]
+
+
+# V55 lift thresholds. ONE band, set high: with 1-3 token queries the F1 is
+# heavily quantised (100 / 80 / 67 / 40 / 0), so a floor of 90 means "the two
+# H1s are twins" and nothing softer earns anything. A second band at 75 was
+# tried and dropped — it lifted "rubberen tegels" -> Zwembadgrondzeilen
+# (overlap 80: both facet values echo the query, the category doesn't), which is
+# exactly the row an H1 check must NOT vouch for.
+H1_OVERLAP_LIFT_FLOOR = 90
+H1_OVERLAP_RECALL_FLOOR = 90   # the query must be near-fully represented
+H1_OVERLAP_LIFT = 10
+H1_OVERLAP_LIFT_CEILING = 89   # H1 alone never manufactures a Tier A
+
+
+def apply_h1_overlap_lift(score: int, overlap: Optional[int],
+                          query_coverage: Optional[int]) -> int:
+    """V55: raise a score whose redirect H1 genuinely echoes the R-URL H1.
+
+    A near-identical H1 pair means the destination page names the same product
+    the searcher named — the strongest end-to-end evidence a redirect is right,
+    because it judges the ANSWER rather than the branch that found it. That
+    matters here: the cascade reaches one target down several routes, and the
+    flat per-branch constants (RC4's 70, samecat's 65, subcat-rescue's 75, ...)
+    disagree about the same URL. Applied once, after the cascade settles, so the
+    route stops deciding the score on its own.
+
+    Deliberately conservative:
+      * lift-only — never subtracts, so it cannot suppress a redirect that
+        scores fine today;
+      * gated on query_coverage as well as overlap, so a redirect that dropped
+        a query token can't buy the bonus with a tidy target side;
+      * capped at H1_OVERLAP_LIFT_CEILING, so H1 alone can't promote a row into
+        the Tier A production set;
+      * a score of 0 (hard-rejected by V27/V38/V39 or a probe guard) stays 0.
+    """
+    if not score or overlap is None:
+        return score
+    if overlap < H1_OVERLAP_LIFT_FLOOR:
+        return score
+    if (query_coverage or 0) < H1_OVERLAP_RECALL_FLOOR:
+        return score
+    return max(score, min(score + H1_OVERLAP_LIFT, H1_OVERLAP_LIFT_CEILING))
