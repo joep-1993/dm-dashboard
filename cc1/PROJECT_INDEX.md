@@ -17,7 +17,7 @@ dm-tools/                    # DM Tools - Digital Marketing Tools Platform (Port
 │   ├── faq_service.py        # FAQ generation service
 │   ├── content_publisher.py  # Publishes content_top + FAQ blobs to website-configuration /automated-content
 │   ├── faq_v2_publisher.py   # "Publish 2.0": FAQ Q&A pairs -> website-configuration /faq (one record per QUESTION, incremental via pa.faq_v2_push_state)
-│   ├── healthscore_keywords.py # HS2.0 -> Keywords API (keywords.api.beslist.nl POST /sitemap): payload build/validate/diff, dry-run; push() gated behind confirm_token, snapshot_live() is the only undo
+│   ├── healthscore_keywords.py # HS2.0 -> Keywords API (keywords.api.beslist.nl POST /sitemap): payload build/validate/diff, dry-run; push() gated behind confirm_token, snapshot_live() is the only undo; MAX_URL_LEN=255 want de API kapt langere urls stil af (LEARNINGS 2026-08-18)
 │   │   # HS2.0 TWEE BEZOEKDEFINITIES — verwissel ze niet:
 │   │   #   _SEO_JOIN/_SEO_WHERE  = dekkings-KPI + URL-score. SEO-only EN url-regex www.beslist.nl.
 │   │   #   _ALL_JOIN/_ALL_WHERE  = cap-sizing (knik-punt + klimatologie). Alle kanalen.

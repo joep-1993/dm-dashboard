@@ -1,6 +1,57 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## De Keywords API kapt urls stil af op 255 tekens (2026-08-18)
+
+Bij de read-back van de HS2.0-re-run kwamen 11 van de 12 buckets byte-identiek terug en
+Kantoor niet: zelfde aantal records (16.918), maar 9 paren weken af. De anchors waren
+identiek — het verschil zat in de **url**. Die negen waren 272-308 tekens lang en de GET gaf
+ze terug op **exact 255**.
+
+Het `url`-veld is dus een `varchar(255)` en de API kapt zonder klagen af: de POST antwoordt
+200, `after` klopt met het aantal records dat je stuurde, en `validate_payload` zag er niets
+in. **Alleen een read-back tegen de payload vindt dit.** Ze stonden vermoedelijk al sinds de
+push van 4 augustus als afgekapte, dode `/r/`-links in Kantoors sitemap.
+
+Alle negen zijn op hol geslagen `/r/`-zoekslugs uit een productbeschrijving
+(`/r/zelfklevende_beschrijfbare_tabs_voor_het_overzichtelijk_onderverdelen_en_...`) — precies
+het soort url waar de anchor ook een halve alinea is. `is_too_long()` / `MAX_URL_LEN` slaan ze
+nu over in beide payload-builders, met een eigen `too_long`-teller zodat het gerapporteerd
+wordt en niet stil verdwijnt, en `validate_payload` maakt er een fout van. Kantoor daarna
+opnieuw gepusht: 16.918 -> 16.909, nul SEO-visits verlies.
+
+**Les die breder geldt:** bij een replace-endpoint zonder DELETE is `after == len(payload)` géén
+bewijs dat er staat wat je stuurde. Vergelijk de (url, anchor)-paren, niet de aantallen.
+
+## De HS1.0-pipeline publiceert nog naar de Keywords API — Fietsen is het bewijs (2026-08-18)
+
+De blokker van 5 augustus ("wie overschrijft onze pushes?") is een stap verder. Stand na 13
+dagen: **11 van de 12 buckets stonden nog exact op onze HS2.0-selectie** (url-sets byte-identiek
+aan de bewaarde payloads), en alleen **Fietsen 38000** was weg — 8.396 rijen / 6.376 urls
+i.p.v. onze 13.326.
+
+Die live Fietsen-set is **100% een subset van `bt.new_hs_data` 'Augustus 2026'** (8.396/8.396
+rijen, url-dekking 100%). Ter contrast: Kantoor zit daar voor 14% in en Grasmaaiers voor 23%.
+`max(load_date)` in new_hs_data is 2026-08-17, met runs op 3, 5, 7, 10, 12, 14 en 17 augustus —
+de HS1.0-keten loopt dus nog en schrijft naar de API.
+
+**Wat nog niet klopt:** 361 en 38000 staan béide als `main_category_id` in HS1.0 (32 maincats),
+dus "alleen maincats" verklaart niet waarom Kantoor 13 dagen bleef staan en Fietsen niet. De
+job zelf is nog niet gevonden.
+
+**Goedkope vormtest om een bucket te herkennen zonder de payload erbij te halen:**
+
+| | HS2.0 | HS1.0 |
+|---|---|---|
+| anchors volledig lowercase | 0% | 13-18% (ruwe GSC-queries) |
+| `/r/`-aandeel | groot (Kantoor 12.224 van 16.954) | ~nul (Fietsen 8 van 8.396) |
+
+**Anchor-drift, apart hiervan:** 263 urls (~1,4% van de gepushte rijen) hadden een ander anchor
+dan onze payload terwijl de url bleef staan — `/r/motorgrasmaaier/` kreeg
+`'Motorgrasmaaier - Grasmaaiers'` waar wij `'Motorgrasmaaier'` stuurden. Beide varianten komen
+in `new_hs_data` voor (49% resp. 46%), dus ook dat wijst naar dezelfde keten. Te klein om de
+dekkingsmeting te raken.
+
 ## De titel noemde de zustercategorie, en dat was verouderde data (2026-08-18)
 
 Vervolg op de padeltekst hierboven. Joep: `h1_title 'Speedo Gezondheidsslippers'` staat op

@@ -4,6 +4,46 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-18 — HS2.0 opnieuw gedraaid en live op alle 12, tool terug in de nav
+
+- [x] **Live-check na 13 dagen: 11 van de 12 buckets stonden nog exact op onze selectie**
+      (url-sets byte-identiek aan de bewaarde payloads). Alleen **Fietsen 38000** was
+      overschreven, en die set is 100% een subset van `bt.new_hs_data` 'Augustus 2026' → de
+      **HS1.0-pipeline is de overschrijver**. Zie LEARNINGS voor het bewijs en de vormtest.
+- [x] **Alles herbouwd as-of 2026-08-18 en alle 12 gepusht, 12/12 teruggelezen en identiek.**
+      `pa.hs2_features` 1.098.271 urls (was 1.081.728); `pa.hs2_sitemap` 1.141.415 rijen /
+      3.539 cats (1.040.258 scored + 101.157 new); `pa.hs2_sitemap_maincat` 654.839 rijen /
+      32 maincats; maincat-map ververst (3.569 cats). Nieuwe standen: Stoelen 4.844,
+      Eetkamerstoelen 1.289, Sneakers 4.120, Voer 1.898, Douchewanden 238, Mobiele telefoons
+      1.524, Airconditionings 450, Dekbedovertrekken 2.568, Grasmaaiers 742, Shirts 1.978,
+      Kantoor 16.909, Fietsen 13.304. Drop-kosten **1.495 SEO-visits/90d** (eerste rollout
+      1.441), waarvan Kantoor 827 en Fietsen 427 — die laatste is HS1.0-inhoud die we
+      terugpakken. Snapshots: `Downloads/claude/hs2_payloads_20260818/` (incl.
+      `live_snapshot_361_nl_prepush.json`).
+- [x] **De new-URL-bucket zakte van 287k naar 101k** — dat bevestigt het vermoeden van 3
+      augustus dat die 287k opgeblazen was door een facet-migratie in het 20-daagse venster.
+- [x] **Caps bewust NIET herbouwd.** De per-cat seizoenscaps (21 juli) staan per
+      `calendar_month`, dus augustus zat er al in. En `pa.hs2_maincat_cap` is 1,5x de **live**
+      set: herbouwen zou Fietsens cap op HS1.0's kleinere set ankeren (6.376 i.p.v. 10.091
+      urls) en hem stil verlagen.
+- [x] **De selectie is stabiel** — de 10 testcats en Kantoor kwamen na 15 dagen binnen ~1% op
+      hetzelfde formaat terug. Fietsen is de enige grote beweging en dat is het herstel.
+- [x] **255-tekens-guard op de payload-builders** (`53e9767`). Zie LEARNINGS; Kantoor daarna
+      16.918 -> 16.909.
+- [x] **Healthscore-tool weer aangezet** (`8f9bd5e`): nav-entry alfabetisch tussen DM Review en
+      Index Checker op 34 pagina's + de tegel "Healthscore 2.0" terug in de SEO Tools-sectie
+      van dashboard.html. `/static/healthscore.html` 200 en `/api/healthscore/health` healthy,
+      dus de router draaide al. Statische bestanden komen van disk → alleen Ctrl+Shift+R nodig.
+- [ ] **Fietsen 38000 is nu de kanarie.** Komt HS1.0 hem opnieuw overschrijven, dan is de
+      publisher nog steeds actief. Wekelijks terugkijken volstaat; de vormtest uit LEARNINGS
+      kost twee GET's. #priority:high
+- [ ] **Meet de 12 tegen hun controls** (40000 Multimedia-accessoires voor Kantoor, 37000
+      Auto's voor Fietsen). Let op: de baseline is nu **18 augustus**, niet 3/4 augustus — de
+      set is opnieuw samengesteld. #priority:medium
+- [ ] **Airconditionings 9005317 krimpt in september.** Cap gaat van 567 (aug) naar 225 (sep,
+      season_index 0,24), dus de volgende run zal die categorie ongeveer halveren. Verwacht
+      gedrag, maar het ziet uit als een regressie als je het niet weet. #priority:low
+
 ### 2026-08-18 — Titels die een zustercategorie noemen: 4.503 opgeruimd
 
 Joep's Teenslippers/Gezondheidsslippers-melding. Oorzaak in de titelgenerator, niet in
@@ -2100,7 +2140,12 @@ Bestanden in `Downloads\claude\N8N`, als **nieuwe** `*_with_check.json` naast de
 
 ### 2026-08-05 — Kopteksten incrementeel publiceren, en de HS2.0-push werd overschreven
 
-- [ ] **BLOKKER: zoek uit wie nog naar de Keywords API publiceert.** Alle 12 HS2.0-categorieën
+- [ ] **BLOKKER: zoek uit wie nog naar de Keywords API publiceert.** **Update 2026-08-18: de
+      overschrijver is de HS1.0-pipeline** — de live Fietsen-set was 100% een subset van
+      `bt.new_hs_data` 'Augustus 2026' (`max(load_date)` 17 aug). De job zelf is nog niet
+      gevonden, en het is nog onverklaard waarom Kantoor 13 dagen ongemoeid bleef terwijl
+      Fietsen terugkwam — beide zijn `main_category_id` in HS1.0. Oorspronkelijke notitie: alle
+      12 HS2.0-categorieën
       stonden binnen een dag terug op hun oude inhoud (zie LEARNINGS voor het bewijs, incl.
       Grasmaaiers op 407 waar zowel pre-push als onze payload 752 was). Niets in deze repo doet
       dat behalve `healthscore_keywords.py`, en `workflow_entity` bestaat niet in de gedeelde
