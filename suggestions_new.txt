@@ -1,0 +1,55 @@
+- Hover-info blok in grafiek zelfde stijl maken als hover-info blok in SEO Stats (en aub opnemen in UI_BLUEPRINT)
+- Uiterlijk van de tabs (Overzicht, URL's, Crawl-verspilling, Categorieën, Ingest) gelijktrekken aan de tabs in Canonicals (en aub opnemen in UI_BLUEPRINT)
+- Donut-grafiek in URL-type aanpassen naar de layout van de donutgrafieken in SEO Stats (en aub opnemen in UI_BLUEPRINT)
+- Footertekst toevoegen (en aub opnemen in UI_BLUEPRINT)
+- Labels in Soort-kolom in Per bot-familie (bijv. search, ai) outlined maken en uppercase, zoals labels in DMA Exclusions
+- Kleuren in 'Facet-diepte — bekend vs onbekend' gelijktrekken aan UI_BLUEPRINT (voeg aub aan UI_BLUEPRINT toe dat de eerste 3 kleuren om te gebruiken in iedere tabel/grafiek zijn: lichtblauw, roze, lichtgroen. Kleurcodes staan in UI_BLUEPRINT)
+- De tegels (Bot-hits totaal, AI-crawlers, Productpagina's, etc.) Graag dezelfde opmaak geven als de tegels in GSD Budgets (en aub opnemen in UI_BLUEPRINT)
+- De grafiek in Hits per dag graag dezelfde opmaak geven als de grafiek in Performance per day in SEO Stats (en aub opnemen in UI_BLUEPRINT)
+- Datum selectie in Filters graag dezelfde opmaak geven als in Performance per day in SEO Stats (en aub opnemen in UI_BLUEPRINT)
+- Filter "In pa.urls" mag weg
+- URL-type filtermogelijkheden graag aanpassen naar: R-url's (url's met /r/), C-url's (url's met /c/), PLP's (url's met /p/), Cat-url's (url's met /products/), Homepage en Overige (in die volgorde van filtering, dus een url met zowel /r/ als /c/ telt mee als R-url).
+- De knoppen Reset en Toepassen naar onderen plaatsen (in de rechteronderhoek van 'row g-3 align-items-start')
+- Graag de "Nieuwe logs ophalen' knop rechts van de infotekst "23 dagen geladen · 2026-02-14 t/m 2026-03-16 · 92.897.176 bot-hits" plaatsen, en de infotekst aanpassen naar "2026-02-14 t/m 2026-03-16 geladen · 92.897.176 hits"
+- De kolomheaders in de tabel in Per bot-familie allemaal 'vast' zetten, nu zijn alleen Aandeel, in pa.urls, en Cache-hit vast.
+- De Soort-kolom in de tabel in Per bot-familie in het midden uitlijnen
+- Graag de rijen in de tabel in Per bot-familie klikbaar maken waarna een uitklapveld verschijnt die een donut-grafiek toont voor die specifieke botfamilie voor URL-type en Domein, en een staafgrafiek voor Facet-diepte
+- In Hits per dag "Ophalen" graag aanpassen naar "Dagen ophalen"
+- Graag de tegels (Bot-hits totaal, AI-crawlers, Productpagina's, etc. ) bovenaan plaatsen, daarna pas Filters
+- Graag percentages (van het totaal) tonen in de hover-info (per lijn)
+- In URL-type donutgrafiek de lijntjes met url-typen en percentages weghalen, en homepage toevoegen als lijn op de donut (inclusief hover effect)
+- de grafiek in Facet-diepte — bekend vs onbekend graag ruimtelijker maken (er is aan de onderkant veel witruimte nu)
+- In de uitklapgrafiek in Per bot-familie staat in de grafiek in Facetdiepte "Invalid Date"
+- Info "Uitsplitsing voor Googlebot — zelfde periode en filters als de pagina" mag weg uit uitklapveld
+- Facet-diepte grafiek mag een kadertje krijgen 
+- td colspan="12" heeft een hover effect waarbij de volledige rij grijs wordt. dat effect mag weg.
+- het pijltje voor "Nieuwe logs ophalen" mag weg
+- hover info-bok in "Facet-diepte — bekend vs onbekend" graag dezelfde layout als de overige hover info-blokken
+- Reset-knop in Filters mag weg
+- in Shop Cmapaigns, graag de filters 7d, 14d, 30d en 90d zo maken dat altijd dag-3 wordt gebruikt als "tot"-datum. Dus als ik vandaag (11-8) op 7d klik, moet ie 2 t/m 8 aug pakken.
+- Wil je in Bothits naast 'Top X URL's' een filter-tekstbox toevoegen waarin ik kan zoeken op bepaalde urls?
+- Wil je in Bothits in 'Top X URL's' het lettertype van de URL-kolom hetzelfde maken als in de rest van de kolommen? 
+- Ik zie in Bothits in 'Top X URL's' vee urls als '/products/gezond_mooi', '/products/mode', '/products/klussen' en '/products/huishoudelijke_apparatuur' (zonder trailing '/'). Krijgen deze url's echt op deze manier bothits of worden ze afgesneden/gesplitst/afgekapt?
+- Wil je in Bothits in Top X URL's voor de Type-kolom de waarden aanhouden zoals die bepaald zijn in Filters > URL-type?
+- Wil je in Bothits de layout van de  tabs zo maken zoals in screenshot C:\Users\JoepvanSchagen\Downloads\claude\2026-08-13 18 11 15.png (de grijze onderlijning is het hover effect, de blauw de geselecteerde tab)? En wil je (als test) het lettertype en de look/feel inm bothits ook aanpassen naar zoals in de screenshot (inclusief de layout voor datum selectie zoals in de screenshot)? 
+- Wil je in SEO Priority de knop met "Apply to Taxonomy" oranje maken?`
+- Als SEO Priority geen Run results heeft, staat er "No rows match the current filter." Graag een duidelijkere weergave met dat de run 0 acties heeft opeleverd.
+- Graag alle knoppen en stijlelementen (zoals div class "card-header" en lettertype, knopkleuren en dropdowns) aanpassen naar de stijl van de screenshiot in C:\Users\JoepvanSchagen\Downloads\claude\2026-08-13 18 11 15.png. Let op: bewaar wel de oude staat zodat we eventueel kunnen terugdraaien. 
+- Graag in Canonicals in Recent results de tabel aanpassen naar de layout als beschreven in UI_BLUEPRINT
+- Graag in Canonicals in Transformation Rules de Preview URL's knop paars maken en Generate oranje, en "+ Add rule" outlined oranje
+- Graag álle Refresh buttons in dm-dashboard outlined paars maken (graag ook opnemen in UI_BLUEPRINT)
+- Graag in Kopteksten, Unique titles de Bestand upload module (class "form-control") minder breed maken (breedte van de module in Auto-Redirects is prima), en die breedte opnemen in UI_BLUEPRINT
+- Graag in R-Finder de opmaak van de kalender (dus als je op div class "date-box" klikt) aanpassen naar de layout in UI_BLUEPRINT
+- Graag in Redirect Generator in Transformation Rules de knoppen met "+ Add {facet/category} rule" outlined paars maken
+- Graag in DMA Bidding in Run DMA Bidding de datumpicker breedte aanpassen naar de nieuwe default-breedte uit UI_BLUEPRINT
+- Graag in DMA Exclusions in Exclude a product from DMA de Preview-knop outlined paars maken
+- Graag in DMA+ in Run History de tabel de opmaak geven zoals beschreven in UI_BLUEPRINT
+- Graag in GSD Tag Toppers in Excel upload de preview knop outlined paars maken
+- Graag op de startpagina van het dshboard de "Open tool"-knoppen weer grijs maken ipv outlined paars
+- Graag in MC ID Finder "Search Merchant Center IDs" aanpassen naar "Search Merchant Center id's"
+- Graag in Thema Ads in tab Check-up de "more info" knop in de nieuwe flat-stijl maken en Reset labels outlined paars maken
+- Graag in Canonicals de layout van de tabs in Transformation Rules aanpassen naar de nieuwe stijl zoals beschreven in UI_BLUEPRINT
+- Graag in Canonicals de Preview URLs knop outlined paars maken en Generate oranje, en de "+ Add Rule" knoppen outlined oranje
+- Graag in SEO Stats de banner met "Show Categories" terugzetten naar grijs ipv paars
+- Graag in SEO Stats in Performance standup tegels toevoegen voor SEO CTR, OPB en Bounce (incl. hover grafiekje en WOW-delta's)
+- Graag in Bothits en SEO Stats dezelfde standaard paginabreedte aanhouden als in Kopteksten. Zijn er nog andere pagina's die een andere breedte aanhouden? Dan ook die graag aanpassen en aangeven welke je aangepast hebt.

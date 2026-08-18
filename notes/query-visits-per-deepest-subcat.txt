@@ -1,0 +1,25 @@
+select 
+dv.main_cat_name
+, dv.deepest_subcat_name
+, dv.url
+, count(*) as visits
+, sum(fcv.cpc_revenue) + sum(fcv.ww_revenue) as visit_rev
+, dv.page_heading
+
+from datamart.fct_visits fcv
+join datamart.dim_visit dv on fcv.dim_visit_key = dv.dim_visit_key
+join datamart.dim_date dat on fcv.dim_date_key = dat.dim_date_key
+join chan_deriv.ref_channel_derivation_stats chan on dv.aff_id = chan.aff_id and dv.channel_id = chan.channel_id
+
+where dv.is_real_visit = 1
+and fcv.dim_date_key >= 20260401
+and fcv.dim_date_key <= 20260721
+--and chan.marketing_channel = 'SEO'
+and dv.url like '%/c/%'
+and dv.url not like '%/r/%'
+and dv.page_heading like '% - %'
+and dv.url like '%beslist.nl%'
+and dv.url not like '%beslist.be%'
+
+group by 3,6,2,1
+order by 4 DESC

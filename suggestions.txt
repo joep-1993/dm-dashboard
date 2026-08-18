@@ -1,0 +1,71 @@
+- In SEO Priority, I would like to be able to run for a certain category name. Please add a maincat dropdown and a deepest cat dopdown (deepest cat dropdown should be filtered by maincat) in which i can also type to get suggestions.
+- Please merge URL Checker and URL Validator to one tool "URL Validator", you can put the URL Checker module on the bottom of URL Validator, and rename the module "Check live URL's". And please make it so the output module of URL Validator looks the same as the output module of URL Checker.
+- In Redshift Upload, please change "Upload to Reshift" to "Upload", and make the "Clear"-button purple outlined
+- Redshift Upload seems to have a different page width than other tools, please fix and review other page widths, tell me which tools differ
+- Width of Performance Standup seems off to, please also fix
+- Please put Performance Standup in SEO Stats (between Per-day overview and Performance standup) and rename it from "Run Settings" to "Update Excel"
+- In section Performance standup in SEO Stats, please implement the 'drawing' of the tables like described in UI_BLUEPRINT.md. Please also review other tools to see where you can implement the same effect. I would like it to be everywhere where there's a table loading.
+- In Keyword Planner, when i use Keyword Redirects, there's a green progress bar showing ('Querying Google Ads, taxonomy & shop-stats (this can take a minute)...') but it doesn't look like the other progress bars troughout dm-dashboard. Please make it the same. Also, the "Processing..." button is different (stays orange and has a spinner), please make it the same as in other tools (grey outlined, not clickable, no spinner)
+- In Keyword Redirect Results in Keyword Planner, please update the table layout to the one described in UI_BLUEPRINT (sortable headers, font size, color of headers, etc.). Please also align the Search Volume and Products columns in the middle horizontally. Also, please add a Copy button to Keyword Redirect Results (to copy to Excel). Lastly, add a column old URL to Keyword Redirect Results, containing the category url + '/r/{keyword}/'
+- In IndexNow, please make the '10.000 remaining' button/label outlined green (the green fom UI_BLUEPRINT)
+- In IndexNow, please update the table in Submission History to the table layout in UI_BLUEPRINT
+- In Index Checker, please move the Check Index Status button to the right and rename it "Check Index", also update the Refresh button to the layout as described in UI_BLUEPRINT
+- Please remove Healthscore 2.0 from the dashboard for now, don't delete it just don't link to it in the menu and from the frontpage.
+- In Thema Ads, please move the Upload & Create Job button to the right, and put the Supported themes button left of it, and make that one outlined purple. Also, make the "More info" button outlined grey. In all tabs in Thema Ads (Plan, Ad Groups, Discover, etc.) move the orange action-button to the right and update the More info-button to outlined grey.
+- The width of Shop-campaigns seems off too, please fix. Also, please add a nyumber of pages-dropdown to the pagination of Top campaigns and Top ad groups, and add option 10 to the dropdown in Per-day overview. Defaultly open in this option.
+- Please move Countries in MC ID Finder to under "Search by, Shop Name, Shop ID" and above Shop Names, swap Search and Clear buttons and make the Clear button purple outlined
+- in GSD Check, please swap Search and Clear buttons and make the Clear button purple outlined
+- in GSD Budgets, please remove the vertical purple left border of Run GSD Budgets, and update the table in Run History to the layout described in UI_BLUEPRINT, and update the date pickers in Run GSD Budgets to the date picker as described in UI_BLUEPRINT 
+- Please update the table headers in SEO stats to the design as described in UI_BLUEPRINT
+- please also remove the purple vertical left border in Run DMA Bidding in DMA Bidding, and check whether there are more of these purple vertical left broders troughout dm-dashboard. If found, please remove them. Also, please update the Run History table in DMA Bidding to the design described in UI_BLUEPRINT.
+- In Redirect Tool, please make tje Check-button outlined orange
+- In Redirect Generator, please make all buttons except for the X-buttons and Generate 301 Redirects outlined purple, and change "Generate 301 Redirects" to "Generate Redirects"
+- In Redirect Checker, please make the Settings toggles and Check URLs button narrower
+- In R-Finder, please move the Search URLs and Clear Filters buttons in Search Filters to the far right, swap them and make Clear Filters outlined purple. Also, please put the info 'Find /r/ URLs from Redshift visits data. Filter by category, minimum visits, and date range.' under a purple "i"-button hover next to Search Filters.
+- In Auto-Redirects, make the 'cancelled' label in Status column in Recent runs orange in stead of yellow, and give the table the design as described in UI_BLUEPRINT
+- In Unique Titles, please make the Download CSV Button outlined purple, and please align the stats in Processing Status vertically in the middle. Also, use the Failed total as headline stat. Now it says '-
+Failed
+total: 7.982" bu this should be "7.982 Failed"
+- In Unique Titles, please swap the layouts of Start Batch and Process All buttons
+- In Kopteksten and FAQ's, in Link Validation, change the order of buttons to: Recheck SKipped, Reset Validation, Validate Links, Validate All
+- In Kopteksten and FAQ's, please make the Recheck Skipped button outlined purple and make the Reset Validation button outlined Redirect
+- In Kopteksten and FAQ's, make the Refresh Stats button in Content Publishing outlined purple, and change the text to "Refresh" (keep the arrow-icon)
+- In Kopteksten and FAQ's, in Content Publishing, make the info-tiles ('266.318
+Content Top
+278.545
+FAQ
+282.666
+Total URLs') fancier, like the tiles Shops in range, Enabled campaigns and Last Run in GSD Budgets. However, make them smaller than the tiles in GSD Budgets.
+- In Kopteksten, remove the "View full content" buttons in Recent Results, in stead make the rows clickable to fold out the content. Keep the href link behind the url intact though.
+- In FAQ's remove the "Show X FAQ's" buttons from Recent FAQ Results, and make those entries clickable aswell to fold out the full content. Again, keep the href on the url intact.
+- In Canonicals, make the X-buttons in Transformation Rules outlined red in stead of outlined orange. Also, make the Preview URLs button outlined purple and update the layout of the Refesh button to the layout described in UI_BLUEPRINT. Same for the Load-buttons in Recent results.
+- in Unique Titles in the Add / Edit Title module, please make the Clear button outlined purple.
+- in Unique Titles in Search Titles, please rmeove the Edit button and add a floating pencil button on the right to edit the title)
+- In Unique Titles in the Add / Edit Title module, please make the alert alert-success banner yellow in stead of light grey. 
+- In Unique Titles in Import CSV to Database, please rename the Import to Database button to "Import"
+- in R-finder in results, please remove the element 'tsvOutput'
+- in R-Finder, in Search Filters, please create the possibility to add a row under URL-filters, adding another row of filter boxes. Per row, these filters should function as an OR row, so row one outputs a set of R-urls, row 2 ouputs a seperate set of urls, etc.
+- Please retrieve the top 5 facets per category (based on visits across all channels), and create all combos for SEO titles for these 5 facet combinations.
+- in SEO Stats, please remove the info text "Revenue = Beslist's own revenue (onze omzet, incl. affiliate) attributed by conversion date, matching the Qlik "Beslist omzet en clicks" report. The most recent 1–2 days undercount because conversions keep settling for up to ~180 days. Visits remain visit-based (real visits only)" since it's already under an "i"-button 
+- in Redirect Tool, i would like to be able to select multiple rows from the preview to Submit. And please change Copy for Excel to "Copy". And plase remove the Label-column from Recent results   
+- In SEO Stats, can we add "Total visits" and "Total Revenue" as options in Per-day overview?
+- In SEO Stats, in Top categories can we rename Selected day to "Yesterday" and switch the Week before and Yesterday columns?
+- In SEO Stats, in Per-day overview, please use the colors as described in https://claude.ai/code/artifact/f1ca5d00-c056-4d95-920c-774f6724bcc3, and then the base-row. However, please do not use red
+- In SEO Stats, in Update Excel, can we remove the info text "Comparison sheets will compare 2026-07-21 vs 2026-07-28 (visits) and 2026-07-20 vs 2026-07-27 (omzet)." and put it under a "i"-button hover next to Update Excel?
+- In URL Validator, can we update the layout of URL Input to the layout of Check live URL's? only the Settings should not be copied. And can we rename URL Input to "Check taxonomy API"? And move Validate urls button to the far right please and make it the same size as "Check URLs"
+- In SEO Stats, the table headers seem different from other tools. Maybe they are not bold/strong?
+- Please make the Reset button in Kopteksten/FAQ's outlined orange in stead of outlined red
+- please make the remove/X-buttons in Recent Results in FAQ's/Kopteksten outlined red, and full red when hovered. Currently it's the other way around.
+- In Kopteksten/FAQ's, please make the Process URLs button outlined orange and rename it to "Process Batch". Process All URLs can be renamed to "Process All", please make sure those buttons have the same size. Also, rename Validate Links to "Validate Batch" and make sure the button has the same size as "Validate All". Also in both tools remove the info line "Publish generated content (content_top + FAQ) to the website-configuration API" from Content Publishing please.
+- in SEO Priority the optional maincat- en deepest cat filters take a long time to load, the're grey/unavailable for a good couple of minutes. Could you fix this?
+- In Redshift upload, please move the Upload and Clear buttons to the right and switch them (Clear left, Upload right). when selecting Paste Data, please move the Parse Data and Clear buttons along with the Upload button to the right, and switch the order to Parse Data, Clear, Upload. Then rename Parse Data to "Parse". And change "Max 10,000 rows per chunk." to "Max 10.000 rows per chunk."
+- In Keyword Planner, please use the same amount of white space between the buttons. The amount of whitespace between Download Excel, Clear All, Get Search volume is perfect, use it between all button combos but keep in mind that the right side of the buttons most right should align
+- The progress bar shown in Keyword Planner when using Keyword Redirects doesn't seem to 'fill', it starts at fully loaded. can we fix that?
+- In IndexNow, please align the Export-column in Submission History in the middle horizontally
+- In Index Checker, please move the Upload & Check button to the right, just like the Upload button. Also remove the info text 'Expects a column named "URL" or uses the first column.'
+- In Thema Ads, please make the Supported themes button the same height as the Upload & Create Job button. Also make the Refresh button in Processing Jobs the same layout as all other refresh buttons; purple outlined with an arrow icon in front of the text. Please also make the banner with text 'Auto-Queue: Enabled - Jobs will start automatically after current job completes (30s delay)' yellow in stead of light grey. Put that info-banner color in UI_BLUEPRINT please.
+- In Shop-campaigns, please make the Refresh button in Processing Jobs the same layout as all other refresh buttons; purple outlined with an arrow icon in front of the text. Also, give the table headers in Per-day overview, Top campaigns and Top ad groups the layout as described in UI_BLUEPRINT.
+- In Redirect tool ,please attach the Check-button in Check redirect to the search bar the way the Lookup button is attached in URL Lookup in Kopteksten
+- In Redirect Generator, please make the Generate redirects button in the Fetch from Redshift tab the same height as the other buttons (Bulk Paste, Remove All)
+- In Unique titles, please align the pencil in Search Titles in the middle of card mb-2 result-row vertically. And please remove 'this run: -' from the Failed-tile. Also please rename Start Batch to Process Batch. And please also add a pencil to edit results in Recent Results.
+- In Canonicals, please rename Generate Canonicals to Generate  
