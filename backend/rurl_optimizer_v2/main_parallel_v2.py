@@ -2680,9 +2680,23 @@ def process_url_v2(args):
                 final_redirect_cat_name = derived['dom_cat_name']
                 final_score = 75
                 final_tier = get_reliability_tier(final_score)
+                # V56: report the AND-match count that the dominance was
+                # actually computed over, not `total`. In OR-fallback mode
+                # (which is most of these) `total` is the whole main category,
+                # so "865778 products dominantly in 'Shampoo' (100%)" read as
+                # overwhelming evidence for a share measured over TWO products.
+                # The audit trail in the xlsx was overstating the case by orders
+                # of magnitude, which is exactly where a reviewer stops looking.
+                _v28_n = derived.get('dom_cat_count')
+                _v28_ev = (f"{_v28_n} product{'' if _v28_n == 1 else 's'}"
+                           if _v28_n is not None else f"{derived.get('total')} products")
                 final_reason = (
-                    f"[V28] Search-derived: {derived.get('total')} products dominantly "
-                    f"in '{derived['dom_cat_name']}' ({int(100*derived['dom_cat_share'])}%)"
+                    f"[V28] Search-derived: {_v28_ev} matched, "
+                    f"{int(100*derived['dom_cat_share'])}% of them in "
+                    f"'{derived['dom_cat_name']}'"
+                    + (f" (search mode {derived.get('mode')}, "
+                       f"total {derived.get('total')})"
+                       if derived.get('mode') == 'fallback' else "")
                     + (f"; preserved original facet '{parsed.existing_facet}'"
                        if parsed.existing_facet else "")
                     + final_reason_extra
