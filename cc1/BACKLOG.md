@@ -8,6 +8,28 @@ _What are we building and why?_
 
 ## Future Enhancements
 
+### Twee systemen noemen dezelfde pagina anders: h1_title vs product_subject (logged 2026-08-18)
+- [ ] `unique_titles_content.h1_title` en het facet-afgeleide `product_subject` zijn het op
+  een groot deel van de facetpagina's ONEENS. Steekproef van 150 uit de 881 gemarkeerde
+  kopteksten: **73% verschilt**. Voorbeelden:
+  `'Speedo Gezondheidsslippers'` vs `'Speedo Teenslippers'` · `'Roze korfbalschoenen'` vs
+  `'Roze Hockeyschoenen'` · `'MSV Prullenbakken'` vs `'MSV Afvalbakken'` ·
+  `'Hedgren Schoudertassen'` vs `'Hedgren Reistassen'`.
+
+  Dit is een inconsistentie op de pagina zelf: de H1/title zegt het ene, de koptekst het
+  andere. Het vertekende ook de driftmeting van 2026-08-18 — driekwart van de 881
+  "onderwerpdrift" was in werkelijkheid dit naamverschil, niet een foute koptekst.
+  Verdient een eigen ronde: welke van de twee is leidend, waar loopt het uiteen, en moet
+  de generator op `h1_title` draaien in plaats van op `product_subject`.
+
+### Facetwaarden die elkaar uitsluiten staan samen op één product (logged 2026-08-18)
+- [ ] 296 producten in categorie 9001062 `Rackets` dragen zowel `Sporten: Tennis` (484337)
+  als `Sporten: Padel` (13339994), waardoor padelrackets terecht op een Tennis-gefilterde
+  pagina terechtkomen. Nu nog laag risico voor kopteksten (slechts 3 halen `shopCount >= 2`),
+  maar het is brondata die niemand bewaakt. Melden bij wie de facetmapping beheert; een
+  facetconflict-filter in `scraper_service` is bewust NIET gebouwd omdat de ONDERWERP-regel
+  in de prompt hetzelfde goedkoper afdekt.
+
 ### GSD: twee bugs in het LEGACY CPC-pad, bewust uitgesteld (logged 2026-08-17)
 - [ ] Bij het integreren van de prijsbucket-structuur voor nieuwe CPC-shops zijn twee
   live defects in het bestaande CPC-pad gevonden en geverifieerd tegen de feed

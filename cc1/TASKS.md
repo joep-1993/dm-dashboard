@@ -4,6 +4,39 @@ _Active task tracking. Update when: starting work, completing tasks, finding blo
 ## Current Sprint
 _Active tasks for immediate work_
 
+### 2026-08-18 — Kopteksten strakker op het onderwerp + DMA Exclusions-knoppen
+
+Aanleiding: padelrackets genoemd én gelinkt in de koptekst van de Tennisrackets-pagina.
+Volledige analyse in LEARNINGS.md ("ean2pim is de verkeerde meetlat").
+
+- [x] **Onderzocht of ES `source=ean2pim` hierbij helpt** — nee. Het is een waarde van
+      `categorization.categorizationSource`, gaat over de categorie-as (tennis en padel
+      delen categorie 9001062 `Rackets`, beide prob 1.0), en voegt binnen `shopCount >= 2`
+      niets toe aan onze bestaande filtering. Search API geeft `categorization` niet terug.
+- [x] **Harde ONDERWERP-regel in de v3-userprompt** (`gpt_service_v3.py`). Bakent af op
+      `h1_title` zelf, dus een brede pagina blijft breed: subject `'Rackets'` → padel blijft
+      (terecht), subject `'Tennis Rackets'` → geen padel, 4/4 runs, ook met padelproducten
+      op positie 2 en 3 van de 30.
+- [x] **`facets_not_resolved`-guard** (`scraper_service.py` + `main.py` +
+      `batch_api_service.py`). Staat er een facet in de URL en herkent de API er geen, dan
+      niet genereren maar `failed` + pending. Was een stille terugval op de kale
+      categorienaam. Blast radius vandaag: 66 `winkel~`-URLs, 0 met koptekst, 0 in de wachtrij.
+- [x] **Percent-decode in `parse_beslist_url`** — `%7E`-URLs gaven nul filters en dus altijd
+      het brede onderwerp. 15 kopteksten, 33 URLs. FAQ deelt deze parser, dus die profiteert mee.
+- [x] **Driftscan gebouwd** — `scripts/analysis/scan_koptekst_onderwerpdrift.py`. Zoekt een
+      tweede productgroep op hetzelfde kopwoord (tennis**rackets** → padel**rackets**).
+      Drie keer aangescherpt tegen valse positieven (20.302 → 6.396): kopwoord-vocabulaire
+      uit alle h1_titles, term los-vs-aaneen, en herschikkingen uit de titel zelf.
+      229.096 gescand → 6.396 drift, waarvan 881 in de openingszin.
+- [x] **881 kopteksten hergenereerd** (572 vervangen, 241 `no_valid_links`, 60 zonder
+      producten, 8 API-fout; 598s). Backup in `Downloads\claude\koptekst_backup_voor_regen_2026-08-18.json`.
+      Tennisrackets-URL zelf geverifieerd schoon.
+- [x] **DMA Exclusions**: "Clean enabled" van `btn-outline-danger` naar `btn-outline-orange`
+      (ruimt historie op, muteert niets in Google Ads); page-local `.btn-fill-primary`
+      opgeruimd naar de gedeelde `.btn-run`.
+- [ ] **OPEN — de 881 was te hoog.** 73% van de gemarkeerde pagina's heeft een
+      `product_subject` dat afwijkt van `h1_title`; die teksten waren nooit fout. Zie BACKLOG.
+
 ### 2026-08-17 — Vier UI-punten: klikbare datum, zoekvelden, Model-chips, filterrij
 
 Vier losse wensen van Joep, drie in SEO stats en een in GSD Campaigns. Commit `f665863`.

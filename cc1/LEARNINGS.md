@@ -1,6 +1,72 @@
 # LEARNINGS
 _Capture mistakes, solutions, and patterns. Update when: errors occur, bugs are fixed, patterns emerge._
 
+## ean2pim is de verkeerde meetlat, en het onderwerp zat de padeltekst dwars (2026-08-18)
+
+Joep zag in de koptekst van de Tennisrackets-pagina
+(`/c/sporten_sport_outdoor~484337`) staan: "Tennis- en padelrackets zijn essentieel ..."
+mét links naar twee echte padelrackets. Vraag: kan het nieuwe ES-veld `source=ean2pim`
+dit voorkomen? Nee, en de weg naar dat "nee" leverde meer op dan het antwoord.
+
+**1. `ean2pim` bestaat niet als veld.** Er is geen kaal `source` in
+`product_search_v4_nl-nl_*` (gecheckt met `_field_caps`). `ean2pim` is een WAARDE van
+`categorization.categorizationSource`, voluit `pimEnrichmentEan2Pim` (5,47M docs, op één
+na grootste van 15 bronnen). Het veld zegt hoe een product aan zijn **categorie** komt:
+deterministische EAN→PIM-match versus de ML-gok `deepestCategoryPredictor` (42M).
+
+**2. Het meet de verkeerde as.** Tennis- én padelrackets zitten in dezelfde, correcte
+categorie 9001062 `Sport & outdoor > Rackets`, en alle vier de producten uit die koptekst
+scoren `pimEnrichmentEan2Pim` met probability 1.0. Het probleem leefde op de FACET-as
+(`Sporten: Tennis` vs `Padel`), waar `categorizationSource` niets over zegt.
+
+**3. Als kwaliteitsfilter voegt het bij ons niets toe.** Over de hele index ziet het er
+geweldig uit (ean2pim `valid` 0,97 / gem. shopCount 1,7 tegen predictor 0,63 / 0,5). Maar
+binnen `shopCount >= 2` — wat kopteksten überhaupt mogen linken — is `valid` ≈1,00 voor
+ELKE bron en is ean2pim al 75% van de populatie. Het hele verschil zat in producten met 0
+of 1 aanbieding, die we al weggooien. Bovendien geeft de Search API `categorization`
+helemaal niet terug, dus gebruiken kost een extra ES-call in het generatiepad.
+Waar het wél iets waard is: 16,4% van de linkbare producten zit in een ML-voorspelde
+categorie (p10 zekerheid 0,54), en dat aandeel loopt per categorie van 3,6% tot 58,9% —
+bruikbaar als offline QA-signaal voor categorievervuiling, niet als runtime-filter.
+
+**4. De echte oorzaak was het ONDERWERP, niet het model en niet de facetdata.** De
+CSV-lookup levert als categorienaam "Rackets". Zodra dat de `product_subject` wordt in
+plaats van "Tennis Rackets", is padel noemen correct gedrag. Deterministisch
+gereproduceerd: subject `'Rackets'` → padel in de tekst, subject `'Tennis Rackets'` → niet.
+Met 2 én met 10 padelproducten in de top-30 hield zowel de oude als de nieuwe prompt zich
+aan een smal onderwerp. **Les: reproduceer de fout vóór je de fix ontwerpt.** Ik had al een
+dubbel-getagde-facetdata-verhaal (296 producten in Rackets dragen Tennis én Padel) en een
+promptverklaring klaar, en beide waren voor dít geval een zijspoor.
+
+**5. `build_product_subject` faalde stil.** `if not selected_facets: return category_name`
+schrijft op een facet-URL een veel te breed onderwerp weg zonder log, zonder markering,
+niet te onderscheiden van een goede tekst. Nu een `facets_not_resolved`-vlag op het
+scrape-resultaat → status `failed`, URL blijft pending, reden in `last_error`. De vlag gaat
+ÓP het normale dict en niet als kaal `{"error": ...}`, want vier aanroepers indexeren
+meteen op `products`. Gaat af op `winkel~`-URLs (bekende klasse zonder facetdata) en niet
+op normale URLs. Ook gedekt in `batch_api_service` (de OpenAI-Batch-route).
+
+**6. Percent-encoded URLs parsen naar NUL filters.** `parse_beslist_url` decodeerde niet,
+dus `merk%7E9991226%7E%7E...` gaf `filters={}` en daarmee altijd het brede onderwerp.
+Geverifieerd: encoded → subject `'Hardloopschoenen'`; gedecodeerd → 2 facetten en
+`'Solo Adidas Terrex Trailrunningschoenen'`. 15 kopteksten, 33 URLs in `pa.urls`.
+
+**7. En de duurste les: ik mat het verkeerde.** De driftscan toetste de tekst tegen
+`unique_titles_content.h1_title`, terwijl de generator op het facet-afgeleide
+`product_subject` draait. Op een steekproef van 150 uit de 881 gemarkeerde pagina's blijkt
+**73% een afwijkend `product_subject`** te hebben (`h1_title 'Speedo Gezondheidsslippers'`
+vs `product_subject 'Speedo Teenslippers'`). Driekwart van wat ik als kopteksten-drift
+rapporteerde was dus een naamgevingsverschil tussen twee systemen; de koptekst volgde
+keurig zijn eigen input. Het echte aantal ligt rond de 240, niet 881. **Toets een detector
+tegen dezelfde bron die het gemeten proces gebruikt, anders meet je de afstand tussen twee
+systemen en noem je dat een defect.**
+
+**Randje:** `no_valid_links` trof 241 van de 881 hergeneraties en dat leek eerst mijn nieuwe
+promptregel. Het is het aantal producten: bij de mislukkingen bleef er na `shopCount >= 2`
+meestal één product over (steekproef 1, 60, 1, 1 tegen 9, 16, 4, 4 bij success). Direct
+getest op zo'n URL: oude prompt 2 links, nieuwe prompt 2 links. Niet-destructief — zonder
+geldige links slaat de pipeline niets op en blijft de oude tekst staan.
+
 ## Knip je een dag uit de reeks, knip dan ook het vergelijkvenster (2026-08-18)
 
 Joep: de nieuwste dag staat nog op nul (ETL heeft niet gedraaid) en dat leest in de grafiek
