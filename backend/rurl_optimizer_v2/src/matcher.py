@@ -630,13 +630,41 @@ class KeywordMatcher:
             return False
         bt = self._coverage_tokens(brand_value)
         kt = self._coverage_tokens(keyword)
-        ct = self._coverage_tokens(category_name) if category_name else []
         if not bt or not kt:
             return False
-        # Was the brand matched at all (under the loose scorer)?
+        # Was the brand matched at all (under the loose scorer)? If not, this
+        # question doesn't apply — the brand didn't arrive by matching, so there
+        # is no match to call genuine or accidental. Callers on a path that can
+        # produce a brand WITHOUT any lexical claim (the V29 probe picks by
+        # result-set coverage) must ask brand_mention_is_distinctive instead;
+        # see _spurious_brand_facet in main_parallel_v2.
         covered = any(self._tokens_equal_modulo_morphology(k, b)
                       for k in kt for b in bt)
         if not covered:
+            return False
+        return not self.brand_mention_is_distinctive(keyword, brand_value,
+                                                     category_name)
+
+    def brand_mention_is_distinctive(self, keyword: str, brand_value: str,
+                                     category_name: str = '') -> bool:
+        """V57: True when a query token really NAMES a token of the brand value.
+
+        A genuine brand mention is a query token that matches a brand token
+        STRICTLY (exact / Dutch suffix / double vowel — never fuzz) and is not
+        itself a word describing the product category: "philips" → Philips,
+        "ferrero" → Ferrero Rocher, "nizoral shampoo" → Nizoral. "wc papier" →
+        'Paper Dreams' is not one ("papier" only fuzz-hits "Paper", and it names
+        the product), and neither is "honden katten" → 'Generic' (nothing links
+        them at all).
+
+        V40: a weight/range qualifier ("max", "min") is never a distinctive
+        mention even when it exactly equals a brand token ("max 30 kg" → "Max &
+        Molly"), so it can't rescue the brand.
+        """
+        bt = self._coverage_tokens(brand_value)
+        kt = self._coverage_tokens(keyword)
+        ct = self._coverage_tokens(category_name) if category_name else []
+        if not bt or not kt:
             return False
 
         def _is_category_word(tok: str) -> bool:
@@ -645,18 +673,12 @@ class KeywordMatcher:
                        or (len(c) >= 4 and c in tok)
                        for c in ct)
 
-        # A genuine, distinctive brand mention: a query token that STRICTLY
-        # names a brand token and isn't a product/category word. If one exists,
-        # the brand was really named → not spurious.
-        # V40: a weight/range qualifier ("max", "min") is never a distinctive
-        # brand mention even when it exactly equals a brand token ("max 30 kg"
-        # → "Max & Molly") — exclude it so it can't rescue the brand here.
         for k in kt:
             if (any(self._tokens_equal_strict(k, b) for b in bt)
                     and k not in WEIGHT_RANGE_QUALIFIERS
                     and not _is_category_word(k)):
-                return False
-        return True
+                return True
+        return False
 
     def match_with_partial(self, keyword: str, facet_values: list[FacetValue], exclude_winkel: bool = False) -> MatchResult:
         """

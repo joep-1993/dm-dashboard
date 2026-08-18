@@ -838,17 +838,36 @@ def _qualifier_matches_value(tok: str, value_name: str) -> bool:
 
 
 def _spurious_brand_facet(pf_name, pf_value_name, keyword, dom_cat_name, matcher) -> bool:
-    """V41 (issue #1): mirror the V39 spurious-brand guard in the search-derived
-    append paths, which bypassed it. A merk/winkel facet whose brand name is
-    only connected to the query through a product/category word (e.g. "wc
-    papier" → merk 'Paper Dreams', "papier" ≈ "Paper") is a false brand match —
-    drop it and keep the bare search-derived subcategory (which is the correct
-    destination, e.g. Toiletpapier)."""
-    return (
-        (pf_name or '').strip().lower() in ('merk', 'winkel')
-        and bool(pf_value_name)
-        and matcher.brand_match_is_spurious(keyword, pf_value_name, dom_cat_name or '')
-    )
+    """A merk/winkel facet the query didn't really name — drop it and keep the
+    bare search-derived subcategory (which is the correct destination).
+
+    V41 (issue #1) mirrored the V39 spurious-brand guard into the search-derived
+    append paths, which had bypassed it: "wc papier" → merk 'Paper Dreams'
+    ("papier" only fuzz-hits "Paper", and it names the product, not a brand).
+
+    V57 (2026-08-18): that guard asked the wrong question on the V29 probe path.
+    brand_match_is_spurious opens by checking whether the brand was matched at
+    all and returns False — "not spurious" — when it wasn't, because it exists to
+    judge whether an existing MATCH was genuine or accidental. But the probe
+    picks a facet by how much of the RESULT SET carries it, with no lexical claim
+    on the query whatsoever. So a brand sharing nothing with the query sailed
+    through, and the less the query had to do with it, the more certain the guard
+    was: /gezond_mooi_560588/r/honden_katten/ (Oordoppen) → Make-up accessoires
+    /c/merk~23800900 'Generic', because 83% of the result set carried it. The
+    probe even records `keyword_match: false` in its payload — nothing read it.
+
+    Now the test is positive: keep a merk/winkel facet only when the query
+    distinctively NAMES it. That strictly subsumes the old rule (old-True implies
+    no distinctive mention), so it can only ever suppress more, never keep
+    something V41 dropped. The V31 leftover-consumer already did exactly this
+    with _keyword_bridges_value; this brings the two V28 sites in line.
+    """
+    if (pf_name or '').strip().lower() not in ('merk', 'winkel'):
+        return False
+    if not pf_value_name:
+        return False
+    return not matcher.brand_mention_is_distinctive(keyword, pf_value_name,
+                                                    dom_cat_name or '')
 
 
 def _facet_fragment_superset(child_fragment, parent_fragment):
@@ -2432,8 +2451,8 @@ def process_url_v2(args):
                                          derived.get('dom_cat_name', ''), matcher):
                     final_match_type = 'search_derived_subcat'
                     final_reason_extra = (
-                        f"; [V41] suppressed spurious brand facet {pf_name}~{pf_vid} "
-                        f"({pf_value_name!r}) — only a product/category word matched"
+                        f"; [V57] suppressed brand facet {pf_name}~{pf_vid} "
+                        f"({pf_value_name!r}) — the query names no token of it"
                     )
                     local_match_used = True
                 elif pf_name not in existing_names:
@@ -2483,8 +2502,9 @@ def process_url_v2(args):
                                          derived.get('dom_cat_name', ''), matcher):
                     final_match_type = 'search_derived_subcat'
                     final_reason_extra = (
-                        f"; [V41] suppressed spurious brand facet {pf_name}~{pf_vid} "
-                        f"({pf_value_name!r}) — only a product/category word matched"
+                        f"; [V57] suppressed brand facet {pf_name}~{pf_vid} "
+                        f"({pf_value_name!r}, coverage-picked) — the query names "
+                        f"no token of it"
                     )
                 elif pf_name not in existing_names:
                     if parsed.existing_facet:
