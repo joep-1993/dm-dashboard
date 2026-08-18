@@ -84,6 +84,10 @@ SITEMAP_TABLE = "pa.hs2_sitemap"
 MAINCAT_SITEMAP_TABLE = "pa.hs2_sitemap_maincat"
 MAINCAT_MAP_TABLE = "pa.hs2_cat_maincat"
 
+# The API stores `url` in a varchar(255) and truncates anything longer without
+# complaint — see is_too_long().
+MAX_URL_LEN = 255
+
 # The 10 validation categories HS2.0 is being rolled out to first.
 TEST_CATEGORIES = {
     9000047: "Stoelen",
@@ -129,6 +133,19 @@ def is_product_path(npath: str) -> bool:
     '/products/' is not a false positive: the substring is exactly slash-p-slash.
     """
     return "/p/" in (npath or "")
+
+
+def is_too_long(url: str) -> bool:
+    """True for URLs the API cannot store intact.
+
+    Measured on the 2026-08-18 Kantoor push: 9 of 16,918 URLs were 272-308 chars
+    and came back from the GET at exactly 255, so the column is varchar(255) and
+    the truncation is SILENT — the POST still answers 200 and the record count
+    matches. A truncated `/r/` path is a dead link on the sitemap page, which is
+    worse than not linking it, so these are skipped rather than sent. All of them
+    are runaway `/r/` search slugs built from a product description.
+    """
+    return len(url or "") > MAX_URL_LEN
 
 
 def canonical_url(npath: str) -> str:
@@ -255,7 +272,8 @@ def build_payload(cat: int, as_of: date, headings: dict, country: str = "nl",
     finally:
         return_db_connection(conn)
 
-    keywords, skipped = [], {"plp": 0, "product": 0, "no_heading": 0, "no_rank": 0}
+    keywords, skipped = [], {"plp": 0, "product": 0, "no_heading": 0, "no_rank": 0,
+                             "too_long": 0}
     for r in rows:
         npath, type_url, rank, source = r["npath"], r["type_url"], r["rank_in_cat"], r["source"]
         if type_url == "PLP" and not include_plp:
@@ -274,7 +292,11 @@ def build_payload(cat: int, as_of: date, headings: dict, country: str = "nl",
             # category either, so this should be unreachable for a cat query.
             skipped["no_rank"] += 1
             continue
-        keywords.append({"url": canonical_url(npath), "keywords": hit[0], "order": int(rank)})
+        url = canonical_url(npath)
+        if is_too_long(url):
+            skipped["too_long"] += 1
+            continue
+        keywords.append({"url": url, "keywords": hit[0], "order": int(rank)})
 
     preserved = 0
     if preserve_cross_category:
@@ -286,6 +308,9 @@ def build_payload(cat: int, as_of: date, headings: dict, country: str = "nl",
         keepers = _selected_under_other_category(would_drop, as_of, cat)
         order = max((k["order"] for k in keywords), default=0)
         for u in sorted(keepers):                      # sorted: stable payloads
+            if is_too_long(u):                         # already-truncated live row
+                skipped["too_long"] += 1
+                continue
             order += 1
             # page_heading when we happen to have it (the URL may belong to a
             # category we ARE pushing), otherwise the live anchor unchanged.
@@ -403,7 +428,8 @@ def build_maincat_payload(maincat: int, as_of: date, headings: dict,
     finally:
         return_db_connection(conn)
 
-    keywords, skipped = [], {"plp": 0, "product": 0, "no_heading": 0, "no_rank": 0}
+    keywords, skipped = [], {"plp": 0, "product": 0, "no_heading": 0, "no_rank": 0,
+                             "too_long": 0}
     for r in rows:
         npath, type_url, rank = r["npath"], r["type_url"], r["rank_in_cat"]
         if type_url == "PLP" and not include_plp:
@@ -421,7 +447,11 @@ def build_maincat_payload(maincat: int, as_of: date, headings: dict,
         if rank is None:
             skipped["no_rank"] += 1
             continue
-        keywords.append({"url": canonical_url(npath), "keywords": hit[0], "order": int(rank)})
+        url = canonical_url(npath)
+        if is_too_long(url):
+            skipped["too_long"] += 1
+            continue
+        keywords.append({"url": url, "keywords": hit[0], "order": int(rank)})
 
     payload = {"deepestCategoryId": int(maincat), "countryCodes": [country],
                "keywords": keywords}
@@ -486,6 +516,9 @@ def validate_payload(payload: dict, allow_duplicate_pairs: bool = False) -> list
             problems.append(f"[{i}] keywords (anchor text) must be a non-empty string")
         if not isinstance(order, int):
             problems.append(f"[{i}] order must be an int, got {order!r}")
+        if url and is_too_long(url):
+            problems.append(f"[{i}] url is {len(url)} chars; the API truncates at "
+                            f"{MAX_URL_LEN} and the link would be dead: {url[:80]}...")
         if url and "/p/" in url:
             problems.append(f"[{i}] {url} is a product page; this channel carries none")
         if (url, kw) in seen and not allow_duplicate_pairs:
