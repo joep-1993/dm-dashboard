@@ -220,6 +220,11 @@ app.include_router(bothits_router)
 # te vallen op v1 zonder codewijziging.
 KOPTEKST_PROMPT_VERSION = os.getenv("KOPTEKST_PROMPT_VERSION", "v3").strip().lower()
 print(f"[startup] Koptekst-promptversie: {KOPTEKST_PROMPT_VERSION}")
+# Kopteksten hebben een eigen model (KOPTEKST_MODEL), los van AI_MODEL dat
+# AI-titels/FAQ/facet-classifier bedient. Beide loggen zodat je na een restart
+# in één blik ziet welk model welke output schrijft.
+from backend.gpt_service_v3 import MODEL as KOPTEKST_MODEL_ACTIVE
+print(f"[startup] Koptekst-model: {KOPTEKST_MODEL_ACTIVE} | overig AI_MODEL: {os.getenv('AI_MODEL', 'gpt-4o-mini')}")
 
 # Include task_scheduler router (env-gated — Windows-only, depends on schtasks)
 TASK_SCHEDULER_ENABLED = os.getenv("ENABLE_TASK_SCHEDULER", "false").lower() == "true"

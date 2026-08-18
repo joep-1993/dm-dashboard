@@ -29,10 +29,12 @@ from backend.faq_service import (
 )
 from backend.scraper_service import scrape_product_page_api, is_main_category_url, MAIN_CATEGORY_H1, parse_beslist_url
 from backend.gpt_service import create_product_recommendation_prompt, create_main_category_prompt, MODEL
+from backend.model_params import chat_params
 from backend.gpt_service_v3 import (
     create_product_recommendation_prompt_v3,
     build_system_message_v3,
     resolve_maincat_from_url,
+    KOPTEKST_REASONING_EFFORT,
 )
 from backend.database import get_db_connection, return_db_connection
 from backend.ai_titles_service import (
@@ -41,6 +43,11 @@ from backend.ai_titles_service import (
 )
 
 AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
+
+# Kopteksten draaien sinds 2026-08-18 op een eigen model (gpt-5.6-luna); FAQ en
+# AI-titels in dit bestand blijven op AI_MODEL. Zelfde env-var als de real-time
+# generatie in gpt_service_v3, zodat beide paden hetzelfde model gebruiken.
+KOPTEKST_MODEL = os.getenv("KOPTEKST_MODEL") or AI_MODEL
 
 # Koptekst-promptversie voor de Batch-API-generatie. Deelt dezelfde env-toggle
 # als de real-time-generatie in main.py, zodat beide paden altijd dezelfde
@@ -632,10 +639,9 @@ def _run_kopteksten_batch():
                         "method": "POST",
                         "url": "/v1/chat/completions",
                         "body": {
-                            "model": AI_MODEL,
                             "messages": data,
-                            "max_tokens": 2000,
-                            "temperature": 0.7
+                            **chat_params(KOPTEKST_MODEL, 2000,
+                                          reasoning_effort=KOPTEKST_REASONING_EFFORT),
                         }
                     })
                 elif status == "skipped":

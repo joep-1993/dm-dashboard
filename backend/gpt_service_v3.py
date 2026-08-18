@@ -27,7 +27,15 @@ from openai import OpenAI
 # koopgids-structuur en lengte van v3 zou blokkeren. De productlijst en linkregels
 # blijven identiek aan v1 zodat de productcontext gelijk is.
 from typing import List, Dict
-from backend.gpt_service import MODEL, fix_truncated_urls
+from backend.gpt_service import fix_truncated_urls
+from backend.model_params import chat_params
+
+# Kopteksten draaien sinds 2026-08-18 op een eigen model (gpt-5.6-luna), los van
+# AI_MODEL. AI_MODEL bedient ook AI-titels, FAQ en de facet-classifier; die zijn
+# NIET meegegaan in de overstap. Leeg laten = terugvallen op AI_MODEL.
+MODEL = os.getenv("KOPTEKST_MODEL") or os.getenv("AI_MODEL", "gpt-4o-mini")
+# Optioneel: "none" | "low" | "medium" | "high". Leeg = model-default.
+KOPTEKST_REASONING_EFFORT = os.getenv("KOPTEKST_REASONING_EFFORT", "").strip() or None
 
 
 def create_product_recommendation_prompt_v3(h1_title: str, products: List[Dict]) -> str:
@@ -185,13 +193,11 @@ def generate_product_content_v3(h1_title: str, products: List[Dict], maincat: Op
     system_message = build_system_message_v3(maincat)
 
     response = client.chat.completions.create(
-        model=MODEL,
         messages=[
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_prompt},
         ],
-        max_tokens=2000,
-        temperature=0.7,
+        **chat_params(MODEL, 2000, reasoning_effort=KOPTEKST_REASONING_EFFORT),
     )
     content = response.choices[0].message.content
     if response.choices[0].finish_reason == "length":
